@@ -48,6 +48,9 @@ def test_spring_gap_waits_for_shifted_cutoff() -> None:
     SiteBinding.objects.filter(pk=system.binding.pk).update(
         validated_at=datetime(2026, 3, 28, 12, tzinfo=UTC)
     )
+    CollectionJob.objects.filter(binding=system.binding).update(
+        scheduled_slot=datetime(2026, 3, 28, 12, tzinfo=UTC)
+    )
     assert enqueue_due(datetime(2026, 3, 29, 1, 0, tzinfo=UTC)) == []
     ids = enqueue_due(datetime(2026, 3, 29, 1, 30, tzinfo=UTC))
     assert CollectionJob.objects.get(pk=ids[0]).scheduled_slot == datetime(
@@ -62,6 +65,9 @@ def test_fall_fold_uses_first_cutoff_occurrence() -> None:
     Region.objects.filter(pk=system.region.pk).update(timezone="Europe/Berlin")
     SiteBinding.objects.filter(pk=system.binding.pk).update(
         validated_at=datetime(2026, 10, 24, 12, tzinfo=UTC)
+    )
+    CollectionJob.objects.filter(binding=system.binding).update(
+        scheduled_slot=datetime(2026, 10, 24, 12, tzinfo=UTC)
     )
     ids = enqueue_due(datetime(2026, 10, 25, 1, 15, tzinfo=UTC))
     assert CollectionJob.objects.get(pk=ids[0]).scheduled_slot == datetime(
