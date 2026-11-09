@@ -35,11 +35,11 @@ no self-hosted runner or organization-specific reusable workflow is required.
 PyYAML 6.0.3 currently needs a source build on CPython 3.15; this was tested on
 Windows. CI permits this locked build. No dependency or interpreter was downgraded.
 
-CI audits locked runtime and development dependencies against public vulnerability
-advisories. To reproduce:
+CI audits locked runtime, optional scientific and development dependencies against
+public vulnerability advisories. To reproduce:
 
 ```text
-uv export --locked --all-groups --no-emit-project --no-hashes --output-file audit-requirements.txt
+uv export --locked --all-groups --all-extras --no-emit-project --no-hashes --output-file audit-requirements.txt
 uv run --locked pip-audit --strict --no-deps --disable-pip --requirement audit-requirements.txt
 ```
 
