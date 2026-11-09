@@ -33,24 +33,35 @@ def test_windows_workspace_grants_inherited_access_to_current_user(
             "-NoProfile",
             "-NonInteractive",
             "-Command",
-            "$p=[Console]::In.ReadLine(); "
-            "$sid=[Security.Principal.WindowsIdentity]::GetCurrent().User; "
-            "$rules=(Get-Acl -LiteralPath $p).GetAccessRules("
-            "$true,$true,[Security.Principal.SecurityIdentifier]); "
-            "ConvertTo-Json -Compress -InputObject @($rules | Where-Object { "
-            "$_.IdentityReference -eq $sid -and "
-            "$_.AccessControlType -eq 'Allow' } | ForEach-Object { [pscustomobject]@{ "
+            "$ErrorActionPreference='Stop'; "
+            "$paths=ConvertFrom-Json ([Console]::In.ReadToEnd()); "
+            "$entries=@(foreach ($p in $paths) { "
+            "$acl=Get-Acl -LiteralPath $p; "
+            "$rules=$acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]); "
+            "[pscustomobject]@{ Path=$p; "
+            "Owner=$acl.GetOwner([Security.Principal.SecurityIdentifier]).Value; "
+            "FileSystem=[IO.DriveInfo]::new([IO.Path]::GetPathRoot($p)).DriveFormat; "
+            "Sddl=$acl.Sddl; Rules=@($rules | ForEach-Object { [pscustomobject]@{ "
+            "Identity=$_.IdentityReference.Value; Access=[int]$_.AccessControlType; "
             "Rights=[int]$_.FileSystemRights; Propagation=[int]$_.PropagationFlags; "
-            "Inherited=[bool]$_.IsInherited } })",
+            "Inherited=[bool]$_.IsInherited } }) } }); "
+            "[pscustomobject]@{ "
+            "CurrentUser=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; "
+            "Entries=$entries } | ConvertTo-Json -Compress -Depth 5",
         ],
-        input=str(child),
+        input=json.dumps([str(root), str(child)]),
         text=True,
         capture_output=True,
-        check=True,
+        check=False,
     )
-    rules = json.loads(probe.stdout)
+    assert probe.returncode == 0, probe.stderr
+    diagnostic = json.loads(probe.stdout)
     # Windows may split an inherited ACE into effective-only and inherit-only entries.
     assert any(
-        rule["Rights"] & 2032127 == 2032127 and not rule["Propagation"] & 2 and rule["Inherited"]
-        for rule in rules
-    ), rules
+        rule["Identity"] == diagnostic["CurrentUser"]
+        and rule["Access"] == 0
+        and rule["Rights"] & 2032127 == 2032127
+        and not rule["Propagation"] & 2
+        and rule["Inherited"]
+        for rule in diagnostic["Entries"][1]["Rules"]
+    ), json.dumps(diagnostic, indent=2)
