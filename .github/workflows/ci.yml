@@ -37,11 +37,11 @@ jobs:
         with:
           version: 0.13.7
           enable-cache: true
-      - run: uv sync --locked
-      - run: uv run --locked python scripts/start_postgres.py
+      - run: uv sync --locked --no-build
+      - run: uv run --locked --no-sync --no-build python scripts/start_postgres.py
       - name: Start RabbitMQ (Windows)
         if: matrix.os == 'windows-latest'
-        run: uv run --locked python scripts/start_rabbitmq.py
+        run: uv run --locked --no-sync --no-build python scripts/start_rabbitmq.py
       - name: Start RabbitMQ (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
         run: |
@@ -56,19 +56,31 @@ jobs:
           done
           docker logs pyracast-rabbitmq
           exit 1
-      - run: uv run --locked pyracast migrate --noinput
-      - run: uv run --locked pyracast check
-      - run: uv run --locked python scripts/check.py
+      - run: uv run --locked --no-sync --no-build pyracast migrate --noinput
+      - run: uv run --locked --no-sync --no-build pyracast check
+      - run: uv run --locked --no-sync --no-build python scripts/check.py
       - run: uv build --no-sources
       - name: Check wheel in an isolated environment
         shell: python
         run: |
+          import os
           import pathlib
           import subprocess
+          import sys
+          import tempfile
           wheel, = pathlib.Path('dist').glob('*.whl')
-          subprocess.run(['uv', 'run', '--no-project', '--python', '3.15.2', '--with', str(wheel.resolve()),
-                          'python', '-I', '-c', 'import pyracast; print(pyracast.__version__)'],
-                         cwd=pathlib.Path.home(), check=True)
+          with tempfile.TemporaryDirectory() as directory:
+              root = pathlib.Path(directory)
+              env = root / 'venv'
+              python = env / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
+              variables = os.environ.copy()
+              variables['UV_PROJECT_ENVIRONMENT'] = str(env)
+              subprocess.run(['uv', 'sync', '--locked', '--no-build', '--no-dev', '--no-install-project'],
+                             env=variables, check=True)
+              subprocess.run(['uv', 'pip', 'install', '--python', str(python), '--no-deps',
+                              '--no-build', str(wheel.resolve())], cwd=pathlib.Path.home(), check=True)
+              subprocess.run([str(python), '-I', '-c', 'import pyracast; print(pyracast.__version__)'],
+                             cwd=pathlib.Path.home(), check=True)
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: matrix.os == 'ubuntu-latest'
         with:
@@ -92,7 +104,13 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: 0.13.7
-      - run: uv run --no-project --python 3.15.2 python scripts/check_scientific.py
+      - name: Check scientific dependencies
+        shell: python
+        run: |
+          import subprocess
+          subprocess.run(['uv', 'python', 'install', '3.15.2'], check=True)
+          python = subprocess.check_output(['uv', 'python', 'find', '3.15.2'], text=True).strip()
+          subprocess.run([python, 'scripts/check_scientific.py'], check=True)
 
   audit:
     name: Dependency audit
@@ -105,9 +123,9 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: 0.13.7
-      - run: uv sync --locked
+      - run: uv sync --locked --no-build
       - run: uv export --locked --all-groups --all-extras --no-emit-project --no-hashes --output-file audit-requirements.txt
-      - run: uv run --locked pip-audit --strict --no-deps --disable-pip --requirement audit-requirements.txt
+      - run: uv run --locked --no-sync --no-build pip-audit --strict --no-deps --disable-pip --requirement audit-requirements.txt
 
   sonar:
     name: Sonar quality gate

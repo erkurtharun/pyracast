@@ -42,6 +42,8 @@ build-backend = "uv_build"
 
 [tool.uv]
 prerelease = "disallow"
+no-build = true
+no-binary-package = ["h5py", "pyyaml"]
 
 [tool.ruff]
 target-version = "py315"

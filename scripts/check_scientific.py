@@ -75,7 +75,16 @@ def main() -> None:
         if uv is None:
             raise RuntimeError("uv is required")
         subprocess.run(  # noqa: S603 -- fixed uv arguments.
-            [uv, "sync", "--locked", "--no-dev", "--extra", "scientific", "--no-cache"],
+            [
+                uv,
+                "sync",
+                "--locked",
+                "--no-build",
+                "--no-dev",
+                "--extra",
+                "scientific",
+                "--no-cache",
+            ],
             env=env,
             check=True,
         )

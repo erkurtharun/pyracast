@@ -32,8 +32,10 @@ against real PostgreSQL and synthetic provider data. CI also builds and imports 
 wheel outside the checkout on Windows and Ubuntu. CI uses GitHub-hosted
 `ubuntu-latest` and `windows-latest` runners;
 no self-hosted runner or organization-specific reusable workflow is required.
-PyYAML 6.0.3 currently needs a source build on CPython 3.15; this was tested on
-Windows. CI permits this locked build. No dependency or interpreter was downgraded.
+The uv policy blocks unlisted third-party source builds and explicitly permits the
+locked PyYAML and h5py builds required on CPython 3.15. Cached wheels may still be
+reused; first-party project builds remain permitted. No dependency or interpreter was
+downgraded.
 
 CI audits locked runtime, optional scientific and development dependencies against
 public vulnerability advisories. To reproduce:
