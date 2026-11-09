@@ -1,0 +1,44 @@
+[project]
+name = "pyracast"
+version = "0.1.0"
+description = "Multi-tenant irradiance forecasting backend"
+readme = "README.md"
+requires-python = "==3.15.2"
+dependencies = []
+
+[dependency-groups]
+dev = ["mypy", "pip-audit", "pytest", "pytest-cov", "ruff"]
+
+[build-system]
+requires = ["uv_build==0.13.7"]
+build-backend = "uv_build"
+
+[tool.ruff]
+target-version = "py315"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "S", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]
+
+[tool.mypy]
+python_version = "3.15"
+strict = true
+warn_unreachable = true
+files = ["src", "tests", "tools"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-config --strict-markers -ra --cov --cov-report=term-missing --cov-report=xml"
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+branch = true
+relative_files = true
+source = ["src/pyracast"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
