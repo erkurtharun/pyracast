@@ -23,6 +23,12 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 55432
+      PGUSER: pyracast
+      PGDATABASE: pyracast
+      PYRACAST_SECRET_KEY: ci-only-key-not-for-deployment
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -31,8 +37,25 @@ jobs:
         with:
           version: 0.13.7
           enable-cache: true
-      - run: uv sync --locked --no-build
-      - run: uv run --locked --no-build python tools/check.py
+      - run: uv sync --locked
+      - run: uv run --locked python scripts/start_postgres.py
+      - name: Start RabbitMQ (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          docker run -d --name pyracast-rabbitmq -p 127.0.0.1:5672:5672 -e RABBITMQ_DEFAULT_USER=pyracast -e RABBITMQ_DEFAULT_PASS=pyracast rabbitmq:4.4.0@sha256:485319d42170eab53d8a030e1cc49d95e41f5d325479fa504736db8091981eb7
+          for attempt in $(seq 1 90); do
+            if docker exec pyracast-rabbitmq rabbitmq-diagnostics -q ping; then
+              echo 'PYRACAST_LIVE_QUEUE=1' >> "$GITHUB_ENV"
+              echo 'PYRACAST_RABBITMQ_URL=amqp://pyracast:pyracast@127.0.0.1:5672/%2F' >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs pyracast-rabbitmq
+          exit 1
+      - run: uv run --locked pyracast migrate --noinput
+      - run: uv run --locked pyracast check
+      - run: uv run --locked python scripts/check.py
       - run: uv build --no-sources
       - name: Check wheel in an isolated environment
         shell: python
@@ -40,7 +63,7 @@ jobs:
           import pathlib
           import subprocess
           wheel, = pathlib.Path('dist').glob('*.whl')
-          subprocess.run(['uv', 'run', '--no-project', '--no-build', '--python', '3.15.2', '--with', str(wheel.resolve()),
+          subprocess.run(['uv', 'run', '--no-project', '--python', '3.15.2', '--with', str(wheel.resolve()),
                           'python', '-I', '-c', 'import pyracast; print(pyracast.__version__)'],
                          cwd=pathlib.Path.home(), check=True)
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -62,9 +85,9 @@ jobs:
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: 0.13.7
-      - run: uv sync --locked --no-build
+      - run: uv sync --locked
       - run: uv export --locked --all-groups --no-emit-project --no-hashes --output-file audit-requirements.txt
-      - run: uv run --locked --no-build pip-audit --strict --no-deps --disable-pip --requirement audit-requirements.txt
+      - run: uv run --locked pip-audit --strict --no-deps --disable-pip --requirement audit-requirements.txt
 
   sonar:
     name: Sonar quality gate

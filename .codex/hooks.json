@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "^(apply_patch|Edit|Write|MultiEdit)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --locked --no-build --quiet python -c \"import runpy,subprocess; runpy.run_path(subprocess.check_output(['git','rev-parse','--show-toplevel'],text=True).strip()+'/.codex/hooks/quality.py',run_name='__main__')\" post-tool",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^(Read|read_file|read_text_file|read_multiple_files|get_file_text_by_path|view_image|mcp__.*__(read_file|read_text_file|read_multiple_files|get_file_text_by_path))$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --locked --no-build --quiet python -c \"import runpy,subprocess; runpy.run_path(subprocess.check_output(['git','rev-parse','--show-toplevel'],text=True).strip()+'/.codex/hooks/quality.py',run_name='__main__')\" pre-read",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

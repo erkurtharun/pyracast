@@ -1,0 +1,30 @@
+import threading
+from typing import Any
+
+from django.core.management.base import BaseCommand, CommandError
+from dramatiq import Worker
+
+from pyracast.runtime import make_actor, make_broker
+
+
+class Command(BaseCommand):
+    help = "Run a threaded RabbitMQ forecast worker."
+
+    def add_arguments(self, parser: Any) -> None:
+        parser.add_argument("--threads", type=int, default=4)
+
+    def handle(self, *args: Any, **options: Any) -> None:
+        threads = options["threads"]
+        if threads < 1:
+            raise CommandError("--threads must be positive")
+        broker = make_broker()
+        make_actor(broker)
+        worker = Worker(broker, worker_threads=threads)
+        try:
+            worker.start()
+            threading.Event().wait()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            worker.stop()
+            broker.close()
