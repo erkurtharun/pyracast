@@ -67,8 +67,12 @@ def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(command, "make_broker", lambda: broker)
     monkeypatch.setattr(command, "make_actor", lambda _: actor)
     monkeypatch.setattr(command, "dispatch", send)
+    calibration_actor, send_calibrations = MagicMock(), MagicMock()
+    monkeypatch.setattr(command, "make_calibration_actor", lambda _: calibration_actor)
+    monkeypatch.setattr(command, "dispatch_calibrations", send_calibrations)
     call_command("dispatch")
     send.assert_called_once_with(actor)
+    send_calibrations.assert_called_once_with(calibration_actor)
     broker.close.assert_called_once()
     with pytest.raises(CommandError, match="positive"):
         call_command("dispatch", poll_seconds=0)
@@ -77,6 +81,7 @@ def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     call_command("dispatch", loop=True, poll_seconds=1)
     assert send.call_count == 2
+    assert send_calibrations.call_count == 2
     assert broker.close.call_count == 2
 
 
@@ -86,6 +91,8 @@ def test_worker_command_stops_on_interrupt(monkeypatch: pytest.MonkeyPatch) -> N
     broker, actor, worker = MagicMock(), MagicMock(), MagicMock()
     monkeypatch.setattr(command, "make_broker", lambda: broker)
     monkeypatch.setattr(command, "make_actor", lambda _: actor)
+    calibration_registration = MagicMock()
+    monkeypatch.setattr(command, "make_calibration_actor", calibration_registration)
     create_worker = MagicMock(return_value=worker)
     monkeypatch.setattr(command, "Worker", create_worker)
     event = MagicMock()
@@ -93,6 +100,7 @@ def test_worker_command_stops_on_interrupt(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(command, "threading", SimpleNamespace(Event=lambda: event))
     call_command("worker", threads=2)
     create_worker.assert_called_once_with(broker, worker_threads=2)
+    calibration_registration.assert_called_once_with(broker)
     worker.start.assert_called_once()
     worker.stop.assert_called_once()
     broker.close.assert_called_once()

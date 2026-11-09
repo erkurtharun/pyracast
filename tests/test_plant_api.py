@@ -1,0 +1,248 @@
+import json
+from datetime import datetime, time, timedelta
+from io import StringIO
+from typing import Any
+from zoneinfo import ZoneInfo
+
+import pytest
+from django.contrib.auth.models import User
+from django.core.management import call_command
+from django.test import Client
+from django.utils import timezone
+from rest_framework.exceptions import ValidationError
+
+from pyracast.accounts.models import Membership, Tenant
+from pyracast.forecasts.models import CollectionJob, ForecastSnapshot
+from pyracast.plants.models import CalibrationRun, Plant, ProductionObservation
+from pyracast.plants.serializers import AwareDateTime, FiniteFloat
+from tests.test_domain import make_system
+
+pytestmark = pytest.mark.django_db(transaction=True)
+
+
+def setup_plant() -> tuple[Client, str, dict[str, Any]]:
+    system = make_system(approved=True)
+    client = Client()
+    client.force_login(system.member)
+    base = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/"
+    response = client.post(
+        base, {"name": "PV", "dc_capacity_mw": 1}, content_type="application/json"
+    )
+    assert response.status_code == 201, response.content
+    return client, base, response.json()
+
+
+def test_tenant_scope_observation_import_and_validation() -> None:
+    client, base, plant = setup_plant()
+    detail = f"{base}{plant['id']}/"
+    assert client.get(base).json()["count"] == 1
+    assert client.get(detail).json()["current_configuration"]["revision"] == 1
+    config = plant["current_configuration"]["id"]
+    observation = {
+        "starts_at": "2020-01-01T09:00:00Z",
+        "ends_at": "2020-01-01T09:30:00Z",
+        "energy": 500,
+        "quality": "valid",
+        "source": "meter",
+    }
+    payload = {"configuration_id": config, "unit": "kWh", "observations": [observation]}
+    response = client.post(detail + "observations/", payload, content_type="application/json")
+    assert response.status_code == 201, response.content
+    assert response.json()["created"] == 1
+    assert ProductionObservation.objects.get().energy_mwh == 0.5
+    assert (
+        client.post(detail + "observations/", payload, content_type="application/json").json()[
+            "existing"
+        ]
+        == 1
+    )
+    assert client.get(detail + "observations/").json()["results"][0]["energy_mwh"] == 0.5
+    for change in (
+        {"energy": True},
+        {"energy": "NaN"},
+        {"starts_at": "2020-01-01T09:00:00"},
+        {"extra": 1},
+    ):
+        invalid = {**payload, "observations": [{**observation, **change}]}
+        assert (
+            client.post(
+                detail + "observations/", invalid, content_type="application/json"
+            ).status_code
+            == 400
+        )
+    assert (
+        client.post(
+            detail + "observations/", {**payload, "unit": "watts"}, content_type="application/json"
+        ).status_code
+        == 400
+    )
+    other_plant = client.post(
+        base, {"name": "Other PV", "dc_capacity_mw": 2}, content_type="application/json"
+    ).json()
+    foreign_config = other_plant["current_configuration"]["id"]
+    assert (
+        client.post(
+            detail + "observations/",
+            {**payload, "configuration_id": foreign_config},
+            content_type="application/json",
+        ).status_code
+        == 404
+    )
+    assert (
+        client.put(
+            detail,
+            {"name": "PV", "dc_capacity_mw": 1, "tenant_id": 1},
+            content_type="application/json",
+        ).status_code
+        == 400
+    )
+    other = Tenant.objects.create(name="Other")
+    user = User.objects.create_user(username="other")
+    Membership.objects.create(tenant=other, user=user)
+    client.force_login(user)
+    assert client.get(detail).status_code == 403
+    assert (
+        client.post(detail + "observations/", payload, content_type="application/json").status_code
+        == 403
+    )
+    own_scope = f"/api/tenants/{other.pk}/regions/{plant['region_id']}/plants/{plant['id']}/"
+    assert client.get(own_scope).status_code == 404
+    assert client.get(own_scope + "calibrations/").status_code == 404
+
+
+def test_calibration_pending_forecast_and_csrf() -> None:
+    client, base, plant = setup_plant()
+    detail = f"{base}{plant['id']}/"
+    end = timezone.now().date() - timedelta(days=2)
+    response = client.post(
+        detail + "calibrations/",
+        {
+            "configuration_id": plant["current_configuration"]["id"],
+            "start_date": (end - timedelta(days=6)).isoformat(),
+            "end_date": end.isoformat(),
+        },
+        content_type="application/json",
+    )
+    assert response.status_code == 202, response.content
+    run = response.json()
+    assert run["status"] == "pending"
+    assert run["completed_at"] is None
+    assert CalibrationRun.objects.get().status == "pending"
+    report = client.get(detail + f"calibrations/{run['id']}/").json()
+    assert report["id"] == run["id"]
+    assert report["dataset_manifest"] == {}
+    listing = client.get(detail + "calibrations/").json()
+    assert listing["count"] == 1
+    assert "dataset_manifest" not in listing["results"][0]
+    assert (
+        client.post(
+            detail + f"calibrations/{run['id']}/activate/", {}, content_type="application/json"
+        ).status_code
+        == 400
+    )
+    assert (
+        client.post(
+            detail + "calibration/reset/", {"extra": 1}, content_type="application/json"
+        ).status_code
+        == 400
+    )
+    assert client.get(detail + "forecast/?date=2020-01-01&resolution_minutes=15").status_code == 400
+    assert (
+        client.get(detail + "forecast/?date=2020-01-01&as_of=2020-01-01T09:00:00").status_code
+        == 400
+    )
+    saved = CalibrationRun.objects.get()
+    saved.status = "ready"
+    saved.factor = 1.0
+    saved.assessment = "provisional"
+    saved.completed_at = timezone.now()
+    saved.result = {"holdout_days": 1, "candidate": {"mae": 1}, "baseline": {"mae": 2}}
+    saved.save()
+    activation = client.post(
+        detail + f"calibrations/{run['id']}/activate/", {}, content_type="application/json"
+    )
+    assert activation.status_code == 200
+    assert activation.json()["calibration_id"] == run["id"]
+    reset = client.post(detail + "calibration/reset/", {}, content_type="application/json")
+    assert reset.status_code == 200
+    assert reset.json()["calibration_id"] is None
+    assert (
+        client.put(
+            detail, {"name": "PV", "dc_capacity_mw": True}, content_type="application/json"
+        ).status_code
+        == 400
+    )
+    guarded = Client(enforce_csrf_checks=True)
+    guarded.force_login(User.objects.get(username="member"))
+    assert (
+        guarded.put(
+            detail, {"name": "PV", "dc_capacity_mw": 1}, content_type="application/json"
+        ).status_code
+        == 403
+    )
+
+
+def test_forecast_resolution_caps_native_intervals() -> None:
+    client, base, plant = setup_plant()
+    detail = f"{base}{plant['id']}/"
+    response = client.put(
+        detail,
+        {"name": "PV", "dc_capacity_mw": 1, "export_limit_mw": 0.5},
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    configuration = Plant.objects.get(pk=plant["id"]).current_configuration
+    assert configuration is not None
+    now = timezone.now()
+    target = now.astimezone(ZoneInfo("Europe/Istanbul")).date() + timedelta(days=1)
+    start = datetime.combine(target, time.min, ZoneInfo("Europe/Istanbul"))
+    job = CollectionJob.objects.create(
+        binding=configuration.binding, target_date=target, scheduled_slot=now, available_at=now
+    )
+    ForecastSnapshot.objects.create(
+        job=job,
+        source_kind="forecast",
+        collected_at=now,
+        raw_payload={},
+        normalized_intervals=[
+            {
+                "start": start.isoformat(),
+                "end": (start + timedelta(minutes=30)).isoformat(),
+                "power_kw": 1,
+            },
+            {
+                "start": (start + timedelta(minutes=30)).isoformat(),
+                "end": (start + timedelta(hours=1)).isoformat(),
+                "power_kw": 0.2,
+            },
+        ],
+    )
+    query = f"{detail}forecast/?date={target.isoformat()}"
+    half = client.get(query + "&resolution_minutes=30")
+    hour = client.get(query + "&resolution_minutes=60")
+    assert half.status_code == 200
+    assert hour.status_code == 200
+    assert half.json()["result"]["intervals"][0]["energy_mwh"] == 0.25
+    assert hour.json()["result"]["intervals"][0]["energy_mwh"] == pytest.approx(0.35)
+
+
+def test_numeric_and_datetime_fields_reject_invalid_values() -> None:
+    for value in (float("nan"), float("inf")):
+        with pytest.raises(ValidationError):
+            FiniteFloat().run_validation(value)
+    for timestamp in (42, "2020-99-01T00:00:00Z", "nonsense"):
+        with pytest.raises(ValidationError):
+            AwareDateTime().run_validation(timestamp)
+
+
+def test_openapi_has_distinct_forecast_and_status_components() -> None:
+    output = StringIO()
+    call_command(
+        "spectacular", format="openapi-json", validate=True, fail_on_warn=True, stdout=output
+    )
+    schema = json.loads(output.getvalue())
+    components = schema["components"]["schemas"]
+    assert "regional_irradiance" in components["PlantForecastOutput"]["properties"]
+    assert "region_id" in components["ForecastOutput"]["properties"]
+    assert "ready" in components["CalibrationStatusEnum"]["enum"]
+    assert "approved" not in components["CalibrationStatusEnum"]["enum"]

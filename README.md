@@ -4,8 +4,10 @@ Multi-tenant irradiance forecasting backend. Product scope and boundaries live i
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); calculation contracts live in
 [docs/IRRADIANCE.md](docs/IRRADIANCE.md). The backend includes a session-authenticated
 tenant API, MFA-protected operations interface, PostgreSQL jobs and quota ledger,
-RabbitMQ/Dramatiq entry points, archived vintages and an explicitly unvalidated
-irradiance baseline. Synthetic fixtures exercise the complete application flow.
+RabbitMQ/Dramatiq entry points, archived vintages, plant generation with native
+interval clipping and offline production calibration. Irradiance reconstruction
+and the initial plant transfer remain explicitly unvalidated proxies. Synthetic
+fixtures exercise the complete application flow.
 
 ## Development
 
@@ -105,7 +107,7 @@ uv run --locked pyracast dispatch --loop
 uv run --locked pyracast worker --threads 4
 ```
 
-The dispatcher scans durable jobs every 60 seconds. Queue publication can be
+The dispatcher scans durable collection and calibration jobs every 60 seconds. Queue publication can be
 repeated; database leases and unique results govern execution. Requests, validation
 and retries share one account/UTC-day budget. Unknown request outcomes consume quota.
 Provider calls happen outside transactions. Changed or suspended regions cannot
@@ -124,6 +126,14 @@ operator provisioning, for example the Django shell (`Tenant`, `Membership`, bui
 | `/api/tenants/{tenant}/regions/` | GET paginated regions; POST region request |
 | `/api/tenants/{tenant}/regions/{region}/` | GET; PUT replacement settings, requiring reapproval |
 | `/api/tenants/{tenant}/regions/{region}/forecast/?date=YYYY-MM-DD` | Saved vintage, intervals, coverage and daily/partial energy |
+| `/api/tenants/{tenant}/regions/{region}/plants/` | GET plants; POST configuration |
+| `/api/tenants/{tenant}/regions/{region}/plants/{plant}/` | GET; PUT a new configuration revision |
+| `.../plants/{plant}/observations/` | GET records; POST an atomic MWh/kWh batch |
+| `.../plants/{plant}/calibrations/` | GET fit summaries; POST a durable calibration request |
+| `.../plants/{plant}/calibrations/{calibration}/` | GET evaluation and reproducible dataset manifest |
+| `.../plants/{plant}/calibrations/{calibration}/activate/` | POST `{}` to activate an eligible fit |
+| `.../plants/{plant}/calibration/reset/` | POST `{}` to restore the baseline |
+| `.../plants/{plant}/forecast/?date=YYYY-MM-DD&resolution_minutes=60` | Electrical interval/daily energy and separate regional irradiance |
 | `/api/platform/accounts/` | POST canonical authorized account and write-only secret reference |
 | `/api/platform/accounts/{account}/rotate-secret/` | POST write-only `secret_reference`; revalidation required |
 | `/api/platform/regions/{region}/bindings/` | POST immutable reference configuration |
@@ -168,6 +178,62 @@ Production requires HTTPS, a deployment secret and explicit hosts/CSRF origins.
 Secure cookies and HTTPS redirects are enabled by default. Serve `pyracast.wsgi`
 with a suitable WSGI server and collect static assets; `runserver` is development only.
 
+## Plant production and calibration
+
+After region approval, configure a plant using a member's username. This example
+means 130 MW DC modules and a 100 MW **net export** limit; it does not invent an
+inverter rating. Add `--inverter-capacity-mw` when known. Use `ac_generation` for
+inverter-side metering instead. The command prints the plant and configuration IDs:
+
+```text
+uv run --locked pyracast configure_plant --username YOUR_USER --region-id REGION_ID --name "Reference plant" --dc-capacity-mw 130 --export-limit-mw 100 --measurement-basis net_export
+```
+
+Add `--plant-id PLANT_ID` to revise an existing plant. Capacity or meter changes
+create a new version; its calibration starts from the baseline. Forecast GET accepts
+`resolution_minutes=30` or `60` and optional aware `as_of`. A requested historical
+time must have an existing configuration. Sources acquired during or after the target
+day cannot turn into day-ahead predictions. The first preceding-day acquisition is
+used consistently for fitting and prediction, with actual lead time in provenance.
+
+Place a CSV inside the working directory (an ignored local directory such as
+`.codex/production.csv` is suitable). Values are **interval energy**, not instantaneous
+MW or cumulative meter readings. Include every interval, including measured night
+zeros; mark outages/curtailment/invalid data explicitly. For example:
+
+```csv
+starts_at,ends_at,energy,quality,source
+2026-11-01T12:00:00+03:00,2026-11-01T13:00:00+03:00,72.4,valid,plant-meter
+```
+
+```text
+uv run --locked pyracast import_production --username YOUR_USER --plant-id PLANT_ID --configuration-id CONFIGURATION_ID --unit MWh --file .codex/production.csv
+uv run --locked pyracast calibrate_plant --username YOUR_USER --plant-id PLANT_ID --configuration-id CONFIGURATION_ID --start-date 2026-11-01 --end-date 2026-11-07 --run
+```
+
+The sample row is illustrative; it is not sufficient calibration data. Supply at
+least seven complete, matched local days; a month is preferable for more weather
+variation. CSV files accept 30/60-minute intervals, at most 2,000 rows and 2 MiB.
+Imports are atomic and exact replay is safe; conflicting records are rejected.
+`--run` processes the saved job locally without RabbitMQ or provider calls; omit it
+to let the dispatcher/worker process the request. No training occurs in API requests.
+
+Inspect the calibration detail endpoint for baseline/candidate errors and exclusions.
+Only a `ready` candidate can be activated; seven-day fits remain `provisional`:
+
+```text
+uv run --locked pyracast activate_calibration --username YOUR_USER --plant-id PLANT_ID --calibration-id CALIBRATION_ID
+uv run --locked pyracast activate_calibration --username YOUR_USER --plant-id PLANT_ID --baseline
+```
+
+Activation/rollback affect subsequent forecast issuance, preserving earlier results.
+No automatic activation or artificial accuracy percentage is provided. Historical
+meter data without matching archived forecasts yields `insufficient`, not a fitted
+hindcast. Solcast historical estimated irradiance is a different input: it can
+support weather-normalized plant analysis when paired with production and geometry,
+but it is not accepted as an archived forecast or a meter reading. See
+[the calculation contract](docs/IRRADIANCE.md) for the statistical policy and limits.
+
 ## Verification boundaries
 
 The CPython 3.15.2 CI matrix checks locked installation, PostgreSQL 18.6 migrations,
@@ -177,8 +243,8 @@ Ubuntu uses their pinned containers. Local Windows and Ubuntu CI checks have exe
 the application against real PostgreSQL. StubBroker tests additionally cover worker
 behavior without a broker, but do not establish RabbitMQ compatibility.
 Set `PYRACAST_LIVE_QUEUE=1` and a dedicated `PYRACAST_RABBITMQ_URL` to run that test
-locally. It uses the dedicated broker's default queue. Without that explicit
-opt-in, the real-broker test reports a skip. Native Windows ACL tests are explicitly
+locally. These tests use the dedicated broker's default and calibration queues. Without that explicit
+opt-in, the real-broker tests report skips. Native Windows ACL tests are explicitly
 skipped on Ubuntu.
 
 The latest resolved scientific stack is available as the `scientific` extra:
@@ -201,13 +267,17 @@ scientific-stack validation. Installing the extra persistently requires the nati
 `os.add_dll_directory` handle before importing h5py/pvlib. The default baseline needs
 neither HDF5 nor a pvlib surrogate and runs with `uv sync --locked`.
 
-An authorized live check on 2026-11-09 used two Bearer-authenticated requests:
+The initial authorized live check on 2026-11-09 used two Bearer-authenticated requests:
 one saved-site lookup and one forecast acquisition. Both succeeded. The saved
 coordinates, numeric capacity (1 kW), tilt (0 degrees) and loss factor (1) matched
 the supplied reference. The response did not establish AC/DC capacity semantics,
 snow/shading configuration or a timezone; the requested region timezone is
-Europe/Istanbul. No live binding was automatically approved from incomplete evidence.
-The captured installation timestamp is retained in the ignored local evidence.
+Europe/Istanbul. Subsequent operator evidence confirmed the Toolkit's inverter AC
+capacity and enabled explicit approval of the reference binding. Validation and a
+normal collection then succeeded, bringing recorded development requests that UTC
+day to four. No matched GHI labels were supplied. The captured installation timestamp
+and operator evidence remain local; unknown physical shading/snow losses are not
+assumed absent.
 
 The sanitized [forecast fixture](tests/fixtures/solcast_forecasts.json) contains
 97 half-hour intervals; its [metadata](tests/fixtures/solcast_forecasts.metadata.json)

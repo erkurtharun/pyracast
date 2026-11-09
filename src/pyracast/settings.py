@@ -26,6 +26,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "django.contrib.admin",
+    "django.contrib.postgres",
     "django_otp",
     "django_otp.plugins.otp_totp",
     "rest_framework",
@@ -34,6 +35,7 @@ INSTALLED_APPS = [
     "pyracast.regions",
     "pyracast.connections",
     "pyracast.forecasts",
+    "pyracast.plants",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -88,7 +90,10 @@ SPECTACULAR_SETTINGS = {
     "TITLE": "Pyracast API",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
-    "ENUM_NAME_OVERRIDES": {"PowerBasisEnum": [("ac", "ac"), ("dc", "dc")]},
+    "ENUM_NAME_OVERRIDES": {
+        "PowerBasisEnum": [("ac", "ac"), ("dc", "dc")],
+        "CalibrationStatusEnum": "pyracast.plants.serializers.calibration_status_choices",
+    },
 }
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"

@@ -24,6 +24,10 @@ urlpatterns = [
     path("api/tenants/<int:tenant_id>/regions/", RegionsView.as_view()),
     path("api/tenants/<int:tenant_id>/regions/<int:region_id>/", RegionView.as_view()),
     path("api/tenants/<int:tenant_id>/regions/<int:region_id>/forecast/", ForecastView.as_view()),
+    path(
+        "api/tenants/<int:tenant_id>/regions/<int:region_id>/plants/",
+        include("pyracast.plants.urls"),
+    ),
     path("api/platform/accounts/", AccountView.as_view()),
     path("api/platform/accounts/<int:account_id>/rotate-secret/", RotateSecretView.as_view()),
     path("api/platform/regions/<int:region_id>/bindings/", BindingView.as_view()),

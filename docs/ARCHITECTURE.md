@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Build a multi-tenant backend where customers request regions, a platform administrator links authorized Solcast accounts and approves them, and scheduled jobs publish tomorrow's irradiance and daily energy estimates. The customer frontend is separate; provide its API and a minimal internal admin interface.
+Build a multi-tenant backend where customers request regions, a platform administrator links authorized Solcast accounts and approves them, and scheduled jobs publish tomorrow's irradiance and daily energy estimates. Plants belong to regions and expose electrical generation at 30-minute or hourly resolution, including capacity limits and optional calibration against metered production. The customer frontend is separate; provide its API and a minimal internal admin interface.
 
 Use only provider accounts authorized for this service. Solcast account creation remains an operator task outside this backend. Implement fixtures so development does not depend on credentials or live API calls.
 
@@ -20,7 +20,7 @@ Celery has no supported native Windows runtime. Selecting Celery would require a
 
 ## Boundaries and records
 
-Use conventional Django apps for accounts, regions, provider connections and forecasts; keep the calculation package independent of Django. API views, admin actions and tasks call shared application operations. Avoid business logic in serializers or implicit model signals.
+Use conventional Django apps for accounts, regions, provider connections, forecasts and plants; keep calculations independent of Django. API views, admin actions and tasks call shared application operations. Avoid business logic in serializers or implicit model signals.
 
 | Record | Owns |
 | --- | --- |
@@ -30,6 +30,10 @@ Use conventional Django apps for accounts, regions, provider connections and for
 | SiteBinding | Region-to-provider-account/site mapping and immutable configuration revisions |
 | CollectionJob, RequestAttempt | Scheduling, leases, quota reservations and execution history |
 | ForecastSnapshot, ForecastResult | Raw input, normalized intervals, derived output and model version |
+| Plant, PlantConfiguration | Region ownership and immutable DC/inverter/export capacity and meter-basis revisions |
+| ProductionObservation | Interval energy, quality, source, configuration and recording time |
+| CalibrationRun, CalibrationActivation | Durable fit, reproducible dataset, held-out evaluation and explicit activation history |
+| PlantForecast, PlantEvent | Immutable electrical result and audited plant operations |
 | AuditEvent | Actor, action, target and timestamp for privileged changes |
 
 Initially each region uses a separately configured provider account. Keep the relationship explicit rather than embedding a credential in the region. Enforce one canonical record per provider account across tenants and credential rotations; duplicate records must not create independent quota budgets.
@@ -59,6 +63,14 @@ Keep approval (`pending`, `approved`, `rejected`, `suspended`), connection healt
 
 Provide authenticated region submission/list/detail, platform-admin connection validation and approve/reject/suspend actions, and dated forecast retrieval. Generate OpenAPI; use explicit units, bounded date ranges, pagination and stable error codes. Approval transitions are operations, not writable status fields.
 
+Plant operations use the same tenant membership boundary. Configuration revisions pin the approved reference binding and distinguish DC nameplate, inverter AC capacity, grid export limit and the measurement point (`net_export` or `ac_generation`). Unknown capacities remain null. Changing the configuration supersedes pending calibration work; it does not rewrite historical forecasts or observations.
+
+Import completed 30/60-minute energy observations in explicit MWh or kWh, with timezone-aware bounds and quality labels. Exact replays are idempotent; conflicting or overlapping records reject the entire batch. PostgreSQL exclusion constraints enforce non-overlap, requiring the `btree_gist` extension. An import contains at most 2,000 rows; larger histories use multiple batches. Observations are immutable in this version; corrections need an explicit replacement-history design before they can be supported safely.
+
+Calibration requests cover 7–90 completed local days and create durable database jobs. A separate Dramatiq `calibration` queue performs offline fitting without provider calls; leases expire after five minutes and permit at most three attempts. Pin observations available at request time, source snapshots, configuration, selection policy and a dataset digest. Recheck configuration and lease ownership before publication. Activation and baseline rollback are explicit tenant operations, recorded separately from the immutable fit. Details and statistical acceptance criteria live in `IRRADIANCE.md`.
+
+Electrical forecasting and calibration select the first eligible forecast acquired on the preceding local day, using one vintage per target day. An explicit `as_of` excludes acquisitions and activations not yet available then; later refreshes cannot retrospectively improve a calibration's input. Preserve actual collection time and lead time. This does not claim publication exactly at the scheduler's 16:00 slot. Missing archives yield insufficient calibration data; historical estimated actuals must never be relabeled as archived forecasts.
+
 Implement in this order:
 
 1. Compatibility checks, locked environment, PostgreSQL, authentication and tenant isolation.
@@ -66,6 +78,7 @@ Implement in this order:
 3. Durable jobs, account quota, live provider adapter and immutable snapshots.
 4. The calculation contract in `IRRADIANCE.md`, results API and reference evaluation.
 5. Restart/concurrency/security tests, Windows/Ubuntu CI and reproducible startup instructions.
+6. Plant configuration, clipped interval generation, metered-production import, offline calibration, explicit activation/rollback and forecast provenance.
 
 Acceptance: a second tenant cannot access the first tenant's records; concurrent approvals/jobs preserve invariants; retries respect quota; restart/redelivery does not duplicate results; invalid secrets remain private; incomplete days are not reported as zero; both OS environments pass the implemented flows. Without live credentials or matched labels, finish the fixture-backed system and identify the unverified integration/accuracy boundary.
 

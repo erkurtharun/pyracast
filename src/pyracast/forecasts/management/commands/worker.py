@@ -4,11 +4,12 @@ from typing import Any
 from django.core.management.base import BaseCommand, CommandError
 from dramatiq import Worker
 
+from pyracast.plants.runtime import make_calibration_actor
 from pyracast.runtime import make_actor, make_broker
 
 
 class Command(BaseCommand):
-    help = "Run a threaded RabbitMQ forecast worker."
+    help = "Run threaded RabbitMQ forecast and calibration workers."
 
     def add_arguments(self, parser: Any) -> None:
         parser.add_argument("--threads", type=int, default=4)
@@ -19,6 +20,7 @@ class Command(BaseCommand):
             raise CommandError("--threads must be positive")
         broker = make_broker()
         make_actor(broker)
+        make_calibration_actor(broker)
         worker = Worker(broker, worker_threads=threads)
         try:
             worker.start()

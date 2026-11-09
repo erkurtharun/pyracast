@@ -11,6 +11,15 @@ from django_otp.admin import OTPAdminSite
 from pyracast.accounts.models import Tenant
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import CollectionJob, ForecastResult, RequestAttempt
+from pyracast.plants.models import (
+    CalibrationActivation,
+    CalibrationRun,
+    Plant,
+    PlantConfiguration,
+    PlantEvent,
+    PlantForecast,
+    ProductionObservation,
+)
 from pyracast.regions.models import AuditEvent, Region
 from pyracast.regions.operations import approve_region, transition_region
 
@@ -78,5 +87,19 @@ class RegionAdmin(ReadOnlyAdmin):
             transition_region(cast(User, request.user), region.pk, "suspended")
 
 
-for model in (Tenant, SiteBinding, CollectionJob, ForecastResult, RequestAttempt, AuditEvent):
+for model in (
+    Tenant,
+    SiteBinding,
+    CollectionJob,
+    ForecastResult,
+    RequestAttempt,
+    AuditEvent,
+    Plant,
+    PlantConfiguration,
+    ProductionObservation,
+    CalibrationRun,
+    CalibrationActivation,
+    PlantForecast,
+    PlantEvent,
+):
     site.register(model, ReadOnlyAdmin)
