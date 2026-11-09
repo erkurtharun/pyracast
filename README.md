@@ -86,7 +86,17 @@ that URL. This development command executes the durable job directly; it does no
 test RabbitMQ. The synthetic day yields 7.2 kWh/m² and carries `synthetic_fixture`
 and `unvalidated` flags. It is not a Solcast forecast or an accuracy reference.
 
-For queued processing, start RabbitMQ and run these in separate terminals:
+For queued processing, provide RabbitMQ. On Windows,
+`uv run --locked python scripts/start_rabbitmq.py` starts an isolated, loopback-only
+development broker from checksum-pinned RabbitMQ 4.4.0 and Erlang/OTP 29.1.2 archives.
+On Ubuntu with Docker, start the pinned broker image:
+
+```text
+docker run -d --rm --name pyracast-rabbitmq -p 127.0.0.1:5672:5672 rabbitmq:4.4.0@sha256:485319d42170eab53d8a030e1cc49d95e41f5d325479fa504736db8091981eb7
+```
+
+These are development services; use your configured broker URL in production. Then
+run these in separate terminals:
 
 ```text
 uv run --locked pyracast dispatch --loop
@@ -158,32 +168,36 @@ with a suitable WSGI server and collect static assets; `runserver` is developmen
 
 ## Verification boundaries
 
-On Windows CPython 3.15.2, locked installation, PostgreSQL 18.6 migrations, authenticated
-API calls, numerical calculations and queued StubBroker delivery have been exercised.
-StubBroker is a test double, not evidence of RabbitMQ operation. CI configures both
-Windows and Ubuntu database tests; Ubuntu additionally runs a real RabbitMQ test.
+The CPython 3.15.2 CI matrix checks locked installation, PostgreSQL 18.6 migrations,
+authenticated API behavior, numerical calculations, a real RabbitMQ task and isolated
+wheel installation on Windows and Ubuntu. Windows uses native PostgreSQL and RabbitMQ;
+Ubuntu uses their pinned containers. Local Windows and Ubuntu CI checks have exercised
+the application against real PostgreSQL. StubBroker tests additionally cover worker
+behavior without a broker, but do not establish RabbitMQ compatibility.
 Set `PYRACAST_LIVE_QUEUE=1` and a dedicated `PYRACAST_RABBITMQ_URL` to run that test
 locally. It uses the dedicated broker's default queue. Without that explicit
-opt-in, the real-broker test reports a skip. Actual Ubuntu and RabbitMQ execution
-remain unverified in this workstation session.
+opt-in, the real-broker test reports a skip. Native Windows ACL tests are explicitly
+skipped on Ubuntu.
 
 The latest resolved scientific stack is available as the `scientific` extra:
 pvlib 0.16.1, NumPy 2.5.4, pandas 3.1.1, SciPy 1.18.1 and h5py 3.16.0. h5py has no
-CPython 3.15 Windows/Ubuntu x64 wheel. On Windows, a source build against the official
-[HDF5 2.2.0 distribution](https://github.com/HDFGroup/hdf5/releases/tag/2.2.0) succeeded
-in an isolated environment. Its `hdf5-2.2.0-win-vs2026_cl.zip` was verified against
-SHA256 `0564e8d75cbc7cd86dec2a629afa8498f9ad22cdcb06d9078ebaa4e834390ac4`.
-The build required `HDF5_DIR`, its `bin` on `PATH`, a C compiler and short `TEMP`/`TMP`
-paths. At runtime, keep the handle from `os.add_dll_directory(HDF5_DIR / "bin")` open
-before importing h5py or pvlib; `PATH` alone did not resolve its DLLs.
-See the [h5py build instructions](https://docs.h5py.org/en/stable/build.html).
+CPython 3.15 Windows/Ubuntu x64 wheel. CI builds it against checksum-pinned official
+[HDF5 2.2.0 archives](https://github.com/HDFGroup/hdf5/releases/tag/2.2.0) in a temporary
+environment on native Windows and Ubuntu 24.04. Both builds and the pvlib smoke
+calculation passed. Reproduce this check with a C compiler installed:
 
-The linked HDF5 version was verified as 2.2.0, and a pvlib solar-position calculation
-for 40 N, 29 E at 2026-06-21 12:00 UTC returned zenith 29.183607 degrees and azimuth
-244.050205 degrees. This is a Windows runtime smoke check, not full scientific-stack
-or Ubuntu validation. `uv sync --locked --extra scientific` requires the native
-setup above on a clean machine. The default baseline needs neither HDF5 nor a pvlib
-surrogate and remains runnable with `uv sync --locked`.
+```text
+uv run --no-project --python 3.15.2 python scripts/check_scientific.py
+```
+
+The helper supplies HDF5, short build paths and platform-specific library loading.
+It verifies the linked HDF5 version and checks solar position at 40 N, 29 E on
+2026-06-21 12:00 UTC (zenith 29.183607 degrees, azimuth 244.050205 degrees).
+This establishes installation and execution, not irradiance accuracy or exhaustive
+scientific-stack validation. Installing the extra persistently requires the native
+[h5py setup](https://docs.h5py.org/en/stable/build.html); Windows also needs an open
+`os.add_dll_directory` handle before importing h5py/pvlib. The default baseline needs
+neither HDF5 nor a pvlib surrogate and runs with `uv sync --locked`.
 
 An authorized live check on 2026-11-09 used two Bearer-authenticated requests:
 one saved-site lookup and one forecast acquisition. Both succeeded. The saved
