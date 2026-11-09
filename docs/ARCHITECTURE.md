@@ -9,7 +9,7 @@ Use only provider accounts authorized for this service. Solcast account creation
 ## Stack and portability
 
 - CPython **3.15.2**, Django, Django REST Framework, PostgreSQL and pvlib.
-- Dramatiq with RabbitMQ is the initial worker candidate for native Windows/Ubuntu operation. Keep tasks thin so a verified better executor can replace it.
+- Dramatiq with RabbitMQ is the initial worker implementation for native Windows/Ubuntu operation. Keep tasks thin so a verified better executor can replace it.
 - One repository, with API, worker and scheduler/dispatcher as separate processes. Keep PostgreSQL as the durable source of truth.
 - API, numerical core and worker must run on Windows x64 and Ubuntu x64. PostgreSQL and RabbitMQ may be local services, remote services or Docker Compose dependencies. Full-stack containers are an additional deployment option.
 - Use portable Python entry points, `pathlib`, UTF-8, timezone-aware dates and an explicit `tzdata` dependency. Correctness must not depend on Bash, cron, Unix signals, `fork`, or development reload/watch features.
