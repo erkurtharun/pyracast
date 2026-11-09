@@ -17,8 +17,49 @@ POSTGRES_IMAGE = (
 )
 
 
-def run(*args: str) -> None:
-    subprocess.run(args, check=True)  # noqa: S603 -- fixed CI commands and local paths.
+def run(*args: str, env: dict[str, str] | None = None) -> None:
+    subprocess.run(args, check=True, env=env)  # noqa: S603 -- fixed CI commands and local paths.
+
+
+def windows_preflight(binary: Path, env: dict[str, str]) -> None:
+    try:
+        for executable in ("initdb.exe", "postgres.exe"):
+            run(str(binary / executable), "--version", env=env)
+    except subprocess.CalledProcessError as error:
+        print(f"PostgreSQL native preflight failed: 0x{error.returncode:08X}", flush=True)
+        if sys.platform == "win32":
+            import ctypes
+
+            with (
+                os.add_dll_directory(str(binary)),
+                os.add_dll_directory(str(binary.parent / "lib")),
+            ):
+                for name in (
+                    "VCRUNTIME140.dll",
+                    "VCRUNTIME140_1.dll",
+                    "MSVCP140.dll",
+                    "libwinpthread-1.dll",
+                    "libiconv-2.dll",
+                    "libintl-9.dll",
+                    "icuuc77.dll",
+                    "icuin77.dll",
+                    "libcrypto-3-x64.dll",
+                    "libssl-3-x64.dll",
+                    "libpq.dll",
+                    "libxml2.dll",
+                    "liblz4.dll",
+                    "libzstd.dll",
+                ):
+                    path = binary / name
+                    try:
+                        ctypes.WinDLL(str(path) if path.is_file() else name)
+                        print(f"Native library probe: {name}: loadable", flush=True)
+                    except OSError as failure:
+                        print(
+                            f"Native library probe: {name}: Windows error {failure.winerror}",
+                            flush=True,
+                        )
+        raise
 
 
 def main() -> None:
@@ -39,6 +80,11 @@ def main() -> None:
                 if item.startswith(("pgsql/bin/", "pgsql/lib/", "pgsql/share/")):
                     source.extract(item, root)
         binary = root / "pgsql" / "bin"
+        env = os.environ.copy()
+        env["PATH"] = os.pathsep.join(
+            (str(binary), str(binary.parent / "lib"), env.get("PATH", ""))
+        )
+        windows_preflight(binary, env)
         data = root / "data"
         run(
             str(binary / "initdb.exe"),
@@ -49,6 +95,7 @@ def main() -> None:
             "--auth=trust",
             "--encoding=UTF8",
             "--no-locale",
+            env=env,
         )
         run(
             str(binary / "pg_ctl.exe"),
@@ -59,6 +106,7 @@ def main() -> None:
             "-o",
             f"-h 127.0.0.1 -p {port}",
             "start",
+            env=env,
         )
         run(
             str(binary / "createdb.exe"),
@@ -69,6 +117,7 @@ def main() -> None:
             "-U",
             "pyracast",
             "pyracast",
+            env=env,
         )
     elif sys.platform == "linux":
         docker = shutil.which("docker")
