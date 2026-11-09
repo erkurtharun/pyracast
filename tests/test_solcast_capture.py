@@ -19,7 +19,8 @@ from scripts import check_solcast
 
 
 @pytest.fixture
-def capture_account(monkeypatch: pytest.MonkeyPatch) -> ProviderAccount:
+def capture_account(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> ProviderAccount:
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("SOLCAST_API_KEY", "synthetic-capture-credential")
     monkeypatch.setenv("SOLCAST_RESOURCE_ID", "synthetic-site")
     reference = "env:SOLCAST_API_KEY"
@@ -47,6 +48,81 @@ def forecast_payload() -> dict[str, object]:
         ],
         "account_id": "private-account",
     }
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("absolute", [True, False])
+def test_capture_rejects_output_outside_cwd_before_creating_files_or_consuming_quota(
+    capture_account: ProviderAccount,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    absolute: bool,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    outside = tmp_path / "outside"
+    output = outside if absolute else Path("../outside")
+
+    def reject_request(request: httpx.Request) -> httpx.Response:
+        pytest.fail("An out-of-workspace output must be rejected before provider access")
+
+    with pytest.raises(ValueError, match="current working directory"):
+        check_solcast.capture(
+            capture_account, "forecast", output, transport=httpx.MockTransport(reject_request)
+        )
+
+    assert not outside.exists()
+    assert not RequestAttempt.objects.exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("form", ["absolute", "relative", "parent_inside"])
+def test_capture_accepts_canonical_output_inside_cwd(
+    capture_account: ProviderAccount, tmp_path: Path, form: str
+) -> None:
+    output = tmp_path / "captures"
+    if form == "relative":
+        output = Path("captures")
+    elif form == "parent_inside":
+        output = Path("nested/../captures")
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json=forecast_payload()))
+
+    target = check_solcast.capture(capture_account, "forecast", output, transport=transport)
+
+    assert target.parent == tmp_path / "captures"
+    assert target.is_file()
+    assert target.with_suffix(".metadata.json").is_file()
+    assert RequestAttempt.objects.get().outcome == "succeeded"
+
+
+@pytest.mark.django_db
+def test_capture_rejects_directory_symlink_escaping_cwd_before_consuming_quota(
+    capture_account: ProviderAccount, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link = workspace / "linked-output"
+    try:
+        link.symlink_to(outside, target_is_directory=True)
+    except OSError as error:
+        if getattr(error, "winerror", None) == 1314:
+            pytest.skip("Windows directory symlink creation requires Developer Mode or privilege")
+        raise
+    monkeypatch.chdir(workspace)
+
+    def reject_request(request: httpx.Request) -> httpx.Response:
+        pytest.fail("An escaping output symlink must be rejected before provider access")
+
+    with pytest.raises(ValueError, match="current working directory"):
+        check_solcast.capture(
+            capture_account, "forecast", link, transport=httpx.MockTransport(reject_request)
+        )
+
+    assert list(outside.iterdir()) == []
+    assert not RequestAttempt.objects.exists()
 
 
 @pytest.mark.django_db(transaction=True)

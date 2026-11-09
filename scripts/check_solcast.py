@@ -70,6 +70,10 @@ def capture(
 
     if kind not in {"settings", "forecast"}:
         raise ValueError("Unknown capture kind.")
+    workspace = Path.cwd().resolve()
+    output = output.resolve()
+    if not output.is_relative_to(workspace):
+        raise ValueError("Output must stay within the current working directory.")
     secret = os.environ.get("SOLCAST_API_KEY", "")
     site_id = os.environ.get("SOLCAST_RESOURCE_ID", "")
     if not secret or not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", site_id):
@@ -147,7 +151,12 @@ def main() -> None:
     )
     parser.add_argument("--account-id", type=int, required=True)
     parser.add_argument("--kind", choices=("settings", "forecast"), required=True)
-    parser.add_argument("--output", type=Path, default=Path(".codex/solcast"))
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path(".codex/solcast"),
+        help="Output directory within the current working directory.",
+    )
     args = parser.parse_args()
     if not args.live:
         parser.error("Live requests require --live.")
