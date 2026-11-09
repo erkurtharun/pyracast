@@ -171,14 +171,19 @@ def collect(job_id: int, adapter: ProviderAdapter, calculator: Calculator, now: 
                 job=job,
             )
         except QuotaExhausted:
-            retry(lease, now, "quota_exhausted", quota=True)
+            retry(
+                lease,
+                now + timedelta(seconds=time.monotonic() - started),
+                "quota_exhausted",
+                quota=True,
+            )
             return False
         try:
             data = adapter.fetch(lease.binding, lease.target_date)
         except ProviderFailure:
             RequestAttempt.objects.filter(pk=attempt.pk).update(outcome="failed")
             logger.warning("Provider request failed correlation_id=%s", attempt.correlation_id)
-            retry(lease, now, "provider_failure")
+            retry(lease, now + timedelta(seconds=time.monotonic() - started), "provider_failure")
             return False
         RequestAttempt.objects.filter(pk=attempt.pk).update(outcome="succeeded")
         logger.info("Provider request succeeded correlation_id=%s", attempt.correlation_id)
@@ -188,7 +193,7 @@ def collect(job_id: int, adapter: ProviderAdapter, calculator: Calculator, now: 
         if snapshot is None:
             return False
     if snapshot.source_kind != "forecast":
-        retry(lease, now, "invalid_source_kind")
+        retry(lease, now + timedelta(seconds=time.monotonic() - started), "invalid_source_kind")
         return False
     data = ProviderData(
         snapshot.raw_payload,
@@ -200,7 +205,7 @@ def collect(job_id: int, adapter: ProviderAdapter, calculator: Calculator, now: 
     try:
         payload = calculator(lease.binding, lease.target_date, data)
     except ValueError, ArithmeticError:
-        retry(lease, now, "calculation_failure")
+        retry(lease, now + timedelta(seconds=time.monotonic() - started), "calculation_failure")
         return False
     return publish(lease, snapshot, payload, now + timedelta(seconds=time.monotonic() - started))
 

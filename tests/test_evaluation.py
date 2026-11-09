@@ -139,6 +139,65 @@ def test_duplicate_daily_and_interval_samples_are_rejected() -> None:
         evaluate_reference([], [interval, interval])
 
 
+@pytest.mark.parametrize("daylight", [True, False])
+@pytest.mark.parametrize("predicted", [None, 100.0])
+@pytest.mark.parametrize("different_date", [True, False])
+def test_overlapping_intervals_from_the_same_vintage_are_rejected(
+    daylight: bool, predicted: float | None, different_date: bool
+) -> None:
+    first = replace(identity(), end=START + timedelta(hours=1))
+    second = replace(
+        first,
+        start=START + timedelta(minutes=30),
+        local_date=date(2026, 11, 11) if different_date else first.local_date,
+    )
+    samples = [
+        MatchedIntervalSample(first, first, predicted, 0, daylight),
+        MatchedIntervalSample(second, second, predicted, 0, daylight),
+    ]
+
+    with pytest.raises(ValueError, match="Overlapping"):
+        evaluate_reference([], samples)
+
+
+def test_adjacent_intervals_are_accepted_in_any_input_order() -> None:
+    first = replace(identity(), end=START + timedelta(minutes=30))
+    second = replace(first, start=first.end, end=START + timedelta(hours=1))
+
+    result = evaluate_reference(
+        [],
+        [
+            MatchedIntervalSample(second, second, 200, 0, True),
+            MatchedIntervalSample(first, first, 100, 0, True),
+        ],
+    )
+
+    assert result.daylight_total_seconds == 3600
+    assert result.daylight_mae_wm2 == 150
+
+
+@pytest.mark.parametrize(
+    "second",
+    [
+        replace(identity(), location_id="other-location"),
+        replace(identity(), configuration_revision="other-binding"),
+        replace(identity(), issued_at=ISSUE + timedelta(hours=1)),
+    ],
+)
+def test_independent_forecast_series_can_have_overlapping_windows(second: ForecastIdentity) -> None:
+    first = identity()
+
+    result = evaluate_reference(
+        [],
+        [
+            MatchedIntervalSample(first, first, 100, 0, True),
+            MatchedIntervalSample(second, second, 200, 0, True),
+        ],
+    )
+
+    assert result.daylight_mae_wm2 == 150
+
+
 def test_large_finite_values_do_not_overflow_metric_accumulation() -> None:
     first, second = identity("first"), identity("second")
     result = evaluate_reference(

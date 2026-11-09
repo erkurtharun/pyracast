@@ -23,6 +23,7 @@ Write code, documents and commits in English; explain progress and decisions in 
 - Context7 and Code Review Graph are CLI-only: no Context7 MCP/setup; no graph MCP/install/daemon/watch/embed/wiki commands.
 - Make the smallest complete change. Bug fixes include a regression test that fails before the fix. Test observable behavior at the relevant boundary.
 - Complete authorized work autonomously; resolve routine choices from evidence. Preserve other writers' changes and escalate only missing authority or consequential unresolved choices.
+- Commit and push completed, verified work to `main`. Merge temporary branches before removing them locally and remotely; keep only `main` after integration.
 - Done means `uv run python scripts/check.py` is green. It runs format, lint, strict mypy and parallel pytest. Never lower the measured coverage floor or weaken checks to obtain green.
 - Use `uv sync --locked` for reproducible setup and `uv build --no-sources` for packaging. Shared quality settings live in `pyproject.toml`; relevant skills live in `.agents/skills/`.
 - Verify affected tenant boundaries, authorization, transactions, concurrency, retries and numerical invariants. Use real PostgreSQL for database guarantees.

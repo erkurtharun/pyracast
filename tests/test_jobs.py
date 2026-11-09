@@ -1,6 +1,6 @@
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
+from datetime import datetime, timedelta
 from threading import Barrier, Event
 from types import SimpleNamespace
 
@@ -182,6 +182,66 @@ def test_quota_backoff_survives_until_next_utc_day() -> None:
     assert job.available_at.isoformat() == "2026-11-10T00:00:00+00:00"
     assert job.last_error == "quota_exhausted"
     assert collect(job.pk, FakeAdapter(), calculate, job.available_at)
+
+
+def test_quota_retry_after_midnight_waits_for_the_following_utc_day(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = make_system(approved=True)
+    job = CollectionJob.objects.get()
+    before_midnight = NOW.replace(hour=23, minute=59, second=59)
+    after_midnight = before_midnight + timedelta(seconds=2)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=1)
+    reserve_request(system.binding, after_midnight, purpose="already_used")
+    clock = [0.0]
+    original_claim = jobs.claim
+
+    def delayed_claim(job_id: int, now: datetime) -> Lease | None:
+        lease = original_claim(job_id, now)
+        clock[0] = 2.0
+        return lease
+
+    def reject_request() -> None:
+        pytest.fail("An exhausted UTC-day budget must prevent provider access")
+
+    monkeypatch.setattr(jobs, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(jobs, "claim", delayed_claim)
+
+    assert not collect(job.pk, FakeAdapter(reject_request), calculate, before_midnight)
+
+    job.refresh_from_db()
+    assert job.status == "retry"
+    assert job.available_at.isoformat() == "2026-11-11T00:00:00+00:00"
+    assert pending_job_ids(after_midnight) == []
+    assert not RequestAttempt.objects.filter(purpose="forecast").exists()
+
+
+@pytest.mark.parametrize("failure", ["provider", "calculation"])
+def test_failure_backoff_starts_after_the_failed_operation_finishes(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    make_system(approved=True)
+    job = CollectionJob.objects.get()
+    clock = [0.0]
+    monkeypatch.setattr(jobs, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    def fail_provider() -> None:
+        if failure == "provider":
+            clock[0] = 90.0
+            raise ProviderFailure("Provider failed after a delayed response")
+
+    def fail_calculation(
+        binding: SiteBinding, target_date: object, data: ProviderData
+    ) -> dict[str, object]:
+        clock[0] = 90.0
+        raise ValueError("Calculation failed after processing the snapshot")
+
+    assert not collect(job.pk, FakeAdapter(fail_provider), fail_calculation, NOW)
+
+    job.refresh_from_db()
+    assert job.status == "retry"
+    assert job.available_at == NOW + timedelta(seconds=150)
+    assert pending_job_ids(NOW + timedelta(seconds=90)) == []
 
 
 @pytest.mark.parametrize("change", ["suspended", "revision", "credential", "disabled"])

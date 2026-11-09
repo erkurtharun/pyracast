@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
+from itertools import pairwise
 from math import fsum, isfinite
 
 
@@ -116,6 +117,7 @@ def evaluate_reference(
     daylight_errors: list[tuple[float, float]] = []
     valid_seconds = total_seconds = 0.0
     seen_intervals: set[tuple[object, ...]] = set()
+    windows_by_vintage: dict[tuple[object, ...], list[tuple[datetime, datetime]]] = {}
     for interval in intervals:
         error = _pair(
             interval.prediction_identity,
@@ -124,14 +126,21 @@ def evaluate_reference(
             interval.solcast_ghi_wm2,
             seen_intervals,
         )
+        identity = interval.reference_identity
+        key = _identity_key(identity)
+        start, end = identity.start.astimezone(UTC), identity.end.astimezone(UTC)
+        # A vintage spans target dates; different date labels cannot separate overlapping windows.
+        windows_by_vintage.setdefault((key[0], key[2], key[3]), []).append((start, end))
         if not interval.daylight:
             continue
-        identity = interval.reference_identity
-        seconds = (identity.end.astimezone(UTC) - identity.start.astimezone(UTC)).total_seconds()
+        seconds = (end - start).total_seconds()
         total_seconds += seconds
         if error is not None:
             valid_seconds += seconds
             daylight_errors.append((error, seconds))
+    for windows in windows_by_vintage.values():
+        if any(start < previous_end for (_, previous_end), (start, _) in pairwise(sorted(windows))):
+            raise ValueError("Overlapping intervals within a forecast vintage are not supported")
     return ReferenceEvaluation(
         _mean([abs(error) for error in daily_errors], len(daily_errors)),
         _mean(daily_errors, len(daily_errors)),
