@@ -44,7 +44,8 @@ def main() -> None:
         raise RuntimeError("Scientific check requires Windows or Linux")
     windows = system == "Windows"
     name, digest = (WINDOWS_ARCHIVE, WINDOWS_SHA256) if windows else (LINUX_ARCHIVE, LINUX_SHA256)
-    with tempfile.TemporaryDirectory(prefix="ps", dir=Path.home()) as directory:
+    temp_parent = Path(os.environ.get("RUNNER_TEMP", str(Path.home())))
+    with tempfile.TemporaryDirectory(prefix="ps", dir=temp_parent) as directory:
         root = Path(directory)
         archive = root / name
         urllib.request.urlretrieve(HDF5_RELEASE + name, archive)  # noqa: S310 -- fixed HTTPS URL.
