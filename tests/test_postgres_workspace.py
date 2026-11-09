@@ -27,6 +27,7 @@ def test_windows_workspace_grants_inherited_access_to_current_user(
     else:
         child.touch()
     powershell = Path(os.environ["SYSTEMROOT"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    # CI may be unable to autoload Microsoft.PowerShell.Security; use native .NET ACL APIs.
     probe = subprocess.run(  # noqa: S603 -- fixed native ACL inspection; path arrives via stdin.
         [
             str(powershell),
@@ -35,13 +36,17 @@ def test_windows_workspace_grants_inherited_access_to_current_user(
             "-Command",
             "$ErrorActionPreference='Stop'; "
             "$paths=ConvertFrom-Json ([Console]::In.ReadToEnd()); "
+            "$PSModuleAutoLoadingPreference='None'; "
             "$entries=@(foreach ($p in $paths) { "
-            "$acl=Get-Acl -LiteralPath $p; "
+            "$acl=if ([IO.Directory]::Exists($p)) { [IO.Directory]::GetAccessControl($p) } "
+            "else { [IO.File]::GetAccessControl($p) }; "
             "$rules=$acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]); "
             "[pscustomobject]@{ Path=$p; "
             "Owner=$acl.GetOwner([Security.Principal.SecurityIdentifier]).Value; "
             "FileSystem=[IO.DriveInfo]::new([IO.Path]::GetPathRoot($p)).DriveFormat; "
-            "Sddl=$acl.Sddl; Rules=@($rules | ForEach-Object { [pscustomobject]@{ "
+            "Sddl=$acl.GetSecurityDescriptorSddlForm("
+            "[Security.AccessControl.AccessControlSections]::All); "
+            "Rules=@($rules | ForEach-Object { [pscustomobject]@{ "
             "Identity=$_.IdentityReference.Value; Access=[int]$_.AccessControlType; "
             "Rights=[int]$_.FileSystemRights; Propagation=[int]$_.PropagationFlags; "
             "Inherited=[bool]$_.IsInherited } }) } }); "
