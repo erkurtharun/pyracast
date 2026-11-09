@@ -1,5 +1,7 @@
+import csv
 import hashlib
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -19,6 +21,23 @@ POSTGRES_IMAGE = (
 
 def run(*args: str, env: dict[str, str] | None = None) -> None:
     subprocess.run(args, check=True, env=env)  # noqa: S603 -- fixed CI commands and local paths.
+
+
+def windows_workspace() -> Path:
+    root = Path(tempfile.mkdtemp(prefix="pyracast-postgres-"))
+    system = Path(os.environ["SYSTEMROOT"]) / "System32"
+    identity = subprocess.check_output(  # noqa: S603 -- fixed Windows identity query.
+        [str(system / "whoami.exe"), "/user", "/fo", "csv", "/nh"],
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    sid = next(csv.reader(identity.splitlines()))[1]
+    if re.fullmatch(r"S-\d+(?:-\d+)+", sid) is None:
+        raise RuntimeError("Windows user SID could not be determined")
+    # initdb drops Administrators; an elevated mkdtemp owner may be that group, not the user.
+    run(str(system / "icacls.exe"), str(root), "/grant", f"*{sid}:(OI)(CI)F", "/Q")
+    return root
 
 
 def windows_preflight(binary: Path, env: dict[str, str]) -> None:
@@ -65,7 +84,7 @@ def windows_preflight(binary: Path, env: dict[str, str]) -> None:
 def main() -> None:
     port = str(int(os.environ.get("PGPORT", "55432")))
     if sys.platform == "win32":
-        root = Path(tempfile.mkdtemp(prefix="pyracast-postgres-"))
+        root = windows_workspace()
         archive = root / "postgres.zip"
         local_archive = os.environ.get("PYRACAST_POSTGRES_ARCHIVE")
         if local_archive:
