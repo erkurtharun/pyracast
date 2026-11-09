@@ -3,7 +3,7 @@ name: verify
 description: Verify Pyracast code or tooling changes and distinguish local checks from unverified provider and platform behavior.
 ---
 
-Use `uv run --locked python tools/check.py` for the shared formatting, lint, type
+Use `uv run --locked python scripts/check.py` for the shared formatting, lint, type
 and test checks. Build packaging changes with `uv build --no-sources`; CI also
 imports the resulting wheel outside the checkout. Settings belong in
 `pyproject.toml`, not duplicated command-line policies.

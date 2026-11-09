@@ -7,7 +7,15 @@ requires-python = "==3.15.2"
 dependencies = []
 
 [dependency-groups]
-dev = ["mypy", "pip-audit", "pytest", "pytest-cov", "ruff"]
+dev = [
+    "hypothesis>=6.170.15",
+    "mypy",
+    "pip-audit",
+    "pytest",
+    "pytest-cov",
+    "pytest-xdist>=3.8.0",
+    "ruff",
+]
 
 [build-system]
 requires = ["uv_build==0.13.7"]
@@ -18,7 +26,7 @@ target-version = "py315"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM", "S", "RUF"]
+select = ["E", "F", "I", "B", "UP", "SIM", "S", "PT", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S101"]
@@ -27,11 +35,11 @@ select = ["E", "F", "I", "UP", "B", "SIM", "S", "RUF"]
 python_version = "3.15"
 strict = true
 warn_unreachable = true
-files = ["src", "tests", "tools"]
+files = ["src", "tests", "scripts", ".codex/hooks"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--strict-config --strict-markers -ra --cov --cov-report=term-missing --cov-report=xml"
+addopts = "-q --tb=short --strict-config --strict-markers -ra --cov --cov-report=term-missing --cov-report=xml"
 filterwarnings = ["error"]
 
 [tool.coverage.run]
@@ -40,5 +48,5 @@ relative_files = true
 source = ["src/pyracast"]
 
 [tool.coverage.report]
-fail_under = 85
+fail_under = 100
 show_missing = true

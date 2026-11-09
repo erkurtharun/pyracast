@@ -46,7 +46,13 @@ db.sqlite3-*
 /staticfiles/
 
 # Local agent/IDE state and scanner output
-.codex/
+/.codex/*
+!/.codex/hooks.json
+!/.codex/hooks/
+/.codex/hooks/*
+!/.codex/hooks/*.py
+.code-review-graph/
+.code-review-graph.db*
 .idea/
 *.code-workspace
 .scannerwork/

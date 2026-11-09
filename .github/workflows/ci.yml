@@ -32,7 +32,7 @@ jobs:
           version: 0.13.7
           enable-cache: true
       - run: uv sync --locked --no-build
-      - run: uv run --locked --no-build python tools/check.py
+      - run: uv run --locked --no-build python scripts/check.py
       - run: uv build --no-sources
       - name: Check wheel in an isolated environment
         shell: python
