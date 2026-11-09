@@ -103,7 +103,8 @@ so hundreds of half-hours are not hundreds of independent weather realizations.
 Report interval power MAE/bias (MW), daily energy MAE/bias (MWh), included/excluded
 days, censored counts and the exact chronological split. A candidate is `ready`
 only when both holdout interval MAE and daily MAE improve by at least 1% over factor
-1 and the fitted factor is inside the allowed bounds. Otherwise retain the baseline.
+1 and the fitted factor is inside the allowed bounds. Rejected candidates cannot
+be activated; the current activation remains unchanged.
 The 1% margin is an operational acceptance rule, not a significance test. Confidence
 intervals are not estimated in this version; do not expose invented probability
 bands. No fit activates itself. Compare later unseen days and revisit performance
