@@ -29,6 +29,9 @@ correctness. CI also builds and imports the wheel outside the checkout on Window
 and Ubuntu. These jobs verify implemented code, not the future database, provider
 or queue stack. CI uses GitHub-hosted `ubuntu-latest` and `windows-latest` runners;
 no self-hosted runner or organization-specific reusable workflow is required.
+CI forbids third-party source-distribution builds with `--no-build`; the first-party
+project and its pinned build backend still build normally. A dependency without a
+compatible wheel fails installation rather than executing an unexpected build script.
 
 CI audits locked runtime and development dependencies against public vulnerability
 advisories. To reproduce:
