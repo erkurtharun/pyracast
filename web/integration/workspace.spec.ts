@@ -61,17 +61,28 @@ test("a customer manages an approved region through the real API", async ({
     await page.getByRole("button", { name: "+ Add a plant" }).click();
     await page.getByLabel("Plant name").fill("Browser plant");
     await page.getByLabel("DC nameplate capacity (MW)").fill("130");
-    await page.getByLabel("Grid export limit (MW, optional)").fill("100");
+    await page.getByLabel("Inverter AC capacity (MW, optional)").fill("100");
     await page.getByRole("button", { name: "Create plant" }).click();
     await expect(
         page.getByRole("heading", { name: "Browser plant" }),
     ).toBeVisible();
-    await page.getByLabel("Forecast date").fill(process.env.BROWSER_DATE!);
+    await expect(page.getByLabel("Forecast date")).toHaveValue(
+        process.env.BROWSER_DATE!,
+    );
     await page.getByLabel("Resolution").selectOption("60");
     await expect(
         page.getByText("View interval data (24 intervals)"),
     ).toBeVisible();
     await page.getByLabel("Resolution").selectOption("30");
+    await expect(
+        page.getByText("View interval data (48 intervals)"),
+    ).toBeVisible();
+    await page.getByLabel("Forecast date").fill(process.env.BROWSER_TODAY!);
+    await expect(
+        page.getByRole("heading", { name: "No configuration for this day" }),
+    ).toBeVisible();
+    await expect(page.getByText("configuration_unavailable")).toHaveCount(0);
+    await page.getByLabel("Forecast date").fill(process.env.BROWSER_DATE!);
     await expect(
         page.getByText("View interval data (48 intervals)"),
     ).toBeVisible();

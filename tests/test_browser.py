@@ -1,6 +1,7 @@
 import os
 import shutil
 import subprocess
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +58,7 @@ def test_browser_against_live_django(live_server: Any) -> None:
         "BROWSER_USERNAME": system.member.username,
         "BROWSER_PASSWORD": password,
         "BROWSER_DATE": job.target_date.isoformat(),
+        "BROWSER_TODAY": (job.target_date - timedelta(days=1)).isoformat(),
         "BROWSER_OTHER_TENANT": str(other_tenant.pk),
         "BROWSER_OTHER_REGION": str(other_region.pk),
     }
@@ -78,7 +80,8 @@ def test_browser_against_live_django(live_server: Any) -> None:
     )
     assert plant.current_configuration is not None
     assert plant.current_configuration.dc_capacity_mw == 130
-    assert plant.current_configuration.export_limit_mw == 100
+    assert plant.current_configuration.inverter_capacity_mw == 100
+    assert plant.current_configuration.export_limit_mw is None
     reminder = ReminderPreference.objects.get(user=system.member, region=system.region)
     assert reminder.enabled
     assert reminder.email == ""

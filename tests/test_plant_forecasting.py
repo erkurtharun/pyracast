@@ -114,6 +114,7 @@ def test_snapshot_selection_excludes_future_issue_collection_and_actuals(
         resolution_minutes=60,
     )
     assert cast(dict[str, Any], result["result"])["provenance"]["snapshot_id"] == first.pk
+    assert result["unavailable_reason"] is None
 
 
 def test_absent_configuration_and_source_are_explicit(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -127,17 +128,22 @@ def test_absent_configuration_and_source_are_explicit(monkeypatch: pytest.Monkey
         resolution_minutes=30,
     )
     assert result["freshness"] == "missing"
+    assert result["unavailable_reason"] == "forecast_unavailable"
     assert result["result"] is None
     PlantConfiguration.objects.update(created_at=NOW)
-    with pytest.raises(ValidationError, match="configuration_unavailable"):
-        plant_forecast(
-            system.member,
-            system.tenant.pk,
-            system.region.pk,
-            plant.pk,
-            target_date=DAY,
-            resolution_minutes=60,
-        )
+    result = plant_forecast(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        target_date=DAY,
+        resolution_minutes=60,
+    )
+    assert result["freshness"] == "missing"
+    assert result["unavailable_reason"] == "configuration_unavailable"
+    assert result["configuration_id"] is None
+    assert result["calibration_id"] is None
+    assert result["result"] is None
 
 
 @pytest.mark.parametrize(

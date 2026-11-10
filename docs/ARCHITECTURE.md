@@ -75,6 +75,8 @@ Calibration requests cover 7–90 completed local days and create durable databa
 
 Electrical forecasting and calibration select the first eligible forecast acquired on the preceding local day, using one vintage per target day. An explicit `as_of` excludes acquisitions and activations not yet available then; later refreshes cannot retrospectively improve a calibration's input. Preserve actual collection time and lead time. This does not claim publication exactly at the scheduler's 16:00 slot. Missing archives yield insufficient calibration data; historical estimated actuals must never be relabeled as archived forecasts.
 
+The plant forecast screen opens tomorrow in the region's timezone. A date without an eligible configuration or saved forecast returns `freshness: missing`, a null result and `unavailable_reason`; this is availability information, not an invalid request. Configuration revisions are never backdated to fill the gap.
+
 Implement in this order:
 
 1. Compatibility checks, locked environment, PostgreSQL, authentication and tenant isolation.

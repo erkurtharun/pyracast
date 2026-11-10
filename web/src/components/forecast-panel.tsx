@@ -31,10 +31,18 @@ export function ForecastPanel({
         return (
             <>
                 <Tag>{forecast.freshness}</Tag>
-                <Empty title="No forecast for this day yet">
-                    A missing forecast is not zero production. Try another date,
-                    or check back after the next scheduled collection.
-                </Empty>
+                {electrical &&
+                forecast.unavailable_reason === "configuration_unavailable" ? (
+                    <Empty title="No configuration for this day">
+                        No configuration existed before the selected day began.
+                        Choose a later date.
+                    </Empty>
+                ) : (
+                    <Empty title="No forecast for this day yet">
+                        A missing forecast is not zero production. Try another
+                        date, or check back after the next scheduled collection.
+                    </Empty>
+                )}
             </>
         );
     const result = forecast.result as Record<string, unknown>,

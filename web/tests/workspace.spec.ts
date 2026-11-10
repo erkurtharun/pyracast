@@ -120,6 +120,10 @@ async function mockApi(
                 result: null,
                 collected_at: null,
                 issued_at: null,
+                ...(path.includes("/plants/") && {
+                    configuration_id: 31,
+                    unavailable_reason: "forecast_unavailable",
+                }),
             };
         else throw new Error(`Unmocked API: ${method} ${path}`);
         await route.fulfill({ json: data });
@@ -196,6 +200,88 @@ test("mock contract: requests a region and surfaces pending approval", async ({
         page.getByRole("button", { name: "Add a plant" }),
     ).toBeDisabled();
 });
+test("plant creation preserves capacities and opens tomorrow across DST", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(new Date("2026-03-28T22:30:00Z"));
+    await mockApi(page);
+    await page.route("**/api/tenants/1/regions/", async (route) => {
+        await route.fulfill({
+            json: paged([{ ...region, timezone: "Europe/Berlin" }]),
+        });
+    });
+    await page.route("**/api/tenants/1/regions/11/plants/", async (route) => {
+        if (route.request().method() !== "POST") return route.fallback();
+        expect(route.request().postDataJSON()).toEqual({
+            name: "New array",
+            dc_capacity_mw: 130,
+            inverter_capacity_mw: 100,
+            export_limit_mw: null,
+            measurement_basis: "net_export",
+        });
+        await route.fulfill({
+            json: {
+                ...plant,
+                name: "New array",
+                current_configuration: {
+                    ...plant.current_configuration,
+                    dc_capacity_mw: 130,
+                    inverter_capacity_mw: 100,
+                },
+            },
+        });
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await page
+        .getByRole("button", { name: "Solar plants", exact: true })
+        .click();
+    await page.getByRole("button", { name: "Add a plant" }).click();
+    await page.getByLabel("Plant name").fill("New array");
+    await page.getByLabel("DC nameplate capacity (MW)").fill("130");
+    await page.getByLabel("Inverter AC capacity (MW, optional)").fill("100");
+    await page.getByRole("button", { name: "Create plant" }).click();
+    await expect(
+        page.getByRole("heading", { name: "New array" }),
+    ).toBeVisible();
+    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-29");
+    await expect(
+        page.getByRole("heading", { name: "No forecast for this day yet" }),
+    ).toBeVisible();
+});
+
+test("missing plant configuration explains the selected day", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/plants/21/forecast/**", async (route) => {
+        await route.fulfill({
+            json: {
+                timezone: region.timezone,
+                freshness: "missing",
+                result: null,
+                configuration_id: null,
+                unavailable_reason: "configuration_unavailable",
+            },
+        });
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await page
+        .getByRole("button", { name: "Solar plants", exact: true })
+        .click();
+    await page.getByRole("button", { name: /East array/ }).click();
+    await expect(
+        page.getByRole("heading", { name: "No configuration for this day" }),
+    ).toBeVisible();
+    await expect(
+        page.getByText(
+            "No configuration existed before the selected day began. Choose a later date.",
+        ),
+    ).toBeVisible();
+    await expect(page.getByText("configuration_unavailable")).toHaveCount(0);
+});
+
 test("mock contract: imports validated production with explicit energy units", async ({
     page,
 }) => {

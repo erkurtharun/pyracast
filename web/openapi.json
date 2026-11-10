@@ -2070,6 +2070,11 @@
                     "username"
                 ]
             },
+            "NullEnum": {
+                "enum": [
+                    null
+                ]
+            },
             "ObservationImport": {
                 "type": "object",
                 "properties": {
@@ -2416,7 +2421,8 @@
                         "format": "date-time"
                     },
                     "configuration_id": {
-                        "type": "integer"
+                        "type": "integer",
+                        "nullable": true
                     },
                     "calibration_id": {
                         "type": "integer",
@@ -2424,6 +2430,17 @@
                     },
                     "freshness": {
                         "type": "string"
+                    },
+                    "unavailable_reason": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/UnavailableReasonEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
                     },
                     "result": {
                         "nullable": true
@@ -2441,7 +2458,8 @@
                     "plant_id",
                     "regional_irradiance",
                     "result",
-                    "timezone"
+                    "timezone",
+                    "unavailable_reason"
                 ]
             },
             "PlantInput": {
@@ -2873,6 +2891,14 @@
                 ],
                 "type": "string",
                 "description": "* `rejected` - rejected\n* `suspended` - suspended"
+            },
+            "UnavailableReasonEnum": {
+                "enum": [
+                    "configuration_unavailable",
+                    "forecast_unavailable"
+                ],
+                "type": "string",
+                "description": "* `configuration_unavailable` - configuration_unavailable\n* `forecast_unavailable` - forecast_unavailable"
             },
             "UnitEnum": {
                 "enum": [

@@ -184,9 +184,12 @@ class PlantForecastOutput(serializers.Serializer[dict[str, Any]]):
     date = serializers.DateField()
     timezone = serializers.CharField()
     as_of = serializers.DateTimeField()
-    configuration_id = serializers.IntegerField()
+    configuration_id = serializers.IntegerField(allow_null=True)
     calibration_id = serializers.IntegerField(allow_null=True)
     freshness = serializers.CharField()
+    unavailable_reason = serializers.ChoiceField(
+        choices=("configuration_unavailable", "forecast_unavailable"), allow_null=True
+    )
     result = serializers.JSONField(allow_null=True)
     regional_irradiance = serializers.JSONField(allow_null=True)
 

@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 from io import StringIO
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -13,7 +13,7 @@ from rest_framework.exceptions import ValidationError
 
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.forecasts.models import CollectionJob, ForecastSnapshot
-from pyracast.plants.models import CalibrationRun, Plant, ProductionObservation
+from pyracast.plants.models import CalibrationRun, Plant, PlantForecast, ProductionObservation
 from pyracast.plants.serializers import AwareDateTime, FiniteFloat
 from tests.test_domain import make_system
 
@@ -30,6 +30,51 @@ def setup_plant() -> tuple[Client, str, dict[str, Any]]:
     )
     assert response.status_code == 201, response.content
     return client, base, response.json()
+
+
+def test_new_plant_forecast_reports_unavailable_history_without_rejecting_capacities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = make_system(approved=True)
+    now = datetime(2026, 11, 10, 7, tzinfo=UTC)
+    monkeypatch.setattr(timezone, "now", lambda: now)
+    client = Client()
+    client.force_login(system.member)
+    base = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/"
+    created = client.post(
+        base,
+        {
+            "name": "New plant",
+            "dc_capacity_mw": 130,
+            "inverter_capacity_mw": 100,
+            "export_limit_mw": None,
+            "measurement_basis": "net_export",
+        },
+        content_type="application/json",
+    )
+    assert created.status_code == 201
+    plant = created.json()
+    configuration = plant["current_configuration"]
+    assert configuration["dc_capacity_mw"] == 130
+    assert configuration["inverter_capacity_mw"] == 100
+    assert configuration["export_limit_mw"] is None
+    detail = f"{base}{plant['id']}/forecast/"
+    today = client.get(detail, {"date": "2026-11-10", "resolution_minutes": "30"})
+    assert today.status_code == 200, today.content
+    assert today.json()["freshness"] == "missing"
+    assert today.json()["unavailable_reason"] == "configuration_unavailable"
+    assert today.json()["configuration_id"] is None
+    assert today.json()["calibration_id"] is None
+    assert today.json()["result"] is None
+    assert today.json()["regional_irradiance"] is None
+    assert today.json()["timezone"] == "Europe/Istanbul"
+    assert datetime.fromisoformat(today.json()["as_of"]) == datetime(2026, 11, 9, 21, tzinfo=UTC)
+    tomorrow = client.get(detail, {"date": "2026-11-11", "resolution_minutes": "60"})
+    assert tomorrow.status_code == 200
+    assert tomorrow.json()["configuration_id"] == configuration["id"]
+    assert tomorrow.json()["unavailable_reason"] == "forecast_unavailable"
+    assert tomorrow.json()["result"] is None
+    assert not PlantForecast.objects.exists()
 
 
 def test_tenant_scope_observation_import_and_validation() -> None:

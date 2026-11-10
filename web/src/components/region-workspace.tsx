@@ -232,8 +232,10 @@ function Plants({
                         </Select>
                     </div>
                     <p className="fine">
-                        Leave unknown limits empty. Capacities are megawatts
-                        (MW).
+                        DC nameplate is the total panel capacity in MW. Inverter
+                        AC capacity is the total inverter rating in MW. Grid
+                        export limit is the permitted grid limit in MW. Leave
+                        either optional value blank if unknown.
                     </p>
                 </ActionForm>
             )}

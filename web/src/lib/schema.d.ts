@@ -517,6 +517,8 @@ export interface components {
             username: string;
             password: string;
         };
+        /** @enum {unknown} */
+        NullEnum: null;
         ObservationImport: {
             configuration_id: number;
             unit: components["schemas"]["UnitEnum"];
@@ -656,9 +658,10 @@ export interface components {
             timezone: string;
             /** Format: date-time */
             as_of: string;
-            configuration_id: number;
+            configuration_id: number | null;
             calibration_id: number | null;
             freshness: string;
+            unavailable_reason: (components["schemas"]["UnavailableReasonEnum"] | components["schemas"]["NullEnum"]) | null;
             result: unknown;
             regional_irradiance: unknown;
         };
@@ -777,6 +780,12 @@ export interface components {
          * @enum {string}
          */
         TransitionInputStatusEnum: "rejected" | "suspended";
+        /**
+         * @description * `configuration_unavailable` - configuration_unavailable
+         *     * `forecast_unavailable` - forecast_unavailable
+         * @enum {string}
+         */
+        UnavailableReasonEnum: "configuration_unavailable" | "forecast_unavailable";
         /**
          * @description * `MWh` - MWh
          *     * `kWh` - kWh

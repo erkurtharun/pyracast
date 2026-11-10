@@ -34,9 +34,14 @@ export function PlantWorkspace({
     onBack: () => void;
 }) {
     const [tab, setTab] = useState("forecast"),
-        [date, setDate] = useState(() =>
-            new Date().toLocaleDateString("en-CA", { timeZone: timezone }),
-        ),
+        [date, setDate] = useState(() => {
+            const today = new Date().toLocaleDateString("en-CA", {
+                timeZone: timezone,
+            });
+            const tomorrow = new Date(`${today}T00:00:00Z`);
+            tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+            return tomorrow.toISOString().slice(0, 10);
+        }),
         [resolution, setResolution] = useState("30");
     const configuration = plant.current_configuration;
     return (

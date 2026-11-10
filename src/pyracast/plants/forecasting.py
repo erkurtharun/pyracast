@@ -191,7 +191,18 @@ def plant_forecast(
         .first()
     )
     if configuration is None:
-        raise ValidationError("configuration_unavailable")
+        return {
+            "plant_id": plant.pk,
+            "date": target_date.isoformat(),
+            "timezone": region.timezone,
+            "as_of": as_of.isoformat(),
+            "configuration_id": None,
+            "calibration_id": None,
+            "freshness": "missing",
+            "unavailable_reason": "configuration_unavailable",
+            "result": None,
+            "regional_irradiance": None,
+        }
     # A historical binding may have a different timezone from the current region.
     configured_start, _ = local_day_bounds(target_date, configuration.binding.timezone)
     if as_of > configured_start:
@@ -254,6 +265,7 @@ def plant_forecast(
         else "fresh"
         if configuration_is_current(configuration)
         else "stale",
+        "unavailable_reason": "forecast_unavailable" if snapshot is None else None,
         "result": result,
         "regional_irradiance": irradiance,
     }
