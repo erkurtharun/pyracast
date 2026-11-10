@@ -31,8 +31,15 @@ export function ForecastPanel({
         return (
             <>
                 <Tag>{forecast.freshness}</Tag>
-                {electrical &&
-                forecast.unavailable_reason === "configuration_unavailable" ? (
+                {forecast.unavailable_reason ===
+                "estimated_actuals_unavailable" ? (
+                    <Empty title="No estimated actuals for this day">
+                        Estimated actuals are not available for this day yet.
+                        Try an archived forecast or another date.
+                    </Empty>
+                ) : electrical &&
+                  forecast.unavailable_reason ===
+                      "configuration_unavailable" ? (
                     <Empty title="No configuration for this day">
                         No configuration existed before the selected day began.
                         Choose a later date.
@@ -74,6 +81,12 @@ export function ForecastPanel({
                             : "Regional irradiance"}
                     </h2>
                     <p>Local times in {forecast.timezone}</p>
+                    {forecast.source_kind === "estimated_actuals" && (
+                        <p>
+                            Estimated actuals. Satellite/model estimates, not
+                            meter readings.
+                        </p>
+                    )}
                 </div>
                 <Tag>{forecast.freshness}</Tag>
             </div>
@@ -151,7 +164,11 @@ export function ForecastPanel({
                         <div className="table-scroll">
                             <table>
                                 <caption className="sr-only">
-                                    Forecast intervals, {forecast.timezone}
+                                    {forecast.source_kind ===
+                                    "estimated_actuals"
+                                        ? "Estimated actual intervals"
+                                        : "Forecast intervals"}
+                                    , {forecast.timezone}
                                 </caption>
                                 <thead>
                                     <tr>
@@ -191,7 +208,7 @@ export function ForecastPanel({
                 </>
             )}
             <div className="provenance">
-                <strong>Behind this forecast</strong>
+                <strong>Source details</strong>
                 <p>
                     {forecast.collected_at
                         ? `Collected ${new Date(forecast.collected_at).toLocaleString("en", { timeZone: forecast.timezone })}. `
@@ -200,11 +217,13 @@ export function ForecastPanel({
                     {forecast.configuration_id
                         ? `Configuration ${forecast.configuration_id}. `
                         : ""}
-                    {electrical
-                        ? forecast.calibration_id
-                            ? `Calibration ${forecast.calibration_id}.`
-                            : "Baseline (no active calibration)."
-                        : ""}
+                    {electrical && forecast.source_kind === "estimated_actuals"
+                        ? "Baseline estimate using the current configuration; no calibration factor applied."
+                        : electrical
+                          ? forecast.calibration_id
+                              ? `Calibration ${forecast.calibration_id}.`
+                              : "Baseline (no active calibration)."
+                          : ""}
                 </p>
                 {Array.isArray(result.quality_flags) &&
                     result.quality_flags.length > 0 && (

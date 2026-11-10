@@ -404,6 +404,105 @@ for (const staleRead of ["resolve", "reject"] as const) {
         });
     }
 }
+test("region collection schedule saves local times separately from reminders", async ({
+    page,
+}) => {
+    await mockApi(page);
+    let schedule = {
+        enabled: true,
+        times: ["16:00"],
+        timezone: region.timezone,
+        daily_request_limit: 10,
+        used_today: 0,
+        remaining_today: 10,
+        history_requests_per_day: 1,
+        max_forecast_times: 9,
+        effective_from: "2026-01-01T00:00:00Z",
+    };
+    await page.route("**/collection-schedule/", async (route) => {
+        if (route.request().method() === "PUT") {
+            expect(route.request().postDataJSON()).toEqual({
+                enabled: true,
+                times: ["08:00", "16:00"],
+            });
+            schedule = { ...schedule, ...route.request().postDataJSON() };
+        }
+        await route.fulfill({ json: schedule });
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await page.getByRole("button", { name: "Data collection" }).click();
+    await expect(page.getByText(/first scheduled time/i)).toBeVisible();
+    await page
+        .getByLabel("Collection times (Europe/Istanbul)")
+        .fill("16:00, 08:00");
+    await page
+        .getByRole("button", { name: "Save collection schedule" })
+        .click();
+    await expect(
+        page.getByLabel("Collection times (Europe/Istanbul)"),
+    ).toHaveValue("08:00, 16:00");
+    await page.getByRole("button", { name: "Email reminders" }).click();
+    await expect(
+        page.getByText(/Sending an email does not request new provider data/),
+    ).toBeVisible();
+});
+
+test("regional and plant data sources identify estimated actuals and retain archived forecasts", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(new Date("2026-03-28T12:00:00Z"));
+    await mockApi(page);
+    const sources: string[] = [];
+    await page.route("**/forecast/**", async (route) => {
+        const url = new URL(route.request().url());
+        const source = url.searchParams.get("data_source") ?? "missing";
+        sources.push(source);
+        await route.fulfill({
+            json: {
+                timezone: region.timezone,
+                freshness: "fresh",
+                source_kind:
+                    source === "forecast" ||
+                    url.searchParams.get("date")! >= "2026-03-28"
+                        ? "forecast"
+                        : "estimated_actuals",
+                result: {
+                    complete: true,
+                    intervals: [],
+                    energy_kwh_m2: 4,
+                    energy_mwh: 5,
+                },
+            },
+        });
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await page.getByLabel("Forecast date").fill("2026-03-27");
+    await expect(
+        page.getByText("Satellite/model estimates, not meter readings."),
+    ).toBeVisible();
+    expect(sources).toContain("auto");
+    await page.getByLabel("Data source").selectOption("forecast");
+    await expect.poll(() => sources.at(-1)).toBe("forecast");
+    await page.getByLabel("Forecast date").fill("2026-03-28");
+    await page.getByLabel("Data source").selectOption("estimated_actuals");
+    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-27");
+    await expect.poll(() => sources.at(-1)).toBe("estimated_actuals");
+    await page
+        .getByRole("button", { name: "Solar plants", exact: true })
+        .click();
+    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByLabel("Forecast date").fill("2026-03-27");
+    await expect(
+        page.getByText("Satellite/model estimates, not meter readings."),
+    ).toBeVisible();
+    await page.getByLabel("Data source").selectOption("forecast");
+    await expect.poll(() => sources.at(-1)).toBe("forecast");
+    await page.getByRole("button", { name: "Calibration" }).click();
+    await expect(page.getByText(/historical estimated actuals/i)).toBeVisible();
+});
+
 test("mock contract: saves cached forecast reminders without provider queries", async ({
     page,
 }) => {

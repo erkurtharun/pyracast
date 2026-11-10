@@ -196,6 +196,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tenants/{tenant_id}/regions/{region_id}/collection-schedule/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["tenants_regions_collection_schedule_retrieve"];
+        put: operations["tenants_regions_collection_schedule_update"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tenants/{tenant_id}/regions/{region_id}/forecast/": {
         parameters: {
             query?: never;
@@ -473,6 +489,22 @@ export interface components {
             readonly result: unknown;
             readonly dataset_sha256: string;
         };
+        CollectionScheduleInput: {
+            enabled: boolean;
+            times: string[];
+        };
+        CollectionScheduleOutput: {
+            enabled: boolean;
+            times: string[];
+            timezone: string;
+            /** Format: date-time */
+            effective_from: string;
+            daily_request_limit: number;
+            used_today: number;
+            remaining_today: number;
+            history_requests_per_day: number;
+            max_forecast_times: number;
+        };
         ConfigurationOutput: {
             readonly id: number;
             binding_id: number;
@@ -500,6 +532,8 @@ export interface components {
             timezone: string;
             status: string;
             freshness: string;
+            source_kind: components["schemas"]["SourceKindEnum"];
+            unavailable_reason: string | null;
             result: unknown;
             /** Format: date-time */
             collected_at: string | null;
@@ -661,6 +695,7 @@ export interface components {
             configuration_id: number | null;
             calibration_id: number | null;
             freshness: string;
+            source_kind: components["schemas"]["SourceKindEnum"];
             unavailable_reason: (components["schemas"]["UnavailableReasonEnum"] | components["schemas"]["NullEnum"]) | null;
             result: unknown;
             regional_irradiance: unknown;
@@ -767,6 +802,12 @@ export interface components {
             username: string;
             email: string;
         };
+        /**
+         * @description * `forecast` - forecast
+         *     * `estimated_actuals` - estimated_actuals
+         * @enum {string}
+         */
+        SourceKindEnum: "forecast" | "estimated_actuals";
         TenantOutput: {
             readonly id: number;
             readonly name: string;
@@ -783,9 +824,10 @@ export interface components {
         /**
          * @description * `configuration_unavailable` - configuration_unavailable
          *     * `forecast_unavailable` - forecast_unavailable
+         *     * `estimated_actuals_unavailable` - estimated_actuals_unavailable
          * @enum {string}
          */
-        UnavailableReasonEnum: "configuration_unavailable" | "forecast_unavailable";
+        UnavailableReasonEnum: "configuration_unavailable" | "forecast_unavailable" | "estimated_actuals_unavailable";
         /**
          * @description * `MWh` - MWh
          *     * `kWh` - kWh
@@ -1166,9 +1208,65 @@ export interface operations {
             };
         };
     };
+    tenants_regions_collection_schedule_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionScheduleOutput"];
+                };
+            };
+        };
+    };
+    tenants_regions_collection_schedule_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CollectionScheduleInput"];
+                "application/x-www-form-urlencoded": components["schemas"]["CollectionScheduleInput"];
+                "multipart/form-data": components["schemas"]["CollectionScheduleInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CollectionScheduleOutput"];
+                };
+            };
+        };
+    };
     tenants_regions_forecast_retrieve: {
         parameters: {
             query: {
+                /**
+                 * @description * `auto` - auto
+                 *     * `forecast` - forecast
+                 *     * `estimated_actuals` - estimated_actuals
+                 */
+                data_source?: "auto" | "forecast" | "estimated_actuals";
                 date: string;
             };
             header?: never;
@@ -1425,6 +1523,12 @@ export interface operations {
         parameters: {
             query: {
                 as_of?: string;
+                /**
+                 * @description * `auto` - auto
+                 *     * `forecast` - forecast
+                 *     * `estimated_actuals` - estimated_actuals
+                 */
+                data_source?: "auto" | "forecast" | "estimated_actuals";
                 date: string;
                 /**
                  * @description * `30` - 30

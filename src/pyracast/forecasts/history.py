@@ -1,0 +1,74 @@
+from datetime import date, datetime
+
+from django.db.models import Q
+
+from pyracast.calculation import calculate
+from pyracast.connections.contracts import ProviderData
+from pyracast.connections.models import SiteBinding
+from pyracast.forecasts.jobs import binding_is_current
+from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.irradiance import local_day_bounds
+from pyracast.regions.models import Region
+
+HISTORY_SELECTION_POLICY = "latest-available-estimated-actuals-v1"
+
+
+def select_actual_snapshot(
+    binding: SiteBinding, target_date: date, as_of: datetime
+) -> ForecastSnapshot | None:
+    start, end = local_day_bounds(target_date, binding.timezone)
+    return (
+        ForecastSnapshot.objects.select_related("job__binding__provider_account")
+        .filter(
+            job__binding=binding,
+            job__status="succeeded",
+            source_kind="estimated_actuals",
+            coverage_start__lt=end,
+            coverage_end__gt=start,
+            collected_at__gte=end,
+            collected_at__lte=as_of,
+            available_at__lte=as_of,
+        )
+        .filter(Q(issued_at__isnull=True) | Q(issued_at__lte=as_of))
+        .order_by("-collected_at", "-available_at", "-pk")
+        .first()
+    )
+
+
+def historical_irradiance(snapshot: ForecastSnapshot, target_date: date) -> dict[str, object]:
+    return calculate(
+        snapshot.job.binding,
+        target_date,
+        ProviderData(
+            raw_payload=snapshot.raw_payload,
+            intervals=snapshot.normalized_intervals,
+            issued_at=snapshot.issued_at,
+            collected_at=snapshot.collected_at,
+            source_kind="estimated_actuals",
+        ),
+    )
+
+
+def regional_history(region: Region, target_date: date, as_of: datetime) -> dict[str, object]:
+    binding = region.approved_binding
+    snapshot = select_actual_snapshot(binding, target_date, as_of) if binding else None
+    result = historical_irradiance(snapshot, target_date) if snapshot else None
+    return {
+        "region_id": region.pk,
+        "date": target_date,
+        "timezone": binding.timezone if binding else region.timezone,
+        "status": region.status,
+        "source_kind": "estimated_actuals",
+        "freshness": "missing"
+        if snapshot is None
+        else "fresh"
+        if binding is not None and binding_is_current(binding)
+        else "stale",
+        "unavailable_reason": "estimated_actuals_unavailable" if snapshot is None else None,
+        "result": result,
+        "collected_at": snapshot.collected_at if snapshot else None,
+        "issued_at": snapshot.issued_at if snapshot else None,
+        "binding_revision": snapshot.job.binding_id if snapshot else None,
+        "scheduled_slot": snapshot.job.scheduled_slot if snapshot else None,
+        "late": snapshot.collected_at > snapshot.job.scheduled_slot if snapshot else None,
+    }

@@ -16,6 +16,7 @@ from pyracast.api.views import (
     TransitionView,
     ValidateView,
 )
+from pyracast.forecasts.views import CollectionScheduleView
 
 urlpatterns = [
     path("admin/", site.urls),
@@ -29,6 +30,10 @@ urlpatterns = [
     path("api/tenants/<int:tenant_id>/regions/", RegionsView.as_view()),
     path("api/tenants/<int:tenant_id>/regions/<int:region_id>/", RegionView.as_view()),
     path("api/tenants/<int:tenant_id>/regions/<int:region_id>/forecast/", ForecastView.as_view()),
+    path(
+        "api/tenants/<int:tenant_id>/regions/<int:region_id>/collection-schedule/",
+        CollectionScheduleView.as_view(),
+    ),
     path(
         "api/tenants/<int:tenant_id>/regions/<int:region_id>/plants/",
         include("pyracast.plants.urls"),

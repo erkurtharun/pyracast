@@ -112,8 +112,32 @@ def ready_run(system: System, plant: Plant) -> CalibrationRun:
         "baseline": {"daily_mae_mwh": 2},
         "candidate": {"daily_mae_mwh": 1},
     }
+    run.dataset_manifest = {
+        "selection_policy": "latest-available-estimated-actuals-v1",
+        "source_kind": "estimated_actuals",
+    }
     run.save()
     return run
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        {},
+        {"selection_policy": "first-available-day-ahead-v1", "source_kind": "forecast"},
+        {"selection_policy": "latest-available-estimated-actuals-v1", "source_kind": "forecast"},
+    ],
+)
+def test_forecast_calibration_cannot_be_newly_activated(
+    monkeypatch: pytest.MonkeyPatch, manifest: dict[str, str]
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    run = ready_run(system, plant)
+    run.dataset_manifest = manifest
+    run.save(update_fields=("dataset_manifest",))
+    with pytest.raises(ValidationError):
+        activate_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk, run.pk)
+    assert not CalibrationActivation.objects.exists()
 
 
 def test_configuration_revision_and_activation_history(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -240,6 +264,47 @@ def test_observation_replay_units_zero_and_atomic_overlap(monkeypatch: pytest.Mo
         observations=[second],
     )
     assert ProductionObservation.objects.latest("starts_at").energy_mwh == 0.5
+
+
+def test_new_configuration_accepts_old_meter_history_and_future_batch_rolls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(timezone, "now", lambda: NOW)
+    system = make_system(approved=True)
+    plant = create_plant(
+        system.member, system.tenant.pk, system.region.pk, name="New", dc_capacity_mw=130
+    )
+    configuration = plant.current_configuration
+    assert configuration is not None
+    assert configuration.created_at == NOW
+    start = NOW - timedelta(days=7)
+    past = ObservationInput(start, start + timedelta(hours=1), 26)
+    future = ObservationInput(NOW, NOW + timedelta(hours=1), 26)
+    with pytest.raises(ValidationError, match="Completed"):
+        import_observations(
+            system.member,
+            system.tenant.pk,
+            system.region.pk,
+            plant.pk,
+            configuration_id=configuration.pk,
+            unit="MWh",
+            observations=[past, future],
+        )
+    assert not ProductionObservation.objects.exists()
+    assert not PlantEvent.objects.filter(action="observations_imported").exists()
+    result = import_observations(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        configuration_id=configuration.pk,
+        unit="MWh",
+        observations=[past],
+    )
+    assert result["created"] == 1
+    observation = ProductionObservation.objects.get()
+    assert observation.ends_at < configuration.created_at
+    assert observation.recorded_at == NOW
 
 
 @pytest.mark.parametrize(

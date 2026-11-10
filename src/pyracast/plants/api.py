@@ -10,7 +10,7 @@ from rest_framework.response import Response
 
 from pyracast.accounts.operations import require_member
 from pyracast.plants import operations
-from pyracast.plants.forecasting import plant_forecast
+from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import CalibrationRun, Plant, ProductionObservation
 from pyracast.plants.serializers import (
     ActivationOutput,
@@ -165,10 +165,11 @@ class ForecastView(ScopedView):
         data = ForecastQuery(data=request.query_params)
         data.is_valid(raise_exception=True)
         values = data.validated_data
-        result = plant_forecast(
+        result = plant_outlook(
             *scope,
             target_date=values["date"],
             resolution_minutes=values["resolution_minutes"],
             as_of=values.get("as_of"),
+            source=values["data_source"],
         )
         return Response(result)

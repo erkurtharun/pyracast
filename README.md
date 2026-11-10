@@ -114,6 +114,13 @@ and retries share one account/UTC-day budget. Unknown request outcomes consume q
 Provider calls happen outside transactions. Changed or suspended regions cannot
 publish through old bindings. Failed calculations can reuse an archived acquisition.
 
+In **Data collection**, choose daily local forecast times for each approved region.
+The first eligible time also makes one estimated-actuals request with `hours=168`,
+refreshing yesterday and retaining the available completed seven-day history.
+Both requests use the account's shared UTC quota. Keep the dispatcher and worker
+running for scheduled collection; changing times does not fetch data in the web request.
+Email reminders use saved forecasts and make no provider requests.
+
 ## Customer interface
 
 The independently running Next.js app is in `web/`. Use Node 26.13.0 LTS and npm;
@@ -257,8 +264,11 @@ Add `--plant-id PLANT_ID` to revise an existing plant. Capacity or meter changes
 create a new version; its calibration starts from the baseline. Forecast GET accepts
 `resolution_minutes=30` or `60` and optional aware `as_of`. A requested historical
 time must have an existing configuration. Sources acquired during or after the target
-day cannot turn into day-ahead predictions. The first preceding-day acquisition is
-used consistently for fitting and prediction, with actual lead time in provenance.
+day cannot turn into day-ahead predictions. Predictions retain the first preceding-day
+acquisition and its actual lead time. Use `data_source=auto` to prefer estimated
+actuals on completed past days, or explicitly choose `forecast` / `estimated_actuals`.
+Past electrical estimates use the declared configuration and baseline factor, with
+source and configuration-assumption flags; they are not meter readings.
 
 Place a CSV inside the working directory (an ignored local directory such as
 `.codex/production.csv` is suitable). Values are **interval energy**, not instantaneous
@@ -276,7 +286,7 @@ uv run --locked pyracast calibrate_plant --username YOUR_USER --plant-id PLANT_I
 ```
 
 The sample row is illustrative; it is not sufficient calibration data. Supply at
-least seven complete, matched local days; a month is preferable for more weather
+least seven complete local days matched to saved estimated actuals; a month is preferable for more weather
 variation. CSV files accept 30/60-minute intervals, at most 2,000 rows and 2 MiB.
 Imports are atomic and exact replay is safe; conflicting records are rejected.
 `--run` processes the saved job locally without RabbitMQ or provider calls; omit it
@@ -348,6 +358,14 @@ The sanitized [forecast fixture](tests/fixtures/solcast_forecasts.json) contains
 records collection time. It contains no matched GHI or provider issue time.
 Reconstructed GHI remains **unvalidated**. Routine tests replay fixtures and never
 consume provider quota. A successful HTTP call establishes integration only.
+
+On 2026-11-10, two quota-counted Bearer-authenticated history checks succeeded.
+The default request returned 97 half-hour records (approximately 48 hours);
+`hours=168` returned 337 records spanning the rolling seven-day window. The
+sanitized [estimated-actuals fixture](tests/fixtures/solcast_estimated_actuals.json)
+and [metadata](tests/fixtures/solcast_estimated_actuals.metadata.json) preserve
+that response. Collection trims incomplete local days and retains both acquisitions;
+neither this response nor the electrical proxy establishes measured irradiance accuracy.
 
 For another explicitly enabled live check, first register the canonical authorized
 Solcast account with `secret_reference=env:SOLCAST_API_KEY`, then run:

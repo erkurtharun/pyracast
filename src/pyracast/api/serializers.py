@@ -87,6 +87,9 @@ class IdentifierOutput(serializers.Serializer[dict[str, Any]]):
 
 class ForecastQuery(InputSerializer):
     date = serializers.DateField()
+    data_source = serializers.ChoiceField(
+        choices=("auto", "forecast", "estimated_actuals"), default="forecast"
+    )
 
 
 class ForecastOutput(serializers.Serializer[dict[str, Any]]):
@@ -95,6 +98,8 @@ class ForecastOutput(serializers.Serializer[dict[str, Any]]):
     timezone = serializers.CharField()
     status = serializers.CharField()
     freshness = serializers.CharField()
+    source_kind = serializers.ChoiceField(choices=("forecast", "estimated_actuals"))
+    unavailable_reason = serializers.CharField(allow_null=True)
     result = serializers.JSONField(allow_null=True)
     collected_at = serializers.DateTimeField(allow_null=True)
     issued_at = serializers.DateTimeField(allow_null=True)

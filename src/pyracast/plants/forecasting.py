@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from pyracast.accounts.operations import require_member
 from pyracast.connections.models import ProviderAccount
+from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.models import ForecastResult, ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import (
@@ -128,6 +129,10 @@ def _payload(
     )
     flags = list(result["quality_flags"]) if isinstance(result["quality_flags"], list) else []
     flags.extend(("unvalidated_reference_transfer", "geometry_not_modeled"))
+    if snapshot.source_kind == "estimated_actuals":
+        flags.append("estimated_actuals_not_metered")
+        if configuration.created_at > start:
+            flags.append("historical_configuration_assumed")
     if calibration is None:
         flags.append("uncalibrated")
     if power_limit(configuration) is None:
@@ -142,7 +147,9 @@ def _payload(
         "measurement_basis": configuration.measurement_basis,
     }
     result["provenance"] = {
-        "selection_policy": SELECTION_POLICY,
+        "selection_policy": HISTORY_SELECTION_POLICY
+        if snapshot.source_kind == "estimated_actuals"
+        else SELECTION_POLICY,
         "snapshot_id": snapshot.pk,
         "binding_id": configuration.binding_id,
         "source_kind": snapshot.source_kind,
@@ -199,6 +206,7 @@ def plant_forecast(
             "configuration_id": None,
             "calibration_id": None,
             "freshness": "missing",
+            "source_kind": "forecast",
             "unavailable_reason": "configuration_unavailable",
             "result": None,
             "regional_irradiance": None,
@@ -260,6 +268,7 @@ def plant_forecast(
         "as_of": as_of.isoformat(),
         "configuration_id": configuration.pk,
         "calibration_id": calibration.pk if calibration else None,
+        "source_kind": "forecast",
         "freshness": "missing"
         if snapshot is None
         else "fresh"

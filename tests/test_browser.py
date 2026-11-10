@@ -14,6 +14,7 @@ from pyracast.accounts.models import Membership, Tenant
 from pyracast.calculation import calculate
 from pyracast.connections.operations import validate_binding
 from pyracast.forecasts.jobs import collect
+from pyracast.forecasts.models import CollectionJob, CollectionSchedule
 from pyracast.notifications.models import ReminderPreference
 from pyracast.plants.models import Plant
 from pyracast.providers import FixtureProvider
@@ -41,6 +42,15 @@ def test_browser_against_live_django(live_server: Any) -> None:
     validate_binding(system.admin, system.binding.pk, FakeAdapter(), now)
     job = approve_region(system.admin, system.region.pk, system.binding.pk, now)
     assert collect(job.pk, FixtureProvider(), calculate, timezone.now())
+    history_date = job.target_date - timedelta(days=2)
+    history_job = CollectionJob.objects.create(
+        binding=system.binding,
+        endpoint="estimated_actuals",
+        target_date=history_date,
+        scheduled_slot=now,
+        available_at=now,
+    )
+    assert collect(history_job.pk, FixtureProvider(), calculate, timezone.now())
 
     outsider = User.objects.create_user(username="other")
     other_tenant = Tenant.objects.create(name="Other")
@@ -59,6 +69,7 @@ def test_browser_against_live_django(live_server: Any) -> None:
         "BROWSER_PASSWORD": password,
         "BROWSER_DATE": job.target_date.isoformat(),
         "BROWSER_TODAY": (job.target_date - timedelta(days=1)).isoformat(),
+        "BROWSER_HISTORY_DATE": history_date.isoformat(),
         "BROWSER_OTHER_TENANT": str(other_tenant.pk),
         "BROWSER_OTHER_REGION": str(other_region.pk),
     }
@@ -82,6 +93,9 @@ def test_browser_against_live_django(live_server: Any) -> None:
     assert plant.current_configuration.dc_capacity_mw == 130
     assert plant.current_configuration.inverter_capacity_mw == 100
     assert plant.current_configuration.export_limit_mw is None
+    schedule = CollectionSchedule.objects.get(region=system.region)
+    assert schedule.enabled
+    assert schedule.times == ["09:00", "16:00"]
     reminder = ReminderPreference.objects.get(user=system.member, region=system.region)
     assert reminder.enabled
     assert reminder.email == ""

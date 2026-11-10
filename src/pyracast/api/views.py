@@ -3,7 +3,7 @@ from typing import cast
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
-from django.db.models import QuerySet
+from django.db.models import Q, QuerySet
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
@@ -30,6 +30,7 @@ from pyracast.api.serializers import (
 )
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import create_account, rotate_secret, validate_binding
+from pyracast.forecasts.history import regional_history
 from pyracast.forecasts.models import ForecastResult
 from pyracast.providers import adapter_for
 from pyracast.regions.models import Region
@@ -178,12 +179,27 @@ class ForecastView(RegionsView):
         query = ForecastQuery(data=request.query_params)
         query.is_valid(raise_exception=True)
         target = query.validated_data["date"]
-        today = timezone.now().astimezone(ZoneInfo(region.timezone)).date()
+        now = timezone.now()
+        today = now.astimezone(ZoneInfo(region.timezone)).date()
         if not today - timedelta(days=366) <= target <= today + timedelta(days=14):
             return Response({"code": "date_out_of_range"}, status=400)
+        source = query.validated_data["data_source"]
+        if source == "estimated_actuals" and target >= today:
+            return Response({"code": "completed_day_required"}, status=400)
+        if source == "estimated_actuals" or (source == "auto" and target < today):
+            history = regional_history(region, target, now)
+            if history["result"] is not None or source == "estimated_actuals":
+                return Response(history)
         saved = (
             ForecastResult.objects.select_related("snapshot__job__binding")
-            .filter(snapshot__job__binding__region=region, snapshot__job__target_date=target)
+            .filter(
+                snapshot__job__binding__region=region,
+                snapshot__job__target_date=target,
+                snapshot__source_kind="forecast",
+                snapshot__collected_at__lte=now,
+                published_at__lte=now,
+            )
+            .filter(Q(snapshot__issued_at__isnull=True) | Q(snapshot__issued_at__lte=now))
             .order_by("-snapshot__collected_at")
             .first()
         )
@@ -199,6 +215,8 @@ class ForecastView(RegionsView):
                 "date": target,
                 "timezone": saved.snapshot.job.binding.timezone if saved else region.timezone,
                 "status": region.status,
+                "source_kind": "forecast",
+                "unavailable_reason": "forecast_unavailable" if saved is None else None,
                 "freshness": "missing" if saved is None else "fresh" if fresh else "stale",
                 "result": saved.payload if saved else None,
                 "collected_at": saved.snapshot.collected_at if saved else None,

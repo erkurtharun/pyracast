@@ -664,10 +664,129 @@
                 }
             }
         },
+        "/api/tenants/{tenant_id}/regions/{region_id}/collection-schedule/": {
+            "get": {
+                "operationId": "tenants_regions_collection_schedule_retrieve",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/CollectionScheduleOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            },
+            "put": {
+                "operationId": "tenants_regions_collection_schedule_update",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CollectionScheduleInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CollectionScheduleInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CollectionScheduleInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/CollectionScheduleOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
         "/api/tenants/{tenant_id}/regions/{region_id}/forecast/": {
             "get": {
                 "operationId": "tenants_regions_forecast_retrieve",
                 "parameters": [
+                    {
+                        "in": "query",
+                        "name": "data_source",
+                        "schema": {
+                            "enum": [
+                                "auto",
+                                "forecast",
+                                "estimated_actuals"
+                            ],
+                            "type": "string",
+                            "default": "forecast",
+                            "minLength": 1
+                        },
+                        "description": "* `auto` - auto\n* `forecast` - forecast\n* `estimated_actuals` - estimated_actuals"
+                    },
                     {
                         "in": "query",
                         "name": "date",
@@ -1258,6 +1377,21 @@
                             "type": "string",
                             "format": "date-time"
                         }
+                    },
+                    {
+                        "in": "query",
+                        "name": "data_source",
+                        "schema": {
+                            "enum": [
+                                "auto",
+                                "forecast",
+                                "estimated_actuals"
+                            ],
+                            "type": "string",
+                            "default": "forecast",
+                            "minLength": 1
+                        },
+                        "description": "* `auto` - auto\n* `forecast` - forecast\n* `estimated_actuals` - estimated_actuals"
                     },
                     {
                         "in": "query",
@@ -1917,6 +2051,75 @@
                     "window_start"
                 ]
             },
+            "CollectionScheduleInput": {
+                "type": "object",
+                "properties": {
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "times": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "maxLength": 5
+                        },
+                        "maxItems": 1440
+                    }
+                },
+                "required": [
+                    "enabled",
+                    "times"
+                ]
+            },
+            "CollectionScheduleOutput": {
+                "type": "object",
+                "properties": {
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "times": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "maxLength": 5
+                        },
+                        "maxItems": 1440
+                    },
+                    "timezone": {
+                        "type": "string"
+                    },
+                    "effective_from": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "daily_request_limit": {
+                        "type": "integer"
+                    },
+                    "used_today": {
+                        "type": "integer"
+                    },
+                    "remaining_today": {
+                        "type": "integer"
+                    },
+                    "history_requests_per_day": {
+                        "type": "integer"
+                    },
+                    "max_forecast_times": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "daily_request_limit",
+                    "effective_from",
+                    "enabled",
+                    "history_requests_per_day",
+                    "max_forecast_times",
+                    "remaining_today",
+                    "times",
+                    "timezone",
+                    "used_today"
+                ]
+            },
             "ConfigurationOutput": {
                 "type": "object",
                 "properties": {
@@ -2000,6 +2203,13 @@
                     "freshness": {
                         "type": "string"
                     },
+                    "source_kind": {
+                        "$ref": "#/components/schemas/SourceKindEnum"
+                    },
+                    "unavailable_reason": {
+                        "type": "string",
+                        "nullable": true
+                    },
                     "result": {
                         "nullable": true
                     },
@@ -2037,8 +2247,10 @@
                     "region_id",
                     "result",
                     "scheduled_slot",
+                    "source_kind",
                     "status",
-                    "timezone"
+                    "timezone",
+                    "unavailable_reason"
                 ]
             },
             "IdentifierOutput": {
@@ -2431,6 +2643,9 @@
                     "freshness": {
                         "type": "string"
                     },
+                    "source_kind": {
+                        "$ref": "#/components/schemas/SourceKindEnum"
+                    },
                     "unavailable_reason": {
                         "nullable": true,
                         "oneOf": [
@@ -2458,6 +2673,7 @@
                     "plant_id",
                     "regional_irradiance",
                     "result",
+                    "source_kind",
                     "timezone",
                     "unavailable_reason"
                 ]
@@ -2856,6 +3072,14 @@
                     "username"
                 ]
             },
+            "SourceKindEnum": {
+                "enum": [
+                    "forecast",
+                    "estimated_actuals"
+                ],
+                "type": "string",
+                "description": "* `forecast` - forecast\n* `estimated_actuals` - estimated_actuals"
+            },
             "TenantOutput": {
                 "type": "object",
                 "properties": {
@@ -2895,10 +3119,11 @@
             "UnavailableReasonEnum": {
                 "enum": [
                     "configuration_unavailable",
-                    "forecast_unavailable"
+                    "forecast_unavailable",
+                    "estimated_actuals_unavailable"
                 ],
                 "type": "string",
-                "description": "* `configuration_unavailable` - configuration_unavailable\n* `forecast_unavailable` - forecast_unavailable"
+                "description": "* `configuration_unavailable` - configuration_unavailable\n* `forecast_unavailable` - forecast_unavailable\n* `estimated_actuals_unavailable` - estimated_actuals_unavailable"
             },
             "UnitEnum": {
                 "enum": [

@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Literal, Protocol
+from typing import Literal, Protocol, runtime_checkable
 
 from pyracast.connections.models import SiteBinding
 
@@ -23,6 +23,11 @@ class ProviderAdapter(Protocol):
     def validate(self, binding: SiteBinding) -> None: ...
 
     def fetch(self, binding: SiteBinding, target_date: date) -> ProviderData: ...
+
+
+@runtime_checkable
+class HistoryAdapter(Protocol):
+    def fetch_history(self, binding: SiteBinding, target_date: date, days: int) -> ProviderData: ...
 
 
 Calculator = Callable[[SiteBinding, date, ProviderData], dict[str, object]]

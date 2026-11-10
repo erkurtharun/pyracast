@@ -3,6 +3,14 @@ import uuid
 from django.db import models
 
 from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.regions.models import Region
+
+
+class CollectionSchedule(models.Model):
+    region = models.OneToOneField(Region, on_delete=models.CASCADE)
+    enabled = models.BooleanField(default=True)
+    times = models.JSONField(default=list)
+    effective_from = models.DateTimeField()
 
 
 class CollectionJob(models.Model):
@@ -22,6 +30,11 @@ class CollectionJob(models.Model):
         constraints = (
             models.UniqueConstraint(
                 fields=("binding", "endpoint", "scheduled_slot"), name="unique_collection_slot"
+            ),
+            models.UniqueConstraint(
+                fields=("binding", "target_date"),
+                condition=models.Q(endpoint="estimated_actuals"),
+                name="unique_history_collection_day",
             ),
         )
 
@@ -44,6 +57,9 @@ class ForecastSnapshot(models.Model):
     collected_at = models.DateTimeField()
     issued_at = models.DateTimeField(null=True)
     source_kind = models.CharField(max_length=20, default="unknown")
+    coverage_start = models.DateTimeField(null=True, db_index=True)
+    coverage_end = models.DateTimeField(null=True, db_index=True)
+    available_at = models.DateTimeField(null=True)
 
 
 class ForecastResult(models.Model):

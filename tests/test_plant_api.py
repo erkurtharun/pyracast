@@ -202,7 +202,22 @@ def test_calibration_pending_forecast_and_csrf() -> None:
     saved.assessment = "provisional"
     saved.completed_at = timezone.now()
     saved.result = {"holdout_days": 1, "candidate": {"mae": 1}, "baseline": {"mae": 2}}
+    saved.dataset_manifest = {
+        "selection_policy": "first-available-day-ahead-v1",
+        "source_kind": "forecast",
+    }
     saved.save()
+    assert (
+        client.post(
+            detail + f"calibrations/{run['id']}/activate/", {}, content_type="application/json"
+        ).status_code
+        == 400
+    )
+    saved.dataset_manifest = {
+        "selection_policy": "latest-available-estimated-actuals-v1",
+        "source_kind": "estimated_actuals",
+    }
+    saved.save(update_fields=("dataset_manifest",))
     activation = client.post(
         detail + f"calibrations/{run['id']}/activate/", {}, content_type="application/json"
     )

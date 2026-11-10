@@ -1,4 +1,6 @@
+import json
 from datetime import UTC, date, datetime
+from pathlib import Path
 from typing import Literal, cast
 
 import httpx
@@ -67,6 +69,22 @@ def test_actuals_are_distinct_from_archived_forecasts() -> None:
     assert result.collected_at.utcoffset() is not None
     with pytest.raises(ProviderFailure, match="endpoint"):
         normalize_payload(raw, cast(Literal["forecasts", "estimated_actuals"], "wrong"))
+
+
+def test_captured_seven_day_actuals_preserves_source_and_interval_bounds() -> None:
+    fixture = Path(__file__).parent / "fixtures" / "solcast_estimated_actuals.json"
+    metadata = json.loads(fixture.with_suffix(".metadata.json").read_text(encoding="utf-8"))
+    collected_at = datetime.fromisoformat(metadata["collected_at"])
+    data = normalize_payload(
+        json.loads(fixture.read_text(encoding="utf-8")),
+        "estimated_actuals",
+        collected_at=collected_at,
+    )
+    assert data.source_kind == "estimated_actuals"
+    assert data.issued_at is None
+    assert len(data.intervals) == 337
+    assert min(cast(str, row["start"]) for row in data.intervals) == "2026-11-03T01:00:00+00:00"
+    assert max(cast(str, row["end"]) for row in data.intervals) == "2026-11-10T01:30:00+00:00"
 
 
 @pytest.mark.parametrize("payload", [None, [], {}, {"forecasts": {}}, {"forecasts": None}])

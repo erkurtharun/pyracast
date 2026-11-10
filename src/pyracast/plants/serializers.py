@@ -175,6 +175,9 @@ class EmptyInput(InputSerializer):
 
 class ForecastQuery(InputSerializer):
     date = serializers.DateField()
+    data_source = serializers.ChoiceField(
+        choices=("auto", "forecast", "estimated_actuals"), default="forecast"
+    )
     resolution_minutes = serializers.ChoiceField(choices=(30, 60), default=30)
     as_of = AwareDateTime(required=False)
 
@@ -187,8 +190,14 @@ class PlantForecastOutput(serializers.Serializer[dict[str, Any]]):
     configuration_id = serializers.IntegerField(allow_null=True)
     calibration_id = serializers.IntegerField(allow_null=True)
     freshness = serializers.CharField()
+    source_kind = serializers.ChoiceField(choices=("forecast", "estimated_actuals"))
     unavailable_reason = serializers.ChoiceField(
-        choices=("configuration_unavailable", "forecast_unavailable"), allow_null=True
+        choices=(
+            "configuration_unavailable",
+            "forecast_unavailable",
+            "estimated_actuals_unavailable",
+        ),
+        allow_null=True,
     )
     result = serializers.JSONField(allow_null=True)
     regional_irradiance = serializers.JSONField(allow_null=True)

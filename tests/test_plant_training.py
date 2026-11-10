@@ -1,5 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from threading import Event
 from types import SimpleNamespace
 from typing import Any, cast
@@ -9,6 +9,8 @@ from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connection
 from django.utils import timezone
 
+from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.irradiance import local_day_bounds
 from pyracast.plants import training
 from pyracast.plants.models import (
     CalibrationActivation,
@@ -31,12 +33,28 @@ from tests.test_plant_operations import make_plant, request_run, snapshot_for
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
+def actual_snapshot_for(
+    system: System, day: date, *, power_kw: float = 0.4, collected_at: datetime | None = None
+) -> ForecastSnapshot:
+    start, end = local_day_bounds(day, system.binding.timezone)
+    acquired = end + timedelta(hours=1) if collected_at is None else collected_at
+    source = snapshot_for(
+        system, day, power_kw=power_kw, collected_at=acquired, source_kind="estimated_actuals"
+    )
+    source.available_at = acquired
+    source.coverage_start, source.coverage_end = start, end
+    source.save()
+    source.job.endpoint, source.job.status = "estimated_actuals", "succeeded"
+    source.job.save()
+    return source
+
+
 def history(system: System, plant: Plant) -> list[int]:
     assert plant.current_configuration_id is not None
     rows: list[ObservationInput] = []
     sources = []
     for offset in range(7):
-        source = snapshot_for(system, date(2026, 11, 2) + timedelta(days=offset))
+        source = actual_snapshot_for(system, date(2026, 11, 2) + timedelta(days=offset))
         sources.append(source.pk)
         start = datetime.fromisoformat(source.normalized_intervals[0]["start"])
         rows.extend(
@@ -87,14 +105,12 @@ def test_durable_fit_freezes_inputs_and_requires_separate_activation(
     assert not pending_calibration_ids(NOW)
 
 
-def test_no_archived_forecasts_is_insufficient_not_estimated_actuals(
+def test_archived_forecasts_cannot_replace_missing_estimated_actuals(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
     sources = history(system, plant)
-    from pyracast.forecasts.models import ForecastSnapshot
-
-    ForecastSnapshot.objects.filter(pk__in=sources).update(source_kind="estimated_actuals")
+    ForecastSnapshot.objects.filter(pk__in=sources).update(source_kind="forecast")
     run = request_run(system, plant)
     assert run_calibration(run.pk, NOW)
     run.refresh_from_db()
@@ -105,20 +121,16 @@ def test_no_archived_forecasts_is_insufficient_not_estimated_actuals(
     assert len(run.dataset_sha256) == 64
 
 
-def test_cutoff_and_day_ahead_selection_exclude_later_information(
+def test_actuals_and_meter_cutoff_exclude_later_information(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
     sources = history(system, plant)
     run = request_run(system, plant)
-    from pyracast.forecasts.models import ForecastSnapshot
-
     first = ForecastSnapshot.objects.get(pk=sources[0])
     second = ForecastSnapshot.objects.get(pk=sources[1])
-    ForecastSnapshot.objects.filter(pk=first.pk).update(
-        collected_at=first.collected_at + timedelta(hours=2)
-    )
-    ForecastSnapshot.objects.filter(pk=second.pk).update(issued_at=NOW)
+    ForecastSnapshot.objects.filter(pk=first.pk).update(collected_at=NOW + timedelta(seconds=1))
+    ForecastSnapshot.objects.filter(pk=second.pk).update(issued_at=NOW + timedelta(seconds=1))
     excluded = ProductionObservation.objects.order_by("starts_at").last()
     assert excluded is not None
     ProductionObservation.objects.filter(pk=excluded.pk).update(
@@ -256,7 +268,7 @@ def test_meter_native_intervals_are_frozen_before_hourly_fitting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    source = snapshot_for(system, date(2026, 11, 8))
+    source = actual_snapshot_for(system, date(2026, 11, 8))
     source.normalized_intervals[0]["power_kw"] = 120 / 130
     source.normalized_intervals[1]["power_kw"] = 80 / 130
     source.save()
@@ -297,32 +309,41 @@ def test_publication_and_failure_include_elapsed_lock_wait(
     assert not run.dataset_sha256
 
 
-def test_training_matches_first_available_day_ahead_issue_policy(
+def test_training_uses_latest_actuals_available_at_request_cutoff(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
     sources = history(system, plant)
-    from pyracast.forecasts.models import ForecastSnapshot
-
+    intervals = []
     for offset, source_id in enumerate(sources):
         day = date(2026, 11, 2) + timedelta(days=offset)
-        previous = day - timedelta(days=1)
-        first_acquired = datetime.combine(previous, datetime.min.time(), UTC) + timedelta(
-            hours=13, minutes=1
-        )
-        ForecastSnapshot.objects.filter(pk=source_id).update(collected_at=first_acquired)
-        snapshot_for(system, day, power_kw=0.9, collected_at=first_acquired + timedelta(hours=7))
+        source = ForecastSnapshot.objects.get(pk=source_id)
+        intervals.extend(source.normalized_intervals)
+        snapshot_for(system, day, power_kw=0.9)
+    latest = actual_snapshot_for(system, date(2026, 11, 9), collected_at=NOW - timedelta(hours=1))
+    latest.normalized_intervals = intervals
+    latest.coverage_start = datetime.fromisoformat(intervals[0]["start"])
+    latest.coverage_end = datetime.fromisoformat(intervals[-1]["end"])
+    latest.issued_at = latest.collected_at
+    latest.save()
+    future = actual_snapshot_for(
+        system, date(2026, 11, 10), collected_at=NOW + timedelta(seconds=1)
+    )
+    future.normalized_intervals = [dict(row, power_kw=0.9) for row in intervals]
+    future.coverage_start, future.coverage_end = latest.coverage_start, latest.coverage_end
+    future.save()
     run = request_run(system, plant)
     assert run_calibration(run.pk, NOW)
     run.refresh_from_db()
     assert run.status == "ready"
-    assert run.dataset_manifest["selection_policy"] == "first-available-day-ahead-v1"
+    assert run.dataset_manifest["selection_policy"] == "latest-available-estimated-actuals-v1"
+    assert run.dataset_manifest["source_kind"] == "estimated_actuals"
     assert (
         sorted(value["snapshot_id"] for value in run.dataset_manifest["sources"].values())
-        == sources
+        == [latest.pk] * 7
     )
     assert all(
-        value["lead_hours"] == pytest.approx(8 - 1 / 60)
+        value["source_kind"] == "estimated_actuals"
         for value in run.dataset_manifest["sources"].values()
     )
 

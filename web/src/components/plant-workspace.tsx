@@ -20,6 +20,7 @@ import {
     useCollection,
 } from "./ui";
 import { ForecastPanel } from "./forecast-panel";
+import { DataSourceControl, localDay, type DataSource } from "./data-source";
 export function PlantWorkspace({
     plant,
     base,
@@ -42,7 +43,9 @@ export function PlantWorkspace({
             tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
             return tomorrow.toISOString().slice(0, 10);
         }),
-        [resolution, setResolution] = useState("30");
+        [resolution, setResolution] = useState("30"),
+        [source, setSource] = useState<DataSource>("auto");
+    const yesterday = localDay(timezone, -1);
     const configuration = plant.current_configuration;
     return (
         <>
@@ -100,11 +103,27 @@ export function PlantWorkspace({
                             <input
                                 type="date"
                                 value={date}
+                                max={
+                                    source === "estimated_actuals"
+                                        ? yesterday
+                                        : undefined
+                                }
                                 onChange={(event) =>
                                     setDate(event.target.value)
                                 }
                             />
                         </label>
+                        <DataSourceControl
+                            value={source}
+                            onChange={(next) => {
+                                setSource(next);
+                                if (
+                                    next === "estimated_actuals" &&
+                                    date > yesterday
+                                )
+                                    setDate(yesterday);
+                            }}
+                        />
                         <label className="field">
                             Resolution
                             <select
@@ -119,10 +138,16 @@ export function PlantWorkspace({
                         </label>
                         <span className="fine">Local dates in {timezone}</span>
                     </div>
-                    <PlantForecast
-                        key={`${date}-${resolution}`}
-                        url={`${base}forecast/?date=${date}&resolution_minutes=${resolution}`}
-                    />
+                    {source === "estimated_actuals" && date > yesterday ? (
+                        <Notice>
+                            Choose a completed local day for estimated actuals.
+                        </Notice>
+                    ) : (
+                        <PlantForecast
+                            key={`${date}-${resolution}-${source}`}
+                            url={`${base}forecast/?date=${date}&resolution_minutes=${resolution}&data_source=${source}`}
+                        />
+                    )}
                 </>
             ) : !configuration ? (
                 <Notice>No configuration is available for this plant.</Notice>
@@ -324,8 +349,9 @@ function Calibrations({
                     <div>
                         <h2>A closer fit to your plant</h2>
                         <p>
-                            Compare metered production with archived forecasts
-                            over 7–90 completed local days.
+                            Compare completed meter/SCADA production with
+                            historical estimated actuals over 7–90 completed
+                            local days.
                         </p>
                     </div>
                 </div>

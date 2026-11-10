@@ -103,6 +103,20 @@ class FixtureProvider:
             interval["sunlight"] = light
         return result
 
+    def fetch_history(self, binding: SiteBinding, target_date: date, days: int) -> ProviderData:
+        intervals: list[dict[str, object]] = []
+        rows: list[object] = []
+        for offset in reversed(range(days)):
+            data = self.fetch(binding, target_date - timedelta(days=offset))
+            intervals.extend(data.intervals)
+            rows.extend(cast(list[object], data.raw_payload["forecasts"]))
+        return ProviderData(
+            {"estimated_actuals": rows, "synthetic": True},
+            intervals,
+            collected_at=datetime.now(UTC),
+            source_kind="estimated_actuals",
+        )
+
 
 class SolcastProvider:
     def __init__(self, transport: httpx.BaseTransport | None = None) -> None:
@@ -113,6 +127,14 @@ class SolcastProvider:
         self.fetch(binding, datetime.now(UTC).date())
 
     def fetch(self, binding: SiteBinding, target_date: date) -> ProviderData:
+        return self._request(binding, "forecasts")
+
+    def fetch_history(self, binding: SiteBinding, target_date: date, days: int) -> ProviderData:
+        return self._request(binding, "estimated_actuals")
+
+    def _request(
+        self, binding: SiteBinding, endpoint: Literal["forecasts", "estimated_actuals"]
+    ) -> ProviderData:
         reference = binding.provider_account.secret_reference
         if not re.fullmatch(r"env:(?:SOLCAST_API_KEY|PYRACAST_SOLCAST_[A-Z0-9_]+)", reference):
             raise ProviderFailure("invalid_secret_reference")
@@ -128,9 +150,9 @@ class SolcastProvider:
                 follow_redirects=False,
             ) as client:
                 response = client.get(
-                    f"https://api.solcast.com.au/rooftop_sites/{binding.site_id}/forecasts",
+                    f"https://api.solcast.com.au/rooftop_sites/{binding.site_id}/{endpoint}",
                     headers={"Authorization": f"Bearer {secret}"},
-                    params={"format": "json", "hours": 72},
+                    params={"format": "json", "hours": 72 if endpoint == "forecasts" else 168},
                 )
                 response.raise_for_status()
                 if secret in response.text:
@@ -140,7 +162,7 @@ class SolcastProvider:
             raise ProviderFailure("provider_request_failed") from None
         if _contains_secret(payload, secret):
             raise ProviderFailure("unsafe_provider_response")
-        return normalize_payload(payload)
+        return normalize_payload(payload, endpoint)
 
 
 def adapter_for(binding: SiteBinding) -> ProviderAdapter:

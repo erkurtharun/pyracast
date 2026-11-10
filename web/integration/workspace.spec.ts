@@ -57,6 +57,14 @@ test("a customer manages an approved region through the real API", async ({
         ),
     ).toEqual([]);
 
+    await page
+        .getByLabel("Forecast date")
+        .fill(process.env.BROWSER_HISTORY_DATE!);
+    await expect(
+        page.getByText(
+            "Estimated actuals. Satellite/model estimates, not meter readings.",
+        ),
+    ).toBeVisible();
     await page.getByRole("button", { name: "Solar plants" }).click();
     await page.getByRole("button", { name: "+ Add a plant" }).click();
     await page.getByLabel("Plant name").fill("Browser plant");
@@ -82,12 +90,37 @@ test("a customer manages an approved region through the real API", async ({
         page.getByRole("heading", { name: "No configuration for this day" }),
     ).toBeVisible();
     await expect(page.getByText("configuration_unavailable")).toHaveCount(0);
+    await page
+        .getByLabel("Forecast date")
+        .fill(process.env.BROWSER_HISTORY_DATE!);
+    await expect(
+        page.getByText(
+            "Estimated actuals. Satellite/model estimates, not meter readings.",
+        ),
+    ).toBeVisible();
+    await expect(
+        page.getByText("View interval data (48 intervals)"),
+    ).toBeVisible();
+    await page.screenshot({
+        path: testInfo.outputPath("plant-history-desktop.png"),
+        fullPage: true,
+    });
     await page.getByLabel("Forecast date").fill(process.env.BROWSER_DATE!);
     await expect(
         page.getByText("View interval data (48 intervals)"),
     ).toBeVisible();
 
     await page.getByRole("button", { name: /all plants/i }).click();
+    await page
+        .getByRole("button", { name: "Data collection", exact: true })
+        .click();
+    await page.getByLabel(/Collection times/).fill("09:00, 16:00");
+    await page
+        .getByRole("button", { name: "Save collection schedule" })
+        .click();
+    await expect(page.getByLabel(/Collection times/)).toHaveValue(
+        "09:00, 16:00",
+    );
     await page.getByRole("button", { name: "Email reminders" }).click();
     await page.getByLabel("Enable forecast emails for this region").check();
     await page.getByLabel(/Delivery times/).fill("10:00");

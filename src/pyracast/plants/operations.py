@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from pyracast.accounts.operations import require_member
 from pyracast.connections.models import SiteBinding
+from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.plants.models import (
     CalibrationActivation,
@@ -366,6 +367,8 @@ def activate_calibration(
             or not run.result.get("holdout_days")
             or not run.result.get("candidate")
             or not run.result.get("baseline")
+            or run.dataset_manifest.get("selection_policy") != HISTORY_SELECTION_POLICY
+            or run.dataset_manifest.get("source_kind") != "estimated_actuals"
         ):
             raise ValidationError(
                 "Only a completed, held-out evaluated calibration can be activated."

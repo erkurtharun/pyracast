@@ -3,6 +3,8 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from typing import cast
+from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -10,6 +12,7 @@ from django.db.models import Q
 
 from pyracast.connections.contracts import (
     Calculator,
+    HistoryAdapter,
     ProviderAdapter,
     ProviderData,
     ProviderFailure,
@@ -18,6 +21,7 @@ from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import QuotaExhausted, reserve_request
 from pyracast.forecasts.models import (
     CollectionJob,
+    CollectionSchedule,
     ForecastResult,
     ForecastSnapshot,
     RequestAttempt,
@@ -35,6 +39,7 @@ class Lease:
     binding: SiteBinding
     target_date: date
     token: uuid.UUID
+    endpoint: str = "forecasts"
 
 
 def binding_is_current(binding: SiteBinding) -> bool:
@@ -67,7 +72,11 @@ def claim(job_id: int, now: datetime) -> Lease | None:
         ):
             return None
         binding = SiteBinding.objects.select_related("provider_account").get(pk=job.binding_id)
-        if not binding_is_current(binding):
+        schedule = CollectionSchedule.objects.filter(region_id=binding.region_id).first()
+        if not binding_is_current(binding) or (
+            schedule is not None
+            and (not schedule.enabled or job.scheduled_slot < schedule.effective_from)
+        ):
             job.status = "stale"
             job.save(update_fields=("status",))
             return None
@@ -77,7 +86,7 @@ def claim(job_id: int, now: datetime) -> Lease | None:
         job.lease_expires_at = now + LEASE_DURATION
         job.attempts += 1
         job.save(update_fields=("status", "lease_token", "lease_expires_at", "attempts"))
-        return Lease(job.pk, binding, job.target_date, token)
+        return Lease(job.pk, binding, job.target_date, token, job.endpoint)
 
 
 def retry(lease: Lease, now: datetime, code: str, *, quota: bool = False) -> None:
@@ -116,6 +125,14 @@ def persist_snapshot(lease: Lease, data: ProviderData, now: datetime) -> Forecas
                 "collected_at": data.collected_at or now,
                 "issued_at": data.issued_at,
                 "source_kind": data.source_kind,
+                "coverage_start": min(
+                    (datetime.fromisoformat(cast(str, row["start"])) for row in data.intervals),
+                    default=None,
+                ),
+                "coverage_end": max(
+                    (datetime.fromisoformat(cast(str, row["end"])) for row in data.intervals),
+                    default=None,
+                ),
             },
         )
         return snapshot
@@ -131,8 +148,9 @@ def publish(
         if snapshot.job_id != job.pk or job.binding_id != lease.binding.pk:
             raise ValidationError("Snapshot, binding and lease must belong to the same job.")
         snapshot.refresh_from_db()
-        if snapshot.source_kind != "forecast":
-            raise ValidationError("Only forecast snapshots can be published.")
+        expected_kind = "estimated_actuals" if job.endpoint == "estimated_actuals" else "forecast"
+        if snapshot.source_kind != expected_kind:
+            raise ValidationError("Snapshot source must match the collection endpoint.")
         ProviderAccount.objects.select_for_update().get(pk=lease.binding.provider_account_id)
         now += timedelta(seconds=time.monotonic() - started)
         if (
@@ -145,14 +163,43 @@ def publish(
         if not binding_is_current(binding):
             job.status = "stale"
         else:
-            ForecastResult.objects.get_or_create(
-                snapshot=snapshot, defaults={"payload": payload, "published_at": now}
+            if job.endpoint == "forecasts":
+                ForecastResult.objects.get_or_create(
+                    snapshot=snapshot, defaults={"payload": payload, "published_at": now}
+                )
+            ForecastSnapshot.objects.filter(pk=snapshot.pk, available_at__isnull=True).update(
+                available_at=now
             )
             job.status = "succeeded"
         job.lease_token = None
         job.lease_expires_at = None
         job.save(update_fields=("status", "lease_token", "lease_expires_at"))
         return job.status == "succeeded"
+
+
+def fetch_history(lease: Lease, adapter: ProviderAdapter) -> ProviderData:
+    if not isinstance(adapter, HistoryAdapter):
+        raise ProviderFailure("history_not_supported")
+    data = adapter.fetch_history(lease.binding, lease.target_date, 7)
+    zone = ZoneInfo(lease.binding.timezone)
+    start = datetime.combine(
+        lease.target_date - timedelta(days=6), datetime.min.time(), zone
+    ).astimezone(UTC)
+    end = datetime.combine(
+        lease.target_date + timedelta(days=1), datetime.min.time(), zone
+    ).astimezone(UTC)
+    return ProviderData(
+        data.raw_payload,
+        [
+            row
+            for row in data.intervals
+            if datetime.fromisoformat(cast(str, row["start"])) < end
+            and datetime.fromisoformat(cast(str, row["end"])) > start
+        ],
+        data.issued_at,
+        data.collected_at,
+        data.source_kind,
+    )
 
 
 def collect(job_id: int, adapter: ProviderAdapter, calculator: Calculator, now: datetime) -> bool:
@@ -167,7 +214,9 @@ def collect(job_id: int, adapter: ProviderAdapter, calculator: Calculator, now: 
             attempt = reserve_request(
                 lease.binding,
                 now + timedelta(seconds=time.monotonic() - started),
-                purpose="forecast",
+                purpose="estimated_actuals"
+                if lease.endpoint == "estimated_actuals"
+                else "forecast",
                 job=job,
             )
         except QuotaExhausted:
@@ -179,7 +228,11 @@ def collect(job_id: int, adapter: ProviderAdapter, calculator: Calculator, now: 
             )
             return False
         try:
-            data = adapter.fetch(lease.binding, lease.target_date)
+            data = (
+                fetch_history(lease, adapter)
+                if lease.endpoint == "estimated_actuals"
+                else adapter.fetch(lease.binding, lease.target_date)
+            )
         except ProviderFailure:
             RequestAttempt.objects.filter(pk=attempt.pk).update(outcome="failed")
             logger.warning("Provider request failed correlation_id=%s", attempt.correlation_id)
@@ -192,9 +245,12 @@ def collect(job_id: int, adapter: ProviderAdapter, calculator: Calculator, now: 
         )
         if snapshot is None:
             return False
-    if snapshot.source_kind != "forecast":
+    expected_kind = "estimated_actuals" if lease.endpoint == "estimated_actuals" else "forecast"
+    if snapshot.source_kind != expected_kind:
         retry(lease, now + timedelta(seconds=time.monotonic() - started), "invalid_source_kind")
         return False
+    if lease.endpoint == "estimated_actuals":
+        return publish(lease, snapshot, {}, now + timedelta(seconds=time.monotonic() - started))
     data = ProviderData(
         snapshot.raw_payload,
         snapshot.normalized_intervals,

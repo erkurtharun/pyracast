@@ -14,6 +14,8 @@ import {
 import { ForecastPanel } from "./forecast-panel";
 import { PlantWorkspace } from "./plant-workspace";
 import { Reminders } from "./reminders";
+import { CollectionSchedule } from "./collection-schedule";
+import { DataSourceControl, localDay, type DataSource } from "./data-source";
 export function RegionWorkspace({
     region,
     tenant,
@@ -30,7 +32,9 @@ export function RegionWorkspace({
             new Date().toLocaleDateString("en-CA", {
                 timeZone: region.timezone,
             }),
-        );
+        ),
+        [source, setSource] = useState<DataSource>("auto");
+    const yesterday = localDay(region.timezone, -1);
     const base = `/api/tenants/${tenant}/regions/${region.id}/`;
     return (
         <>
@@ -52,6 +56,7 @@ export function RegionWorkspace({
                 {[
                     ["forecast", "Regional forecast"],
                     ["plants", "Solar plants"],
+                    ["collection", "Data collection"],
                     ["reminders", "Email reminders"],
                 ].map(([key, label]) => (
                     <button
@@ -68,7 +73,7 @@ export function RegionWorkspace({
                 <>
                     <div className="section-heading">
                         <div>
-                            <h2>See the day ahead</h2>
+                            <h2>Explore daily irradiance</h2>
                             <p>
                                 Daily irradiance at your region’s surface. Dates
                                 follow {region.timezone}.
@@ -79,19 +84,43 @@ export function RegionWorkspace({
                             <input
                                 type="date"
                                 value={date}
+                                max={
+                                    source === "estimated_actuals"
+                                        ? yesterday
+                                        : undefined
+                                }
                                 onChange={(event) =>
                                     setDate(event.target.value)
                                 }
                             />
                         </label>
+                        <DataSourceControl
+                            value={source}
+                            onChange={(next) => {
+                                setSource(next);
+                                if (
+                                    next === "estimated_actuals" &&
+                                    date > yesterday
+                                )
+                                    setDate(yesterday);
+                            }}
+                        />
                     </div>
-                    <RegionalForecast
-                        key={date}
-                        url={`${base}forecast/?date=${date}`}
-                    />
+                    {source === "estimated_actuals" && date > yesterday ? (
+                        <Notice>
+                            Choose a completed local day for estimated actuals.
+                        </Notice>
+                    ) : (
+                        <RegionalForecast
+                            key={`${date}-${source}`}
+                            url={`${base}forecast/?date=${date}&data_source=${source}`}
+                        />
+                    )}
                 </>
             ) : tab === "plants" ? (
                 <Plants base={base} region={region} token={token} />
+            ) : tab === "collection" ? (
+                <CollectionSchedule base={base} region={region} token={token} />
             ) : (
                 <Reminders base={base} region={region} token={token} />
             )}

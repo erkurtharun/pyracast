@@ -110,12 +110,21 @@ intervals are not estimated in this version; do not expose invented probability
 bands. No fit activates itself. Compare later unseen days and revisit performance
 across seasons before making accuracy or degradation claims.
 
-The dataset uses the first forecast acquired during the previous local day, never
-estimated actuals or a refresh collected later than the forecast's `as_of`. Store
-the source-selection policy, actual collection times, observation cutoff, configuration
-and dataset digest. Activation applies only after its recorded time. Historical
-forecasts retain the factor actually available then. Production history alone
-cannot reconstruct forecasts that were never archived.
+The dataset pairs metered production with matching Solcast estimated actuals,
+never archived forecasts. Select the latest matching acquisition published by the
+request cutoff and retain its snapshot, source kind, collection/publication times,
+configuration and dataset digest. Only completed local days enter calibration;
+future production intervals are rejected at import. Importing an old measurement
+explicitly associates it with the declared configuration, without backdating that
+configuration. Do not mix periods with different capacities or meter definitions.
+
+The initial seven-day provider window can contain fewer than seven complete local
+days. Wait for enough matched days rather than relaxing the minimum. The new
+selection policy is `latest-available-estimated-actuals-v1`; old forecast-based
+candidates cannot be newly activated as this calibration. Existing activation
+history remains readable. Activation applies only after its recorded time, so
+archived forecasts retain the factor available then. Holdout improvement against
+estimated actuals does not establish improvement in future forecast accuracy.
 
 ## Historical irradiance and measured performance
 
@@ -135,10 +144,10 @@ or net export and flag outages, curtailment and meter changes.
 Historical irradiance without plant production cannot identify plant efficiency.
 Production without independent irradiance cannot separate forecast bias, weather,
 geometry, soiling, availability and degradation. The implemented multiplier corrects
-combined forecast-transfer bias; it is **not** an estimate of panel degradation or
-a calibration of true irradiance. Historical-irradiance import and a physical
-performance model require a verified dataset contract and are separate from this
-forecast-transfer calibration. Never use later estimated actuals as future forecast
+combined reference-model transfer bias; it is **not** an estimate of panel degradation
+or a calibration of true irradiance. Rooftop estimated-actual power is still a model
+output. Historical GHI/weather file import and a physical performance model require
+a verified dataset contract and are separate from this proxy calibration. Never use later estimated actuals as future forecast
 features or as matched Solcast forecast GHI for reconstruction-equivalence claims.
 
 ## Primary references

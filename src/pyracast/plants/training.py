@@ -4,6 +4,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import cast
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
@@ -12,13 +13,9 @@ from django.db.models import Q
 from django.utils import timezone
 
 from pyracast.connections.models import ProviderAccount
+from pyracast.forecasts.history import HISTORY_SELECTION_POLICY, select_actual_snapshot
 from pyracast.irradiance import local_day_bounds
-from pyracast.plants.forecasting import (
-    SELECTION_POLICY,
-    power_intervals,
-    power_limit,
-    select_snapshot,
-)
+from pyracast.plants.forecasting import power_intervals, power_limit
 from pyracast.plants.models import (
     CalibrationRun,
     Plant,
@@ -119,17 +116,15 @@ def _dataset(
         day = observation.starts_at.astimezone(zone).date()
         key = day.isoformat()
         if key not in sources:
-            day_start, _ = local_day_bounds(day, str(zone))
-            snapshot = select_snapshot(configuration, day, min(day_start, run.cutoff_at))
+            snapshot = select_actual_snapshot(configuration.binding, day, run.cutoff_at)
             sources[key] = (
                 None
                 if snapshot is None
                 else {
                     "snapshot_id": snapshot.pk,
+                    "source_kind": snapshot.source_kind,
                     "collected_at": snapshot.collected_at.isoformat(),
-                    "scheduled_slot": snapshot.job.scheduled_slot.isoformat(),
-                    "late": snapshot.collected_at > snapshot.job.scheduled_slot,
-                    "lead_hours": (day_start - snapshot.collected_at).total_seconds() / 3600,
+                    "available_at": cast(datetime, snapshot.available_at).isoformat(),
                     "issued_at": snapshot.issued_at.isoformat() if snapshot.issued_at else None,
                 }
             )
@@ -185,7 +180,8 @@ def _dataset(
         "cutoff_at": run.cutoff_at.isoformat(),
         "window_start": run.window_start.isoformat(),
         "window_end": run.window_end.isoformat(),
-        "selection_policy": SELECTION_POLICY,
+        "selection_policy": HISTORY_SELECTION_POLICY,
+        "source_kind": "estimated_actuals",
         "sources": sources,
         "observations": entries,
     }
