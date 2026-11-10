@@ -13,6 +13,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from pyracast import trash
 from pyracast.accounts.models import Tenant
 from pyracast.accounts.operations import require_member
 from pyracast.api.serializers import (
@@ -69,7 +70,7 @@ class RegionsView(GenericAPIView[Region]):
     def get_queryset(self) -> QuerySet[Region]:
         tenant_id = self.kwargs["tenant_id"]
         require_member(cast(User, self.request.user), tenant_id)
-        return Region.objects.filter(tenant_id=tenant_id).order_by("id")
+        return Region.objects.filter(tenant_id=tenant_id, deleted_at__isnull=True).order_by("id")
 
     @extend_schema(responses=RegionOutput(many=True))
     def get(self, request: Request, tenant_id: int) -> Response:
@@ -99,7 +100,12 @@ class RegionView(RegionsView):
         )
         return Response(RegionOutput(region).data)
 
-    http_method_names = ["get", "put", "head", "options"]  # noqa: RUF012 -- Django class setting.
+    @extend_schema(responses={204: None})
+    def delete(self, request: Request, tenant_id: int, region_id: int) -> Response:
+        trash.trash_region(cast(User, request.user), tenant_id, region_id)
+        return Response(status=204)
+
+    http_method_names = ("get", "put", "delete", "head", "options")
 
 
 class AccountView(APIView):

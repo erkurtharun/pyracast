@@ -4,6 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 
 from pyracast.admin import site
 from pyracast.api.session import SessionLoginView, SessionLogoutView, SessionView
+from pyracast.api.trash import RestoreRegionView, TrashedPlantsView, TrashedRegionsView
 from pyracast.api.views import (
     AccountView,
     ApproveView,
@@ -27,8 +28,14 @@ urlpatterns = [
     path("api/session/logout/", SessionLogoutView.as_view()),
     path("api/", include("pyracast.notifications.urls")),
     path("api/tenants/", TenantsView.as_view()),
+    path("api/tenants/<int:tenant_id>/trash/regions/", TrashedRegionsView.as_view()),
+    path("api/tenants/<int:tenant_id>/trash/plants/", TrashedPlantsView.as_view()),
     path("api/tenants/<int:tenant_id>/regions/", RegionsView.as_view()),
     path("api/tenants/<int:tenant_id>/regions/<int:region_id>/", RegionView.as_view()),
+    path(
+        "api/tenants/<int:tenant_id>/regions/<int:region_id>/restore/",
+        RestoreRegionView.as_view(),
+    ),
     path("api/tenants/<int:tenant_id>/regions/<int:region_id>/forecast/", ForecastView.as_view()),
     path(
         "api/tenants/<int:tenant_id>/regions/<int:region_id>/collection-schedule/",

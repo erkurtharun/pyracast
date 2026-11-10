@@ -39,6 +39,8 @@ class ObservationInput:
 def configuration_is_current(configuration: PlantConfiguration) -> bool:
     return Plant.objects.filter(
         pk=configuration.plant_id,
+        deleted_at__isnull=True,
+        region__deleted_at__isnull=True,
         current_configuration_id=configuration.pk,
         region_id=configuration.binding.region_id,
     ).exists() and binding_is_current(configuration.binding)
@@ -136,7 +138,9 @@ def create_plant(
         name, dc_capacity_mw, inverter_capacity_mw, export_limit_mw, measurement_basis
     )
     with transaction.atomic():
-        region = Region.objects.select_for_update().get(pk=region_id, tenant_id=tenant_id)
+        region = Region.objects.select_for_update().get(
+            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
+        )
         binding = _binding(region)
         plant = Plant.objects.create(region=region, name=name.strip())
         _save_configuration(
@@ -169,8 +173,12 @@ def revise_plant(
         name, dc_capacity_mw, inverter_capacity_mw, export_limit_mw, measurement_basis
     )
     with transaction.atomic():
-        region = Region.objects.select_for_update().get(pk=region_id, tenant_id=tenant_id)
-        plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
+        region = Region.objects.select_for_update().get(
+            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
+        )
+        plant = Plant.objects.select_for_update().get(
+            pk=plant_id, region=region, deleted_at__isnull=True
+        )
         _save_configuration(
             actor,
             plant,
@@ -225,8 +233,12 @@ def import_observations(
     if unit not in {"MWh", "kWh"} or not 1 <= len(observations) <= 2000:
         raise ValidationError("Use MWh or kWh and a batch of 1 to 2000 observations.")
     with transaction.atomic():
-        region = Region.objects.select_for_update().get(pk=region_id, tenant_id=tenant_id)
-        plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
+        region = Region.objects.select_for_update().get(
+            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
+        )
+        plant = Plant.objects.select_for_update().get(
+            pk=plant_id, region=region, deleted_at__isnull=True
+        )
         configuration = PlantConfiguration.objects.select_related("binding").get(
             pk=configuration_id, plant=plant
         )
@@ -295,8 +307,12 @@ def request_calibration(
 ) -> CalibrationRun:
     require_member(actor, tenant_id)
     with transaction.atomic():
-        region = Region.objects.select_for_update().get(pk=region_id, tenant_id=tenant_id)
-        plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
+        region = Region.objects.select_for_update().get(
+            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
+        )
+        plant = Plant.objects.select_for_update().get(
+            pk=plant_id, region=region, deleted_at__isnull=True
+        )
         configuration = _configuration(plant)
         now = timezone.now()
         if configuration_id != configuration.pk:
@@ -366,8 +382,12 @@ def activate_calibration(
 ) -> CalibrationActivation:
     require_member(actor, tenant_id)
     with transaction.atomic():
-        region = Region.objects.select_for_update().get(pk=region_id, tenant_id=tenant_id)
-        plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
+        region = Region.objects.select_for_update().get(
+            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
+        )
+        plant = Plant.objects.select_for_update().get(
+            pk=plant_id, region=region, deleted_at__isnull=True
+        )
         configuration = _configuration(plant)
         run = CalibrationRun.objects.get(
             pk=calibration_id, plant=plant, configuration=configuration
@@ -400,6 +420,10 @@ def reset_calibration(
 ) -> CalibrationActivation:
     require_member(actor, tenant_id)
     with transaction.atomic():
-        region = Region.objects.select_for_update().get(pk=region_id, tenant_id=tenant_id)
-        plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
+        region = Region.objects.select_for_update().get(
+            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
+        )
+        plant = Plant.objects.select_for_update().get(
+            pk=plant_id, region=region, deleted_at__isnull=True
+        )
         return _activate(actor, plant, _configuration(plant), None)

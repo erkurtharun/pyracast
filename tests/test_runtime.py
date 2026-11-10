@@ -63,7 +63,8 @@ def test_rabbitmq_broker_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     from pyracast.forecasts.management.commands import dispatch as command
 
-    broker, actor, send = MagicMock(), MagicMock(), MagicMock()
+    broker, actor, send, purge = MagicMock(), MagicMock(), MagicMock(), MagicMock()
+    monkeypatch.setattr(command, "purge_expired", purge)
     monkeypatch.setattr(command, "make_broker", lambda: broker)
     monkeypatch.setattr(command, "make_actor", lambda _: actor)
     monkeypatch.setattr(command, "dispatch", send)
@@ -74,6 +75,7 @@ def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(command, "make_notification_actor", lambda _: notification_actor)
     monkeypatch.setattr(command, "dispatch_notifications", send_notifications)
     call_command("dispatch")
+    purge.assert_called_once_with()
     send.assert_called_once_with(actor)
     send_calibrations.assert_called_once_with(calibration_actor)
     send_notifications.assert_called_once_with(notification_actor)
@@ -85,6 +87,7 @@ def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     call_command("dispatch", loop=True, poll_seconds=1)
     assert send.call_count == 2
+    assert purge.call_count == 2
     assert send_calibrations.call_count == 2
     assert send_notifications.call_count == 2
     assert broker.close.call_count == 2

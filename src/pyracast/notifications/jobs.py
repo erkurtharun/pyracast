@@ -50,7 +50,9 @@ def process_notification(
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
     with transaction.atomic():
-        delivery = NotificationDelivery.objects.select_for_update().get(pk=delivery_id)
+        delivery = NotificationDelivery.objects.select_for_update().filter(pk=delivery_id).first()
+        if delivery is None:
+            return False
         if delivery.status == "sending":
             if delivery.lease_expires_at is None or delivery.lease_expires_at <= now:
                 delivery.status, delivery.last_error = "uncertain", "interrupted_send"
@@ -107,7 +109,9 @@ def process_notification(
 
 def pending_notification_ids(now: datetime, limit: int = 100) -> list[int]:
     return list(
-        NotificationDelivery.objects.filter(available_at__lte=now)
+        NotificationDelivery.objects.filter(
+            available_at__lte=now, preference__region__deleted_at__isnull=True
+        )
         .filter(
             Q(status__in=("pending", "retry"))
             | Q(status="sending", lease_expires_at__lte=now)

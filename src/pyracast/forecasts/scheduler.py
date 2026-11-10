@@ -16,13 +16,18 @@ def enqueue_due(now: datetime, cutoff_hour: int | None = None) -> list[int]:
         raise ValidationError("An aware timestamp and valid cutoff hour are required.")
     cutoff: time = settings.PYRACAST_CUTOFF_LOCAL if cutoff_hour is None else time(cutoff_hour)
     jobs: list[int] = []
-    for region_id in Region.objects.filter(status="approved").values_list("pk", flat=True):
+    for region_id in Region.objects.filter(status="approved", deleted_at__isnull=True).values_list(
+        "pk", flat=True
+    ):
         with transaction.atomic():
             region = (
                 Region.objects.select_for_update(of=("self",))
                 .select_related("approved_binding__provider_account")
-                .get(pk=region_id)
+                .filter(pk=region_id)
+                .first()
             )
+            if region is None:
+                continue
             binding = region.approved_binding
             if binding is None or binding.validated_at is None or not binding_is_current(binding):
                 continue

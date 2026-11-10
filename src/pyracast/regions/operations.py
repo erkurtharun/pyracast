@@ -60,7 +60,9 @@ def update_region(
     if not name.strip() or len(name) > 200:
         raise ValidationError("A region name of at most 200 characters is required.")
     with transaction.atomic():
-        region = Region.objects.select_for_update().get(pk=region_id, tenant_id=tenant_id)
+        region = Region.objects.select_for_update().get(
+            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
+        )
         region.name = name.strip()
         region.latitude = latitude
         region.longitude = longitude
@@ -105,7 +107,7 @@ def configure_binding(
     if not math.isfinite(losses_percent) or not 0 <= losses_percent < 100:
         raise ValidationError("Losses must be between 0 and 100 percent.")
     with transaction.atomic():
-        region = Region.objects.select_for_update().get(pk=region_id)
+        region = Region.objects.select_for_update().get(pk=region_id, deleted_at__isnull=True)
         account = ProviderAccount.objects.get(pk=provider_account_id, enabled=True)
         reference = settings_verification_reference.strip()
         if len(reference) > 500 or (
@@ -146,7 +148,7 @@ def approve_region(actor: User, region_id: int, binding_id: int, now: datetime) 
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
     with transaction.atomic():
-        region = Region.objects.select_for_update().get(pk=region_id)
+        region = Region.objects.select_for_update().get(pk=region_id, deleted_at__isnull=True)
         binding = SiteBinding.objects.select_related("provider_account").get(
             pk=binding_id, region=region, region_revision=region.revision
         )
@@ -189,7 +191,7 @@ def transition_region(actor: User, region_id: int, status: str) -> Region:
     if status not in {"rejected", "suspended"}:
         raise ValidationError("Use approval for approval transitions.")
     with transaction.atomic():
-        region = Region.objects.select_for_update().get(pk=region_id)
+        region = Region.objects.select_for_update().get(pk=region_id, deleted_at__isnull=True)
         region.status = status
         region.save(update_fields=("status",))
         AuditEvent.objects.create(

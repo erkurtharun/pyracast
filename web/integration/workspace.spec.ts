@@ -4,6 +4,7 @@ import AxeBuilder from "@axe-core/playwright";
 test("a customer manages an approved region through the real API", async ({
     page,
 }, testInfo) => {
+    test.setTimeout(60_000);
     await page.goto("/");
     await expect(page.getByLabel("Username")).toBeVisible();
     await page.screenshot({
@@ -216,4 +217,62 @@ test("a customer manages an approved region through the real API", async ({
             (item) => item.impact === "critical" || item.impact === "serious",
         ),
     ).toEqual([]);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page
+        .getByRole("button", { name: "Solar plants", exact: true })
+        .click();
+    await page.getByRole("button", { name: /Browser plant/ }).click();
+    await page
+        .getByRole("button", { name: "Delete plant", exact: true })
+        .click();
+    await page
+        .getByRole("button", { name: "Move plant to recycle bin" })
+        .click();
+    await expect(
+        page.getByRole("button", { name: /Browser plant/ }),
+    ).toHaveCount(0);
+    await page
+        .getByRole("button", { name: "Recycle bin", exact: true })
+        .click();
+    await page.getByRole("button", { name: "Restore Browser plant" }).click();
+    await expect(
+        page.getByText("Browser plant restored. Find it in Overview."),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Overview", exact: true }).click();
+    await page.getByRole("button", { name: /Site/ }).click();
+    await page
+        .getByRole("button", { name: "Delete region", exact: true })
+        .click();
+    await page
+        .getByRole("button", { name: "Move region to recycle bin" })
+        .click();
+    await expect(page.getByRole("button", { name: /Site/ })).toHaveCount(0);
+    await page
+        .getByRole("button", { name: "Recycle bin", exact: true })
+        .click();
+    await expect(
+        page.getByRole("button", { name: "Restore Site" }),
+    ).toBeVisible();
+    await page.screenshot({
+        path: testInfo.outputPath("recycle-bin-desktop.png"),
+        fullPage: true,
+    });
+    await page.getByRole("button", { name: "Restore Site" }).click();
+    await expect(
+        page.getByText("Site restored. Find it in Overview."),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Overview", exact: true }).click();
+    await page.getByRole("button", { name: /Site/ }).click();
+    await page
+        .getByRole("button", { name: "Solar plants", exact: true })
+        .click();
+    await page.getByRole("button", { name: /Browser plant/ }).click();
+    await page
+        .getByRole("button", { name: "Calibration", exact: true })
+        .click();
+    await expect(
+        page
+            .getByRole("table", { name: "Meter entries" })
+            .getByText("1.25 MWh", { exact: true }),
+    ).toBeVisible();
 });

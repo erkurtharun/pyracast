@@ -17,6 +17,7 @@ class Region(models.Model):
         "connections.SiteBinding", on_delete=models.PROTECT, null=True, related_name="approvals"
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    deleted_at = models.DateTimeField(null=True, db_index=True)
 
     class Meta:
         constraints = (

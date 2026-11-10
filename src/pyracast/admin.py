@@ -65,7 +65,7 @@ class RegionAdmin(ReadOnlyAdmin):
 
     @admin.action(description="Approve validated reference binding", permissions=["view"])
     def approve(self, request: HttpRequest, queryset: QuerySet[Region]) -> None:
-        for region in queryset:
+        for region in queryset.filter(deleted_at__isnull=True):
             try:
                 binding = SiteBinding.objects.filter(
                     region=region, region_revision=region.revision, validated_at__isnull=False
@@ -78,12 +78,12 @@ class RegionAdmin(ReadOnlyAdmin):
 
     @admin.action(description="Reject region", permissions=["view"])
     def reject(self, request: HttpRequest, queryset: QuerySet[Region]) -> None:
-        for region in queryset:
+        for region in queryset.filter(deleted_at__isnull=True):
             transition_region(cast(User, request.user), region.pk, "rejected")
 
     @admin.action(description="Suspend region", permissions=["view"])
     def suspend(self, request: HttpRequest, queryset: QuerySet[Region]) -> None:
-        for region in queryset:
+        for region in queryset.filter(deleted_at__isnull=True):
             transition_region(cast(User, request.user), region.pk, "suspended")
 
 

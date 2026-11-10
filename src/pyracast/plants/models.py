@@ -19,6 +19,7 @@ class Plant(models.Model):
         "PlantConfiguration", null=True, on_delete=models.PROTECT, related_name="+"
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    deleted_at = models.DateTimeField(null=True, db_index=True)
 
 
 class PlantConfiguration(models.Model):

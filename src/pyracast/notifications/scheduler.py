@@ -9,6 +9,7 @@ from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.notifications.models import NotificationDelivery, ReminderPreference
 from pyracast.notifications.schedule import local_slot
+from pyracast.regions.models import Region
 
 MAX_LATENESS = timedelta(hours=2)
 
@@ -17,9 +18,9 @@ def enqueue_due(now: datetime) -> list[int]:
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
     ids: list[int] = []
-    for preference in ReminderPreference.objects.filter(enabled=True).select_related(
-        "user", "region__approved_binding__provider_account"
-    ):
+    for preference in ReminderPreference.objects.filter(
+        enabled=True, region__deleted_at__isnull=True
+    ).select_related("user", "region__approved_binding__provider_account"):
         region, binding = preference.region, preference.region.approved_binding
         if (
             not preference.user.is_active
@@ -38,6 +39,15 @@ def enqueue_due(now: datetime) -> list[int]:
                 if slot is None or slot > now or slot < preference.effective_from:
                     continue
                 with transaction.atomic():
+                    locked_region = Region.objects.select_for_update().filter(pk=region.pk).first()
+                    if (
+                        locked_region is None
+                        or not binding_is_current(binding)
+                        or not ReminderPreference.objects.filter(
+                            pk=preference.pk, enabled=True, effective_from__lte=slot
+                        ).exists()
+                    ):
+                        continue
                     snapshot = (
                         ForecastSnapshot.objects.filter(
                             job__binding=binding,

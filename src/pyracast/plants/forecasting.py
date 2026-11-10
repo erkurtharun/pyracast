@@ -231,8 +231,8 @@ def plant_forecast(
     as_of: datetime | None = None,
 ) -> dict[str, object]:
     require_member(actor, tenant_id)
-    region = Region.objects.get(pk=region_id, tenant_id=tenant_id)
-    plant = Plant.objects.get(pk=plant_id, region=region)
+    region = Region.objects.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
+    plant = Plant.objects.get(pk=plant_id, region=region, deleted_at__isnull=True)
     now = timezone.now()
     today = now.astimezone(ZoneInfo(region.timezone)).date()
     if isinstance(resolution_minutes, bool) or resolution_minutes not in (30, 60):

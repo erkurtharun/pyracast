@@ -13,6 +13,7 @@ import {
 } from "./ui";
 import { ForecastPanel } from "./forecast-panel";
 import { PlantWorkspace } from "./plant-workspace";
+import { MoveToRecycleBin } from "./recycle-bin";
 import { Reminders } from "./reminders";
 import { CollectionSchedule } from "./collection-schedule";
 import { DataSourceControl, localDay, type DataSource } from "./data-source";
@@ -21,11 +22,13 @@ export function RegionWorkspace({
     tenant,
     token,
     onBack,
+    onDeleted,
 }: {
     region: Region;
     tenant: number;
     token: string;
     onBack: () => void;
+    onDeleted: () => void;
 }) {
     const [tab, setTab] = useState("forecast"),
         [date, setDate] = useState(() =>
@@ -50,7 +53,16 @@ export function RegionWorkspace({
                         <span className="separator">·</span> {region.timezone}
                     </p>
                 </div>
-                <Tag>{region.status}</Tag>
+                <div className="button-group">
+                    <Tag>{region.status}</Tag>
+                    <MoveToRecycleBin
+                        kind="region"
+                        name={region.name}
+                        url={base}
+                        token={token}
+                        onDeleted={onDeleted}
+                    />
+                </div>
             </div>
             <nav className="tabs" aria-label="Region sections">
                 {[
@@ -161,8 +173,11 @@ function Plants({
 }) {
     const [version, setVersion] = useState(0),
         [creating, setCreating] = useState(false),
-        [selected, setSelected] = useState<Plant>();
+        [selected, setSelected] = useState<Plant>(),
+        [deleted, setDeleted] = useState<number[]>([]);
     const plants = useCollection<Plant>(`${base}plants/`, version);
+    const rows =
+        plants.data?.results.filter((row) => !deleted.includes(row.id)) ?? [];
     if (selected)
         return (
             <PlantWorkspace
@@ -172,6 +187,11 @@ function Plants({
                 timezone={region.timezone}
                 token={token}
                 onBack={() => setSelected(undefined)}
+                onDeleted={() => {
+                    setDeleted((current) => [...current, selected.id]);
+                    setVersion((current) => current + 1);
+                    setSelected(undefined);
+                }}
             />
         );
     return (
@@ -272,9 +292,9 @@ function Plants({
                 <p role="status">Loading plants…</p>
             ) : plants.error ? (
                 <Notice error>{plants.error}</Notice>
-            ) : plants.data?.results.length ? (
+            ) : rows.length ? (
                 <div className="region-grid">
-                    {plants.data.results.map((plant) => (
+                    {rows.map((plant) => (
                         <button
                             className="region-card"
                             key={plant.id}

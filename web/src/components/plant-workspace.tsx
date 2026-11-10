@@ -19,6 +19,7 @@ import {
     useCollection,
 } from "./ui";
 import { ProductionHistory } from "./production-history";
+import { MoveToRecycleBin } from "./recycle-bin";
 import { ForecastPanel } from "./forecast-panel";
 import { DataSourceControl, localDay, type DataSource } from "./data-source";
 export function PlantWorkspace({
@@ -27,12 +28,14 @@ export function PlantWorkspace({
     timezone,
     token,
     onBack,
+    onDeleted,
 }: {
     plant: Plant;
     base: string;
     timezone: string;
     token: string;
     onBack: () => void;
+    onDeleted: () => void;
 }) {
     const [tab, setTab] = useState("forecast"),
         [date, setDate] = useState(() => {
@@ -61,7 +64,16 @@ export function PlantWorkspace({
                         {configuration?.measurement_basis.replaceAll("_", " ")}
                     </p>
                 </div>
-                <Tag>Solar plant</Tag>
+                <div className="button-group">
+                    <Tag>Solar plant</Tag>
+                    <MoveToRecycleBin
+                        kind="plant"
+                        name={plant.name}
+                        url={base}
+                        token={token}
+                        onDeleted={onDeleted}
+                    />
+                </div>
             </div>
             <div className="stats">
                 <Stat

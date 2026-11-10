@@ -46,6 +46,7 @@ def binding_is_current(binding: SiteBinding) -> bool:
     return (
         Region.objects.filter(
             pk=binding.region_id,
+            deleted_at__isnull=True,
             status="approved",
             revision=binding.region_revision,
             approved_binding_id=binding.pk,
@@ -61,7 +62,9 @@ def claim(job_id: int, now: datetime) -> Lease | None:
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
     with transaction.atomic():
-        job = CollectionJob.objects.select_for_update().get(pk=job_id)
+        job = CollectionJob.objects.select_for_update().filter(pk=job_id).first()
+        if job is None:
+            return None
         now += timedelta(seconds=time.monotonic() - started)
         if job.status in {"succeeded", "stale", "failed"} or job.available_at > now:
             return None
@@ -268,7 +271,9 @@ def collect(job_id: int, adapter: ProviderAdapter, calculator: Calculator, now: 
 
 def pending_job_ids(now: datetime, limit: int = 100) -> list[int]:
     return list(
-        CollectionJob.objects.filter(available_at__lte=now)
+        CollectionJob.objects.filter(
+            available_at__lte=now, binding__region__deleted_at__isnull=True
+        )
         .filter(Q(status__in=("pending", "retry")) | Q(status="running", lease_expires_at__lte=now))
         .order_by("available_at", "pk")
         .values_list("pk", flat=True)[:limit]

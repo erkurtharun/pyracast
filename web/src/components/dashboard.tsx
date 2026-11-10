@@ -18,6 +18,7 @@ import {
     useCollection,
 } from "./ui";
 import { RegionWorkspace } from "./region-workspace";
+import { RecycleBin } from "./recycle-bin";
 
 export function Dashboard() {
     const [version, setVersion] = useState(0),
@@ -144,7 +145,7 @@ function Workspace({
 }) {
     const tenants = useCollection<Tenant>("/api/tenants/");
     const [selected, setSelected] = useState<number>(),
-        [view, setView] = useState<"regions" | "profile">("regions"),
+        [view, setView] = useState<"regions" | "profile" | "trash">("regions"),
         [logoutError, setLogoutError] = useState("");
     const tenant =
         tenants.data?.results.find((row) => row.id === selected) ??
@@ -179,6 +180,12 @@ function Workspace({
                         onClick={() => setView("regions")}
                     >
                         <span aria-hidden="true">▦</span> Overview
+                    </button>
+                    <button
+                        className={view === "trash" ? "active" : ""}
+                        onClick={() => setView("trash")}
+                    >
+                        Recycle bin
                     </button>
                     <button
                         className={view === "profile" ? "active" : ""}
@@ -232,7 +239,9 @@ function Workspace({
                         <strong>
                             {view === "regions"
                                 ? "Overview"
-                                : "Account settings"}
+                                : view === "trash"
+                                  ? "Recycle bin"
+                                  : "Account settings"}
                         </strong>
                     </span>
                     <span className="topbar-label">
@@ -286,6 +295,12 @@ function Workspace({
                                 </ActionForm>
                             </section>
                         </>
+                    ) : tenant && view === "trash" ? (
+                        <RecycleBin
+                            key={tenant.id}
+                            tenant={tenant.id}
+                            token={session.csrf_token}
+                        />
                     ) : tenant ? (
                         <Regions
                             key={tenant.id}
@@ -312,6 +327,7 @@ function Workspace({
 function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
     const [version, setVersion] = useState(0),
         [selected, setSelected] = useState<Region>(),
+        [deleted, setDeleted] = useState<number[]>([]),
         [creating, setCreating] = useState(false),
         [more, setMore] = useState<Region[]>([]),
         [pageError, setPageError] = useState(""),
@@ -328,9 +344,18 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
                 tenant={tenant.id}
                 token={token}
                 onBack={() => setSelected(undefined)}
+                onDeleted={() => {
+                    setDeleted((current) => [...current, selected.id]);
+                    setVersion((current) => current + 1);
+                    setMore([]);
+                    setNext(undefined);
+                    setSelected(undefined);
+                }}
             />
         );
-    const rows = [...(regions.data?.results ?? []), ...more];
+    const rows = [...(regions.data?.results ?? []), ...more].filter(
+        (row) => !deleted.includes(row.id),
+    );
     return (
         <>
             <div className="page-heading">

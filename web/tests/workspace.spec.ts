@@ -1043,3 +1043,306 @@ for (const source of ["forecast", "estimated_actuals"] as const) {
         ).toHaveCount(0);
     });
 }
+
+for (const kind of ["region", "plant"] as const) {
+    test(`recycle bin confirms deletion and restores a ${kind} with associated data`, async ({
+        page,
+    }) => {
+        await mockApi(page);
+        let deleted = false;
+        const entity = kind === "region" ? region : plant;
+        const entityPath = `/api/tenants/1/regions/11/${kind === "plant" ? "plants/21/" : ""}`;
+        await page.route("**/api/tenants/1/**", async (route) => {
+            const path = new URL(route.request().url()).pathname;
+            if (path === entityPath && route.request().method() === "DELETE") {
+                expect(route.request().headers()["x-csrftoken"]).toBe(
+                    "signed-token",
+                );
+                deleted = true;
+                await route.fulfill({ status: 204 });
+            } else if (path === `${entityPath}restore/`) {
+                expect(route.request().method()).toBe("POST");
+                expect(route.request().headers()["x-csrftoken"]).toBe(
+                    "signed-token",
+                );
+                expect(route.request().postDataJSON()).toEqual({});
+                deleted = false;
+                await route.fulfill({ json: entity });
+            } else if (
+                path === "/api/tenants/1/regions/" &&
+                route.request().method() === "GET"
+            ) {
+                await route.fulfill({
+                    json: paged(deleted && kind === "region" ? [] : [region]),
+                });
+            } else if (
+                path === "/api/tenants/1/regions/11/plants/" &&
+                route.request().method() === "GET"
+            ) {
+                await route.fulfill({
+                    json: paged(deleted && kind === "plant" ? [] : [plant]),
+                });
+            } else if (path.includes("/trash/")) {
+                const ownList = path.endsWith(`/trash/${kind}s/`);
+                await route.fulfill({
+                    json: paged(
+                        deleted && ownList
+                            ? [
+                                  {
+                                      id: entity.id,
+                                      name: entity.name,
+                                      deleted_at: "2026-11-10T12:00:00Z",
+                                      purge_after: "2026-12-10T12:00:00Z",
+                                      can_restore: true,
+                                      ...(kind === "plant"
+                                          ? {
+                                                region_id: 11,
+                                                region_name: region.name,
+                                                parent_deleted: false,
+                                            }
+                                          : {}),
+                                  },
+                              ]
+                            : [],
+                    ),
+                });
+            } else await route.fallback();
+        });
+        await page.goto("/");
+        await page.getByRole("button", { name: /Antalya solar park/ }).click();
+        if (kind === "plant") {
+            await page
+                .getByRole("button", { name: "Solar plants", exact: true })
+                .click();
+            await page.getByRole("button", { name: /East array/ }).click();
+        }
+        await page
+            .getByRole("button", { name: `Delete ${kind}`, exact: true })
+            .click();
+        const confirmation = page.getByRole("region", {
+            name: `Delete ${kind} confirmation`,
+        });
+        await expect(confirmation).toContainText("30 days");
+        await expect(confirmation).toContainText(
+            "permanently deleted automatically",
+        );
+        await confirmation
+            .getByRole("button", { name: "Cancel", exact: true })
+            .click();
+        expect(deleted).toBe(false);
+        await page
+            .getByRole("button", { name: `Delete ${kind}`, exact: true })
+            .click();
+        await page
+            .getByRole("button", {
+                name: `Move ${kind} to recycle bin`,
+                exact: true,
+            })
+            .click();
+        await expect(
+            page.getByRole("button", { name: new RegExp(entity.name) }),
+        ).toHaveCount(0);
+        await page
+            .getByRole("button", { name: "Recycle bin", exact: true })
+            .click();
+        await expect(
+            page.getByRole("heading", { name: "Recycle bin", exact: true }),
+        ).toBeVisible();
+        const row = page.getByRole("row").filter({
+            has: page.getByRole("rowheader", {
+                name: entity.name,
+                exact: true,
+            }),
+        });
+        await expect(
+            row.locator('time[datetime="2026-12-10T12:00:00Z"]'),
+        ).toBeVisible();
+        await row
+            .getByRole("button", {
+                name: `Restore ${entity.name}`,
+                exact: true,
+            })
+            .click();
+        await expect(
+            page.getByText(`${entity.name} restored. Find it in Overview.`, {
+                exact: true,
+            }),
+        ).toBeVisible();
+        await expect(
+            page.getByRole("button", {
+                name: `Restore ${entity.name}`,
+                exact: true,
+            }),
+        ).toHaveCount(0);
+        await page
+            .getByRole("button", { name: "Overview", exact: true })
+            .click();
+        await page.getByRole("button", { name: /Antalya solar park/ }).click();
+        if (kind === "plant") {
+            await page
+                .getByRole("button", { name: "Solar plants", exact: true })
+                .click();
+            await expect(
+                page.getByRole("button", { name: /East array/ }),
+            ).toBeVisible();
+        } else
+            await expect(
+                page.getByRole("heading", { name: region.name, exact: true }),
+            ).toBeVisible();
+    });
+}
+
+test("recycle bin disables expired records and asks to restore a parent region first", async ({
+    page,
+}) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mockApi(page);
+    await page.route("**/trash/regions/", async (route) =>
+        route.fulfill({
+            json: paged([
+                {
+                    id: 91,
+                    name: "Expired region",
+                    deleted_at: "2026-01-01T00:00:00Z",
+                    purge_after: "2026-01-31T00:00:00Z",
+                    can_restore: false,
+                },
+            ]),
+        }),
+    );
+    await page.route("**/trash/plants/", async (route) =>
+        route.fulfill({
+            json: paged([
+                {
+                    id: 92,
+                    name: "Plant in deleted region",
+                    deleted_at: "2026-11-10T00:00:00Z",
+                    purge_after: "2026-12-10T00:00:00Z",
+                    can_restore: false,
+                    region_id: 11,
+                    region_name: region.name,
+                    parent_deleted: true,
+                },
+            ]),
+        }),
+    );
+    await page.goto("/");
+    await page
+        .getByRole("button", { name: "Recycle bin", exact: true })
+        .click();
+    await expect(
+        page.getByRole("button", {
+            name: "Restore Expired region",
+            exact: true,
+        }),
+    ).toBeDisabled();
+    await expect(
+        page.getByText("The 30-day restore period has ended.", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", {
+            name: "Restore Plant in deleted region",
+            exact: true,
+        }),
+    ).toBeDisabled();
+    await expect(
+        page.getByText("Restore its region first.", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: /permanently delete|purge/i }),
+    ).toHaveCount(0);
+    expect(
+        await page.evaluate(
+            () => document.documentElement.scrollWidth <= window.innerWidth,
+        ),
+    ).toBe(true);
+    const scan = await new AxeBuilder({ page })
+        .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+        .analyze();
+    expect(scan.violations).toEqual([]);
+});
+
+test("recycle bin ignores a prior workspace response and restores only in the selected workspace", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/api/tenants/", async (route) =>
+        route.fulfill({
+            json: paged([
+                { id: 1, name: "Sunfield Energy" },
+                { id: 2, name: "Second workspace" },
+            ]),
+        }),
+    );
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+    });
+    let requestedFirst!: () => void;
+    const firstRequest = new Promise<void>((resolve) => {
+        requestedFirst = resolve;
+    });
+    await page.route("**/trash/**", async (route) => {
+        const path = new URL(route.request().url()).pathname;
+        if (path.endsWith("/plants/")) {
+            await route.fulfill({ json: paged([]) });
+            return;
+        }
+        const first = path.includes("/tenants/1/");
+        if (first) {
+            requestedFirst();
+            await firstGate;
+        }
+        await route.fulfill({
+            json: paged([
+                {
+                    id: first ? 101 : 102,
+                    name: first
+                        ? "First workspace deleted region"
+                        : "Second workspace deleted region",
+                    deleted_at: "2026-11-10T00:00:00Z",
+                    purge_after: "2026-12-10T00:00:00Z",
+                    can_restore: true,
+                },
+            ]),
+        });
+    });
+    await page.route("**/regions/102/restore/", async (route) => {
+        expect(new URL(route.request().url()).pathname).toBe(
+            "/api/tenants/2/regions/102/restore/",
+        );
+        expect(route.request().headers()["x-csrftoken"]).toBe("signed-token");
+        await route.fulfill({ json: { ...region, id: 102 } });
+    });
+    await page.goto("/");
+    await page
+        .getByRole("button", { name: "Recycle bin", exact: true })
+        .click();
+    await firstRequest;
+    await page.getByRole("combobox", { name: /Workspace/ }).selectOption("2");
+    await expect(
+        page.getByRole("button", {
+            name: "Restore Second workspace deleted region",
+            exact: true,
+        }),
+    ).toBeVisible();
+    releaseFirst();
+    await expect(
+        page.getByRole("button", {
+            name: "Restore First workspace deleted region",
+            exact: true,
+        }),
+    ).toHaveCount(0);
+    await page
+        .getByRole("button", {
+            name: "Restore Second workspace deleted region",
+            exact: true,
+        })
+        .click();
+    await expect(
+        page.getByText(
+            "Second workspace deleted region restored. Find it in Overview.",
+            { exact: true },
+        ),
+    ).toBeVisible();
+});

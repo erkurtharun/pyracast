@@ -21,7 +21,7 @@ def forecast_time_limit(daily_quota: int) -> int:
 def get_schedule(actor: User, tenant_id: int, region_id: int, now: datetime) -> CollectionSchedule:
     require_member(actor, tenant_id)
     region = Region.objects.select_related("approved_binding__provider_account").get(
-        pk=region_id, tenant_id=tenant_id
+        pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
     )
     return CollectionSchedule.objects.filter(region=region).first() or CollectionSchedule(
         region=region,
@@ -41,7 +41,7 @@ def configure_schedule(
         region = (
             Region.objects.select_for_update(of=("self",))
             .select_related("approved_binding__provider_account")
-            .get(pk=region_id, tenant_id=tenant_id)
+            .get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
         )
         binding = region.approved_binding
         limit = forecast_time_limit(binding.provider_account.daily_quota if binding else 10)

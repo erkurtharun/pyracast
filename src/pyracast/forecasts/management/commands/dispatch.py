@@ -6,6 +6,7 @@ from django.core.management.base import BaseCommand, CommandError
 from pyracast.notifications.runtime import dispatch_notifications, make_notification_actor
 from pyracast.plants.runtime import dispatch_calibrations, make_calibration_actor
 from pyracast.runtime import dispatch, make_actor, make_broker
+from pyracast.trash import purge_expired
 
 
 class Command(BaseCommand):
@@ -25,6 +26,7 @@ class Command(BaseCommand):
         notification_actor = make_notification_actor(broker)
         try:
             while True:
+                purge_expired()
                 dispatch(actor)
                 dispatch_calibrations(calibration_actor)
                 dispatch_notifications(notification_actor)

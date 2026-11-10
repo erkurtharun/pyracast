@@ -97,6 +97,9 @@ def test_browser_against_live_django(live_server: Any) -> None:
     assert plant.current_configuration.dc_capacity_mw == 130
     assert plant.current_configuration.inverter_capacity_mw == 100
     assert plant.current_configuration.export_limit_mw is None
+    assert plant.deleted_at is None
+    system.region.refresh_from_db()
+    assert system.region.deleted_at is None
     observation = ProductionObservation.objects.get(plant=plant)
     assert observation.energy_mwh == 1.25
     assert observation.configuration_id == plant.current_configuration_id

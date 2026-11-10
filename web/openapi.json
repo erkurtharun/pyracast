@@ -662,6 +662,40 @@
                         "description": ""
                     }
                 }
+            },
+            "delete": {
+                "operationId": "tenants_regions_destroy",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No response body"
+                    }
+                }
             }
         },
         "/api/tenants/{tenant_id}/regions/{region_id}/collection-schedule/": {
@@ -1064,6 +1098,48 @@
                             }
                         },
                         "description": ""
+                    }
+                }
+            },
+            "delete": {
+                "operationId": "tenants_regions_plants_destroy",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No response body"
                     }
                 }
             }
@@ -1671,6 +1747,57 @@
                 }
             }
         },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/restore/": {
+            "post": {
+                "operationId": "tenants_regions_plants_restore_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PlantOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
         "/api/tenants/{tenant_id}/regions/{region_id}/reminders/": {
             "get": {
                 "operationId": "tenants_regions_reminders_retrieve",
@@ -1767,6 +1894,137 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/ReminderOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/restore/": {
+            "post": {
+                "operationId": "tenants_regions_restore_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RegionOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/trash/plants/": {
+            "get": {
+                "operationId": "tenants_trash_plants_list",
+                "parameters": [
+                    {
+                        "name": "page",
+                        "required": false,
+                        "in": "query",
+                        "description": "A page number within the paginated result set.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PaginatedTrashedPlantOutputList"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/trash/regions/": {
+            "get": {
+                "operationId": "tenants_trash_regions_list",
+                "parameters": [
+                    {
+                        "name": "page",
+                        "required": false,
+                        "in": "query",
+                        "description": "A page number within the paginated result set.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PaginatedTrashedRegionOutputList"
                                 }
                             }
                         },
@@ -2685,6 +2943,68 @@
                     }
                 }
             },
+            "PaginatedTrashedPlantOutputList": {
+                "type": "object",
+                "required": [
+                    "count",
+                    "results"
+                ],
+                "properties": {
+                    "count": {
+                        "type": "integer",
+                        "example": 123
+                    },
+                    "next": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=4"
+                    },
+                    "previous": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=2"
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/TrashedPlantOutput"
+                        }
+                    }
+                }
+            },
+            "PaginatedTrashedRegionOutputList": {
+                "type": "object",
+                "required": [
+                    "count",
+                    "results"
+                ],
+                "properties": {
+                    "count": {
+                        "type": "integer",
+                        "example": 123
+                    },
+                    "next": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=4"
+                    },
+                    "previous": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=2"
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/TrashedRegionOutput"
+                        }
+                    }
+                }
+            },
             "PatchedEmailInput": {
                 "type": "object",
                 "properties": {
@@ -3333,6 +3653,85 @@
                 ],
                 "type": "string",
                 "description": "* `rejected` - rejected\n* `suspended` - suspended"
+            },
+            "TrashedPlantOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "name": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "region_id": {
+                        "type": "integer"
+                    },
+                    "region_name": {
+                        "type": "string"
+                    },
+                    "parent_deleted": {
+                        "type": "boolean",
+                        "readOnly": true
+                    },
+                    "deleted_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "purge_after": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    },
+                    "can_restore": {
+                        "type": "boolean",
+                        "readOnly": true
+                    }
+                },
+                "required": [
+                    "can_restore",
+                    "deleted_at",
+                    "id",
+                    "name",
+                    "parent_deleted",
+                    "purge_after",
+                    "region_id",
+                    "region_name"
+                ]
+            },
+            "TrashedRegionOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "name": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "deleted_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "purge_after": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    },
+                    "can_restore": {
+                        "type": "boolean",
+                        "readOnly": true
+                    }
+                },
+                "required": [
+                    "can_restore",
+                    "deleted_at",
+                    "id",
+                    "name",
+                    "purge_after"
+                ]
             },
             "UnavailableReasonEnum": {
                 "enum": [

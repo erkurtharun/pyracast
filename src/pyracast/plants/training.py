@@ -42,10 +42,14 @@ class _Lease:
 
 def _claim(run_id: int, now: datetime) -> _Lease | None:
     started = time.monotonic()
-    identity = CalibrationRun.objects.select_related("plant").get(pk=run_id)
+    identity = CalibrationRun.objects.select_related("plant").filter(pk=run_id).first()
+    if identity is None:
+        return None
     with transaction.atomic():
-        Region.objects.select_for_update().get(pk=identity.plant.region_id)
-        Plant.objects.select_for_update().get(pk=identity.plant_id)
+        if not Region.objects.select_for_update().filter(pk=identity.plant.region_id).exists():
+            return None
+        if not Plant.objects.select_for_update().filter(pk=identity.plant_id).exists():
+            return None
         run = CalibrationRun.objects.select_for_update().get(pk=run_id)
         now += timedelta(seconds=time.monotonic() - started)
         if run.status not in {"pending", "running"}:
@@ -316,7 +320,9 @@ def pending_calibration_ids(now: datetime, limit: int = 100) -> list[int]:
         CalibrationRun.objects.filter(
             Q(status="pending")
             | Q(status="running", lease_expires_at__lte=now)
-            | Q(status="running", lease_expires_at__isnull=True)
+            | Q(status="running", lease_expires_at__isnull=True),
+            plant__deleted_at__isnull=True,
+            plant__region__deleted_at__isnull=True,
         )
         .order_by("created_at", "pk")
         .values_list("pk", flat=True)[:limit]

@@ -16,7 +16,7 @@ def get_preference(
     actor: User, tenant_id: int, region_id: int, now: datetime
 ) -> ReminderPreference:
     require_member(actor, tenant_id)
-    region = Region.objects.get(pk=region_id, tenant_id=tenant_id)
+    region = Region.objects.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
     return ReminderPreference.objects.filter(
         user=actor, region=region
     ).first() or ReminderPreference(user=actor, region=region, effective_from=now)
@@ -36,7 +36,9 @@ def configure_reminders(
         raise ValidationError("An aware timestamp is required.")
     require_member(actor, tenant_id)
     with transaction.atomic():
-        region = Region.objects.select_for_update().get(pk=region_id, tenant_id=tenant_id)
+        region = Region.objects.select_for_update().get(
+            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
+        )
         preference, _ = ReminderPreference.objects.get_or_create(
             user=actor, region=region, defaults={"effective_from": now}
         )

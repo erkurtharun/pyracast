@@ -123,7 +123,9 @@ def validate_binding(
     actor: User, binding_id: int, adapter: ProviderAdapter, now: datetime
 ) -> SiteBinding:
     require_admin(actor)
-    binding = SiteBinding.objects.select_related("provider_account").get(pk=binding_id)
+    binding = SiteBinding.objects.select_related("provider_account").get(
+        pk=binding_id, region__deleted_at__isnull=True
+    )
     if binding.provider_account.provider == "solcast" and (
         not binding.settings_verification_reference or binding.installation_date is None
     ):
@@ -138,8 +140,10 @@ def validate_binding(
     with transaction.atomic():
         region = Region.objects.select_for_update().get(pk=binding.region_id)
         account = ProviderAccount.objects.select_for_update().get(pk=binding.provider_account_id)
-        if region.revision != binding.region_revision or (
-            account.credential_revision != binding.provider_account.credential_revision
+        if (
+            region.deleted_at is not None
+            or region.revision != binding.region_revision
+            or (account.credential_revision != binding.provider_account.credential_revision)
         ):
             raise ValidationError("Configuration changed during validation.")
         binding.validated_at = now
