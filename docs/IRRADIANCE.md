@@ -200,6 +200,16 @@ confidence intervals from a short or selectively observed history.
 
 ## Historical irradiance and measured performance
 
+EPİAŞ `realtime-generation` is archived as provider-reported hourly production,
+separate from Solcast weather estimates and user meter observations. The current
+official web interface labels `total` as MWh. Preserve the provider timestamp:
+the published technical schema does not establish whether it labels an interval's
+start or end, nor whether the measurement is gross AC generation or net export.
+The separate UEVM injection service's definition cannot establish those semantics
+for real-time generation. Until verified, display only provider-hour values and
+their sum, without asserting a midnight-to-midnight energy total or training on
+them. Do not split hourly reported energy into invented half-hour measurements.
+
 Solcast historical GHI/GTI are satellite/model-derived **estimated actuals**; they
 are not automatically on-site measurements. AWS is a distribution channel, not a
 statement about a dataset's measurement method, location coverage or usage rights.
@@ -223,6 +233,8 @@ a verified dataset contract and are separate from this proxy calibration. Never 
 features or as matched Solcast forecast GHI for reconstruction-equivalence claims.
 
 ## Primary references
+
+- [EPİAŞ electricity API](https://seffaflik.epias.com.tr/electricity-service/technical/tr/index.html) and [reported-generation interface](https://seffaflik.epias.com.tr/electricity/electricity-generation/ex-post-generation/real-time-generation).
 
 - [Hobby contract](https://docs.solcast.com.au/docs/section/rooftop-sites-hobbyist).
 - [Rooftop model](https://www.solcast.com/rooftop-pv-power-model).

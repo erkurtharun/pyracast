@@ -13,6 +13,7 @@ from pyracast.plants.api import (
     ProductionView,
     ResetView,
 )
+from pyracast.plants.epias_api import EpiasConnectionView, EpiasHistoryView
 
 urlpatterns = [
     path("", PlantsView.as_view()),
@@ -20,6 +21,8 @@ urlpatterns = [
     path("<int:plant_id>/restore/", RestorePlantView.as_view()),
     path("<int:plant_id>/observations/", ObservationsView.as_view()),
     path("<int:plant_id>/production/", ProductionView.as_view()),
+    path("<int:plant_id>/production-source/", EpiasConnectionView.as_view()),
+    path("<int:plant_id>/reported-production/", EpiasHistoryView.as_view()),
     path("<int:plant_id>/performance/", PerformanceView.as_view()),
     path("<int:plant_id>/calibrations/", CalibrationsView.as_view()),
     path("<int:plant_id>/calibrations/<int:calibration_id>/", CalibrationView.as_view()),

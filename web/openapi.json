@@ -1830,6 +1830,227 @@
                 }
             }
         },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production-source/": {
+            "get": {
+                "operationId": "tenants_regions_plants_production_source_retrieve",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/EpiasConnectionOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            },
+            "put": {
+                "operationId": "tenants_regions_plants_production_source_update",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/EpiasConnectionInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/EpiasConnectionInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/EpiasConnectionInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/EpiasConnectionOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            },
+            "delete": {
+                "operationId": "tenants_regions_plants_production_source_destroy",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No response body"
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/reported-production/": {
+            "get": {
+                "operationId": "tenants_regions_plants_reported_production_retrieve",
+                "parameters": [
+                    {
+                        "in": "query",
+                        "name": "date",
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/EpiasHistoryOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/restore/": {
             "post": {
                 "operationId": "tenants_regions_plants_restore_create",
@@ -2663,6 +2884,174 @@
                     "starts_at"
                 ]
             },
+            "EpiasConnectionInput": {
+                "type": "object",
+                "properties": {
+                    "provider_plant_id": {
+                        "type": "integer",
+                        "minimum": 1
+                    },
+                    "expected_eic": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9-]{16}$"
+                    },
+                    "meter_basis": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/MeterBasisEnum"
+                            }
+                        ],
+                        "default": "unknown"
+                    }
+                },
+                "required": [
+                    "expected_eic",
+                    "provider_plant_id"
+                ]
+            },
+            "EpiasConnectionOutput": {
+                "type": "object",
+                "properties": {
+                    "connected": {
+                        "type": "boolean"
+                    },
+                    "provider_plant_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "eic": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "meter_basis": {
+                        "$ref": "#/components/schemas/MeterBasisEnum"
+                    },
+                    "last_success_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "last_error": {
+                        "type": "string"
+                    },
+                    "pending_jobs": {
+                        "type": "integer"
+                    },
+                    "archived_days": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "archived_days",
+                    "connected",
+                    "eic",
+                    "last_error",
+                    "last_success_at",
+                    "meter_basis",
+                    "name",
+                    "pending_jobs",
+                    "provider_plant_id"
+                ]
+            },
+            "EpiasHistoryOutput": {
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "format": "date"
+                    },
+                    "timezone": {
+                        "type": "string"
+                    },
+                    "unit": {
+                        "type": "string"
+                    },
+                    "calibration_eligible": {
+                        "type": "boolean"
+                    },
+                    "calibration_blocker": {
+                        "type": "string"
+                    },
+                    "snapshot": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/EpiasSnapshotOutput"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "readings": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/EpiasReadingOutput"
+                        }
+                    }
+                },
+                "required": [
+                    "calibration_blocker",
+                    "calibration_eligible",
+                    "date",
+                    "readings",
+                    "snapshot",
+                    "timezone",
+                    "unit"
+                ]
+            },
+            "EpiasReadingOutput": {
+                "type": "object",
+                "properties": {
+                    "provider_timestamp": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "energy_mwh": {
+                        "type": "number",
+                        "format": "double",
+                        "nullable": true
+                    },
+                    "solar_mwh": {
+                        "type": "number",
+                        "format": "double",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "energy_mwh",
+                    "provider_timestamp",
+                    "solar_mwh"
+                ]
+            },
+            "EpiasSnapshotOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "configuration_id": {
+                        "type": "integer"
+                    },
+                    "collected_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "available_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "content_sha256": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "available_at",
+                    "collected_at",
+                    "configuration_id",
+                    "content_sha256",
+                    "id"
+                ]
+            },
             "ForecastOutput": {
                 "type": "object",
                 "properties": {
@@ -2760,6 +3149,15 @@
                     "password",
                     "username"
                 ]
+            },
+            "MeterBasisEnum": {
+                "enum": [
+                    "unknown",
+                    "net_export",
+                    "ac_generation"
+                ],
+                "type": "string",
+                "description": "* `unknown` - unknown\n* `net_export` - net_export\n* `ac_generation` - ac_generation"
             },
             "MetricScopeEnum": {
                 "enum": [

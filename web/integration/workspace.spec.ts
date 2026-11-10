@@ -119,6 +119,23 @@ test("a customer manages an approved region through the real API", async ({
         page.getByText("View interval data (48 intervals)"),
     ).toBeVisible();
 
+    await page.getByRole("button", { name: "Automatic production" }).click();
+    await expect(page.getByLabel("EPİAŞ plant ID")).toBeVisible();
+    await expect(
+        page.getByLabel(/Measurement point/),
+    ).toHaveValue("unknown");
+    await page
+        .getByLabel("Archive date")
+        .fill(process.env.BROWSER_HISTORY_DATE!);
+    await expect(
+        page.getByText("No EPİAŞ data has been archived for this day."),
+    ).toBeVisible();
+    await expect(
+        page.getByText(
+            "Calibration is waiting for confirmation of the time interval convention and measurement point.",
+        ),
+    ).toBeVisible();
+
     await page
         .getByRole("button", { name: "Calibration", exact: true })
         .click();

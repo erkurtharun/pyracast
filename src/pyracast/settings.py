@@ -37,6 +37,7 @@ INSTALLED_APPS = [
     "pyracast.forecasts",
     "pyracast.plants",
     "pyracast.notifications",
+    "pyracast.metering",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",

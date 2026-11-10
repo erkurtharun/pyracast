@@ -388,6 +388,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production-source/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["tenants_regions_plants_production_source_retrieve"];
+        put: operations["tenants_regions_plants_production_source_update"];
+        post?: never;
+        delete: operations["tenants_regions_plants_production_source_destroy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/reported-production/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["tenants_regions_plants_reported_production_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/restore/": {
         parameters: {
             query?: never;
@@ -646,6 +678,51 @@ export interface components {
             /** Format: date-time */
             ends_at: string;
         };
+        EpiasConnectionInput: {
+            provider_plant_id: number;
+            expected_eic: string;
+            /** @default unknown */
+            meter_basis: components["schemas"]["MeterBasisEnum"];
+        };
+        EpiasConnectionOutput: {
+            connected: boolean;
+            provider_plant_id: number | null;
+            eic: string;
+            name: string;
+            meter_basis: components["schemas"]["MeterBasisEnum"];
+            /** Format: date-time */
+            last_success_at: string | null;
+            last_error: string;
+            pending_jobs: number;
+            archived_days: number;
+        };
+        EpiasHistoryOutput: {
+            /** Format: date */
+            date: string;
+            timezone: string;
+            unit: string;
+            calibration_eligible: boolean;
+            calibration_blocker: string;
+            snapshot: components["schemas"]["EpiasSnapshotOutput"] | null;
+            readings: components["schemas"]["EpiasReadingOutput"][];
+        };
+        EpiasReadingOutput: {
+            /** Format: date-time */
+            provider_timestamp: string;
+            /** Format: double */
+            energy_mwh: number | null;
+            /** Format: double */
+            solar_mwh: number | null;
+        };
+        EpiasSnapshotOutput: {
+            id: number;
+            configuration_id: number;
+            /** Format: date-time */
+            collected_at: string;
+            /** Format: date-time */
+            available_at: string;
+            content_sha256: string;
+        };
         ForecastOutput: {
             region_id: number;
             /** Format: date */
@@ -672,6 +749,13 @@ export interface components {
             username: string;
             password: string;
         };
+        /**
+         * @description * `unknown` - unknown
+         *     * `net_export` - net_export
+         *     * `ac_generation` - ac_generation
+         * @enum {string}
+         */
+        MeterBasisEnum: "unknown" | "net_export" | "ac_generation";
         /**
          * @description * `daylight_intervals` - daylight_intervals
          *     * `full_day` - full_day
@@ -2016,6 +2100,105 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProductionHistoryOutput"];
+                };
+            };
+        };
+    };
+    tenants_regions_plants_production_source_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plant_id: number;
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EpiasConnectionOutput"];
+                };
+            };
+        };
+    };
+    tenants_regions_plants_production_source_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plant_id: number;
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EpiasConnectionInput"];
+                "application/x-www-form-urlencoded": components["schemas"]["EpiasConnectionInput"];
+                "multipart/form-data": components["schemas"]["EpiasConnectionInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EpiasConnectionOutput"];
+                };
+            };
+        };
+    };
+    tenants_regions_plants_production_source_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plant_id: number;
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    tenants_regions_plants_reported_production_retrieve: {
+        parameters: {
+            query?: {
+                date?: string;
+            };
+            header?: never;
+            path: {
+                plant_id: number;
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EpiasHistoryOutput"];
                 };
             };
         };

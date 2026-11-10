@@ -22,6 +22,7 @@ import { ProductionHistory } from "./production-history";
 import { MoveToRecycleBin } from "./recycle-bin";
 import { ForecastPanel } from "./forecast-panel";
 import { ForecastPerformance } from "./forecast-performance";
+import { EpiasProduction } from "./epias-production";
 import {
     PlantConfigurationFields,
     configurationInput,
@@ -143,6 +144,7 @@ export function PlantWorkspace({
                 {[
                     ["forecast", "Generation forecast"],
                     ["production", "Production import"],
+                    ["automatic", "Automatic production"],
                     ["calibration", "Calibration"],
                 ].map(([key, label]) => (
                     <button
@@ -214,6 +216,8 @@ export function PlantWorkspace({
                         timezone={timezone}
                     />
                 </>
+            ) : tab === "automatic" ? (
+                <EpiasProduction base={base} token={token} />
             ) : !configuration ? (
                 <Notice>No configuration is available for this plant.</Notice>
             ) : tab === "production" ? (

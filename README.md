@@ -108,8 +108,8 @@ uv run --locked pyracast dispatch --loop
 uv run --locked pyracast worker --threads 4
 ```
 
-The dispatcher scans durable collection, calibration and notification jobs every 60 seconds. Queue publication can be
-repeated; database leases and unique results govern execution. Requests, validation
+The dispatcher scans durable forecast, EPİAŞ production, calibration and notification jobs every 60 seconds. Queue publication can be
+repeated; database leases and unique results govern execution. Solcast requests, validation
 and retries share one account/UTC-day budget. Unknown request outcomes consume quota.
 Provider calls happen outside transactions. Changed or suspended regions cannot
 publish through old bindings. Failed calculations can reuse an archived acquisition.
@@ -163,6 +163,22 @@ service is used. Regenerate the contract after API changes:
 uv run --locked pyracast spectacular --validate --fail-on-warn --format openapi-json --file web/openapi.json
 npm --prefix web run api:generate
 ```
+
+## Automatic plant production
+
+Set `EPIAS_USERNAME` and `EPIAS_PASSWORD` in the ignored root `.env`, apply migrations,
+and restart the API and worker. In a plant's **Automatic production** tab, enter its
+EPİAŞ plant ID and EIC. The backend verifies their match and queues the previous
+seven completed Istanbul dates. Keep `dispatch --loop` and `worker --threads 4`
+running; the region's first collection time also schedules a daily seven-day refresh
+for late or revised reports. No Solcast request is needed for this archive.
+
+Reported hourly MWh and missing values remain separate from manual production.
+Disconnect preserves saved acquisitions. The measurement-point and hour-label
+contracts still need verification before these reports can enter calibration.
+Routine tests use synthetic and sanitized captured responses. Live checks are
+opt-in: set `PYRACAST_EPIAS_LIVE=1`, `EPIAS_LIVE_PLANT_ID` and `EPIAS_LIVE_EIC`, then
+run `uv run --locked pytest tests/test_epias_live.py --no-cov`.
 
 ## Email reminders
 

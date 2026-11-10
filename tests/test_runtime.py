@@ -74,11 +74,15 @@ def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     notification_actor, send_notifications = MagicMock(), MagicMock()
     monkeypatch.setattr(command, "make_notification_actor", lambda _: notification_actor)
     monkeypatch.setattr(command, "dispatch_notifications", send_notifications)
+    epias_actor, send_epias = MagicMock(), MagicMock()
+    monkeypatch.setattr(command, "make_epias_actor", lambda _: epias_actor)
+    monkeypatch.setattr(command, "dispatch_epias", send_epias)
     call_command("dispatch")
     purge.assert_called_once_with()
     send.assert_called_once_with(actor)
     send_calibrations.assert_called_once_with(calibration_actor)
     send_notifications.assert_called_once_with(notification_actor)
+    send_epias.assert_called_once_with(epias_actor)
     broker.close.assert_called_once()
     with pytest.raises(CommandError, match="positive"):
         call_command("dispatch", poll_seconds=0)
@@ -90,6 +94,7 @@ def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     assert purge.call_count == 2
     assert send_calibrations.call_count == 2
     assert send_notifications.call_count == 2
+    assert send_epias.call_count == 2
     assert broker.close.call_count == 2
 
 
@@ -103,6 +108,8 @@ def test_worker_command_stops_on_interrupt(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(command, "make_calibration_actor", calibration_registration)
     notification_registration = MagicMock()
     monkeypatch.setattr(command, "make_notification_actor", notification_registration)
+    epias_registration = MagicMock()
+    monkeypatch.setattr(command, "make_epias_actor", epias_registration)
     create_worker = MagicMock(return_value=worker)
     monkeypatch.setattr(command, "Worker", create_worker)
     event = MagicMock()
@@ -112,6 +119,7 @@ def test_worker_command_stops_on_interrupt(monkeypatch: pytest.MonkeyPatch) -> N
     create_worker.assert_called_once_with(broker, worker_threads=2)
     calibration_registration.assert_called_once_with(broker)
     notification_registration.assert_called_once_with(broker)
+    epias_registration.assert_called_once_with(broker)
     worker.start.assert_called_once()
     worker.stop.assert_called_once()
     broker.close.assert_called_once()

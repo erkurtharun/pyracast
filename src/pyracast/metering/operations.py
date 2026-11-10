@@ -1,0 +1,175 @@
+from datetime import date, timedelta
+
+from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.utils import timezone
+
+from pyracast.accounts.operations import require_member
+from pyracast.epias import EpiasClient
+from pyracast.metering.client import get_epias_client
+from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
+from pyracast.plants.models import Plant, PlantEvent
+from pyracast.plants.operations import configuration_is_current
+from pyracast.regions.models import Region
+
+
+def member_plant(plant_id: int, actor: User) -> Plant:
+    plant = Plant.objects.select_related("region").get(
+        pk=plant_id, deleted_at__isnull=True, region__deleted_at__isnull=True
+    )
+    require_member(actor, plant.region.tenant_id)
+    return plant
+
+
+def connect_epias(
+    plant_id: int,
+    *,
+    actor: User,
+    provider_plant_id: int,
+    expected_eic: str,
+    meter_basis: str = "unknown",
+    client: EpiasClient | None = None,
+) -> EpiasConnection:
+    plant = member_plant(plant_id, actor)
+    if meter_basis not in {"unknown", "net_export", "ac_generation"}:
+        raise ValidationError("unsupported_meter_basis")
+    if isinstance(provider_plant_id, bool) or provider_plant_id <= 0 or not expected_eic.strip():
+        raise ValidationError("invalid_epias_plant")
+    if plant.current_configuration is None or not configuration_is_current(
+        plant.current_configuration
+    ):
+        raise ValidationError("configuration_unavailable")
+    candidates = (client or get_epias_client()).list_plants()
+    selected = next((p for p in candidates if p.id == provider_plant_id), None)
+    if selected is None or selected.eic != expected_eic.strip():
+        raise ValidationError("epias_plant_identity_mismatch")
+    with transaction.atomic():
+        Region.objects.select_for_update().get(pk=plant.region_id)
+        plant = Plant.objects.select_for_update().get(pk=plant.pk)
+        require_member(actor, plant.region.tenant_id)
+        if (
+            plant.deleted_at is not None
+            or plant.region.deleted_at is not None
+            or plant.current_configuration is None
+            or not configuration_is_current(plant.current_configuration)
+        ):
+            raise ValidationError("configuration_unavailable")
+        connection = EpiasConnection.objects.select_for_update().filter(plant=plant).first()
+        if connection is None:
+            connection = EpiasConnection(plant=plant, connected_by=actor)
+        else:
+            connection.revision += 1
+            EpiasCollectionJob.objects.filter(
+                connection=connection, status__in=("pending", "running")
+            ).update(status="superseded", lease_token=None, lease_expires_at=None)
+        connection.provider_plant_id = selected.id
+        connection.eic = selected.eic
+        connection.name = selected.name
+        connection.meter_basis = meter_basis
+        connection.connected_by = actor
+        connection.enabled = True
+        connection.save()
+        PlantEvent.objects.create(
+            plant=plant,
+            actor=actor,
+            action="epias_connected",
+            details={
+                "provider_plant_id": connection.provider_plant_id,
+                "eic": connection.eic,
+                "revision": connection.revision,
+            },
+        )
+        from pyracast.metering.scheduler import enqueue_connection
+
+        enqueue_connection(connection, timezone.now(), initial=True)
+        return connection
+
+
+def disconnect_epias(plant_id: int, *, actor: User) -> None:
+    plant = member_plant(plant_id, actor)
+    with transaction.atomic():
+        Region.objects.select_for_update().get(pk=plant.region_id)
+        Plant.objects.select_for_update().get(pk=plant.pk)
+        require_member(actor, plant.region.tenant_id)
+        connection = EpiasConnection.objects.select_for_update().filter(plant=plant).first()
+        if connection is None:
+            return
+        connection.enabled = False
+        connection.save(update_fields=("enabled", "updated_at"))
+        PlantEvent.objects.create(
+            plant=plant,
+            actor=actor,
+            action="epias_disconnected",
+            details={
+                "provider_plant_id": connection.provider_plant_id,
+                "eic": connection.eic,
+                "revision": connection.revision,
+            },
+        )
+        EpiasCollectionJob.objects.filter(
+            connection=connection, status__in=("pending", "running")
+        ).update(status="superseded", lease_token=None, lease_expires_at=None)
+
+
+def get_epias_status(plant_id: int, *, actor: User) -> dict[str, object]:
+    plant = member_plant(plant_id, actor)
+    connection = EpiasConnection.objects.filter(plant=plant).first()
+    if connection is None:
+        return {
+            "connected": False,
+            "provider_plant_id": None,
+            "eic": "",
+            "name": "",
+            "meter_basis": "unknown",
+            "last_success_at": None,
+            "last_error": "",
+            "pending_jobs": 0,
+            "archived_days": 0,
+        }
+    jobs = EpiasCollectionJob.objects.filter(connection=connection)
+    snapshots = EpiasSnapshot.objects.filter(
+        connection=connection,
+        job__provider_plant__id=connection.provider_plant_id,
+        job__provider_plant__eic=connection.eic,
+    )
+    latest = snapshots.order_by("-available_at").first()
+    last_job = jobs.order_by("-scheduled_for", "-pk").first()
+    return {
+        "connected": connection.enabled,
+        "provider_plant_id": connection.provider_plant_id,
+        "eic": connection.eic,
+        "name": connection.name,
+        "meter_basis": connection.meter_basis,
+        "last_success_at": latest.available_at if latest else None,
+        "last_error": last_job.last_error if last_job else "",
+        "pending_jobs": jobs.filter(status__in=("pending", "running")).count(),
+        "archived_days": snapshots.values("target_day").distinct().count(),
+    }
+
+
+def read_epias_history(
+    plant_id: int,
+    *,
+    actor: User,
+    start_day: date | None = None,
+    end_day: date | None = None,
+) -> list[EpiasSnapshot]:
+    plant = member_plant(plant_id, actor)
+    end_day = end_day or timezone.now().date()
+    start_day = start_day or end_day - timedelta(days=30)
+    if end_day < start_day or (end_day - start_day).days > 366:
+        raise ValidationError("invalid_history_window")
+    connection = EpiasConnection.objects.filter(plant=plant).first()
+    if connection is None:
+        return []
+    return list(
+        EpiasSnapshot.objects.filter(
+            connection=connection,
+            target_day__range=(start_day, end_day),
+            job__provider_plant__id=connection.provider_plant_id,
+            job__provider_plant__eic=connection.eic,
+        )
+        .order_by("target_day", "-available_at", "-pk")
+        .distinct("target_day")
+    )

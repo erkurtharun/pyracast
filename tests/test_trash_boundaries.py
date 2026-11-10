@@ -105,13 +105,24 @@ def test_dispatch_runs_purge_and_continues_all_queues(monkeypatch: pytest.Monkey
     calls: list[str] = []
     broker = Mock()
     monkeypatch.setattr(dispatch_command, "make_broker", lambda: broker)
-    for name in ("make_actor", "make_calibration_actor", "make_notification_actor"):
+    for name in (
+        "make_actor",
+        "make_calibration_actor",
+        "make_notification_actor",
+        "make_epias_actor",
+    ):
         monkeypatch.setattr(dispatch_command, name, lambda broker: object())
     monkeypatch.setattr(dispatch_command, "purge_expired", lambda: calls.append("purge"))
-    for name in ("dispatch", "dispatch_calibrations", "dispatch_notifications"):
+    for name in ("dispatch", "dispatch_calibrations", "dispatch_notifications", "dispatch_epias"):
         monkeypatch.setattr(dispatch_command, name, lambda actor, name=name: calls.append(name))
     dispatch_command.Command().handle(loop=False, poll_seconds=60.0)
-    assert calls == ["purge", "dispatch", "dispatch_calibrations", "dispatch_notifications"]
+    assert calls == [
+        "purge",
+        "dispatch",
+        "dispatch_calibrations",
+        "dispatch_notifications",
+        "dispatch_epias",
+    ]
     broker.close.assert_called_once_with()
 
 

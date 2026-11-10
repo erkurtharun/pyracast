@@ -33,6 +33,7 @@ Use conventional Django apps for accounts, regions, provider connections, foreca
 | ForecastSnapshot, ForecastResult | Raw input, normalized intervals, derived output and model version |
 | Plant, PlantConfiguration | Region ownership and immutable DC/inverter/export capacity and meter-basis revisions |
 | ProductionObservation | Interval energy, quality, source, configuration and recording time |
+| EpiasConnection, EpiasCollectionJob, EpiasSnapshot | Plant identity, independent collection and immutable reported-production acquisitions |
 | CalibrationRun, CalibrationActivation | Durable fit, reproducible dataset, held-out evaluation and explicit activation history |
 | PlantForecast, PlantEvent | Immutable electrical result and audited plant operations |
 | ReminderPreference, NotificationDelivery | Per-user region email schedules, pinned saved forecasts and durable delivery outcomes |
@@ -62,6 +63,24 @@ Keep approval (`pending`, `approved`, `rejected`, `suspended`), connection healt
 - Preserve forecast vintages and configuration/model versions. Expose stale or incomplete results explicitly. Monitor last successful collection, queue lag, provider errors, quota, solver failures and coverage; logs carry correlation IDs without credentials.
 
 ## API and delivery
+
+EPİAŞ production uses a separate `metering` app and durable `epias` queue. A tenant
+member links a plant by provider ID and EIC; server-side `EPIAS_USERNAME` and
+`EPIAS_PASSWORD` obtain a cached TGT without exposing credentials to the browser.
+Collect seven completed Istanbul dates on connection, then reconcile the trailing
+seven dates at the region's first daily collection slot. The jobs are independent
+of Solcast requests and its account quota. Three bounded attempts, expiring leases
+and immutable acquisitions handle redelivery, missing hours and provider revisions.
+Pin plant configuration, provider identity and connection revision; recheck active
+ownership/configuration before publishing. Disconnect stops future collection and
+retains the archive. Definition deletion uses the existing recycle-bin lifecycle.
+
+The plant's **Automatic production** tab reads the latest acquisition per date for
+the currently linked provider identity. Preserve native hourly labels, MWh, missing
+values, collection/publication times and a payload digest. These reported values
+are separate from manual meter observations. They do not enter calibration or
+forecast-performance metrics until the interval-label convention and measurement
+point have been verified; a user-declared meter basis alone does not unlock them.
 
 Provide authenticated region submission/list/detail, platform-admin connection validation and approve/reject/suspend actions, and dated forecast retrieval. Generate OpenAPI; use explicit units, bounded date ranges, pagination and stable error codes. Approval transitions are operations, not writable status fields.
 
