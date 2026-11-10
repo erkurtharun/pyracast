@@ -10,7 +10,6 @@ import { parseProduction, type Observation } from "@/lib/production";
 import {
     ActionForm,
     Empty,
-    Field,
     JsonDetails,
     Notice,
     Select,
@@ -19,6 +18,7 @@ import {
     useResource,
     useCollection,
 } from "./ui";
+import { ProductionHistory } from "./production-history";
 import { ForecastPanel } from "./forecast-panel";
 import { DataSourceControl, localDay, type DataSource } from "./data-source";
 export function PlantWorkspace({
@@ -45,6 +45,7 @@ export function PlantWorkspace({
         }),
         [resolution, setResolution] = useState("30"),
         [source, setSource] = useState<DataSource>("auto");
+    const [productionRevision, setProductionRevision] = useState(0);
     const yesterday = localDay(timezone, -1);
     const configuration = plant.current_configuration;
     return (
@@ -158,11 +159,21 @@ export function PlantWorkspace({
                     token={token}
                 />
             ) : (
-                <Calibrations
-                    base={base}
-                    configuration={configuration.id}
-                    token={token}
-                />
+                <>
+                    <ProductionHistory
+                        base={base}
+                        configuration={configuration.id}
+                        token={token}
+                        onSaved={() =>
+                            setProductionRevision((current) => current + 1)
+                        }
+                    />
+                    <Calibrations
+                        base={base}
+                        token={token}
+                        productionRevision={productionRevision}
+                    />
+                </>
             )}
         </>
     );
@@ -208,7 +219,9 @@ function Production({
                     <h2>Bring your real production into view</h2>
                     <p>
                         Import completed 30 or 60 minute energy observations for
-                        this configuration.
+                        this configuration. Only intervals covered by archived
+                        estimated actuals can be imported. Check the Calibration
+                        journal for available dates.
                     </p>
                 </div>
             </div>
@@ -310,12 +323,12 @@ function Production({
 }
 function Calibrations({
     base,
-    configuration,
     token,
+    productionRevision,
 }: {
     base: string;
-    configuration: number;
     token: string;
+    productionRevision: number;
 }) {
     const [version, setVersion] = useState(0),
         [selected, setSelected] = useState<Calibration>(),
@@ -324,7 +337,7 @@ function Calibrations({
         [working, setWorking] = useState(false);
     const resource = useCollection<Calibration>(
         `${base}calibrations/`,
-        version,
+        version + productionRevision,
     );
     async function action(url: string) {
         setWorking(true);
@@ -344,57 +357,6 @@ function Calibrations({
     }
     return (
         <>
-            <section className="panel">
-                <div className="section-heading">
-                    <div>
-                        <h2>A closer fit to your plant</h2>
-                        <p>
-                            Compare completed meter/SCADA production with
-                            historical estimated actuals over 7–90 completed
-                            local days.
-                        </p>
-                    </div>
-                </div>
-                <ActionForm
-                    submit="Request calibration"
-                    onSubmit={async (data) => {
-                        const start = String(data.get("start_date")),
-                            end = String(data.get("end_date"));
-                        const days =
-                            (Date.parse(end) - Date.parse(start)) / 86400000 +
-                            1;
-                        if (days < 7 || days > 90)
-                            throw new Error(
-                                "Choose a window of 7–90 inclusive completed days.",
-                            );
-                        const run = await request<Calibration>(
-                            `${base}calibrations/`,
-                            "POST",
-                            {
-                                configuration_id: configuration,
-                                start_date: start,
-                                end_date: end,
-                            },
-                            token,
-                        );
-                        setSelected(run);
-                        setVersion(version + 1);
-                    }}
-                >
-                    <div className="form-grid">
-                        <Field
-                            label="First local day"
-                            name="start_date"
-                            type="date"
-                        />
-                        <Field
-                            label="Last local day (inclusive)"
-                            name="end_date"
-                            type="date"
-                        />
-                    </div>
-                </ActionForm>
-            </section>
             <section className="panel">
                 <div className="section-heading">
                     <div>
@@ -496,8 +458,9 @@ function Calibrations({
                     </div>
                 ) : (
                     <Empty title="Better estimates start with evidence">
-                        Import production observations, then request your first
-                        calibration.
+                        Fill the production journal. A candidate is prepared
+                        automatically once enough complete paired days are
+                        available.
                     </Empty>
                 )}
                 {selected && (

@@ -27,8 +27,12 @@ def test_rabbitmq_delivery_publishes_forecast() -> None:
     make_system(approved=True)
     job = CollectionJob.objects.get()
     broker = runtime.make_broker()
-    actor = runtime.make_actor(broker)
-    worker = Worker(broker, worker_threads=1, worker_timeout=100)
+    original = runtime.make_actor(broker)
+    queue = f"test_forecast_{uuid.uuid4().hex}"
+    actor = dramatiq.actor(broker=broker, actor_name=queue, queue_name=queue, max_retries=0)(
+        original.fn
+    )
+    worker = Worker(broker, queues={queue}, worker_threads=1, worker_timeout=100)
     worker.start()
     try:
         actor.send(job.pk)
@@ -61,11 +65,12 @@ def test_rabbitmq_actuals_redelivery_archives_once_with_one_provider_request() -
     )
     requests = RequestAttempt.objects.count()
     broker = runtime.make_broker()
+    original = runtime.make_actor(broker)
     queue = f"test_actuals_{uuid.uuid4().hex}"
     actor = dramatiq.actor(broker=broker, actor_name=queue, queue_name=queue, max_retries=0)(
-        runtime.deliver
+        original.fn
     )
-    worker = Worker(broker, worker_threads=1, worker_timeout=100)
+    worker = Worker(broker, queues={queue}, worker_threads=1, worker_timeout=100)
     worker.start()
     try:
         actor.send(job.pk)

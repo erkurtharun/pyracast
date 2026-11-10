@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from threading import Barrier
 from typing import Any, cast
+from zoneinfo import ZoneInfo
 
 import pytest
 from django.contrib.auth.models import User
@@ -102,6 +103,19 @@ def request_run(system: System, plant: Plant) -> CalibrationRun:
         start_date=date(2026, 11, 2),
         end_date=date(2026, 11, 8),
     )
+
+
+def saved_actuals(system: System, day: date) -> ForecastSnapshot:
+    start, end = local_day_bounds(day, system.binding.timezone)
+    source = snapshot_for(
+        system, day, collected_at=end + timedelta(hours=1), source_kind="estimated_actuals"
+    )
+    source.available_at = source.collected_at
+    source.coverage_start, source.coverage_end = start, end
+    source.save()
+    source.job.status = "succeeded"
+    source.job.save()
+    return source
 
 
 def ready_run(system: System, plant: Plant) -> CalibrationRun:
@@ -228,6 +242,7 @@ def test_observation_replay_units_zero_and_atomic_overlap(monkeypatch: pytest.Mo
     system, plant = make_plant(monkeypatch)
     assert plant.current_configuration_id is not None
     start = NOW - timedelta(days=2)
+    saved_actuals(system, start.astimezone(ZoneInfo(system.binding.timezone)).date())
     item = ObservationInput(start, start + timedelta(hours=1), 0)
     arguments: dict[str, Any] = dict(
         configuration_id=plant.current_configuration_id, unit="kWh", observations=[item]
@@ -278,6 +293,7 @@ def test_new_configuration_accepts_old_meter_history_and_future_batch_rolls_back
     assert configuration is not None
     assert configuration.created_at == NOW
     start = NOW - timedelta(days=7)
+    saved_actuals(system, start.astimezone(ZoneInfo(system.binding.timezone)).date())
     past = ObservationInput(start, start + timedelta(hours=1), 26)
     future = ObservationInput(NOW, NOW + timedelta(hours=1), 26)
     with pytest.raises(ValidationError, match="Completed"):
@@ -395,6 +411,7 @@ def test_calibration_request_bounds_dedup_and_validation(monkeypatch: pytest.Mon
 
 def test_concurrent_observation_replay_is_one_row(monkeypatch: pytest.MonkeyPatch) -> None:
     system, plant = make_plant(monkeypatch)
+    saved_actuals(system, (NOW - timedelta(days=1)).date())
     barrier = Barrier(2)
     configuration_id = plant.current_configuration_id
     assert configuration_id is not None
@@ -411,7 +428,7 @@ def test_concurrent_observation_replay_is_one_row(monkeypatch: pytest.MonkeyPatc
                 configuration_id=configuration_id,
                 unit="MWh",
                 observations=[
-                    ObservationInput(NOW - timedelta(hours=2), NOW - timedelta(hours=1), 0)
+                    ObservationInput(NOW - timedelta(days=1), NOW - timedelta(hours=23), 0)
                 ],
             )
         finally:
@@ -432,6 +449,17 @@ def test_configless_plant_cannot_activate_and_historical_imports_keep_revision(
         reset_calibration(system.member, system.tenant.pk, system.region.pk, unfinished.pk)
     old_id = plant.current_configuration_id
     assert old_id is not None
+    observation = ObservationInput(NOW - timedelta(days=1), NOW - timedelta(hours=23), 0)
+    saved_actuals(system, (NOW - timedelta(days=1)).date())
+    import_observations(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        configuration_id=old_id,
+        unit="MWh",
+        observations=[observation],
+    )
     revised = revise_plant(
         system.member,
         system.tenant.pk,
@@ -440,7 +468,6 @@ def test_configless_plant_cannot_activate_and_historical_imports_keep_revision(
         name="Revised",
         dc_capacity_mw=140,
     )
-    observation = ObservationInput(NOW - timedelta(hours=2), NOW - timedelta(hours=1), 0)
     import_observations(
         system.member,
         system.tenant.pk,

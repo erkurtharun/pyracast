@@ -356,6 +356,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["tenants_regions_plants_production_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tenants/{tenant_id}/regions/{region_id}/reminders/": {
         parameters: {
             query?: never;
@@ -731,6 +747,40 @@ export interface components {
          * @enum {string}
          */
         PowerBasisEnum: "ac" | "dc";
+        ProductionDayOutput: {
+            /** Format: date */
+            date: string;
+            available_count: number;
+            recorded_count: number;
+            missing_count: number;
+        };
+        ProductionHistoryOutput: {
+            plant_id: number;
+            configuration_id: number | null;
+            timezone: string;
+            /** Format: date */
+            available_start_date: string | null;
+            /** Format: date */
+            available_end_date: string | null;
+            /** Format: date */
+            start_date: string;
+            /** Format: date */
+            end_date: string;
+            resolution_minutes: components["schemas"]["ResolutionMinutesEnum"];
+            days: components["schemas"]["ProductionDayOutput"][];
+            intervals: components["schemas"]["ProductionIntervalOutput"][];
+            observations: components["schemas"]["ObservationOutput"][];
+        };
+        ProductionIntervalOutput: {
+            /** Format: date-time */
+            starts_at: string;
+            /** Format: date-time */
+            ends_at: string;
+            reference_available: boolean;
+            observation: components["schemas"]["ObservationOutput"] | null;
+            can_enter: boolean;
+            unavailable_reason: string | null;
+        };
         /**
          * @description * `fixture` - fixture
          *     * `solcast` - solcast
@@ -790,6 +840,12 @@ export interface components {
             daily_reminder_limit: number;
             queries_per_email: number;
         };
+        /**
+         * @description * `30` - 30
+         *     * `60` - 60
+         * @enum {integer}
+         */
+        ResolutionMinutesEnum: 30 | 60;
         RotateSecretInput: {
             secret_reference: string;
         };
@@ -1607,6 +1663,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ObservationImportOutput"];
+                };
+            };
+        };
+    };
+    tenants_regions_plants_production_retrieve: {
+        parameters: {
+            query?: {
+                end_date?: string;
+                /**
+                 * @description * `30` - 30
+                 *     * `60` - 60
+                 */
+                resolution_minutes?: 30 | 60;
+                start_date?: string;
+            };
+            header?: never;
+            path: {
+                plant_id: number;
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductionHistoryOutput"];
                 };
             };
         };

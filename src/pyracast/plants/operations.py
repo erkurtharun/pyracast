@@ -6,12 +6,14 @@ from zoneinfo import ZoneInfo
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Max
 from django.utils import timezone
 
 from pyracast.accounts.operations import require_member
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.jobs import binding_is_current
+from pyracast.plants.availability import interval_is_covered, reference_intervals
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
@@ -20,6 +22,8 @@ from pyracast.plants.models import (
     PlantEvent,
     ProductionObservation,
 )
+from pyracast.plants.numerics import PowerInterval
+from pyracast.plants.preparation import prepare_calibration
 from pyracast.regions.models import Region
 
 
@@ -229,6 +233,7 @@ def import_observations(
         now, zone = timezone.now(), ZoneInfo(configuration.binding.timezone)
         created = 0
         ids: list[int] = []
+        references: dict[date, tuple[PowerInterval, ...]] = {}
         for item in observations:
             start, end, value, quality, source = _observation(item, unit, zone, now)
             overlap = ProductionObservation.objects.filter(
@@ -246,6 +251,15 @@ def import_observations(
                     raise ValidationError("Conflicting or overlapping observation.")
                 ids.append(overlap.pk)
                 continue
+            if not configuration_is_current(configuration):
+                raise ValidationError(
+                    "Production entry requires the current approved configuration."
+                )
+            day = start.astimezone(zone).date()
+            if day not in references:
+                references[day] = reference_intervals(configuration, day, now)
+            if not interval_is_covered(references[day], start, end):
+                raise ValidationError("estimated_actuals_unavailable")
             saved = ProductionObservation.objects.create(
                 plant=plant,
                 configuration=configuration,
@@ -265,6 +279,7 @@ def import_observations(
                 action="observations_imported",
                 details={"configuration_id": configuration.pk, "created": created, "ids": ids},
             )
+            prepare_calibration(plant.pk)
         return {"created": created, "existing": len(ids) - created, "count": len(ids), "ids": ids}
 
 
@@ -310,6 +325,10 @@ def request_calibration(
             window_start=start_date,
             window_end=end_date,
             cutoff_at=now,
+            observation_id_cutoff=ProductionObservation.objects.filter(
+                configuration=configuration, recorded_at__lte=now
+            ).aggregate(last=Max("pk"))["last"]
+            or 0,
         )
         PlantEvent.objects.create(
             plant=plant,

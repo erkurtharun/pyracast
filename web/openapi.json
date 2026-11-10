@@ -1591,6 +1591,86 @@
                 }
             }
         },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/": {
+            "get": {
+                "operationId": "tenants_regions_plants_production_retrieve",
+                "parameters": [
+                    {
+                        "in": "query",
+                        "name": "end_date",
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "query",
+                        "name": "resolution_minutes",
+                        "schema": {
+                            "enum": [
+                                30,
+                                60
+                            ],
+                            "type": "integer",
+                            "default": 60
+                        },
+                        "description": "* `30` - 30\n* `60` - 60"
+                    },
+                    {
+                        "in": "query",
+                        "name": "start_date",
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProductionHistoryOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
         "/api/tenants/{tenant_id}/regions/{region_id}/reminders/": {
             "get": {
                 "operationId": "tenants_regions_reminders_retrieve",
@@ -2768,6 +2848,136 @@
                 "type": "string",
                 "description": "* `ac` - ac\n* `dc` - dc"
             },
+            "ProductionDayOutput": {
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "format": "date"
+                    },
+                    "available_count": {
+                        "type": "integer"
+                    },
+                    "recorded_count": {
+                        "type": "integer"
+                    },
+                    "missing_count": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "available_count",
+                    "date",
+                    "missing_count",
+                    "recorded_count"
+                ]
+            },
+            "ProductionHistoryOutput": {
+                "type": "object",
+                "properties": {
+                    "plant_id": {
+                        "type": "integer"
+                    },
+                    "configuration_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "timezone": {
+                        "type": "string"
+                    },
+                    "available_start_date": {
+                        "type": "string",
+                        "format": "date",
+                        "nullable": true
+                    },
+                    "available_end_date": {
+                        "type": "string",
+                        "format": "date",
+                        "nullable": true
+                    },
+                    "start_date": {
+                        "type": "string",
+                        "format": "date"
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "format": "date"
+                    },
+                    "resolution_minutes": {
+                        "$ref": "#/components/schemas/ResolutionMinutesEnum"
+                    },
+                    "days": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ProductionDayOutput"
+                        }
+                    },
+                    "intervals": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ProductionIntervalOutput"
+                        }
+                    },
+                    "observations": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ObservationOutput"
+                        }
+                    }
+                },
+                "required": [
+                    "available_end_date",
+                    "available_start_date",
+                    "configuration_id",
+                    "days",
+                    "end_date",
+                    "intervals",
+                    "observations",
+                    "plant_id",
+                    "resolution_minutes",
+                    "start_date",
+                    "timezone"
+                ]
+            },
+            "ProductionIntervalOutput": {
+                "type": "object",
+                "properties": {
+                    "starts_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "ends_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "reference_available": {
+                        "type": "boolean"
+                    },
+                    "observation": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ObservationOutput"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "can_enter": {
+                        "type": "boolean"
+                    },
+                    "unavailable_reason": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "can_enter",
+                    "ends_at",
+                    "observation",
+                    "reference_available",
+                    "starts_at",
+                    "unavailable_reason"
+                ]
+            },
             "ProviderEnum": {
                 "enum": [
                     "fixture",
@@ -3010,6 +3220,14 @@
                     "daily_reminder_limit",
                     "queries_per_email"
                 ]
+            },
+            "ResolutionMinutesEnum": {
+                "enum": [
+                    30,
+                    60
+                ],
+                "type": "integer",
+                "description": "* `30` - 30\n* `60` - 60"
             },
             "RotateSecretInput": {
                 "type": "object",

@@ -122,6 +122,42 @@ class CalibrationInput(InputSerializer):
     end_date = serializers.DateField()
 
 
+class ProductionQuery(InputSerializer):
+    start_date = serializers.DateField(required=False)
+    end_date = serializers.DateField(required=False)
+    resolution_minutes = serializers.ChoiceField(choices=(30, 60), default=60)
+
+
+class ProductionDayOutput(serializers.Serializer[dict[str, Any]]):
+    date = serializers.DateField()
+    available_count = serializers.IntegerField()
+    recorded_count = serializers.IntegerField()
+    missing_count = serializers.IntegerField()
+
+
+class ProductionIntervalOutput(serializers.Serializer[dict[str, Any]]):
+    starts_at = serializers.DateTimeField()
+    ends_at = serializers.DateTimeField()
+    reference_available = serializers.BooleanField()
+    observation = ObservationOutput(allow_null=True)
+    can_enter = serializers.BooleanField()
+    unavailable_reason = serializers.CharField(allow_null=True)
+
+
+class ProductionHistoryOutput(serializers.Serializer[dict[str, Any]]):
+    plant_id = serializers.IntegerField()
+    configuration_id = serializers.IntegerField(allow_null=True)
+    timezone = serializers.CharField()
+    available_start_date = serializers.DateField(allow_null=True)
+    available_end_date = serializers.DateField(allow_null=True)
+    start_date = serializers.DateField()
+    end_date = serializers.DateField()
+    resolution_minutes = serializers.ChoiceField(choices=(30, 60))
+    days = ProductionDayOutput(many=True)
+    intervals = ProductionIntervalOutput(many=True)
+    observations = ObservationOutput(many=True)
+
+
 class CalibrationOutput(serializers.ModelSerializer[CalibrationRun]):
     configuration_id = serializers.IntegerField()
     binding_id = serializers.IntegerField()

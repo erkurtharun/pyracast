@@ -1,7 +1,9 @@
 import os
 import time
+import uuid
 from datetime import timedelta
 
+import dramatiq
 import pytest
 from dramatiq import Worker
 from dramatiq.brokers.stub import StubBroker
@@ -67,8 +69,12 @@ def test_calibration_queue_redelivery_completes_once_without_provider_requests()
 def test_rabbitmq_delivers_calibration_job() -> None:
     run = calibration_request()
     broker = make_broker()
-    actor = make_calibration_actor(broker)
-    worker = Worker(broker, worker_threads=1, worker_timeout=100)
+    original = make_calibration_actor(broker)
+    queue = f"test_calibration_{uuid.uuid4().hex}"
+    actor = dramatiq.actor(broker=broker, actor_name=queue, queue_name=queue, max_retries=0)(
+        original.fn
+    )
+    worker = Worker(broker, queues={queue}, worker_threads=1, worker_timeout=100)
     worker.start()
     try:
         actor.send(run.pk)

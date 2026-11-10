@@ -126,6 +126,15 @@ history remains readable. Activation applies only after its recorded time, so
 archived forecasts retain the factor available then. Holdout improvement against
 estimated actuals does not establish improvement in future forecast accuracy.
 
+Meter entry requires matching archived estimated actuals for the entire interval.
+Saving at least seven complete valid matched days automatically schedules fitting;
+gaps, outage labels and partial days do not satisfy this preparation threshold.
+Use a 90-day window ending on the latest recorded local day and elapsed durations, including DST
+days. Capture both an observation timestamp cutoff and an ID watermark so readings
+saved during fitting cannot enter that dataset, even with identical timestamps.
+New readings remain saved and can prepare a subsequent candidate. Preparation never
+activates a factor automatically.
+
 ## Historical irradiance and measured performance
 
 Solcast historical GHI/GTI are satellite/model-derived **estimated actuals**; they

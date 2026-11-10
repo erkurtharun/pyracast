@@ -77,11 +77,12 @@ def test_rabbitmq_duplicate_reminder_sends_one_mail_without_provider_requests(
     requests, jobs = RequestAttempt.objects.count(), CollectionJob.objects.count()
     monkeypatch.setattr(runtime, "datetime", SimpleNamespace(now=lambda _: SLOT))
     broker = forecast_runtime.make_broker()
+    original = runtime.make_notification_actor(broker)
     queue = f"test_reminders_{uuid.uuid4().hex}"
     actor = dramatiq.actor(broker=broker, actor_name=queue, queue_name=queue, max_retries=0)(
-        runtime.deliver_notification
+        original.fn
     )
-    worker = Worker(broker, worker_threads=1, worker_timeout=100)
+    worker = Worker(broker, queues={queue}, worker_threads=1, worker_timeout=100)
     worker.start()
     try:
         actor.send(delivery.pk)

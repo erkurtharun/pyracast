@@ -110,6 +110,67 @@ test("a customer manages an approved region through the real API", async ({
         page.getByText("View interval data (48 intervals)"),
     ).toBeVisible();
 
+    await page
+        .getByRole("button", { name: "Calibration", exact: true })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "Production journal" }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: "Request calibration" }),
+    ).toHaveCount(0);
+    await page.getByLabel("From date").fill(process.env.BROWSER_HISTORY_DATE!);
+    await page.getByLabel("To date").fill(process.env.BROWSER_HISTORY_DATE!);
+    const meterEntries = page.getByRole("table", { name: "Meter entries" });
+    await expect(meterEntries.getByRole("spinbutton").first()).toBeEnabled();
+    await meterEntries.getByRole("spinbutton").first().fill("1250");
+    await page.getByRole("button", { name: "Save meter readings" }).click();
+    await expect(page.getByText("1 meter readings saved.")).toBeVisible();
+    await expect(
+        meterEntries.getByText("1.25 MWh", { exact: true }),
+    ).toBeVisible();
+    const historyDate = new Date(
+        `${process.env.BROWSER_HISTORY_DATE!}T12:00:00Z`,
+    );
+    historyDate.setUTCDate(historyDate.getUTCDate() - 10);
+    const missingDate = historyDate.toISOString().slice(0, 10);
+    await page.getByLabel("From date").fill(missingDate);
+    await page.getByLabel("To date").fill(missingDate);
+    await expect(meterEntries.getByRole("spinbutton")).toHaveCount(24);
+    await expect(meterEntries.getByRole("spinbutton").first()).toBeDisabled();
+    await expect(
+        page.getByRole("button", { name: "Save meter readings" }),
+    ).toBeDisabled();
+    await page.getByLabel("To date").fill(process.env.BROWSER_HISTORY_DATE!);
+    await page.getByLabel("From date").fill(process.env.BROWSER_HISTORY_DATE!);
+    await expect(
+        meterEntries.getByText("1.25 MWh", { exact: true }),
+    ).toBeVisible();
+    await page.screenshot({
+        path: testInfo.outputPath("production-journal-desktop.png"),
+        fullPage: true,
+    });
+    const journalA11y = await new AxeBuilder({ page })
+        .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+        .analyze();
+    expect(
+        journalA11y.violations.filter(
+            (item) => item.impact === "critical" || item.impact === "serious",
+        ),
+    ).toEqual([]);
+    await page.reload();
+    await page.getByRole("button", { name: /Site/ }).click();
+    await page.getByRole("button", { name: "Solar plants" }).click();
+    await page.getByRole("button", { name: /Browser plant/ }).click();
+    await page
+        .getByRole("button", { name: "Calibration", exact: true })
+        .click();
+    await expect(
+        page
+            .getByRole("table", { name: "Meter entries" })
+            .getByText("1.25 MWh", { exact: true }),
+    ).toBeVisible();
+
     await page.getByRole("button", { name: /all plants/i }).click();
     await page
         .getByRole("button", { name: "Data collection", exact: true })

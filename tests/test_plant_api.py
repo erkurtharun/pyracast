@@ -16,12 +16,14 @@ from pyracast.forecasts.models import CollectionJob, ForecastSnapshot
 from pyracast.plants.models import CalibrationRun, Plant, PlantForecast, ProductionObservation
 from pyracast.plants.serializers import AwareDateTime, FiniteFloat
 from tests.test_domain import make_system
+from tests.test_plant_operations import saved_actuals
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
 def setup_plant() -> tuple[Client, str, dict[str, Any]]:
     system = make_system(approved=True)
+    saved_actuals(system, datetime(2020, 1, 1).date())
     client = Client()
     client.force_login(system.member)
     base = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/"

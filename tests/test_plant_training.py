@@ -105,6 +105,33 @@ def test_durable_fit_freezes_inputs_and_requires_separate_activation(
     assert not pending_calibration_ids(NOW)
 
 
+def test_negative_power_outside_matched_days_does_not_break_fit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    sources = history(system, plant)
+    source = ForecastSnapshot.objects.get(pk=sources[0])
+    first_start = datetime.fromisoformat(source.normalized_intervals[0]["start"])
+    source.normalized_intervals.insert(
+        0,
+        {
+            "start": (first_start - timedelta(minutes=30)).isoformat(),
+            "end": first_start.isoformat(),
+            "power_kw": -1,
+        },
+    )
+    source.coverage_start = first_start - timedelta(minutes=30)
+    source.save()
+    run = request_run(system, plant)
+    assert run_calibration(run.pk, NOW)
+    run.refresh_from_db()
+    assert run.status == "ready"
+    assert run.result["valid_days"] == 7
+    assert len(run.dataset_manifest["observations"]) == 168
+    assert run.factor is not None
+    assert 0.5 < run.factor < 0.6
+
+
 def test_archived_forecasts_cannot_replace_missing_estimated_actuals(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

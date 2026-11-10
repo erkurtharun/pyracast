@@ -15,7 +15,8 @@ from django.utils import timezone
 from pyracast.connections.models import ProviderAccount
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY, select_actual_snapshot
 from pyracast.irradiance import local_day_bounds
-from pyracast.plants.forecasting import power_intervals, power_limit
+from pyracast.plants.availability import actual_power_intervals
+from pyracast.plants.forecasting import power_limit
 from pyracast.plants.models import (
     CalibrationRun,
     Plant,
@@ -25,6 +26,7 @@ from pyracast.plants.models import (
 )
 from pyracast.plants.numerics import CalibrationSample, FitResult, PowerInterval, fit_calibration
 from pyracast.plants.operations import configuration_is_current
+from pyracast.plants.preparation import prepare_calibration
 from pyracast.regions.models import Region
 
 LEASE_DURATION = timedelta(minutes=5)
@@ -85,6 +87,7 @@ def _claim(run_id: int, now: datetime) -> _Lease | None:
                 "lease_expires_at",
             )
         )
+        prepare_calibration(run.plant_id, now)
         return None
 
 
@@ -101,12 +104,15 @@ def _dataset(
         starts_at__gte=start,
         ends_at__lte=end,
     )
-    late = candidates.filter(
-        Q(recorded_at__gt=run.cutoff_at) | Q(ends_at__gt=run.cutoff_at)
-    ).count()
-    observations = candidates.filter(
-        recorded_at__lte=run.cutoff_at, ends_at__lte=run.cutoff_at
-    ).order_by("starts_at", "pk")
+    excluded = Q(recorded_at__gt=run.cutoff_at) | Q(ends_at__gt=run.cutoff_at)
+    if run.observation_id_cutoff is not None:
+        excluded |= Q(pk__gt=run.observation_id_cutoff)
+    late = candidates.filter(excluded).count()
+    observations = (
+        candidates.filter(recorded_at__lte=run.cutoff_at, ends_at__lte=run.cutoff_at)
+        .exclude(excluded)
+        .order_by("starts_at", "pk")
+    )
     samples = []
     entries: list[dict[str, object]] = []
     sources: dict[str, dict[str, object] | None] = {}
@@ -129,7 +135,7 @@ def _dataset(
                 }
             )
             native_by_day[key] = (
-                () if snapshot is None else power_intervals(snapshot, configuration)
+                () if snapshot is None else actual_power_intervals(snapshot, configuration)
             )
         pieces = tuple(
             PowerInterval(
@@ -178,6 +184,7 @@ def _dataset(
         "limit_mw": power_limit(configuration),
         "measurement_basis": configuration.measurement_basis,
         "cutoff_at": run.cutoff_at.isoformat(),
+        "observation_id_cutoff": run.observation_id_cutoff,
         "window_start": run.window_start.isoformat(),
         "window_end": run.window_end.isoformat(),
         "selection_policy": HISTORY_SELECTION_POLICY,
@@ -243,12 +250,15 @@ def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now:
                 "dataset_sha256": run.dataset_sha256,
             },
         )
+        prepare_calibration(run.plant_id, now)
         return run.status != "superseded"
 
 
 def _fail(lease: _Lease, now: datetime) -> None:
     started = time.monotonic()
     with transaction.atomic():
+        Region.objects.select_for_update().get(pk=lease.configuration.binding.region_id)
+        Plant.objects.select_for_update().get(pk=lease.run.plant_id)
         run = CalibrationRun.objects.select_for_update().get(pk=lease.run.pk)
         now += timedelta(seconds=time.monotonic() - started)
         if (
@@ -272,6 +282,8 @@ def _fail(lease: _Lease, now: datetime) -> None:
                 "lease_expires_at",
             )
         )
+        if run.status == "failed":
+            prepare_calibration(run.plant_id, now)
 
 
 def run_calibration(run_id: int, now: datetime | None = None) -> bool:

@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import date, timedelta
 from io import StringIO
 from pathlib import Path
 
@@ -15,12 +15,14 @@ from pyracast.plants.models import (
     ProductionObservation,
 )
 from tests.test_domain import make_system
+from tests.test_plant_operations import saved_actuals
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
 def test_operator_workflow_and_permissions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     system = make_system(approved=True)
+    saved_actuals(system, date(2020, 1, 1))
     monkeypatch.chdir(tmp_path)
     out = StringIO()
     call_command(

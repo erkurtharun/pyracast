@@ -12,6 +12,7 @@ from pyracast.accounts.operations import require_member
 from pyracast.plants import operations
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import CalibrationRun, Plant, ProductionObservation
+from pyracast.plants.production import production_history
 from pyracast.plants.serializers import (
     ActivationOutput,
     CalibrationInput,
@@ -25,6 +26,8 @@ from pyracast.plants.serializers import (
     PlantForecastOutput,
     PlantInput,
     PlantOutput,
+    ProductionHistoryOutput,
+    ProductionQuery,
 )
 from pyracast.regions.models import Region
 
@@ -110,6 +113,15 @@ class ObservationsView(ScopedView):
             observations=rows,
         )
         return Response(result, status=201)
+
+
+class ProductionView(ScopedView):
+    @extend_schema(parameters=[ProductionQuery], responses=ProductionHistoryOutput)
+    def get(self, request: Request, **kwargs: Any) -> Response:
+        plant = self.plant()
+        data = ProductionQuery(data=request.query_params)
+        data.is_valid(raise_exception=True)
+        return Response(production_history(plant, **data.validated_data))
 
 
 class CalibrationsView(ScopedView):

@@ -88,7 +88,18 @@ async function mockApi(
                 unit: "kWh",
             });
             data = { created: 1, existing: 0, count: 1, ids: [1] };
-        } else if (path.endsWith("/calibrations/"))
+        } else if (path.endsWith("/production/"))
+            data = {
+                timezone: region.timezone,
+                available_start_date: null,
+                available_end_date: null,
+                start_date: "2026-01-01",
+                end_date: "2026-01-07",
+                days: [],
+                intervals: [],
+                observations: [],
+            };
+        else if (path.endsWith("/calibrations/"))
             data =
                 method === "POST"
                     ? {
@@ -661,4 +672,289 @@ test("mock contract: follows tenant pagination and keeps missing intervals visib
         .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
         .analyze();
     expect(scan.violations).toEqual([]);
+});
+async function openJournal(page: Page) {
+    await page.goto("/");
+    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await page
+        .getByRole("button", { name: "Solar plants", exact: true })
+        .click();
+    await page.getByRole("button", { name: /East array/ }).click();
+    await page
+        .getByRole("button", { name: "Calibration", exact: true })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "Production journal" }),
+    ).toBeVisible();
+}
+
+test("production journal saves missing readings, preserves dates and shows archived availability", async ({
+    page,
+}) => {
+    await mockApi(page);
+    type Saved = {
+        id: number;
+        configuration_id: number;
+        starts_at: string;
+        ends_at: string;
+        energy_mwh: number;
+        quality: string;
+        source: string;
+    };
+    const observations: Saved[] = [];
+    const previousRun = {
+        id: 40,
+        window_start: "2025-12-01",
+        window_end: "2025-12-07",
+        status: "ready",
+        assessment: "provisional",
+        factor: 1.1,
+        result: {},
+    };
+    await page.route("**/plants/21/calibrations/", async (route) => {
+        await route.fulfill({
+            json: paged(
+                observations.length
+                    ? [
+                          previousRun,
+                          {
+                              ...previousRun,
+                              id: 41,
+                              status: "pending",
+                              assessment: "pending",
+                              factor: null,
+                          },
+                      ]
+                    : [previousRun],
+            ),
+        });
+    });
+    await page.route("**/plants/21/calibrations/40/", async (route) => {
+        await route.fulfill({ json: previousRun });
+    });
+
+    await page.route("**/plants/21/observations/", async (route) => {
+        const body = route.request().postDataJSON();
+        expect(body).toMatchObject({ configuration_id: 31, unit: "MWh" });
+        for (const row of body.observations)
+            observations.push({
+                ...row,
+                energy_mwh: row.energy,
+                configuration_id: 31,
+                id: observations.length + 1,
+            });
+        await route.fulfill({
+            json: {
+                created: body.observations.length,
+                existing: 0,
+                count: body.observations.length,
+            },
+        });
+    });
+    await page.route("**/plants/21/production/**", async (route) => {
+        const url = new URL(route.request().url()),
+            date = url.searchParams.get("start_date") ?? "2026-01-07",
+            resolution = Number(url.searchParams.get("resolution_minutes"));
+        const starts_at = `${date}T09:00:00Z`,
+            ends_at = `${date}T${resolution === 30 ? "09:30" : "10:00"}:00Z`;
+        const observation =
+            observations.find(
+                (row) => row.starts_at === starts_at && row.ends_at === ends_at,
+            ) ?? null;
+        await route.fulfill({
+            json: {
+                timezone: region.timezone,
+                available_start_date: "2026-01-01",
+                available_end_date: "2026-01-07",
+                start_date: date,
+                end_date: date,
+                days: [
+                    {
+                        date,
+                        available_count: 1,
+                        recorded_count: observation ? 1 : 0,
+                        missing_count: observation ? 0 : 1,
+                    },
+                ],
+                intervals: [
+                    {
+                        starts_at,
+                        ends_at,
+                        observation,
+                        can_enter: !observation,
+                        unavailable_reason: observation
+                            ? "already_recorded"
+                            : null,
+                    },
+                    {
+                        starts_at: `${date}T11:00:00Z`,
+                        ends_at: `${date}T12:00:00Z`,
+                        observation: null,
+                        can_enter: false,
+                        unavailable_reason: "estimated_actuals_unavailable",
+                    },
+                ],
+                observations,
+            },
+        });
+    });
+    await openJournal(page);
+    await page
+        .getByRole("button", { name: "View details", exact: true })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "Calibration #40", exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: "Request calibration" }),
+    ).toHaveCount(0);
+    await expect(page.getByLabel("From date")).not.toHaveAttribute("min");
+    await expect(
+        page.getByLabel("Production 2026-01-07T11:00:00Z"),
+    ).toBeDisabled();
+    await expect(
+        page.getByText("No archived estimated actuals for this interval."),
+    ).toBeVisible();
+    await page.getByLabel("Production 2026-01-07T09:00:00Z").fill("250");
+    await page.getByRole("button", { name: "Save meter readings" }).click();
+    await expect(
+        page.getByRole("cell", { name: "0.25 MWh", exact: true }),
+    ).toBeVisible();
+    expect(observations).toHaveLength(1);
+    await expect(
+        page.getByRole("cell", { name: "#41", exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("heading", { name: "Calibration #40", exact: true }),
+    ).toBeVisible();
+    await page.getByLabel("From date").fill("2026-01-06");
+    await expect(
+        page.getByLabel("Production 2026-01-06T09:00:00Z"),
+    ).toHaveValue("");
+    await page.getByLabel("Production 2026-01-06T09:00:00Z").fill("100");
+    await page.getByLabel("Meter interval").selectOption("30");
+    await expect(
+        page.getByText("Meter entries \u00b7 30 minutes", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByLabel("Production 2026-01-06T09:00:00Z"),
+    ).toHaveValue("");
+    await page.getByLabel("Entry energy unit").selectOption("MWh");
+    await page.getByLabel("Production 2026-01-06T09:00:00Z").fill("0.5");
+    await page.getByRole("button", { name: "Save meter readings" }).click();
+    await expect(
+        page.getByRole("cell", { name: "0.5 MWh", exact: true }),
+    ).toBeVisible();
+    expect(observations[1]).toMatchObject({
+        energy_mwh: 0.5,
+        ends_at: "2026-01-06T09:30:00Z",
+    });
+    await page.getByLabel("From date").fill("2026-01-07");
+    await page.getByLabel("Meter interval").selectOption("60");
+    await expect(
+        page.getByRole("cell", { name: "0.25 MWh", exact: true }),
+    ).toBeVisible();
+});
+
+test("production journal ignores stale dates and preserves new drafts during a save", async ({
+    page,
+}) => {
+    await mockApi(page);
+    let releaseDate!: () => void;
+    const dateGate = new Promise<void>((resolve) => {
+        releaseDate = resolve;
+    });
+    let releaseSave!: () => void;
+    const saveGate = new Promise<void>((resolve) => {
+        releaseSave = resolve;
+    });
+    let dateRequested!: () => void;
+    const oldDateRequested = new Promise<void>((resolve) => {
+        dateRequested = resolve;
+    });
+    await page.route("**/plants/21/production/**", async (route) => {
+        const date =
+            new URL(route.request().url()).searchParams.get("start_date") ??
+            "2026-01-07";
+        if (date === "2026-01-06") {
+            dateRequested();
+            await dateGate;
+        }
+        await route.fulfill({
+            json: {
+                timezone: region.timezone,
+                available_start_date: "2026-01-01",
+                available_end_date: "2026-01-07",
+                start_date: date,
+                end_date: date,
+                days: [],
+                intervals: [
+                    {
+                        starts_at: `${date}T09:00:00Z`,
+                        ends_at: `${date}T10:00:00Z`,
+                        observation: null,
+                        can_enter: true,
+                        unavailable_reason: null,
+                    },
+                ],
+                observations: [],
+            },
+        });
+    });
+    await page.route("**/plants/21/observations/", async (route) => {
+        expect(route.request().postDataJSON().observations).toEqual([
+            {
+                starts_at: "2026-01-07T09:00:00Z",
+                ends_at: "2026-01-07T10:00:00Z",
+                energy: 0.25,
+                quality: "valid",
+                source: "meter",
+            },
+        ]);
+        await saveGate;
+        await route.fulfill({ json: { created: 1, existing: 0, count: 1 } });
+    });
+    await openJournal(page);
+    const entry = page.getByLabel("Production 2026-01-07T09:00:00Z");
+    await entry.fill("250");
+    await page.getByRole("button", { name: "Save meter readings" }).click();
+    await expect(page.getByRole("button", { name: "Saving…" })).toBeDisabled();
+    await entry.fill("300");
+    releaseSave();
+    await expect(
+        page.getByText("1 meter readings saved.", { exact: true }),
+    ).toBeVisible();
+    await expect(entry).toHaveValue("300");
+    await page.getByLabel("From date").fill("2026-01-06");
+    await oldDateRequested;
+    await page.getByLabel("From date").fill("2026-01-05");
+    await expect(
+        page.getByLabel("Production 2026-01-05T09:00:00Z"),
+    ).toBeVisible();
+    releaseDate();
+    await expect(
+        page.getByLabel("Production 2026-01-06T09:00:00Z"),
+    ).toHaveCount(0);
+    await expect(page.getByLabel("From date")).toHaveValue("2026-01-05");
+});
+
+test("production journal stops loading after a failed history request", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/plants/21/production/**", async (route) => {
+        await route.fulfill({
+            status: 503,
+            json: { detail: "Production history is temporarily unavailable." },
+        });
+    });
+    await openJournal(page);
+    await expect(
+        page.getByRole("alert").filter({
+            hasText: "Production history is temporarily unavailable.",
+        }),
+    ).toBeVisible();
+    await expect(
+        page.getByText("Loading production history?", { exact: true }),
+    ).toHaveCount(0);
 });

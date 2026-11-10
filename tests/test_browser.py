@@ -16,7 +16,7 @@ from pyracast.connections.operations import validate_binding
 from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule
 from pyracast.notifications.models import ReminderPreference
-from pyracast.plants.models import Plant
+from pyracast.plants.models import CalibrationRun, Plant, ProductionObservation
 from pyracast.providers import FixtureProvider
 from pyracast.regions.operations import approve_region, submit_region
 from tests.test_domain import FakeAdapter, make_system
@@ -93,6 +93,10 @@ def test_browser_against_live_django(live_server: Any) -> None:
     assert plant.current_configuration.dc_capacity_mw == 130
     assert plant.current_configuration.inverter_capacity_mw == 100
     assert plant.current_configuration.export_limit_mw is None
+    observation = ProductionObservation.objects.get(plant=plant)
+    assert observation.energy_mwh == 1.25
+    assert observation.configuration_id == plant.current_configuration_id
+    assert not CalibrationRun.objects.filter(plant=plant).exists()
     schedule = CollectionSchedule.objects.get(region=system.region)
     assert schedule.enabled
     assert schedule.times == ["09:00", "16:00"]

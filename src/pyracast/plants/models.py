@@ -110,6 +110,7 @@ class CalibrationRun(models.Model):
     window_start = models.DateField()
     window_end = models.DateField()
     cutoff_at = models.DateTimeField()
+    observation_id_cutoff = models.PositiveBigIntegerField(null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True)
     status = models.CharField(
