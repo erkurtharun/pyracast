@@ -1,5 +1,7 @@
 ﻿"use client";
 import { useEffect, useState } from "react";
+import { CsvDownload } from "./csv-download";
+import { dataIntervalRange } from "@/lib/intervals";
 import { request } from "@/lib/api";
 import type { components } from "@/lib/schema";
 import { localDay } from "./data-source";
@@ -87,6 +89,15 @@ export function ProductionHistory({
             timeZoneName: "short",
         }).format(new Date(value));
     const day = ready ? history.days[0] : undefined;
+    const visibleIntervals = ready
+        ? dataIntervalRange(
+              history.intervals,
+              (row) =>
+                  row.reference_available ||
+                  row.observation != null ||
+                  Boolean(drafts[`${row.starts_at}/${row.ends_at}`]?.energy),
+          )
+        : [];
     const pending = ready
         ? history.intervals.filter(
               (row) =>
@@ -230,6 +241,26 @@ export function ProductionHistory({
                 )
             ) : (
                 <>
+                    <CsvDownload
+                        label="Download production journal CSV"
+                        filename={`production-journal-${history.start_date}-${history.end_date}`}
+                        records={history.intervals.map((row) => {
+                            const draft =
+                                drafts[`${row.starts_at}/${row.ends_at}`];
+                            return {
+                                ...row,
+                                draft_energy: draft?.energy
+                                    ? Number(draft.energy)
+                                    : null,
+                                draft_unit: draft?.unit ?? null,
+                            };
+                        })}
+                        metadata={{
+                            ...history,
+                            intervals: undefined,
+                            observations: undefined,
+                        }}
+                    />
                     {day && (
                         <div className="journal-summary">
                             <div>
@@ -277,8 +308,11 @@ export function ProductionHistory({
                             void save();
                         }}
                     >
-                        {history.intervals.length === 0 ? (
-                            <p>No daylight intervals for this day.</p>
+                        {visibleIntervals.length === 0 ? (
+                            <p>
+                                No comparison data or saved meter intervals are
+                                available for this day.
+                            </p>
                         ) : (
                             <div className="table-scroll">
                                 <table className="journal-table">
@@ -293,7 +327,7 @@ export function ProductionHistory({
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {history.intervals.map((row) => {
+                                        {visibleIntervals.map((row) => {
                                             const key = `${row.starts_at}/${row.ends_at}`,
                                                 draft = drafts[key];
                                             return (
@@ -383,6 +417,15 @@ export function ProductionHistory({
                                 Saved meter readings (
                                 {history.observations.length})
                             </summary>
+                            <CsvDownload
+                                label="Download saved readings CSV"
+                                filename={`meter-readings-${history.start_date}-${history.end_date}`}
+                                records={history.observations}
+                                metadata={{
+                                    timezone: history.timezone,
+                                    plant_id: history.plant_id,
+                                }}
+                            />
                             <div className="table-scroll">
                                 <table>
                                     <caption>

@@ -166,6 +166,8 @@ class PerformanceDay(serializers.Serializer[dict[str, Any]]):
     predicted_energy_mwh = serializers.FloatField(allow_null=True)
     baseline_energy_mwh = serializers.FloatField(allow_null=True)
     error_mwh = serializers.FloatField(allow_null=True)
+    manual_observation_ids = serializers.ListField(child=serializers.IntegerField())
+    settlement_snapshot_ids = serializers.ListField(child=serializers.IntegerField())
 
 
 class PerformanceOutput(serializers.Serializer[dict[str, Any]]):

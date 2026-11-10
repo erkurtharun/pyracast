@@ -14,6 +14,7 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.plants import training
 from pyracast.plants.models import (
     CalibrationActivation,
+    CalibrationRun,
     Plant,
     PlantEvent,
     ProductionObservation,
@@ -196,6 +197,7 @@ def test_archived_forecasts_cannot_replace_missing_estimated_actuals(
     system, plant = make_plant(monkeypatch)
     sources = history(system, plant)
     ForecastSnapshot.objects.filter(pk__in=sources).update(source_kind="forecast")
+    CalibrationRun.objects.all().delete()
     run = request_run(system, plant)
     assert run_calibration(run.pk, NOW)
     run.refresh_from_db()
@@ -211,7 +213,7 @@ def test_actuals_and_meter_cutoff_exclude_later_information(
 ) -> None:
     system, plant = make_plant(monkeypatch)
     sources = history(system, plant)
-    run = request_run(system, plant)
+    CalibrationRun.objects.all().delete()
     first = ForecastSnapshot.objects.get(pk=sources[0])
     second = ForecastSnapshot.objects.get(pk=sources[1])
     ForecastSnapshot.objects.filter(pk=first.pk).update(collected_at=NOW + timedelta(seconds=1))
@@ -221,6 +223,7 @@ def test_actuals_and_meter_cutoff_exclude_later_information(
     ProductionObservation.objects.filter(pk=excluded.pk).update(
         recorded_at=NOW + timedelta(seconds=1)
     )
+    run = request_run(system, plant)
     assert run_calibration(run.pk, NOW)
     run.refresh_from_db()
     assert run.status == "insufficient"
@@ -417,6 +420,7 @@ def test_training_uses_latest_actuals_available_at_request_cutoff(
     future.normalized_intervals = [dict(row, power_kw=0.9) for row in intervals]
     future.coverage_start, future.coverage_end = latest.coverage_start, latest.coverage_end
     future.save()
+    CalibrationRun.objects.all().delete()
     run = request_run(system, plant)
     assert run_calibration(run.pk, NOW)
     run.refresh_from_db()

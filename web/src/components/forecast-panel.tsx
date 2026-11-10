@@ -1,6 +1,8 @@
 "use client";
 import type { Forecast } from "@/lib/api";
 import { Empty, JsonDetails, Notice, Stat, Tag } from "./ui";
+import { CsvDownload } from "./csv-download";
+import { dataIntervalRange } from "@/lib/intervals";
 type Interval = {
     start: string;
     end: string;
@@ -53,11 +55,18 @@ export function ForecastPanel({
             </>
         );
     const result = forecast.result as Record<string, unknown>,
-        rows = (
+        allRows = (
             Array.isArray(result.intervals) ? result.intervals : []
         ) as Interval[];
     const metric = electrical ? "mean_power_mw" : "ghi_wm2",
         unit = electrical ? "MW" : "W/m²";
+    const positiveRows = dataIntervalRange(
+        allRows,
+        (row) => typeof row[metric] === "number" && row[metric]! > 0,
+    );
+    const rows = positiveRows.length
+        ? positiveRows
+        : dataIntervalRange(allRows, (row) => row[metric] != null);
     const max = Math.max(
         1,
         ...rows.map((row) =>
@@ -88,7 +97,17 @@ export function ForecastPanel({
                         </p>
                     )}
                 </div>
-                <Tag>{forecast.freshness}</Tag>
+                <div className="button-group">
+                    <CsvDownload
+                        filename={`${electrical ? "plant" : "region"}-${forecast.date}-${forecast.source_kind}`}
+                        records={allRows}
+                        metadata={{
+                            ...forecast,
+                            result: { ...result, intervals: undefined },
+                        }}
+                    />
+                    <Tag>{forecast.freshness}</Tag>
+                </div>
             </div>
             {electrical &&
                 Array.isArray(result.quality_flags) &&
@@ -134,8 +153,30 @@ export function ForecastPanel({
                     unit="%"
                 />
             </div>
+            {rows.length === 0 && (
+                <p>
+                    No interval values are available for this day. Missing
+                    values are not zero.
+                </p>
+            )}
             {rows.length > 0 && (
                 <>
+                    {positiveRows.length > 0 &&
+                        rows.length < allRows.length && (
+                            <p className="fine">
+                                Showing the first through last generating
+                                interval, including gaps. CSV includes all
+                                intervals.
+                            </p>
+                        )}
+                    {!positiveRows.length &&
+                        rows.every(
+                            (row) => row[metric] == null || row[metric] === 0,
+                        ) && (
+                            <p className="fine">
+                                All available intervals have zero generation.
+                            </p>
+                        )}
                     <div className="chart-title">
                         <strong>
                             {electrical

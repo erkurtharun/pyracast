@@ -14,9 +14,15 @@ from django.utils import timezone
 
 from pyracast.connections.models import ProviderAccount
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY, select_actual_snapshot
+from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.availability import actual_power_intervals
 from pyracast.plants.forecasting import power_limit
+from pyracast.plants.measurements import (
+    MEASUREMENT_POLICY,
+    select_measurements,
+    settlement_identity_current,
+)
 from pyracast.plants.models import (
     CalibrationRun,
     Plant,
@@ -85,6 +91,7 @@ def _claim(run_id: int, now: datetime) -> _Lease | None:
         if (
             not configuration_is_current(configuration)
             or run.binding_id != configuration.binding_id
+            or not settlement_identity_current(run)
         ):
             run.status = "superseded"
         elif run.attempts >= MAX_ATTEMPTS or run.cutoff_at > now:
@@ -131,10 +138,13 @@ def _dataset(
     if run.observation_id_cutoff is not None:
         excluded |= Q(pk__gt=run.observation_id_cutoff)
     late = candidates.filter(excluded).count()
-    observations = (
-        candidates.filter(recorded_at__lte=run.cutoff_at, ends_at__lte=run.cutoff_at)
-        .exclude(excluded)
-        .order_by("starts_at", "pk")
+    observations, _ = select_measurements(
+        configuration,
+        start,
+        end,
+        run.cutoff_at,
+        observation_id_cutoff=run.observation_id_cutoff,
+        settlement_snapshot_ids=run.settlement_snapshot_ids,
     )
     samples = []
     entries: list[dict[str, object]] = []
@@ -145,7 +155,12 @@ def _dataset(
         day = observation.starts_at.astimezone(zone).date()
         key = day.isoformat()
         if key not in sources:
-            snapshot = select_actual_snapshot(configuration.binding, day, run.cutoff_at)
+            if run.reference_snapshot_ids is not None:
+                snapshot = ForecastSnapshot.objects.filter(
+                    pk=run.reference_snapshot_ids.get(key)
+                ).first()
+            else:
+                snapshot = select_actual_snapshot(configuration.binding, day, run.cutoff_at)
             sources[key] = (
                 None
                 if snapshot is None
@@ -172,6 +187,14 @@ def _dataset(
         entries.append(
             {
                 "observation_id": observation.pk,
+                "settlement_snapshot_id": observation.snapshot.pk if observation.snapshot else None,
+                "settlement_digest": observation.snapshot.content_sha256
+                if observation.snapshot
+                else None,
+                "settlement_provider": observation.snapshot.provider_plant
+                if observation.snapshot
+                else None,
+                "settlement_basis": "net_export" if observation.snapshot else None,
                 "start": observation.starts_at.isoformat(),
                 "end": observation.ends_at.isoformat(),
                 "energy_mwh": observation.energy_mwh,
@@ -201,6 +224,7 @@ def _dataset(
             )
         )
     manifest: dict[str, object] = {
+        "measurement_selection_policy": MEASUREMENT_POLICY,
         "metric_scope": "daylight_intervals",
         "coverage_policy": DAYLIGHT_COVERAGE_POLICY,
         "daylight_policy": DAYLIGHT_POLICY,
@@ -266,6 +290,7 @@ def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now:
         if (
             not configuration_is_current(configuration)
             or run.binding_id != configuration.binding_id
+            or not settlement_identity_current(run)
         ):
             run.status = "superseded"
         else:

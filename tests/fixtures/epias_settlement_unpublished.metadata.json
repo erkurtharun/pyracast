@@ -1,0 +1,12 @@
+{
+  "provider": "EPIAS Transparency Platform",
+  "product": "injection-quantity",
+  "unit": "MWh",
+  "observed_on": "2026-11-11",
+  "eic": "40W000005011621Y",
+  "provider_plant_id": 5011621,
+  "period": "2026-10",
+  "http_status": 200,
+  "sanitization": "Only empty items and pagination retained from the authorized integration response; unrelated totals omitted. No credentials or tickets.",
+  "interpretation": "No published readings; neither zero production nor an HTTP failure."
+}

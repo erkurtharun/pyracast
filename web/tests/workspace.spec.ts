@@ -1,6 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { parseProduction } from "../src/lib/production";
+import { readFile } from "node:fs/promises";
+import Papa from "papaparse";
 const region = {
     id: 11,
     name: "Antalya solar park",
@@ -603,6 +605,181 @@ test("regional and plant data sources identify estimated actuals and retain arch
     await expect(page.getByText(/historical estimated actuals/i)).toBeVisible();
 });
 
+test("forecast crops edge zeros, retains gaps and downloads the full safe CSV", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const values = [0, 12.34567, null, 5, 0];
+    await page.route("**/forecast/**", (route) =>
+        route.fulfill({
+            json: {
+                date: "2026-01-01",
+                timezone: region.timezone,
+                freshness: "fresh",
+                source_kind: "forecast",
+                result: {
+                    complete: false,
+                    model_version: 'Ölçüm, "north"\nroof',
+                    provenance: { supplier: " =SUM(A1:A2)", offset: -2.5 },
+                    intervals: values.map((ghi_wm2, index) => ({
+                        start: `2026-01-01T${String(index + 6).padStart(2, "0")}:00:00+03:00`,
+                        end: `2026-01-01T${String(index + 7).padStart(2, "0")}:00:00+03:00`,
+                        ghi_wm2,
+                    })),
+                },
+            },
+        }),
+    );
+    await page.goto("/");
+    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await page.getByText("View interval data (3 intervals)").click();
+    const table = page.getByRole("table");
+    await expect(table.getByRole("row")).toHaveCount(4);
+    await expect(
+        table.getByRole("cell", { name: "07:00", exact: true }),
+    ).toBeVisible();
+    await expect(
+        table.getByRole("cell", { name: "06:00", exact: true }),
+    ).toHaveCount(0);
+    await expect(page.locator(".chart-column.missing")).toHaveCount(1);
+    const download = page.waitForEvent("download");
+    await page
+        .getByRole("button", { name: "Download CSV", exact: true })
+        .click();
+    const bytes = await readFile((await (await download).path())!);
+    expect([...bytes.subarray(0, 3)]).toEqual([239, 187, 191]);
+    const csv = bytes.toString("utf8");
+    const parsed = Papa.parse<Record<string, string>>(csv, {
+        header: true,
+        skipEmptyLines: true,
+    });
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.data.map((row) => row.ghi_wm2)).toEqual([
+        "0",
+        "12.34567",
+        "",
+        "5",
+        "0",
+    ]);
+    expect(parsed.data[0]).toMatchObject({
+        start: "2026-01-01T06:00:00+03:00",
+        timezone: region.timezone,
+        "result.model_version": 'Ölçüm, "north"\nroof',
+        "result.provenance.supplier": "' =SUM(A1:A2)",
+        "result.provenance.offset": "-2.5",
+    });
+    expect(csv).toContain(",-2.5,");
+});
+
+test("journal retains unmeasured reference slots and internal missing comparisons", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/production/**", (route) =>
+        route.fulfill({
+            json: {
+                timezone: region.timezone,
+                plant_id: 21,
+                configuration_id: 31,
+                start_date: "2026-01-01",
+                end_date: "2026-01-01",
+                resolution_minutes: 60,
+                days: [],
+                observations: [],
+                intervals: [false, true, false, true, false].map(
+                    (reference_available, index) => ({
+                        starts_at: `2026-01-01T${String(index + 6).padStart(2, "0")}:00:00+03:00`,
+                        ends_at: `2026-01-01T${String(index + 7).padStart(2, "0")}:00:00+03:00`,
+                        reference_available,
+                        can_enter: reference_available,
+                        observation: null,
+                        unavailable_reason: reference_available
+                            ? null
+                            : "estimated_actuals_unavailable",
+                    }),
+                ),
+            },
+        }),
+    );
+    await page.goto("/");
+    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await page
+        .getByRole("button", { name: "Solar plants", exact: true })
+        .click();
+    await page.getByRole("button", { name: /East array/ }).click();
+    await page
+        .getByRole("button", { name: "Calibration", exact: true })
+        .click();
+    await expect(page.getByRole("table").getByRole("row")).toHaveCount(4);
+    const missing = page.getByRole("spinbutton", {
+        name: "Production 2026-01-01T08:00:00+03:00",
+        exact: true,
+    });
+    await expect(missing).toBeDisabled();
+    await page
+        .getByRole("spinbutton", {
+            name: "Production 2026-01-01T07:00:00+03:00",
+            exact: true,
+        })
+        .fill("0");
+    const download = page.waitForEvent("download");
+    await page
+        .getByRole("button", { name: "Download production journal CSV" })
+        .click();
+    const csv = await readFile((await (await download).path())!, "utf8");
+    const records = Papa.parse<Record<string, string>>(csv, {
+        header: true,
+        skipEmptyLines: true,
+    }).data;
+    expect(records).toHaveLength(5);
+    expect(records[1]).toMatchObject({
+        draft_energy: "0",
+        draft_unit: "kWh",
+        reference_available: "true",
+    });
+});
+
+test("all-zero forecasts remain visible as measured zero values", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/forecast/**", (route) =>
+        route.fulfill({
+            json: {
+                timezone: region.timezone,
+                freshness: "fresh",
+                result: {
+                    complete: true,
+                    intervals: [
+                        {
+                            start: "2026-01-01T09:00:00Z",
+                            end: "2026-01-01T10:00:00Z",
+                            ghi_wm2: 0,
+                        },
+                        {
+                            start: "2026-01-01T10:00:00Z",
+                            end: "2026-01-01T11:00:00Z",
+                            ghi_wm2: null,
+                        },
+                        {
+                            start: "2026-01-01T11:00:00Z",
+                            end: "2026-01-01T12:00:00Z",
+                            ghi_wm2: 0,
+                        },
+                    ],
+                },
+            },
+        }),
+    );
+    await page.goto("/");
+    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await page.getByText("View interval data (3 intervals)").click();
+    await expect(
+        page.getByRole("table").getByRole("cell", { name: "0", exact: true }),
+    ).toHaveCount(2);
+    await expect(page.locator(".chart-column.missing")).toHaveCount(1);
+});
+
 test("mock contract: saves cached forecast reminders without provider queries", async ({
     page,
 }) => {
@@ -735,6 +912,12 @@ test("mock contract: follows tenant pagination and keeps missing intervals visib
                             ghi_wm2: null,
                             quality_flags: ["missing"],
                         },
+                        {
+                            start: "2026-01-01T10:00:00Z",
+                            end: "2026-01-01T10:30:00Z",
+                            ghi_wm2: 250,
+                            quality_flags: [],
+                        },
                     ],
                 },
             },
@@ -753,7 +936,7 @@ test("mock contract: follows tenant pagination and keeps missing intervals visib
     await expect(
         page.getByText("synthetic fixture", { exact: true }),
     ).toBeVisible();
-    await page.getByText("View interval data (2 intervals)").click();
+    await page.getByText("View interval data (3 intervals)").click();
     await expect(
         page.getByRole("cell", { name: "500", exact: true }),
     ).toBeVisible();
@@ -776,6 +959,82 @@ async function openJournal(page: Page) {
         page.getByRole("heading", { name: "Production journal" }),
     ).toBeVisible();
 }
+
+test("performance hides stale CSV while a selected range is loading", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(new Date("2026-11-10T12:00:00Z"));
+    await mockApi(page);
+    let release: () => void = () => {};
+    const responseReady = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    let requested = false;
+    await page.route("**/plants/21/performance/**", async (route) => {
+        const selected = new URL(route.request().url()).searchParams.has(
+            "start_date",
+        );
+        if (selected) {
+            requested = true;
+            await responseReady;
+        }
+        await route.fulfill({
+            json: {
+                start_date: selected ? "2026-11-01" : "2026-10-01",
+                end_date: selected ? "2026-11-02" : "2026-10-02",
+                matched_days: 0,
+                requested_days: 2,
+                metrics: null,
+                baseline_metrics: null,
+                days: [],
+            },
+        });
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await page
+        .getByRole("button", { name: "Solar plants", exact: true })
+        .click();
+    await page.getByRole("button", { name: /East array/ }).click();
+    const performance = page.locator("section").filter({
+        has: page.getByRole("heading", {
+            name: "Forecast performance",
+            exact: true,
+        }),
+    });
+    const csv = performance.getByRole("button", {
+        name: "Download CSV",
+        exact: true,
+    });
+    await expect(csv).toBeVisible();
+    await page.getByLabel("Start date").fill("2026-11-01");
+    await page.getByLabel("End date").fill("2026-11-02");
+    await page.getByRole("button", { name: "Load performance" }).click();
+    try {
+        await expect.poll(() => requested).toBe(true);
+        await expect(csv).toHaveCount(0);
+        await expect(performance.getByRole("status")).toContainText(
+            "Loading performance",
+        );
+    } finally {
+        release();
+    }
+    await expect(csv).toBeVisible();
+    const download = page.waitForEvent("download");
+    await csv.click();
+    const exported = await download;
+    expect(exported.suggestedFilename()).toBe(
+        "performance-2026-11-01-2026-11-02.csv",
+    );
+    const records = Papa.parse<Record<string, string>>(
+        await readFile((await exported.path())!, "utf8"),
+        { header: true, skipEmptyLines: true },
+    ).data;
+    expect(records[0]).toMatchObject({
+        start_date: "2026-11-01",
+        end_date: "2026-11-02",
+    });
+});
 
 test("forecast performance shows replay metrics, missing days and selected range", async ({
     page,
@@ -852,6 +1111,27 @@ test("forecast performance shows replay metrics, missing days and selected range
         .toContain("start_date=2026-11-01&end_date=2026-11-02");
     await expect.poll(() => lastQuery).toContain("daylight_only=true");
     await expect(page.getByRole("cell", { name: "8.5" })).toBeVisible();
+    const download = page.waitForEvent("download");
+    await page
+        .getByRole("button", { name: "Download CSV", exact: true })
+        .last()
+        .click();
+    const exported = Papa.parse<Record<string, string>>(
+        await readFile((await (await download).path())!, "utf8"),
+        { header: true, skipEmptyLines: true },
+    ).data;
+    expect(exported).toHaveLength(2);
+    expect(exported[0]).toMatchObject({
+        date: "2026-11-01",
+        error_mwh: "-1.5",
+        "metrics.daily_bias_mwh": "-1.5",
+        timezone: region.timezone,
+    });
+    expect(exported[1]).toMatchObject({
+        date: "2026-11-02",
+        error_mwh: "",
+        reason: "forecast_not_available",
+    });
     await expect(
         page.locator(".stat").filter({ hasText: "Generating-interval error" }),
     ).toContainText("—");
@@ -911,6 +1191,20 @@ test("calibration detail explains support, rejection and incumbent comparison", 
             name: "Selection at training (factor 1.2)",
         }),
     ).toBeVisible();
+    const download = page.waitForEvent("download");
+    await page
+        .getByRole("button", { name: "Download calibration details CSV" })
+        .click();
+    const exported = Papa.parse<Record<string, string>>(
+        await readFile((await (await download).path())!, "utf8"),
+        { header: true, skipEmptyLines: true },
+    ).data;
+    expect(exported[0]).toMatchObject({
+        id: "40",
+        factor: "1.1",
+        "result.training_support.informative_days": "4",
+        "result.incumbent_factor": "1.2",
+    });
 });
 
 test("production journal saves missing readings, preserves dates and shows archived availability", async ({
@@ -1006,6 +1300,7 @@ test("production journal saves missing readings, preserves dates and shows archi
                         starts_at,
                         ends_at,
                         observation,
+                        reference_available: true,
                         can_enter: !observation,
                         unavailable_reason: observation
                             ? "already_recorded"
@@ -1017,6 +1312,14 @@ test("production journal saves missing readings, preserves dates and shows archi
                         observation: null,
                         can_enter: false,
                         unavailable_reason: "estimated_actuals_unavailable",
+                    },
+                    {
+                        starts_at: `${date}T13:00:00Z`,
+                        ends_at: `${date}T14:00:00Z`,
+                        reference_available: true,
+                        observation: null,
+                        can_enter: true,
+                        unavailable_reason: null,
                     },
                 ],
                 observations,
@@ -1121,6 +1424,7 @@ test("production journal ignores stale dates and preserves new drafts during a s
                         ends_at: `${date}T10:00:00Z`,
                         observation: null,
                         can_enter: true,
+                        reference_available: true,
                         unavailable_reason: null,
                     },
                 ],

@@ -5,6 +5,8 @@ import { request } from "@/lib/api";
 import type { components } from "@/lib/schema";
 import { localDay } from "./data-source";
 import { ActionForm, Notice, useResource } from "./ui";
+import { CsvDownload } from "./csv-download";
+import { dataIntervalRange } from "@/lib/intervals";
 
 type Connection = components["schemas"]["EpiasConnectionOutput"];
 type History = components["schemas"]["EpiasHistoryOutput"];
@@ -24,6 +26,7 @@ export function EpiasProduction({
 }) {
     const yesterday = localDay("Europe/Istanbul", -1);
     const [date, setDate] = useState(yesterday);
+    const [source, setSource] = useState("auto");
     const [revision, setRevision] = useState(0);
     const [editing, setEditing] = useState(false);
     const [error, setError] = useState("");
@@ -32,42 +35,7 @@ export function EpiasProduction({
         `${base}production-source/`,
         revision,
     );
-    const history = useResource<History>(
-        `${base}reported-production/?date=${date}`,
-        revision,
-    );
     const data = connection.data;
-    const selectedHistory =
-        history.data?.date === date ? history.data : undefined;
-    const rows = selectedHistory?.readings ?? [];
-    const hours = new Set(
-        rows.map((row) => {
-            const stamp = new Date(row.provider_timestamp);
-            if (Number.isNaN(stamp.getTime())) return "invalid";
-            if (
-                stamp.toLocaleDateString("en-CA", {
-                    timeZone: "Europe/Istanbul",
-                }) !== date ||
-                stamp.getUTCSeconds() !== 0 ||
-                stamp.getUTCMilliseconds() !== 0
-            )
-                return "invalid";
-            return new Intl.DateTimeFormat("en-GB", {
-                timeZone: "Europe/Istanbul",
-                hour: "2-digit",
-                minute: "2-digit",
-                hourCycle: "h23",
-            }).format(stamp);
-        }),
-    );
-    const complete =
-        rows.length === 24 &&
-        hours.size === 24 &&
-        [...hours].every((hour) => /^\d{2}:00$/.test(hour)) &&
-        rows.every((row) => row.energy_mwh !== null);
-    const total = complete
-        ? rows.reduce((sum, row) => sum + (row.energy_mwh ?? 0), 0)
-        : null;
 
     async function disconnect() {
         setWorking(true);
@@ -95,10 +63,12 @@ export function EpiasProduction({
                 Automatically reported hourly production from EPİAŞ. Archived
                 data remains available when collection is disconnected.
             </p>
-            <Notice>
-                Calibration is waiting for confirmation of the time interval
-                convention and measurement point.
-            </Notice>
+            <p className="fine">
+                Automatic selection prefers settlement injection (UEVM), then
+                provisional reported production. Only settlement injection
+                matching the plant's net-export measurement point can enter
+                calibration.
+            </p>
             {error && <Notice error>{error}</Notice>}
             {connection.loading ? (
                 <p role="status">Loading connection…</p>
@@ -236,6 +206,25 @@ export function EpiasProduction({
                 )
             )}
             <h3>Reported production archive</h3>
+            {data?.first_settlement_date && data.last_settlement_date && (
+                <div className="button-group">
+                    <p>
+                        Archived settlement injection (UEVM):{" "}
+                        {data.first_settlement_date} to{" "}
+                        {data.last_settlement_date}
+                    </p>
+                    <button
+                        type="button"
+                        className="button secondary"
+                        onClick={() => {
+                            setDate(data.last_settlement_date!);
+                            setSource("settlement_injection");
+                        }}
+                    >
+                        Latest settlement day
+                    </button>
+                </div>
+            )}
             <div className="button-group">
                 <button
                     className="button secondary"
@@ -258,6 +247,21 @@ export function EpiasProduction({
                         }}
                     />
                 </label>
+                <label className="field">
+                    Production source
+                    <select
+                        value={source}
+                        onChange={(event) => setSource(event.target.value)}
+                    >
+                        <option value="auto">Automatic</option>
+                        <option value="realtime_generation">
+                            Reported production (provisional)
+                        </option>
+                        <option value="settlement_injection">
+                            Settlement injection (UEVM)
+                        </option>
+                    </select>
+                </label>
                 <button
                     className="button secondary"
                     disabled={date >= yesterday}
@@ -272,19 +276,121 @@ export function EpiasProduction({
                     Refresh
                 </button>
             </div>
-            {history.loading || (!selectedHistory && !history.error) ? (
+            <EpiasArchive
+                key={`${date}/${source}/${revision}`}
+                base={base}
+                date={date}
+                source={source}
+            />
+        </section>
+    );
+}
+
+const sourceLabels: Record<string, string> = {
+    realtime_generation: "Reported production (provisional)",
+    settlement_injection: "Settlement injection (UEVM)",
+};
+const blockers: Record<string, string> = {
+    provisional_production:
+        "Provisional reported production is excluded from calibration. Use settlement injection (UEVM).",
+    configuration_unavailable:
+        "No plant configuration is available for calibration.",
+    configuration_mismatch:
+        "This acquisition belongs to another plant configuration.",
+    source_disconnected:
+        "Connect the production source before using settlement injection for calibration.",
+    measurement_basis_mismatch:
+        "Settlement injection requires the plant and connection measurement points to be net export.",
+    production_unavailable:
+        "No reported production is available for calibration.",
+};
+
+function EpiasArchive({
+    base,
+    date,
+    source,
+}: {
+    base: string;
+    date: string;
+    source: string;
+}) {
+    const history = useResource<History>(
+        `${base}reported-production/?${new URLSearchParams({ date, data_source: source })}`,
+    );
+    const selectedHistory = history.data;
+    const rows = selectedHistory?.readings ?? [];
+    const positiveRows = dataIntervalRange(
+        rows,
+        (row) => row.energy_mwh !== null && row.energy_mwh > 0,
+    );
+    const visibleRows = positiveRows.length
+        ? positiveRows
+        : dataIntervalRange(rows, (row) => row.energy_mwh !== null);
+    const total =
+        selectedHistory?.snapshot?.complete &&
+        rows.every((row) => row.energy_mwh !== null)
+            ? rows.reduce((sum, row) => sum + (row.energy_mwh ?? 0), 0)
+            : null;
+    const time = (value: string) =>
+        new Date(value).toLocaleString("en-GB", {
+            timeZone: selectedHistory?.timezone,
+            hour: "2-digit",
+            minute: "2-digit",
+            hourCycle: "h23",
+        });
+    return (
+        <>
+            {history.loading ? (
                 <p role="status">Loading reported production…</p>
             ) : history.error ? (
                 <Notice error>{history.error}</Notice>
             ) : selectedHistory?.snapshot ? (
                 <>
+                    <CsvDownload
+                        filename={`epias-${selectedHistory.source_kind}-${selectedHistory.date}`}
+                        records={rows}
+                        metadata={{ ...selectedHistory, readings: undefined }}
+                    />
+                    <Notice>
+                        {selectedHistory.calibration_eligible
+                            ? "Settlement injection is eligible for calibration when valid interval coverage is complete."
+                            : (blockers[
+                                  selectedHistory.calibration_blocker ?? ""
+                              ] ??
+                              "This production source is excluded from calibration because its measurement point does not match net export.")}
+                    </Notice>
                     <p className="fine">
-                        Source: EPİAŞ · Collected{" "}
+                        Source: EPİAŞ ·{" "}
+                        {sourceLabels[selectedHistory.source_kind ?? ""] ??
+                            "Reported production"}{" "}
+                        · Collected{" "}
                         {new Date(
                             selectedHistory.snapshot.collected_at,
                         ).toLocaleString()}{" "}
                         · Times shown in {selectedHistory.timezone}
                     </p>
+                    {positiveRows.length > 0 &&
+                        visibleRows.length < rows.length && (
+                            <p className="fine">
+                                Showing the first through last positive
+                                interval, including gaps. CSV includes all
+                                intervals.
+                            </p>
+                        )}
+                    {!positiveRows.length &&
+                        visibleRows.length > 0 &&
+                        visibleRows.every(
+                            (row) =>
+                                row.energy_mwh === null || row.energy_mwh === 0,
+                        ) && (
+                            <p>All available intervals have zero production.</p>
+                        )}
+                    {!visibleRows.length && (
+                        <p>
+                            No interval production values are available. Missing
+                            values are not zero.
+                        </p>
+                    )}
                     <p>
                         {total === null
                             ? "Incomplete provider hours — total unavailable"
@@ -295,25 +401,18 @@ export function EpiasProduction({
                             <caption>EPİAŞ reported hourly production</caption>
                             <thead>
                                 <tr>
-                                    <th>Provider time</th>
+                                    <th>Local interval</th>
                                     <th>Production (MWh)</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                {rows.map((row, index) => (
+                                {visibleRows.map((row, index) => (
                                     <tr
                                         key={`${row.provider_timestamp}-${index}`}
                                     >
                                         <td>
-                                            {new Date(
-                                                row.provider_timestamp,
-                                            ).toLocaleString(undefined, {
-                                                timeZone:
-                                                    history.data?.timezone,
-                                                hour: "2-digit",
-                                                minute: "2-digit",
-                                                hourCycle: "h23",
-                                            })}
+                                            {time(row.period_start)}–
+                                            {time(row.period_end)}
                                         </td>
                                         <td>
                                             {row.energy_mwh === null
@@ -334,6 +433,6 @@ export function EpiasProduction({
             ) : (
                 <p>No EPİAŞ data has been archived for this day.</p>
             )}
-        </section>
+        </>
     );
 }

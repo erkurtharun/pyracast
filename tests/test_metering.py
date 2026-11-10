@@ -49,6 +49,9 @@ class FixtureClient:
         self.action()
         return (PROVIDER_PLANT,)
 
+    def resolve_settlement_plant(self, eic: str) -> EpiasPlant | None:
+        return None
+
     def fetch_day(self, plant: EpiasPlant, day: date) -> EpiasDay:
         assert not connection.in_atomic_block
         return day_data(plant, day)
@@ -180,6 +183,14 @@ def test_daily_reconciliation_preserves_acquisitions_and_history(
             initial.target_day, datetime.min.time(), tzinfo=timezone.get_current_timezone()
         ).isoformat(),
         "hour": "00:00",
+        "period_start": datetime.combine(
+            initial.target_day, datetime.min.time(), tzinfo=timezone.get_current_timezone()
+        ).isoformat(),
+        "period_end": datetime.combine(
+            initial.target_day, datetime.min.time(), tzinfo=timezone.get_current_timezone()
+        )
+        .replace(hour=1)
+        .isoformat(),
         "total_mwh": "1.5",
         "sun_mwh": None,
     }
@@ -533,6 +544,9 @@ def test_missing_connection_history_and_status_are_complete(
     assert status == {
         "connected": False,
         "provider_plant_id": None,
+        "settlement_plant_id": None,
+        "first_settlement_date": None,
+        "last_settlement_date": None,
         "eic": "",
         "name": "",
         "meter_basis": "unknown",

@@ -5,6 +5,8 @@ from django.db import models
 class EpiasConnection(models.Model):
     plant = models.OneToOneField("plants.Plant", on_delete=models.CASCADE)
     provider_plant_id = models.PositiveBigIntegerField()
+    settlement_plant_id = models.PositiveBigIntegerField(null=True)
+    settlement_checked_at = models.DateTimeField(null=True)
     eic = models.CharField(max_length=100)
     name = models.CharField(max_length=300)
     enabled = models.BooleanField(default=True)
@@ -25,6 +27,8 @@ class EpiasCollectionJob(models.Model):
     connection_revision = models.PositiveIntegerField()
     provider_plant = models.JSONField()
     target_day = models.DateField()
+    period_end_day = models.DateField(null=True)
+    source_kind = models.CharField(max_length=30, default="realtime_generation")
     scheduled_for = models.DateTimeField()
     status = models.CharField(max_length=20, default="pending")
     lease_token = models.UUIDField(null=True)
@@ -41,6 +45,7 @@ class EpiasCollectionJob(models.Model):
                     "connection",
                     "connection_revision",
                     "configuration",
+                    "source_kind",
                     "target_day",
                     "scheduled_for",
                 ),
@@ -56,6 +61,10 @@ class EpiasSnapshot(models.Model):
     connection = models.ForeignKey(EpiasConnection, on_delete=models.CASCADE)
     configuration = models.ForeignKey("plants.PlantConfiguration", on_delete=models.CASCADE)
     target_day = models.DateField()
+    source_kind = models.CharField(max_length=30, default="realtime_generation")
+    provider_plant = models.JSONField(default=dict)
+    endpoint = models.URLField(default="")
+    normalization_policy = models.CharField(max_length=40, default="hour-start-istanbul-v1")
     collected_at = models.DateTimeField()
     available_at = models.DateTimeField()
     raw_payload = models.JSONField()
@@ -65,6 +74,8 @@ class EpiasSnapshot(models.Model):
 
     class Meta:
         constraints = (
-            models.UniqueConstraint(fields=("job", "attempt"), name="epias_unique_job_acquisition"),
+            models.UniqueConstraint(
+                fields=("job", "attempt", "target_day"), name="epias_unique_job_acquisition"
+            ),
         )
         indexes = (models.Index(fields=("connection", "target_day", "available_at")),)

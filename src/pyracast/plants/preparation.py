@@ -8,7 +8,14 @@ from django.utils import timezone
 
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.irradiance import local_day_bounds
+from pyracast.metering.models import EpiasConnection
 from pyracast.plants.availability import reference_intervals
+from pyracast.plants.measurements import (
+    Measurement,
+    latest_measurement_day,
+    select_measurements,
+    selection_fingerprint,
+)
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
@@ -28,10 +35,10 @@ from pyracast.solar import daylight_window
 
 
 def _matched_days(
-    configuration: PlantConfiguration, observations: list[ProductionObservation], now: datetime
+    configuration: PlantConfiguration, observations: list[Measurement], now: datetime
 ) -> list[date]:
     zone = ZoneInfo(configuration.binding.timezone)
-    grouped: dict[date, list[ProductionObservation]] = defaultdict(list)
+    grouped: dict[date, list[Measurement]] = defaultdict(list)
     for observation in observations:
         grouped[observation.starts_at.astimezone(zone).date()].append(observation)
     matched = []
@@ -88,24 +95,34 @@ def prepare_calibration(plant_id: int, now: datetime | None = None) -> Calibrati
         moment = timezone.now() if now is None else max(now, timezone.now())
         today = moment.astimezone(ZoneInfo(configuration.binding.timezone)).date()
         day_start, _ = local_day_bounds(today, configuration.binding.timezone)
-        observations = ProductionObservation.objects.filter(
-            plant=plant,
-            configuration=configuration,
-            recorded_at__lte=moment,
-            ends_at__lte=day_start,
+        latest = (
+            ProductionObservation.objects.filter(
+                plant=plant,
+                configuration=configuration,
+                recorded_at__lte=moment,
+                ends_at__lte=day_start,
+            )
+            .order_by("-pk")
+            .first()
         )
-        latest = observations.order_by("-pk").first()
-        if latest is None:
+        watermark = latest.pk if latest else 0
+        end_day = latest_measurement_day(configuration, day_start, moment, watermark)
+        if end_day is None:
             return None
-        last = observations.latest("ends_at")
-        end_day = (
-            (last.ends_at - timedelta(microseconds=1))
-            .astimezone(ZoneInfo(configuration.binding.timezone))
-            .date()
-        )
         start, _ = local_day_bounds(end_day - timedelta(days=89), configuration.binding.timezone)
-        rows = list(observations.filter(starts_at__gte=start).order_by("starts_at"))
+        _, end = local_day_bounds(end_day, configuration.binding.timezone)
+        rows, snapshot_ids = select_measurements(
+            configuration, start, end, moment, observation_id_cutoff=watermark
+        )
         days = _matched_days(configuration, rows, moment)
+        if len(days) < 7:
+            return None
+        window_start, _ = local_day_bounds(days[0], configuration.binding.timezone)
+        _, window_end = local_day_bounds(days[-1], configuration.binding.timezone)
+        rows, snapshot_ids = select_measurements(
+            configuration, window_start, window_end, moment, observation_id_cutoff=watermark
+        )
+        fingerprint, reference_ids = selection_fingerprint(configuration, rows, moment)
         comparison = (
             CalibrationActivation.objects.filter(plant=plant, configuration=configuration)
             .order_by("-created_at", "-pk")
@@ -114,33 +131,40 @@ def prepare_calibration(plant_id: int, now: datetime | None = None) -> Calibrati
         compared = Q(comparison_activation=comparison)
         if comparison is not None and comparison.calibration_id is not None:
             compared |= Q(pk=comparison.calibration_id)
-        if (
-            len(days) < 7
-            or CalibrationRun.objects.filter(
-                compared,
-                Q(status="failed") | Q(result__policy_version=POLICY_VERSION),
-                configuration=configuration,
-                observation_id_cutoff__gte=latest.pk,
-                window_start__lte=days[0],
-                window_end__gte=days[-1],
-            ).exists()
+        previous = CalibrationRun.objects.filter(
+            compared,
+            Q(status="failed") | Q(result__policy_version=POLICY_VERSION),
+            configuration=configuration,
+            window_start__lte=days[0],
+            window_end__gte=days[-1],
+        )
+        if previous.filter(input_fingerprint=fingerprint).exists() or (
+            latest is not None
+            and not snapshot_ids
+            and previous.filter(input_fingerprint="", observation_id_cutoff__gte=watermark).exists()
         ):
             return None
+        actor = (
+            latest.recorded_by if latest else EpiasConnection.objects.get(plant=plant).connected_by
+        )
         run = CalibrationRun.objects.create(
             plant=plant,
             configuration=configuration,
             binding=configuration.binding,
             comparison_activation=comparison,
-            requested_by=latest.recorded_by,
+            requested_by=actor,
             window_start=days[0],
             window_end=days[-1],
             cutoff_at=moment,
-            observation_id_cutoff=latest.pk,
+            observation_id_cutoff=watermark,
+            settlement_snapshot_ids=snapshot_ids,
+            reference_snapshot_ids=reference_ids,
+            input_fingerprint=fingerprint,
         )
         PlantEvent.objects.create(
             plant=plant,
-            actor=latest.recorded_by,
+            actor=actor,
             action="calibration_scheduled",
-            details={"calibration_id": run.pk, "observation_id_cutoff": latest.pk},
+            details={"calibration_id": run.pk, "observation_id_cutoff": watermark},
         )
         return run

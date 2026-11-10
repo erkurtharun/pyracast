@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { readFile } from "node:fs/promises";
+import Papa from "papaparse";
 
 test("connects, displays partial reported production and disconnects", async ({
     page,
@@ -38,6 +40,7 @@ test("connects, displays partial reported production and disconnects", async ({
     };
     let connected = false;
     let requestedDate = "";
+    let requestedSource = "";
     await page.route("**/api/**", async (route) => {
         const url = new URL(route.request().url()),
             path = url.pathname;
@@ -84,6 +87,7 @@ test("connects, displays partial reported production and disconnects", async ({
             data = {
                 connected,
                 provider_plant_id: connected ? 3154 : null,
+                settlement_plant_id: connected ? 55 : null,
                 eic: connected ? "40W000005011621Y" : "",
                 name: connected ? "G4-BOR-1 GES" : "",
                 meter_basis: "unknown",
@@ -91,42 +95,73 @@ test("connects, displays partial reported production and disconnects", async ({
                 last_error: "",
                 pending_jobs: 0,
                 archived_days: 1,
+                first_settlement_date: connected ? "2025-12-01" : null,
+                last_settlement_date: connected ? "2026-01-01" : null,
             };
         } else if (path.endsWith("/reported-production/")) {
             requestedDate = url.searchParams.get("date") ?? "";
+            requestedSource = url.searchParams.get("data_source") ?? "auto";
             data = {
                 date: requestedDate,
                 timezone: "Europe/Istanbul",
                 unit: "MWh",
+                source_kind: "realtime_generation",
+                available_sources: ["realtime_generation"],
                 calibration_eligible: false,
-                calibration_blocker: "measurement_contract_unverified",
+                calibration_blocker: "provisional_production",
                 snapshot: {
                     id: 1,
                     configuration_id: 31,
                     collected_at: "2026-01-03T12:00:00Z",
                     available_at: "2026-01-03T12:00:00Z",
                     content_sha256: "x",
+                    source_kind: "realtime_generation",
+                    normalization_policy: "hour_start",
+                    complete: requestedDate === "2026-01-03",
                 },
-                readings:
-                    requestedDate === "2026-01-03"
-                        ? Array.from({ length: 24 }, (_, hour) => ({
-                              provider_timestamp: `${requestedDate}T${String(hour).padStart(2, "0")}:00:00+03:00`,
-                              energy_mwh: hour,
-                              solar_mwh: hour,
-                          }))
-                        : [
-                              {
-                                  provider_timestamp: `${requestedDate}T00:00:00+03:00`,
-                                  energy_mwh: 0,
-                                  solar_mwh: 0,
-                              },
-                              {
-                                  provider_timestamp: `${requestedDate}T01:00:00+03:00`,
-                                  energy_mwh: null,
-                                  solar_mwh: null,
-                              },
-                          ],
+                readings: Array.from({ length: 24 }, (_, hour) => {
+                    const period_start = `${requestedDate}T${String(hour).padStart(2, "0")}:00:00+03:00`;
+                    const missing =
+                        requestedDate !== "2026-01-03" && hour === 8;
+                    const energy =
+                        requestedDate === "2026-01-03"
+                            ? hour
+                            : hour === 7
+                              ? 1
+                              : hour === 9
+                                ? 2
+                                : missing
+                                  ? null
+                                  : 0;
+                    return {
+                        provider_timestamp: missing ? null : period_start,
+                        period_start,
+                        period_end: new Date(
+                            new Date(period_start).getTime() + 3600000,
+                        ).toISOString(),
+                        reported: !missing,
+                        energy_mwh: energy,
+                        solar_mwh: energy,
+                    };
+                }),
             };
+            if (
+                requestedSource === "settlement_injection" &&
+                requestedDate === "2026-01-01"
+            )
+                data = {
+                    ...(data as object),
+                    source_kind: "settlement_injection",
+                    calibration_blocker: "measurement_basis_mismatch",
+                };
+            else if (requestedSource === "settlement_injection")
+                data = {
+                    ...(data as object),
+                    source_kind: "settlement_injection",
+                    snapshot: null,
+                    readings: [],
+                    calibration_blocker: "production_unavailable",
+                };
         } else throw new Error(`Unmocked API: ${path}`);
         await route.fulfill({ json: data });
     });
@@ -137,10 +172,34 @@ test("connects, displays partial reported production and disconnects", async ({
         .click();
     await page.getByRole("button", { name: /EPİAŞ plant/ }).click();
     await page.getByRole("button", { name: "Automatic production" }).click();
+    await expect(
+        page.getByRole("button", { name: "Latest settlement day" }),
+    ).toHaveCount(0);
     await page.getByLabel("EPİAŞ plant ID").fill("3154");
     await page.getByLabel("Plant EIC").fill("40W000005011621Y");
     await page.getByRole("button", { name: "Connect EPİAŞ" }).click();
     await expect(page.getByText("G4-BOR-1 GES")).toBeVisible();
+    await expect(
+        page.getByText(
+            "Archived settlement injection (UEVM): 2025-12-01 to 2026-01-01",
+        ),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Latest settlement day" }).click();
+    await expect(page.getByLabel("Archive date")).toHaveValue("2026-01-01");
+    await expect(page.getByLabel("Production source")).toHaveValue(
+        "settlement_injection",
+    );
+    await expect
+        .poll(() => [requestedDate, requestedSource])
+        .toEqual(["2026-01-01", "settlement_injection"]);
+    await expect(
+        page.getByText(
+            "Settlement injection requires the plant and connection measurement points to be net export.",
+        ),
+    ).toBeVisible();
+    await page
+        .getByLabel("Production source")
+        .selectOption("realtime_generation");
     await page.getByLabel("Archive date").fill("2026-01-02");
     await expect.poll(() => requestedDate).toBe("2026-01-02");
     await expect(
@@ -150,21 +209,63 @@ test("connects, displays partial reported production and disconnects", async ({
         name: "EPİAŞ reported hourly production",
     });
     await expect(
-        table.getByRole("cell", { name: "0", exact: true }),
+        table.getByRole("cell", { name: "1", exact: true }),
     ).toBeVisible();
+    await expect(table.getByRole("cell", { name: "Missing" })).toBeVisible();
+    await expect(table.getByRole("row")).toHaveCount(4);
+    await expect(
+        table.getByRole("cell", { name: "07:00–08:00", exact: true }),
+    ).toBeVisible();
+    await expect(
+        table.getByRole("cell", { name: "09:00–10:00", exact: true }),
+    ).toBeVisible();
+    const download = page.waitForEvent("download");
+    await page
+        .getByRole("button", { name: "Download CSV", exact: true })
+        .click();
+    const records = Papa.parse<Record<string, string>>(
+        await readFile((await (await download).path())!, "utf8"),
+        { header: true, skipEmptyLines: true },
+    ).data;
+    expect(records).toHaveLength(24);
+    expect(records[0]).toMatchObject({
+        energy_mwh: "0",
+        source_kind: "realtime_generation",
+        period_start: "2026-01-02T00:00:00+03:00",
+    });
+    expect(records[8]).toMatchObject({
+        energy_mwh: "",
+        reported: "false",
+        provider_timestamp: "",
+        period_start: "2026-01-02T08:00:00+03:00",
+    });
+    await page
+        .getByLabel("Production source")
+        .selectOption("settlement_injection");
+    await expect.poll(() => requestedSource).toBe("settlement_injection");
+    await expect(
+        page.getByText("No EPİAŞ data has been archived for this day."),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: "Download CSV", exact: true }),
+    ).toHaveCount(0);
+    await page
+        .getByLabel("Production source")
+        .selectOption("realtime_generation");
+    await expect.poll(() => requestedSource).toBe("realtime_generation");
     await expect(table.getByRole("cell", { name: "Missing" })).toBeVisible();
     await page.getByLabel("Archive date").fill("2026-01-03");
     await expect(
         page.getByText("Sum of provider-reported hours: 276 MWh"),
     ).toBeVisible();
-    await expect(table.getByRole("row")).toHaveCount(25);
+    await expect(table.getByRole("row")).toHaveCount(24);
     await page.getByLabel("Archive date").fill("2026-01-02");
     await expect(
         page.getByText("Incomplete provider hours — total unavailable"),
     ).toBeVisible();
     await expect(
         page.getByText(
-            "Calibration is waiting for confirmation of the time interval convention and measurement point.",
+            "Provisional reported production is excluded from calibration. Use settlement injection (UEVM).",
         ),
     ).toBeVisible();
     await page.getByRole("button", { name: "Disconnect collection" }).click();
@@ -172,6 +273,6 @@ test("connects, displays partial reported production and disconnects", async ({
         page.getByRole("button", { name: "Connect EPİAŞ" }),
     ).toBeVisible();
     await expect(
-        table.getByRole("cell", { name: "0", exact: true }),
+        table.getByRole("cell", { name: "1", exact: true }),
     ).toBeVisible();
 });

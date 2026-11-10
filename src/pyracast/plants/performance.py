@@ -9,7 +9,8 @@ from django.utils import timezone
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecasting import calibration_at, power_intervals, power_limit
-from pyracast.plants.models import Plant, PlantConfiguration, ProductionObservation
+from pyracast.plants.measurements import Measurement, select_measurements
+from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.plants.numerics import (
     CalibrationSample,
     PowerInterval,
@@ -40,7 +41,7 @@ def _snapshot(configuration: PlantConfiguration, day: date) -> ForecastSnapshot 
 
 
 def _samples(
-    observations: list[ProductionObservation],
+    observations: list[Measurement],
     intervals: tuple[PowerInterval, ...],
     factor: float,
     cap: float | None,
@@ -76,7 +77,7 @@ def _samples(
 def _day(
     configuration: PlantConfiguration,
     day: date,
-    observations: list[ProductionObservation],
+    observations: list[Measurement],
     required_windows: RequiredWindows | None,
 ) -> tuple[dict[str, Any], tuple[CalibrationSample, ...], tuple[CalibrationSample, ...]]:
     result: dict[str, Any] = {
@@ -92,6 +93,8 @@ def _day(
         "predicted_energy_mwh": None,
         "baseline_energy_mwh": None,
         "error_mwh": None,
+        "manual_observation_ids": [],
+        "settlement_snapshot_ids": [],
     }
     zone = configuration.binding.timezone
     start, end = local_day_bounds(day, zone)
@@ -131,12 +134,27 @@ def _day(
         return result, (), ()
     errors = cast(list[dict[str, Any]], evaluation["day_errors"])
     reference_errors = cast(list[dict[str, Any]], reference["day_errors"])
+    used_readings = [
+        row
+        for row in readings
+        if required_windows is None
+        or any(
+            row.starts_at < stop and row.ends_at > begin
+            for begin, stop in required_windows.get(day, ())
+        )
+    ]
     result.update(
         status="matched",
         measured_energy_mwh=errors[0]["measured_energy_mwh"],
         predicted_energy_mwh=errors[0]["predicted_energy_mwh"],
         baseline_energy_mwh=reference_errors[0]["predicted_energy_mwh"],
         error_mwh=errors[0]["error_mwh"],
+        manual_observation_ids=sorted(
+            {row.pk for row in used_readings if row.snapshot is None and row.pk is not None}
+        ),
+        settlement_snapshot_ids=sorted(
+            {row.snapshot.pk for row in used_readings if row.snapshot is not None}
+        ),
     )
     return result, selected, baseline
 
@@ -171,15 +189,7 @@ def forecast_performance(
         raise ValidationError("Use 1 to 90 completed local days within the past year.")
     start, _ = local_day_bounds(start_date, zone)
     _, end = local_day_bounds(end_date, zone)
-    observations = list(
-        ProductionObservation.objects.filter(
-            plant=plant,
-            configuration=configuration,
-            starts_at__gte=start,
-            ends_at__lte=end,
-            recorded_at__lte=now,
-        ).order_by("starts_at", "pk")
-    )
+    observations = select_measurements(configuration, start, end, now)[0] if configuration else []
     days: list[dict[str, Any]] = []
     selected: tuple[CalibrationSample, ...] = ()
     baseline: tuple[CalibrationSample, ...] = ()

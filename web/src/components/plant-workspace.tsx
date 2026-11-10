@@ -1,5 +1,6 @@
 "use client";
 import { useRef, useState } from "react";
+import { CsvDownload } from "./csv-download";
 import {
     request,
     type Plant,
@@ -74,6 +75,12 @@ export function PlantWorkspace({
                 </div>
                 <div className="button-group">
                     <Tag>Solar plant</Tag>
+                    <CsvDownload
+                        label="Download plant CSV"
+                        filename={`plant-${currentPlant.id}`}
+                        records={[currentPlant]}
+                        metadata={{ timezone }}
+                    />
                     <button
                         className="button secondary"
                         onClick={() => setEditing(!editing)}
@@ -439,6 +446,15 @@ function Calibrations({
                         </p>
                     </div>
                     <div className="button-group">
+                        {resource.data &&
+                            !resource.loading &&
+                            !resource.error && (
+                                <CsvDownload
+                                    label="Download calibration CSV"
+                                    filename="calibrations"
+                                    records={resource.data.results}
+                                />
+                            )}
                         <button
                             className="button secondary"
                             onClick={() => setVersion(version + 1)}
@@ -546,6 +562,11 @@ function Calibrations({
                             {selected.factor ?? "unavailable"}.
                         </p>
                         <CalibrationAssessment run={selected} />
+                        <CsvDownload
+                            label="Download calibration details CSV"
+                            filename={`calibration-${selected.id}`}
+                            records={[selected]}
+                        />
                         <JsonDetails
                             data={selected.result}
                             label="Evaluation metrics & exclusions"

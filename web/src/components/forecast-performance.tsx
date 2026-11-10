@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import type { components } from "@/lib/schema";
 import { localDay } from "./data-source";
 import { Notice, Stat, useResource } from "./ui";
+import { CsvDownload } from "./csv-download";
 
 type Performance = components["schemas"]["PerformanceOutput"];
 
@@ -32,7 +33,6 @@ export function ForecastPerformance({
     const [start, setStart] = useState(() => localDay(timezone, -30));
     const [end, setEnd] = useState(() => localDay(timezone, -1));
     const [url, setUrl] = useState(`${base}performance/?daylight_only=true`);
-    const resource = useResource<Performance>(url);
     function load(event: FormEvent) {
         event.preventDefault();
         setUrl(
@@ -83,6 +83,21 @@ export function ForecastPerformance({
                     Load performance
                 </button>
             </form>
+            <PerformanceResults key={url} url={url} timezone={timezone} />
+        </section>
+    );
+}
+
+function PerformanceResults({
+    url,
+    timezone,
+}: {
+    url: string;
+    timezone: string;
+}) {
+    const resource = useResource<Performance>(url);
+    return (
+        <>
             {resource.loading ? (
                 <p role="status">Loading performance…</p>
             ) : resource.error ? (
@@ -90,6 +105,15 @@ export function ForecastPerformance({
             ) : (
                 resource.data && (
                     <>
+                        <CsvDownload
+                            filename={`performance-${resource.data.start_date}-${resource.data.end_date}`}
+                            records={resource.data.days}
+                            metadata={{
+                                ...resource.data,
+                                days: undefined,
+                                timezone,
+                            }}
+                        />
                         <div className="stats">
                             <Stat
                                 label="Matched days"
@@ -191,6 +215,6 @@ export function ForecastPerformance({
                     </>
                 )
             )}
-        </section>
+        </>
     );
 }

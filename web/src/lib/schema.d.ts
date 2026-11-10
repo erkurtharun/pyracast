@@ -687,6 +687,11 @@ export interface components {
         EpiasConnectionOutput: {
             connected: boolean;
             provider_plant_id: number | null;
+            settlement_plant_id: number | null;
+            /** Format: date */
+            first_settlement_date: string | null;
+            /** Format: date */
+            last_settlement_date: string | null;
             eic: string;
             name: string;
             meter_basis: components["schemas"]["MeterBasisEnum"];
@@ -701,14 +706,21 @@ export interface components {
             date: string;
             timezone: string;
             unit: string;
+            source_kind: (components["schemas"]["EpiasSourceKindEnum"] | components["schemas"]["NullEnum"]) | null;
+            available_sources: components["schemas"]["EpiasSourceKindEnum"][];
             calibration_eligible: boolean;
-            calibration_blocker: string;
+            calibration_blocker: string | null;
             snapshot: components["schemas"]["EpiasSnapshotOutput"] | null;
             readings: components["schemas"]["EpiasReadingOutput"][];
         };
         EpiasReadingOutput: {
             /** Format: date-time */
-            provider_timestamp: string;
+            provider_timestamp: string | null;
+            /** Format: date-time */
+            period_start: string;
+            /** Format: date-time */
+            period_end: string;
+            reported: boolean;
             /** Format: double */
             energy_mwh: number | null;
             /** Format: double */
@@ -722,7 +734,16 @@ export interface components {
             /** Format: date-time */
             available_at: string;
             content_sha256: string;
+            source_kind: components["schemas"]["EpiasSourceKindEnum"];
+            normalization_policy: string;
+            complete: boolean;
         };
+        /**
+         * @description * `realtime_generation` - realtime_generation
+         *     * `settlement_injection` - settlement_injection
+         * @enum {string}
+         */
+        EpiasSourceKindEnum: "realtime_generation" | "settlement_injection";
         ForecastOutput: {
             region_id: number;
             /** Format: date */
@@ -730,7 +751,7 @@ export interface components {
             timezone: string;
             status: string;
             freshness: string;
-            source_kind: components["schemas"]["SourceKindEnum"];
+            source_kind: components["schemas"]["ForecastSourceKindEnum"];
             unavailable_reason: string | null;
             result: unknown;
             /** Format: date-time */
@@ -742,6 +763,12 @@ export interface components {
             scheduled_slot: string | null;
             late: boolean | null;
         };
+        /**
+         * @description * `forecast` - forecast
+         *     * `estimated_actuals` - estimated_actuals
+         * @enum {string}
+         */
+        ForecastSourceKindEnum: "forecast" | "estimated_actuals";
         IdentifierOutput: {
             id: number;
         };
@@ -947,6 +974,8 @@ export interface components {
             baseline_energy_mwh: number | null;
             /** Format: double */
             error_mwh: number | null;
+            manual_observation_ids: number[];
+            settlement_snapshot_ids: number[];
         };
         /**
          * @description * `matched` - matched
@@ -998,7 +1027,7 @@ export interface components {
             configuration_id: number | null;
             calibration_id: number | null;
             freshness: string;
-            source_kind: components["schemas"]["SourceKindEnum"];
+            source_kind: components["schemas"]["ForecastSourceKindEnum"];
             unavailable_reason: (components["schemas"]["UnavailableReasonEnum"] | components["schemas"]["NullEnum"]) | null;
             result: unknown;
             regional_irradiance: unknown;
@@ -1172,12 +1201,6 @@ export interface components {
          * @enum {string}
          */
         SlotScopeEnum: "daylight" | "full_day";
-        /**
-         * @description * `forecast` - forecast
-         *     * `estimated_actuals` - estimated_actuals
-         * @enum {string}
-         */
-        SourceKindEnum: "forecast" | "estimated_actuals";
         TenantOutput: {
             readonly id: number;
             readonly name: string;
@@ -2181,6 +2204,12 @@ export interface operations {
     tenants_regions_plants_reported_production_retrieve: {
         parameters: {
             query?: {
+                /**
+                 * @description * `auto` - auto
+                 *     * `realtime_generation` - realtime_generation
+                 *     * `settlement_injection` - settlement_injection
+                 */
+                data_source?: "auto" | "realtime_generation" | "settlement_injection";
                 date?: string;
             };
             header?: never;

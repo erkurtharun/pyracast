@@ -142,10 +142,13 @@ they neither tune hyperparameters nor establish operational forecast accuracy.
 Report source-positive interval MAE separately, using whole meter intervals with
 positive reference power; it is not an astronomical daylight classification.
 
-The dataset pairs metered production with matching Solcast estimated actuals,
+The dataset pairs manual metered production or settlement injection with matching Solcast estimated actuals,
 never archived forecasts. Select the latest matching acquisition published by the
 request cutoff and retain its snapshot, source kind, collection/publication times,
-configuration and dataset digest. Only completed local days enter calibration;
+configuration and dataset digest. Pin the selected reference and settlement
+snapshot IDs when requesting a new run; later acquisitions cannot enter its
+retries, even with a backdated timestamp. Existing legacy runs retain their
+recorded cutoff policy. Only completed local days enter calibration;
 future production intervals are rejected at import. Importing an old measurement
 explicitly associates it with the declared configuration, without backdating that
 configuration. Do not mix periods with different capacities or meter definitions.
@@ -239,12 +242,26 @@ EPİAŞ hour h to TEİAŞ h+1 gave MAE 475.81 MWh, versus 1,458.50 MWh for h and
 empirical evidence, not an explicit interval convention in the published API
 schema; both the schema and CSV export only say "hour".
 
-Runtime still preserves provider labels and excludes these readings from
-calibration and forecast-performance metrics. Automatic UEVM collection, revision-aware
-reconciliation and verified interval/meter normalization are not implemented.
-Keep operational and settlement acquisitions distinct when adding them; never
-overwrite forecast vintages or silently promote a provisional proxy to a meter
-observation. Do not split hourly energy into invented half-hour measurements.
+The accepted runtime contract is `hour-start-istanbul-v1`: preserve provider
+labels and normalize them to explicit one-hour bounds. Collect operational and
+settlement series separately with immutable revisions. Provisional real-time
+production remains excluded from fitting and forecast-performance metrics.
+
+Policy `manual-over-settlement-hour-v1` supplements manual observations with the
+latest available UEVM acquisition per day for the current configuration and
+provider identity, only for a `net_export` target. This target includes settlement
+adjustments; it does not assert raw connection-meter equivalence. Any overlapping
+manual observation, including invalid/outage/curtailed readings, suppresses the
+entire provider hour. Missing or invalid provider values remain missing, and the
+existing daylight-coverage rules decide which days qualify. Do not split hourly
+energy into invented half-hour measurements.
+
+Record settlement snapshot IDs, provider identity and digests in the dataset
+manifest. A stable fingerprint of measurement values, quality, source identity,
+configuration and matched reference content controls automatic refitting;
+unchanged repeated acquisitions do not trigger a new fit. Preserve the request's
+selected snapshot IDs separately for replay. Corrected inputs can prepare a new
+candidate, while completed fits and archived forecasts remain unchanged.
 
 Solcast historical GHI/GTI are satellite/model-derived **estimated actuals**; they
 are not automatically on-site measurements. AWS is a distribution channel, not a

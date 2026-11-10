@@ -7,7 +7,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from email.utils import parsedate_to_datetime
 from threading import Lock
-from typing import cast
+from typing import Literal, cast
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -15,6 +15,7 @@ import httpx
 AUTH_URL = "https://giris.epias.com.tr/cas/v1/tickets"
 BASE_URL = "https://seffaflik.epias.com.tr/electricity-service/v1/generation/data"
 TIMEZONE = ZoneInfo("Europe/Istanbul")
+SourceKind = Literal["realtime_generation", "settlement_injection"]
 
 
 class EpiasError(Exception):
@@ -38,6 +39,14 @@ class EpiasReading:
     total: Decimal | None
     sun: Decimal | None
 
+    @property
+    def period_start(self) -> datetime:
+        return self.timestamp
+
+    @property
+    def period_end(self) -> datetime:
+        return self.timestamp + timedelta(hours=1)
+
 
 @dataclass(frozen=True)
 class EpiasDay:
@@ -48,6 +57,8 @@ class EpiasDay:
     raw_payload: str
     endpoint: str = f"{BASE_URL}/realtime-generation"
     unit: str = "MWh"
+    source_kind: SourceKind = "realtime_generation"
+    end_day: date | None = None
 
 
 def _retry_after(value: str | None) -> int | None:
@@ -105,7 +116,13 @@ def _energy(value: object) -> Decimal | None:
     return result
 
 
-def _reading(row: dict[str, object], day: date, plant: EpiasPlant) -> EpiasReading:
+def _reading(
+    row: dict[str, object],
+    day: date,
+    plant: EpiasPlant,
+    source_kind: SourceKind = "realtime_generation",
+    end_day: date | None = None,
+) -> EpiasReading:
     try:
         start = datetime.fromisoformat(_text(row.get("date")))
     except ValueError:
@@ -113,14 +130,25 @@ def _reading(row: dict[str, object], day: date, plant: EpiasPlant) -> EpiasReadi
     if start.utcoffset() is None:
         raise EpiasError("invalid_epias_interval")
     start = start.astimezone(TIMEZONE)
-    if start.date() != day or start.minute or start.second or start.microsecond:
+    if (
+        not day <= start.date() <= (end_day or day)
+        or start.minute
+        or start.second
+        or start.microsecond
+    ):
         raise EpiasError("invalid_epias_interval")
-    if row.get("hour") != start.strftime("%H:%M"):
+    settlement = source_kind == "settlement_injection"
+    hour = _integer(row.get("hour")) if settlement else row.get("hour")
+    if hour != (start.hour if settlement else start.strftime("%H:%M")):
         raise EpiasError("invalid_epias_interval")
-    if "powerPlantId" in row and _integer(row["powerPlantId"]) != plant.id:
+    identity_key = "powerplantId" if settlement else "powerPlantId"
+    if identity_key in row and _integer(row[identity_key]) != plant.id:
         raise EpiasError("invalid_epias_plant")
     return EpiasReading(
-        start, start.strftime("%H:%M"), _energy(row.get("total")), _energy(row.get("sun"))
+        start,
+        start.strftime("%H:%M"),
+        _energy(row.get("total")),
+        _energy(row.get("sun")),
     )
 
 
@@ -211,7 +239,19 @@ class EpiasClient:
         return _object(payload)
 
     def list_plants(self) -> tuple[EpiasPlant, ...]:
-        items = self._data("powerplant-list").get("items")
+        return self._list_plants("powerplant-list")
+
+    def list_settlement_plants(self) -> tuple[EpiasPlant, ...]:
+        return self._list_plants("injection-quantity-powerplant-list")
+
+    def resolve_settlement_plant(self, eic: str) -> EpiasPlant | None:
+        matches = [plant for plant in self.list_settlement_plants() if plant.eic == eic]
+        if len(matches) > 1:
+            raise EpiasError("ambiguous_epias_eic")
+        return matches[0] if matches else None
+
+    def _list_plants(self, endpoint: str) -> tuple[EpiasPlant, ...]:
+        items = self._data(endpoint).get("items")
         if not isinstance(items, list) or len(items) > 100_000:
             raise EpiasError("invalid_epias_schema")
         result: list[EpiasPlant] = []
@@ -232,10 +272,26 @@ class EpiasClient:
         return tuple(result)
 
     def fetch_day(self, plant: EpiasPlant, day: date) -> EpiasDay:
+        return self._fetch_period(plant, day, day, "realtime_generation")
+
+    def fetch_settlement(self, plant: EpiasPlant, start_day: date, end_day: date) -> EpiasDay:
+        if end_day < start_day or (end_day - start_day).days > 30:
+            raise EpiasError("invalid_epias_period")
+        return self._fetch_period(plant, start_day, end_day, "settlement_injection")
+
+    def _fetch_period(
+        self,
+        plant: EpiasPlant,
+        day: date,
+        end_day: date,
+        source_kind: SourceKind,
+    ) -> EpiasDay:
         if _integer(plant.id) == 0:
             raise EpiasError("invalid_epias_plant")
         start = datetime.combine(day, datetime.min.time(), TIMEZONE)
-        stop = datetime.combine(day + timedelta(days=1), datetime.min.time(), TIMEZONE)
+        stop = datetime.combine(end_day + timedelta(days=1), datetime.min.time(), TIMEZONE)
+        settlement = source_kind == "settlement_injection"
+        endpoint = "injection-quantity" if settlement else "realtime-generation"
         expected_hours = int((stop.astimezone(UTC) - start.astimezone(UTC)).total_seconds() / 3600)
         readings: list[EpiasReading] = []
         safe_rows: list[dict[str, object]] = []
@@ -243,33 +299,49 @@ class EpiasClient:
         number = 1
         while True:
             payload = self._data(
-                "realtime-generation",
+                endpoint,
                 {
                     "startDate": start.isoformat(),
                     "endDate": (stop - timedelta(hours=1)).isoformat(),
-                    "powerPlantId": plant.id,
+                    "powerplantId" if settlement else "powerPlantId": plant.id,
                     "page": {"number": number, "size": self._page_size},
                 },
             )
             page = _object(payload.get("page"))
-            current_total = _integer(page.get("total"))
             if (
                 _integer(page.get("number")) != number
                 or _integer(page.get("size")) != self._page_size
-                or current_total > expected_hours
-                or (total is not None and current_total != total)
             ):
                 raise EpiasError("invalid_epias_pagination")
-            total = current_total
             items = payload.get("items")
+            current_total = (
+                0
+                if settlement
+                and number == 1
+                and "total" in page
+                and page["total"] is None
+                and items == []
+                else _integer(page.get("total"))
+            )
+            if current_total > expected_hours or (total is not None and current_total != total):
+                raise EpiasError("invalid_epias_pagination")
+            total = current_total
             expected_count = min(self._page_size, total - len(readings))
             if not isinstance(items, list) or len(items) != expected_count:
                 raise EpiasError("invalid_epias_pagination")
             for item in items:
                 row = _object(item)
-                readings.append(_reading(row, day, plant))
+                readings.append(_reading(row, day, plant, source_kind, end_day))
                 safe_rows.append(
-                    {key: row[key] for key in ("date", "hour", "total", "sun") if key in row}
+                    {
+                        key: row[key]
+                        for key in (
+                            ("date", "hour", "total", "sun", "powerplantId")
+                            if settlement
+                            else ("date", "hour", "total", "sun", "powerPlantId")
+                        )
+                        if key in row
+                    }
                 )
             if len(readings) == total:
                 break
@@ -283,4 +355,7 @@ class EpiasClient:
             ordered,
             datetime.now(UTC),
             json.dumps({"items": safe_rows}, ensure_ascii=False, allow_nan=False),
+            endpoint=f"{BASE_URL}/{endpoint}",
+            source_kind=source_kind,
+            end_day=end_day if settlement else None,
         )

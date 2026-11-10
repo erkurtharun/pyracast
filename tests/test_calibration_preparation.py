@@ -5,6 +5,7 @@ from typing import Any, cast
 
 import pytest
 from django.db import close_old_connections, connection
+from django.utils import timezone
 
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
@@ -328,7 +329,9 @@ def test_legacy_run_without_watermark_preserves_timestamp_cutoff(
     add_days(system, plant, 1, 3)
     add_days(system, plant, 5, 4)
     run = CalibrationRun.objects.get()
-    CalibrationRun.objects.filter(pk=run.pk).update(observation_id_cutoff=None)
+    CalibrationRun.objects.filter(pk=run.pk).update(
+        observation_id_cutoff=None, reference_snapshot_ids=None
+    )
     add_days(system, plant, 4, 1)
     new_rows = ProductionObservation.objects.filter(pk__gt=run.observation_id_cutoff)
     first_new = new_rows.order_by("pk").first()
@@ -371,3 +374,16 @@ def test_failed_work_schedules_new_data_only_at_terminal_state(
     first.refresh_from_db()
     assert first.status == "failed"
     assert CalibrationRun.objects.exclude(pk=first.pk).get().status == "pending"
+
+
+def test_old_complete_history_uses_window_ending_at_latest_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    add_days(system, plant, 1, 7)
+    CalibrationRun.objects.all().delete()
+    monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=120))
+    run = prepare_calibration(plant.pk)
+    assert run is not None
+    assert run.window_start == date(2026, 11, 1)
+    assert run.window_end == date(2026, 11, 7)

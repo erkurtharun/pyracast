@@ -96,6 +96,8 @@ SPECTACULAR_SETTINGS = {
     "ENUM_NAME_OVERRIDES": {
         "PowerBasisEnum": [("ac", "ac"), ("dc", "dc")],
         "CalibrationStatusEnum": "pyracast.plants.serializers.calibration_status_choices",
+        "EpiasSourceKindEnum": "pyracast.plants.epias_api.SOURCES",
+        "ForecastSourceKindEnum": ["forecast", "estimated_actuals"],
     },
 }
 LANGUAGE_CODE = "en-us"

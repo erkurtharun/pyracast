@@ -1998,6 +1998,21 @@
                 "parameters": [
                     {
                         "in": "query",
+                        "name": "data_source",
+                        "schema": {
+                            "enum": [
+                                "auto",
+                                "realtime_generation",
+                                "settlement_injection"
+                            ],
+                            "type": "string",
+                            "default": "auto",
+                            "minLength": 1
+                        },
+                        "description": "* `auto` - auto\n* `realtime_generation` - realtime_generation\n* `settlement_injection` - settlement_injection"
+                    },
+                    {
+                        "in": "query",
                         "name": "date",
                         "schema": {
                             "type": "string",
@@ -2919,6 +2934,20 @@
                         "type": "integer",
                         "nullable": true
                     },
+                    "settlement_plant_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "first_settlement_date": {
+                        "type": "string",
+                        "format": "date",
+                        "nullable": true
+                    },
+                    "last_settlement_date": {
+                        "type": "string",
+                        "format": "date",
+                        "nullable": true
+                    },
                     "eic": {
                         "type": "string"
                     },
@@ -2947,12 +2976,15 @@
                     "archived_days",
                     "connected",
                     "eic",
+                    "first_settlement_date",
                     "last_error",
+                    "last_settlement_date",
                     "last_success_at",
                     "meter_basis",
                     "name",
                     "pending_jobs",
-                    "provider_plant_id"
+                    "provider_plant_id",
+                    "settlement_plant_id"
                 ]
             },
             "EpiasHistoryOutput": {
@@ -2968,11 +3000,29 @@
                     "unit": {
                         "type": "string"
                     },
+                    "source_kind": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/EpiasSourceKindEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "available_sources": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/EpiasSourceKindEnum"
+                        }
+                    },
                     "calibration_eligible": {
                         "type": "boolean"
                     },
                     "calibration_blocker": {
-                        "type": "string"
+                        "type": "string",
+                        "nullable": true
                     },
                     "snapshot": {
                         "allOf": [
@@ -2990,11 +3040,13 @@
                     }
                 },
                 "required": [
+                    "available_sources",
                     "calibration_blocker",
                     "calibration_eligible",
                     "date",
                     "readings",
                     "snapshot",
+                    "source_kind",
                     "timezone",
                     "unit"
                 ]
@@ -3004,7 +3056,19 @@
                 "properties": {
                     "provider_timestamp": {
                         "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "period_start": {
+                        "type": "string",
                         "format": "date-time"
+                    },
+                    "period_end": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "reported": {
+                        "type": "boolean"
                     },
                     "energy_mwh": {
                         "type": "number",
@@ -3019,7 +3083,10 @@
                 },
                 "required": [
                     "energy_mwh",
+                    "period_end",
+                    "period_start",
                     "provider_timestamp",
+                    "reported",
                     "solar_mwh"
                 ]
             },
@@ -3042,15 +3109,35 @@
                     },
                     "content_sha256": {
                         "type": "string"
+                    },
+                    "source_kind": {
+                        "$ref": "#/components/schemas/EpiasSourceKindEnum"
+                    },
+                    "normalization_policy": {
+                        "type": "string"
+                    },
+                    "complete": {
+                        "type": "boolean"
                     }
                 },
                 "required": [
                     "available_at",
                     "collected_at",
+                    "complete",
                     "configuration_id",
                     "content_sha256",
-                    "id"
+                    "id",
+                    "normalization_policy",
+                    "source_kind"
                 ]
+            },
+            "EpiasSourceKindEnum": {
+                "enum": [
+                    "realtime_generation",
+                    "settlement_injection"
+                ],
+                "type": "string",
+                "description": "* `realtime_generation` - realtime_generation\n* `settlement_injection` - settlement_injection"
             },
             "ForecastOutput": {
                 "type": "object",
@@ -3072,7 +3159,7 @@
                         "type": "string"
                     },
                     "source_kind": {
-                        "$ref": "#/components/schemas/SourceKindEnum"
+                        "$ref": "#/components/schemas/ForecastSourceKindEnum"
                     },
                     "unavailable_reason": {
                         "type": "string",
@@ -3120,6 +3207,14 @@
                     "timezone",
                     "unavailable_reason"
                 ]
+            },
+            "ForecastSourceKindEnum": {
+                "enum": [
+                    "forecast",
+                    "estimated_actuals"
+                ],
+                "type": "string",
+                "description": "* `forecast` - forecast\n* `estimated_actuals` - estimated_actuals"
             },
             "IdentifierOutput": {
                 "type": "object",
@@ -3618,6 +3713,18 @@
                         "type": "number",
                         "format": "double",
                         "nullable": true
+                    },
+                    "manual_observation_ids": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
+                    },
+                    "settlement_snapshot_ids": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
                     }
                 },
                 "required": [
@@ -3628,9 +3735,11 @@
                     "date",
                     "error_mwh",
                     "factor",
+                    "manual_observation_ids",
                     "measured_energy_mwh",
                     "predicted_energy_mwh",
                     "reason",
+                    "settlement_snapshot_ids",
                     "snapshot_id",
                     "status"
                 ]
@@ -3799,7 +3908,7 @@
                         "type": "string"
                     },
                     "source_kind": {
-                        "$ref": "#/components/schemas/SourceKindEnum"
+                        "$ref": "#/components/schemas/ForecastSourceKindEnum"
                     },
                     "unavailable_reason": {
                         "nullable": true,
@@ -4433,14 +4542,6 @@
                 ],
                 "type": "string",
                 "description": "* `daylight` - daylight\n* `full_day` - full_day"
-            },
-            "SourceKindEnum": {
-                "enum": [
-                    "forecast",
-                    "estimated_actuals"
-                ],
-                "type": "string",
-                "description": "* `forecast` - forecast\n* `estimated_actuals` - estimated_actuals"
             },
             "TenantOutput": {
                 "type": "object",

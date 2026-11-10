@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import { readFile } from "node:fs/promises";
+import Papa from "papaparse";
 
 test("a customer manages an approved region through the real API", async ({
     page,
@@ -80,12 +82,47 @@ test("a customer manages an approved region through the real API", async ({
     );
     await page.getByLabel("Resolution").selectOption("60");
     await expect(
-        page.getByText("View interval data (24 intervals)"),
+        page.getByText("View interval data (12 intervals)"),
     ).toBeVisible();
+    async function expectFullForecastCsv(fullCount: 24 | 48) {
+        const download = page.waitForEvent("download");
+        await page
+            .getByRole("button", { name: "Download CSV", exact: true })
+            .first()
+            .click();
+        const bytes = await readFile((await (await download).path())!);
+        expect([...bytes.subarray(0, 3)]).toEqual([239, 187, 191]);
+        const parsed = Papa.parse<Record<string, string>>(
+            bytes.toString("utf8"),
+            { header: true, skipEmptyLines: true },
+        );
+        expect(parsed.errors).toEqual([]);
+        expect(parsed.data).toHaveLength(fullCount);
+        // FixtureProvider supplies positive power from 06:00 through 18:00 local.
+        const positive = parsed.data.filter(
+            (row) => Number(row.mean_power_mw) > 0,
+        );
+        expect(positive).toHaveLength(fullCount / 2);
+        expect(parsed.data[0].mean_power_mw).toBe("0");
+        expect(parsed.data.at(-1)!.mean_power_mw).toBe("0");
+        const localTime = (stamp: string) =>
+            new Intl.DateTimeFormat("en-GB", {
+                timeZone: "Europe/Istanbul",
+                hour: "2-digit",
+                minute: "2-digit",
+                hourCycle: "h23",
+            }).format(new Date(stamp));
+        expect(localTime(parsed.data[0].start)).toBe("00:00");
+        expect(localTime(parsed.data.at(-1)!.end)).toBe("00:00");
+        expect(localTime(positive[0].start)).toBe("06:00");
+        expect(localTime(positive.at(-1)!.end)).toBe("18:00");
+    }
+    await expectFullForecastCsv(24);
     await page.getByLabel("Resolution").selectOption("30");
     await expect(
-        page.getByText("View interval data (48 intervals)"),
+        page.getByText("View interval data (24 intervals)"),
     ).toBeVisible();
+    await expectFullForecastCsv(48);
     await page.getByLabel("Forecast date").fill(process.env.BROWSER_TODAY!);
     await expect(
         page.getByText(
@@ -108,7 +145,7 @@ test("a customer manages an approved region through the real API", async ({
         ),
     ).toBeVisible();
     await expect(
-        page.getByText("View interval data (48 intervals)"),
+        page.getByText("View interval data (24 intervals)"),
     ).toBeVisible();
     await page.screenshot({
         path: testInfo.outputPath("plant-history-desktop.png"),
@@ -116,7 +153,7 @@ test("a customer manages an approved region through the real API", async ({
     });
     await page.getByLabel("Forecast date").fill(process.env.BROWSER_DATE!);
     await expect(
-        page.getByText("View interval data (48 intervals)"),
+        page.getByText("View interval data (24 intervals)"),
     ).toBeVisible();
 
     await page.getByRole("button", { name: "Automatic production" }).click();
@@ -130,7 +167,8 @@ test("a customer manages an approved region through the real API", async ({
     ).toBeVisible();
     await expect(
         page.getByText(
-            "Calibration is waiting for confirmation of the time interval convention and measurement point.",
+            "Only settlement injection matching the plant's net-export measurement point can enter calibration.",
+            { exact: false },
         ),
     ).toBeVisible();
 
@@ -160,8 +198,12 @@ test("a customer manages an approved region through the real API", async ({
     historyDate.setUTCDate(historyDate.getUTCDate() - 10);
     const missingDate = historyDate.toISOString().slice(0, 10);
     await page.getByLabel("Day", { exact: true }).fill(missingDate);
-    await expect(meterEntries.getByRole("spinbutton").first()).toBeVisible();
-    await expect(meterEntries.getByRole("spinbutton").first()).toBeDisabled();
+    await expect(
+        page.getByText(
+            "No comparison data or saved meter intervals are available for this day.",
+        ),
+    ).toBeVisible();
+    await expect(meterEntries.getByRole("spinbutton")).toHaveCount(0);
     await expect(
         page.getByRole("button", { name: "Save meter readings" }),
     ).toBeDisabled();

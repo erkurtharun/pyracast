@@ -386,6 +386,21 @@ def request_calibration(
             .order_by("-created_at", "-pk")
             .first()
         )
+        from pyracast.irradiance import local_day_bounds
+        from pyracast.plants.measurements import select_measurements, selection_fingerprint
+
+        start, _ = local_day_bounds(start_date, configuration.binding.timezone)
+        _, end = local_day_bounds(end_date, configuration.binding.timezone)
+        watermark = (
+            ProductionObservation.objects.filter(
+                configuration=configuration, recorded_at__lte=now
+            ).aggregate(last=Max("pk"))["last"]
+            or 0
+        )
+        rows, snapshot_ids = select_measurements(
+            configuration, start, end, now, observation_id_cutoff=watermark
+        )
+        fingerprint, reference_ids = selection_fingerprint(configuration, rows, now)
         run = CalibrationRun.objects.create(
             plant=plant,
             configuration=configuration,
@@ -395,10 +410,10 @@ def request_calibration(
             window_start=start_date,
             window_end=end_date,
             cutoff_at=now,
-            observation_id_cutoff=ProductionObservation.objects.filter(
-                configuration=configuration, recorded_at__lte=now
-            ).aggregate(last=Max("pk"))["last"]
-            or 0,
+            observation_id_cutoff=watermark,
+            settlement_snapshot_ids=snapshot_ids,
+            reference_snapshot_ids=reference_ids,
+            input_fingerprint=fingerprint,
         )
         PlantEvent.objects.create(
             plant=plant,
@@ -446,6 +461,10 @@ def activate_calibration(
         run = CalibrationRun.objects.get(
             pk=calibration_id, plant=plant, configuration=configuration
         )
+        from pyracast.plants.measurements import settlement_identity_current
+
+        if not settlement_identity_current(run):
+            raise ValidationError("The settlement source changed; request a new calibration.")
         current = (
             CalibrationActivation.objects.filter(plant=plant, configuration=configuration)
             .order_by("-created_at", "-pk")

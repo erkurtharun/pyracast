@@ -141,6 +141,9 @@ class CalibrationRun(models.Model):
     window_end = models.DateField()
     cutoff_at = models.DateTimeField()
     observation_id_cutoff = models.PositiveBigIntegerField(null=True)
+    settlement_snapshot_ids = models.JSONField(default=list)
+    reference_snapshot_ids = models.JSONField(null=True, default=None)
+    input_fingerprint = models.CharField(max_length=64, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True)
     status = models.CharField(
