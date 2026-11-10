@@ -27,7 +27,6 @@ def enqueue_connection(
         or not configuration_is_current(configuration)
     ):
         return []
-    today = now.astimezone(MARKET_ZONE).date()
     scheduled_for = now
     if not initial:
         schedule = CollectionSchedule.objects.filter(region=plant.region).first()
@@ -46,6 +45,7 @@ def enqueue_connection(
         if slot < connection.updated_at:
             return []
         scheduled_for = slot
+    today = scheduled_for.astimezone(MARKET_ZONE).date()
     jobs = []
     for offset in range(1, 8):
         job, _ = EpiasCollectionJob.objects.get_or_create(

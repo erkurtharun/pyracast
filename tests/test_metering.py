@@ -260,6 +260,25 @@ def test_two_schedulers_create_only_seven_daily_jobs(monkeypatch: pytest.MonkeyP
     assert EpiasCollectionJob.objects.count() == 14
 
 
+def test_daily_slot_keeps_same_market_days_across_istanbul_midnight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, _, _ = connected(monkeypatch)
+    Region.objects.filter(pk=system.region.pk).update(timezone="America/New_York")
+    CollectionSchedule.objects.create(region=system.region, times=["14:00"], effective_from=NOW)
+    before_midnight = NOW + timedelta(hours=7, minutes=59)
+    after_midnight = NOW + timedelta(hours=8, minutes=1)
+    first = enqueue_due_epias_jobs(now=before_midnight)
+    assert len(first) == 7
+    assert enqueue_due_epias_jobs(now=after_midnight) == first
+    jobs = EpiasCollectionJob.objects.filter(pk__in=first)
+    assert set(jobs.values_list("scheduled_for", flat=True)) == {NOW + timedelta(hours=6)}
+    assert set(jobs.values_list("target_day", flat=True)) == {
+        NOW.date() - timedelta(days=offset) for offset in range(1, 8)
+    }
+    assert EpiasCollectionJob.objects.count() == 14
+
+
 def test_duplicate_workers_only_one_external_acquisition(monkeypatch: pytest.MonkeyPatch) -> None:
     connected(monkeypatch)
     job_id = EpiasCollectionJob.objects.first()
