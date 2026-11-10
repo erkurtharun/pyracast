@@ -126,7 +126,7 @@ Start Django on port 8000 with `PYRACAST_DEBUG=1`. Add
 root `.env`, then run:
 
 ```text
-npm --prefix web ci
+npm --prefix web ci --ignore-scripts
 npm --prefix web run dev
 ```
 

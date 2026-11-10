@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
     request,
     type Plant,
@@ -162,6 +162,7 @@ function Production({
     configuration: number;
     token: string;
 }) {
+    const fileReadSequence = useRef(0);
     const [preview, setPreview] = useState<Observation[]>([]),
         [error, setError] = useState(""),
         [fileName, setFileName] = useState(""),
@@ -231,21 +232,25 @@ function Production({
                             accept=".csv,text/csv"
                             required
                             onChange={async (event) => {
+                                const sequence = ++fileReadSequence.current;
                                 setPreview([]);
                                 setError("");
                                 setResult(undefined);
                                 const file = event.target.files?.[0];
+                                setFileName(file?.name ?? "");
                                 if (!file) return;
-                                setFileName(file.name);
                                 try {
                                     if (file.size > 2 * 1024 * 1024)
                                         throw new Error(
                                             "Choose a CSV no larger than 2 MiB.",
                                         );
-                                    setPreview(
-                                        parseProduction(await file.text()),
-                                    );
+                                    const text = await file.text();
+                                    if (sequence !== fileReadSequence.current)
+                                        return;
+                                    setPreview(parseProduction(text));
                                 } catch (error) {
+                                    if (sequence !== fileReadSequence.current)
+                                        return;
                                     setError((error as Error).message);
                                 }
                             }}

@@ -15,3 +15,7 @@ updates:
     directory: /web
     schedule:
       interval: weekly
+    ignore:
+      # Upgrade with the OpenAPI generator when its TypeScript peer range permits it.
+      - dependency-name: typescript
+        versions: [">=6"]

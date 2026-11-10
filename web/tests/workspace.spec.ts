@@ -222,6 +222,102 @@ test("mock contract: imports validated production with explicit energy units", a
         ),
     ).toBeVisible();
 });
+
+for (const staleRead of ["resolve", "reject"] as const) {
+    for (const selection of ["new file", "clear"] as const) {
+        test(`CSV ignores an old ${staleRead} after ${selection}`, async ({
+            page,
+        }) => {
+            await page.addInitScript(
+                ({ staleRead }) => {
+                    const read = File.prototype.text;
+                    File.prototype.text = function () {
+                        if (this.name !== "old.csv") return read.call(this);
+                        return new Promise<string>((resolve, reject) => {
+                            Object.assign(window, {
+                                releaseOldCsv: async () => {
+                                    if (staleRead === "reject")
+                                        reject(
+                                            new Error("Old file read failed."),
+                                        );
+                                    else resolve(await read.call(this));
+                                },
+                            });
+                        });
+                    };
+                },
+                { staleRead },
+            );
+            await mockApi(page);
+            await page.goto("/");
+            await page
+                .getByRole("button", { name: /Antalya solar park/ })
+                .click();
+            await page
+                .getByRole("button", { name: "Solar plants", exact: true })
+                .click();
+            await page.getByRole("button", { name: /East array/ }).click();
+            await page
+                .getByRole("button", { name: "Production import" })
+                .click();
+            const csv = (energy: number, source: string) =>
+                Buffer.from(
+                    `starts_at,ends_at,energy,quality,source\n2026-01-01T09:00:00+03:00,2026-01-01T09:30:00+03:00,${energy},valid,${source}`,
+                );
+            const input = page.getByLabel("Production CSV");
+            await input.setInputFiles({
+                name: "old.csv",
+                mimeType: "text/csv",
+                buffer: csv(250, "old-meter"),
+            });
+            if (selection === "clear") await input.setInputFiles([]);
+            else {
+                await input.setInputFiles({
+                    name: "new.csv",
+                    mimeType: "text/csv",
+                    buffer: csv(777, "new-meter"),
+                });
+                await expect(
+                    page.getByText(/new.csv: 1 valid observations ready/),
+                ).toBeVisible();
+            }
+            await page.evaluate(async () => {
+                await (
+                    window as unknown as { releaseOldCsv: () => Promise<void> }
+                ).releaseOldCsv();
+                await new Promise<void>((resolve) =>
+                    requestAnimationFrame(() => resolve()),
+                );
+            });
+            await expect(
+                page.getByText("Old file read failed.", { exact: true }),
+            ).toHaveCount(0);
+            if (selection === "clear") {
+                await expect(
+                    page.getByText(/valid observations ready/),
+                ).toHaveCount(0);
+                await expect(
+                    page.getByRole("button", {
+                        name: "Import observations",
+                        exact: true,
+                    }),
+                ).toBeVisible();
+                return;
+            }
+            const imported = page.waitForRequest(
+                (request) =>
+                    request.method() === "POST" &&
+                    request.url().includes("/observations/"),
+            );
+            await page
+                .getByRole("button", { name: "Import 1 observations" })
+                .click();
+            expect((await imported).postDataJSON()).toMatchObject({
+                observations: [{ energy: 777, source: "new-meter" }],
+            });
+        });
+    }
+}
 test("mock contract: saves cached forecast reminders without provider queries", async ({
     page,
 }) => {
