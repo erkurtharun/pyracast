@@ -132,3 +132,42 @@ def test_database_rejects_invalid_values_and_duplicate_baseline_forecast() -> No
     CalibrationRun.objects.create(**run)
     with pytest.raises(IntegrityError), transaction.atomic():
         CalibrationRun.objects.create(**run)
+
+
+def test_database_enforces_mounting_and_angle_contract() -> None:
+    system = make_system(approved=True)
+    plant = Plant.objects.create(region=system.region, name="Geometry")
+    invalid: list[dict[str, Any]] = [
+        {"mounting_type": "dual_axis"},
+        {"mounting_type": "unknown", "surface_tilt": 0},
+        {"mounting_type": "tracking", "surface_azimuth": 180},
+        {"mounting_type": "fixed", "surface_tilt": -1},
+        {"mounting_type": "fixed", "surface_tilt": 91},
+        {"mounting_type": "fixed", "surface_tilt": float("nan")},
+        {"mounting_type": "fixed", "surface_tilt": float("inf")},
+        {"mounting_type": "fixed", "surface_azimuth": -1},
+        {"mounting_type": "fixed", "surface_azimuth": 360},
+        {"mounting_type": "fixed", "surface_azimuth": float("nan")},
+        {"mounting_type": "fixed", "surface_azimuth": float("inf")},
+    ]
+    for values in invalid:
+        with pytest.raises(IntegrityError), transaction.atomic():
+            PlantConfiguration.objects.create(
+                plant=plant,
+                binding=system.binding,
+                revision=1,
+                dc_capacity_mw=1,
+                created_by=system.member,
+                **values,
+            )
+    configuration = PlantConfiguration.objects.create(
+        plant=plant,
+        binding=system.binding,
+        revision=1,
+        dc_capacity_mw=1,
+        created_by=system.member,
+        mounting_type="fixed",
+        surface_tilt=0,
+        surface_azimuth=0,
+    )
+    assert (configuration.surface_tilt, configuration.surface_azimuth) == (0, 0)

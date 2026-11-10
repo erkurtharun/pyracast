@@ -3,19 +3,21 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.availability import interval_is_covered, reference_intervals
 from pyracast.plants.models import (
+    CalibrationActivation,
     CalibrationRun,
     Plant,
     PlantConfiguration,
     PlantEvent,
     ProductionObservation,
 )
-from pyracast.plants.numerics import PowerInterval
+from pyracast.plants.numerics import POLICY_VERSION, PowerInterval
 from pyracast.regions.models import Region
 
 
@@ -84,9 +86,19 @@ def prepare_calibration(plant_id: int, now: datetime | None = None) -> Calibrati
         start, _ = local_day_bounds(end_day - timedelta(days=89), configuration.binding.timezone)
         rows = list(observations.filter(starts_at__gte=start).order_by("starts_at"))
         days = _matched_days(configuration, rows, moment)
+        comparison = (
+            CalibrationActivation.objects.filter(plant=plant, configuration=configuration)
+            .order_by("-created_at", "-pk")
+            .first()
+        )
+        compared = Q(comparison_activation=comparison)
+        if comparison is not None and comparison.calibration_id is not None:
+            compared |= Q(pk=comparison.calibration_id)
         if (
             len(days) < 7
             or CalibrationRun.objects.filter(
+                compared,
+                Q(status="failed") | Q(result__policy_version=POLICY_VERSION),
                 configuration=configuration,
                 observation_id_cutoff__gte=latest.pk,
                 window_start__lte=days[0],
@@ -98,6 +110,7 @@ def prepare_calibration(plant_id: int, now: datetime | None = None) -> Calibrati
             plant=plant,
             configuration=configuration,
             binding=configuration.binding,
+            comparison_activation=comparison,
             requested_by=latest.recorded_by,
             window_start=days[0],
             window_end=days[-1],

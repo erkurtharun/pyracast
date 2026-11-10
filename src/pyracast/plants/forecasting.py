@@ -85,7 +85,7 @@ def select_snapshot(
     )
 
 
-def _calibration(configuration: PlantConfiguration, as_of: datetime) -> CalibrationRun | None:
+def calibration_at(configuration: PlantConfiguration, as_of: datetime) -> CalibrationRun | None:
     activation = (
         CalibrationActivation.objects.select_related("calibration")
         .filter(configuration=configuration, created_at__lte=as_of)
@@ -269,7 +269,7 @@ def plant_forecast(
     configured_start, _ = local_day_bounds(target_date, configuration.binding.timezone)
     if as_of > configured_start:
         raise ValidationError("as_of must not follow the configured local day start.")
-    calibration = _calibration(configuration, as_of)
+    calibration = calibration_at(configuration, as_of)
     snapshot = select_snapshot(configuration, target_date, as_of)
     result: dict[str, object] | None = None
     irradiance: dict[str, object] | None = None

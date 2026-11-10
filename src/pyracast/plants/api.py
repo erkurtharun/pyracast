@@ -13,6 +13,7 @@ from pyracast.accounts.operations import require_member
 from pyracast.plants import operations
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import CalibrationRun, Plant, ProductionObservation
+from pyracast.plants.performance import forecast_performance
 from pyracast.plants.production import production_history
 from pyracast.plants.serializers import (
     ActivationOutput,
@@ -24,6 +25,8 @@ from pyracast.plants.serializers import (
     ObservationImport,
     ObservationImportOutput,
     ObservationOutput,
+    PerformanceOutput,
+    PerformanceQuery,
     PlantForecastOutput,
     PlantInput,
     PlantOutput,
@@ -135,6 +138,15 @@ class ProductionView(ScopedView):
         data = ProductionQuery(data=request.query_params)
         data.is_valid(raise_exception=True)
         return Response(production_history(plant, **data.validated_data))
+
+
+class PerformanceView(ScopedView):
+    @extend_schema(parameters=[PerformanceQuery], responses=PerformanceOutput)
+    def get(self, request: Request, **kwargs: Any) -> Response:
+        plant = self.plant()
+        data = PerformanceQuery(data=request.query_params)
+        data.is_valid(raise_exception=True)
+        return Response(forecast_performance(plant, **data.validated_data))
 
 
 class CalibrationsView(ScopedView):

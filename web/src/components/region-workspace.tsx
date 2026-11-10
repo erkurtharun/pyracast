@@ -4,15 +4,17 @@ import { request, type Region, type Plant, type Forecast } from "@/lib/api";
 import {
     ActionForm,
     Empty,
-    Field,
     Notice,
-    Select,
     Tag,
     useResource,
     useCollection,
 } from "./ui";
 import { ForecastPanel } from "./forecast-panel";
 import { PlantWorkspace } from "./plant-workspace";
+import {
+    PlantConfigurationFields,
+    configurationInput,
+} from "./plant-configuration-fields";
 import { MoveToRecycleBin } from "./recycle-bin";
 import { Reminders } from "./reminders";
 import { CollectionSchedule } from "./collection-schedule";
@@ -186,7 +188,10 @@ function Plants({
                 base={`${base}plants/${selected.id}/`}
                 timezone={region.timezone}
                 token={token}
-                onBack={() => setSelected(undefined)}
+                onBack={() => {
+                    setVersion((current) => current + 1);
+                    setSelected(undefined);
+                }}
                 onDeleted={() => {
                     setDeleted((current) => [...current, selected.id]);
                     setVersion((current) => current + 1);
@@ -222,70 +227,17 @@ function Plants({
                 <ActionForm
                     submit="Create plant"
                     onSubmit={async (data) => {
-                        const optional = (name: string) =>
-                            data.get(name) === ""
-                                ? null
-                                : Number(data.get(name));
                         const created = await request<Plant>(
                             `${base}plants/`,
                             "POST",
-                            {
-                                name: data.get("name"),
-                                dc_capacity_mw: Number(
-                                    data.get("dc_capacity_mw"),
-                                ),
-                                inverter_capacity_mw: optional(
-                                    "inverter_capacity_mw",
-                                ),
-                                export_limit_mw: optional("export_limit_mw"),
-                                measurement_basis:
-                                    data.get("measurement_basis"),
-                            },
+                            configurationInput(data),
                             token,
                         );
                         setVersion(version + 1);
                         setSelected(created);
                     }}
                 >
-                    <div className="form-grid">
-                        <Field label="Plant name" name="name" />
-                        <Field
-                            label="DC nameplate capacity (MW)"
-                            name="dc_capacity_mw"
-                            type="number"
-                            step="any"
-                            min={0.000001}
-                        />
-                        <Field
-                            label="Inverter AC capacity (MW, optional)"
-                            name="inverter_capacity_mw"
-                            type="number"
-                            step="any"
-                            min={0.000001}
-                            required={false}
-                        />
-                        <Field
-                            label="Grid export limit (MW, optional)"
-                            name="export_limit_mw"
-                            type="number"
-                            step="any"
-                            min={0.000001}
-                            required={false}
-                        />
-                        <Select
-                            label="Measurement point"
-                            name="measurement_basis"
-                        >
-                            <option value="net_export">Net export</option>
-                            <option value="ac_generation">AC generation</option>
-                        </Select>
-                    </div>
-                    <p className="fine">
-                        DC nameplate is the total panel capacity in MW. Inverter
-                        AC capacity is the total inverter rating in MW. Grid
-                        export limit is the permitted grid limit in MW. Leave
-                        either optional value blank if unknown.
-                    </p>
+                    <PlantConfigurationFields />
                 </ActionForm>
             )}
             {plants.loading ? (

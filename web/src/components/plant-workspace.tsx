@@ -21,6 +21,11 @@ import {
 import { ProductionHistory } from "./production-history";
 import { MoveToRecycleBin } from "./recycle-bin";
 import { ForecastPanel } from "./forecast-panel";
+import { ForecastPerformance } from "./forecast-performance";
+import {
+    PlantConfigurationFields,
+    configurationInput,
+} from "./plant-configuration-fields";
 import { DataSourceControl, localDay, type DataSource } from "./data-source";
 export function PlantWorkspace({
     plant,
@@ -49,8 +54,10 @@ export function PlantWorkspace({
         [resolution, setResolution] = useState("30"),
         [source, setSource] = useState<DataSource>("auto");
     const [productionRevision, setProductionRevision] = useState(0);
+    const [currentPlant, setCurrentPlant] = useState(plant);
+    const [editing, setEditing] = useState(false);
     const yesterday = localDay(timezone, -1);
-    const configuration = plant.current_configuration;
+    const configuration = currentPlant.current_configuration;
     return (
         <>
             <button className="back-button" onClick={onBack}>
@@ -58,7 +65,7 @@ export function PlantWorkspace({
             </button>
             <div className="section-heading">
                 <div>
-                    <h2>{plant.name}</h2>
+                    <h2>{currentPlant.name}</h2>
                     <p>
                         Configuration {configuration?.revision ?? "—"} ·{" "}
                         {configuration?.measurement_basis.replaceAll("_", " ")}
@@ -66,9 +73,15 @@ export function PlantWorkspace({
                 </div>
                 <div className="button-group">
                     <Tag>Solar plant</Tag>
+                    <button
+                        className="button secondary"
+                        onClick={() => setEditing(!editing)}
+                    >
+                        {editing ? "Close configuration" : "Edit configuration"}
+                    </button>
                     <MoveToRecycleBin
                         kind="plant"
-                        name={plant.name}
+                        name={currentPlant.name}
                         url={base}
                         token={token}
                         onDeleted={onDeleted}
@@ -92,6 +105,40 @@ export function PlantWorkspace({
                     unit="MW"
                 />
             </div>
+            <p className="fine">
+                DC nameplate is the panel rating; inverter AC capacity is the
+                inverter rating; grid export limit is the permitted grid cap.
+                The measurement point identifies whether production is measured
+                at AC generation or net export. Unknown optional capacities
+                remain unspecified.
+            </p>
+            {editing && configuration && (
+                <section className="panel">
+                    <h2>Edit plant configuration</h2>
+                    <p>
+                        Saving creates a new configuration revision and may
+                        supersede pending calibration work.
+                    </p>
+                    <ActionForm
+                        submit="Save configuration"
+                        onSubmit={async (data) => {
+                            const updated = await request<Plant>(
+                                base,
+                                "PUT",
+                                configurationInput(data),
+                                token,
+                            );
+                            setCurrentPlant(updated);
+                            setEditing(false);
+                        }}
+                    >
+                        <PlantConfigurationFields
+                            name={currentPlant.name}
+                            configuration={configuration}
+                        />
+                    </ActionForm>
+                </section>
+            )}
             <nav className="tabs" aria-label="Plant sections">
                 {[
                     ["forecast", "Generation forecast"],
@@ -157,15 +204,21 @@ export function PlantWorkspace({
                         </Notice>
                     ) : (
                         <PlantForecast
-                            key={`${date}-${resolution}-${source}`}
+                            key={`${date}-${resolution}-${source}-${configuration?.id}`}
                             url={`${base}forecast/?date=${date}&resolution_minutes=${resolution}&data_source=${source}`}
                         />
                     )}
+                    <ForecastPerformance
+                        key={configuration?.id}
+                        base={base}
+                        timezone={timezone}
+                    />
                 </>
             ) : !configuration ? (
                 <Notice>No configuration is available for this plant.</Notice>
             ) : tab === "production" ? (
                 <Production
+                    key={configuration.id}
                     base={base}
                     configuration={configuration.id}
                     token={token}
@@ -173,6 +226,7 @@ export function PlantWorkspace({
             ) : (
                 <>
                     <ProductionHistory
+                        key={`history-${configuration.id}`}
                         base={base}
                         configuration={configuration.id}
                         token={token}
@@ -181,6 +235,7 @@ export function PlantWorkspace({
                         }
                     />
                     <Calibrations
+                        key={`calibration-${configuration.id}`}
                         base={base}
                         token={token}
                         productionRevision={productionRevision}
@@ -374,7 +429,8 @@ function Calibrations({
                     <div>
                         <h2>Calibration history</h2>
                         <p>
-                            Ready fits can be activated explicitly. Reset
+                            Ready fits can be activated explicitly. Older runs
+                            may need a new assessment before activation. Reset
                             returns future estimates to the baseline.
                         </p>
                     </div>
@@ -506,6 +562,9 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
     const result = asRecord(run.result),
         baseline = asRecord(result.baseline),
         candidate = asRecord(result.candidate),
+        incumbent = asRecord(result.incumbent),
+        support = asRecord(result.training_support),
+        rolling = asRecord(result.rolling_origin),
         exclusions = asRecord(result.exclusions);
     const format = (value: unknown) =>
         typeof value === "number"
@@ -522,6 +581,26 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
         insufficient:
             "There are not enough eligible complete days to evaluate a fit.",
     };
+    const reasonMessages: Record<string, string> = {
+        insufficient_complete_days:
+            "Not enough complete paired days are available.",
+        insufficient_training_support:
+            "The training days do not contain enough informative production.",
+        baseline_improvement_below_margin:
+            "The candidate did not improve enough over the baseline.",
+        factor_at_bound: "The fitted factor reached its allowed boundary.",
+        incumbent_mae_regression:
+            "The candidate increased error compared with the selection at training.",
+        baseline_bias_regression:
+            "The candidate increased bias compared with the baseline.",
+        incumbent_bias_regression:
+            "The candidate increased bias compared with the selection at training.",
+    };
+    const reasons = Array.isArray(result.reasons)
+        ? result.reasons.filter(
+              (reason): reason is string => typeof reason === "string",
+          )
+        : [];
     return (
         <>
             <Notice>
@@ -530,11 +609,34 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
                     ? " This is a provisional assessment based on fewer than 30 valid days."
                     : ""}
             </Notice>
+            {reasons.length > 0 && (
+                <ul>
+                    {reasons.map((reason) => (
+                        <li key={reason}>
+                            {reasonMessages[reason] ??
+                                reason.replaceAll("_", " ")}
+                        </li>
+                    ))}
+                </ul>
+            )}
             <div className="stats">
                 <Stat label="Valid days" value={result.valid_days} />
                 <Stat label="Training days" value={result.training_days} />
                 <Stat label="Held-out days" value={result.holdout_days} />
+                {Object.keys(support).length > 0 && (
+                    <Stat
+                        label="Informative training days"
+                        value={`${format(support.informative_days)} / ${format(support.minimum_days)} required`}
+                    />
+                )}
             </div>
+            {typeof rolling.status === "string" && (
+                <p className="fine">
+                    Rolling-origin diagnostic: {rolling.status};{" "}
+                    {Array.isArray(rolling.folds) ? rolling.folds.length : 0}{" "}
+                    folds.
+                </p>
+            )}
             {Object.keys(candidate).length > 0 && (
                 <div className="table-scroll">
                     <table>
@@ -546,6 +648,12 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
                                 <th>Metric</th>
                                 <th>Baseline</th>
                                 <th>Candidate</th>
+                                {Object.keys(incumbent).length > 0 && (
+                                    <th>
+                                        Selection at training (factor{" "}
+                                        {format(result.incumbent_factor)})
+                                    </th>
+                                )}
                             </tr>
                         </thead>
                         <tbody>
@@ -565,6 +673,9 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
                                     <th>{label}</th>
                                     <td>{format(baseline[key])}</td>
                                     <td>{format(candidate[key])}</td>
+                                    {Object.keys(incumbent).length > 0 && (
+                                        <td>{format(incumbent[key])}</td>
+                                    )}
                                 </tr>
                             ))}
                         </tbody>

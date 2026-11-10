@@ -23,12 +23,13 @@ from pyracast.plants.operations import (
     ObservationInput,
     activate_calibration,
     import_observations,
+    reset_calibration,
     revise_plant,
 )
 from pyracast.plants.training import LEASE_DURATION, pending_calibration_ids, run_calibration
 from pyracast.regions.models import Region
 from tests.test_domain import NOW, System
-from tests.test_plant_operations import make_plant, request_run, snapshot_for
+from tests.test_plant_operations import make_plant, ready_run, request_run, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -103,6 +104,55 @@ def test_durable_fit_freezes_inputs_and_requires_separate_activation(
     activate_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk, run.pk)
     assert CalibrationActivation.objects.get().calibration_id == run.pk
     assert not pending_calibration_ids(NOW)
+
+
+def test_worker_compares_against_the_activation_at_request_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    incumbent = ready_run(system, plant)
+    incumbent.factor = 0.8
+    incumbent.save(update_fields=("factor",))
+    activation = activate_calibration(
+        system.member, system.tenant.pk, system.region.pk, plant.pk, incumbent.pk
+    )
+    history(system, plant)
+    run = request_run(system, plant)
+    reset_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk)
+    assert run_calibration(run.pk, NOW)
+    run.refresh_from_db()
+    assert run.dataset_manifest["comparison_activation_id"] == activation.pk
+    assert run.dataset_manifest["incumbent_factor"] == 0.8
+    assert run.result["comparison_activation_id"] == activation.pk
+    assert run.result["incumbent_factor"] == 0.8
+    assert run.result["incumbent"]
+    with pytest.raises(ValidationError, match="changed"):
+        activate_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk, run.pk)
+
+
+def test_worker_uses_identity_for_pinned_reset_and_retries_invalid_incumbent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    reset = reset_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk)
+    history(system, plant)
+    run = request_run(system, plant)
+    assert run_calibration(run.pk, NOW)
+    run.refresh_from_db()
+    assert run.result["incumbent_factor"] == 1.0
+    assert run.result["comparison_activation_id"] == reset.pk
+    monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(minutes=1))
+    active = activate_calibration(
+        system.member, system.tenant.pk, system.region.pk, plant.pk, run.pk
+    )
+    next_run = request_run(system, plant)
+    run.factor = None
+    run.save(update_fields=("factor",))
+    assert next_run.comparison_activation_id == active.pk
+    assert not run_calibration(next_run.pk, NOW + timedelta(minutes=1))
+    next_run.refresh_from_db()
+    assert next_run.status == "pending"
+    assert next_run.last_error == "invalid_calibration_data"
 
 
 def test_negative_power_outside_matched_days_does_not_break_fit(

@@ -29,6 +29,13 @@ class PlantConfiguration(models.Model):
     dc_capacity_mw = models.FloatField()
     inverter_capacity_mw = models.FloatField(null=True)
     export_limit_mw = models.FloatField(null=True)
+    mounting_type = models.CharField(
+        max_length=10,
+        choices=(("unknown", "Unknown"), ("fixed", "Fixed"), ("tracking", "Tracking")),
+        default="unknown",
+    )
+    surface_tilt = models.FloatField(null=True)
+    surface_azimuth = models.FloatField(null=True)
     measurement_basis = models.CharField(
         max_length=20,
         choices=(("net_export", "Net export"), ("ac_generation", "AC generation")),
@@ -55,6 +62,25 @@ class PlantConfiguration(models.Model):
                 condition=Q(export_limit_mw__isnull=True)
                 | Q(export_limit_mw__gt=0, export_limit_mw__lt=float("inf")),
                 name="plant_export_limit_finite",
+            ),
+            models.CheckConstraint(
+                condition=Q(mounting_type__in=("unknown", "fixed", "tracking")),
+                name="plant_mounting_type_supported",
+            ),
+            models.CheckConstraint(
+                condition=Q(surface_tilt__isnull=True)
+                | Q(surface_tilt__gte=0, surface_tilt__lte=90),
+                name="plant_surface_tilt_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(surface_azimuth__isnull=True)
+                | Q(surface_azimuth__gte=0, surface_azimuth__lt=360),
+                name="plant_surface_azimuth_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(mounting_type="fixed")
+                | Q(surface_tilt__isnull=True, surface_azimuth__isnull=True),
+                name="plant_angles_require_fixed",
             ),
         )
 
@@ -107,6 +133,9 @@ class CalibrationRun(models.Model):
     plant = models.ForeignKey(Plant, on_delete=models.PROTECT)
     configuration = models.ForeignKey(PlantConfiguration, on_delete=models.PROTECT)
     binding = models.ForeignKey("connections.SiteBinding", on_delete=models.PROTECT)
+    comparison_activation = models.ForeignKey(
+        "CalibrationActivation", null=True, on_delete=models.PROTECT, related_name="comparison_runs"
+    )
     requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     window_start = models.DateField()
     window_end = models.DateField()

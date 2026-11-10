@@ -182,6 +182,8 @@ def _dataset(
             )
         )
     manifest: dict[str, object] = {
+        "comparison_activation_id": run.comparison_activation_id,
+        "incumbent_factor": _incumbent_factor(run),
         "configuration_id": configuration.pk,
         "binding_id": configuration.binding_id,
         "dc_capacity_mw": configuration.dc_capacity_mw,
@@ -203,6 +205,16 @@ def _dataset(
         "selected_observations": len(entries),
     }
     return tuple(samples), manifest, report
+
+
+def _incumbent_factor(run: CalibrationRun) -> float:
+    activation = run.comparison_activation
+    if activation is None or activation.calibration is None:
+        return 1.0
+    factor = activation.calibration.factor
+    if factor is None:
+        raise ValueError("The comparison calibration has no factor.")
+    return factor
 
 
 def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now: datetime) -> bool:
@@ -305,7 +317,9 @@ def run_calibration(run_id: int, now: datetime | None = None) -> bool:
             timezone=lease.configuration.binding.timezone,
             normalization_mw=lease.configuration.dc_capacity_mw,
             limit_mw=power_limit(lease.configuration),
+            incumbent_factor=_incumbent_factor(lease.run),
         )
+        result.report["comparison_activation_id"] = lease.run.comparison_activation_id
         result.report["selection"] = selection
         return _publish(lease, result, manifest, now + timedelta(seconds=time.monotonic() - start))
     except ValueError, ArithmeticError, TypeError, KeyError:

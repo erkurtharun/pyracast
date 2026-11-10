@@ -320,6 +320,18 @@ def test_purge_region_removes_owned_dependencies_and_preserves_shared_quota_ledg
 def test_purge_plant_keeps_region_history_and_reminders(monkeypatch: pytest.MonkeyPatch) -> None:
     system, plant = make_plant(monkeypatch)
     source, preference = linked_records(system, plant)
+    previous = CalibrationRun.objects.get(plant=plant)
+    CalibrationRun.objects.create(
+        plant=plant,
+        configuration=previous.configuration,
+        binding=previous.binding,
+        requested_by=system.member,
+        window_start=previous.window_start,
+        window_end=previous.window_end,
+        cutoff_at=NOW,
+        status="rejected",
+        comparison_activation=CalibrationActivation.objects.get(plant=plant),
+    )
     args = (system.member, system.tenant.pk, system.region.pk)
     trash_plant(*args, plant.pk)
     assert CollectionJob.objects.get(pk=source.job_id).status == "succeeded"

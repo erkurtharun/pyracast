@@ -121,6 +121,16 @@ async function mockApi(
                 quota: { daily_reminder_limit: 10, queries_per_email: 0 },
                 deliveries: [],
             };
+        else if (path.endsWith("/performance/"))
+            data = {
+                start_date: "2026-01-01",
+                end_date: "2026-01-01",
+                matched_days: 0,
+                requested_days: 1,
+                metrics: null,
+                baseline_metrics: null,
+                days: [],
+            };
         else if (path.endsWith("/forecast/"))
             data = {
                 region_id: 11,
@@ -229,6 +239,9 @@ test("plant creation preserves capacities and opens tomorrow across DST", async 
             inverter_capacity_mw: 100,
             export_limit_mw: null,
             measurement_basis: "net_export",
+            mounting_type: "unknown",
+            surface_tilt: null,
+            surface_azimuth: null,
         });
         await route.fulfill({
             json: {
@@ -259,6 +272,82 @@ test("plant creation preserves capacities and opens tomorrow across DST", async 
     await expect(
         page.getByRole("heading", { name: "No forecast for this day yet" }),
     ).toBeVisible();
+});
+
+test("plant configuration saves fixed angles and clears them when tracking", async ({
+    page,
+}) => {
+    await mockApi(page);
+    let updated = {
+        ...plant,
+        current_configuration: {
+            ...plant.current_configuration,
+            mounting_type: "fixed",
+            surface_tilt: 33,
+            surface_azimuth: 180,
+        },
+    };
+    const bodies: Record<string, unknown>[] = [];
+    await page.route("**/plants/21/", async (route) => {
+        if (route.request().method() !== "PUT") return route.fallback();
+        const body = route.request().postDataJSON();
+        bodies.push(body);
+        updated = {
+            ...updated,
+            name: body.name,
+            current_configuration: {
+                ...updated.current_configuration,
+                ...body,
+                id: 31 + bodies.length,
+            },
+        };
+        await route.fulfill({ json: updated });
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await page
+        .getByRole("button", { name: "Solar plants", exact: true })
+        .click();
+    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByRole("button", { name: "Production import" }).click();
+    await page.getByLabel("Production CSV").setInputFiles({
+        name: "production.csv",
+        mimeType: "text/csv",
+        buffer: Buffer.from(
+            "starts_at,ends_at,energy,quality,source\n2026-01-01T09:00:00+03:00,2026-01-01T09:30:00+03:00,250,valid,meter\n",
+        ),
+    });
+    await expect(page.getByText(/1 valid observations ready/)).toBeVisible();
+    await page.getByRole("button", { name: "Edit configuration" }).click();
+    await page.getByLabel("Mounting type").selectOption("fixed");
+    await page.getByLabel("Surface tilt (degrees, optional)").fill("0");
+    await page.getByLabel("Surface azimuth (degrees, optional)").fill("360");
+    await page.getByRole("button", { name: "Save configuration" }).click();
+    expect(bodies).toHaveLength(0);
+    await page.getByLabel("Surface azimuth (degrees, optional)").fill("180");
+    await page.getByRole("button", { name: "Save configuration" }).click();
+    await expect.poll(() => bodies.length).toBe(1);
+    await expect(page.getByText(/1 valid observations ready/)).toHaveCount(0);
+    expect(bodies[0]).toMatchObject({
+        mounting_type: "fixed",
+        surface_tilt: 0,
+        surface_azimuth: 180,
+        dc_capacity_mw: 5,
+        inverter_capacity_mw: 4,
+        export_limit_mw: null,
+    });
+    await page.getByRole("button", { name: "Edit configuration" }).click();
+    await expect(
+        page.getByLabel("Surface tilt (degrees, optional)"),
+    ).toHaveValue("0");
+    await page.getByLabel("Mounting type").selectOption("tracking");
+    await page.getByRole("button", { name: "Save configuration" }).click();
+    await expect.poll(() => bodies.length).toBe(2);
+    expect(bodies[1]).toMatchObject({
+        mounting_type: "tracking",
+        surface_tilt: null,
+        surface_azimuth: null,
+    });
 });
 
 test("missing plant configuration explains the selected day", async ({
@@ -687,6 +776,133 @@ async function openJournal(page: Page) {
         page.getByRole("heading", { name: "Production journal" }),
     ).toBeVisible();
 }
+
+test("forecast performance shows replay metrics, missing days and selected range", async ({
+    page,
+}) => {
+    await page.clock.setFixedTime(new Date("2026-11-10T12:00:00Z"));
+    await mockApi(page);
+    let lastQuery = "";
+    await page.route("**/plants/21/performance/**", async (route) => {
+        lastQuery = new URL(route.request().url()).search;
+        await route.fulfill({
+            json: {
+                start_date: "2026-11-01",
+                end_date: "2026-11-02",
+                matched_days: 1,
+                requested_days: 2,
+                metrics: {
+                    daily_mae_mwh: 1.5,
+                    daily_bias_mwh: -1.5,
+                    source_positive_mae_mw: lastQuery ? null : 0.3,
+                },
+                baseline_metrics: { daily_mae_mwh: 2.5 },
+                days: [
+                    {
+                        date: "2026-11-01",
+                        status: "matched",
+                        reason: null,
+                        measured_energy_mwh: 10,
+                        predicted_energy_mwh: 8.5,
+                        error_mwh: -1.5,
+                    },
+                    {
+                        date: "2026-11-02",
+                        status: "missing",
+                        reason: "forecast_not_available",
+                        measured_energy_mwh: null,
+                        predicted_energy_mwh: null,
+                        error_mwh: null,
+                    },
+                ],
+            },
+        });
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await page
+        .getByRole("button", { name: "Solar plants", exact: true })
+        .click();
+    await page.getByRole("button", { name: /East array/ }).click();
+    await expect(
+        page.getByRole("heading", { name: "Forecast performance" }),
+    ).toBeVisible();
+    await expect(
+        page.getByText("Day-ahead forecast was not available"),
+    ).toBeVisible();
+    await expect(
+        page.getByText("This does not establish", { exact: false }),
+    ).toBeVisible();
+    await expect(
+        page.getByText("Baseline daily mean absolute error"),
+    ).toBeVisible();
+    await expect(
+        page
+            .locator(".stat")
+            .filter({ hasText: "Baseline daily mean absolute error" }),
+    ).toContainText("2.5");
+    await expect(
+        page.getByText("Generating-interval error", { exact: true }),
+    ).toBeVisible();
+    await page.getByLabel("Start date").fill("2026-11-01");
+    await page.getByLabel("End date").fill("2026-11-02");
+    await page.getByRole("button", { name: "Load performance" }).click();
+    await expect
+        .poll(() => lastQuery)
+        .toContain("start_date=2026-11-01&end_date=2026-11-02");
+    await expect(page.getByRole("cell", { name: "8.5" })).toBeVisible();
+    await expect(
+        page.locator(".stat").filter({ hasText: "Generating-interval error" }),
+    ).toContainText("—");
+});
+
+test("calibration detail explains support, rejection and incumbent comparison", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const run = {
+        id: 40,
+        window_start: "2026-01-01",
+        window_end: "2026-01-10",
+        status: "rejected",
+        assessment: "provisional",
+        factor: 1.1,
+        result: {
+            valid_days: 10,
+            training_days: 8,
+            holdout_days: 2,
+            training_support: { informative_days: 4, minimum_days: 5 },
+            reasons: ["incumbent_mae_regression"],
+            rolling_origin: { status: "diagnostic", folds: [{}, {}] },
+            baseline: { daily_mae_mwh: 3 },
+            candidate: { daily_mae_mwh: 2 },
+            incumbent: { daily_mae_mwh: 1 },
+            incumbent_factor: 1.2,
+        },
+    };
+    await page.route("**/plants/21/calibrations/", (route) =>
+        route.fulfill({ json: paged([run]) }),
+    );
+    await page.route("**/plants/21/calibrations/40/", (route) =>
+        route.fulfill({ json: run }),
+    );
+    await openJournal(page);
+    await page.getByRole("button", { name: "View details" }).click();
+    await expect(
+        page.getByText(
+            "The candidate increased error compared with the selection at training.",
+        ),
+    ).toBeVisible();
+    await expect(page.getByText("4 / 5 required")).toBeVisible();
+    await expect(
+        page.getByText("Rolling-origin diagnostic: diagnostic; 2 folds."),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("columnheader", {
+            name: "Selection at training (factor 1.2)",
+        }),
+    ).toBeVisible();
+});
 
 test("production journal saves missing readings, preserves dates and shows archived availability", async ({
     page,

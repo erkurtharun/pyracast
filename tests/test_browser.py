@@ -97,12 +97,17 @@ def test_browser_against_live_django(live_server: Any) -> None:
     assert plant.current_configuration.dc_capacity_mw == 130
     assert plant.current_configuration.inverter_capacity_mw == 100
     assert plant.current_configuration.export_limit_mw is None
+    assert plant.current_configuration.revision == 2
+    assert plant.current_configuration.mounting_type == "fixed"
+    assert plant.current_configuration.surface_tilt == 33
+    assert plant.current_configuration.surface_azimuth == 180
     assert plant.deleted_at is None
     system.region.refresh_from_db()
     assert system.region.deleted_at is None
     observation = ProductionObservation.objects.get(plant=plant)
     assert observation.energy_mwh == 1.25
-    assert observation.configuration_id == plant.current_configuration_id
+    assert observation.configuration_id != plant.current_configuration_id
+    assert observation.configuration.revision == 1
     assert not CalibrationRun.objects.filter(plant=plant).exists()
     schedule = CollectionSchedule.objects.get(region=system.region)
     assert schedule.enabled

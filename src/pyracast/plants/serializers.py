@@ -41,6 +41,13 @@ class PlantInput(InputSerializer):
     measurement_basis = serializers.ChoiceField(
         choices=("net_export", "ac_generation"), default="net_export"
     )
+    mounting_type = serializers.ChoiceField(
+        choices=("unknown", "fixed", "tracking"), default="unknown"
+    )
+    surface_tilt = FiniteFloat(
+        min_value=0, max_value=90, allow_null=True, required=False, default=None
+    )
+    surface_azimuth = FiniteFloat(min_value=0, allow_null=True, required=False, default=None)
 
 
 class ConfigurationOutput(serializers.ModelSerializer[PlantConfiguration]):
@@ -56,6 +63,9 @@ class ConfigurationOutput(serializers.ModelSerializer[PlantConfiguration]):
             "inverter_capacity_mw",
             "export_limit_mw",
             "measurement_basis",
+            "mounting_type",
+            "surface_tilt",
+            "surface_azimuth",
             "created_at",
         )
         read_only_fields = fields
@@ -126,6 +136,52 @@ class ProductionQuery(InputSerializer):
     start_date = serializers.DateField(required=False)
     end_date = serializers.DateField(required=False)
     resolution_minutes = serializers.ChoiceField(choices=(30, 60), default=60)
+
+
+class PerformanceQuery(InputSerializer):
+    start_date = serializers.DateField(required=False)
+    end_date = serializers.DateField(required=False)
+
+
+class PerformanceMetrics(serializers.Serializer[dict[str, Any]]):
+    interval_mae_mw = serializers.FloatField()
+    source_positive_mae_mw = serializers.FloatField(allow_null=True)
+    bias_mw = serializers.FloatField()
+    daily_mae_mwh = serializers.FloatField()
+    daily_bias_mwh = serializers.FloatField()
+
+
+class PerformanceDay(serializers.Serializer[dict[str, Any]]):
+    date = serializers.DateField()
+    status = serializers.ChoiceField(choices=("matched", "missing"))
+    reason = serializers.CharField(allow_null=True)
+    snapshot_id = serializers.IntegerField(allow_null=True)
+    collected_at = serializers.DateTimeField(allow_null=True)
+    available_at = serializers.DateTimeField(allow_null=True)
+    calibration_id = serializers.IntegerField(allow_null=True)
+    factor = serializers.FloatField(allow_null=True)
+    measured_energy_mwh = serializers.FloatField(allow_null=True)
+    predicted_energy_mwh = serializers.FloatField(allow_null=True)
+    baseline_energy_mwh = serializers.FloatField(allow_null=True)
+    error_mwh = serializers.FloatField(allow_null=True)
+
+
+class PerformanceOutput(serializers.Serializer[dict[str, Any]]):
+    plant_id = serializers.IntegerField()
+    configuration_id = serializers.IntegerField(allow_null=True)
+    timezone = serializers.CharField()
+    start_date = serializers.DateField()
+    end_date = serializers.DateField()
+    evaluated_at = serializers.DateTimeField()
+    evaluation_kind = serializers.CharField()
+    selection_policy = serializers.CharField()
+    measurement_basis = serializers.CharField(allow_null=True)
+    matched_days = serializers.IntegerField()
+    requested_days = serializers.IntegerField()
+    metrics = PerformanceMetrics(allow_null=True)
+    baseline_metrics = PerformanceMetrics(allow_null=True)
+    days = PerformanceDay(many=True)
+    uncertainty = serializers.CharField()
 
 
 class ProductionDayOutput(serializers.Serializer[dict[str, Any]]):

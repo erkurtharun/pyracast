@@ -1667,6 +1667,73 @@
                 }
             }
         },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/performance/": {
+            "get": {
+                "operationId": "tenants_regions_plants_performance_retrieve",
+                "parameters": [
+                    {
+                        "in": "query",
+                        "name": "end_date",
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "query",
+                        "name": "start_date",
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PerformanceOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/": {
             "get": {
                 "operationId": "tenants_regions_plants_production_retrieve",
@@ -2497,6 +2564,26 @@
                         ],
                         "readOnly": true
                     },
+                    "mounting_type": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ConfigurationOutputMountingTypeEnum"
+                            }
+                        ],
+                        "readOnly": true
+                    },
+                    "surface_tilt": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "surface_azimuth": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true,
+                        "nullable": true
+                    },
                     "created_at": {
                         "type": "string",
                         "format": "date-time",
@@ -2511,7 +2598,10 @@
                     "id",
                     "inverter_capacity_mw",
                     "measurement_basis",
-                    "revision"
+                    "mounting_type",
+                    "revision",
+                    "surface_azimuth",
+                    "surface_tilt"
                 ]
             },
             "ConfigurationOutputMeasurementBasisEnum": {
@@ -2521,6 +2611,15 @@
                 ],
                 "type": "string",
                 "description": "* `net_export` - Net export\n* `ac_generation` - AC generation"
+            },
+            "ConfigurationOutputMountingTypeEnum": {
+                "enum": [
+                    "unknown",
+                    "fixed",
+                    "tracking"
+                ],
+                "type": "string",
+                "description": "* `unknown` - Unknown\n* `fixed` - Fixed\n* `tracking` - Tracking"
             },
             "ForecastOutput": {
                 "type": "object",
@@ -3015,6 +3114,205 @@
                     }
                 }
             },
+            "PerformanceDay": {
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "format": "date"
+                    },
+                    "status": {
+                        "$ref": "#/components/schemas/PerformanceDayStatusEnum"
+                    },
+                    "reason": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "snapshot_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "collected_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "available_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "calibration_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "factor": {
+                        "type": "number",
+                        "format": "double",
+                        "nullable": true
+                    },
+                    "measured_energy_mwh": {
+                        "type": "number",
+                        "format": "double",
+                        "nullable": true
+                    },
+                    "predicted_energy_mwh": {
+                        "type": "number",
+                        "format": "double",
+                        "nullable": true
+                    },
+                    "baseline_energy_mwh": {
+                        "type": "number",
+                        "format": "double",
+                        "nullable": true
+                    },
+                    "error_mwh": {
+                        "type": "number",
+                        "format": "double",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "available_at",
+                    "baseline_energy_mwh",
+                    "calibration_id",
+                    "collected_at",
+                    "date",
+                    "error_mwh",
+                    "factor",
+                    "measured_energy_mwh",
+                    "predicted_energy_mwh",
+                    "reason",
+                    "snapshot_id",
+                    "status"
+                ]
+            },
+            "PerformanceDayStatusEnum": {
+                "enum": [
+                    "matched",
+                    "missing"
+                ],
+                "type": "string",
+                "description": "* `matched` - matched\n* `missing` - missing"
+            },
+            "PerformanceMetrics": {
+                "type": "object",
+                "properties": {
+                    "interval_mae_mw": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "source_positive_mae_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "nullable": true
+                    },
+                    "bias_mw": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "daily_mae_mwh": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "daily_bias_mwh": {
+                        "type": "number",
+                        "format": "double"
+                    }
+                },
+                "required": [
+                    "bias_mw",
+                    "daily_bias_mwh",
+                    "daily_mae_mwh",
+                    "interval_mae_mw",
+                    "source_positive_mae_mw"
+                ]
+            },
+            "PerformanceOutput": {
+                "type": "object",
+                "properties": {
+                    "plant_id": {
+                        "type": "integer"
+                    },
+                    "configuration_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "timezone": {
+                        "type": "string"
+                    },
+                    "start_date": {
+                        "type": "string",
+                        "format": "date"
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "format": "date"
+                    },
+                    "evaluated_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "evaluation_kind": {
+                        "type": "string"
+                    },
+                    "selection_policy": {
+                        "type": "string"
+                    },
+                    "measurement_basis": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "matched_days": {
+                        "type": "integer"
+                    },
+                    "requested_days": {
+                        "type": "integer"
+                    },
+                    "metrics": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/PerformanceMetrics"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "baseline_metrics": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/PerformanceMetrics"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "days": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PerformanceDay"
+                        }
+                    },
+                    "uncertainty": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "baseline_metrics",
+                    "configuration_id",
+                    "days",
+                    "end_date",
+                    "evaluated_at",
+                    "evaluation_kind",
+                    "matched_days",
+                    "measurement_basis",
+                    "metrics",
+                    "plant_id",
+                    "requested_days",
+                    "selection_policy",
+                    "start_date",
+                    "timezone",
+                    "uncertainty"
+                ]
+            },
             "PlantForecastOutput": {
                 "type": "object",
                 "properties": {
@@ -3109,6 +3407,27 @@
                             }
                         ],
                         "default": "net_export"
+                    },
+                    "mounting_type": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/PlantInputMountingTypeEnum"
+                            }
+                        ],
+                        "default": "unknown"
+                    },
+                    "surface_tilt": {
+                        "type": "number",
+                        "format": "double",
+                        "maximum": 90,
+                        "minimum": 0,
+                        "nullable": true
+                    },
+                    "surface_azimuth": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0,
+                        "nullable": true
                     }
                 },
                 "required": [
@@ -3123,6 +3442,15 @@
                 ],
                 "type": "string",
                 "description": "* `net_export` - net_export\n* `ac_generation` - ac_generation"
+            },
+            "PlantInputMountingTypeEnum": {
+                "enum": [
+                    "unknown",
+                    "fixed",
+                    "tracking"
+                ],
+                "type": "string",
+                "description": "* `unknown` - unknown\n* `fixed` - fixed\n* `tracking` - tracking"
             },
             "PlantOutput": {
                 "type": "object",

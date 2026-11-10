@@ -5,13 +5,17 @@ from math import ceil, isfinite
 from zoneinfo import ZoneInfo
 
 MODEL_VERSION = "reference-power-transfer-v1"
-POLICY_VERSION = "regularized-huber-v1"
+POLICY_VERSION = "regularized-huber-v2"
 FACTOR_MIN = 0.25
 FACTOR_MAX = 2.0
 HUBER_DELTA = 0.05
 IDENTITY_PENALTY = 0.001
 CAP_MARGIN = 0.98
 MIN_IMPROVEMENT = 0.01
+MIN_SUPPORT_DAYS = 5
+MIN_SUPPORT_HOURS = 2.0
+MIN_LEVERAGE_HOURS = 0.02
+COMPARISON_TOLERANCE = 1e-9
 
 
 @dataclass(frozen=True)
@@ -175,6 +179,8 @@ def forecast(
 def _rows(
     samples: tuple[CalibrationSample, ...],
     zone: ZoneInfo,
+    *,
+    require_informative_day: bool = True,
 ) -> tuple[list[_Row], dict[str, int], list[date]]:
     rows: list[_Row] = []
     exclusions = {"quality": 0, "source_incomplete": 0, "incomplete_day": 0}
@@ -206,8 +212,11 @@ def _rows(
         day_end = datetime.combine(day + timedelta(days=1), datetime.min.time(), zone)
         hours = (day_end.astimezone(UTC) - day_start.astimezone(UTC)).total_seconds() / 3600
         day_rows = [row for row in rows if row.day == day]
-        if abs(sum(row.hours for row in day_rows) - hours) < 1e-9 and any(
-            row.sample.energy_mwh > 0 and any(p > 0 for p, _ in row.pieces) for row in day_rows
+        if abs(sum(row.hours for row in day_rows) - hours) < 1e-9 and (
+            not require_informative_day
+            or any(
+                row.sample.energy_mwh > 0 and any(p > 0 for p, _ in row.pieces) for row in day_rows
+            )
         ):
             valid.append(day)
         else:
@@ -301,7 +310,133 @@ def _metrics(rows: list[_Row], factor: float, cap: float | None) -> dict[str, fl
         "daily_mae_mwh": sum(abs(error) for error in daily.values()) / len(daily),
         "daily_bias_mwh": sum(daily.values()) / len(daily),
     }
+    source_positive_errors = [
+        (row, error) for row, error in errors if any(power > 0 for power, _ in row.pieces)
+    ]
+    source_positive_hours = sum(row.hours for row, _ in source_positive_errors)
+    if source_positive_hours:
+        metrics["source_positive_mae_mw"] = (
+            sum(abs(error) for _, error in source_positive_errors) / source_positive_hours
+        )
     return {name: _finite(value, "Calibration metric") for name, value in metrics.items()}
+
+
+def evaluate_samples(
+    samples: tuple[CalibrationSample, ...],
+    *,
+    timezone: str,
+    factor: float = 1.0,
+    limit_mw: float | None,
+) -> dict[str, object]:
+    _positive(factor, "factor")
+    if limit_mw is not None:
+        _positive(limit_mw, "limit_mw")
+    rows, exclusions, days = _rows(samples, ZoneInfo(timezone), require_informative_day=False)
+    daily = []
+    for day in days:
+        day_rows = [row for row in rows if row.day == day]
+        measured = _finite(sum(row.sample.energy_mwh for row in day_rows), "Measured daily energy")
+        predicted = _finite(
+            sum(_energy(row.pieces, factor, limit_mw) for row in day_rows),
+            "Predicted daily energy",
+        )
+        daily.append(
+            {
+                "day": day.isoformat(),
+                "measured_energy_mwh": measured,
+                "predicted_energy_mwh": predicted,
+                "error_mwh": _finite(predicted - measured, "Daily energy error"),
+            }
+        )
+    return {
+        "valid_days": len(days),
+        "samples": len(rows),
+        "exclusions": exclusions,
+        "included_day_dates": [day.isoformat() for day in days],
+        "metrics": {"source_positive_mae_mw": None, **_metrics(rows, factor, limit_mw)}
+        if rows
+        else None,
+        "day_errors": daily,
+        "factor": factor,
+        "limit_mw": limit_mw,
+    }
+
+
+def _eligible(rows: list[_Row], cap: float | None) -> list[_Row]:
+    return [
+        row
+        for row in rows
+        if any(power > 0 for power, _ in row.pieces)
+        and (cap is None or row.sample.energy_mwh / row.hours < CAP_MARGIN * cap)
+    ]
+
+
+def _support(
+    rows: list[_Row], days: list[date], normalization: float, cap: float | None
+) -> dict[str, object]:
+    daily: list[dict[str, object]] = []
+    supported = 0
+    for day in days:
+        hours = leverage = 0.0
+        for row in rows:
+            if row.day != day:
+                continue
+            pieces = tuple(
+                (power, duration)
+                for power, duration in row.pieces
+                if power > 0 and (cap is None or FACTOR_MIN * power < cap)
+            )
+            hours += sum(duration for _, duration in pieces)
+            slope = sum(power * duration for power, duration in pieces) / row.hours
+            leverage += row.hours * (min(slope, normalization) / normalization) ** 2
+        sufficient = hours >= MIN_SUPPORT_HOURS and leverage >= MIN_LEVERAGE_HOURS
+        supported += sufficient
+        daily.append(
+            {
+                "day": day.isoformat(),
+                "informative_hours": hours,
+                "normalized_leverage_hours": leverage,
+                "sufficient": sufficient,
+            }
+        )
+    return {
+        "minimum_days": MIN_SUPPORT_DAYS,
+        "minimum_hours_per_day": MIN_SUPPORT_HOURS,
+        "minimum_leverage_hours_per_day": MIN_LEVERAGE_HOURS,
+        "informative_days": supported,
+        "day_support": daily,
+        "sufficient": supported >= MIN_SUPPORT_DAYS,
+    }
+
+
+def _worse(candidate: float, reference: float) -> bool:
+    return candidate > reference + COMPARISON_TOLERANCE * max(1, abs(reference))
+
+
+def _rolling_origin(
+    rows: list[_Row], days: list[date], normalization: float, cap: float | None, incumbent: float
+) -> dict[str, object]:
+    folds: list[dict[str, object]] = []
+    for offset in (9, 6, 3):
+        evaluation_start = len(days) - offset
+        training_days = days[:evaluation_start]
+        evaluation_days = days[evaluation_start : evaluation_start + 3]
+        eligible = _eligible([row for row in rows if row.day in training_days], cap)
+        if not _support(eligible, training_days, normalization, cap)["sufficient"]:
+            continue
+        factor = _fit(eligible, normalization, cap)
+        validation = [row for row in rows if row.day in evaluation_days]
+        folds.append(
+            {
+                "training_day_dates": [day.isoformat() for day in training_days],
+                "evaluation_day_dates": [day.isoformat() for day in evaluation_days],
+                "factor": factor,
+                "baseline": _metrics(validation, 1, cap),
+                "candidate": _metrics(validation, factor, cap),
+                "incumbent": _metrics(validation, incumbent, cap),
+            }
+        )
+    return {"status": "diagnostic" if folds else "insufficient", "folds": folds}
 
 
 def fit_calibration(
@@ -310,10 +445,14 @@ def fit_calibration(
     timezone: str,
     normalization_mw: float,
     limit_mw: float | None,
+    incumbent_factor: float = 1.0,
 ) -> FitResult:
     _positive(normalization_mw, "normalization_mw")
     if limit_mw is not None:
         _positive(limit_mw, "limit_mw")
+    _positive(incumbent_factor, "incumbent_factor")
+    if not FACTOR_MIN <= incumbent_factor <= FACTOR_MAX:
+        raise ValueError("incumbent_factor must be inside the allowed factor bounds")
     rows, exclusions, days = _rows(samples, ZoneInfo(timezone))
     report: dict[str, object] = {
         "policy_version": POLICY_VERSION,
@@ -332,21 +471,22 @@ def fit_calibration(
         "huber_delta": HUBER_DELTA,
         "identity_penalty": IDENTITY_PENALTY,
         "cap_margin": CAP_MARGIN,
+        "incumbent_factor": incumbent_factor,
+        "reasons": [],
+        "rolling_origin": {"status": "insufficient", "folds": []},
     }
     if len(days) < 7:
+        report["reasons"] = ["insufficient_complete_days"]
         return FitResult("insufficient", None, "insufficient", report)
     holdout_count = 7 if len(days) >= 30 else max(2, ceil(len(days) * 0.2))
     holdout_days = days[-holdout_count:]
     training = [row for row in rows if row.day not in holdout_days]
     validation = [row for row in rows if row.day in holdout_days]
     informative = [row for row in training if any(power > 0 for power, _ in row.pieces)]
-    eligible = [
-        row
-        for row in informative
-        if limit_mw is None or row.sample.energy_mwh / row.hours < CAP_MARGIN * limit_mw
-    ]
+    eligible = _eligible(informative, limit_mw)
     exclusions["uninformative_training"] = len(training) - len(informative)
     exclusions["censored_training"] = len(informative) - len(eligible)
+    support = _support(eligible, days[:-holdout_count], normalization_mw, limit_mw)
     report.update(
         {
             "training_days": len(days) - holdout_count,
@@ -355,21 +495,52 @@ def fit_calibration(
             "holdout_start": holdout_days[0].isoformat(),
             "training_day_dates": [day.isoformat() for day in days[:-holdout_count]],
             "holdout_day_dates": [day.isoformat() for day in holdout_days],
+            "training_support": support,
         }
     )
-    if not eligible:
+    if not support["sufficient"]:
+        report["reasons"] = ["insufficient_training_support"]
         return FitResult("insufficient", None, "insufficient", report)
     powers = [power for row in eligible for power, _ in row.pieces if power > 0]
     report["power_regime_mw"] = {"min": min(powers), "max": max(powers)}
     factor = _fit(eligible, normalization_mw, limit_mw)
     baseline = _metrics(validation, 1, limit_mw)
     candidate = _metrics(validation, factor, limit_mw)
-    report.update({"candidate_factor": factor, "baseline": baseline, "candidate": candidate})
+    incumbent = _metrics(validation, incumbent_factor, limit_mw)
+    report.update(
+        {
+            "candidate_factor": factor,
+            "baseline": baseline,
+            "candidate": candidate,
+            "incumbent": incumbent,
+        }
+    )
+    if len(days) >= 30:
+        report["rolling_origin"] = _rolling_origin(
+            training, days[:-holdout_count], normalization_mw, limit_mw, incumbent_factor
+        )
     improves = all(
         candidate[metric] < baseline[metric] * (1 - MIN_IMPROVEMENT)
         for metric in ("interval_mae_mw", "daily_mae_mwh")
     )
-    accepted = improves and FACTOR_MIN + 1e-6 < factor < FACTOR_MAX - 1e-6
+    reasons = []
+    if not improves:
+        reasons.append("baseline_improvement_below_margin")
+    if not FACTOR_MIN + 1e-6 < factor < FACTOR_MAX - 1e-6:
+        reasons.append("factor_at_bound")
+    if any(
+        _worse(candidate[metric], incumbent[metric])
+        for metric in ("interval_mae_mw", "daily_mae_mwh")
+    ):
+        reasons.append("incumbent_mae_regression")
+    for name, reference in (("baseline", baseline), ("incumbent", incumbent)):
+        if any(
+            _worse(abs(candidate[metric]), abs(reference[metric]))
+            for metric in ("bias_mw", "daily_bias_mwh")
+        ):
+            reasons.append(f"{name}_bias_regression")
+    report["reasons"] = reasons
+    accepted = not reasons
     return FitResult(
         "ready" if accepted else "rejected",
         factor if accepted else None,

@@ -19,6 +19,17 @@ class Command(BaseCommand):
         parser.add_argument("--inverter-capacity-mw", type=float)
         parser.add_argument("--export-limit-mw", type=float)
         parser.add_argument(
+            "--mounting-type", choices=("unknown", "fixed", "tracking"), default="unknown"
+        )
+        parser.add_argument(
+            "--surface-tilt", type=float, help="Fixed surface tilt in degrees, 0 to 90."
+        )
+        parser.add_argument(
+            "--surface-azimuth",
+            type=float,
+            help="Fixed surface azimuth in degrees clockwise from north, 0 to below 360.",
+        )
+        parser.add_argument(
             "--measurement-basis", choices=("net_export", "ac_generation"), default="net_export"
         )
         parser.add_argument("--plant-id", type=int)
@@ -35,6 +46,9 @@ class Command(BaseCommand):
                     "inverter_capacity_mw",
                     "export_limit_mw",
                     "measurement_basis",
+                    "mounting_type",
+                    "surface_tilt",
+                    "surface_azimuth",
                 )
             }
             if options["plant_id"] is None:

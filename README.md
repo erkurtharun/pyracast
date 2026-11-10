@@ -205,6 +205,7 @@ operator provisioning, for example the Django shell (`Tenant`, `Membership`, bui
 | `.../plants/{plant}/calibrations/{calibration}/activate/` | POST `{}` to activate an eligible fit |
 | `.../plants/{plant}/calibration/reset/` | POST `{}` to restore the baseline |
 | `.../plants/{plant}/forecast/?date=YYYY-MM-DD&resolution_minutes=60` | Electrical interval/daily energy and separate regional irradiance |
+| `.../plants/{plant}/performance/?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD` | Archived day-ahead input replay against meter energy, up to 90 completed days |
 | `/api/platform/accounts/` | POST canonical authorized account and write-only secret reference |
 | `/api/platform/accounts/{account}/rotate-secret/` | POST write-only `secret_reference`; revalidation required |
 | `/api/platform/regions/{region}/bindings/` | POST immutable reference configuration |
@@ -292,8 +293,10 @@ Imports are atomic and exact replay is safe; conflicting records are rejected.
 `--run` processes the saved job locally without RabbitMQ or provider calls; omit it
 to let the dispatcher/worker process the request. No training occurs in API requests.
 
-Inspect the calibration detail endpoint for baseline/candidate errors and exclusions.
-Only a `ready` candidate can be activated; seven-day fits remain `provisional`:
+Inspect the calibration detail endpoint for baseline/candidate/incumbent errors,
+training support and rejection reasons. Five training days must each have enough
+uncensored source exposure. Only a `ready` current-policy candidate can be activated;
+seven-day fits remain `provisional`, and a changed incumbent requires a new comparison:
 
 ```text
 uv run --locked pyracast activate_calibration --username YOUR_USER --plant-id PLANT_ID --calibration-id CALIBRATION_ID
@@ -302,8 +305,11 @@ uv run --locked pyracast activate_calibration --username YOUR_USER --plant-id PL
 
 Activation/rollback affect subsequent forecast issuance, preserving earlier results.
 No automatic activation or artificial accuracy percentage is provided. Historical
-meter data without matching archived forecasts yields `insufficient`, not a fitted
-hindcast. Solcast historical estimated irradiance is a different input: it can
+meter data without matching archived estimated actuals yields `insufficient`.
+The Forecast performance panel independently compares archived day-ahead inputs
+with meter energy; it identifies historical replay rather than claiming that the
+plant output was published then. Valid zero-production days remain in its errors.
+Solcast historical estimated irradiance is a different input: it can
 support weather-normalized plant analysis when paired with production and geometry,
 but it is not accepted as an archived forecast or a meter reading. See
 [the calculation contract](docs/IRRADIANCE.md) for the statistical policy and limits.

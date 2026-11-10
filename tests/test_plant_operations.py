@@ -21,6 +21,7 @@ from pyracast.plants.models import (
     PlantEvent,
     ProductionObservation,
 )
+from pyracast.plants.numerics import POLICY_VERSION
 from pyracast.plants.operations import (
     ObservationInput,
     activate_calibration,
@@ -122,6 +123,7 @@ def ready_run(system: System, plant: Plant) -> CalibrationRun:
     run = request_run(system, plant)
     run.status, run.factor, run.assessment, run.completed_at = "ready", 0.5, "provisional", NOW
     run.result = {
+        "policy_version": POLICY_VERSION,
         "holdout_days": 2,
         "baseline": {"daily_mae_mwh": 2},
         "candidate": {"daily_mae_mwh": 1},
@@ -132,6 +134,64 @@ def ready_run(system: System, plant: Plant) -> CalibrationRun:
     }
     run.save()
     return run
+
+
+def test_older_policy_ready_candidate_cannot_be_activated(monkeypatch: pytest.MonkeyPatch) -> None:
+    system, plant = make_plant(monkeypatch)
+    run = ready_run(system, plant)
+    run.result["policy_version"] = "regularized-huber-v1"
+    run.save(update_fields=("result",))
+    with pytest.raises(ValidationError):
+        activate_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk, run.pk)
+    assert not CalibrationActivation.objects.exists()
+
+
+def test_ready_candidate_cannot_replace_a_changed_incumbent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    run = ready_run(system, plant)
+    reset = reset_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk)
+    with pytest.raises(ValidationError, match="changed"):
+        activate_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk, run.pk)
+    assert CalibrationActivation.objects.get().pk == reset.pk
+
+
+def test_manual_request_pins_current_activation(monkeypatch: pytest.MonkeyPatch) -> None:
+    system, plant = make_plant(monkeypatch)
+    incumbent = ready_run(system, plant)
+    activation = activate_calibration(
+        system.member, system.tenant.pk, system.region.pk, plant.pk, incumbent.pk
+    )
+    run = request_run(system, plant)
+    assert run.comparison_activation_id == activation.pk
+    assert request_run(system, plant).comparison_activation_id == activation.pk
+
+
+def test_concurrent_candidates_cannot_both_replace_the_same_incumbent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    candidates = (ready_run(system, plant), ready_run(system, plant))
+    barrier = Barrier(2)
+
+    def activate(run: CalibrationRun) -> int | None:
+        close_old_connections()
+        try:
+            barrier.wait(timeout=10)
+            try:
+                return activate_calibration(
+                    system.member, system.tenant.pk, system.region.pk, plant.pk, run.pk
+                ).pk
+            except ValidationError:
+                return None
+        finally:
+            connection.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        activations = list(pool.map(activate, candidates))
+    assert sum(value is not None for value in activations) == 1
+    assert CalibrationActivation.objects.count() == 1
 
 
 @pytest.mark.parametrize(
@@ -204,6 +264,16 @@ def test_configuration_revision_and_activation_history(monkeypatch: pytest.Monke
         {"inverter_capacity_mw": float("inf")},
         {"export_limit_mw": -1},
         {"measurement_basis": "dc"},
+        {"mounting_type": "dual_axis"},
+        {"mounting_type": "unknown", "surface_tilt": 0},
+        {"mounting_type": "tracking", "surface_azimuth": 180},
+        {"mounting_type": "fixed", "surface_tilt": True},
+        {"mounting_type": "fixed", "surface_tilt": float("nan")},
+        {"mounting_type": "fixed", "surface_tilt": float("inf")},
+        {"mounting_type": "fixed", "surface_tilt": -1},
+        {"mounting_type": "fixed", "surface_tilt": 91},
+        {"mounting_type": "fixed", "surface_azimuth": -1},
+        {"mounting_type": "fixed", "surface_azimuth": 360},
     ],
 )
 def test_invalid_configuration_is_atomic(
@@ -217,6 +287,66 @@ def test_invalid_configuration_is_atomic(
     with pytest.raises(ValidationError):
         revise_plant(system.member, system.tenant.pk, system.region.pk, plant.pk, **values)
     assert Plant.objects.count() == PlantConfiguration.objects.count() == 1
+
+
+def test_geometry_revisions_preserve_explicit_unknowns_and_prior_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    initial = plant.current_configuration
+    assert initial is not None
+    assert (initial.mounting_type, initial.surface_tilt, initial.surface_azimuth) == (
+        "unknown",
+        None,
+        None,
+    )
+    fixed = revise_plant(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        name="Fixed",
+        dc_capacity_mw=130,
+        export_limit_mw=100,
+        mounting_type="fixed",
+        surface_tilt=90,
+        surface_azimuth=359.9,
+    ).current_configuration
+    assert fixed is not None
+    assert (fixed.mounting_type, fixed.surface_tilt, fixed.surface_azimuth) == ("fixed", 90, 359.9)
+    tracking = revise_plant(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        name="Tracking",
+        dc_capacity_mw=130,
+        export_limit_mw=100,
+        mounting_type="tracking",
+    ).current_configuration
+    assert tracking is not None
+    assert (tracking.mounting_type, tracking.surface_tilt, tracking.surface_azimuth) == (
+        "tracking",
+        None,
+        None,
+    )
+    assert tracking.export_limit_mw == 100
+    assert tracking.inverter_capacity_mw is None
+    initial.refresh_from_db()
+    fixed.refresh_from_db()
+    assert initial.mounting_type == "unknown"
+    assert (fixed.surface_tilt, fixed.surface_azimuth) == (90, 359.9)
+    partial = create_plant(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        name="Unknown fixed angles",
+        dc_capacity_mw=1,
+        mounting_type="fixed",
+    ).current_configuration
+    assert partial is not None
+    assert partial.surface_tilt is None
+    assert partial.surface_azimuth is None
 
 
 def test_tenant_and_binding_boundaries(monkeypatch: pytest.MonkeyPatch) -> None:

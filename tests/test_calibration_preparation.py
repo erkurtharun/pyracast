@@ -15,12 +15,18 @@ from pyracast.plants.models import (
     Plant,
     ProductionObservation,
 )
-from pyracast.plants.numerics import FitResult
-from pyracast.plants.operations import ObservationInput, import_observations, request_calibration
+from pyracast.plants.numerics import POLICY_VERSION, FitResult
+from pyracast.plants.operations import (
+    ObservationInput,
+    activate_calibration,
+    import_observations,
+    request_calibration,
+    reset_calibration,
+)
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.regions.models import Region
 from tests.test_domain import NOW, System
-from tests.test_plant_operations import make_plant
+from tests.test_plant_operations import make_plant, ready_run
 from tests.test_plant_training import actual_snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -80,6 +86,76 @@ def test_only_seven_complete_valid_matched_days_schedule(
     assert run.observation_id_cutoff == latest.pk
     assert prepare_calibration(plant.pk) is None
     assert not CalibrationActivation.objects.exists()
+
+
+def test_preparation_pins_reset_and_refits_once_after_comparator_change(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    incumbent = ready_run(system, plant)
+    active = activate_calibration(
+        system.member, system.tenant.pk, system.region.pk, plant.pk, incumbent.pk
+    )
+    add_days(system, plant, 1, 7)
+    run = CalibrationRun.objects.exclude(pk=incumbent.pk).get()
+    assert run.comparison_activation_id == active.pk
+    run.status = "rejected"
+    run.result = {"policy_version": POLICY_VERSION}
+    run.save(update_fields=("status", "result"))
+    assert prepare_calibration(plant.pk) is None
+    reset = reset_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk)
+    next_run = prepare_calibration(plant.pk)
+    assert next_run is not None
+    assert next_run.comparison_activation_id == reset.pk
+    next_run.status = "rejected"
+    next_run.result = {"policy_version": POLICY_VERSION}
+    next_run.save(update_fields=("status", "result"))
+    assert prepare_calibration(plant.pk) is None
+
+
+def test_activating_candidate_does_not_repeat_the_same_dataset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    add_days(system, plant, 2, 7)
+    run = ready_run(system, plant)
+    activate_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk, run.pk)
+    assert prepare_calibration(plant.pk) is None
+
+
+@pytest.mark.parametrize("old_status", ["ready", "rejected", "insufficient"])
+def test_legacy_policy_does_not_block_one_current_policy_fit(
+    monkeypatch: pytest.MonkeyPatch, old_status: str
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    add_days(system, plant, 1, 7)
+    old = CalibrationRun.objects.get()
+    old.status = old_status
+    old.result = {"policy_version": "regularized-huber-v1"}
+    old.save(update_fields=("status", "result"))
+    current = prepare_calibration(plant.pk)
+    assert current is not None
+    assert current.pk != old.pk
+    assert current.observation_id_cutoff == old.observation_id_cutoff
+    assert training.run_calibration(current.pk, NOW)
+    current.refresh_from_db()
+    assert current.result["policy_version"] == POLICY_VERSION
+    assert CalibrationRun.objects.count() == 2
+    assert prepare_calibration(plant.pk) is None
+
+
+@pytest.mark.parametrize("status", ["insufficient", "rejected", "failed"])
+def test_current_policy_terminal_run_does_not_repeat_unchanged_data(
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    add_days(system, plant, 1, 7)
+    run = CalibrationRun.objects.get()
+    run.status = status
+    run.result = {} if status == "failed" else {"policy_version": POLICY_VERSION}
+    run.save(update_fields=("status", "result"))
+    assert prepare_calibration(plant.pk) is None
+    assert CalibrationRun.objects.count() == 1
 
 
 def test_unavailable_configuration_or_reference_does_not_schedule(

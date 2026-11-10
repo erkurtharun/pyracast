@@ -356,6 +356,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/performance/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["tenants_regions_plants_performance_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/": {
         parameters: {
             query?: never;
@@ -596,6 +612,11 @@ export interface components {
             /** Format: double */
             readonly export_limit_mw: number | null;
             readonly measurement_basis: components["schemas"]["ConfigurationOutputMeasurementBasisEnum"];
+            readonly mounting_type: components["schemas"]["ConfigurationOutputMountingTypeEnum"];
+            /** Format: double */
+            readonly surface_tilt: number | null;
+            /** Format: double */
+            readonly surface_azimuth: number | null;
             /** Format: date-time */
             readonly created_at: string;
         };
@@ -605,6 +626,13 @@ export interface components {
          * @enum {string}
          */
         ConfigurationOutputMeasurementBasisEnum: "net_export" | "ac_generation";
+        /**
+         * @description * `unknown` - Unknown
+         *     * `fixed` - Fixed
+         *     * `tracking` - Tracking
+         * @enum {string}
+         */
+        ConfigurationOutputMountingTypeEnum: "unknown" | "fixed" | "tracking";
         ForecastOutput: {
             region_id: number;
             /** Format: date */
@@ -795,6 +823,66 @@ export interface components {
             /** Format: email */
             email?: string;
         };
+        PerformanceDay: {
+            /** Format: date */
+            date: string;
+            status: components["schemas"]["PerformanceDayStatusEnum"];
+            reason: string | null;
+            snapshot_id: number | null;
+            /** Format: date-time */
+            collected_at: string | null;
+            /** Format: date-time */
+            available_at: string | null;
+            calibration_id: number | null;
+            /** Format: double */
+            factor: number | null;
+            /** Format: double */
+            measured_energy_mwh: number | null;
+            /** Format: double */
+            predicted_energy_mwh: number | null;
+            /** Format: double */
+            baseline_energy_mwh: number | null;
+            /** Format: double */
+            error_mwh: number | null;
+        };
+        /**
+         * @description * `matched` - matched
+         *     * `missing` - missing
+         * @enum {string}
+         */
+        PerformanceDayStatusEnum: "matched" | "missing";
+        PerformanceMetrics: {
+            /** Format: double */
+            interval_mae_mw: number;
+            /** Format: double */
+            source_positive_mae_mw: number | null;
+            /** Format: double */
+            bias_mw: number;
+            /** Format: double */
+            daily_mae_mwh: number;
+            /** Format: double */
+            daily_bias_mwh: number;
+        };
+        PerformanceOutput: {
+            plant_id: number;
+            configuration_id: number | null;
+            timezone: string;
+            /** Format: date */
+            start_date: string;
+            /** Format: date */
+            end_date: string;
+            /** Format: date-time */
+            evaluated_at: string;
+            evaluation_kind: string;
+            selection_policy: string;
+            measurement_basis: string | null;
+            matched_days: number;
+            requested_days: number;
+            metrics: components["schemas"]["PerformanceMetrics"] | null;
+            baseline_metrics: components["schemas"]["PerformanceMetrics"] | null;
+            days: components["schemas"]["PerformanceDay"][];
+            uncertainty: string;
+        };
         PlantForecastOutput: {
             plant_id: number;
             /** Format: date */
@@ -820,6 +908,12 @@ export interface components {
             export_limit_mw?: number | null;
             /** @default net_export */
             measurement_basis: components["schemas"]["PlantInputMeasurementBasisEnum"];
+            /** @default unknown */
+            mounting_type: components["schemas"]["PlantInputMountingTypeEnum"];
+            /** Format: double */
+            surface_tilt?: number | null;
+            /** Format: double */
+            surface_azimuth?: number | null;
         };
         /**
          * @description * `net_export` - net_export
@@ -827,6 +921,13 @@ export interface components {
          * @enum {string}
          */
         PlantInputMeasurementBasisEnum: "net_export" | "ac_generation";
+        /**
+         * @description * `unknown` - unknown
+         *     * `fixed` - fixed
+         *     * `tracking` - tracking
+         * @enum {string}
+         */
+        PlantInputMountingTypeEnum: "unknown" | "fixed" | "tracking";
         PlantOutput: {
             readonly id: number;
             readonly name: string;
@@ -1821,6 +1922,32 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ObservationImportOutput"];
+                };
+            };
+        };
+    };
+    tenants_regions_plants_performance_retrieve: {
+        parameters: {
+            query?: {
+                end_date?: string;
+                start_date?: string;
+            };
+            header?: never;
+            path: {
+                plant_id: number;
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PerformanceOutput"];
                 };
             };
         };

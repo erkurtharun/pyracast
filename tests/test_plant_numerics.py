@@ -6,7 +6,13 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from pyracast.plants.numerics import CalibrationSample, PowerInterval, fit_calibration, forecast
+from pyracast.plants.numerics import (
+    CalibrationSample,
+    PowerInterval,
+    evaluate_samples,
+    fit_calibration,
+    forecast,
+)
 
 START = datetime(2026, 6, 1, tzinfo=UTC)
 
@@ -119,7 +125,7 @@ def test_nonfinite_calibration_metrics_are_rejected() -> None:
 
 
 def test_nonfinite_calibration_loss_is_rejected() -> None:
-    samples = tuple(replace(sample, energy_mwh=2.0) for sample in _samples(7, power=5e-324))
+    samples = tuple(replace(sample, energy_mwh=2.0) for sample in _samples(7, power=1e-308))
     with pytest.raises(ValueError, match="Calibration loss must be finite"):
         fit_calibration(samples, timezone="UTC", normalization_mw=1e-308, limit_mw=None)
 
@@ -357,3 +363,194 @@ def test_mixed_native_piece_slope_has_interior_optimum() -> None:
     assert result.status == "ready"
     assert result.factor is not None
     assert 0.8 < result.factor < 0.81
+
+
+def test_one_informative_hour_per_day_does_not_support_a_fit() -> None:
+    samples = tuple(
+        sample
+        if sample.start.hour == 6
+        else replace(sample, energy_mwh=0, intervals=(PowerInterval(sample.start, sample.end, 0),))
+        for sample in _samples(7)
+    )
+    result = fit_calibration(samples, timezone="UTC", normalization_mw=100, limit_mw=100)
+    assert result.status == "insufficient"
+    assert result.report["reasons"] == ["insufficient_training_support"]
+
+
+def test_candidate_cannot_replace_a_better_incumbent() -> None:
+    result = fit_calibration(
+        _samples(7), timezone="UTC", normalization_mw=100, limit_mw=100, incumbent_factor=0.8
+    )
+    assert result.status == "rejected"
+    assert "incumbent_mae_regression" in cast(list[str], result.report["reasons"])
+
+
+def test_smaller_mae_cannot_hide_worse_absolute_daily_bias() -> None:
+    samples = list(_samples(7))
+    for index, sample in enumerate(samples):
+        if index >= 6 * 24 and 6 <= sample.start.hour < 18:
+            samples[index] = replace(
+                sample, energy_mwh=18, intervals=(PowerInterval(sample.start, sample.end, 10),)
+            )
+    result = fit_calibration(tuple(samples), timezone="UTC", normalization_mw=100, limit_mw=None)
+    assert result.status == "rejected"
+    assert "baseline_bias_regression" in cast(list[str], result.report["reasons"])
+
+
+def test_small_source_power_does_not_establish_training_leverage() -> None:
+    result = fit_calibration(
+        _samples(7, power=0.01), timezone="UTC", normalization_mw=100, limit_mw=None
+    )
+    assert result.status == "insufficient"
+    support = cast(dict[str, object], result.report["training_support"])
+    assert support["informative_days"] == 0
+    daily = cast(list[dict[str, object]], support["day_support"])
+    assert daily[0]["informative_hours"] == 12
+    assert daily[0]["normalized_leverage_hours"] == pytest.approx(1.2e-7)
+
+
+def test_training_support_requires_five_supported_days() -> None:
+    samples = list(_samples(7))
+    for index in range(24):
+        sample = samples[index]
+        power = 0.01 if 6 <= sample.start.hour < 18 else 0
+        samples[index] = replace(
+            sample,
+            energy_mwh=power * 0.8,
+            intervals=(PowerInterval(sample.start, sample.end, power),),
+        )
+    result = fit_calibration(tuple(samples), timezone="UTC", normalization_mw=100, limit_mw=None)
+    assert result.status == "insufficient"
+    assert cast(dict[str, object], result.report["training_support"])["informative_days"] == 4
+
+
+def test_support_counts_positive_native_duration_and_excludes_always_clipped_power() -> None:
+    samples = []
+    for sample in _samples(7):
+        middle = sample.start + timedelta(minutes=30)
+        positive = sample.start.hour in (6, 7, 8)
+        samples.append(
+            replace(
+                sample,
+                energy_mwh=16 if positive else 0,
+                intervals=(
+                    PowerInterval(sample.start, middle, 40 if positive else 0),
+                    PowerInterval(middle, sample.end, 0),
+                ),
+            )
+        )
+    result = fit_calibration(tuple(samples), timezone="UTC", normalization_mw=100, limit_mw=100)
+    assert result.status == "insufficient"
+    daily = cast(
+        list[dict[str, object]],
+        cast(dict[str, object], result.report["training_support"])["day_support"],
+    )
+    assert daily[0]["informative_hours"] == 1.5
+    flat = fit_calibration(
+        _samples(7, power=1000, factor=0.08),
+        timezone="UTC",
+        normalization_mw=100,
+        limit_mw=100,
+    )
+    assert flat.status == "insufficient"
+
+
+def test_rolling_origin_diagnostics_never_use_final_holdout() -> None:
+    initial = fit_calibration(_samples(30), timezone="UTC", normalization_mw=100, limit_mw=100)
+    samples = list(_samples(30))
+    for index in range(23 * 24, len(samples)):
+        samples[index] = replace(samples[index], energy_mwh=samples[index].energy_mwh * 1.5)
+    changed = fit_calibration(tuple(samples), timezone="UTC", normalization_mw=100, limit_mw=100)
+    assert initial.report["rolling_origin"] == changed.report["rolling_origin"]
+    rolling = cast(dict[str, object], initial.report["rolling_origin"])
+    assert rolling["status"] == "diagnostic"
+    folds = cast(list[dict[str, object]], rolling["folds"])
+    assert len(folds) == 3
+    for fold in folds:
+        training = cast(list[str], fold["training_day_dates"])
+        evaluation = cast(list[str], fold["evaluation_day_dates"])
+        assert max(training) < min(evaluation)
+        assert len(evaluation) == 3
+        assert max(evaluation) < "2026-06-24"
+
+
+def test_rolling_origin_skips_unsupported_early_training_days() -> None:
+    samples = list(_samples(30))
+    for index in range(15 * 24):
+        sample = samples[index]
+        power = 0.01 if 6 <= sample.start.hour < 18 else 0
+        samples[index] = replace(
+            sample,
+            energy_mwh=power * 0.8,
+            intervals=(PowerInterval(sample.start, sample.end, power),),
+        )
+    result = fit_calibration(tuple(samples), timezone="UTC", normalization_mw=100, limit_mw=100)
+    assert result.status == "ready"
+    rolling = cast(dict[str, object], result.report["rolling_origin"])
+    folds = cast(list[dict[str, object]], rolling["folds"])
+    assert len(folds) == 1
+
+
+def test_public_evaluation_preserves_units_and_excludes_partial_days() -> None:
+    report = evaluate_samples(_samples(2)[:-1], timezone="UTC", factor=0.9, limit_mw=100)
+    assert report["valid_days"] == 1
+    assert report["samples"] == 24
+    assert report["included_day_dates"] == ["2026-06-01"]
+    metrics = cast(dict[str, float], report["metrics"])
+    assert metrics["interval_mae_mw"] == pytest.approx(2)
+    assert metrics["source_positive_mae_mw"] == pytest.approx(4)
+    assert metrics["daily_mae_mwh"] == pytest.approx(48)
+    assert report["day_errors"] == [
+        {
+            "day": "2026-06-01",
+            "measured_energy_mwh": 384,
+            "predicted_energy_mwh": 432,
+            "error_mwh": 48,
+        }
+    ]
+    empty = evaluate_samples((), timezone="UTC", limit_mw=None)
+    assert empty["metrics"] is None
+    assert empty["day_errors"] == []
+
+
+@pytest.mark.parametrize("factor", [0, float("nan"), float("inf"), 0.1, 3])
+def test_invalid_incumbent_factor_is_rejected(factor: float) -> None:
+    with pytest.raises(ValueError, match="incumbent_factor"):
+        fit_calibration(
+            (), timezone="UTC", normalization_mw=100, limit_mw=None, incumbent_factor=factor
+        )
+
+
+def test_public_evaluation_validates_factor_and_cap() -> None:
+    with pytest.raises(ValueError, match="factor"):
+        evaluate_samples((), timezone="UTC", factor=0, limit_mw=None)
+    with pytest.raises(ValueError, match="limit_mw"):
+        evaluate_samples((), timezone="UTC", limit_mw=0)
+
+
+@pytest.mark.parametrize(
+    ("power", "energy", "error", "source_positive_mae"),
+    [(10, 0, 240, 10), (0, 10, -240, None), (0, 0, 0, None)],
+)
+def test_evaluation_retains_complete_valid_zero_source_and_zero_meter_days(
+    power: float, energy: float, error: float, source_positive_mae: float | None
+) -> None:
+    samples = tuple(
+        replace(
+            sample,
+            energy_mwh=energy,
+            intervals=(PowerInterval(sample.start, sample.end, power),),
+        )
+        for sample in _samples(1)
+    )
+    report = evaluate_samples(samples, timezone="UTC", limit_mw=None)
+    assert report["valid_days"] == 1
+    assert report["samples"] == 24
+    metrics = cast(dict[str, float | None], report["metrics"])
+    assert metrics["daily_bias_mwh"] == error
+    assert metrics["daily_mae_mwh"] == abs(error)
+    assert metrics["interval_mae_mw"] == abs(error) / 24
+    assert metrics["source_positive_mae_mw"] == source_positive_mae
+    daily = cast(list[dict[str, object]], report["day_errors"])
+    assert daily[0]["predicted_energy_mwh"] == power * 24
+    assert daily[0]["measured_energy_mwh"] == energy * 24

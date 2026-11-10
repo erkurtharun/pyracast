@@ -137,6 +137,7 @@ def restore_plant(actor: User, tenant_id: int, region_id: int, plant_id: int) ->
 
 def _purge_plant(plant: Plant) -> None:
     PlantForecast.objects.filter(configuration__plant=plant).delete()
+    CalibrationRun.objects.filter(plant=plant).update(comparison_activation=None)
     CalibrationActivation.objects.filter(plant=plant).delete()
     CalibrationRun.objects.filter(plant=plant).delete()
     ProductionObservation.objects.filter(plant=plant).delete()

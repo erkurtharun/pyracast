@@ -275,4 +275,32 @@ test("a customer manages an approved region through the real API", async ({
             .getByRole("table", { name: "Meter entries" })
             .getByText("1.25 MWh", { exact: true }),
     ).toBeVisible();
+    await page.getByRole("button", { name: "Edit configuration" }).click();
+    await page.getByLabel("Mounting type").selectOption("fixed");
+    await page.getByLabel("Surface tilt (degrees, optional)").fill("33");
+    await page.getByLabel("Surface azimuth (degrees, optional)").fill("180");
+    await page.getByRole("button", { name: "Save configuration" }).click();
+    await expect(
+        page.getByRole("heading", { name: "Edit plant configuration" }),
+    ).toHaveCount(0);
+    await page.getByRole("button", { name: "Edit configuration" }).click();
+    await expect(page.getByLabel("Mounting type")).toHaveValue("fixed");
+    await expect(
+        page.getByLabel("Surface tilt (degrees, optional)"),
+    ).toHaveValue("33");
+    await expect(
+        page.getByLabel("Surface azimuth (degrees, optional)"),
+    ).toHaveValue("180");
+    await page.getByRole("button", { name: "Close configuration" }).click();
+    await page
+        .getByRole("button", { name: "Generation forecast", exact: true })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "Forecast performance" }),
+    ).toBeVisible();
+    await expect(page.getByText("Loading performance…")).toHaveCount(0);
+    await page.screenshot({
+        path: testInfo.outputPath("forecast-performance-desktop.png"),
+        fullPage: true,
+    });
 });

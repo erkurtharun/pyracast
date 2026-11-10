@@ -34,6 +34,53 @@ def setup_plant() -> tuple[Client, str, dict[str, Any]]:
     return client, base, response.json()
 
 
+def test_mounting_geometry_is_validated_and_versioned_in_api() -> None:
+    client, base, plant = setup_plant()
+    configuration = plant["current_configuration"]
+    assert configuration["mounting_type"] == "unknown"
+    assert configuration["surface_tilt"] is None
+    assert configuration["surface_azimuth"] is None
+    values = {
+        "name": "Fixed PV",
+        "dc_capacity_mw": 130,
+        "export_limit_mw": 100,
+        "mounting_type": "fixed",
+        "surface_tilt": 30,
+        "surface_azimuth": 180,
+    }
+    detail = f"{base}{plant['id']}/"
+    response = client.put(detail, values, content_type="application/json")
+    assert response.status_code == 200, response.content
+    fixed = response.json()["current_configuration"]
+    assert fixed["mounting_type"] == "fixed"
+    assert fixed["surface_tilt"] == 30
+    assert fixed["surface_azimuth"] == 180
+    assert fixed["export_limit_mw"] == 100
+    assert fixed["inverter_capacity_mw"] is None
+    for invalid in (
+        {"mounting_type": "tracking"},
+        {"mounting_type": "unknown"},
+        {"mounting_type": "dual_axis"},
+        {"surface_tilt": True},
+        {"surface_tilt": 91},
+        {"surface_azimuth": 360},
+    ):
+        response = client.put(detail, values | invalid, content_type="application/json")
+        assert response.status_code == 400, response.content
+        assert client.get(detail).json()["current_configuration"]["id"] == fixed["id"]
+    response = client.put(
+        detail,
+        values | {"mounting_type": "tracking", "surface_tilt": None, "surface_azimuth": None},
+        content_type="application/json",
+    )
+    assert response.status_code == 200, response.content
+    tracking = response.json()["current_configuration"]
+    assert tracking["mounting_type"] == "tracking"
+    assert tracking["surface_tilt"] is None
+    assert tracking["surface_azimuth"] is None
+    assert tracking["revision"] == fixed["revision"] + 1
+
+
 def test_new_plant_forecast_reports_unavailable_history_without_rejecting_capacities(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -203,7 +250,12 @@ def test_calibration_pending_forecast_and_csrf() -> None:
     saved.factor = 1.0
     saved.assessment = "provisional"
     saved.completed_at = timezone.now()
-    saved.result = {"holdout_days": 1, "candidate": {"mae": 1}, "baseline": {"mae": 2}}
+    saved.result = {
+        "policy_version": "regularized-huber-v2",
+        "holdout_days": 1,
+        "candidate": {"mae": 1},
+        "baseline": {"mae": 2},
+    }
     saved.dataset_manifest = {
         "selection_policy": "first-available-day-ahead-v1",
         "source_kind": "forecast",

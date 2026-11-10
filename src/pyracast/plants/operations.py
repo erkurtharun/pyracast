@@ -22,7 +22,7 @@ from pyracast.plants.models import (
     PlantEvent,
     ProductionObservation,
 )
-from pyracast.plants.numerics import PowerInterval
+from pyracast.plants.numerics import POLICY_VERSION, PowerInterval
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.regions.models import Region
 
@@ -74,6 +74,9 @@ def _validate_configuration(
     inverter_capacity_mw: float | None,
     export_limit_mw: float | None,
     measurement_basis: str,
+    mounting_type: str,
+    surface_tilt: float | None,
+    surface_azimuth: float | None,
 ) -> None:
     if not name.strip() or len(name.strip()) > 200:
         raise ValidationError("A plant name of at most 200 characters is required.")
@@ -82,6 +85,19 @@ def _validate_configuration(
             raise ValidationError("Capacities must be finite and positive.")
     if measurement_basis not in {"net_export", "ac_generation"}:
         raise ValidationError("Unsupported meter basis.")
+    if mounting_type not in {"unknown", "fixed", "tracking"}:
+        raise ValidationError("Unsupported mounting type.")
+    for angle, bound, exclusive in ((surface_tilt, 90, False), (surface_azimuth, 360, True)):
+        if angle is not None and (
+            isinstance(angle, bool)
+            or not isfinite(angle)
+            or angle < 0
+            or angle > bound
+            or (exclusive and angle == bound)
+        ):
+            raise ValidationError("Surface angles must be finite and inside the allowed bounds.")
+    if mounting_type != "fixed" and (surface_tilt is not None or surface_azimuth is not None):
+        raise ValidationError("Only fixed mounting permits surface angles.")
 
 
 def _save_configuration(
@@ -94,6 +110,9 @@ def _save_configuration(
     inverter_capacity_mw: float | None,
     export_limit_mw: float | None,
     measurement_basis: str,
+    mounting_type: str,
+    surface_tilt: float | None,
+    surface_azimuth: float | None,
 ) -> None:
     revision = 1
     if plant.current_configuration_id is not None:
@@ -106,6 +125,9 @@ def _save_configuration(
         inverter_capacity_mw=inverter_capacity_mw,
         export_limit_mw=export_limit_mw,
         measurement_basis=measurement_basis,
+        mounting_type=mounting_type,
+        surface_tilt=surface_tilt,
+        surface_azimuth=surface_azimuth,
         created_by=actor,
     )
     plant.name = name.strip()
@@ -132,10 +154,20 @@ def create_plant(
     inverter_capacity_mw: float | None = None,
     export_limit_mw: float | None = None,
     measurement_basis: str = "net_export",
+    mounting_type: str = "unknown",
+    surface_tilt: float | None = None,
+    surface_azimuth: float | None = None,
 ) -> Plant:
     require_member(actor, tenant_id)
     _validate_configuration(
-        name, dc_capacity_mw, inverter_capacity_mw, export_limit_mw, measurement_basis
+        name,
+        dc_capacity_mw,
+        inverter_capacity_mw,
+        export_limit_mw,
+        measurement_basis,
+        mounting_type,
+        surface_tilt,
+        surface_azimuth,
     )
     with transaction.atomic():
         region = Region.objects.select_for_update().get(
@@ -152,6 +184,9 @@ def create_plant(
             inverter_capacity_mw=inverter_capacity_mw,
             export_limit_mw=export_limit_mw,
             measurement_basis=measurement_basis,
+            mounting_type=mounting_type,
+            surface_tilt=surface_tilt,
+            surface_azimuth=surface_azimuth,
         )
         return plant
 
@@ -167,10 +202,20 @@ def revise_plant(
     inverter_capacity_mw: float | None = None,
     export_limit_mw: float | None = None,
     measurement_basis: str = "net_export",
+    mounting_type: str = "unknown",
+    surface_tilt: float | None = None,
+    surface_azimuth: float | None = None,
 ) -> Plant:
     require_member(actor, tenant_id)
     _validate_configuration(
-        name, dc_capacity_mw, inverter_capacity_mw, export_limit_mw, measurement_basis
+        name,
+        dc_capacity_mw,
+        inverter_capacity_mw,
+        export_limit_mw,
+        measurement_basis,
+        mounting_type,
+        surface_tilt,
+        surface_azimuth,
     )
     with transaction.atomic():
         region = Region.objects.select_for_update().get(
@@ -188,6 +233,9 @@ def revise_plant(
             inverter_capacity_mw=inverter_capacity_mw,
             export_limit_mw=export_limit_mw,
             measurement_basis=measurement_basis,
+            mounting_type=mounting_type,
+            surface_tilt=surface_tilt,
+            surface_azimuth=surface_azimuth,
         )
         return plant
 
@@ -333,10 +381,16 @@ def request_calibration(
             ):
                 return pending
             raise ValidationError("A calibration is already pending.")
+        comparison = (
+            CalibrationActivation.objects.filter(plant=plant, configuration=configuration)
+            .order_by("-created_at", "-pk")
+            .first()
+        )
         run = CalibrationRun.objects.create(
             plant=plant,
             configuration=configuration,
             binding=configuration.binding,
+            comparison_activation=comparison,
             requested_by=actor,
             window_start=start_date,
             window_end=end_date,
@@ -392,6 +446,15 @@ def activate_calibration(
         run = CalibrationRun.objects.get(
             pk=calibration_id, plant=plant, configuration=configuration
         )
+        current = (
+            CalibrationActivation.objects.filter(plant=plant, configuration=configuration)
+            .order_by("-created_at", "-pk")
+            .first()
+        )
+        if current is not None and current.calibration_id == run.pk:
+            return current
+        if (current.pk if current else None) != run.comparison_activation_id:
+            raise ValidationError("The active calibration changed; request a new comparison.")
         now = timezone.now()
         if (
             run.binding_id != configuration.binding_id
@@ -406,6 +469,7 @@ def activate_calibration(
             or not run.result.get("holdout_days")
             or not run.result.get("candidate")
             or not run.result.get("baseline")
+            or run.result.get("policy_version") != POLICY_VERSION
             or run.dataset_manifest.get("selection_policy") != HISTORY_SELECTION_POLICY
             or run.dataset_manifest.get("source_kind") != "estimated_actuals"
         ):

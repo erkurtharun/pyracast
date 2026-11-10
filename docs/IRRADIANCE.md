@@ -63,6 +63,11 @@ physical model or a claim that reference AC capacity equals plant DC capacity.
 Plant geometry, temperature and individual losses are not inferred from the
 reference site. A physical replacement needs appropriate irradiance/weather inputs,
 plant geometry and verified improvement on unseen days.
+Plant configuration can record unknown, fixed or tracking mounting, with optional
+fixed-array tilt and azimuth (clockwise from true north). These are declared metadata;
+the reference-transfer model does not use them. Tracking does not imply a known axis,
+backtracking policy or row geometry. Never infer plant geometry from a downloaded
+weather filename or treat a grid export limit as an inverter rating.
 
 For inverter AC production, apply the known inverter limit. For net export, apply
 the smaller known inverter/export limit. Omit unknown limits rather than inventing
@@ -92,6 +97,14 @@ missing data, invalid records, outages or declared curtailment. Do not infer out
 from low output alone. Exclude measurements at or above 98% of the known cap from
 training because clipping hides uncapped performance; retain valid clipped intervals
 in evaluation. Zero-source samples do not identify a multiplicative factor.
+Policy `regularized-huber-v2` also requires five training days with at least two
+hours of positive native source power that is not already clipped at the minimum
+factor. Each supported day must have normalized slope-squared exposure of at least
+0.02 hours: sum the sample duration times the squared ratio of its uncapped power
+slope to DC capacity, capping that ratio at one. For example, two hours at 10% of
+DC capacity reach this threshold. These conservative support thresholds prevent a
+fit based on one useful measurement; they are engineering guards, not confidence
+levels or a requirement for distinct power values in a one-parameter model.
 
 At least seven complete matched days are required. For 7–29 days, reserve the last
 max(2, ceil(20% of days)) for evaluation; for 30 or more, reserve the last seven.
@@ -103,12 +116,23 @@ so hundreds of half-hours are not hundreds of independent weather realizations.
 Report interval power MAE/bias (MW), daily energy MAE/bias (MWh), included/excluded
 days, censored counts and the exact chronological split. A candidate is `ready`
 only when both holdout interval MAE and daily MAE improve by at least 1% over factor
-1 and the fitted factor is inside the allowed bounds. Rejected candidates cannot
+1 and the fitted factor is inside the allowed bounds. Neither MAE may worsen against
+the incumbent factor, and absolute power/energy bias may not worsen against either
+comparator (apart from numerical tolerance). Pin the incumbent activation when the
+job is created and retain it in the dataset manifest. Activation fails if the current
+selection has changed since that comparison. Old policy candidates cannot be newly
+activated; existing activation history remains valid. Rejected candidates cannot
 be activated; the current activation remains unchanged.
 The 1% margin is an operational acceptance rule, not a significance test. Confidence
 intervals are not estimated in this version; do not expose invented probability
 bands. No fit activates itself. Compare later unseen days and revisit performance
 across seasons before making accuracy or degradation claims.
+With at least 30 matched days, report up to three expanding-training, three-day
+evaluation folds within the training period. The final seven-day holdout is never
+included in these folds. They diagnose historical reference-transfer stability;
+they neither tune hyperparameters nor establish operational forecast accuracy.
+Report source-positive interval MAE separately, using whole meter intervals with
+positive reference power; it is not an astronomical daylight classification.
 
 The dataset pairs metered production with matching Solcast estimated actuals,
 never archived forecasts. Select the latest matching acquisition published by the
@@ -134,6 +158,26 @@ days. Capture both an observation timestamp cutoff and an ID watermark so readin
 saved during fitting cannot enter that dataset, even with identical timestamps.
 New readings remain saved and can prepare a subsequent candidate. Preparation never
 activates a factor automatically.
+
+## Archived forecast evaluation
+
+The plant performance endpoint replays archived day-ahead forecast inputs against
+meter energy for 1–90 completed local days. It uses only the current configuration's
+observations, and excludes days before that configuration existed. Select the first
+forecast acquired on the preceding local day, published before the target day,
+with a successful collection and no later provider issue time. Use only the
+calibration activated and completed before that day. Never fall back to estimated
+actuals or a retrospectively declared configuration.
+
+Mark this as `historical_input_replay`: it does not prove that an electrical output
+was actually published at that historical time. Compare the selected historical
+factor and factor 1 on the same complete, valid days. Keep valid zero-production
+and zero-source days in evaluation, including their errors; do not infer outages
+from zero alone. Source-positive MAE is null when no such intervals exist.
+Return daily measured/predicted/baseline MWh, signed error, snapshot and calibration
+identities, excluded-day reasons and aggregate MAE/bias. Missing days cannot become
+zero errors. This diagnostic does not train or activate a model and does not produce
+confidence intervals from a short or selectively observed history.
 
 ## Historical irradiance and measured performance
 
