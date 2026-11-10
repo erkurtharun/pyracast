@@ -121,9 +121,7 @@ test("a customer manages an approved region through the real API", async ({
 
     await page.getByRole("button", { name: "Automatic production" }).click();
     await expect(page.getByLabel("EPİAŞ plant ID")).toBeVisible();
-    await expect(
-        page.getByLabel(/Measurement point/),
-    ).toHaveValue("unknown");
+    await expect(page.getByLabel(/Measurement point/)).toHaveValue("unknown");
     await page
         .getByLabel("Archive date")
         .fill(process.env.BROWSER_HISTORY_DATE!);
