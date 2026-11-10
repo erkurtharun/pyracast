@@ -251,7 +251,7 @@ def test_calibration_pending_forecast_and_csrf() -> None:
     saved.assessment = "provisional"
     saved.completed_at = timezone.now()
     saved.result = {
-        "policy_version": "regularized-huber-v2",
+        "policy_version": "regularized-huber-v3",
         "holdout_days": 1,
         "candidate": {"mae": 1},
         "baseline": {"mae": 2},

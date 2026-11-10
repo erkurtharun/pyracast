@@ -14,6 +14,7 @@ from pyracast.plants.availability import (
 from pyracast.plants.models import Plant, PlantConfiguration, ProductionObservation
 from pyracast.plants.operations import configuration_is_current
 from pyracast.plants.serializers import ObservationOutput
+from pyracast.solar import DAYLIGHT_POLICY, daylight_window
 
 
 def production_history(
@@ -22,6 +23,7 @@ def production_history(
     start_date: date | None = None,
     end_date: date | None = None,
     resolution_minutes: int = 60,
+    daylight_only: bool = False,
 ) -> dict[str, Any]:
     configuration = (
         PlantConfiguration.objects.select_related("binding__provider_account").get(
@@ -37,7 +39,11 @@ def production_history(
         raise ValidationError("Both start_date and end_date are required.")
     if start_date is None or end_date is None:
         end_date = last or now.astimezone(ZoneInfo(zone)).date() - timedelta(days=1)
-        start_date = max(first or end_date - timedelta(days=6), end_date - timedelta(days=6))
+        start_date = (
+            end_date
+            if daylight_only
+            else max(first or end_date - timedelta(days=6), end_date - timedelta(days=6))
+        )
     if resolution_minutes not in {30, 60} or not 1 <= (end_date - start_date).days + 1 <= 31:
         raise ValidationError("Use a range of 1 to 31 days and 30 or 60 minute resolution.")
     range_start, _ = local_day_bounds(start_date, zone)
@@ -52,11 +58,18 @@ def production_history(
     days, intervals = [], []
     day = start_date
     while day <= end_date:
+        location = configuration.binding if configuration else plant.region
+        daylight = daylight_window(day, zone, location.latitude, location.longitude)
         native = reference_intervals(configuration, day, now) if configuration else ()
         cursor, day_end = local_day_bounds(day, zone)
         available_count = recorded_count = missing_count = 0
         while cursor < day_end:
             end = min(cursor + timedelta(minutes=resolution_minutes), day_end)
+            if daylight_only and not any(
+                cursor < finish and end > begin for begin, finish in daylight.windows
+            ):
+                cursor = end
+                continue
             overlaps = [row for row in observations if row.starts_at < end and row.ends_at > cursor]
             exact = next(
                 (row for row in overlaps if row.starts_at == cursor and row.ends_at == end), None
@@ -95,6 +108,12 @@ def production_history(
                 "available_count": available_count,
                 "recorded_count": recorded_count,
                 "missing_count": missing_count,
+                "sunrise": daylight.sunrise,
+                "sunset": daylight.sunset,
+                "daylight_status": daylight.status,
+                "daylight_windows": [
+                    {"starts_at": begin, "ends_at": finish} for begin, finish in daylight.windows
+                ],
             }
         )
         day += timedelta(days=1)
@@ -107,6 +126,8 @@ def production_history(
         "start_date": start_date,
         "end_date": end_date,
         "resolution_minutes": resolution_minutes,
+        "slot_scope": "daylight" if daylight_only else "full_day",
+        "daylight_policy": DAYLIGHT_POLICY,
         "days": days,
         "intervals": intervals,
         "observations": list(encoded.values()),

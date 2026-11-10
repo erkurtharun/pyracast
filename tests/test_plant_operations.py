@@ -136,10 +136,13 @@ def ready_run(system: System, plant: Plant) -> CalibrationRun:
     return run
 
 
-def test_older_policy_ready_candidate_cannot_be_activated(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("policy", ["regularized-huber-v1", "regularized-huber-v2"])
+def test_older_policy_ready_candidate_cannot_be_activated(
+    monkeypatch: pytest.MonkeyPatch, policy: str
+) -> None:
     system, plant = make_plant(monkeypatch)
     run = ready_run(system, plant)
-    run.result["policy_version"] = "regularized-huber-v1"
+    run.result["policy_version"] = policy
     run.save(update_fields=("result",))
     with pytest.raises(ValidationError):
         activate_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk, run.pk)

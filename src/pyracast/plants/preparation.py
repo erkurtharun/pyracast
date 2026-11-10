@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.irradiance import local_day_bounds
-from pyracast.plants.availability import interval_is_covered, reference_intervals
+from pyracast.plants.availability import reference_intervals
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
@@ -17,8 +17,14 @@ from pyracast.plants.models import (
     PlantEvent,
     ProductionObservation,
 )
-from pyracast.plants.numerics import POLICY_VERSION, PowerInterval
+from pyracast.plants.numerics import (
+    POLICY_VERSION,
+    CalibrationSample,
+    PowerInterval,
+    evaluate_samples,
+)
 from pyracast.regions.models import Region
+from pyracast.solar import daylight_window
 
 
 def _matched_days(
@@ -30,19 +36,33 @@ def _matched_days(
         grouped[observation.starts_at.astimezone(zone).date()].append(observation)
     matched = []
     for day, rows in grouped.items():
-        start, end = local_day_bounds(day, str(zone))
-        measured = tuple(
-            PowerInterval(
-                row.starts_at,
-                row.ends_at,
-                row.energy_mwh / ((row.ends_at - row.starts_at).total_seconds() / 3600),
-            )
-            for row in rows
-            if row.quality == "valid"
+        binding = configuration.binding
+        windows = daylight_window(day, str(zone), binding.latitude, binding.longitude).windows
+        source = reference_intervals(configuration, day, now)
+        evaluation = evaluate_samples(
+            tuple(
+                CalibrationSample(
+                    row.starts_at,
+                    row.ends_at,
+                    row.energy_mwh,
+                    tuple(
+                        PowerInterval(
+                            max(piece.start, row.starts_at),
+                            min(piece.end, row.ends_at),
+                            piece.power_mw,
+                        )
+                        for piece in source
+                        if piece.start < row.ends_at and piece.end > row.starts_at
+                    ),
+                    row.quality,
+                )
+                for row in rows
+            ),
+            timezone=str(zone),
+            limit_mw=None,
+            required_windows={day: windows},
         )
-        if interval_is_covered(measured, start, end) and interval_is_covered(
-            reference_intervals(configuration, day, now), start, end
-        ):
+        if evaluation["valid_days"] == 1:
             matched.append(day)
     return sorted(matched)
 

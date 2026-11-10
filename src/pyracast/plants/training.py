@@ -3,7 +3,7 @@ import json
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import cast
 from zoneinfo import ZoneInfo
 
@@ -24,10 +24,17 @@ from pyracast.plants.models import (
     PlantEvent,
     ProductionObservation,
 )
-from pyracast.plants.numerics import CalibrationSample, FitResult, PowerInterval, fit_calibration
+from pyracast.plants.numerics import (
+    DAYLIGHT_COVERAGE_POLICY,
+    CalibrationSample,
+    FitResult,
+    PowerInterval,
+    fit_calibration,
+)
 from pyracast.plants.operations import configuration_is_current
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.regions.models import Region
+from pyracast.solar import DAYLIGHT_POLICY, daylight_window
 
 LEASE_DURATION = timedelta(minutes=5)
 MAX_ATTEMPTS = 3
@@ -38,6 +45,18 @@ class _Lease:
     run: CalibrationRun
     configuration: PlantConfiguration
     token: uuid.UUID
+
+
+def _daylight_windows(lease: _Lease) -> dict[date, tuple[tuple[datetime, datetime], ...]]:
+    binding = lease.configuration.binding
+    day = lease.run.window_start
+    windows = {}
+    while day <= lease.run.window_end:
+        windows[day] = daylight_window(
+            day, binding.timezone, binding.latitude, binding.longitude
+        ).windows
+        day += timedelta(days=1)
+    return windows
 
 
 def _claim(run_id: int, now: datetime) -> _Lease | None:
@@ -182,6 +201,13 @@ def _dataset(
             )
         )
     manifest: dict[str, object] = {
+        "metric_scope": "daylight_intervals",
+        "coverage_policy": DAYLIGHT_COVERAGE_POLICY,
+        "daylight_policy": DAYLIGHT_POLICY,
+        "required_windows": {
+            day.isoformat(): [[start.isoformat(), end.isoformat()] for start, end in windows]
+            for day, windows in _daylight_windows(lease).items()
+        },
         "comparison_activation_id": run.comparison_activation_id,
         "incumbent_factor": _incumbent_factor(run),
         "configuration_id": configuration.pk,
@@ -318,6 +344,7 @@ def run_calibration(run_id: int, now: datetime | None = None) -> bool:
             normalization_mw=lease.configuration.dc_capacity_mw,
             limit_mw=power_limit(lease.configuration),
             incumbent_factor=_incumbent_factor(lease.run),
+            required_windows=_daylight_windows(lease),
         )
         result.report["comparison_activation_id"] = lease.run.comparison_activation_id
         result.report["selection"] = selection

@@ -565,7 +565,8 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
         incumbent = asRecord(result.incumbent),
         support = asRecord(result.training_support),
         rolling = asRecord(result.rolling_origin),
-        exclusions = asRecord(result.exclusions);
+        exclusions = asRecord(result.exclusions),
+        daylightMetrics = result.metric_scope === "daylight_intervals";
     const format = (value: unknown) =>
         typeof value === "number"
             ? new Intl.NumberFormat("en", { maximumFractionDigits: 4 }).format(
@@ -637,6 +638,12 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
                     folds.
                 </p>
             )}
+            {daylightMetrics && (
+                <p className="fine">
+                    Metrics use whole meter intervals intersecting daylight, not
+                    24-hour totals.
+                </p>
+            )}
             {Object.keys(candidate).length > 0 && (
                 <div className="table-scroll">
                     <table>
@@ -665,9 +672,16 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
                                 ["bias_mw", "Interval bias (MW)"],
                                 [
                                     "daily_mae_mwh",
-                                    "Daily mean absolute error (MWh)",
+                                    daylightMetrics
+                                        ? "Daylight energy MAE (MWh)"
+                                        : "Daily mean absolute error (MWh)",
                                 ],
-                                ["daily_bias_mwh", "Daily bias (MWh)"],
+                                [
+                                    "daily_bias_mwh",
+                                    daylightMetrics
+                                        ? "Daylight energy bias (MWh)"
+                                        : "Daily bias (MWh)",
+                                ],
                             ].map(([key, label]) => (
                                 <tr key={key}>
                                     <th>{label}</th>

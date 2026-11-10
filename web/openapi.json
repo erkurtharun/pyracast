@@ -1673,6 +1673,14 @@
                 "parameters": [
                     {
                         "in": "query",
+                        "name": "daylight_only",
+                        "schema": {
+                            "type": "boolean",
+                            "default": false
+                        }
+                    },
+                    {
+                        "in": "query",
                         "name": "end_date",
                         "schema": {
                             "type": "string",
@@ -1738,6 +1746,14 @@
             "get": {
                 "operationId": "tenants_regions_plants_production_retrieve",
                 "parameters": [
+                    {
+                        "in": "query",
+                        "name": "daylight_only",
+                        "schema": {
+                            "type": "boolean",
+                            "default": false
+                        }
+                    },
                     {
                         "in": "query",
                         "name": "end_date",
@@ -2621,6 +2637,32 @@
                 "type": "string",
                 "description": "* `unknown` - Unknown\n* `fixed` - Fixed\n* `tracking` - Tracking"
             },
+            "DaylightStatusEnum": {
+                "enum": [
+                    "normal",
+                    "polar_day",
+                    "polar_night"
+                ],
+                "type": "string",
+                "description": "* `normal` - normal\n* `polar_day` - polar_day\n* `polar_night` - polar_night"
+            },
+            "DaylightWindowOutput": {
+                "type": "object",
+                "properties": {
+                    "starts_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "ends_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                },
+                "required": [
+                    "ends_at",
+                    "starts_at"
+                ]
+            },
             "ForecastOutput": {
                 "type": "object",
                 "properties": {
@@ -2718,6 +2760,14 @@
                     "password",
                     "username"
                 ]
+            },
+            "MetricScopeEnum": {
+                "enum": [
+                    "daylight_intervals",
+                    "full_day"
+                ],
+                "type": "string",
+                "description": "* `daylight_intervals` - daylight_intervals\n* `full_day` - full_day"
             },
             "NullEnum": {
                 "enum": [
@@ -3263,6 +3313,13 @@
                         "type": "string",
                         "nullable": true
                     },
+                    "metric_scope": {
+                        "$ref": "#/components/schemas/MetricScopeEnum"
+                    },
+                    "daylight_policy": {
+                        "type": "string",
+                        "nullable": true
+                    },
                     "matched_days": {
                         "type": "integer"
                     },
@@ -3298,12 +3355,14 @@
                 "required": [
                     "baseline_metrics",
                     "configuration_id",
+                    "daylight_policy",
                     "days",
                     "end_date",
                     "evaluated_at",
                     "evaluation_kind",
                     "matched_days",
                     "measurement_basis",
+                    "metric_scope",
                     "metrics",
                     "plant_id",
                     "requested_days",
@@ -3511,13 +3570,36 @@
                     },
                     "missing_count": {
                         "type": "integer"
+                    },
+                    "sunrise": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "sunset": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "daylight_status": {
+                        "$ref": "#/components/schemas/DaylightStatusEnum"
+                    },
+                    "daylight_windows": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DaylightWindowOutput"
+                        }
                     }
                 },
                 "required": [
                     "available_count",
                     "date",
+                    "daylight_status",
+                    "daylight_windows",
                     "missing_count",
-                    "recorded_count"
+                    "recorded_count",
+                    "sunrise",
+                    "sunset"
                 ]
             },
             "ProductionHistoryOutput": {
@@ -3554,6 +3636,12 @@
                     "resolution_minutes": {
                         "$ref": "#/components/schemas/ResolutionMinutesEnum"
                     },
+                    "slot_scope": {
+                        "$ref": "#/components/schemas/SlotScopeEnum"
+                    },
+                    "daylight_policy": {
+                        "type": "string"
+                    },
                     "days": {
                         "type": "array",
                         "items": {
@@ -3577,12 +3665,14 @@
                     "available_end_date",
                     "available_start_date",
                     "configuration_id",
+                    "daylight_policy",
                     "days",
                     "end_date",
                     "intervals",
                     "observations",
                     "plant_id",
                     "resolution_minutes",
+                    "slot_scope",
                     "start_date",
                     "timezone"
                 ]
@@ -3937,6 +4027,14 @@
                     "id",
                     "username"
                 ]
+            },
+            "SlotScopeEnum": {
+                "enum": [
+                    "daylight",
+                    "full_day"
+                ],
+                "type": "string",
+                "description": "* `daylight` - daylight\n* `full_day` - full_day"
             },
             "SourceKindEnum": {
                 "enum": [

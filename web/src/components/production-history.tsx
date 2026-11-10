@@ -1,9 +1,10 @@
-"use client";
+﻿"use client";
 import { useEffect, useState } from "react";
 import { request } from "@/lib/api";
 import type { components } from "@/lib/schema";
 import { localDay } from "./data-source";
 import { Notice } from "./ui";
+
 type History = components["schemas"]["ProductionHistoryOutput"];
 type Draft = { energy: string; unit: string };
 const reasons: Record<string, string> = {
@@ -16,6 +17,11 @@ const reasons: Record<string, string> = {
         "No archived estimated actuals for this interval.",
     already_recorded: "Already saved.",
 };
+function shiftDay(day: string, amount: number) {
+    const value = new Date(`${day}T12:00:00Z`);
+    value.setUTCDate(value.getUTCDate() + amount);
+    return value.toISOString().slice(0, 10);
+}
 export function ProductionHistory({
     base,
     configuration,
@@ -27,11 +33,8 @@ export function ProductionHistory({
     token: string;
     onSaved: () => void;
 }) {
-    const [range, setRange] = useState({
-        start: "",
-        end: "",
-        resolution: "60",
-    });
+    const [date, setDate] = useState("");
+    const [resolution, setResolution] = useState("60");
     const [history, setHistory] = useState<History>();
     const [loadedQuery, setLoadedQuery] = useState("");
     const [failedQuery, setFailedQuery] = useState("");
@@ -41,7 +44,7 @@ export function ProductionHistory({
     const [saving, setSaving] = useState(false);
     const [unit, setUnit] = useState("kWh");
     const [drafts, setDrafts] = useState<Record<string, Draft>>({});
-    const query = `${base}production/?resolution_minutes=${range.resolution}${range.start && range.end ? `&start_date=${range.start}&end_date=${range.end}` : ""}`;
+    const query = `${base}production/?daylight_only=true&resolution_minutes=${resolution}${date ? `&start_date=${date}&end_date=${date}` : ""}`;
     useEffect(() => {
         let current = true;
         request<History>(query)
@@ -49,6 +52,7 @@ export function ProductionHistory({
                 if (!current) return;
                 setHistory(data);
                 setLoadedQuery(query);
+                setDate((selected) => selected || data.end_date);
                 setError("");
                 setFailedQuery("");
             })
@@ -63,16 +67,33 @@ export function ProductionHistory({
         };
     }, [query, version]);
     const ready = history && query === loadedQuery;
-    const label = (start: string, end: string) => {
-        const format = new Intl.DateTimeFormat("en-GB", {
+    const time = (value: string) =>
+        new Intl.DateTimeFormat("en-GB", {
             timeZone: history?.timezone,
+            hour: "2-digit",
+            minute: "2-digit",
+            timeZoneName: "short",
+        }).format(new Date(value));
+    const label = (start: string, end: string) =>
+        `${time(start)} – ${time(end)}`;
+    const datedTime = (value: string) =>
+        new Intl.DateTimeFormat("en-GB", {
+            timeZone: history?.timezone,
+            year: "numeric",
             month: "short",
             day: "numeric",
             hour: "2-digit",
             minute: "2-digit",
-        });
-        return `${format.format(new Date(start))} – ${format.format(new Date(end))}`;
-    };
+            timeZoneName: "short",
+        }).format(new Date(value));
+    const day = ready ? history.days[0] : undefined;
+    const pending = ready
+        ? history.intervals.filter(
+              (row) =>
+                  row.can_enter &&
+                  drafts[`${row.starts_at}/${row.ends_at}`]?.energy.trim(),
+          ).length
+        : 0;
     async function save() {
         if (!ready || saving) return;
         const submitted = history.intervals
@@ -115,7 +136,9 @@ export function ProductionHistory({
                     if (next[row.key] === row.draft) delete next[row.key];
                 return next;
             });
-            setMessage(`${submitted.length} meter readings saved.`);
+            setMessage(
+                `${submitted.length} meter ${submitted.length === 1 ? "reading" : "readings"} saved.`,
+            );
             setVersion((current) => current + 1);
             onSaved();
         } catch (failure) {
@@ -124,80 +147,56 @@ export function ProductionHistory({
             setSaving(false);
         }
     }
+    const maxDate = history ? localDay(history.timezone, -1) : undefined;
     return (
-        <section className="panel">
+        <section className="panel journal">
             <div className="section-heading">
                 <div>
                     <h2>Production journal</h2>
-                    <p>
-                        See saved meter readings and fill missing production
-                        whenever you are ready.
-                    </p>
+                    <p>Enter meter readings for one day at a time.</p>
                 </div>
             </div>
-            <p>
-                Historical estimated actuals provide the comparison data. Once
-                at least 7 complete, valid paired days are available, a fit is
-                prepared automatically in the background. You review and
-                activate any candidate below.
+            <p className="fine">
+                Historical estimated actuals provide comparison data. Complete
+                daylight coverage helps prepare a calibration candidate. Blank
+                entries stay missing; saved readings are permanent.
             </p>
-            {history && (
-                <p className="fine">
-                    Available comparison dates:{" "}
-                    {history.available_start_date && history.available_end_date
-                        ? `${history.available_start_date} to ${history.available_end_date}`
-                        : "No archived estimated actuals yet"}
-                    . This window grows as daily data is collected. Local times
-                    in {history.timezone}.
-                </p>
-            )}
-            <div className="forecast-controls">
-                <label className="field">
-                    From date
-                    <input
-                        type="date"
-                        disabled={!history}
-                        value={range.start || history?.start_date || ""}
-                        max={
-                            history ? localDay(history.timezone, -1) : undefined
-                        }
-                        onChange={(event) =>
-                            setRange({
-                                ...range,
-                                start: event.target.value,
-                                end: range.end || history?.end_date || "",
-                            })
-                        }
-                    />
-                </label>
-                <label className="field">
-                    To date
-                    <input
-                        type="date"
-                        disabled={!history}
-                        value={range.end || history?.end_date || ""}
-                        max={
-                            history ? localDay(history.timezone, -1) : undefined
-                        }
-                        onChange={(event) =>
-                            setRange({
-                                ...range,
-                                start: range.start || history?.start_date || "",
-                                end: event.target.value,
-                            })
-                        }
-                    />
-                </label>
+            <div className="journal-controls">
+                <div className="journal-date-nav">
+                    <button
+                        type="button"
+                        className="button secondary"
+                        aria-label="Previous day"
+                        disabled={!date}
+                        onClick={() => setDate(shiftDay(date, -1))}
+                    >
+                        ←
+                    </button>
+                    <label className="field">
+                        Day
+                        <input
+                            type="date"
+                            disabled={!history}
+                            value={date}
+                            max={maxDate}
+                            onChange={(event) => setDate(event.target.value)}
+                        />
+                    </label>
+                    <button
+                        type="button"
+                        className="button secondary"
+                        aria-label="Next day"
+                        disabled={!date || date >= (maxDate ?? "")}
+                        onClick={() => setDate(shiftDay(date, 1))}
+                    >
+                        →
+                    </button>
+                </div>
                 <label className="field">
                     Meter interval
                     <select
-                        value={range.resolution}
-                        onChange={(event) =>
-                            setRange({
-                                ...range,
-                                resolution: event.target.value,
-                            })
-                        }
+                        value={resolution}
+                        onChange={(event) => setResolution(event.target.value)}
                     >
                         <option value="30">30 minutes</option>
                         <option value="60">60 minutes</option>
@@ -214,11 +213,15 @@ export function ProductionHistory({
                     </select>
                 </label>
             </div>
-            <p className="fine">
-                View up to 31 days at a time. Blank entries stay missing. Saved
-                readings are permanent; only intervals with archived comparison
-                data accept new entries.
-            </p>
+            {history && (
+                <p className="fine">
+                    Available comparison dates:{" "}
+                    {history.available_start_date && history.available_end_date
+                        ? `${history.available_start_date} to ${history.available_end_date}`
+                        : "No archived estimated actuals yet"}
+                    . Local times in {history.timezone}.
+                </p>
+            )}
             {error && <Notice error>{error}</Notice>}
             {message && <Notice>{message}</Notice>}
             {!ready ? (
@@ -227,132 +230,152 @@ export function ProductionHistory({
                 )
             ) : (
                 <>
-                    <div className="table-scroll">
-                        <table>
-                            <caption>Daily coverage</caption>
-                            <thead>
-                                <tr>
-                                    <th>Local date</th>
-                                    <th>Available intervals</th>
-                                    <th>Recorded</th>
-                                    <th>Missing</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {history.days.map((day) => (
-                                    <tr key={day.date}>
-                                        <th>{day.date}</th>
-                                        <td>{day.available_count}</td>
-                                        <td>{day.recorded_count}</td>
-                                        <td>{day.missing_count}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
+                    {day && (
+                        <div className="journal-summary">
+                            <div>
+                                <strong>{day.recorded_count} recorded</strong>
+                                <span>
+                                    {day.missing_count} missing ·{" "}
+                                    {day.available_count} with comparison data
+                                </span>
+                            </div>
+                            <div>
+                                <strong>Daylight</strong>
+                                <span>
+                                    {day.daylight_status === "polar_day"
+                                        ? "Sun above horizon all day"
+                                        : day.daylight_status === "polar_night"
+                                          ? "No daylight this day"
+                                          : day.daylight_windows?.length > 1
+                                            ? day.daylight_windows
+                                                  .map((window) =>
+                                                      label(
+                                                          window.starts_at,
+                                                          window.ends_at,
+                                                      ),
+                                                  )
+                                                  .join(", ")
+                                            : day.sunrise && day.sunset
+                                              ? `${time(day.sunrise)} – ${time(day.sunset)}`
+                                              : day.daylight_windows?.length
+                                                ? day.daylight_windows
+                                                      .map((window) =>
+                                                          label(
+                                                              window.starts_at,
+                                                              window.ends_at,
+                                                          ),
+                                                      )
+                                                      .join(", ")
+                                                : "Daylight times unavailable"}
+                                </span>
+                            </div>
+                        </div>
+                    )}
                     <form
                         onSubmit={(event) => {
                             event.preventDefault();
                             void save();
                         }}
                     >
-                        <div className="table-scroll">
-                            <table>
-                                <caption>
-                                    Meter entries · {range.resolution} minutes
-                                </caption>
-                                <thead>
-                                    <tr>
-                                        <th>Local interval</th>
-                                        <th>Production</th>
-                                        <th>Status</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {history.intervals.map((row) => {
-                                        const key = `${row.starts_at}/${row.ends_at}`,
-                                            draft = drafts[key];
-                                        return (
-                                            <tr key={key}>
-                                                <th>
-                                                    {label(
-                                                        row.starts_at,
-                                                        row.ends_at,
-                                                    )}
-                                                </th>
-                                                <td>
-                                                    {row.observation ? (
-                                                        `${row.observation.energy_mwh} MWh`
-                                                    ) : (
-                                                        <>
-                                                            <input
-                                                                className="meter-input"
-                                                                aria-label={`Production ${row.starts_at}`}
-                                                                type="number"
-                                                                min="0"
-                                                                step="any"
-                                                                disabled={
-                                                                    !row.can_enter
-                                                                }
-                                                                value={
-                                                                    draft?.energy ??
-                                                                    ""
-                                                                }
-                                                                onChange={(
-                                                                    event,
-                                                                ) =>
-                                                                    setDrafts(
-                                                                        (
-                                                                            current,
-                                                                        ) => ({
-                                                                            ...current,
-                                                                            [key]: {
-                                                                                energy: event
-                                                                                    .target
-                                                                                    .value,
-                                                                                unit,
-                                                                            },
-                                                                        }),
-                                                                    )
-                                                                }
-                                                            />{" "}
-                                                            {draft?.unit ??
-                                                                unit}
-                                                        </>
-                                                    )}
-                                                </td>
-                                                <td>
-                                                    {row.observation
-                                                        ? `${row.observation.quality} · ${row.observation.source}`
-                                                        : row.can_enter
-                                                          ? "Missing · ready for your reading"
-                                                          : (reasons[
-                                                                row.unavailable_reason ??
-                                                                    ""
-                                                            ] ??
-                                                            "Unavailable for entry.")}
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
+                        {history.intervals.length === 0 ? (
+                            <p>No daylight intervals for this day.</p>
+                        ) : (
+                            <div className="table-scroll">
+                                <table className="journal-table">
+                                    <caption>
+                                        Meter entries · {resolution} minutes
+                                    </caption>
+                                    <thead>
+                                        <tr>
+                                            <th>Local interval</th>
+                                            <th>Production</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {history.intervals.map((row) => {
+                                            const key = `${row.starts_at}/${row.ends_at}`,
+                                                draft = drafts[key];
+                                            return (
+                                                <tr key={key}>
+                                                    <th scope="row">
+                                                        {label(
+                                                            row.starts_at,
+                                                            row.ends_at,
+                                                        )}
+                                                    </th>
+                                                    <td>
+                                                        {row.observation ? (
+                                                            `${row.observation.energy_mwh} MWh`
+                                                        ) : (
+                                                            <>
+                                                                <input
+                                                                    className="meter-input"
+                                                                    aria-label={`Production ${row.starts_at}`}
+                                                                    type="number"
+                                                                    min="0"
+                                                                    step="any"
+                                                                    disabled={
+                                                                        !row.can_enter
+                                                                    }
+                                                                    value={
+                                                                        draft?.energy ??
+                                                                        ""
+                                                                    }
+                                                                    onChange={(
+                                                                        event,
+                                                                    ) =>
+                                                                        setDrafts(
+                                                                            (
+                                                                                current,
+                                                                            ) => ({
+                                                                                ...current,
+                                                                                [key]: {
+                                                                                    energy: event
+                                                                                        .target
+                                                                                        .value,
+                                                                                    unit,
+                                                                                },
+                                                                            }),
+                                                                        )
+                                                                    }
+                                                                />{" "}
+                                                                {draft?.unit ??
+                                                                    unit}
+                                                            </>
+                                                        )}
+                                                    </td>
+                                                    <td>
+                                                        {row.observation
+                                                            ? `${row.observation.quality} · ${row.observation.source}`
+                                                            : row.can_enter
+                                                              ? "Missing · ready for your reading"
+                                                              : (reasons[
+                                                                    row.unavailable_reason ??
+                                                                        ""
+                                                                ] ??
+                                                                "Unavailable for entry.")}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                        <div className="journal-save">
+                            <span>
+                                {pending}{" "}
+                                {pending === 1 ? "reading" : "readings"} ready
+                                to save
+                            </span>
+                            <button
+                                className="button"
+                                disabled={saving || !pending}
+                            >
+                                {saving ? "Saving…" : "Save meter readings"}
+                            </button>
                         </div>
-                        <button
-                            className="button"
-                            disabled={
-                                saving ||
-                                !history.intervals.some(
-                                    (row) =>
-                                        row.can_enter &&
-                                        drafts[
-                                            `${row.starts_at}/${row.ends_at}`
-                                        ]?.energy.trim(),
-                                )
-                            }
-                        >
-                            {saving ? "Saving…" : "Save meter readings"}
-                        </button>
                     </form>
                     {history.observations.length > 0 && (
                         <details>
@@ -379,10 +402,8 @@ export function ProductionHistory({
                                         {history.observations.map((row) => (
                                             <tr key={row.id}>
                                                 <th>
-                                                    {label(
-                                                        row.starts_at,
-                                                        row.ends_at,
-                                                    )}
+                                                    {datedTime(row.starts_at)}{" "}
+                                                    to {datedTime(row.ends_at)}
                                                 </th>
                                                 <td>{row.energy_mwh}</td>
                                                 <td>{row.quality}</td>

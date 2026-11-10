@@ -633,6 +633,19 @@ export interface components {
          * @enum {string}
          */
         ConfigurationOutputMountingTypeEnum: "unknown" | "fixed" | "tracking";
+        /**
+         * @description * `normal` - normal
+         *     * `polar_day` - polar_day
+         *     * `polar_night` - polar_night
+         * @enum {string}
+         */
+        DaylightStatusEnum: "normal" | "polar_day" | "polar_night";
+        DaylightWindowOutput: {
+            /** Format: date-time */
+            starts_at: string;
+            /** Format: date-time */
+            ends_at: string;
+        };
         ForecastOutput: {
             region_id: number;
             /** Format: date */
@@ -659,6 +672,12 @@ export interface components {
             username: string;
             password: string;
         };
+        /**
+         * @description * `daylight_intervals` - daylight_intervals
+         *     * `full_day` - full_day
+         * @enum {string}
+         */
+        MetricScopeEnum: "daylight_intervals" | "full_day";
         /** @enum {unknown} */
         NullEnum: null;
         ObservationImport: {
@@ -876,6 +895,8 @@ export interface components {
             evaluation_kind: string;
             selection_policy: string;
             measurement_basis: string | null;
+            metric_scope: components["schemas"]["MetricScopeEnum"];
+            daylight_policy: string | null;
             matched_days: number;
             requested_days: number;
             metrics: components["schemas"]["PerformanceMetrics"] | null;
@@ -948,6 +969,12 @@ export interface components {
             available_count: number;
             recorded_count: number;
             missing_count: number;
+            /** Format: date-time */
+            sunrise: string | null;
+            /** Format: date-time */
+            sunset: string | null;
+            daylight_status: components["schemas"]["DaylightStatusEnum"];
+            daylight_windows: components["schemas"]["DaylightWindowOutput"][];
         };
         ProductionHistoryOutput: {
             plant_id: number;
@@ -962,6 +989,8 @@ export interface components {
             /** Format: date */
             end_date: string;
             resolution_minutes: components["schemas"]["ResolutionMinutesEnum"];
+            slot_scope: components["schemas"]["SlotScopeEnum"];
+            daylight_policy: string;
             days: components["schemas"]["ProductionDayOutput"][];
             intervals: components["schemas"]["ProductionIntervalOutput"][];
             observations: components["schemas"]["ObservationOutput"][];
@@ -1053,6 +1082,12 @@ export interface components {
             username: string;
             email: string;
         };
+        /**
+         * @description * `daylight` - daylight
+         *     * `full_day` - full_day
+         * @enum {string}
+         */
+        SlotScopeEnum: "daylight" | "full_day";
         /**
          * @description * `forecast` - forecast
          *     * `estimated_actuals` - estimated_actuals
@@ -1929,6 +1964,7 @@ export interface operations {
     tenants_regions_plants_performance_retrieve: {
         parameters: {
             query?: {
+                daylight_only?: boolean;
                 end_date?: string;
                 start_date?: string;
             };
@@ -1955,6 +1991,7 @@ export interface operations {
     tenants_regions_plants_production_retrieve: {
         parameters: {
             query?: {
+                daylight_only?: boolean;
                 end_date?: string;
                 /**
                  * @description * `30` - 30

@@ -31,12 +31,12 @@ export function ForecastPerformance({
 }) {
     const [start, setStart] = useState(() => localDay(timezone, -30));
     const [end, setEnd] = useState(() => localDay(timezone, -1));
-    const [url, setUrl] = useState(`${base}performance/`);
+    const [url, setUrl] = useState(`${base}performance/?daylight_only=true`);
     const resource = useResource<Performance>(url);
     function load(event: FormEvent) {
         event.preventDefault();
         setUrl(
-            `${base}performance/?${new URLSearchParams({ start_date: start, end_date: end })}`,
+            `${base}performance/?${new URLSearchParams({ start_date: start, end_date: end, daylight_only: "true" })}`,
         );
     }
     return (
@@ -51,8 +51,9 @@ export function ForecastPerformance({
                         was published at the time.
                     </p>
                     <p>
-                        Results use the current configuration and measured
-                        production, not estimated actuals. Dates are local to{" "}
+                        Results use measured intervals overlapping daylight, not
+                        estimated actuals or full-day totals. The complete
+                        daylight window must be covered. Dates are local to{" "}
                         {timezone}; choose up to 90 completed days.
                     </p>
                 </div>
@@ -102,12 +103,12 @@ export function ForecastPerformance({
                                 }
                             />
                             <Stat
-                                label="Daily mean absolute error"
+                                label="Daylight energy error"
                                 value={resource.data.metrics?.daily_mae_mwh}
                                 unit="MWh"
                             />
                             <Stat
-                                label="Baseline daily mean absolute error"
+                                label="Baseline daylight energy error"
                                 value={
                                     resource.data.baseline_metrics
                                         ?.daily_mae_mwh
@@ -115,7 +116,7 @@ export function ForecastPerformance({
                                 unit="MWh"
                             />
                             <Stat
-                                label="Daily bias"
+                                label="Daylight energy bias"
                                 value={resource.data.metrics?.daily_bias_mwh}
                                 unit="MWh"
                             />
@@ -142,8 +143,8 @@ export function ForecastPerformance({
                         <div className="table-scroll">
                             <table>
                                 <caption>
-                                    Daily replay: {resource.data.start_date} to{" "}
-                                    {resource.data.end_date}
+                                    Daylight replay: {resource.data.start_date}{" "}
+                                    to {resource.data.end_date}
                                 </caption>
                                 <thead>
                                     <tr>

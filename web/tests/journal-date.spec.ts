@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test("journal date controls wait for the initial range before selecting a day", async ({
     page,
-}) => {
+}, testInfo) => {
     const paged = (results: unknown[]) => ({
         results,
         count: results.length,
@@ -71,6 +71,11 @@ test("journal date controls wait for the initial range before selecting a day", 
                 result: null,
             };
         else if (path.endsWith("/production/")) {
+            expect(url.searchParams.get("daylight_only")).toBe("true");
+            if (url.searchParams.has("start_date"))
+                expect(url.searchParams.get("end_date")).toBe(
+                    url.searchParams.get("start_date"),
+                );
             const start = url.searchParams.get("start_date") ?? "2026-01-01",
                 end = url.searchParams.get("end_date") ?? "2026-01-07";
             if (!url.searchParams.has("start_date")) await initialResponse;
@@ -86,6 +91,33 @@ test("journal date controls wait for the initial range before selecting a day", 
                         available_count: 1,
                         recorded_count: 0,
                         missing_count: 1,
+                        sunrise:
+                            start === "2026-01-06"
+                                ? `${start}T03:00:00+03:00`
+                                : `${start}T06:15:00Z`,
+                        sunset:
+                            start === "2026-01-06"
+                                ? `${start}T01:00:00+03:00`
+                                : `${start}T16:45:00Z`,
+                        daylight_status: "normal",
+                        daylight_windows:
+                            start === "2026-01-06"
+                                ? [
+                                      {
+                                          starts_at: `${start}T00:00:00+03:00`,
+                                          ends_at: `${start}T01:00:00+03:00`,
+                                      },
+                                      {
+                                          starts_at: `${start}T03:00:00+03:00`,
+                                          ends_at: "2026-01-07T00:00:00+03:00",
+                                      },
+                                  ]
+                                : [
+                                      {
+                                          starts_at: `${start}T06:15:00Z`,
+                                          ends_at: `${start}T16:45:00Z`,
+                                      },
+                                  ],
                     },
                 ],
                 intervals: [
@@ -111,15 +143,38 @@ test("journal date controls wait for the initial range before selecting a day", 
     await page
         .getByRole("button", { name: "Calibration", exact: true })
         .click();
-    await expect(page.getByLabel("From date")).toBeDisabled();
-    await expect(page.getByLabel("To date")).toBeDisabled();
+    await expect(page.getByLabel("Day", { exact: true })).toBeDisabled();
     release();
-    await page.getByLabel("From date").fill("2026-01-07");
-    await page.getByLabel("To date").fill("2026-01-07");
+    await page.getByLabel("Day", { exact: true }).fill("2026-01-07");
     await expect(
         page.getByLabel("Production 2026-01-07T09:00:00Z"),
     ).toBeEnabled();
     await expect(
         page.getByLabel("Production 2026-01-01T09:00:00Z"),
     ).toHaveCount(0);
+    await expect(page.getByText(/09:15 GMT\+3/)).toBeVisible();
+    const entry = page.getByLabel("Production 2026-01-07T09:00:00Z");
+    await entry.fill("0");
+    await expect(
+        page.getByRole("button", { name: "Save meter readings" }),
+    ).toBeEnabled();
+    await page.getByLabel("Day", { exact: true }).fill("2026-01-06");
+    await expect(
+        page.getByLabel("Production 2026-01-06T09:00:00Z"),
+    ).toHaveValue("");
+    await expect(
+        page.getByText(
+            "00:00 GMT+3 \u2013 01:00 GMT+3, 03:00 GMT+3 \u2013 00:00 GMT+3",
+        ),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: "Save meter readings" }),
+    ).toBeDisabled();
+    await page.getByLabel("Day", { exact: true }).fill("2026-01-07");
+    await expect(entry).toHaveValue("0");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({
+        path: testInfo.outputPath("production-journal-mobile.png"),
+        fullPage: true,
+    });
 });

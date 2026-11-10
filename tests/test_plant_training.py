@@ -28,6 +28,7 @@ from pyracast.plants.operations import (
 )
 from pyracast.plants.training import LEASE_DURATION, pending_calibration_ids, run_calibration
 from pyracast.regions.models import Region
+from pyracast.solar import DAYLIGHT_POLICY
 from tests.test_domain import NOW, System
 from tests.test_plant_operations import make_plant, ready_run, request_run, snapshot_for
 
@@ -88,6 +89,13 @@ def test_durable_fit_freezes_inputs_and_requires_separate_activation(
     assert run.factor is not None
     assert 0.5 < run.factor < 0.6
     assert len(run.dataset_sha256) == 64
+    assert run.dataset_manifest["daylight_policy"] == DAYLIGHT_POLICY
+    assert run.dataset_manifest["metric_scope"] == "daylight_intervals"
+    assert run.dataset_manifest["coverage_policy"] == "whole-meter-intervals-cover-daylight-v1"
+    assert sorted(run.dataset_manifest["required_windows"]) == [
+        (date(2026, 11, 2) + timedelta(days=offset)).isoformat() for offset in range(7)
+    ]
+    assert run.result["exclusions"]["outside_required_windows"] > 0
     assert len(run.dataset_manifest["observations"]) == 168
     assert (
         sorted(value["snapshot_id"] for value in run.dataset_manifest["sources"].values())

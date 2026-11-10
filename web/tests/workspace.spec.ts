@@ -834,12 +834,12 @@ test("forecast performance shows replay metrics, missing days and selected range
         page.getByText("This does not establish", { exact: false }),
     ).toBeVisible();
     await expect(
-        page.getByText("Baseline daily mean absolute error"),
+        page.getByText("Baseline daylight energy error"),
     ).toBeVisible();
     await expect(
         page
             .locator(".stat")
-            .filter({ hasText: "Baseline daily mean absolute error" }),
+            .filter({ hasText: "Baseline daylight energy error" }),
     ).toContainText("2.5");
     await expect(
         page.getByText("Generating-interval error", { exact: true }),
@@ -850,6 +850,7 @@ test("forecast performance shows replay metrics, missing days and selected range
     await expect
         .poll(() => lastQuery)
         .toContain("start_date=2026-11-01&end_date=2026-11-02");
+    await expect.poll(() => lastQuery).toContain("daylight_only=true");
     await expect(page.getByRole("cell", { name: "8.5" })).toBeVisible();
     await expect(
         page.locator(".stat").filter({ hasText: "Generating-interval error" }),
@@ -868,6 +869,7 @@ test("calibration detail explains support, rejection and incumbent comparison", 
         assessment: "provisional",
         factor: 1.1,
         result: {
+            metric_scope: "daylight_intervals",
             valid_days: 10,
             training_days: 8,
             holdout_days: 2,
@@ -894,6 +896,13 @@ test("calibration detail explains support, rejection and incumbent comparison", 
         ),
     ).toBeVisible();
     await expect(page.getByText("4 / 5 required")).toBeVisible();
+    await expect(
+        page.getByText(
+            "Metrics use whole meter intervals intersecting daylight, not 24-hour totals.",
+        ),
+    ).toBeVisible();
+    await expect(page.getByText("Daylight energy MAE (MWh)")).toBeVisible();
+    await expect(page.getByText("Daylight energy bias (MWh)")).toBeVisible();
     await expect(
         page.getByText("Rolling-origin diagnostic: diagnostic; 2 folds."),
     ).toBeVisible();
@@ -1024,7 +1033,9 @@ test("production journal saves missing readings, preserves dates and shows archi
     await expect(
         page.getByRole("button", { name: "Request calibration" }),
     ).toHaveCount(0);
-    await expect(page.getByLabel("From date")).not.toHaveAttribute("min");
+    await expect(page.getByLabel("Day", { exact: true })).not.toHaveAttribute(
+        "min",
+    );
     await expect(
         page.getByLabel("Production 2026-01-07T11:00:00Z"),
     ).toBeDisabled();
@@ -1043,7 +1054,7 @@ test("production journal saves missing readings, preserves dates and shows archi
     await expect(
         page.getByRole("heading", { name: "Calibration #40", exact: true }),
     ).toBeVisible();
-    await page.getByLabel("From date").fill("2026-01-06");
+    await page.getByLabel("Day", { exact: true }).fill("2026-01-06");
     await expect(
         page.getByLabel("Production 2026-01-06T09:00:00Z"),
     ).toHaveValue("");
@@ -1065,7 +1076,7 @@ test("production journal saves missing readings, preserves dates and shows archi
         energy_mwh: 0.5,
         ends_at: "2026-01-06T09:30:00Z",
     });
-    await page.getByLabel("From date").fill("2026-01-07");
+    await page.getByLabel("Day", { exact: true }).fill("2026-01-07");
     await page.getByLabel("Meter interval").selectOption("60");
     await expect(
         page.getByRole("cell", { name: "0.25 MWh", exact: true }),
@@ -1138,12 +1149,12 @@ test("production journal ignores stale dates and preserves new drafts during a s
     await entry.fill("300");
     releaseSave();
     await expect(
-        page.getByText("1 meter readings saved.", { exact: true }),
+        page.getByText("1 meter reading saved.", { exact: true }),
     ).toBeVisible();
     await expect(entry).toHaveValue("300");
-    await page.getByLabel("From date").fill("2026-01-06");
+    await page.getByLabel("Day", { exact: true }).fill("2026-01-06");
     await oldDateRequested;
-    await page.getByLabel("From date").fill("2026-01-05");
+    await page.getByLabel("Day", { exact: true }).fill("2026-01-05");
     await expect(
         page.getByLabel("Production 2026-01-05T09:00:00Z"),
     ).toBeVisible();
@@ -1151,7 +1162,9 @@ test("production journal ignores stale dates and preserves new drafts during a s
     await expect(
         page.getByLabel("Production 2026-01-06T09:00:00Z"),
     ).toHaveCount(0);
-    await expect(page.getByLabel("From date")).toHaveValue("2026-01-05");
+    await expect(page.getByLabel("Day", { exact: true })).toHaveValue(
+        "2026-01-05",
+    );
 });
 
 test("production journal stops loading after a failed history request", async ({

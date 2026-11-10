@@ -136,11 +136,13 @@ class ProductionQuery(InputSerializer):
     start_date = serializers.DateField(required=False)
     end_date = serializers.DateField(required=False)
     resolution_minutes = serializers.ChoiceField(choices=(30, 60), default=60)
+    daylight_only = serializers.BooleanField(default=False)
 
 
 class PerformanceQuery(InputSerializer):
     start_date = serializers.DateField(required=False)
     end_date = serializers.DateField(required=False)
+    daylight_only = serializers.BooleanField(default=False)
 
 
 class PerformanceMetrics(serializers.Serializer[dict[str, Any]]):
@@ -176,6 +178,8 @@ class PerformanceOutput(serializers.Serializer[dict[str, Any]]):
     evaluation_kind = serializers.CharField()
     selection_policy = serializers.CharField()
     measurement_basis = serializers.CharField(allow_null=True)
+    metric_scope = serializers.ChoiceField(choices=("daylight_intervals", "full_day"))
+    daylight_policy = serializers.CharField(allow_null=True)
     matched_days = serializers.IntegerField()
     requested_days = serializers.IntegerField()
     metrics = PerformanceMetrics(allow_null=True)
@@ -184,11 +188,20 @@ class PerformanceOutput(serializers.Serializer[dict[str, Any]]):
     uncertainty = serializers.CharField()
 
 
+class DaylightWindowOutput(serializers.Serializer[dict[str, Any]]):
+    starts_at = serializers.DateTimeField()
+    ends_at = serializers.DateTimeField()
+
+
 class ProductionDayOutput(serializers.Serializer[dict[str, Any]]):
     date = serializers.DateField()
     available_count = serializers.IntegerField()
     recorded_count = serializers.IntegerField()
     missing_count = serializers.IntegerField()
+    sunrise = serializers.DateTimeField(allow_null=True)
+    sunset = serializers.DateTimeField(allow_null=True)
+    daylight_status = serializers.ChoiceField(choices=("normal", "polar_day", "polar_night"))
+    daylight_windows = DaylightWindowOutput(many=True)
 
 
 class ProductionIntervalOutput(serializers.Serializer[dict[str, Any]]):
@@ -209,6 +222,8 @@ class ProductionHistoryOutput(serializers.Serializer[dict[str, Any]]):
     start_date = serializers.DateField()
     end_date = serializers.DateField()
     resolution_minutes = serializers.ChoiceField(choices=(30, 60))
+    slot_scope = serializers.ChoiceField(choices=("daylight", "full_day"))
+    daylight_policy = serializers.CharField()
     days = ProductionDayOutput(many=True)
     intervals = ProductionIntervalOutput(many=True)
     observations = ObservationOutput(many=True)

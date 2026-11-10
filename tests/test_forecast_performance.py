@@ -17,6 +17,7 @@ from pyracast.plants.models import (
     ProductionObservation,
 )
 from pyracast.plants.performance import forecast_performance
+from pyracast.solar import daylight_window
 from tests.test_domain import NOW, System
 from tests.test_plant_operations import make_plant, snapshot_for
 
@@ -92,6 +93,62 @@ def test_performance_replays_native_clipping_and_keeps_read_only(
     assert result["days"][0]["calibration_id"] is None
     assert result["days"][0]["snapshot_id"] == source.pk
     assert not PlantForecast.objects.exists()
+
+
+def test_daylight_performance_needs_no_night_readings_and_retains_boundary_energy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    configuration = plant.current_configuration
+    assert configuration is not None
+    source = snapshot_for(system, DAY, power_kw=0.4)
+    publish(source)
+    measurements(system, configuration, 52)
+    windows = daylight_window(
+        DAY, system.binding.timezone, system.binding.latitude, system.binding.longitude
+    ).windows
+    for row in ProductionObservation.objects.filter(plant=plant):
+        if not any(row.starts_at < end and row.ends_at > start for start, end in windows):
+            row.delete()
+    count = ProductionObservation.objects.filter(plant=plant).count()
+    full = forecast_performance(plant, start_date=DAY, end_date=DAY)
+    assert full["matched_days"] == 0
+    result = forecast_performance(plant, start_date=DAY, end_date=DAY, daylight_only=True)
+    assert result["metric_scope"] == "daylight_intervals"
+    assert result["matched_days"] == 1
+    assert result["days"][0]["measured_energy_mwh"] == count * 52
+    assert result["days"][0]["predicted_energy_mwh"] == pytest.approx(count * 52)
+    assert result["metrics"]["daily_mae_mwh"] == pytest.approx(0)
+    client = Client()
+    client.force_login(system.member)
+    url = (
+        f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/performance/"
+    )
+    response = client.get(
+        url, {"start_date": DAY.isoformat(), "end_date": DAY.isoformat(), "daylight_only": "true"}
+    )
+    assert response.status_code == 200
+    assert response.json()["matched_days"] == 1
+    first = ProductionObservation.objects.filter(plant=plant).earliest("starts_at")
+    first.delete()
+    assert (
+        forecast_performance(plant, start_date=DAY, end_date=DAY, daylight_only=True)[
+            "matched_days"
+        ]
+        == 0
+    )
+
+
+def test_daylight_performance_without_configuration_is_explicitly_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, plant = make_plant(monkeypatch)
+    plant.current_configuration = None
+    plant.save()
+    result = forecast_performance(plant, start_date=DAY, end_date=DAY, daylight_only=True)
+    assert result["matched_days"] == 0
+    assert result["metrics"] is None
+    assert result["metric_scope"] == "daylight_intervals"
 
 
 def test_performance_uses_historical_activation_and_ignores_later_source_revisions(
@@ -207,7 +264,9 @@ def test_performance_scope_and_date_validation(monkeypatch: pytest.MonkeyPatch) 
         {"start_date": date(2020, 1, 1), "end_date": date(2020, 1, 2)},
     ):
         with pytest.raises(ValidationError):
-            forecast_performance(plant, **params)
+            forecast_performance(
+                plant, start_date=params.get("start_date"), end_date=params.get("end_date")
+            )
 
 
 def test_meter_basis_and_revisions_are_not_mixed(monkeypatch: pytest.MonkeyPatch) -> None:

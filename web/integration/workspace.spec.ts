@@ -128,13 +128,14 @@ test("a customer manages an approved region through the real API", async ({
     await expect(
         page.getByRole("button", { name: "Request calibration" }),
     ).toHaveCount(0);
-    await page.getByLabel("From date").fill(process.env.BROWSER_HISTORY_DATE!);
-    await page.getByLabel("To date").fill(process.env.BROWSER_HISTORY_DATE!);
+    await page
+        .getByLabel("Day", { exact: true })
+        .fill(process.env.BROWSER_HISTORY_DATE!);
     const meterEntries = page.getByRole("table", { name: "Meter entries" });
     await expect(meterEntries.getByRole("spinbutton").first()).toBeEnabled();
     await meterEntries.getByRole("spinbutton").first().fill("1250");
     await page.getByRole("button", { name: "Save meter readings" }).click();
-    await expect(page.getByText("1 meter readings saved.")).toBeVisible();
+    await expect(page.getByText("1 meter reading saved.")).toBeVisible();
     await expect(
         meterEntries.getByText("1.25 MWh", { exact: true }),
     ).toBeVisible();
@@ -143,15 +144,15 @@ test("a customer manages an approved region through the real API", async ({
     );
     historyDate.setUTCDate(historyDate.getUTCDate() - 10);
     const missingDate = historyDate.toISOString().slice(0, 10);
-    await page.getByLabel("From date").fill(missingDate);
-    await page.getByLabel("To date").fill(missingDate);
-    await expect(meterEntries.getByRole("spinbutton")).toHaveCount(24);
+    await page.getByLabel("Day", { exact: true }).fill(missingDate);
+    await expect(meterEntries.getByRole("spinbutton").first()).toBeVisible();
     await expect(meterEntries.getByRole("spinbutton").first()).toBeDisabled();
     await expect(
         page.getByRole("button", { name: "Save meter readings" }),
     ).toBeDisabled();
-    await page.getByLabel("To date").fill(process.env.BROWSER_HISTORY_DATE!);
-    await page.getByLabel("From date").fill(process.env.BROWSER_HISTORY_DATE!);
+    await page
+        .getByLabel("Day", { exact: true })
+        .fill(process.env.BROWSER_HISTORY_DATE!);
     await expect(
         meterEntries.getByText("1.25 MWh", { exact: true }),
     ).toBeVisible();
@@ -159,6 +160,16 @@ test("a customer manages an approved region through the real API", async ({
         path: testInfo.outputPath("production-journal-desktop.png"),
         fullPage: true,
     });
+    await page.setViewportSize({ width: 390, height: 844 });
+    expect(
+        await page
+            .locator(".journal")
+            .evaluate((element) => element.scrollWidth <= element.clientWidth),
+    ).toBe(true);
+    await page.locator(".journal").screenshot({
+        path: testInfo.outputPath("production-journal-mobile.png"),
+    });
+    await page.setViewportSize({ width: 1440, height: 1100 });
     const journalA11y = await new AxeBuilder({ page })
         .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
         .analyze();

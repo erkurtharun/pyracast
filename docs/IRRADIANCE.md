@@ -92,12 +92,17 @@ domain [0.25, 2]. The one-dimensional solver considers every clipping breakpoint
 and each convex segment; it does not assume the entire capped objective is convex.
 These are versioned engineering defaults, not universal statistical constants.
 
-Use complete, matched local days with `valid` observations. Exclude days containing
-missing data, invalid records, outages or declared curtailment. Do not infer outages
-from low output alone. Exclude measurements at or above 98% of the known cap from
+Policy `regularized-huber-v3` uses completed local days with complete, matched
+astronomical daylight coverage and `valid` observations. Select whole meter
+intervals with positive overlap with daylight; keep sunrise/sunset boundary slots
+and their full energy without prorating. Valid measurements must cover every
+daylight window, and reference data must cover each entire selected meter interval.
+Exclude days containing daylight gaps, invalid records, outages or declared curtailment.
+Night readings are optional and excluded from this scope, never synthesized as zeros.
+Do not infer outages from low output alone. Exclude measurements at or above 98% of the known cap from
 training because clipping hides uncapped performance; retain valid clipped intervals
 in evaluation. Zero-source samples do not identify a multiplicative factor.
-Policy `regularized-huber-v2` also requires five training days with at least two
+The policy also requires five training days with at least two
 hours of positive native source power that is not already clipped at the minimum
 factor. Each supported day must have normalized slope-squared exposure of at least
 0.02 hours: sum the sample duration times the squared ratio of its uncapped power
@@ -113,8 +118,11 @@ pipeline and support a **provisional** fit; a month covers more conditions but
 neither duration proves seasonal validity. Intervals within a day are correlated,
 so hundreds of half-hours are not hundreds of independent weather realizations.
 
-Report interval power MAE/bias (MW), daily energy MAE/bias (MWh), included/excluded
-days, censored counts and the exact chronological split. A candidate is `ready`
+Report interval power MAE/bias (MW), per-day daylight-interval energy MAE/bias (MWh),
+included/excluded days, censored counts and the exact chronological split. These
+energy sums are not 24-hour totals. Preserve `metric_scope`, astronomical policy
+and UTC daylight windows in the dataset manifest; compare all factors on identical
+meter intervals. A candidate is `ready`
 only when both holdout interval MAE and daily MAE improve by at least 1% over factor
 1 and the fitted factor is inside the allowed bounds. Neither MAE may worsen against
 the incumbent factor, and absolute power/energy bias may not worsen against either
@@ -151,13 +159,21 @@ archived forecasts retain the factor available then. Holdout improvement against
 estimated actuals does not establish improvement in future forecast accuracy.
 
 Meter entry requires matching archived estimated actuals for the entire interval.
-Saving at least seven complete valid matched days automatically schedules fitting;
-gaps, outage labels and partial days do not satisfy this preparation threshold.
+Saving at least seven days with complete valid matched daylight coverage automatically
+schedules fitting; daylight gaps and outage labels do not satisfy this threshold.
 Use a 90-day window ending on the latest recorded local day and elapsed durations, including DST
 days. Capture both an observation timestamp cutoff and an ID watermark so readings
 saved during fitting cannot enter that dataset, even with identical timestamps.
 New readings remain saved and can prepare a subsequent candidate. Preparation never
 activates a factor automatically.
+
+The versioned `astral-3.2-sea-level-v1` policy uses the apparent upper solar limb,
+standard refraction and a sea-level horizon, without terrain or shading inference.
+Collect UTC sunrise/sunset events around the local day to preserve DST, date-line
+and midnight-crossing daylight. Polar day requires the full local day; polar night
+does not count as a calibration day. The journal and calibration use the same
+windows. A time interval ending exactly at sunrise or starting at sunset has no
+daylight overlap. The journal hides night slots but retains original saved readings.
 
 ## Archived forecast evaluation
 
@@ -171,7 +187,10 @@ actuals or a retrospectively declared configuration.
 
 Mark this as `historical_input_replay`: it does not prove that an electrical output
 was actually published at that historical time. Compare the selected historical
-factor and factor 1 on the same complete, valid days. Keep valid zero-production
+factor and factor 1 on the same complete, valid days. With `daylight_only=true`,
+require complete daylight coverage and report `metric_scope: daylight_intervals`;
+this is the frontend default. The API's full-day mode retains 24-hour coverage and
+metrics. Both modes preserve whole meter boundary intervals. Keep valid zero-production
 and zero-source days in evaluation, including their errors; do not infer outages
 from zero alone. Source-positive MAE is null when no such intervals exist.
 Return daily measured/predicted/baseline MWh, signed error, snapshot and calibration
@@ -211,4 +230,5 @@ features or as matched Solcast forecast GHI for reconstruction-equivalence claim
 - [Historical time-series parameters and interval means](https://solcast.com/time-series).
 - [PVWatts DC model inputs](https://pvlib-python.readthedocs.io/en/stable/reference/generated/pvlib.pvsystem.pvwatts_dc.html) and [inverter clipping](https://pvlib-python.readthedocs.io/en/stable/reference/generated/pvlib.inverter.pvwatts.html).
 - [Huber regression](https://scikit-learn.org/stable/modules/linear_model.html#huber-regression) and [time-series evaluation](https://otexts.com/fpp3/tscv.html).
+- [Astral sunrise/sunset definitions](https://sffjunkie.github.io/astral/package.html#astral.sun.sunrise) and [independent USNO MICA reference](https://griffithobservatory.lacity.gov/explore/observing-the-sky/whats-in-the-sky/the-sun/2025-sunrise-and-sunset/).
 - [NREL weather-corrected performance ratio](https://research-hub.nlr.gov/en/publications/weather-corrected-performance-ratio/).

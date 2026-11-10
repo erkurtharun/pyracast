@@ -36,6 +36,189 @@ def _fit(samples: tuple[CalibrationSample, ...], cap: float | None = 100) -> obj
     return fit_calibration(samples, timezone="UTC", normalization_mw=100, limit_mw=cap)
 
 
+def test_daylight_only_samples_fit_without_fabricating_night_energy() -> None:
+    samples = tuple(sample for sample in _samples(7) if sample.start.hour in range(6, 18))
+    windows = {
+        (START + timedelta(days=offset)).date(): (
+            (
+                START + timedelta(days=offset, hours=6, minutes=15),
+                START + timedelta(days=offset, hours=17, minutes=45),
+            ),
+        )
+        for offset in range(7)
+    }
+    result = fit_calibration(
+        samples,
+        timezone="UTC",
+        normalization_mw=100,
+        limit_mw=100,
+        required_windows=windows,
+    )
+    assert result.status == "ready"
+    assert result.report["valid_days"] == 7
+    assert result.report["samples"] == 84
+    assert result.report["metric_scope"] == "daylight_intervals"
+    evaluated = evaluate_samples(
+        samples,
+        timezone="UTC",
+        limit_mw=100,
+        required_windows=windows,
+    )
+    daily = cast(list[dict[str, object]], evaluated["day_errors"])
+    assert daily[0]["measured_energy_mwh"] == 384
+    assert daily[0]["predicted_energy_mwh"] == 480
+
+
+@pytest.mark.parametrize("hour", [6, 12, 17])
+@pytest.mark.parametrize("quality", ["missing", "invalid", "outage", "curtailed", "source_gap"])
+def test_daylight_boundary_or_internal_gap_invalidates_day(hour: int, quality: str) -> None:
+    samples = tuple(sample for sample in _samples(1) if sample.start.hour in range(6, 18))
+    selected = samples[hour - 6]
+    if quality == "missing":
+        samples = tuple(sample for sample in samples if sample != selected)
+    else:
+        replacement = (
+            replace(selected, intervals=())
+            if quality == "source_gap"
+            else replace(selected, quality=quality)
+        )
+        samples = tuple(replacement if sample == selected else sample for sample in samples)
+    result = evaluate_samples(
+        samples,
+        timezone="UTC",
+        limit_mw=100,
+        required_windows={
+            START.date(): (
+                (START + timedelta(hours=6, minutes=15), START + timedelta(hours=17, minutes=45)),
+            )
+        },
+    )
+    assert result["valid_days"] == 0
+    assert result["metrics"] is None
+
+
+def test_polar_night_never_becomes_a_complete_day() -> None:
+    result = evaluate_samples(
+        _samples(1),
+        timezone="UTC",
+        limit_mw=100,
+        required_windows={START.date(): ()},
+    )
+    assert result["valid_days"] == 0
+    assert result["samples"] == 0
+    assert (
+        evaluate_samples(
+            (),
+            timezone="UTC",
+            limit_mw=100,
+            required_windows={START.date(): ()},
+        )["valid_days"]
+        == 0
+    )
+
+
+def test_optional_night_quality_does_not_affect_daylight_but_input_is_validated() -> None:
+    samples = tuple(
+        replace(sample, quality="outage") if sample.start.hour < 6 else sample
+        for sample in _samples(1)
+    )
+    windows = {START.date(): ((START + timedelta(hours=6), START + timedelta(hours=18)),)}
+    result = evaluate_samples(samples, timezone="UTC", limit_mw=100, required_windows=windows)
+    exclusions = cast(dict[str, int], result["exclusions"])
+    assert result["valid_days"] == 1
+    assert exclusions["outside_required_windows"] == 12
+    assert exclusions["quality"] == 0
+    with pytest.raises(ValueError, match="nonnegative"):
+        evaluate_samples(
+            (replace(samples[0], energy_mwh=-1), *samples[1:]),
+            timezone="UTC",
+            limit_mw=100,
+            required_windows=windows,
+        )
+    with pytest.raises(ValueError, match="overlap"):
+        evaluate_samples(
+            (*samples, samples[0]),
+            timezone="UTC",
+            limit_mw=100,
+            required_windows=windows,
+        )
+
+
+def test_multiple_daylight_windows_preserve_the_union_and_full_meter_energy() -> None:
+    windows = {
+        START.date(): (
+            (START + timedelta(hours=1, minutes=15), START + timedelta(hours=2, minutes=45)),
+            (START + timedelta(hours=21, minutes=15), START + timedelta(hours=22, minutes=45)),
+        )
+    }
+    samples = tuple(replace(sample, energy_mwh=1) for sample in _samples(1))
+    result = evaluate_samples(samples, timezone="UTC", limit_mw=100, required_windows=windows)
+    assert result["valid_days"] == 1
+    assert result["samples"] == 4
+    daily = cast(list[dict[str, object]], result["day_errors"])
+    assert daily[0]["measured_energy_mwh"] == 4
+    missing_last = tuple(sample for sample in samples if sample.start.hour != 22)
+    assert (
+        evaluate_samples(
+            missing_last,
+            timezone="UTC",
+            limit_mw=100,
+            required_windows=windows,
+        )["valid_days"]
+        == 0
+    )
+    missing_first_window = tuple(sample for sample in samples if sample.start.hour not in (1, 2))
+    assert (
+        evaluate_samples(
+            missing_first_window,
+            timezone="UTC",
+            limit_mw=100,
+            required_windows=windows,
+        )["valid_days"]
+        == 0
+    )
+
+
+@pytest.mark.parametrize(
+    "windows",
+    [
+        ((START - timedelta(seconds=1), START + timedelta(hours=1)),),
+        ((START, START + timedelta(days=1, seconds=1)),),
+        (
+            (START, START + timedelta(hours=2)),
+            (START + timedelta(hours=1), START + timedelta(hours=3)),
+        ),
+    ],
+)
+def test_invalid_required_windows_are_rejected(
+    windows: tuple[tuple[datetime, datetime], ...],
+) -> None:
+    with pytest.raises(ValueError, match="Required windows"):
+        evaluate_samples(
+            (),
+            timezone="UTC",
+            limit_mw=100,
+            required_windows={START.date(): windows},
+        )
+
+
+def test_selected_boundary_meter_requires_source_even_outside_daylight() -> None:
+    sample = CalibrationSample(
+        START + timedelta(hours=6),
+        START + timedelta(hours=7),
+        10,
+        (PowerInterval(START + timedelta(hours=6, minutes=15), START + timedelta(hours=7), 20),),
+    )
+    result = evaluate_samples(
+        (sample,),
+        timezone="UTC",
+        limit_mw=100,
+        required_windows={START.date(): ((sample.intervals[0].start, sample.end),)},
+    )
+    assert result["valid_days"] == 0
+    assert cast(dict[str, int], result["exclusions"])["source_incomplete"] == 1
+
+
 def test_native_clipping_precedes_hourly_aggregation() -> None:
     end = START + timedelta(hours=1)
     middle = START + timedelta(minutes=30)
@@ -145,6 +328,16 @@ def test_dst_energy_uses_explicit_utc_duration(month: int, day: int, hours: int)
     )
     assert result["energy_mwh"] == hours * 10
     assert len(cast(list[object], result["intervals"])) == hours
+    evaluated = evaluate_samples(
+        (CalibrationSample(start, end, hours * 8, (PowerInterval(start, end, 10),)),),
+        timezone=str(zone),
+        limit_mw=100,
+        required_windows={start.date(): ((start.astimezone(UTC), end.astimezone(UTC)),)},
+    )
+    assert evaluated["valid_days"] == 1
+    daily = cast(list[dict[str, object]], evaluated["day_errors"])
+    assert daily[0]["measured_energy_mwh"] == hours * 8
+    assert daily[0]["predicted_energy_mwh"] == hours * 10
 
 
 @pytest.mark.parametrize("power", [float("nan"), float("inf"), -1.0])
@@ -326,7 +519,8 @@ def test_bound_optimum_is_rejected(factor: float) -> None:
     assert result.factor is None
 
 
-def test_fit_optimizes_native_capped_energy_instead_of_capped_average() -> None:
+@pytest.mark.parametrize("daylight_only", [False, True])
+def test_fit_optimizes_native_capped_energy_instead_of_capped_average(daylight_only: bool) -> None:
     samples = []
     for day in range(7):
         for hour in range(24):
@@ -340,7 +534,26 @@ def test_fit_optimizes_native_capped_energy_instead_of_capped_average() -> None:
                     (PowerInterval(start, middle, 80), PowerInterval(middle, end, 200)),
                 )
             )
-    result = fit_calibration(tuple(samples), timezone="UTC", normalization_mw=100, limit_mw=100)
+    windows = (
+        {
+            (START + timedelta(days=day)).date(): (
+                (
+                    START + timedelta(days=day, hours=6, minutes=15),
+                    START + timedelta(days=day, hours=17, minutes=45),
+                ),
+            )
+            for day in range(7)
+        }
+        if daylight_only
+        else None
+    )
+    result = fit_calibration(
+        tuple(samples),
+        timezone="UTC",
+        normalization_mw=100,
+        limit_mw=100,
+        required_windows=windows,
+    )
     assert result.status == "rejected"
     assert cast(float, result.report["candidate_factor"]) == pytest.approx(1)
 

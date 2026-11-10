@@ -296,7 +296,8 @@ to let the dispatcher/worker process the request. No training occurs in API requ
 Inspect the calibration detail endpoint for baseline/candidate/incumbent errors,
 training support and rejection reasons. Five training days must each have enough
 uncensored source exposure. Only a `ready` current-policy candidate can be activated;
-seven-day fits remain `provisional`, and a changed incumbent requires a new comparison:
+fits with seven days of complete daylight coverage remain `provisional`, and a
+changed incumbent requires a new comparison:
 
 ```text
 uv run --locked pyracast activate_calibration --username YOUR_USER --plant-id PLANT_ID --calibration-id CALIBRATION_ID
@@ -306,9 +307,12 @@ uv run --locked pyracast activate_calibration --username YOUR_USER --plant-id PL
 Activation/rollback affect subsequent forecast issuance, preserving earlier results.
 No automatic activation or artificial accuracy percentage is provided. Historical
 meter data without matching archived estimated actuals yields `insufficient`.
+The production journal selects one local day and shows only whole 30/60-minute
+intervals overlapping daylight. Night readings are not invented.
 The Forecast performance panel independently compares archived day-ahead inputs
-with meter energy; it identifies historical replay rather than claiming that the
-plant output was published then. Valid zero-production days remain in its errors.
+with meter energy on the same daylight intervals; it identifies historical replay
+rather than claiming that the plant output was published then. Valid zero-production
+days remain in its errors.
 Solcast historical estimated irradiance is a different input: it can
 support weather-normalized plant analysis when paired with production and geometry,
 but it is not accepted as an archived forecast or a meter reading. See

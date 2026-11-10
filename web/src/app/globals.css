@@ -1143,3 +1143,73 @@ footer span {
         scroll-behavior: auto !important;
     }
 }
+
+.journal-controls,
+.journal-date-nav,
+.journal-save {
+    display: flex;
+    align-items: end;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.journal-controls {
+    margin: 20px 0 12px;
+}
+.journal-controls .field {
+    margin: 0;
+}
+.journal-controls > .field {
+    width: 150px;
+}
+.journal-date-nav .field {
+    width: 160px;
+}
+.journal-date-nav .button {
+    padding: 10px 14px;
+}
+.journal-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px 40px;
+    background: #f6f8f3;
+    border-radius: 10px;
+    padding: 16px;
+    margin: 18px 0;
+}
+.journal-summary strong,
+.journal-summary span {
+    display: block;
+}
+.journal-summary span {
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 5px;
+}
+.journal-table th,
+.journal-table td {
+    padding: 8px 12px;
+}
+.journal-save {
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 0;
+}
+.journal-save span {
+    color: var(--muted);
+    font-size: 12px;
+}
+
+@media (max-width: 600px) {
+    .journal-table {
+        table-layout: fixed;
+    }
+    .journal-table th,
+    .journal-table td {
+        white-space: normal;
+        overflow-wrap: anywhere;
+        padding: 8px 5px;
+    }
+    .journal-table .meter-input {
+        width: 100%;
+    }
+}

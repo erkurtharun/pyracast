@@ -25,6 +25,7 @@ from pyracast.plants.operations import (
 )
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.regions.models import Region
+from pyracast.solar import daylight_window
 from tests.test_domain import NOW, System
 from tests.test_plant_operations import make_plant, ready_run
 from tests.test_plant_training import actual_snapshot_for
@@ -33,7 +34,13 @@ pytestmark = pytest.mark.django_db(transaction=True)
 
 
 def add_days(
-    system: System, plant: Plant, first: int, count: int, *, invalid: bool = False
+    system: System,
+    plant: Plant,
+    first: int,
+    count: int,
+    *,
+    invalid: bool = False,
+    daylight_only: bool = False,
 ) -> None:
     assert plant.current_configuration_id is not None
     rows = []
@@ -42,15 +49,22 @@ def add_days(
         actual_snapshot_for(system, day)
         start, end = local_day_bounds(day, system.binding.timezone)
         cursor = start
+        windows = daylight_window(
+            day, system.binding.timezone, system.binding.latitude, system.binding.longitude
+        ).windows
         while cursor < end:
             # Alternate half-hour and hourly days to exercise mixed resolutions.
             duration = timedelta(minutes=30 if offset % 2 else 60)
+            selected = any(cursor < stop and cursor + duration > begin for begin, stop in windows)
+            if daylight_only and not selected:
+                cursor += duration
+                continue
             rows.append(
                 ObservationInput(
                     cursor,
                     cursor + duration,
                     26 * duration.total_seconds() / 3600,
-                    "invalid" if invalid and cursor == start else "valid",
+                    "invalid" if invalid and cursor == start + timedelta(hours=12) else "valid",
                 )
             )
             cursor += duration
@@ -63,6 +77,40 @@ def add_days(
         unit="MWh",
         observations=rows,
     )
+
+
+def test_seven_daylight_only_days_schedule_and_fit(monkeypatch: pytest.MonkeyPatch) -> None:
+    system, plant = make_plant(monkeypatch)
+    add_days(system, plant, 1, 7, daylight_only=True)
+    run = CalibrationRun.objects.get()
+    assert training.run_calibration(run.pk, NOW)
+    run.refresh_from_db()
+    assert run.status == "ready"
+    assert run.result["valid_days"] == 7
+    assert run.result["metric_scope"] == "daylight_intervals"
+    assert run.dataset_manifest["metric_scope"] == "daylight_intervals"
+    assert len(run.dataset_manifest["required_windows"]) == 7
+    assert len(run.dataset_manifest["observations"]) == ProductionObservation.objects.count()
+    assert ProductionObservation.objects.count() < 7 * 24
+
+
+@pytest.mark.parametrize("slot", ["dawn", "noon", "dusk"])
+def test_daylight_meter_gap_does_not_prepare_a_complete_day(
+    monkeypatch: pytest.MonkeyPatch, slot: str
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    add_days(system, plant, 1, 7, daylight_only=True)
+    CalibrationRun.objects.all().delete()
+    start, end = local_day_bounds(date(2026, 11, 7), system.binding.timezone)
+    observations = list(
+        ProductionObservation.objects.filter(starts_at__gte=start, ends_at__lte=end).order_by(
+            "starts_at"
+        )
+    )
+    index = {"dawn": 0, "noon": len(observations) // 2, "dusk": -1}[slot]
+    observations[index].delete()
+    assert prepare_calibration(plant.pk) is None
+    assert not CalibrationRun.objects.exists()
 
 
 @pytest.mark.parametrize("invalid", [False, True])
@@ -131,7 +179,7 @@ def test_legacy_policy_does_not_block_one_current_policy_fit(
     add_days(system, plant, 1, 7)
     old = CalibrationRun.objects.get()
     old.status = old_status
-    old.result = {"policy_version": "regularized-huber-v1"}
+    old.result = {"policy_version": "regularized-huber-v2"}
     old.save(update_fields=("status", "result"))
     current = prepare_calibration(plant.pk)
     assert current is not None

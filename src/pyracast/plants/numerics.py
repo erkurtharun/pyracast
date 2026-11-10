@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from itertools import pairwise
@@ -5,7 +6,9 @@ from math import ceil, isfinite
 from zoneinfo import ZoneInfo
 
 MODEL_VERSION = "reference-power-transfer-v1"
-POLICY_VERSION = "regularized-huber-v2"
+POLICY_VERSION = "regularized-huber-v3"
+DAYLIGHT_COVERAGE_POLICY = "whole-meter-intervals-cover-daylight-v1"
+type RequiredWindows = Mapping[date, tuple[tuple[datetime, datetime], ...]]
 FACTOR_MIN = 0.25
 FACTOR_MAX = 2.0
 HUBER_DELTA = 0.05
@@ -181,9 +184,13 @@ def _rows(
     zone: ZoneInfo,
     *,
     require_informative_day: bool = True,
+    required_windows: RequiredWindows | None = None,
 ) -> tuple[list[_Row], dict[str, int], list[date]]:
     rows: list[_Row] = []
     exclusions = {"quality": 0, "source_incomplete": 0, "incomplete_day": 0}
+    windows_by_day = _required_windows(required_windows, zone)
+    if windows_by_day is not None:
+        exclusions["outside_required_windows"] = 0
     previous_end: datetime | None = None
     for sample in sorted(samples, key=lambda sample: _bounds(sample.start, sample.end)[0]):
         start, end = _bounds(sample.start, sample.end)
@@ -199,6 +206,11 @@ def _rows(
         intervals = _validate(sample.intervals)
         pieces = _pieces(intervals, start, end)
         hours = (end - start).total_seconds() / 3600
+        if windows_by_day is not None and not any(
+            start < stop and end > begin for begin, stop in windows_by_day.get(day, ())
+        ):
+            exclusions["outside_required_windows"] += 1
+            continue
         if sample.quality != "valid":
             exclusions["quality"] += 1
         elif abs(sum(duration for _, duration in pieces) - hours) > 1e-9:
@@ -210,18 +222,70 @@ def _rows(
     for day in days:
         day_start = datetime.combine(day, datetime.min.time(), zone)
         day_end = datetime.combine(day + timedelta(days=1), datetime.min.time(), zone)
-        hours = (day_end.astimezone(UTC) - day_start.astimezone(UTC)).total_seconds() / 3600
         day_rows = [row for row in rows if row.day == day]
-        if abs(sum(row.hours for row in day_rows) - hours) < 1e-9 and (
-            not require_informative_day
-            or any(
-                row.sample.energy_mwh > 0 and any(p > 0 for p, _ in row.pieces) for row in day_rows
+        windows = (
+            ((day_start.astimezone(UTC), day_end.astimezone(UTC)),)
+            if windows_by_day is None
+            else windows_by_day.get(day, ())
+        )
+        if (
+            windows
+            and all(_covers_window(day_rows, start, end) for start, end in windows)
+            and (
+                not require_informative_day
+                or any(
+                    row.sample.energy_mwh > 0 and any(p > 0 for p, _ in row.pieces)
+                    for row in day_rows
+                )
             )
         ):
             valid.append(day)
         else:
             exclusions["incomplete_day"] += len(day_rows)
     return [row for row in rows if row.day in valid], exclusions, valid
+
+
+def _required_windows(
+    windows: RequiredWindows | None, zone: ZoneInfo
+) -> dict[date, tuple[tuple[datetime, datetime], ...]] | None:
+    if windows is None:
+        return None
+    normalized = {}
+    for day, intervals in windows.items():
+        bounds = tuple(sorted(_bounds(start, end) for start, end in intervals))
+        day_start = datetime.combine(day, datetime.min.time(), zone).astimezone(UTC)
+        day_end = datetime.combine(day + timedelta(days=1), datetime.min.time(), zone).astimezone(
+            UTC
+        )
+        if any(start < day_start or end > day_end for start, end in bounds):
+            raise ValueError("Required windows must stay within their local day")
+        if any(left[1] > right[0] for left, right in pairwise(bounds)):
+            raise ValueError("Required windows must not overlap")
+        normalized[day] = bounds
+    return normalized
+
+
+def _covers_window(rows: list[_Row], start: datetime, end: datetime) -> bool:
+    cursor = start
+    for row in rows:
+        begin, stop = _bounds(row.sample.start, row.sample.end)
+        if stop <= cursor or begin >= end:
+            continue
+        if begin > cursor:
+            return False
+        cursor = max(cursor, stop)
+        if cursor >= end:
+            return True
+    return False
+
+
+def _scope(required_windows: RequiredWindows | None) -> dict[str, object]:
+    return {
+        "metric_scope": "full_day" if required_windows is None else "daylight_intervals",
+        "coverage_policy": "full-local-day-v1"
+        if required_windows is None
+        else DAYLIGHT_COVERAGE_POLICY,
+    }
 
 
 def _huber(residual: float) -> float:
@@ -327,11 +391,17 @@ def evaluate_samples(
     timezone: str,
     factor: float = 1.0,
     limit_mw: float | None,
+    required_windows: RequiredWindows | None = None,
 ) -> dict[str, object]:
     _positive(factor, "factor")
     if limit_mw is not None:
         _positive(limit_mw, "limit_mw")
-    rows, exclusions, days = _rows(samples, ZoneInfo(timezone), require_informative_day=False)
+    rows, exclusions, days = _rows(
+        samples,
+        ZoneInfo(timezone),
+        require_informative_day=False,
+        required_windows=required_windows,
+    )
     daily = []
     for day in days:
         day_rows = [row for row in rows if row.day == day]
@@ -349,6 +419,7 @@ def evaluate_samples(
             }
         )
     return {
+        **_scope(required_windows),
         "valid_days": len(days),
         "samples": len(rows),
         "exclusions": exclusions,
@@ -446,6 +517,7 @@ def fit_calibration(
     normalization_mw: float,
     limit_mw: float | None,
     incumbent_factor: float = 1.0,
+    required_windows: RequiredWindows | None = None,
 ) -> FitResult:
     _positive(normalization_mw, "normalization_mw")
     if limit_mw is not None:
@@ -453,8 +525,9 @@ def fit_calibration(
     _positive(incumbent_factor, "incumbent_factor")
     if not FACTOR_MIN <= incumbent_factor <= FACTOR_MAX:
         raise ValueError("incumbent_factor must be inside the allowed factor bounds")
-    rows, exclusions, days = _rows(samples, ZoneInfo(timezone))
+    rows, exclusions, days = _rows(samples, ZoneInfo(timezone), required_windows=required_windows)
     report: dict[str, object] = {
+        **_scope(required_windows),
         "policy_version": POLICY_VERSION,
         "valid_days": len(days),
         "samples": len(rows),

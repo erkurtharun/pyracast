@@ -10,7 +10,13 @@ from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecasting import calibration_at, power_intervals, power_limit
 from pyracast.plants.models import Plant, PlantConfiguration, ProductionObservation
-from pyracast.plants.numerics import CalibrationSample, PowerInterval, evaluate_samples
+from pyracast.plants.numerics import (
+    CalibrationSample,
+    PowerInterval,
+    RequiredWindows,
+    evaluate_samples,
+)
+from pyracast.solar import DAYLIGHT_POLICY, daylight_window
 
 SELECTION_POLICY = "published-day-ahead-replay-v1"
 
@@ -71,6 +77,7 @@ def _day(
     configuration: PlantConfiguration,
     day: date,
     observations: list[ProductionObservation],
+    required_windows: RequiredWindows | None,
 ) -> tuple[dict[str, Any], tuple[CalibrationSample, ...], tuple[CalibrationSample, ...]]:
     result: dict[str, Any] = {
         "date": day,
@@ -110,8 +117,12 @@ def _day(
         cap = power_limit(configuration)
         selected = _samples(readings, intervals, factor, cap)
         baseline = _samples(readings, intervals, 1.0, cap)
-        evaluation = evaluate_samples(selected, timezone=zone, limit_mw=None)
-        reference = evaluate_samples(baseline, timezone=zone, limit_mw=None)
+        evaluation = evaluate_samples(
+            selected, timezone=zone, limit_mw=None, required_windows=required_windows
+        )
+        reference = evaluate_samples(
+            baseline, timezone=zone, limit_mw=None, required_windows=required_windows
+        )
     except ValueError, ArithmeticError:
         result["reason"] = "invalid_forecast_data"
         return result, (), ()
@@ -131,7 +142,11 @@ def _day(
 
 
 def forecast_performance(
-    plant: Plant, *, start_date: date | None = None, end_date: date | None = None
+    plant: Plant,
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    daylight_only: bool = False,
 ) -> dict[str, Any]:
     configuration = (
         PlantConfiguration.objects.select_related("binding").get(
@@ -168,16 +183,29 @@ def forecast_performance(
     days: list[dict[str, Any]] = []
     selected: tuple[CalibrationSample, ...] = ()
     baseline: tuple[CalibrationSample, ...] = ()
+    required_windows = None
+    if daylight_only:
+        location = configuration.binding if configuration else plant.region
+        required_windows = {
+            start_date + timedelta(days=offset): daylight_window(
+                start_date + timedelta(days=offset), zone, location.latitude, location.longitude
+            ).windows
+            for offset in range((end_date - start_date).days + 1)
+        }
     if configuration is not None:
         for offset in range((end_date - start_date).days + 1):
             day, chosen, reference = _day(
-                configuration, start_date + timedelta(days=offset), observations
+                configuration, start_date + timedelta(days=offset), observations, required_windows
             )
             days.append(day)
             selected += chosen
             baseline += reference
-    evaluation = evaluate_samples(selected, timezone=zone, limit_mw=None)
-    comparison = evaluate_samples(baseline, timezone=zone, limit_mw=None)
+    evaluation = evaluate_samples(
+        selected, timezone=zone, limit_mw=None, required_windows=required_windows
+    )
+    comparison = evaluate_samples(
+        baseline, timezone=zone, limit_mw=None, required_windows=required_windows
+    )
     return {
         "plant_id": plant.pk,
         "configuration_id": configuration.pk if configuration else None,
@@ -188,6 +216,8 @@ def forecast_performance(
         "evaluation_kind": "historical_input_replay",
         "selection_policy": SELECTION_POLICY,
         "measurement_basis": configuration.measurement_basis if configuration else None,
+        "metric_scope": "daylight_intervals" if daylight_only else "full_day",
+        "daylight_policy": DAYLIGHT_POLICY if daylight_only else None,
         "matched_days": evaluation["valid_days"],
         "requested_days": (end_date - start_date).days + 1,
         "metrics": evaluation["metrics"],
