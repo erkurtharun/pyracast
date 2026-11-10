@@ -156,6 +156,7 @@ export function ProductionHistory({
                     From date
                     <input
                         type="date"
+                        disabled={!history}
                         value={range.start || history?.start_date || ""}
                         max={
                             history ? localDay(history.timezone, -1) : undefined
@@ -173,6 +174,7 @@ export function ProductionHistory({
                     To date
                     <input
                         type="date"
+                        disabled={!history}
                         value={range.end || history?.end_date || ""}
                         max={
                             history ? localDay(history.timezone, -1) : undefined
