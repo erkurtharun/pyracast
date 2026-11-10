@@ -202,13 +202,49 @@ confidence intervals from a short or selectively observed history.
 
 EPİAŞ `realtime-generation` is archived as provider-reported hourly production,
 separate from Solcast weather estimates and user meter observations. The current
-official web interface labels `total` as MWh. Preserve the provider timestamp:
-the published technical schema does not establish whether it labels an interval's
-start or end, nor whether the measurement is gross AC generation or net export.
-The separate UEVM injection service's definition cannot establish those semantics
-for real-time generation. Until verified, display only provider-hour values and
-their sum, without asserting a midnight-to-midnight energy total or training on
-them. Do not split hourly reported energy into invented half-hour measurements.
+official interface labels `total` as MWh and identifies TEİAŞ as the source. This
+is reported operating production, not a forecast or necessarily final settlement
+energy. TEİAŞ describes its aggregate YTBS production statistics as gross, with
+manual or automatic input and subsequent corrections. That aggregate definition
+does not establish the meter boundary of an individual EPİAŞ plant series.
+
+For a grid-delivery target, use settlement injection (`injection-quantity`, UEVM)
+as the separately identified benchmark. Its definition is energy supplied to the
+system during the settlement period. DUY articles 84–85 apply registered meter
+configuration and applicable loss adjustments; UEVM is not automatically raw
+connection-meter energy or injection minus all grid withdrawals (UEÇM). The
+published data list specifies hourly values published in the following month
+(A+1), not next-day availability. Resolve each service's plant ID by the same EIC;
+the real-time and settlement IDs are different namespaces.
+
+The authorized 2026-11-10 comparison for G4-BOR-1 GES, EIC `40W000005011621Y`,
+used real-time ID `3154` and UEVM ID `5011621`. Both September acquisitions had
+720 unique hourly records with no missing values. Real-time energy summed to
+24,321.53 MWh versus 24,324.05 MWh UEVM: a signed difference of -2.52 MWh
+(-0.01036%). Hourly MAE was 0.008694 MWh and the largest difference 0.64 MWh;
+661 hours matched exactly, including 339 of 398 hours positive in either series.
+Twelve hours disagreed on zero versus positive production. This supports a close
+provisional proxy for this plant and month, not universal meter equivalence or
+forecast accuracy. UEVM queries for 2026-10-31 and 2026-11-09 were empty at that
+check; an empty response is not zero production or a fixed publication deadline.
+
+Evidence strongly supports start labels: the inferred interval for EPİAŞ
+`10:00+03:00` is `[10:00, 11:00)` Istanbul time. On 718 common September hours, same-label
+real-time/UEVM MAE was 0.008719 MWh versus approximately 8.08 MWh with either
+one-hour shift. Positive `06:00` production on September 15 also agrees with
+the reference site's calculated 06:24 sunrise. In the November 9 TEİAŞ daily
+report, hours are labelled 01:00–24:00; across 11 common nighttime hours, matching
+EPİAŞ hour h to TEİAŞ h+1 gave MAE 475.81 MWh, versus 1,458.50 MWh for h and
+2,659.58 MWh for h-1. Their different coverage prevents exact equality. This is
+empirical evidence, not an explicit interval convention in the published API
+schema; both the schema and CSV export only say "hour".
+
+Runtime still preserves provider labels and excludes these readings from
+calibration and forecast-performance metrics. Automatic UEVM collection, revision-aware
+reconciliation and verified interval/meter normalization are not implemented.
+Keep operational and settlement acquisitions distinct when adding them; never
+overwrite forecast vintages or silently promote a provisional proxy to a meter
+observation. Do not split hourly energy into invented half-hour measurements.
 
 Solcast historical GHI/GTI are satellite/model-derived **estimated actuals**; they
 are not automatically on-site measurements. AWS is a distribution channel, not a
@@ -235,6 +271,8 @@ features or as matched Solcast forecast GHI for reconstruction-equivalence claim
 ## Primary references
 
 - [EPİAŞ electricity API](https://seffaflik.epias.com.tr/electricity-service/technical/tr/index.html) and [reported-generation interface](https://seffaflik.epias.com.tr/electricity/electricity-generation/ex-post-generation/real-time-generation).
+- [TEİAŞ YTBS data definitions](https://ytbsbilgi.teias.gov.tr/ytbsbilgi/frm_sorular.jsf) and [daily operating reports](https://ytbsbilgi.teias.gov.tr/ytbsbilgi/frm_istatistikler.jsf).
+- [EPİAŞ published-data list, rows 104–105](https://www.epias.com.tr/wp-content/uploads/2022/01/S%CC%A7effaflik-Platformunda-Yayimlanacak-Veri-Listesi.pdf) and [DUY articles 81–85, official English translation](https://www.epias.com.tr/wp-content/uploads/2026/02/Electricity-Market-Balancing-and-Settlement-Regulation-29.12.2025.pdf).
 
 - [Hobby contract](https://docs.solcast.com.au/docs/section/rooftop-sites-hobbyist).
 - [Rooftop model](https://www.solcast.com/rooftop-pv-power-model).
