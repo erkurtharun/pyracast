@@ -20,6 +20,7 @@ from pyracast.plants.models import CalibrationRun, Plant, ProductionObservation
 from pyracast.providers import FixtureProvider
 from pyracast.regions.operations import approve_region, submit_region
 from tests.test_domain import FakeAdapter, make_system
+from tests.test_plant_operations import snapshot_for
 
 pytestmark = [
     pytest.mark.django_db(transaction=True),
@@ -42,6 +43,9 @@ def test_browser_against_live_django(live_server: Any) -> None:
     validate_binding(system.admin, system.binding.pk, FakeAdapter(), now)
     job = approve_region(system.admin, system.region.pk, system.binding.pk, now)
     assert collect(job.pk, FixtureProvider(), calculate, timezone.now())
+    earlier_forecast = snapshot_for(system, job.target_date - timedelta(days=1))
+    earlier_forecast.job.status = "succeeded"
+    earlier_forecast.job.save(update_fields=["status"])
     history_date = job.target_date - timedelta(days=2)
     history_job = CollectionJob.objects.create(
         binding=system.binding,

@@ -64,8 +64,8 @@ def test_new_plant_forecast_reports_unavailable_history_without_rejecting_capaci
     today = client.get(detail, {"date": "2026-11-10", "resolution_minutes": "30"})
     assert today.status_code == 200, today.content
     assert today.json()["freshness"] == "missing"
-    assert today.json()["unavailable_reason"] == "configuration_unavailable"
-    assert today.json()["configuration_id"] is None
+    assert today.json()["unavailable_reason"] == "forecast_unavailable"
+    assert today.json()["configuration_id"] == configuration["id"]
     assert today.json()["calibration_id"] is None
     assert today.json()["result"] is None
     assert today.json()["regional_irradiance"] is None

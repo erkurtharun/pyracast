@@ -90,6 +90,17 @@ export function ForecastPanel({
                 </div>
                 <Tag>{forecast.freshness}</Tag>
             </div>
+            {electrical &&
+                Array.isArray(result.quality_flags) &&
+                result.quality_flags.includes(
+                    "historical_configuration_assumed",
+                ) && (
+                    <Notice>
+                        {forecast.source_kind === "estimated_actuals"
+                            ? "Calculated from estimated actuals using the plant configuration entered later. No calibration is applied."
+                            : "Calculated from the archived forecast using the plant configuration entered later. No calibration is applied."}
+                    </Notice>
+                )}
             {result.complete !== true && (
                 <Notice>
                     Partial coverage. The complete daily total is unavailable;

@@ -1,5 +1,6 @@
 from datetime import UTC, date, datetime, timedelta
 from math import isfinite
+from typing import cast
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
@@ -164,6 +165,59 @@ def _payload(
         "calibration_dataset_sha256": calibration.dataset_sha256 if calibration else None,
     }
     return result
+
+
+def declared_forecast(
+    plant: Plant,
+    target_date: date,
+    resolution_minutes: int,
+    cutoff: datetime,
+    now: datetime,
+) -> dict[str, object] | None:
+    if plant.current_configuration_id is None:
+        return None
+    configuration = (
+        PlantConfiguration.objects.select_related("binding__provider_account")
+        .filter(pk=plant.current_configuration_id, plant=plant, created_at__lte=now)
+        .first()
+    )
+    if configuration is None or not configuration_is_current(configuration):
+        return None
+    snapshot = select_snapshot(configuration, target_date, cutoff)
+    result = None
+    irradiance = None
+    if snapshot is not None:
+        try:
+            result = _payload(configuration, snapshot, None, target_date, resolution_minutes)
+        except (ValueError, ArithmeticError) as exc:
+            raise ValidationError("calculation_out_of_range") from exc
+        cast(list[str], result["quality_flags"]).append("historical_configuration_assumed")
+        cast(dict[str, object], result["provenance"])["configuration_created_at"] = (
+            configuration.created_at.isoformat()
+        )
+        regional = ForecastResult.objects.filter(snapshot=snapshot).first()
+        if regional is not None:
+            irradiance = {
+                key: regional.payload.get(key)
+                for key in ("energy_kwh_m2", "partial_energy_kwh_m2", "complete", "quality_flags")
+            }
+    configuration.binding.refresh_from_db()
+    configuration.binding.provider_account.refresh_from_db()
+    if not configuration_is_current(configuration):
+        return None
+    return {
+        "plant_id": plant.pk,
+        "date": target_date.isoformat(),
+        "timezone": configuration.binding.timezone,
+        "as_of": cutoff.isoformat(),
+        "configuration_id": configuration.pk,
+        "calibration_id": None,
+        "source_kind": "forecast",
+        "freshness": "fresh" if snapshot is not None else "missing",
+        "unavailable_reason": None if snapshot is not None else "forecast_unavailable",
+        "result": result,
+        "regional_irradiance": irradiance,
+    }
 
 
 def plant_forecast(

@@ -1,4 +1,5 @@
 from datetime import UTC, date, datetime, timedelta
+from typing import cast
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
@@ -8,7 +9,7 @@ from django.utils import timezone
 from pyracast.accounts.operations import require_member
 from pyracast.forecasts.history import historical_irradiance, select_actual_snapshot
 from pyracast.irradiance import local_day_bounds
-from pyracast.plants.forecasting import _payload, plant_forecast
+from pyracast.plants.forecasting import _payload, declared_forecast, plant_forecast
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.plants.operations import configuration_is_current
 from pyracast.regions.models import Region
@@ -33,14 +34,15 @@ def plant_outlook(
     if source not in {"auto", "forecast", "estimated_actuals"}:
         raise ValidationError("Unsupported data source.")
     if source == "forecast" or (source == "auto" and target_date >= today):
-        return plant_forecast(
+        return _forecast_outlook(
             actor,
             tenant_id,
             region_id,
-            plant_id,
+            plant,
             target_date=target_date,
             resolution_minutes=resolution_minutes,
             as_of=as_of,
+            projection_at=now if as_of is None else None,
         )
     if isinstance(resolution_minutes, bool) or resolution_minutes not in (30, 60):
         raise ValidationError("Resolution must be 30 or 60 minutes.")
@@ -63,14 +65,15 @@ def plant_outlook(
         else None
     )
     if snapshot is None and source == "auto":
-        return plant_forecast(
+        return _forecast_outlook(
             actor,
             tenant_id,
             region_id,
-            plant_id,
+            plant,
             target_date=target_date,
             resolution_minutes=resolution_minutes,
             as_of=min(cutoff, local_day_bounds(target_date, region.timezone)[0]),
+            projection_at=now if as_of is None else None,
         )
     result = None
     irradiance = None
@@ -101,3 +104,37 @@ def plant_outlook(
         "result": result,
         "regional_irradiance": irradiance,
     }
+
+
+def _forecast_outlook(
+    actor: User,
+    tenant_id: int,
+    region_id: int,
+    plant: Plant,
+    *,
+    target_date: date,
+    resolution_minutes: int,
+    as_of: datetime | None,
+    projection_at: datetime | None,
+) -> dict[str, object]:
+    result = plant_forecast(
+        actor,
+        tenant_id,
+        region_id,
+        plant.pk,
+        target_date=target_date,
+        resolution_minutes=resolution_minutes,
+        as_of=as_of,
+    )
+    if projection_at is None or result["unavailable_reason"] != "configuration_unavailable":
+        return result
+    return (
+        declared_forecast(
+            plant,
+            target_date,
+            resolution_minutes,
+            datetime.fromisoformat(cast(str, result["as_of"])),
+            projection_at,
+        )
+        or result
+    )

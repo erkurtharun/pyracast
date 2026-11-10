@@ -958,3 +958,88 @@ test("production journal stops loading after a failed history request", async ({
         page.getByText("Loading production history?", { exact: true }),
     ).toHaveCount(0);
 });
+
+for (const source of ["forecast", "estimated_actuals"] as const) {
+    test(`new plant explains later configuration when projecting ${source}`, async ({
+        page,
+    }) => {
+        await page.clock.setFixedTime(new Date("2026-11-10T12:00:00Z"));
+        await mockApi(page);
+        await page.route("**/plants/", async (route) => {
+            await route.fulfill({
+                json: paged([
+                    {
+                        ...plant,
+                        created_at: "2026-11-10T10:00:00Z",
+                        current_configuration: {
+                            ...plant.current_configuration,
+                            created_at: "2026-11-10T10:00:00Z",
+                        },
+                    },
+                ]),
+            });
+        });
+        await page.route("**/forecast/**", async (route) => {
+            const electrical = new URL(route.request().url()).pathname.includes(
+                "/plants/",
+            );
+            await route.fulfill({
+                json: {
+                    timezone: region.timezone,
+                    freshness: "fresh",
+                    source_kind: source,
+                    configuration_id: electrical ? 31 : undefined,
+                    calibration_id: null,
+                    result: {
+                        complete: true,
+                        coverage_fraction: 1,
+                        energy_kwh_m2: 4,
+                        energy_mwh: 5,
+                        intervals: [],
+                        quality_flags: electrical
+                            ? [
+                                  "historical_configuration_assumed",
+                                  "uncalibrated",
+                              ]
+                            : [],
+                    },
+                },
+            });
+        });
+        await page.goto("/");
+        await page.getByRole("button", { name: /Antalya solar park/ }).click();
+        await expect(
+            page.getByRole("heading", { name: "Regional irradiance" }),
+        ).toBeVisible();
+        await page
+            .getByRole("button", { name: "Solar plants", exact: true })
+            .click();
+        await page.getByRole("button", { name: /East array/ }).click();
+        await page.getByLabel("Data source").selectOption(source);
+        await page
+            .getByLabel("Forecast date")
+            .fill(source === "forecast" ? "2026-11-10" : "2026-11-09");
+        await expect(
+            page.getByRole("heading", { name: "Electrical generation" }),
+        ).toBeVisible();
+        await expect(
+            page.getByText(
+                source === "forecast"
+                    ? "Calculated from the archived forecast using the plant configuration entered later. No calibration is applied."
+                    : "Calculated from estimated actuals using the plant configuration entered later. No calibration is applied.",
+                { exact: true },
+            ),
+        ).toBeVisible();
+        await expect(
+            page.getByText("historical configuration assumed", { exact: true }),
+        ).toBeVisible();
+        await expect(
+            page.getByText("uncalibrated", { exact: true }),
+        ).toBeVisible();
+        await expect(
+            page.getByRole("heading", {
+                name: "No configuration for this day",
+            }),
+        ).toHaveCount(0);
+    });
+}

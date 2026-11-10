@@ -87,8 +87,16 @@ test("a customer manages an approved region through the real API", async ({
     ).toBeVisible();
     await page.getByLabel("Forecast date").fill(process.env.BROWSER_TODAY!);
     await expect(
-        page.getByRole("heading", { name: "No configuration for this day" }),
+        page.getByText(
+            "Calculated from the archived forecast using the plant configuration entered later. No calibration is applied.",
+        ),
     ).toBeVisible();
+    await expect(
+        page.getByText("View interval data (48 intervals)"),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("heading", { name: "No configuration for this day" }),
+    ).toHaveCount(0);
     await expect(page.getByText("configuration_unavailable")).toHaveCount(0);
     await page
         .getByLabel("Forecast date")
