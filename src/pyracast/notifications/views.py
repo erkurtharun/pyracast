@@ -1,0 +1,73 @@
+from datetime import datetime, timedelta
+from typing import cast
+
+from django.contrib.auth.models import User
+from django.utils import timezone
+from drf_spectacular.utils import extend_schema
+from rest_framework.request import Request
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from pyracast.notifications.models import NotificationDelivery, ReminderPreference
+from pyracast.notifications.operations import configure_reminders, get_preference
+from pyracast.notifications.serializers import ReminderInput, ReminderOutput
+
+
+def preference_payload(preference: ReminderPreference, now: datetime) -> dict[str, object]:
+    binding = preference.region.approved_binding
+    quota: dict[str, object] | None = None
+    if binding is not None:
+        account = binding.provider_account
+        quota = {
+            "daily_reminder_limit": account.daily_quota,
+            "queries_per_email": 0,
+        }
+    deliveries = [
+        {
+            "id": delivery.pk,
+            "scheduled_for": delivery.scheduled_for,
+            "status": delivery.status,
+            "last_error": delivery.last_error,
+            "collected_at": delivery.snapshot.collected_at if delivery.snapshot else None,
+            "late": delivery.sent_at - delivery.scheduled_for > timedelta(seconds=60)
+            if delivery.sent_at
+            else None,
+            "source_age_seconds": (now - delivery.snapshot.collected_at).total_seconds()
+            if delivery.snapshot
+            else None,
+            "stale": now - delivery.snapshot.collected_at > timedelta(hours=24)
+            if delivery.snapshot
+            else None,
+            "sent_at": delivery.sent_at,
+        }
+        for delivery in NotificationDelivery.objects.filter(preference_id=preference.pk)
+        .select_related("snapshot")
+        .order_by("-scheduled_for", "-pk")[:20]
+    ]
+    return {
+        "enabled": preference.enabled,
+        "email": preference.email,
+        "times": preference.times,
+        "effective_email": preference.email or preference.user.email,
+        "timezone": preference.region.timezone,
+        "quota": quota,
+        "deliveries": deliveries,
+    }
+
+
+class RemindersView(APIView):
+    @extend_schema(responses=ReminderOutput)
+    def get(self, request: Request, tenant_id: int, region_id: int) -> Response:
+        now = timezone.now()
+        preference = get_preference(cast(User, request.user), tenant_id, region_id, now)
+        return Response(preference_payload(preference, now))
+
+    @extend_schema(request=ReminderInput, responses=ReminderOutput)
+    def put(self, request: Request, tenant_id: int, region_id: int) -> Response:
+        data = ReminderInput(data=request.data)
+        data.is_valid(raise_exception=True)
+        now = timezone.now()
+        preference = configure_reminders(
+            cast(User, request.user), tenant_id, region_id, now=now, **data.validated_data
+        )
+        return Response(preference_payload(preference, now))

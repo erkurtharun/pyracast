@@ -36,9 +36,11 @@ INSTALLED_APPS = [
     "pyracast.connections",
     "pyracast.forecasts",
     "pyracast.plants",
+    "pyracast.notifications",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "pyracast.api.middleware.PrivateAPIResponses",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -106,10 +108,28 @@ CSRF_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 SECURE_SSL_REDIRECT = not DEBUG
+SECURE_PROXY_SSL_HEADER = (
+    ("HTTP_X_FORWARDED_PROTO", "https") if os.environ.get("PYRACAST_TRUST_PROXY") == "1" else None
+)
 SECURE_HSTS_SECONDS = 31536000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
 LOGIN_REDIRECT_URL = "/api/tenants/"
+MAILERS = {
+    "default": {
+        "BACKEND": "django.core.mail.backends.smtp.EmailBackend",
+        "OPTIONS": {
+            "host": os.environ.get("PYRACAST_EMAIL_HOST", "localhost"),
+            "port": int(os.environ.get("PYRACAST_EMAIL_PORT", "587")),
+            "username": os.environ.get("PYRACAST_EMAIL_USER", ""),
+            "password": os.environ.get("PYRACAST_EMAIL_PASSWORD", ""),
+            "use_tls": os.environ.get("PYRACAST_EMAIL_TLS", "1") == "1",
+            "use_ssl": os.environ.get("PYRACAST_EMAIL_SSL", "0") == "1",
+            "timeout": 15,
+        },
+    },
+}
+DEFAULT_FROM_EMAIL = os.environ.get("PYRACAST_FROM_EMAIL", "Pyracast <noreply@localhost>")
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

@@ -1,0 +1,584 @@
+"use client";
+import { useState } from "react";
+import {
+    request,
+    type Plant,
+    type Forecast,
+    type Calibration,
+} from "@/lib/api";
+import { parseProduction, type Observation } from "@/lib/production";
+import {
+    ActionForm,
+    Empty,
+    Field,
+    JsonDetails,
+    Notice,
+    Select,
+    Stat,
+    Tag,
+    useResource,
+    useCollection,
+} from "./ui";
+import { ForecastPanel } from "./forecast-panel";
+export function PlantWorkspace({
+    plant,
+    base,
+    timezone,
+    token,
+    onBack,
+}: {
+    plant: Plant;
+    base: string;
+    timezone: string;
+    token: string;
+    onBack: () => void;
+}) {
+    const [tab, setTab] = useState("forecast"),
+        [date, setDate] = useState(() =>
+            new Date().toLocaleDateString("en-CA", { timeZone: timezone }),
+        ),
+        [resolution, setResolution] = useState("30");
+    const configuration = plant.current_configuration;
+    return (
+        <>
+            <button className="back-button" onClick={onBack}>
+                ← All plants
+            </button>
+            <div className="section-heading">
+                <div>
+                    <h2>{plant.name}</h2>
+                    <p>
+                        Configuration {configuration?.revision ?? "—"} ·{" "}
+                        {configuration?.measurement_basis.replaceAll("_", " ")}
+                    </p>
+                </div>
+                <Tag>Solar plant</Tag>
+            </div>
+            <div className="stats">
+                <Stat
+                    label="DC nameplate"
+                    value={configuration?.dc_capacity_mw}
+                    unit="MW"
+                />
+                <Stat
+                    label="Inverter AC capacity"
+                    value={configuration?.inverter_capacity_mw}
+                    unit="MW"
+                />
+                <Stat
+                    label="Grid export limit"
+                    value={configuration?.export_limit_mw}
+                    unit="MW"
+                />
+            </div>
+            <nav className="tabs" aria-label="Plant sections">
+                {[
+                    ["forecast", "Generation forecast"],
+                    ["production", "Production import"],
+                    ["calibration", "Calibration"],
+                ].map(([key, label]) => (
+                    <button
+                        key={key}
+                        className={tab === key ? "active" : ""}
+                        aria-current={tab === key ? "page" : undefined}
+                        onClick={() => setTab(key)}
+                    >
+                        {label}
+                    </button>
+                ))}
+            </nav>
+            {tab === "forecast" ? (
+                <>
+                    <div className="forecast-controls">
+                        <label className="field">
+                            Forecast date
+                            <input
+                                type="date"
+                                value={date}
+                                onChange={(event) =>
+                                    setDate(event.target.value)
+                                }
+                            />
+                        </label>
+                        <label className="field">
+                            Resolution
+                            <select
+                                value={resolution}
+                                onChange={(event) =>
+                                    setResolution(event.target.value)
+                                }
+                            >
+                                <option value="30">30 minutes</option>
+                                <option value="60">60 minutes</option>
+                            </select>
+                        </label>
+                        <span className="fine">Local dates in {timezone}</span>
+                    </div>
+                    <PlantForecast
+                        key={`${date}-${resolution}`}
+                        url={`${base}forecast/?date=${date}&resolution_minutes=${resolution}`}
+                    />
+                </>
+            ) : !configuration ? (
+                <Notice>No configuration is available for this plant.</Notice>
+            ) : tab === "production" ? (
+                <Production
+                    base={base}
+                    configuration={configuration.id}
+                    token={token}
+                />
+            ) : (
+                <Calibrations
+                    base={base}
+                    configuration={configuration.id}
+                    token={token}
+                />
+            )}
+        </>
+    );
+}
+function PlantForecast({ url }: { url: string }) {
+    const resource = useResource<Forecast>(url);
+    return (
+        <section className="panel">
+            {resource.loading ? (
+                <p role="status">Loading generation forecast…</p>
+            ) : resource.error ? (
+                <Notice error>{resource.error}</Notice>
+            ) : (
+                resource.data && (
+                    <ForecastPanel forecast={resource.data} electrical />
+                )
+            )}
+        </section>
+    );
+}
+function Production({
+    base,
+    configuration,
+    token,
+}: {
+    base: string;
+    configuration: number;
+    token: string;
+}) {
+    const [preview, setPreview] = useState<Observation[]>([]),
+        [error, setError] = useState(""),
+        [fileName, setFileName] = useState(""),
+        [result, setResult] = useState<{
+            created: number;
+            existing: number;
+            count: number;
+        }>();
+    return (
+        <section className="panel">
+            <div className="section-heading">
+                <div>
+                    <h2>Bring your real production into view</h2>
+                    <p>
+                        Import completed 30 or 60 minute energy observations for
+                        this configuration.
+                    </p>
+                </div>
+            </div>
+            <p>
+                Use a CSV with the exact header below. Timestamps need an
+                explicit timezone, energy must be non-negative, and intervals
+                cannot overlap. Each batch accepts up to 2,000 rows.
+            </p>
+            <div className="csv-example">
+                <code>
+                    starts_at,ends_at,energy,quality,source
+                    <br />
+                    2026-01-01T09:00:00+03:00,2026-01-01T09:30:00+03:00,250,valid,meter
+                </code>
+            </div>
+            <p className="fine">
+                Quality: valid, outage, curtailed, or invalid. Quoted CSV fields
+                may contain commas and line breaks. Units apply to the whole
+                batch. Exact replays are safe; conflicting records reject the
+                whole batch.
+            </p>
+            <ActionForm
+                submit={`Import ${preview.length || ""} observations`}
+                onSubmit={async (data) => {
+                    if (!preview.length)
+                        throw new Error(
+                            "Choose and validate a CSV before importing.",
+                        );
+                    const response = await request<{
+                        created: number;
+                        existing: number;
+                        count: number;
+                    }>(
+                        `${base}observations/`,
+                        "POST",
+                        {
+                            configuration_id: configuration,
+                            unit: data.get("unit"),
+                            observations: preview,
+                        },
+                        token,
+                    );
+                    setResult(response);
+                }}
+            >
+                <div className="form-grid">
+                    <label className="field">
+                        Production CSV
+                        <input
+                            type="file"
+                            accept=".csv,text/csv"
+                            required
+                            onChange={async (event) => {
+                                setPreview([]);
+                                setError("");
+                                setResult(undefined);
+                                const file = event.target.files?.[0];
+                                if (!file) return;
+                                setFileName(file.name);
+                                try {
+                                    if (file.size > 2 * 1024 * 1024)
+                                        throw new Error(
+                                            "Choose a CSV no larger than 2 MiB.",
+                                        );
+                                    setPreview(
+                                        parseProduction(await file.text()),
+                                    );
+                                } catch (error) {
+                                    setError((error as Error).message);
+                                }
+                            }}
+                        />
+                    </label>
+                    <Select label="Energy unit" name="unit">
+                        <option value="kWh">kWh — kilowatt-hours</option>
+                        <option value="MWh">MWh — megawatt-hours</option>
+                    </Select>
+                </div>
+                {error && <Notice error>{error}</Notice>}
+                {preview.length > 0 && (
+                    <Notice>
+                        {fileName}: {preview.length} valid observations ready.
+                        First interval: {preview[0].starts_at}.
+                    </Notice>
+                )}
+            </ActionForm>
+            {result && (
+                <Notice>
+                    Import complete: {result.created} created, {result.existing}{" "}
+                    already present, {result.count} total.
+                </Notice>
+            )}
+        </section>
+    );
+}
+function Calibrations({
+    base,
+    configuration,
+    token,
+}: {
+    base: string;
+    configuration: number;
+    token: string;
+}) {
+    const [version, setVersion] = useState(0),
+        [selected, setSelected] = useState<Calibration>(),
+        [actionError, setActionError] = useState(""),
+        [message, setMessage] = useState(""),
+        [working, setWorking] = useState(false);
+    const resource = useCollection<Calibration>(
+        `${base}calibrations/`,
+        version,
+    );
+    async function action(url: string) {
+        setWorking(true);
+        setActionError("");
+        setMessage("");
+        try {
+            await request(url, "POST", {}, token);
+            setMessage(
+                "Calibration selection updated. Refresh the forecast to see the current result.",
+            );
+            setVersion(version + 1);
+        } catch (error) {
+            setActionError((error as Error).message);
+        } finally {
+            setWorking(false);
+        }
+    }
+    return (
+        <>
+            <section className="panel">
+                <div className="section-heading">
+                    <div>
+                        <h2>A closer fit to your plant</h2>
+                        <p>
+                            Compare metered production with archived forecasts
+                            over 7–90 completed local days.
+                        </p>
+                    </div>
+                </div>
+                <ActionForm
+                    submit="Request calibration"
+                    onSubmit={async (data) => {
+                        const start = String(data.get("start_date")),
+                            end = String(data.get("end_date"));
+                        const days =
+                            (Date.parse(end) - Date.parse(start)) / 86400000 +
+                            1;
+                        if (days < 7 || days > 90)
+                            throw new Error(
+                                "Choose a window of 7–90 inclusive completed days.",
+                            );
+                        const run = await request<Calibration>(
+                            `${base}calibrations/`,
+                            "POST",
+                            {
+                                configuration_id: configuration,
+                                start_date: start,
+                                end_date: end,
+                            },
+                            token,
+                        );
+                        setSelected(run);
+                        setVersion(version + 1);
+                    }}
+                >
+                    <div className="form-grid">
+                        <Field
+                            label="First local day"
+                            name="start_date"
+                            type="date"
+                        />
+                        <Field
+                            label="Last local day (inclusive)"
+                            name="end_date"
+                            type="date"
+                        />
+                    </div>
+                </ActionForm>
+            </section>
+            <section className="panel">
+                <div className="section-heading">
+                    <div>
+                        <h2>Calibration history</h2>
+                        <p>
+                            Ready fits can be activated explicitly. Reset
+                            returns future estimates to the baseline.
+                        </p>
+                    </div>
+                    <div className="button-group">
+                        <button
+                            className="button secondary"
+                            onClick={() => setVersion(version + 1)}
+                        >
+                            Refresh
+                        </button>
+                        <button
+                            className="button secondary"
+                            disabled={working}
+                            onClick={() => action(`${base}calibration/reset/`)}
+                        >
+                            Reset to baseline
+                        </button>
+                    </div>
+                </div>
+                {actionError && <Notice error>{actionError}</Notice>}
+                {message && <Notice>{message}</Notice>}
+                {resource.loading ? (
+                    <p role="status">Loading calibration runs…</p>
+                ) : resource.error ? (
+                    <Notice error>{resource.error}</Notice>
+                ) : resource.data?.results.length ? (
+                    <div className="table-scroll">
+                        <table>
+                            <caption className="sr-only">
+                                Calibration runs
+                            </caption>
+                            <thead>
+                                <tr>
+                                    <th>Run</th>
+                                    <th>Window</th>
+                                    <th>Status</th>
+                                    <th>Assessment</th>
+                                    <th>Factor</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {resource.data.results.map((run) => (
+                                    <tr key={run.id}>
+                                        <td>#{run.id}</td>
+                                        <td>
+                                            {run.window_start} →{" "}
+                                            {run.window_end}
+                                        </td>
+                                        <td>
+                                            <Tag>{run.status}</Tag>
+                                        </td>
+                                        <td>{run.assessment}</td>
+                                        <td>{run.factor ?? "—"}</td>
+                                        <td>
+                                            <button
+                                                className="text-button"
+                                                onClick={async () => {
+                                                    try {
+                                                        setSelected(
+                                                            await request<Calibration>(
+                                                                `${base}calibrations/${run.id}/`,
+                                                            ),
+                                                        );
+                                                    } catch (error) {
+                                                        setActionError(
+                                                            (error as Error)
+                                                                .message,
+                                                        );
+                                                    }
+                                                }}
+                                            >
+                                                View details
+                                            </button>
+                                            {run.status === "ready" && (
+                                                <button
+                                                    className="text-button"
+                                                    disabled={working}
+                                                    onClick={() =>
+                                                        action(
+                                                            `${base}calibrations/${run.id}/activate/`,
+                                                        )
+                                                    }
+                                                >
+                                                    Activate
+                                                </button>
+                                            )}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                ) : (
+                    <Empty title="Better estimates start with evidence">
+                        Import production observations, then request your first
+                        calibration.
+                    </Empty>
+                )}
+                {selected && (
+                    <div className="calibration-detail">
+                        <div className="section-heading">
+                            <h3>Calibration #{selected.id}</h3>
+                            <Tag>{selected.status}</Tag>
+                        </div>
+                        <p>
+                            Assessment: {selected.assessment}. Factor:{" "}
+                            {selected.factor ?? "unavailable"}.
+                        </p>
+                        <CalibrationAssessment run={selected} />
+                        <JsonDetails
+                            data={selected.result}
+                            label="Evaluation metrics & exclusions"
+                        />
+                        <JsonDetails data={selected} label="Run provenance" />
+                    </div>
+                )}
+            </section>
+        </>
+    );
+}
+
+function CalibrationAssessment({ run }: { run: Calibration }) {
+    const asRecord = (value: unknown): Record<string, unknown> =>
+        value && typeof value === "object" && !Array.isArray(value)
+            ? (value as Record<string, unknown>)
+            : {};
+    const result = asRecord(run.result),
+        baseline = asRecord(result.baseline),
+        candidate = asRecord(result.candidate),
+        exclusions = asRecord(result.exclusions);
+    const format = (value: unknown) =>
+        typeof value === "number"
+            ? new Intl.NumberFormat("en", { maximumFractionDigits: 4 }).format(
+                  value,
+              )
+            : "—";
+    const messages: Record<string, string> = {
+        pending: "Waiting for the calibration worker.",
+        running: "The worker is fitting and evaluating this calibration.",
+        ready: "This fit passed the held-out comparison and is ready for explicit activation.",
+        rejected:
+            "This fit did not pass the improvement criteria. The current selection remains in use.",
+        insufficient:
+            "There are not enough eligible complete days to evaluate a fit.",
+    };
+    return (
+        <>
+            <Notice>
+                {messages[run.status] ?? `Calibration status: ${run.status}.`}
+                {run.assessment === "provisional"
+                    ? " This is a provisional assessment based on fewer than 30 valid days."
+                    : ""}
+            </Notice>
+            <div className="stats">
+                <Stat label="Valid days" value={result.valid_days} />
+                <Stat label="Training days" value={result.training_days} />
+                <Stat label="Held-out days" value={result.holdout_days} />
+            </div>
+            {Object.keys(candidate).length > 0 && (
+                <div className="table-scroll">
+                    <table>
+                        <caption>
+                            Held-out accuracy comparison — lower error is better
+                        </caption>
+                        <thead>
+                            <tr>
+                                <th>Metric</th>
+                                <th>Baseline</th>
+                                <th>Candidate</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {[
+                                [
+                                    "interval_mae_mw",
+                                    "Interval mean absolute error (MW)",
+                                ],
+                                ["bias_mw", "Interval bias (MW)"],
+                                [
+                                    "daily_mae_mwh",
+                                    "Daily mean absolute error (MWh)",
+                                ],
+                                ["daily_bias_mwh", "Daily bias (MWh)"],
+                            ].map(([key, label]) => (
+                                <tr key={key}>
+                                    <th>{label}</th>
+                                    <td>{format(baseline[key])}</td>
+                                    <td>{format(candidate[key])}</td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </div>
+            )}
+            {Object.entries(exclusions).some(
+                ([, value]) => typeof value === "number" && value > 0,
+            ) && (
+                <div className="provenance">
+                    <strong>Excluded observations</strong>
+                    <ul>
+                        {Object.entries(exclusions)
+                            .filter(
+                                ([, value]) =>
+                                    typeof value === "number" && value > 0,
+                            )
+                            .map(([key, value]) => (
+                                <li key={key}>
+                                    {key.replaceAll("_", " ")}: {String(value)}
+                                </li>
+                            ))}
+                    </ul>
+                </div>
+            )}
+        </>
+    );
+}

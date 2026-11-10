@@ -1,0 +1,36 @@
+from rest_framework import serializers
+
+
+class ReminderInput(serializers.Serializer[dict[str, object]]):
+    enabled = serializers.BooleanField()
+    email = serializers.EmailField(allow_blank=True, default="")
+    times = serializers.ListField(
+        child=serializers.RegexField(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"), max_length=1440
+    )
+
+
+class ReminderQuotaOutput(serializers.Serializer[dict[str, object]]):
+    daily_reminder_limit = serializers.IntegerField()
+    queries_per_email = serializers.IntegerField()
+
+
+class ReminderDeliveryOutput(serializers.Serializer[dict[str, object]]):
+    id = serializers.IntegerField()
+    scheduled_for = serializers.DateTimeField()
+    status = serializers.CharField()
+    last_error = serializers.CharField(allow_blank=True)
+    collected_at = serializers.DateTimeField(allow_null=True)
+    late = serializers.BooleanField(allow_null=True)
+    source_age_seconds = serializers.FloatField(allow_null=True)
+    stale = serializers.BooleanField(allow_null=True)
+    sent_at = serializers.DateTimeField(allow_null=True)
+
+
+class ReminderOutput(serializers.Serializer[dict[str, object]]):
+    enabled = serializers.BooleanField()
+    email = serializers.EmailField(allow_blank=True)
+    times = serializers.ListField(child=serializers.CharField())
+    effective_email = serializers.CharField()
+    timezone = serializers.CharField()
+    quota = ReminderQuotaOutput(allow_null=True)
+    deliveries = ReminderDeliveryOutput(many=True)

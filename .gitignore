@@ -44,6 +44,18 @@ db.sqlite3
 db.sqlite3-*
 /media/
 /staticfiles/
+/docs/json_*.json
+
+# Frontend dependencies and generated output
+node_modules/
+.next/
+.next-*/
+out/
+*.tsbuildinfo
+/web/coverage/
+/web/playwright-report/
+/web/test-results/
+/web/AGENTS.md
 
 # Local agent/IDE state and scanner output
 /.codex/*

@@ -1,0 +1,2894 @@
+{
+    "openapi": "3.0.3",
+    "info": {
+        "title": "Pyracast API",
+        "version": "1.0.0"
+    },
+    "paths": {
+        "/api/platform/accounts/": {
+            "post": {
+                "operationId": "platform_accounts_create",
+                "tags": [
+                    "platform"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AccountInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AccountInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AccountInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IdentifierOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/platform/accounts/{account_id}/rotate-secret/": {
+            "post": {
+                "operationId": "platform_accounts_rotate_secret_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "account_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "platform"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RotateSecretInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RotateSecretInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RotateSecretInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IdentifierOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/platform/bindings/{binding_id}/validate/": {
+            "post": {
+                "operationId": "platform_bindings_validate_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "binding_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "platform"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IdentifierOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/platform/regions/{region_id}/approve/": {
+            "post": {
+                "operationId": "platform_regions_approve_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "platform"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ApprovalInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ApprovalInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ApprovalInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IdentifierOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/platform/regions/{region_id}/bindings/": {
+            "post": {
+                "operationId": "platform_regions_bindings_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "platform"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/BindingInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/BindingInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/BindingInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IdentifierOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/platform/regions/{region_id}/transition/": {
+            "post": {
+                "operationId": "platform_regions_transition_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "platform"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/TransitionInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/TransitionInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/TransitionInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RegionOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/session/": {
+            "get": {
+                "operationId": "session_retrieve",
+                "tags": [
+                    "session"
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SessionOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            },
+            "patch": {
+                "operationId": "session_partial_update",
+                "tags": [
+                    "session"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PatchedEmailInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PatchedEmailInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PatchedEmailInput"
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SessionOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/session/login/": {
+            "post": {
+                "operationId": "session_login_create",
+                "tags": [
+                    "session"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/LoginInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/LoginInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/LoginInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SessionOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/session/logout/": {
+            "post": {
+                "operationId": "session_logout_create",
+                "tags": [
+                    "session"
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SessionOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/": {
+            "get": {
+                "operationId": "tenants_list",
+                "parameters": [
+                    {
+                        "name": "page",
+                        "required": false,
+                        "in": "query",
+                        "description": "A page number within the paginated result set.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PaginatedTenantOutputList"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/": {
+            "get": {
+                "operationId": "tenants_regions_list",
+                "parameters": [
+                    {
+                        "name": "page",
+                        "required": false,
+                        "in": "query",
+                        "description": "A page number within the paginated result set.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PaginatedRegionOutputList"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            },
+            "post": {
+                "operationId": "tenants_regions_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RegionInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RegionInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RegionInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RegionOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/": {
+            "get": {
+                "operationId": "tenants_regions_retrieve",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RegionOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            },
+            "put": {
+                "operationId": "tenants_regions_update",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RegionInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RegionInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RegionInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RegionOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/forecast/": {
+            "get": {
+                "operationId": "tenants_regions_forecast_retrieve",
+                "parameters": [
+                    {
+                        "in": "query",
+                        "name": "date",
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ForecastOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/": {
+            "get": {
+                "operationId": "tenants_regions_plants_list",
+                "parameters": [
+                    {
+                        "name": "page",
+                        "required": false,
+                        "in": "query",
+                        "description": "A page number within the paginated result set.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PaginatedPlantOutputList"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            },
+            "post": {
+                "operationId": "tenants_regions_plants_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PlantInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PlantInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PlantInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PlantOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/": {
+            "get": {
+                "operationId": "tenants_regions_plants_retrieve",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PlantOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            },
+            "put": {
+                "operationId": "tenants_regions_plants_update",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PlantInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PlantInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PlantInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PlantOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibration/reset/": {
+            "post": {
+                "operationId": "tenants_regions_plants_calibration_reset_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ActivationOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibrations/": {
+            "get": {
+                "operationId": "tenants_regions_plants_calibrations_list",
+                "parameters": [
+                    {
+                        "name": "page",
+                        "required": false,
+                        "in": "query",
+                        "description": "A page number within the paginated result set.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PaginatedCalibrationSummaryOutputList"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            },
+            "post": {
+                "operationId": "tenants_regions_plants_calibrations_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CalibrationInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CalibrationInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CalibrationInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/CalibrationOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibrations/{calibration_id}/": {
+            "get": {
+                "operationId": "tenants_regions_plants_calibrations_retrieve",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "calibration_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/CalibrationOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibrations/{calibration_id}/activate/": {
+            "post": {
+                "operationId": "tenants_regions_plants_calibrations_activate_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "calibration_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ActivationOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/forecast/": {
+            "get": {
+                "operationId": "tenants_regions_plants_forecast_retrieve",
+                "parameters": [
+                    {
+                        "in": "query",
+                        "name": "as_of",
+                        "schema": {
+                            "type": "string",
+                            "format": "date-time"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "date",
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "query",
+                        "name": "resolution_minutes",
+                        "schema": {
+                            "enum": [
+                                30,
+                                60
+                            ],
+                            "type": "integer",
+                            "default": 30
+                        },
+                        "description": "* `30` - 30\n* `60` - 60"
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PlantForecastOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/observations/": {
+            "get": {
+                "operationId": "tenants_regions_plants_observations_list",
+                "parameters": [
+                    {
+                        "name": "page",
+                        "required": false,
+                        "in": "query",
+                        "description": "A page number within the paginated result set.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PaginatedObservationOutputList"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            },
+            "post": {
+                "operationId": "tenants_regions_plants_observations_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ObservationImport"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ObservationImport"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ObservationImport"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ObservationImportOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/reminders/": {
+            "get": {
+                "operationId": "tenants_regions_reminders_retrieve",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ReminderOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            },
+            "put": {
+                "operationId": "tenants_regions_reminders_update",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ReminderInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ReminderInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ReminderInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ReminderOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        }
+    },
+    "components": {
+        "schemas": {
+            "AccountInput": {
+                "type": "object",
+                "properties": {
+                    "provider": {
+                        "$ref": "#/components/schemas/ProviderEnum"
+                    },
+                    "external_account_id": {
+                        "type": "string",
+                        "maxLength": 200
+                    },
+                    "secret_reference": {
+                        "type": "string",
+                        "writeOnly": true,
+                        "maxLength": 250
+                    },
+                    "daily_quota": {
+                        "type": "integer",
+                        "maximum": 10,
+                        "minimum": 1,
+                        "default": 10
+                    },
+                    "authorization_reference": {
+                        "type": "string",
+                        "default": "",
+                        "maxLength": 500
+                    }
+                },
+                "required": [
+                    "external_account_id",
+                    "provider",
+                    "secret_reference"
+                ]
+            },
+            "ActivationOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "configuration_id": {
+                        "type": "integer"
+                    },
+                    "calibration_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "actor_id": {
+                        "type": "integer"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    }
+                },
+                "required": [
+                    "actor_id",
+                    "calibration_id",
+                    "configuration_id",
+                    "created_at",
+                    "id"
+                ]
+            },
+            "ApprovalInput": {
+                "type": "object",
+                "properties": {
+                    "binding_id": {
+                        "type": "integer",
+                        "minimum": 1
+                    }
+                },
+                "required": [
+                    "binding_id"
+                ]
+            },
+            "BindingInput": {
+                "type": "object",
+                "properties": {
+                    "provider_account_id": {
+                        "type": "integer",
+                        "minimum": 1
+                    },
+                    "site_id": {
+                        "type": "string",
+                        "maxLength": 200
+                    },
+                    "capacity_kw": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0
+                    },
+                    "power_basis": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/PowerBasisEnum"
+                            }
+                        ],
+                        "default": "ac"
+                    },
+                    "capacity_basis": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/PowerBasisEnum"
+                            }
+                        ],
+                        "default": "ac"
+                    },
+                    "capacity_semantics_verified": {
+                        "type": "boolean"
+                    },
+                    "tilt_degrees": {
+                        "type": "number",
+                        "format": "double",
+                        "default": 0.0
+                    },
+                    "azimuth_degrees": {
+                        "type": "number",
+                        "format": "double",
+                        "default": 180.0
+                    },
+                    "losses_percent": {
+                        "type": "number",
+                        "format": "double",
+                        "default": 0.0
+                    },
+                    "installation_date": {
+                        "type": "string",
+                        "format": "date"
+                    },
+                    "settings_verification_reference": {
+                        "type": "string",
+                        "default": "",
+                        "maxLength": 500
+                    }
+                },
+                "required": [
+                    "capacity_kw",
+                    "capacity_semantics_verified",
+                    "installation_date",
+                    "provider_account_id",
+                    "site_id"
+                ]
+            },
+            "CalibrationInput": {
+                "type": "object",
+                "properties": {
+                    "configuration_id": {
+                        "type": "integer",
+                        "minimum": 1
+                    },
+                    "start_date": {
+                        "type": "string",
+                        "format": "date"
+                    },
+                    "end_date": {
+                        "type": "string",
+                        "format": "date"
+                    }
+                },
+                "required": [
+                    "configuration_id",
+                    "end_date",
+                    "start_date"
+                ]
+            },
+            "CalibrationOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "configuration_id": {
+                        "type": "integer"
+                    },
+                    "binding_id": {
+                        "type": "integer"
+                    },
+                    "requested_by_id": {
+                        "type": "integer"
+                    },
+                    "window_start": {
+                        "type": "string",
+                        "format": "date",
+                        "readOnly": true
+                    },
+                    "window_end": {
+                        "type": "string",
+                        "format": "date",
+                        "readOnly": true
+                    },
+                    "cutoff_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    },
+                    "completed_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "status": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/CalibrationStatusEnum"
+                            }
+                        ],
+                        "readOnly": true
+                    },
+                    "assessment": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "factor": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "result": {
+                        "readOnly": true
+                    },
+                    "dataset_manifest": {
+                        "readOnly": true
+                    },
+                    "dataset_sha256": {
+                        "type": "string",
+                        "readOnly": true
+                    }
+                },
+                "required": [
+                    "assessment",
+                    "binding_id",
+                    "completed_at",
+                    "configuration_id",
+                    "created_at",
+                    "cutoff_at",
+                    "dataset_manifest",
+                    "dataset_sha256",
+                    "factor",
+                    "id",
+                    "requested_by_id",
+                    "result",
+                    "status",
+                    "window_end",
+                    "window_start"
+                ]
+            },
+            "CalibrationStatusEnum": {
+                "enum": [
+                    "pending",
+                    "running",
+                    "ready",
+                    "insufficient",
+                    "rejected",
+                    "failed",
+                    "superseded"
+                ],
+                "type": "string",
+                "description": "* `pending` - pending\n* `running` - running\n* `ready` - ready\n* `insufficient` - insufficient\n* `rejected` - rejected\n* `failed` - failed\n* `superseded` - superseded"
+            },
+            "CalibrationSummaryOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "configuration_id": {
+                        "type": "integer"
+                    },
+                    "binding_id": {
+                        "type": "integer"
+                    },
+                    "requested_by_id": {
+                        "type": "integer"
+                    },
+                    "window_start": {
+                        "type": "string",
+                        "format": "date",
+                        "readOnly": true
+                    },
+                    "window_end": {
+                        "type": "string",
+                        "format": "date",
+                        "readOnly": true
+                    },
+                    "cutoff_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    },
+                    "completed_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "status": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/CalibrationStatusEnum"
+                            }
+                        ],
+                        "readOnly": true
+                    },
+                    "assessment": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "factor": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "result": {
+                        "readOnly": true
+                    },
+                    "dataset_sha256": {
+                        "type": "string",
+                        "readOnly": true
+                    }
+                },
+                "required": [
+                    "assessment",
+                    "binding_id",
+                    "completed_at",
+                    "configuration_id",
+                    "created_at",
+                    "cutoff_at",
+                    "dataset_sha256",
+                    "factor",
+                    "id",
+                    "requested_by_id",
+                    "result",
+                    "status",
+                    "window_end",
+                    "window_start"
+                ]
+            },
+            "ConfigurationOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "binding_id": {
+                        "type": "integer"
+                    },
+                    "revision": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "dc_capacity_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true
+                    },
+                    "inverter_capacity_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "export_limit_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "measurement_basis": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ConfigurationOutputMeasurementBasisEnum"
+                            }
+                        ],
+                        "readOnly": true
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    }
+                },
+                "required": [
+                    "binding_id",
+                    "created_at",
+                    "dc_capacity_mw",
+                    "export_limit_mw",
+                    "id",
+                    "inverter_capacity_mw",
+                    "measurement_basis",
+                    "revision"
+                ]
+            },
+            "ConfigurationOutputMeasurementBasisEnum": {
+                "enum": [
+                    "net_export",
+                    "ac_generation"
+                ],
+                "type": "string",
+                "description": "* `net_export` - Net export\n* `ac_generation` - AC generation"
+            },
+            "ForecastOutput": {
+                "type": "object",
+                "properties": {
+                    "region_id": {
+                        "type": "integer"
+                    },
+                    "date": {
+                        "type": "string",
+                        "format": "date"
+                    },
+                    "timezone": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "freshness": {
+                        "type": "string"
+                    },
+                    "result": {
+                        "nullable": true
+                    },
+                    "collected_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "issued_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "binding_revision": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "scheduled_slot": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "late": {
+                        "type": "boolean",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "binding_revision",
+                    "collected_at",
+                    "date",
+                    "freshness",
+                    "issued_at",
+                    "late",
+                    "region_id",
+                    "result",
+                    "scheduled_slot",
+                    "status",
+                    "timezone"
+                ]
+            },
+            "IdentifierOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "id"
+                ]
+            },
+            "LoginInput": {
+                "type": "object",
+                "properties": {
+                    "username": {
+                        "type": "string",
+                        "maxLength": 150
+                    },
+                    "password": {
+                        "type": "string",
+                        "writeOnly": true,
+                        "maxLength": 1024
+                    }
+                },
+                "required": [
+                    "password",
+                    "username"
+                ]
+            },
+            "ObservationImport": {
+                "type": "object",
+                "properties": {
+                    "configuration_id": {
+                        "type": "integer",
+                        "minimum": 1
+                    },
+                    "unit": {
+                        "$ref": "#/components/schemas/UnitEnum"
+                    },
+                    "observations": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ObservationRow"
+                        }
+                    }
+                },
+                "required": [
+                    "configuration_id",
+                    "observations",
+                    "unit"
+                ]
+            },
+            "ObservationImportOutput": {
+                "type": "object",
+                "properties": {
+                    "created": {
+                        "type": "integer"
+                    },
+                    "existing": {
+                        "type": "integer"
+                    },
+                    "count": {
+                        "type": "integer"
+                    },
+                    "ids": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
+                    }
+                },
+                "required": [
+                    "count",
+                    "created",
+                    "existing",
+                    "ids"
+                ]
+            },
+            "ObservationOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "configuration_id": {
+                        "type": "integer"
+                    },
+                    "starts_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    },
+                    "ends_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    },
+                    "energy_mwh": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true
+                    },
+                    "quality": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ObservationOutputQualityEnum"
+                            }
+                        ],
+                        "readOnly": true
+                    },
+                    "source": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "recorded_by_id": {
+                        "type": "integer"
+                    },
+                    "recorded_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    }
+                },
+                "required": [
+                    "configuration_id",
+                    "ends_at",
+                    "energy_mwh",
+                    "id",
+                    "quality",
+                    "recorded_at",
+                    "recorded_by_id",
+                    "source",
+                    "starts_at"
+                ]
+            },
+            "ObservationOutputQualityEnum": {
+                "enum": [
+                    "valid",
+                    "outage",
+                    "curtailed",
+                    "invalid"
+                ],
+                "type": "string",
+                "description": "* `valid` - Valid\n* `outage` - Outage\n* `curtailed` - Curtailed\n* `invalid` - Invalid"
+            },
+            "ObservationRow": {
+                "type": "object",
+                "properties": {
+                    "starts_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "ends_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "energy": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0
+                    },
+                    "quality": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ObservationRowQualityEnum"
+                            }
+                        ],
+                        "default": "valid"
+                    },
+                    "source": {
+                        "type": "string",
+                        "maxLength": 200
+                    }
+                },
+                "required": [
+                    "ends_at",
+                    "energy",
+                    "source",
+                    "starts_at"
+                ]
+            },
+            "ObservationRowQualityEnum": {
+                "enum": [
+                    "valid",
+                    "outage",
+                    "curtailed",
+                    "invalid"
+                ],
+                "type": "string",
+                "description": "* `valid` - valid\n* `outage` - outage\n* `curtailed` - curtailed\n* `invalid` - invalid"
+            },
+            "PaginatedCalibrationSummaryOutputList": {
+                "type": "object",
+                "required": [
+                    "count",
+                    "results"
+                ],
+                "properties": {
+                    "count": {
+                        "type": "integer",
+                        "example": 123
+                    },
+                    "next": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=4"
+                    },
+                    "previous": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=2"
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/CalibrationSummaryOutput"
+                        }
+                    }
+                }
+            },
+            "PaginatedObservationOutputList": {
+                "type": "object",
+                "required": [
+                    "count",
+                    "results"
+                ],
+                "properties": {
+                    "count": {
+                        "type": "integer",
+                        "example": 123
+                    },
+                    "next": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=4"
+                    },
+                    "previous": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=2"
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ObservationOutput"
+                        }
+                    }
+                }
+            },
+            "PaginatedPlantOutputList": {
+                "type": "object",
+                "required": [
+                    "count",
+                    "results"
+                ],
+                "properties": {
+                    "count": {
+                        "type": "integer",
+                        "example": 123
+                    },
+                    "next": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=4"
+                    },
+                    "previous": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=2"
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PlantOutput"
+                        }
+                    }
+                }
+            },
+            "PaginatedRegionOutputList": {
+                "type": "object",
+                "required": [
+                    "count",
+                    "results"
+                ],
+                "properties": {
+                    "count": {
+                        "type": "integer",
+                        "example": 123
+                    },
+                    "next": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=4"
+                    },
+                    "previous": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=2"
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/RegionOutput"
+                        }
+                    }
+                }
+            },
+            "PaginatedTenantOutputList": {
+                "type": "object",
+                "required": [
+                    "count",
+                    "results"
+                ],
+                "properties": {
+                    "count": {
+                        "type": "integer",
+                        "example": 123
+                    },
+                    "next": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=4"
+                    },
+                    "previous": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=2"
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/TenantOutput"
+                        }
+                    }
+                }
+            },
+            "PatchedEmailInput": {
+                "type": "object",
+                "properties": {
+                    "email": {
+                        "type": "string",
+                        "format": "email",
+                        "maxLength": 254
+                    }
+                }
+            },
+            "PlantForecastOutput": {
+                "type": "object",
+                "properties": {
+                    "plant_id": {
+                        "type": "integer"
+                    },
+                    "date": {
+                        "type": "string",
+                        "format": "date"
+                    },
+                    "timezone": {
+                        "type": "string"
+                    },
+                    "as_of": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "configuration_id": {
+                        "type": "integer"
+                    },
+                    "calibration_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "freshness": {
+                        "type": "string"
+                    },
+                    "result": {
+                        "nullable": true
+                    },
+                    "regional_irradiance": {
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "as_of",
+                    "calibration_id",
+                    "configuration_id",
+                    "date",
+                    "freshness",
+                    "plant_id",
+                    "regional_irradiance",
+                    "result",
+                    "timezone"
+                ]
+            },
+            "PlantInput": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "maxLength": 200
+                    },
+                    "dc_capacity_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0
+                    },
+                    "inverter_capacity_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0,
+                        "nullable": true
+                    },
+                    "export_limit_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0,
+                        "nullable": true
+                    },
+                    "measurement_basis": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/PlantInputMeasurementBasisEnum"
+                            }
+                        ],
+                        "default": "net_export"
+                    }
+                },
+                "required": [
+                    "dc_capacity_mw",
+                    "name"
+                ]
+            },
+            "PlantInputMeasurementBasisEnum": {
+                "enum": [
+                    "net_export",
+                    "ac_generation"
+                ],
+                "type": "string",
+                "description": "* `net_export` - net_export\n* `ac_generation` - ac_generation"
+            },
+            "PlantOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "name": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "region_id": {
+                        "type": "integer"
+                    },
+                    "current_configuration": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ConfigurationOutput"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    }
+                },
+                "required": [
+                    "created_at",
+                    "current_configuration",
+                    "id",
+                    "name",
+                    "region_id"
+                ]
+            },
+            "PowerBasisEnum": {
+                "enum": [
+                    "ac",
+                    "dc"
+                ],
+                "type": "string",
+                "description": "* `ac` - ac\n* `dc` - dc"
+            },
+            "ProviderEnum": {
+                "enum": [
+                    "fixture",
+                    "solcast"
+                ],
+                "type": "string",
+                "description": "* `fixture` - fixture\n* `solcast` - solcast"
+            },
+            "RegionInput": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "maxLength": 200
+                    },
+                    "latitude": {
+                        "type": "number",
+                        "format": "double",
+                        "maximum": 90,
+                        "minimum": -90
+                    },
+                    "longitude": {
+                        "type": "number",
+                        "format": "double",
+                        "maximum": 180,
+                        "minimum": -180
+                    },
+                    "timezone": {
+                        "type": "string",
+                        "maxLength": 100
+                    }
+                },
+                "required": [
+                    "latitude",
+                    "longitude",
+                    "name",
+                    "timezone"
+                ]
+            },
+            "RegionOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "name": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "latitude": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true
+                    },
+                    "longitude": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true
+                    },
+                    "timezone": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "surface": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "revision": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "status": {
+                        "type": "string",
+                        "readOnly": true
+                    }
+                },
+                "required": [
+                    "id",
+                    "latitude",
+                    "longitude",
+                    "name",
+                    "revision",
+                    "status",
+                    "surface",
+                    "timezone"
+                ]
+            },
+            "ReminderDeliveryOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "scheduled_for": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "last_error": {
+                        "type": "string"
+                    },
+                    "collected_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "late": {
+                        "type": "boolean",
+                        "nullable": true
+                    },
+                    "source_age_seconds": {
+                        "type": "number",
+                        "format": "double",
+                        "nullable": true
+                    },
+                    "stale": {
+                        "type": "boolean",
+                        "nullable": true
+                    },
+                    "sent_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "collected_at",
+                    "id",
+                    "last_error",
+                    "late",
+                    "scheduled_for",
+                    "sent_at",
+                    "source_age_seconds",
+                    "stale",
+                    "status"
+                ]
+            },
+            "ReminderInput": {
+                "type": "object",
+                "properties": {
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "email": {
+                        "oneOf": [
+                            {
+                                "type": "string",
+                                "format": "email",
+                                "default": ""
+                            },
+                            {
+                                "type": "string",
+                                "maxLength": 0
+                            }
+                        ]
+                    },
+                    "times": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                        },
+                        "maxItems": 1440
+                    }
+                },
+                "required": [
+                    "enabled",
+                    "times"
+                ]
+            },
+            "ReminderOutput": {
+                "type": "object",
+                "properties": {
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "email": {
+                        "oneOf": [
+                            {
+                                "type": "string",
+                                "format": "email"
+                            },
+                            {
+                                "type": "string",
+                                "maxLength": 0
+                            }
+                        ]
+                    },
+                    "times": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "effective_email": {
+                        "type": "string"
+                    },
+                    "timezone": {
+                        "type": "string"
+                    },
+                    "quota": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ReminderQuotaOutput"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "deliveries": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ReminderDeliveryOutput"
+                        }
+                    }
+                },
+                "required": [
+                    "deliveries",
+                    "effective_email",
+                    "email",
+                    "enabled",
+                    "quota",
+                    "times",
+                    "timezone"
+                ]
+            },
+            "ReminderQuotaOutput": {
+                "type": "object",
+                "properties": {
+                    "daily_reminder_limit": {
+                        "type": "integer"
+                    },
+                    "queries_per_email": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "daily_reminder_limit",
+                    "queries_per_email"
+                ]
+            },
+            "RotateSecretInput": {
+                "type": "object",
+                "properties": {
+                    "secret_reference": {
+                        "type": "string",
+                        "writeOnly": true,
+                        "maxLength": 250
+                    }
+                },
+                "required": [
+                    "secret_reference"
+                ]
+            },
+            "SessionOutput": {
+                "type": "object",
+                "properties": {
+                    "user": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/SessionUserOutput"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "csrf_token": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "csrf_token",
+                    "user"
+                ]
+            },
+            "SessionUserOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "username": {
+                        "type": "string"
+                    },
+                    "email": {
+                        "oneOf": [
+                            {
+                                "type": "string",
+                                "format": "email"
+                            },
+                            {
+                                "type": "string",
+                                "maxLength": 0
+                            }
+                        ]
+                    }
+                },
+                "required": [
+                    "email",
+                    "id",
+                    "username"
+                ]
+            },
+            "TenantOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "name": {
+                        "type": "string",
+                        "readOnly": true
+                    }
+                },
+                "required": [
+                    "id",
+                    "name"
+                ]
+            },
+            "TransitionInput": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "$ref": "#/components/schemas/TransitionInputStatusEnum"
+                    }
+                },
+                "required": [
+                    "status"
+                ]
+            },
+            "TransitionInputStatusEnum": {
+                "enum": [
+                    "rejected",
+                    "suspended"
+                ],
+                "type": "string",
+                "description": "* `rejected` - rejected\n* `suspended` - suspended"
+            },
+            "UnitEnum": {
+                "enum": [
+                    "MWh",
+                    "kWh"
+                ],
+                "type": "string",
+                "description": "* `MWh` - MWh\n* `kWh` - kWh"
+            }
+        },
+        "securitySchemes": {
+            "cookieAuth": {
+                "type": "apiKey",
+                "in": "cookie",
+                "name": "sessionid"
+            }
+        }
+    }
+}

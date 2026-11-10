@@ -1,13 +1,14 @@
 # Pyracast
 
-Multi-tenant irradiance forecasting backend. Product scope and boundaries live in
+Multi-tenant irradiance forecasting application. Product scope and boundaries live in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); calculation contracts live in
 [docs/IRRADIANCE.md](docs/IRRADIANCE.md). The backend includes a session-authenticated
 tenant API, MFA-protected operations interface, PostgreSQL jobs and quota ledger,
 RabbitMQ/Dramatiq entry points, archived vintages, plant generation with native
 interval clipping and offline production calibration. Irradiance reconstruction
 and the initial plant transfer remain explicitly unvalidated proxies. Synthetic
-fixtures exercise the complete application flow.
+fixtures exercise the application flow. The `web/` Next.js interface provides region,
+plant, production, calibration and saved-forecast email workflows.
 
 ## Development
 
@@ -107,13 +108,76 @@ uv run --locked pyracast dispatch --loop
 uv run --locked pyracast worker --threads 4
 ```
 
-The dispatcher scans durable collection and calibration jobs every 60 seconds. Queue publication can be
+The dispatcher scans durable collection, calibration and notification jobs every 60 seconds. Queue publication can be
 repeated; database leases and unique results govern execution. Requests, validation
 and retries share one account/UTC-day budget. Unknown request outcomes consume quota.
 Provider calls happen outside transactions. Changed or suspended regions cannot
 publish through old bindings. Failed calculations can reuse an archived acquisition.
 
-## Operations and API
+## Customer interface
+
+The independently running Next.js app is in `web/`. Use Node 26.13.0 LTS and npm;
+exact compatible stable versions live in `web/package.json` and `package-lock.json`.
+TypeScript 5.9.3 is currently the newest stable version accepted by the OpenAPI
+generator's peer dependency. Upgrades must preserve a valid dependency tree.
+
+Start Django on port 8000 with `PYRACAST_DEBUG=1`. Add
+`PYRACAST_CSRF_ORIGINS=http://localhost:3000 http://127.0.0.1:3000` to the ignored
+root `.env`, then run:
+
+```text
+npm --prefix web ci
+npm --prefix web run dev
+```
+
+Open `http://127.0.0.1:3000` and sign in with an existing Django user. The user's
+tenant memberships determine which regions are visible. For another API address,
+copy `web/.env.example` to ignored `web/.env.local` and set `DJANGO_API_ORIGIN`.
+The API origin is a server setting, never a browser credential. Frontend text is English.
+
+For production, run `npm --prefix web run build` and `npm --prefix web start` behind
+an HTTPS gateway. Route `/api/` to Django on the same public origin, disable gateway
+caching for authenticated responses and rate-limit login attempts. If the gateway
+terminates TLS, set `PYRACAST_TRUST_PROXY=1` only when it strips and sets
+`X-Forwarded-Proto` and the Django service is reachable only through trusted infrastructure.
+
+```text
+npm --prefix web exec -- playwright install chromium
+npm --prefix web run check
+```
+
+The browser suite includes mocked error/empty-state and accessibility checks. CI
+also sets `PYRACAST_BROWSER_TEST=1` and runs
+`uv run --locked python -m pytest tests/test_browser.py -n 1 --no-cov` against a
+real Django server and isolated PostgreSQL test database. No live provider or mail
+service is used. Regenerate the contract after API changes:
+
+```text
+uv run --locked pyracast spectacular --validate --fail-on-warn --format openapi-json --file web/openapi.json
+npm --prefix web run api:generate
+```
+
+## Email reminders
+
+Choose an approved region's **Email reminders** tab, enter local delivery times,
+and optionally override its recipient. Otherwise the address in **Account settings**
+is used. Emails use the latest saved forecast; they make no Solcast requests.
+Timing, plan limits, stale-data and retry contracts are in
+[ARCHITECTURE.md](docs/ARCHITECTURE.md#saved-forecast-email-reminders).
+
+Set `PYRACAST_EMAIL_HOST`, `PYRACAST_EMAIL_PORT`, `PYRACAST_EMAIL_USER`,
+`PYRACAST_EMAIL_PASSWORD`, and `PYRACAST_FROM_EMAIL` in ignored `.env` for your
+authorized SMTP service. STARTTLS defaults to port 587; implicit TLS uses port 465,
+`PYRACAST_EMAIL_TLS=0` and `PYRACAST_EMAIL_SSL=1`. Django's `MAILERS` configuration
+uses a bounded timeout. Run the dispatcher and worker commands above continuously.
+The 60-second dispatch interval and mail-server latency mean delivery is not an
+exact-to-the-second guarantee. Inspect recent delivery states in the region UI.
+External SMTP acceptance and inbox delivery require separate live verification.
+
+Large historical Solcast downloads remain local and ignored under `docs/json_*.json`;
+they are not frontend assets or routine test fixtures.
+
+## Backend operations and API
 
 All tenant routes require membership in the path's tenant; request bodies cannot
 choose ownership or approval status. Create tenant memberships through trusted

@@ -3,6 +3,7 @@ from drf_spectacular.views import SpectacularAPIView
 from rest_framework.permissions import IsAuthenticated
 
 from pyracast.admin import site
+from pyracast.api.session import SessionLoginView, SessionLogoutView, SessionView
 from pyracast.api.views import (
     AccountView,
     ApproveView,
@@ -20,6 +21,10 @@ urlpatterns = [
     path("admin/", site.urls),
     path("auth/", include("rest_framework.urls")),
     path("api/schema/", SpectacularAPIView.as_view(permission_classes=[IsAuthenticated])),
+    path("api/session/", SessionView.as_view()),
+    path("api/session/login/", SessionLoginView.as_view()),
+    path("api/session/logout/", SessionLogoutView.as_view()),
+    path("api/", include("pyracast.notifications.urls")),
     path("api/tenants/", TenantsView.as_view()),
     path("api/tenants/<int:tenant_id>/regions/", RegionsView.as_view()),
     path("api/tenants/<int:tenant_id>/regions/<int:region_id>/", RegionView.as_view()),

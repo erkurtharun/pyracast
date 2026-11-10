@@ -1,0 +1,85 @@
+import os
+import shutil
+import subprocess
+from pathlib import Path
+from typing import Any
+
+import pytest
+from django.contrib.auth.models import User
+from django.test import override_settings
+from django.utils import timezone
+
+from pyracast.accounts.models import Membership, Tenant
+from pyracast.calculation import calculate
+from pyracast.connections.operations import validate_binding
+from pyracast.forecasts.jobs import collect
+from pyracast.notifications.models import ReminderPreference
+from pyracast.plants.models import Plant
+from pyracast.providers import FixtureProvider
+from pyracast.regions.operations import approve_region, submit_region
+from tests.test_domain import FakeAdapter, make_system
+
+pytestmark = [
+    pytest.mark.django_db(transaction=True),
+    pytest.mark.skipif(
+        os.environ.get("PYRACAST_BROWSER_TEST") != "1",
+        reason="requires PYRACAST_BROWSER_TEST=1, Node dependencies, and Playwright Chromium",
+    ),
+]
+
+
+def test_browser_against_live_django(live_server: Any) -> None:
+    npm = shutil.which("npm.cmd" if os.name == "nt" else "npm")
+    assert npm is not None, "Node and npm are required for the browser integration test"
+    system = make_system()
+    password = "browser-test-" + "x" * 40
+    system.member.set_password(password)
+    system.member.email = "member@example.com"
+    system.member.save(update_fields=["password", "email"])
+    now = timezone.now()
+    validate_binding(system.admin, system.binding.pk, FakeAdapter(), now)
+    job = approve_region(system.admin, system.region.pk, system.binding.pk, now)
+    assert collect(job.pk, FixtureProvider(), calculate, timezone.now())
+
+    outsider = User.objects.create_user(username="other")
+    other_tenant = Tenant.objects.create(name="Other")
+    Membership.objects.create(user=outsider, tenant=other_tenant)
+    other_region = submit_region(
+        outsider,
+        other_tenant.pk,
+        name="Private",
+        latitude=40,
+        longitude=29,
+        timezone="Europe/Istanbul",
+    )
+    env = os.environ | {
+        "DJANGO_API_ORIGIN": live_server.url,
+        "BROWSER_USERNAME": system.member.username,
+        "BROWSER_PASSWORD": password,
+        "BROWSER_DATE": job.target_date.isoformat(),
+        "BROWSER_OTHER_TENANT": str(other_tenant.pk),
+        "BROWSER_OTHER_REGION": str(other_region.pk),
+    }
+    with override_settings(
+        CSRF_TRUSTED_ORIGINS=["http://127.0.0.1:3101"],
+        SESSION_COOKIE_SECURE=False,
+        CSRF_COOKIE_SECURE=False,
+        SECURE_SSL_REDIRECT=False,
+    ):
+        subprocess.run(  # noqa: S603 -- npm is resolved locally and arguments are fixed.
+            [npm, "run", "test:integration", "--prefix", "web"],
+            cwd=Path(__file__).resolve().parent.parent,
+            env=env,
+            check=True,
+            timeout=180,
+        )
+    plant = Plant.objects.select_related("current_configuration").get(
+        region=system.region, name="Browser plant"
+    )
+    assert plant.current_configuration is not None
+    assert plant.current_configuration.dc_capacity_mw == 130
+    assert plant.current_configuration.export_limit_mw == 100
+    reminder = ReminderPreference.objects.get(user=system.member, region=system.region)
+    assert reminder.enabled
+    assert reminder.email == ""
+    assert reminder.times == ["10:00"]

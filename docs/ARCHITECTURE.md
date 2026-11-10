@@ -1,8 +1,8 @@
-# Backend plan
+# Application architecture
 
 ## Outcome
 
-Build a multi-tenant backend where customers request regions, a platform administrator links authorized Solcast accounts and approves them, and scheduled jobs publish tomorrow's irradiance and daily energy estimates. Plants belong to regions and expose electrical generation at 30-minute or hourly resolution, including capacity limits and optional calibration against metered production. The customer frontend is separate; provide its API and a minimal internal admin interface.
+Build a multi-tenant application where customers request regions, a platform administrator links authorized Solcast accounts and approves them, and scheduled jobs publish tomorrow's irradiance and daily energy estimates. Plants belong to regions and expose electrical generation at 30-minute or hourly resolution, including capacity limits and optional calibration against metered production. The Next.js/TypeScript customer frontend lives in `web/` in this repository and runs separately from the Django API and internal admin interface.
 
 Use only provider accounts authorized for this service. Solcast account creation remains an operator task outside this backend. Implement fixtures so development does not depend on credentials or live API calls.
 
@@ -11,6 +11,7 @@ Use only provider accounts authorized for this service. Solcast account creation
 - CPython **3.15.2**, Django, Django REST Framework, PostgreSQL and pvlib.
 - Dramatiq with RabbitMQ is the initial worker implementation for native Windows/Ubuntu operation. Keep tasks thin so a verified better executor can replace it.
 - One repository, with API, worker and scheduler/dispatcher as separate processes. Keep PostgreSQL as the durable source of truth.
+- Keep frontend dependencies and their npm lockfile inside `web/`. Use Node LTS, the Next.js App Router, strict TypeScript and API types generated from the backend OpenAPI schema. Reuse the adjacent web platform's contract and verification practices without its unrelated services or deployment machinery.
 - API, numerical core and worker must run on Windows x64 and Ubuntu x64. PostgreSQL and RabbitMQ may be local services, remote services or Docker Compose dependencies. Full-stack containers are an additional deployment option.
 - Use portable Python entry points, `pathlib`, UTF-8, timezone-aware dates and an explicit `tzdata` dependency. Correctness must not depend on Bash, cron, Unix signals, `fork`, or development reload/watch features.
 
@@ -34,6 +35,7 @@ Use conventional Django apps for accounts, regions, provider connections, foreca
 | ProductionObservation | Interval energy, quality, source, configuration and recording time |
 | CalibrationRun, CalibrationActivation | Durable fit, reproducible dataset, held-out evaluation and explicit activation history |
 | PlantForecast, PlantEvent | Immutable electrical result and audited plant operations |
+| ReminderPreference, NotificationDelivery | Per-user region email schedules, pinned saved forecasts and durable delivery outcomes |
 | AuditEvent | Actor, action, target and timestamp for privileged changes |
 
 Initially each region uses a separately configured provider account. Keep the relationship explicit rather than embedding a credential in the region. Enforce one canonical record per provider account across tenants and credential rotations; duplicate records must not create independent quota budgets.
@@ -63,6 +65,8 @@ Keep approval (`pending`, `approved`, `rejected`, `suspended`), connection healt
 
 Provide authenticated region submission/list/detail, platform-admin connection validation and approve/reject/suspend actions, and dated forecast retrieval. Generate OpenAPI; use explicit units, bounded date ranges, pagination and stable error codes. Approval transitions are operations, not writable status fields.
 
+Serve the frontend and `/api/` through one origin. Django owns authentication and authorization; JSON session endpoints enforce CSRF even before login. Keep sessions in HttpOnly cookies and API responses private and non-cacheable. The frontend reads stored results and never handles provider credentials. Forwarded HTTPS headers are trusted only when explicitly enabled behind a private, trusted proxy. Rate-limit authentication at the deployment ingress.
+
 Plant operations use the same tenant membership boundary. Configuration revisions pin the approved reference binding and distinguish DC nameplate, inverter AC capacity, grid export limit and the measurement point (`net_export` or `ac_generation`). Unknown capacities remain null. Changing the configuration supersedes pending calibration work; it does not rewrite historical forecasts or observations.
 
 Import completed 30/60-minute energy observations in explicit MWh or kWh, with timezone-aware bounds and quality labels. Exact replays are idempotent; conflicting or overlapping records reject the entire batch. PostgreSQL exclusion constraints enforce non-overlap, requiring the `btree_gist` extension. An import contains at most 2,000 rows; larger histories use multiple batches. Observations are immutable in this version; corrections need an explicit replacement-history design before they can be supported safely.
@@ -81,6 +85,14 @@ Implement in this order:
 6. Plant configuration, clipped interval generation, metered-production import, offline calibration, explicit activation/rollback and forecast provenance.
 
 Acceptance: a second tenant cannot access the first tenant's records; concurrent approvals/jobs preserve invariants; retries respect quota; restart/redelivery does not duplicate results; invalid secrets remain private; incomplete days are not reported as zero; both OS environments pass the implemented flows. Without live credentials or matched labels, finish the fixture-backed system and identify the unverified integration/accuracy boundary.
+
+## Saved-forecast email reminders
+
+Each member can configure daily local `HH:MM` times for an approved region, with one optional recipient override for that region. Otherwise use the member's default account email. The current provider plan's daily request limit also caps daily reminder times; this is a product limit, not a quota reservation. Emails make **zero provider requests** and do not consume the request ledger. A reduced plan limit retains only the earliest configured times within the current limit.
+
+The dispatcher pins the latest current-binding forecast acquired and published at or before the scheduled time, along with the recipient. Never substitute a later acquisition after a delayed dispatch. Email contains today's and tomorrow's irradiance summaries, completeness, units, source age and an interval CSV; incident energy is distinct from plant electricity. An age over 24 hours is labeled stale, not silently corrected. Missing saved data is an explicit unavailable outcome.
+
+Use region IANA timezones, skip nonexistent DST times and use the first occurrence of repeated times. Catch up at most two hours; older missed slots are recorded without sending a backlog. Unique database slots and a separate notification queue prevent concurrent duplicate sends. Recheck membership, approval, preferences, the current recipient and binding revisions before sending. A changed recipient cancels pending delivery rather than sending to the old address. A known non-send may retry three times; ambiguous SMTP acceptance or interrupted sending becomes `uncertain` without automatic retry. SMTP acceptance does not prove inbox delivery. Provider/mail errors never expose credentials.
 
 ## Primary references
 

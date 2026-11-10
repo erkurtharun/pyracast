@@ -89,6 +89,53 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  web:
+    name: Web (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 55432
+      PGUSER: pyracast
+      PGDATABASE: pyracast
+      PYRACAST_SECRET_KEY: ci-only-key-not-for-deployment
+      PYRACAST_BROWSER_TEST: '1'
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: 0.13.7
+          enable-cache: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.13.0
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: uv sync --locked --no-build
+      - run: uv run --locked --no-sync --no-build python scripts/start_postgres.py
+      - run: npm ci
+        working-directory: web
+      - run: npx --no-install playwright install --with-deps chromium
+        working-directory: web
+      - name: Verify API schema and generated types
+        run: |
+          uv run --locked pyracast spectacular --validate --fail-on-warn --format openapi-json --file web/openapi.json
+          npm --prefix web run api:generate
+          git diff --exit-code -- web/openapi.json web/src/lib/schema.d.ts
+      - run: npm run check
+        working-directory: web
+      - run: npm audit --audit-level=low
+        working-directory: web
+      - name: Exercise browser against Django and PostgreSQL
+        run: uv run --locked python -m pytest tests/test_browser.py -n 1 --no-cov
+
   scientific:
     name: Scientific (${{ matrix.os }})
     strategy:
