@@ -139,6 +139,8 @@ def _payload(
             flags.append("historical_configuration_assumed")
     if calibration is None:
         flags.append("uncalibrated")
+    elif calibration.result.get("provisional_production"):
+        flags.append("provisional_production_calibration")
     if power_limit(configuration) is None:
         flags.append("output_limit_unknown")
     result["quality_flags"] = flags

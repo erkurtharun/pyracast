@@ -1,4 +1,5 @@
 from datetime import date, datetime, time, timedelta
+from math import isfinite
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
@@ -59,6 +60,8 @@ class EpiasSnapshotOutput(serializers.Serializer[Any]):
 
 
 class EpiasReadingOutput(serializers.Serializer[Any]):
+    source_kind = serializers.ChoiceField(choices=SOURCES, allow_null=True)
+    snapshot_id = serializers.IntegerField(allow_null=True)
     provider_timestamp = serializers.DateTimeField(allow_null=True)
     period_start = serializers.DateTimeField()
     period_end = serializers.DateTimeField()
@@ -71,11 +74,13 @@ class EpiasHistoryOutput(serializers.Serializer[Any]):
     date = serializers.DateField()
     timezone = serializers.CharField()
     unit = serializers.CharField()
-    source_kind = serializers.ChoiceField(choices=SOURCES, allow_null=True)
+    source_kind = serializers.ChoiceField(choices=(*SOURCES, "mixed"), allow_null=True)
+    complete = serializers.BooleanField()
     available_sources = serializers.ListField(child=serializers.ChoiceField(choices=SOURCES))
     calibration_eligible = serializers.BooleanField()
     calibration_blocker = serializers.CharField(allow_null=True)
     snapshot = EpiasSnapshotOutput(allow_null=True)
+    source_snapshots = EpiasSnapshotOutput(many=True)
     readings = EpiasReadingOutput(many=True)
 
 
@@ -90,6 +95,8 @@ def _intervals(snapshot: EpiasSnapshot | None, day: date) -> list[dict[str, obje
         reading = indexed.get(start)
         rows.append(
             {
+                "source_kind": snapshot.source_kind if reading else None,
+                "snapshot_id": snapshot.pk if reading else None,
                 "provider_timestamp": reading["provider_timestamp"] if reading else None,
                 "period_start": start,
                 "period_end": start + timedelta(hours=1),
@@ -101,11 +108,54 @@ def _intervals(snapshot: EpiasSnapshot | None, day: date) -> list[dict[str, obje
     return rows
 
 
-def _calibration_blocker(plant: Plant, snapshot: EpiasSnapshot | None) -> str | None:
-    if snapshot is None or not snapshot.readings:
-        return "production_unavailable"
-    if snapshot.source_kind != "settlement_injection":
-        return "provisional_production"
+def _valid_energy(row: dict[str, object]) -> bool:
+    value = row["total_mwh"]
+    if value is None:
+        return False
+    try:
+        energy = float(str(value))
+    except TypeError, ValueError, OverflowError:
+        return False
+    return isfinite(energy) and energy >= 0
+
+
+def _automatic_intervals(
+    by_source: dict[str, EpiasSnapshot], day: date
+) -> tuple[list[dict[str, object]], list[EpiasSnapshot]]:
+    candidates = [
+        (snapshot, _intervals(snapshot, day))
+        for source in reversed(SOURCES)
+        if (snapshot := by_source.get(source)) is not None and snapshot.readings
+    ]
+    if not candidates:
+        return [], []
+    rows = []
+    used: set[int] = set()
+    for hour in range(24):
+        for snapshot, intervals in candidates:
+            row = intervals[hour]
+            if _valid_energy(row):
+                rows.append(row)
+                used.add(snapshot.pk)
+                break
+        else:
+            missing = next(
+                (intervals[hour] for _, intervals in candidates if intervals[hour]["reported"]),
+                candidates[0][1][hour],
+            )
+            rows.append(
+                {
+                    **missing,
+                    "total_mwh": None,
+                    "sun_mwh": None,
+                    "source_kind": None,
+                    "snapshot_id": None,
+                }
+            )
+    return rows, [snapshot for snapshot, _ in candidates if snapshot.pk in used]
+
+
+def _calibration_blocker(plant: Plant, snapshot: EpiasSnapshot) -> str | None:
     configuration = plant.current_configuration
     if configuration is None or snapshot.configuration_id != configuration.pk:
         return "configuration_mismatch"
@@ -168,18 +218,40 @@ class EpiasHistoryView(ScopedView):
         ]
         selected = query.validated_data["data_source"]
         if selected == "auto":
-            selected = next((source for source in reversed(SOURCES) if source in available), None)
-        snapshot = by_source.get(selected)
-        blocker = _calibration_blocker(plant, snapshot)
+            readings, used_snapshots = _automatic_intervals(by_source, day)
+            snapshot = used_snapshots[0] if used_snapshots else None
+            selected = (
+                "mixed"
+                if len(used_snapshots) > 1
+                else (snapshot.source_kind if snapshot is not None else None)
+            )
+        else:
+            snapshot = by_source.get(selected)
+            readings = _intervals(snapshot, day)
+            used_snapshots = (
+                [snapshot]
+                if snapshot is not None and any(_valid_energy(row) for row in readings)
+                else []
+            )
+        blocker = next(
+            (
+                reason
+                for source_snapshot in used_snapshots
+                if (reason := _calibration_blocker(plant, source_snapshot)) is not None
+            ),
+            None if used_snapshots else "production_unavailable",
+        )
         result = {
             "date": day,
             "timezone": "Europe/Istanbul",
             "unit": "MWh",
             "source_kind": selected,
+            "complete": len(readings) == 24 and all(_valid_energy(row) for row in readings),
             "available_sources": available,
             "calibration_eligible": blocker is None,
             "calibration_blocker": blocker,
             "snapshot": snapshot,
-            "readings": _intervals(snapshot, day),
+            "source_snapshots": used_snapshots,
+            "readings": readings,
         }
         return Response(EpiasHistoryOutput(result).data)

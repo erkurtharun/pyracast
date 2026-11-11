@@ -63,9 +63,10 @@ export function EpiasProduction({
                 <summary>Sources and calibration eligibility</summary>
                 <p className="fine">
                     Automatic selection prefers settlement injection (UEVM),
-                    then provisional reported production. Only UEVM matching net
-                    export can enter calibration. Disconnecting collection
-                    retains the archive.
+                    then provisional reported production. Reported production
+                    can support provisional calibration; UEVM matching net
+                    export is preferred. Disconnecting collection retains the
+                    archive.
                 </p>
             </details>
             {error && <Notice error>{error}</Notice>}
@@ -301,10 +302,9 @@ export function EpiasProduction({
 const sourceLabels: Record<string, string> = {
     realtime_generation: "Reported production (provisional)",
     settlement_injection: "Settlement injection (UEVM)",
+    mixed: "Combined production",
 };
 const blockers: Record<string, string> = {
-    provisional_production:
-        "Provisional reported production is excluded from calibration. Use settlement injection (UEVM).",
     configuration_unavailable:
         "No plant configuration is available for calibration.",
     configuration_mismatch:
@@ -331,6 +331,11 @@ function EpiasArchive({
     );
     const selectedHistory = history.data;
     const rows = selectedHistory?.readings ?? [];
+    const snapshots = selectedHistory?.source_snapshots?.length
+        ? selectedHistory.source_snapshots
+        : selectedHistory?.snapshot
+          ? [selectedHistory.snapshot]
+          : [];
     const positiveRows = dataIntervalRange(
         rows,
         (row) => row.energy_mwh !== null && row.energy_mwh > 0,
@@ -339,7 +344,7 @@ function EpiasArchive({
         ? positiveRows
         : dataIntervalRange(rows, (row) => row.energy_mwh !== null);
     const total =
-        selectedHistory?.snapshot?.complete &&
+        (selectedHistory?.complete ?? selectedHistory?.snapshot?.complete) &&
         rows.every((row) => row.energy_mwh !== null)
             ? rows.reduce((sum, row) => sum + (row.energy_mwh ?? 0), 0)
             : null;
@@ -368,28 +373,40 @@ function EpiasArchive({
                     />
                     <details>
                         <summary>Acquisition details</summary>
-                        <p className="fine">
-                            Collected{" "}
-                            {new Date(
-                                selectedHistory.snapshot.collected_at,
-                            ).toLocaleString()}
-                            {" - Published "}
-                            {new Date(
-                                selectedHistory.snapshot.available_at,
-                            ).toLocaleString()}
-                        </p>
-                        <p className="fine">
-                            Acquisition #{selectedHistory.snapshot.id} - Policy:{" "}
-                            {selectedHistory.snapshot.normalization_policy}
-                        </p>
-                        <p className="fine">
-                            Payload digest:{" "}
-                            {selectedHistory.snapshot.content_sha256}
-                        </p>
+                        {snapshots.map((snapshot) => (
+                            <div key={snapshot.id}>
+                                <p className="fine">
+                                    {sourceLabels[snapshot.source_kind] ??
+                                        snapshot.source_kind}{" "}
+                                    - Collected{" "}
+                                    {new Date(
+                                        snapshot.collected_at,
+                                    ).toLocaleString()}
+                                    {" - Published "}
+                                    {new Date(
+                                        snapshot.available_at,
+                                    ).toLocaleString()}
+                                </p>
+                                <p className="fine">
+                                    Acquisition #{snapshot.id} - Policy:{" "}
+                                    {snapshot.normalization_policy}
+                                </p>
+                                <p className="fine">
+                                    Payload digest: {snapshot.content_sha256}
+                                </p>
+                            </div>
+                        ))}
                     </details>
                     <Notice>
+                        {(selectedHistory.source_kind ===
+                            "realtime_generation" ||
+                            rows.some(
+                                (row) =>
+                                    row.source_kind === "realtime_generation",
+                            )) &&
+                            "Reported production is provisional and may differ from net export. Settlement injection (UEVM) is preferred. "}
                         {selectedHistory.calibration_eligible
-                            ? "Settlement injection is eligible for calibration when valid interval coverage is complete."
+                            ? "Eligible for calibration when valid interval coverage is complete."
                             : (blockers[
                                   selectedHistory.calibration_blocker ?? ""
                               ] ??
@@ -445,6 +462,16 @@ function EpiasArchive({
                                         <td>
                                             {time(row.period_start)}–
                                             {time(row.period_end)}
+                                            {selectedHistory.source_kind ===
+                                                "mixed" &&
+                                                row.source_kind && (
+                                                    <div className="fine">
+                                                        {row.source_kind ===
+                                                        "settlement_injection"
+                                                            ? "UEVM"
+                                                            : "Provisional"}
+                                                    </div>
+                                                )}
                                         </td>
                                         <td>
                                             {row.energy_mwh === null

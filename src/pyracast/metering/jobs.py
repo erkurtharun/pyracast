@@ -246,11 +246,7 @@ def _publish(lease: EpiasLease, data: EpiasDay, now: datetime) -> bool:
         job.lease_token = None
         job.lease_expires_at = None
         job.save()
-        if (
-            job.source_kind == "settlement_injection"
-            and job.status in {"succeeded", "awaiting_publication"}
-            and data.readings
-        ):
+        if job.status != "superseded":
             from pyracast.plants.preparation import prepare_calibration
 
             prepare_calibration(job.connection.plant_id)

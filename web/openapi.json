@@ -3444,12 +3444,15 @@
                         "nullable": true,
                         "oneOf": [
                             {
-                                "$ref": "#/components/schemas/EpiasSourceKindEnum"
+                                "$ref": "#/components/schemas/EpiasHistoryOutputSourceKindEnum"
                             },
                             {
                                 "$ref": "#/components/schemas/NullEnum"
                             }
                         ]
+                    },
+                    "complete": {
+                        "type": "boolean"
                     },
                     "available_sources": {
                         "type": "array",
@@ -3472,6 +3475,12 @@
                         ],
                         "nullable": true
                     },
+                    "source_snapshots": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/EpiasSnapshotOutput"
+                        }
+                    },
                     "readings": {
                         "type": "array",
                         "items": {
@@ -3483,17 +3492,43 @@
                     "available_sources",
                     "calibration_blocker",
                     "calibration_eligible",
+                    "complete",
                     "date",
                     "readings",
                     "snapshot",
                     "source_kind",
+                    "source_snapshots",
                     "timezone",
                     "unit"
                 ]
             },
+            "EpiasHistoryOutputSourceKindEnum": {
+                "enum": [
+                    "realtime_generation",
+                    "settlement_injection",
+                    "mixed"
+                ],
+                "type": "string",
+                "description": "* `realtime_generation` - realtime_generation\n* `settlement_injection` - settlement_injection\n* `mixed` - mixed"
+            },
             "EpiasReadingOutput": {
                 "type": "object",
                 "properties": {
+                    "source_kind": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/EpiasSourceKindEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "snapshot_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
                     "provider_timestamp": {
                         "type": "string",
                         "format": "date-time",
@@ -3527,7 +3562,9 @@
                     "period_start",
                     "provider_timestamp",
                     "reported",
-                    "solar_mwh"
+                    "snapshot_id",
+                    "solar_mwh",
+                    "source_kind"
                 ]
             },
             "EpiasSnapshotOutput": {

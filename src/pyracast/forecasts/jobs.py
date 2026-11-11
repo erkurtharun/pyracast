@@ -237,6 +237,16 @@ def publish(
         job.lease_token = None
         job.lease_expires_at = None
         job.save(update_fields=("status", "last_error", "lease_token", "lease_expires_at"))
+        if job.status == "succeeded" and job.endpoint == "estimated_actuals":
+            from pyracast.plants.models import Plant
+            from pyracast.plants.preparation import prepare_calibration
+
+            for plant_id in Plant.objects.filter(
+                region_id=binding.region_id,
+                deleted_at__isnull=True,
+                current_configuration__binding=binding,
+            ).values_list("pk", flat=True):
+                prepare_calibration(plant_id, now)
         return job.status == "succeeded"
 
 

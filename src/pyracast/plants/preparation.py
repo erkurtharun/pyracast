@@ -10,6 +10,7 @@ from pyracast.forecasts.jobs import binding_is_current
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasConnection
 from pyracast.plants.availability import reference_intervals
+from pyracast.plants.measurement_policy import MEASUREMENT_POLICY
 from pyracast.plants.measurements import (
     Measurement,
     latest_measurement_day,
@@ -161,7 +162,8 @@ def prepare_calibration(plant_id: int, now: datetime | None = None) -> Calibrati
             window_end=days[-1],
             cutoff_at=moment,
             observation_id_cutoff=watermark,
-            settlement_snapshot_ids=snapshot_ids,
+            production_snapshot_ids=snapshot_ids,
+            measurement_selection_policy=MEASUREMENT_POLICY,
             reference_snapshot_ids=reference_ids,
             incident_revision_ids=incidents,
             input_fingerprint=fingerprint,

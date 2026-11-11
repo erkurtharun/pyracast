@@ -513,7 +513,20 @@ function Calibrations({
                                         <td>
                                             <Tag>{run.status}</Tag>
                                         </td>
-                                        <td>{run.assessment}</td>
+                                        <td>
+                                            {run.assessment}{" "}
+                                            {(
+                                                run.result as Record<
+                                                    string,
+                                                    unknown
+                                                > | null
+                                            )?.provisional_production ===
+                                                true && (
+                                                <Tag tone="warning">
+                                                    Provisional production
+                                                </Tag>
+                                            )}
+                                        </td>
                                         <td>{run.factor ?? "—"}</td>
                                         <td>
                                             <button
@@ -564,7 +577,19 @@ function Calibrations({
                     <div className="calibration-detail">
                         <div className="section-heading">
                             <h3>Calibration #{selected.id}</h3>
-                            <Tag>{selected.status}</Tag>
+                            <div className="tags">
+                                <Tag>{selected.status}</Tag>
+                                {(
+                                    selected.result as Record<
+                                        string,
+                                        unknown
+                                    > | null
+                                )?.provisional_production === true && (
+                                    <Tag tone="warning">
+                                        Provisional production
+                                    </Tag>
+                                )}
+                            </div>
                         </div>
                         <p>
                             Assessment: {selected.assessment}. Factor:{" "}

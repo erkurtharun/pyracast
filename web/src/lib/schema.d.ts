@@ -792,14 +792,25 @@ export interface components {
             date: string;
             timezone: string;
             unit: string;
-            source_kind: (components["schemas"]["EpiasSourceKindEnum"] | components["schemas"]["NullEnum"]) | null;
+            source_kind: (components["schemas"]["EpiasHistoryOutputSourceKindEnum"] | components["schemas"]["NullEnum"]) | null;
+            complete: boolean;
             available_sources: components["schemas"]["EpiasSourceKindEnum"][];
             calibration_eligible: boolean;
             calibration_blocker: string | null;
             snapshot: components["schemas"]["EpiasSnapshotOutput"] | null;
+            source_snapshots: components["schemas"]["EpiasSnapshotOutput"][];
             readings: components["schemas"]["EpiasReadingOutput"][];
         };
+        /**
+         * @description * `realtime_generation` - realtime_generation
+         *     * `settlement_injection` - settlement_injection
+         *     * `mixed` - mixed
+         * @enum {string}
+         */
+        EpiasHistoryOutputSourceKindEnum: "realtime_generation" | "settlement_injection" | "mixed";
         EpiasReadingOutput: {
+            source_kind: (components["schemas"]["EpiasSourceKindEnum"] | components["schemas"]["NullEnum"]) | null;
+            snapshot_id: number | null;
             /** Format: date-time */
             provider_timestamp: string | null;
             /** Format: date-time */

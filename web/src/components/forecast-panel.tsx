@@ -172,6 +172,14 @@ export function ForecastPanel({
                     <Tag>{forecast.freshness}</Tag>
                     {Array.isArray(result.quality_flags) &&
                         result.quality_flags.includes(
+                            "provisional_production_calibration",
+                        ) && (
+                            <Tag tone="warning">
+                                Provisional production calibration
+                            </Tag>
+                        )}
+                    {Array.isArray(result.quality_flags) &&
+                        result.quality_flags.includes(
                             "unvalidated_reference_transfer",
                         ) && <Tag tone="warning">Needs validation</Tag>}
                 </div>

@@ -90,21 +90,28 @@ ownership/configuration before publishing. Disconnect stops future collection an
 retains the archive. Definition deletion uses the existing recycle-bin lifecycle.
 
 The plant's **Automatic production** tab keeps provisional reported production and
-settlement injection selectable separately. Automatic selection prefers available
-UEVM, falling back to reported production with its provisional label. Preserve
+settlement injection selectable separately. Automatic selection prefers valid
+UEVM values hour by hour, falling back to the latest reported-production acquisition
+with its provisional label. Preserve
 native hourly labels, MWh, missing values, collection/publication times and a
 payload digest. Policy `hour-start-istanbul-v1` treats 10:00 as [10:00, 11:00).
 Missing provider rows have null values and an explicit `reported: false` flag.
 Latest revisions never fill their missing hours from older acquisitions.
 
-Only UEVM can supplement manual measurements in net-export calibration and
-forecast-performance evaluation. Manual measurements of any quality override an
-overlapping whole UEVM hour; never split that hour into invented half-hours or
+Net-export calibration selects manual observations, then valid UEVM hours, then
+provisional reported-production hours. The latter are explicitly labeled proxies;
+they do not establish the meter boundary. Forecast-performance evaluation remains
+limited to manual observations and UEVM. Manual measurements of any quality override an
+overlapping whole provider hour; never split that hour into invented half-hours or
 replace an outage label with provider data. Keep source snapshots separate from
 manual observations. Pin measurement and reference snapshot IDs when requesting
 calibration, and reject publication or activation after the plant's source identity
-changes. Content fingerprints prevent unchanged acquisitions from repeatedly
-requesting the same fit. Source suitability does not bypass matched weather,
+changes. Pin the measurement-selection policy as well as both production source
+kinds. Existing runs retain their settlement-only policy. Content fingerprints
+prevent unchanged acquisitions from repeatedly requesting the same fit; an RT-to-UEVM
+source change prepares a new candidate even when the energy values match. Publication
+of either production or Solcast estimated actuals checks for newly matched data.
+Source suitability does not bypass matched weather,
 daylight coverage or statistical acceptance requirements.
 
 Read-only interval tables show the first through last positive value, retaining

@@ -6,6 +6,8 @@ from django.contrib.postgres.fields import DateTimeRangeField, RangeBoundary, Ra
 from django.db import models
 from django.db.models import F, Q
 
+from pyracast.plants.measurement_policy import MEASUREMENT_POLICY
+
 
 class TsTzRange(models.Func):
     function = "TSTZRANGE"
@@ -141,7 +143,8 @@ class CalibrationRun(models.Model):
     window_end = models.DateField()
     cutoff_at = models.DateTimeField()
     observation_id_cutoff = models.PositiveBigIntegerField(null=True)
-    settlement_snapshot_ids = models.JSONField(default=list)
+    production_snapshot_ids = models.JSONField(default=list)
+    measurement_selection_policy = models.CharField(max_length=80, default=MEASUREMENT_POLICY)
     reference_snapshot_ids = models.JSONField(null=True, default=None)
     incident_revision_ids = models.JSONField(default=list)
     input_fingerprint = models.CharField(max_length=64, default="")

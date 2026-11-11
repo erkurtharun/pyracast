@@ -6,16 +6,28 @@ from math import isfinite
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from django.db.models import QuerySet
+from django.db.models import Q, QuerySet
 
 from pyracast.epias import TIMEZONE
 from pyracast.forecasts.history import select_actual_snapshot
 from pyracast.incidents.operations import pinned_incidents, select_incidents
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasConnection, EpiasSnapshot
+from pyracast.plants.measurement_policy import (
+    LEGACY_MEASUREMENT_POLICY as LEGACY_MEASUREMENT_POLICY,
+)
+from pyracast.plants.measurement_policy import (
+    MEASUREMENT_POLICY as MEASUREMENT_POLICY,
+)
 from pyracast.plants.models import CalibrationRun, PlantConfiguration, ProductionObservation
 
-MEASUREMENT_POLICY = "manual-over-settlement-hour-v1"
+
+def _source_kinds(policy: str) -> tuple[str, ...]:
+    if policy == LEGACY_MEASUREMENT_POLICY:
+        return ("settlement_injection",)
+    if policy == MEASUREMENT_POLICY:
+        return ("settlement_injection", "realtime_generation")
+    raise ValueError("Unknown measurement selection policy")
 
 
 @dataclass(frozen=True)
@@ -30,30 +42,31 @@ class Measurement:
     snapshot: EpiasSnapshot | None = None
 
 
-def _current_settlement(
-    configuration: PlantConfiguration, cutoff: datetime
+def _current_production(
+    configuration: PlantConfiguration, cutoff: datetime, policy: str
 ) -> QuerySet[EpiasSnapshot]:
     connection = EpiasConnection.objects.filter(
         plant_id=configuration.plant_id, enabled=True
     ).first()
     query = EpiasSnapshot.objects.filter(
         configuration=configuration,
-        source_kind="settlement_injection",
-        job__source_kind="settlement_injection",
+        source_kind__in=_source_kinds(policy),
         available_at__lte=cutoff,
         collected_at__lte=cutoff,
     )
-    if (
-        configuration.measurement_basis != "net_export"
-        or connection is None
-        or connection.settlement_plant_id is None
-    ):
+    if configuration.measurement_basis != "net_export" or connection is None:
         return query.none()
+    identities = Q(
+        source_kind="realtime_generation", provider_plant__id=connection.provider_plant_id
+    )
+    if connection.settlement_plant_id is not None:
+        identities |= Q(
+            source_kind="settlement_injection", provider_plant__id=connection.settlement_plant_id
+        )
     return query.filter(
         connection=connection,
-        provider_plant__id=connection.settlement_plant_id,
         provider_plant__eic=connection.eic,
-    )
+    ).filter(identities)
 
 
 def latest_measurement_day(
@@ -61,6 +74,8 @@ def latest_measurement_day(
     completed_before: datetime,
     cutoff: datetime,
     observation_id_cutoff: int,
+    *,
+    policy: str = MEASUREMENT_POLICY,
 ) -> date | None:
     zone = ZoneInfo(configuration.binding.timezone)
     last_manual = (
@@ -80,7 +95,7 @@ def latest_measurement_day(
         else None
     )
     days = (
-        _current_settlement(configuration, cutoff)
+        _current_production(configuration, cutoff, policy)
         .filter(
             target_day__lte=(completed_before - timedelta(microseconds=1))
             .astimezone(TIMEZONE)
@@ -102,7 +117,12 @@ def latest_measurement_day(
             start, end = local_day_bounds(day, configuration.binding.timezone)
             if day not in seen and end <= completed_before:
                 rows, _ = select_measurements(
-                    configuration, start, end, cutoff, observation_id_cutoff=observation_id_cutoff
+                    configuration,
+                    start,
+                    end,
+                    cutoff,
+                    observation_id_cutoff=observation_id_cutoff,
+                    policy=policy,
                 )
                 if rows:
                     return day
@@ -118,80 +138,63 @@ def select_measurements(
     cutoff: datetime,
     *,
     observation_id_cutoff: int | None = None,
-    settlement_snapshot_ids: list[int] | None = None,
+    production_snapshot_ids: list[int] | None = None,
     incident_revision_ids: list[int] | None = None,
+    policy: str = MEASUREMENT_POLICY,
 ) -> tuple[list[Measurement], list[int]]:
+    kinds = _source_kinds(policy)
     manual = ProductionObservation.objects.filter(
         configuration=configuration,
-        starts_at__gte=start,
-        ends_at__lte=end,
+        starts_at__lt=end,
+        ends_at__gt=start,
         recorded_at__lte=cutoff,
     )
     manual = manual.filter(ends_at__lte=cutoff)
     if observation_id_cutoff is not None:
         manual = manual.filter(pk__lte=observation_id_cutoff)
+    overlapping_manual = list(manual)
     rows = [
         Measurement(r.starts_at, r.ends_at, r.energy_mwh, r.quality, r.source, r.pk, r.recorded_at)
-        for r in manual
+        for r in overlapping_manual
+        if r.starts_at >= start and r.ends_at <= end
     ]
-    if settlement_snapshot_ids is None:
-        snapshots = _current_settlement(configuration, cutoff)
+    if production_snapshot_ids is None:
+        snapshots = _current_production(configuration, cutoff, policy)
     else:
         snapshots = EpiasSnapshot.objects.filter(
             configuration=configuration,
-            source_kind="settlement_injection",
+            source_kind__in=kinds,
             available_at__lte=cutoff,
             collected_at__lte=cutoff,
-            pk__in=settlement_snapshot_ids,
+            pk__in=production_snapshot_ids,
         )
     snapshots = (
         snapshots.filter(
             target_day__gte=start.astimezone(TIMEZONE).date(),
             target_day__lte=(end - timedelta(microseconds=1)).astimezone(TIMEZONE).date(),
         )
-        .order_by("target_day", "-collected_at", "-available_at", "-pk")
-        .distinct("target_day")
+        .order_by("target_day", "source_kind", "-collected_at", "-available_at", "-pk")
+        .distinct("target_day", "source_kind")
     )
-    selected = list(snapshots)
+    selected = sorted(
+        snapshots.select_related("job"), key=lambda snapshot: kinds.index(snapshot.source_kind)
+    )
+    provider_rows: dict[datetime, Measurement] = {}
     for snapshot in selected:
-        for reading in snapshot.readings:
-            if not isinstance(reading, dict) or reading.get("total_mwh") is None:
-                continue
-            try:
-                begin = datetime.fromisoformat(reading["period_start"])
-                finish = datetime.fromisoformat(reading["period_end"])
-                energy = float(reading["total_mwh"])
-            except ValueError, TypeError, KeyError:
-                continue
-            if (
-                begin.utcoffset() is None
-                or finish.utcoffset() is None
-                or finish - begin != timedelta(hours=1)
-                or begin < start
-                or finish > end
-                or finish > cutoff
-                or not isfinite(energy)
-                or energy < 0
+        if (
+            snapshot.job.source_kind != snapshot.source_kind
+            or snapshot.job.configuration_id != configuration.pk
+            or snapshot.normalization_policy != "hour-start-istanbul-v1"
+        ):
+            continue
+        for row in _provider_measurements(snapshot, start, end, cutoff):
+            if row.starts_at in provider_rows or any(
+                manual.starts_at < row.ends_at and manual.ends_at > row.starts_at
+                for manual in overlapping_manual
             ):
                 continue
-            if any(
-                row.starts_at < finish and row.ends_at > begin
-                for row in rows
-                if row.snapshot is None
-            ):
-                continue
-            rows.append(
-                Measurement(
-                    begin,
-                    finish,
-                    energy,
-                    "valid",
-                    "settlement_injection",
-                    None,
-                    snapshot.available_at,
-                    snapshot,
-                )
-            )
+            provider_rows[row.starts_at] = row
+    rows.extend(provider_rows.values())
     incidents = (
         select_incidents(configuration.plant_id, start, end, cutoff)
         if incident_revision_ids is None
@@ -210,8 +213,56 @@ def select_measurements(
     ]
     used = {row.snapshot.pk for row in rows if row.snapshot is not None}
     return sorted(rows, key=lambda r: (r.starts_at, r.pk or 0)), [
-        snapshot.pk for snapshot in selected if snapshot.pk in used
+        snapshot.pk
+        for snapshot in sorted(selected, key=lambda s: (s.target_day, s.pk))
+        if snapshot.pk in used
     ]
+
+
+def _provider_measurements(
+    snapshot: EpiasSnapshot, start: datetime, end: datetime, cutoff: datetime
+) -> list[Measurement]:
+    rows = []
+    for reading in snapshot.readings:
+        if (
+            not isinstance(reading, dict)
+            or reading.get("total_mwh") is None
+            or reading.get("reported") is False
+        ):
+            continue
+        try:
+            begin = datetime.fromisoformat(reading["period_start"])
+            finish = datetime.fromisoformat(reading["period_end"])
+            energy = float(reading["total_mwh"])
+        except ValueError, TypeError, KeyError:
+            continue
+        local_begin = begin.astimezone(TIMEZONE) if begin.utcoffset() is not None else begin
+        if (
+            begin.utcoffset() is None
+            or finish.utcoffset() is None
+            or finish - begin != timedelta(hours=1)
+            or local_begin.date() != snapshot.target_day
+            or any((local_begin.minute, local_begin.second, local_begin.microsecond))
+            or begin < start
+            or finish > end
+            or finish > cutoff
+            or not isfinite(energy)
+            or energy < 0
+        ):
+            continue
+        rows.append(
+            Measurement(
+                begin,
+                finish,
+                energy,
+                "valid",
+                snapshot.source_kind,
+                None,
+                snapshot.available_at,
+                snapshot,
+            )
+        )
+    return rows
 
 
 def selection_fingerprint(
@@ -219,6 +270,8 @@ def selection_fingerprint(
     rows: list[Measurement],
     cutoff: datetime,
     incident_revision_ids: list[int] | None = None,
+    *,
+    policy: str = MEASUREMENT_POLICY,
 ) -> tuple[str, dict[str, int | None]]:
     zone = ZoneInfo(configuration.binding.timezone)
     days = sorted({r.starts_at.astimezone(zone).date() for r in rows})
@@ -241,7 +294,7 @@ def selection_fingerprint(
         for r in rows
     ]
     payload = {
-        "policy": MEASUREMENT_POLICY,
+        "policy": policy,
         "configuration": configuration.pk,
         "rows": values,
         "reference": reference_content,
@@ -253,22 +306,31 @@ def selection_fingerprint(
     return digest, references
 
 
-def settlement_identity_current(run: CalibrationRun) -> bool:
-    if not run.settlement_snapshot_ids:
+def production_identity_current(run: CalibrationRun) -> bool:
+    if not run.production_snapshot_ids:
         return True
     connection = EpiasConnection.objects.filter(plant_id=run.plant_id).first()
-    if connection is None or connection.settlement_plant_id is None:
+    if connection is None:
         return False
     snapshots = list(
         EpiasSnapshot.objects.filter(
-            pk__in=run.settlement_snapshot_ids,
+            pk__in=run.production_snapshot_ids,
             configuration_id=run.configuration_id,
             connection=connection,
-            source_kind="settlement_injection",
-        )
+            source_kind__in=_source_kinds(run.measurement_selection_policy),
+        ).select_related("job")
     )
-    return len(snapshots) == len(run.settlement_snapshot_ids) and all(
-        snapshot.provider_plant.get("id") == connection.settlement_plant_id
+    return len(snapshots) == len(run.production_snapshot_ids) and all(
+        snapshot.provider_plant.get("id") is not None
+        and snapshot.provider_plant.get("id")
+        == (
+            connection.settlement_plant_id
+            if snapshot.source_kind == "settlement_injection"
+            else connection.provider_plant_id
+        )
         and snapshot.provider_plant.get("eic") == connection.eic
+        and snapshot.job.source_kind == snapshot.source_kind
+        and snapshot.job.configuration_id == run.configuration_id
+        and snapshot.normalization_policy == "hour-start-istanbul-v1"
         for snapshot in snapshots
     )

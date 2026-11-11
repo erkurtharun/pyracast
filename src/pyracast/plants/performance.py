@@ -9,6 +9,7 @@ from django.utils import timezone
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecasting import calibration_at, power_intervals, power_limit
+from pyracast.plants.measurement_policy import LEGACY_MEASUREMENT_POLICY
 from pyracast.plants.measurements import Measurement, select_measurements
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.plants.numerics import (
@@ -189,7 +190,11 @@ def forecast_performance(
         raise ValidationError("Use 1 to 90 completed local days within the past year.")
     start, _ = local_day_bounds(start_date, zone)
     _, end = local_day_bounds(end_date, zone)
-    observations = select_measurements(configuration, start, end, now)[0] if configuration else []
+    observations = (
+        select_measurements(configuration, start, end, now, policy=LEGACY_MEASUREMENT_POLICY)[0]
+        if configuration
+        else []
+    )
     days: list[dict[str, Any]] = []
     selected: tuple[CalibrationSample, ...] = ()
     baseline: tuple[CalibrationSample, ...] = ()

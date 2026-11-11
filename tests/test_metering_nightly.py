@@ -9,6 +9,7 @@ from pyracast.forecasts.models import CollectionSchedule
 from pyracast.metering.jobs import EpiasLease, claim_epias_job, pending_epias_ids, run_epias_job
 from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
 from pyracast.metering.scheduler import enqueue_due_epias_jobs
+from pyracast.plants.models import CalibrationRun
 from tests.test_metering import NEXT_NIGHT, connected, day_data
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -167,20 +168,17 @@ def test_disabling_schedule_stops_nightly_requests_and_publication(
     assert not EpiasSnapshot.objects.filter(job=job).exists()
 
 
-def test_nightly_complete_data_stops_retries_without_calibration(
+def test_nightly_complete_data_stops_retries_without_matched_reference_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     job = nightly_job(monkeypatch)
 
-    def unexpected_calibration(plant_id: int) -> None:
-        pytest.fail("Provisional generation must not prepare calibration.")
-
-    monkeypatch.setattr("pyracast.plants.preparation.prepare_calibration", unexpected_calibration)
     assert run_epias_job(job.pk, fetch=day_data, now=NEXT_NIGHT)
     job.refresh_from_db()
     assert job.status == "succeeded"
     assert not run_epias_job(job.pk, fetch=day_data, now=NEXT_NIGHT + timedelta(minutes=30))
     assert EpiasSnapshot.objects.filter(job=job, complete=True).count() == 1
+    assert not CalibrationRun.objects.exists()
 
 
 def test_deadline_reached_after_claim_prevents_provider_io(

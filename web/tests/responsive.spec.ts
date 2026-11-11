@@ -35,9 +35,10 @@ async function setup(page: Page) {
             json: {
                 timezone: region.timezone,
                 date: "2026-01-07",
-                source_kind: "realtime_generation",
-                calibration_eligible: false,
-                calibration_blocker: "provisional_production",
+                source_kind: "mixed",
+                complete: false,
+                calibration_eligible: true,
+                calibration_blocker: null,
                 snapshot: {
                     id: 1,
                     collected_at: "2026-01-08T03:00:00Z",
@@ -52,9 +53,31 @@ async function setup(page: Page) {
                     provider_timestamp:
                         energy === null ? null : `hour-${index}`,
                     energy_mwh: energy,
+                    source_kind:
+                        energy === null
+                            ? null
+                            : index === 0
+                              ? "settlement_injection"
+                              : "realtime_generation",
+                    snapshot_id: energy === null ? null : index === 0 ? 2 : 1,
                 })),
             },
         }),
+    );
+    const calibration = {
+        id: 40,
+        window_start: "2026-01-01",
+        window_end: "2026-01-07",
+        status: "ready",
+        assessment: "validated",
+        factor: 1.1,
+        result: { provisional_production: true },
+    };
+    await page.route("**/calibrations/", (route) =>
+        route.fulfill({ json: paged([calibration]) }),
+    );
+    await page.route("**/calibrations/40/", (route) =>
+        route.fulfill({ json: calibration }),
     );
     await page.route("**/outages/", (route) =>
         route.fulfill({ json: paged([]) }),
@@ -101,7 +124,10 @@ async function setup(page: Page) {
                     coverage_fraction: 1,
                     partial_energy_kwh_m2: 3,
                     partial_energy_mwh: 10,
-                    quality_flags: ["unvalidated_reference_transfer"],
+                    quality_flags: [
+                        "unvalidated_reference_transfer",
+                        "provisional_production_calibration",
+                    ],
                     factor: 1,
                     model_version: "reference-power-transfer-v1",
                     configuration: { revision: 1 },
@@ -243,6 +269,11 @@ for (const width of [320, 390, 768, 1440]) {
         await fits(page, "Plants", audit);
         await page.getByRole("button", { name: /East array/ }).click();
         await page.getByRole("img", { name: /Power by interval/ }).waitFor();
+        await expect(
+            page.getByText("Provisional production calibration", {
+                exact: true,
+            }),
+        ).toBeVisible();
         await fits(page, "Plant forecast", audit);
         await page.getByRole("button", { name: "Edit configuration" }).click();
         await fits(page, "Plant configuration", audit);
@@ -254,14 +285,33 @@ for (const width of [320, 390, 768, 1440]) {
             "Production import",
         ]) {
             await page.getByRole("button", { name: tab, exact: true }).click();
-            if (tab === "Calibration")
+            if (tab === "Calibration") {
                 await page.getByLabel("Day", { exact: true }).waitFor();
+                await expect(
+                    page.getByText("Provisional production", { exact: true }),
+                ).toHaveCount(1);
+                await page
+                    .getByRole("button", { name: "View details" })
+                    .click();
+                await expect(
+                    page.getByText("Provisional production", { exact: true }),
+                ).toHaveCount(2);
+                await expect(
+                    page.getByText("Assessment: validated. Factor: 1.1."),
+                ).toBeVisible();
+            }
             if (tab === "Automatic production") {
                 const table = page.getByRole("table", {
                     name: "EPİAŞ reported hourly production",
                 });
                 await expect(
                     table.getByText("Missing", { exact: true }),
+                ).toBeVisible();
+                await expect(
+                    table.getByText("UEVM", { exact: true }),
+                ).toBeVisible();
+                await expect(
+                    table.getByText("Provisional", { exact: true }),
                 ).toBeVisible();
                 const overflow = await table.evaluate(
                     (node) =>

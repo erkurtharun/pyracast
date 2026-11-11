@@ -20,9 +20,8 @@ from pyracast.plants.availability import actual_power_intervals
 from pyracast.plants.forecasting import power_limit
 from pyracast.plants.incident_policy import incidents_unchanged
 from pyracast.plants.measurements import (
-    MEASUREMENT_POLICY,
+    production_identity_current,
     select_measurements,
-    settlement_identity_current,
 )
 from pyracast.plants.models import (
     CalibrationRun,
@@ -92,7 +91,7 @@ def _claim(run_id: int, now: datetime) -> _Lease | None:
         if (
             not configuration_is_current(configuration)
             or run.binding_id != configuration.binding_id
-            or not settlement_identity_current(run)
+            or not production_identity_current(run)
             or not incidents_unchanged(run, now)
         ):
             run.status = "superseded"
@@ -146,7 +145,8 @@ def _dataset(
         end,
         run.cutoff_at,
         observation_id_cutoff=run.observation_id_cutoff,
-        settlement_snapshot_ids=run.settlement_snapshot_ids,
+        production_snapshot_ids=run.production_snapshot_ids,
+        policy=run.measurement_selection_policy,
         incident_revision_ids=run.incident_revision_ids,
     )
     samples = []
@@ -190,14 +190,23 @@ def _dataset(
         entries.append(
             {
                 "observation_id": observation.pk,
-                "settlement_snapshot_id": observation.snapshot.pk if observation.snapshot else None,
-                "settlement_digest": observation.snapshot.content_sha256
+                "production_snapshot_id": observation.snapshot.pk if observation.snapshot else None,
+                "production_digest": observation.snapshot.content_sha256
                 if observation.snapshot
                 else None,
-                "settlement_provider": observation.snapshot.provider_plant
+                "production_provider": observation.snapshot.provider_plant
                 if observation.snapshot
                 else None,
-                "settlement_basis": "net_export" if observation.snapshot else None,
+                "production_source_kind": observation.snapshot.source_kind
+                if observation.snapshot
+                else None,
+                "production_basis": (
+                    "net_export"
+                    if observation.snapshot.source_kind == "settlement_injection"
+                    else "provisional_proxy"
+                )
+                if observation.snapshot
+                else None,
                 "start": observation.starts_at.isoformat(),
                 "end": observation.ends_at.isoformat(),
                 "energy_mwh": observation.energy_mwh,
@@ -227,7 +236,7 @@ def _dataset(
             )
         )
     manifest: dict[str, object] = {
-        "measurement_selection_policy": MEASUREMENT_POLICY,
+        "measurement_selection_policy": run.measurement_selection_policy,
         "incident_revision_ids": run.incident_revision_ids,
         "incident_policy": "exclude-whole-overlapping-meter-interval-v1",
         "metric_scope": "daylight_intervals",
@@ -258,6 +267,13 @@ def _dataset(
         "unmatched_observations": unmatched,
         "unmatched_days": [day for day, source in sources.items() if source is None],
         "selected_observations": len(entries),
+        "provisional_production": any(
+            row.snapshot is not None and row.snapshot.source_kind == "realtime_generation"
+            for row in observations
+        ),
+        "production_sources": sorted(
+            {row.source if row.snapshot else "manual" for row in observations}
+        ),
     }
     return tuple(samples), manifest, report
 
@@ -266,7 +282,9 @@ def _incumbent_factor(run: CalibrationRun) -> float:
     activation = run.comparison_activation
     if activation is None or activation.calibration is None:
         return 1.0
-    if not incidents_unchanged(activation.calibration, run.cutoff_at):
+    if not incidents_unchanged(
+        activation.calibration, run.cutoff_at
+    ) or not production_identity_current(activation.calibration):
         return 1.0
     factor = activation.calibration.factor
     if factor is None:
@@ -297,7 +315,7 @@ def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now:
         if (
             not configuration_is_current(configuration)
             or run.binding_id != configuration.binding_id
-            or not settlement_identity_current(run)
+            or not production_identity_current(run)
             or not incidents_unchanged(run, now)
         ):
             run.status = "superseded"
@@ -381,6 +399,8 @@ def run_calibration(run_id: int, now: datetime | None = None) -> bool:
         )
         result.report["comparison_activation_id"] = lease.run.comparison_activation_id
         result.report["selection"] = selection
+        result.report["provisional_production"] = selection["provisional_production"]
+        result.report["production_sources"] = selection["production_sources"]
         return _publish(lease, result, manifest, now + timedelta(seconds=time.monotonic() - start))
     except ValueError, ArithmeticError, TypeError, KeyError:
         _fail(lease, now + timedelta(seconds=time.monotonic() - start))

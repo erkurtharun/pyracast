@@ -107,8 +107,8 @@ test("connects, displays partial reported production and disconnects", async ({
                 unit: "MWh",
                 source_kind: "realtime_generation",
                 available_sources: ["realtime_generation"],
-                calibration_eligible: false,
-                calibration_blocker: "provisional_production",
+                calibration_eligible: true,
+                calibration_blocker: null,
                 snapshot: {
                     id: 1,
                     configuration_id: 31,
@@ -145,6 +145,39 @@ test("connects, displays partial reported production and disconnects", async ({
                     };
                 }),
             };
+            if (requestedSource === "auto" && requestedDate === "2026-01-03") {
+                const original = data as {
+                    snapshot: Record<string, unknown>;
+                    readings: Record<string, unknown>[];
+                };
+                const realtime = {
+                    ...original.snapshot,
+                    complete: false,
+                    content_sha256: "realtime-digest",
+                };
+                const settlement = {
+                    ...original.snapshot,
+                    id: 2,
+                    source_kind: "settlement_injection",
+                    complete: false,
+                    content_sha256: "settlement-digest",
+                };
+                data = {
+                    ...original,
+                    source_kind: "mixed",
+                    complete: true,
+                    snapshot: settlement,
+                    source_snapshots: [settlement, realtime],
+                    readings: original.readings.map((row, hour) => ({
+                        ...row,
+                        source_kind:
+                            hour < 12
+                                ? "settlement_injection"
+                                : "realtime_generation",
+                        snapshot_id: hour < 12 ? 2 : 1,
+                    })),
+                };
+            }
             if (
                 requestedSource === "settlement_injection" &&
                 requestedDate === "2026-01-01"
@@ -152,12 +185,14 @@ test("connects, displays partial reported production and disconnects", async ({
                 data = {
                     ...(data as object),
                     source_kind: "settlement_injection",
+                    calibration_eligible: false,
                     calibration_blocker: "measurement_basis_mismatch",
                 };
             else if (requestedSource === "settlement_injection")
                 data = {
                     ...(data as object),
                     source_kind: "settlement_injection",
+                    calibration_eligible: false,
                     snapshot: null,
                     readings: [],
                     calibration_blocker: "production_unavailable",
@@ -259,13 +294,35 @@ test("connects, displays partial reported production and disconnects", async ({
         page.getByText("Sum of provider-reported hours: 276 MWh"),
     ).toBeVisible();
     await expect(table.getByRole("row")).toHaveCount(24);
+    await page.getByLabel("Production source").selectOption("auto");
+    await expect(page.getByText(/Combined production/)).toBeVisible();
+    await expect(
+        page.getByText("Sum of provider-reported hours: 276 MWh"),
+    ).toBeVisible();
+    await expect(table.getByText("UEVM", { exact: true })).toHaveCount(11);
+    await expect(table.getByText("Provisional", { exact: true })).toHaveCount(
+        12,
+    );
+    await expect(
+        page.getByText(/Reported production is provisional and may differ/),
+    ).toBeVisible();
+    await page.getByText("Acquisition details", { exact: true }).click();
+    await expect(
+        page.getByText("Payload digest: realtime-digest"),
+    ).toBeVisible();
+    await expect(
+        page.getByText("Payload digest: settlement-digest"),
+    ).toBeVisible();
+    await page
+        .getByLabel("Production source")
+        .selectOption("realtime_generation");
     await page.getByLabel("Archive date").fill("2026-01-02");
     await expect(
         page.getByText("Incomplete provider hours — total unavailable"),
     ).toBeVisible();
     await expect(
         page.getByText(
-            "Provisional reported production is excluded from calibration. Use settlement injection (UEVM).",
+            "Reported production is provisional and may differ from net export. Settlement injection (UEVM) is preferred. Eligible for calibration when valid interval coverage is complete.",
         ),
     ).toBeVisible();
     await page

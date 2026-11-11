@@ -11,6 +11,7 @@ from pyracast.connections.models import ProviderAccount
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecasting import _payload, calibration_at
+from pyracast.plants.measurements import production_identity_current
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.plants.operations import configuration_is_current
 
@@ -64,6 +65,8 @@ def current_forecast(
             .first()
         )
         calibration = calibration_at(configuration, now)
+        if calibration is not None and not production_identity_current(calibration):
+            calibration = None
         if snapshot is not None:
             try:
                 result = _payload(

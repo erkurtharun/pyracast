@@ -32,6 +32,10 @@ def test_epias_api_connects_archives_native_values_and_preserves_history_after_d
     assert missing.json()["connected"] is False
     assert missing.json()["provider_plant_id"] is None
     assert client.get(history).json()["snapshot"] is None
+    absent = client.get(history, {"data_source": "settlement_injection"}).json()
+    assert absent["snapshot"] is None
+    assert absent["readings"] == []
+    assert absent["complete"] is False
 
     def handler(request: httpx.Request) -> httpx.Response:
         if str(request.url) == AUTH_URL:
@@ -75,8 +79,8 @@ def test_epias_api_connects_archives_native_values_and_preserves_history_after_d
     assert result.status_code == 200, result.content
     values = result.json()
     assert values["unit"] == "MWh"
-    assert values["calibration_eligible"] is False
-    assert values["calibration_blocker"] == "provisional_production"
+    assert values["calibration_eligible"] is True
+    assert values["calibration_blocker"] is None
     assert values["source_kind"] == "realtime_generation"
     assert values["available_sources"] == ["realtime_generation"]
     assert values["snapshot"]["id"] == snapshot.pk
@@ -231,7 +235,7 @@ def connected_source() -> tuple[Client, str, EpiasConnection]:
     return client, f"{base}{plant.pk}/reported-production/", connection
 
 
-def test_production_sources_remain_distinct_and_latest_settlement_keeps_missing_hours() -> None:
+def test_automatic_production_merges_latest_sources_and_explicit_views_keep_missing_hours() -> None:
     client, path, connection = connected_source()
     provisional = archive_source(connection, "realtime_generation", {8: "20", 9: "22", 10: "24"})
     archive_source(connection, "settlement_injection", {8: "19", 9: "21", 10: "23"})
@@ -239,13 +243,22 @@ def test_production_sources_remain_distinct_and_latest_settlement_keeps_missing_
     result = client.get(path, {"date": "2020-01-01"})
     assert result.status_code == 200, result.content
     data = result.json()
-    assert data["source_kind"] == "settlement_injection"
+    assert data["source_kind"] == "mixed"
+    assert data["complete"] is False
+    assert [snapshot["id"] for snapshot in data["source_snapshots"]] == [revised.pk, provisional.pk]
     assert data["snapshot"]["id"] == revised.pk
     assert set(data["available_sources"]) == {"realtime_generation", "settlement_injection"}
     assert data["calibration_eligible"] is True
     assert data["calibration_blocker"] is None
-    assert [row["energy_mwh"] for row in data["readings"]][8:11] == [18, None, 22]
-    assert data["readings"][9]["reported"] is False
+    assert [row["energy_mwh"] for row in data["readings"]][8:11] == [18, 22, 22]
+    assert data["readings"][9]["reported"] is True
+    assert data["readings"][8]["snapshot_id"] == revised.pk
+    assert data["readings"][8]["source_kind"] == "settlement_injection"
+    assert data["readings"][9]["snapshot_id"] == provisional.pk
+    assert data["readings"][9]["source_kind"] == "realtime_generation"
+    assert data["readings"][7]["energy_mwh"] is None
+    assert data["readings"][7]["snapshot_id"] is None
+    assert data["readings"][7]["source_kind"] is None
     assert data["readings"][10]["period_start"] == "2020-01-01T07:00:00Z"
     assert data["readings"][10]["period_end"] == "2020-01-01T08:00:00Z"
     status = operations.get_epias_status(connection.plant_id, actor=connection.connected_by)
@@ -253,8 +266,13 @@ def test_production_sources_remain_distinct_and_latest_settlement_keeps_missing_
     assert status["last_settlement_date"] == date(2020, 1, 1)
     old = client.get(path, {"date": "2020-01-01", "data_source": "realtime_generation"}).json()
     assert old["snapshot"]["id"] == provisional.pk
-    assert old["calibration_eligible"] is False
+    assert old["calibration_eligible"] is True
     assert old["readings"][9]["energy_mwh"] == 22
+    explicit = client.get(
+        path, {"date": "2020-01-01", "data_source": "settlement_injection"}
+    ).json()
+    assert explicit["readings"][9]["energy_mwh"] is None
+    assert explicit["readings"][9]["reported"] is False
     assert EpiasSnapshot.objects.count() == 3
     assert not ProductionObservation.objects.exists()
 
@@ -271,6 +289,8 @@ def test_unpublished_settlement_falls_back_only_in_automatic_view() -> None:
     assert explicit["snapshot"]["id"] == pending.pk
     assert explicit["source_kind"] == "settlement_injection"
     assert explicit["readings"] == []
+    assert explicit["complete"] is False
+    assert explicit["source_snapshots"] == []
     assert explicit["calibration_blocker"] == "production_unavailable"
     with pytest.raises(ValidationError, match="invalid_production_source"):
         operations.read_epias_history(
@@ -283,22 +303,32 @@ def test_unpublished_settlement_falls_back_only_in_automatic_view() -> None:
     [
         ("disconnected", "source_disconnected"),
         ("ac", "measurement_basis_mismatch"),
+        ("unknown", "measurement_basis_mismatch"),
         ("unconfigured", "configuration_mismatch"),
         ("suspended", "configuration_unavailable"),
     ],
 )
+@pytest.mark.parametrize(
+    "sources",
+    [
+        ("settlement_injection",),
+        ("realtime_generation",),
+        ("realtime_generation", "settlement_injection"),
+    ],
+)
 def test_settlement_suitability_respects_configuration_and_connection(
-    state: str, blocker: str
+    state: str, blocker: str, sources: tuple[str, ...]
 ) -> None:
     client, path, connection = connected_source()
-    archive_source(connection, "settlement_injection", {10: "10"})
+    for hour, source in enumerate(sources, start=10):
+        archive_source(connection, source, {hour: "10"})
     if state == "disconnected":
         connection.enabled = False
         connection.save()
-    elif state == "ac":
+    elif state in {"ac", "unknown"}:
         configuration = connection.plant.current_configuration
         assert configuration is not None
-        configuration.measurement_basis = "ac_generation"
+        configuration.measurement_basis = "ac_generation" if state == "ac" else "unknown"
         configuration.save()
     elif state == "unconfigured":
         connection.plant.current_configuration = None
@@ -311,3 +341,96 @@ def test_settlement_suitability_respects_configuration_and_connection(
     assert response.status_code == 200, response.content
     assert response.json()["calibration_eligible"] is False
     assert response.json()["calibration_blocker"] == blocker
+
+
+def test_new_settlement_replaces_provisional_hours_without_rewriting_archive() -> None:
+    client, path, connection = connected_source()
+    provisional = archive_source(connection, "realtime_generation", dict.fromkeys(range(24), "5"))
+    original = provisional.readings
+    before = client.get(path, {"date": "2020-01-01"}).json()
+    assert before["source_kind"] == "realtime_generation"
+    assert before["complete"] is True
+    assert before["calibration_eligible"] is True
+    assert [snapshot["id"] for snapshot in before["source_snapshots"]] == [provisional.pk]
+    final = archive_source(connection, "settlement_injection", {8: "0", 9: "7"})
+    after = client.get(path, {"date": "2020-01-01"}).json()
+    assert after["source_kind"] == "mixed"
+    assert after["complete"] is True
+    assert after["snapshot"]["id"] == final.pk
+    assert after["readings"][8]["energy_mwh"] == 0
+    assert after["readings"][8]["snapshot_id"] == final.pk
+    assert after["readings"][9]["energy_mwh"] == 7
+    assert after["readings"][10]["energy_mwh"] == 5
+    provisional.refresh_from_db()
+    assert provisional.readings == original
+    assert provisional.raw_payload == {"items": original}
+    assert EpiasSnapshot.objects.count() == 2
+    assert not ProductionObservation.objects.exists()
+
+
+def test_latest_missing_values_never_fill_from_older_source_acquisitions() -> None:
+    client, path, connection = connected_source()
+    archive_source(connection, "realtime_generation", {8: "99", 9: "99"})
+    realtime = archive_source(connection, "realtime_generation", {8: "4"})
+    archive_source(connection, "settlement_injection", {8: "88", 9: "88"})
+    final = archive_source(connection, "settlement_injection", {8: None, 9: None, 10: "0"})
+    data = client.get(path, {"date": "2020-01-01"}).json()
+    assert data["source_kind"] == "mixed"
+    assert data["complete"] is False
+    assert [row["energy_mwh"] for row in data["readings"]][8:11] == [4, None, 0]
+    assert data["readings"][8]["snapshot_id"] == realtime.pk
+    assert data["readings"][9]["snapshot_id"] is None
+    assert data["readings"][10]["snapshot_id"] == final.pk
+
+
+def test_unused_provisional_snapshot_does_not_label_final_day_mixed() -> None:
+    client, path, connection = connected_source()
+    archive_source(connection, "realtime_generation", {10: "10"})
+    final = archive_source(connection, "settlement_injection", {10: "0"})
+    data = client.get(path, {"date": "2020-01-01"}).json()
+    assert data["source_kind"] == "settlement_injection"
+    assert [snapshot["id"] for snapshot in data["source_snapshots"]] == [final.pk]
+    assert data["readings"][10]["energy_mwh"] == 0
+
+
+def test_complementary_partial_sources_form_complete_day() -> None:
+    client, path, connection = connected_source()
+    realtime = archive_source(
+        connection, "realtime_generation", dict.fromkeys(range(0, 24, 2), "0")
+    )
+    final = archive_source(connection, "settlement_injection", dict.fromkeys(range(1, 24, 2), "0"))
+    data = client.get(path, {"date": "2020-01-01"}).json()
+    assert data["source_kind"] == "mixed"
+    assert data["complete"] is True
+    assert [snapshot["complete"] for snapshot in data["source_snapshots"]] == [False, False]
+    assert [row["energy_mwh"] for row in data["readings"]] == [0] * 24
+    assert [row["snapshot_id"] for row in data["readings"]] == [realtime.pk, final.pk] * 12
+
+
+def test_missing_values_in_both_sources_have_no_selected_acquisition() -> None:
+    client, path, connection = connected_source()
+    archive_source(connection, "realtime_generation", {8: None})
+    archive_source(connection, "settlement_injection", {8: None})
+    data = client.get(path, {"date": "2020-01-01"}).json()
+    assert data["source_kind"] is None
+    assert data["snapshot"] is None
+    assert data["source_snapshots"] == []
+    assert data["available_sources"] == []
+    assert data["complete"] is False
+    assert data["calibration_blocker"] == "production_unavailable"
+    assert all(row["energy_mwh"] is None for row in data["readings"])
+    assert all(row["source_kind"] is None for row in data["readings"])
+    assert all(row["snapshot_id"] is None for row in data["readings"])
+
+
+@pytest.mark.parametrize("invalid", ["-1", "NaN", "Infinity", "malformed"])
+def test_invalid_settlement_energy_falls_back_and_never_makes_day_complete(invalid: str) -> None:
+    client, path, connection = connected_source()
+    realtime = archive_source(connection, "realtime_generation", {8: "2"})
+    archive_source(connection, "settlement_injection", {8: invalid, 9: invalid})
+    data = client.get(path, {"date": "2020-01-01"}).json()
+    assert data["source_kind"] == "realtime_generation"
+    assert data["complete"] is False
+    assert data["readings"][8]["energy_mwh"] == 2
+    assert data["readings"][8]["snapshot_id"] == realtime.pk
+    assert data["readings"][9]["energy_mwh"] is None

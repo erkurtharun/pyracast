@@ -178,9 +178,11 @@ intervals before 09:00, respecting longer provider retry hints. No Solcast reque
 is needed for this archive.
 
 Reported hourly MWh and missing values remain separate from manual production.
-Disconnect preserves saved acquisitions. Provisional reported production stays
-outside calibration; separately published settlement injection can supplement
-manual net-export readings under the [source policy](docs/IRRADIANCE.md).
+Disconnect preserves saved acquisitions. Calibration uses manual net-export
+readings, then settlement injection, then provisional reported production under
+the [source policy](docs/IRRADIANCE.md). Later settlement values replace provisional
+hours in the current view and prepare a new calibration candidate. Prior fits
+remain unchanged; activation is explicit.
 Routine tests use synthetic and sanitized captured responses. Live checks are
 opt-in: set `PYRACAST_EPIAS_LIVE=1`, `EPIAS_LIVE_PLANT_ID` and `EPIAS_LIVE_EIC`, then
 run `uv run --locked pytest tests/test_epias_live.py --no-cov`.

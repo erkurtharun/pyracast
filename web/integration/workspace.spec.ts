@@ -240,9 +240,12 @@ test("a customer manages an approved region through the real API", async ({
         .getByText("Sources and calibration eligibility", { exact: true })
         .click();
     await expect(
-        page.getByText("Only UEVM matching net export can enter calibration.", {
-            exact: false,
-        }),
+        page.getByText(
+            "Reported production can support provisional calibration; UEVM matching net export is preferred.",
+            {
+                exact: false,
+            },
+        ),
     ).toBeVisible();
 
     await page

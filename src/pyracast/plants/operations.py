@@ -14,6 +14,7 @@ from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.plants.availability import interval_is_covered, reference_intervals
+from pyracast.plants.measurement_policy import MEASUREMENT_POLICY
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
@@ -420,7 +421,8 @@ def request_calibration(
             window_end=end_date,
             cutoff_at=now,
             observation_id_cutoff=watermark,
-            settlement_snapshot_ids=snapshot_ids,
+            production_snapshot_ids=snapshot_ids,
+            measurement_selection_policy=MEASUREMENT_POLICY,
             reference_snapshot_ids=reference_ids,
             incident_revision_ids=incidents,
             input_fingerprint=fingerprint,
@@ -471,10 +473,10 @@ def activate_calibration(
         run = CalibrationRun.objects.get(
             pk=calibration_id, plant=plant, configuration=configuration
         )
-        from pyracast.plants.measurements import settlement_identity_current
+        from pyracast.plants.measurements import production_identity_current
 
-        if not settlement_identity_current(run):
-            raise ValidationError("The settlement source changed; request a new calibration.")
+        if not production_identity_current(run):
+            raise ValidationError("The production source changed; request a new calibration.")
         from pyracast.plants.incident_policy import incidents_unchanged
 
         if not incidents_unchanged(run, timezone.now()):
