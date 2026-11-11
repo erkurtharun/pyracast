@@ -1,7 +1,7 @@
 import logging
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from typing import cast
 from zoneinfo import ZoneInfo
@@ -33,7 +33,10 @@ from pyracast.forecasts.models import (
     ForecastSnapshot,
     RequestAttempt,
 )
+from pyracast.forecasts.sources import snapshot_data
+from pyracast.irradiance import local_day_bounds
 from pyracast.regions.models import Region
+from pyracast.weather import OpenMeteoProvider, WeatherFailure, serialize_weather
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +105,15 @@ def claim(job_id: int, now: datetime) -> Lease | None:
                         "%H:%M"
                     )
                     not in schedule.times
+                    # Approval creates one immediate acquisition outside existing clocks.
+                    and (
+                        job.scheduled_slot < schedule.effective_from
+                        or job.pk
+                        != CollectionJob.objects.filter(binding=binding, endpoint="forecasts")
+                        .order_by("scheduled_slot", "pk")
+                        .values_list("pk", flat=True)
+                        .first()
+                    )
                 )
             )
         ):
@@ -165,6 +177,8 @@ def persist_snapshot(lease: Lease, data: ProviderData, now: datetime) -> Forecas
                 "collected_at": data.collected_at or now,
                 "issued_at": data.issued_at,
                 "source_kind": data.source_kind,
+                "weather_payload": serialize_weather(data.weather) if data.weather else None,
+                "weather_error": data.weather_error,
                 "coverage_start": min(
                     (datetime.fromisoformat(cast(str, row["start"])) for row in data.intervals),
                     default=None,
@@ -275,11 +289,54 @@ def fetch_history(lease: Lease, adapter: ProviderAdapter) -> ProviderData:
     )
 
 
-def collect(job_id: int, adapter: ProviderAdapter, calculator: Calculator, now: datetime) -> bool:
+def _attach_weather(lease: Lease, data: ProviderData, provider: OpenMeteoProvider) -> ProviderData:
+    day_start, day_end = local_day_bounds(lease.target_date, lease.binding.timezone)
+    start = min(
+        (datetime.fromisoformat(cast(str, row["start"])) for row in data.intervals),
+        default=day_start,
+    )
+    end = max(
+        (datetime.fromisoformat(cast(str, row["end"])) for row in data.intervals), default=day_end
+    )
+    try:
+        weather = provider.fetch(lease.binding.latitude, lease.binding.longitude, start, end)
+    except WeatherFailure as exc:
+        return replace(data, weather=None, weather_error=exc.code)
+    return replace(data, weather=weather, weather_error="")
+
+
+def _persist_weather(lease: Lease, data: ProviderData, now: datetime) -> bool:
+    started = time.monotonic()
+    with transaction.atomic():
+        job = CollectionJob.objects.select_for_update().get(pk=lease.job_id)
+        now += timedelta(seconds=time.monotonic() - started)
+        if (
+            job.lease_token != lease.token
+            or job.lease_expires_at is None
+            or job.lease_expires_at <= now
+        ):
+            return False
+        return bool(
+            ForecastSnapshot.objects.filter(job=job, available_at__isnull=True).update(
+                weather_payload=serialize_weather(data.weather) if data.weather else None,
+                weather_error=data.weather_error,
+            )
+        )
+
+
+def collect(
+    job_id: int,
+    adapter: ProviderAdapter,
+    calculator: Calculator,
+    now: datetime,
+    *,
+    weather_provider: OpenMeteoProvider | None = None,
+) -> bool:
     started = time.monotonic()
     lease = claim(job_id, now)
     if lease is None:
         return False
+    weather_provider = weather_provider if lease.endpoint == "forecasts" else None
     snapshot = ForecastSnapshot.objects.filter(job_id=job_id).first()
     if snapshot is None:
         try:
@@ -322,24 +379,27 @@ def collect(job_id: int, adapter: ProviderAdapter, calculator: Calculator, now: 
             return False
         RequestAttempt.objects.filter(pk=attempt.pk).update(outcome="succeeded")
         logger.info("Provider request succeeded correlation_id=%s", attempt.correlation_id)
+        if weather_provider is not None:
+            data = replace(data, weather=None, weather_error="weather_acquisition_interrupted")
         snapshot = persist_snapshot(
             lease, data, now + timedelta(seconds=time.monotonic() - started)
         )
         if snapshot is None:
             return False
+        if weather_provider is not None:
+            data = _attach_weather(lease, data, weather_provider)
+            if not _persist_weather(
+                lease, data, now + timedelta(seconds=time.monotonic() - started)
+            ):
+                return False
+            snapshot.refresh_from_db(fields=("weather_payload", "weather_error"))
     expected_kind = "estimated_actuals" if lease.endpoint == "estimated_actuals" else "forecast"
     if snapshot.source_kind != expected_kind:
         retry(lease, now + timedelta(seconds=time.monotonic() - started), "invalid_source_kind")
         return False
     if lease.endpoint == "estimated_actuals":
         return publish(lease, snapshot, {}, now + timedelta(seconds=time.monotonic() - started))
-    data = ProviderData(
-        snapshot.raw_payload,
-        snapshot.normalized_intervals,
-        snapshot.issued_at,
-        snapshot.collected_at,
-        source_kind="forecast",
-    )
+    data = snapshot_data(snapshot)
     try:
         payload = calculator(lease.binding, lease.target_date, data)
     except ValueError, ArithmeticError:

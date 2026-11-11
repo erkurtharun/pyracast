@@ -345,6 +345,16 @@ but it is not accepted as an archived forecast or a meter reading. See
 
 ## Verification boundaries
 
+Forecast worker deliveries can additionally save an independent hourly Open-Meteo
+GHI forecast with temperature and ground-snow indicators. This uses only the
+existing Hobby endpoints at Solcast. `PYRACAST_WEATHER_ENABLED=1` enables the
+auxiliary request; set it to `0` to disable it. The default Open-Meteo endpoint
+supports evaluation/non-commercial use. An authorized commercial key can be set
+as `PYRACAST_OPEN_METEO_API_KEY`, which selects the customer endpoint. Regional
+views keep the two estimates separate and include the required attribution.
+See the [irradiance contract](docs/IRRADIANCE.md#live-auxiliary-weather) for units,
+timestamp conventions, missingness and the limits of snow-loss inference.
+
 The CPython 3.15.2 CI matrix checks locked installation, PostgreSQL 18.6 migrations,
 authenticated API behavior, numerical calculations, a real RabbitMQ task and isolated
 wheel installation on Windows and Ubuntu. Windows uses native PostgreSQL and RabbitMQ;

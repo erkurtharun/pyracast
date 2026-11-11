@@ -52,6 +52,20 @@ Primary metrics are daily kWh/m² MAE and signed bias against matched Solcast fo
 
 Return region/date/timezone, surface, interval bounds and GHI, daily/partial energy, completeness, source vintage, collection time, binding/model revision and quality flags. Tests cover unit conversion, local midnight/DST, missingness, overlap, solver validity and selection of information available at issuance. Keep the pure calculation core free of network/database access.
 
+## Live auxiliary weather
+
+Only Hobby endpoints are used for Solcast acquisitions. With `PYRACAST_WEATHER_ENABLED=1` (the default), forecast worker deliveries additionally acquire Open-Meteo `temperature_2m`, `snow_depth`, `snowfall` and `shortwave_radiation` for the source coverage window. No additional Solcast entitlement or request is required. Fixture providers and estimated-actual acquisitions do not trigger this auxiliary request.
+
+Open-Meteo `shortwave_radiation` is a separate model's GHI forecast. Preserve hourly means as `[timestamp-1h, timestamp)`; temperature and ground snow depth are instantaneous endpoint values, while snowfall is a preceding-hour sum. Request UTC Unix timestamps, preserve native hourly resolution, and integrate elapsed overlap with the region's IANA calendar day. Missing values and gaps give partial energy with a null complete total. Never split an hourly mean into purported measured half-hours.
+
+Persist the successful Hobby acquisition before requesting auxiliary weather. Archive the raw auxiliary response, request coordinates/window, acquisition time and failure separately on that snapshot before publication. Calculation retries reuse the saved acquisitions without new network calls. An interrupted auxiliary request leaves an explicit unavailable reference; a reclaimed worker publishes the pinned primary acquisition without consuming Hobby quota again. A stale worker cannot attach weather after losing its lease. The response's `generationtime_ms` is execution duration, not issue time; leave issue time null. The daily projection includes native intervals, requested/grid coordinates, a payload digest, coverage and source-specific acquisition time. Auxiliary failures do not block publication of an otherwise valid Hobby result; they produce an unavailable weather reference until a subsequent acquisition.
+
+The result's `weather_reference` is displayed separately from the reconstructed regional proxy and plant electricity. It never fills or replaces their missing values, trains plant calibration, or becomes a matched Solcast GHI label. Ground snow depth and snowfall do not identify panel snow-loss percentage. The conditional quadratic inverse remains unavailable without a verified snow-loss input; external temperature does not inherit the historical Solcast-weather validation result. This integration makes no claim of improved forecast or on-site accuracy.
+
+Open-Meteo's free endpoint supports evaluation/non-commercial use. Set `PYRACAST_OPEN_METEO_API_KEY` for an authorized commercial customer endpoint; the adapter does not fall back to the free endpoint after a customer-request failure. Keys remain outside raw snapshots and HTTPX request logs. Display the required Open-Meteo and CC BY 4.0 attribution next to this data, including a processing note. Existing Hobby CSV downloads and reminder emails continue to contain only their original dataset, not the auxiliary weather reference.
+
+Primary contracts: [Open-Meteo forecast fields](https://open-meteo.com/en/docs), [attribution](https://open-meteo.com/en/licence), and [access plans](https://open-meteo.com/en/pricing).
+
 ## Offline conditional reconstruction
 
 `scripts/calibrate_irradiance.py` pairs Historical Rooftop PV `PT30M` power with six contiguous `PT5M` irradiance/weather intervals. Match explicit UTC bounds, not array positions or filename geometry. Required weather fields are `ghi`, `air_temp` and `snow_soiling_rooftop`; the tilted `gti` field is not the horizontal reference. The operator must establish matching coordinates, horizontal geometry, capacity and loss settings. Unmatched intervals remain counted, never filled.

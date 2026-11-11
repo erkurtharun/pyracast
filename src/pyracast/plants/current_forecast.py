@@ -6,9 +6,9 @@ from django.core.exceptions import ValidationError
 from django.db.models import Q
 
 from pyracast.calculation import calculate
-from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import ProviderAccount
 from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.forecasts.sources import snapshot_data
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_sources import SELECTION_POLICY, apply_composition, compose_snapshots
 from pyracast.plants.forecasting import _payload, calibration_at
@@ -85,13 +85,7 @@ def current_forecast(
                 irradiance = calculate(
                     configuration.binding,
                     target_date,
-                    ProviderData(
-                        raw_payload=snapshot.raw_payload,
-                        intervals=list(composition.intervals),
-                        issued_at=snapshot.issued_at,
-                        collected_at=snapshot.collected_at,
-                        source_kind="forecast",
-                    ),
+                    snapshot_data(snapshot, intervals=list(composition.intervals)),
                 )
                 irradiance["provenance"] = {
                     "snapshot_id": snapshot.pk,

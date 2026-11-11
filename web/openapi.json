@@ -1334,13 +1334,14 @@
                             "enum": [
                                 "auto",
                                 "forecast",
-                                "estimated_actuals"
+                                "estimated_actuals",
+                                "archived_forecast"
                             ],
                             "type": "string",
                             "default": "forecast",
                             "minLength": 1
                         },
-                        "description": "* `auto` - auto\n* `forecast` - forecast\n* `estimated_actuals` - estimated_actuals"
+                        "description": "* `auto` - auto\n* `forecast` - forecast\n* `estimated_actuals` - estimated_actuals\n* `archived_forecast` - archived_forecast"
                     },
                     {
                         "in": "query",

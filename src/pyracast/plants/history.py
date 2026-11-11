@@ -11,7 +11,12 @@ from pyracast.accounts.operations import require_member
 from pyracast.forecasts.history import historical_irradiance, select_actual_snapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.current_forecast import current_forecast
-from pyracast.plants.forecasting import _payload, declared_forecast, plant_forecast
+from pyracast.plants.forecasting import (
+    _payload,
+    archived_forecast,
+    declared_forecast,
+    plant_forecast,
+)
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.plants.operations import configuration_is_current
 from pyracast.regions.models import Region
@@ -46,8 +51,13 @@ def plant_outlook(
             as_of=as_of,
             source=source,
         )
+        scenario_at = (
+            datetime.fromisoformat(cast(str, result["as_of"]))
+            if source == "archived_forecast"
+            else as_of or timezone.now()
+        )
         result["outage_scenario"] = incident_scenario(
-            result, target_date, resolution_minutes, as_of or timezone.now()
+            result, target_date, resolution_minutes, scenario_at
         )
         return result
 
@@ -68,8 +78,10 @@ def _plant_outlook(
     plant = Plant.objects.get(pk=plant_id, region=region, deleted_at__isnull=True)
     now = timezone.now()
     today = now.astimezone(ZoneInfo(region.timezone)).date()
-    if source not in {"auto", "forecast", "estimated_actuals"}:
+    if source not in {"auto", "forecast", "estimated_actuals", "archived_forecast"}:
         raise ValidationError("Unsupported data source.")
+    if source == "archived_forecast":
+        return archived_forecast(plant, target_date, resolution_minutes, now, as_of=as_of)
     if source == "forecast" or (source == "auto" and target_date >= today):
         if as_of is None and target_date >= today:
             return current_forecast(plant, target_date, resolution_minutes, now)
@@ -92,12 +104,22 @@ def _plant_outlook(
     if as_of is not None and (as_of.utcoffset() is None or as_of > now):
         raise ValidationError("as_of must be aware and no later than now.")
     cutoff = (as_of or now).astimezone(UTC)
-    configuration = (
-        PlantConfiguration.objects.select_related("binding__provider_account")
-        .filter(plant=plant, created_at__lte=cutoff)
-        .order_by("-created_at", "-pk")
-        .first()
+    configurations = PlantConfiguration.objects.select_related("binding__provider_account").filter(
+        plant=plant, created_at__lte=cutoff
     )
+    configuration = None
+    if as_of is None:
+        day_start, day_end = local_day_bounds(target_date, region.timezone)
+        configuration = (
+            configurations.filter(created_at__lte=day_start).order_by("-created_at", "-pk").first()
+        )
+        if configuration is None:
+            configuration = (
+                configurations.filter(created_at__lt=day_end).order_by("-created_at", "-pk").first()
+            )
+    if configuration is None:
+        ordering = ("created_at", "pk") if as_of is None else ("-created_at", "-pk")
+        configuration = configurations.order_by(*ordering).first()
     snapshot = (
         select_actual_snapshot(configuration.binding, target_date, cutoff)
         if configuration is not None

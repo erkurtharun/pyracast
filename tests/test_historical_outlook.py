@@ -7,7 +7,7 @@ from django.core.exceptions import ValidationError
 from django.test import Client
 
 from pyracast.accounts.models import Membership, Tenant
-from pyracast.connections.models import ProviderAccount
+from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY, select_actual_snapshot
 from pyracast.forecasts.models import ForecastResult, ForecastSnapshot, RequestAttempt
 from pyracast.irradiance import local_day_bounds
@@ -18,10 +18,54 @@ from pyracast.plants.models import Plant, PlantConfiguration, PlantForecast
 from pyracast.plants.operations import activate_calibration, revise_plant
 from pyracast.regions.models import Region
 from tests.test_domain import NOW, System
-from tests.test_plant_operations import make_plant, ready_run, snapshot_for
+from tests.test_plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 8)
+
+
+@pytest.mark.parametrize(
+    "state", ["failed", "pending", "unavailable", "late_available", "missing_result", "late_result"]
+)
+def test_forecast_selection_requires_publication_before_cutoff(
+    monkeypatch: pytest.MonkeyPatch, state: str
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    configuration = plant.configurations.get()
+    start, _ = local_day_bounds(DAY, system.binding.timezone)
+    cutoff = start - timedelta(minutes=10)
+    candidate = publish_snapshot(snapshot_for(system, DAY))
+    if state in {"failed", "pending"}:
+        candidate.job.status = state
+        candidate.job.save(update_fields=["status"])
+    elif state == "unavailable":
+        ForecastSnapshot.objects.filter(pk=candidate.pk).update(available_at=None)
+    elif state == "late_available":
+        ForecastSnapshot.objects.filter(pk=candidate.pk).update(
+            available_at=cutoff + timedelta(seconds=1)
+        )
+    elif state == "missing_result":
+        ForecastResult.objects.filter(snapshot=candidate).delete()
+    else:
+        ForecastResult.objects.filter(snapshot=candidate).update(
+            published_at=cutoff + timedelta(seconds=1)
+        )
+    assert forecasting.select_snapshot(configuration, DAY, cutoff) is None
+
+
+def test_forecast_selection_uses_first_published_before_local_day(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    configuration = plant.configurations.get()
+    start, _ = local_day_bounds(DAY, system.binding.timezone)
+    first = publish_snapshot(snapshot_for(system, DAY, collected_at=start - timedelta(hours=2)))
+    later = publish_snapshot(snapshot_for(system, DAY, collected_at=start - timedelta(hours=1)))
+    ForecastResult.objects.filter(snapshot=first).update(published_at=start)
+    assert forecasting.select_snapshot(configuration, DAY, start) == later
+    ForecastResult.objects.filter(snapshot=first).update(published_at=start - timedelta(minutes=30))
+    assert forecasting.select_snapshot(configuration, DAY, start - timedelta(minutes=30)) == first
+    assert forecasting.select_snapshot(configuration, DAY, start - timedelta(minutes=31)) == later
 
 
 @pytest.mark.parametrize("source", ["forecast", "auto"])
@@ -32,11 +76,9 @@ def test_new_plant_projects_saved_forecast_without_backdating_or_calibration(
     system, plant = make_plant(monkeypatch)
     configuration = plant.configurations.get()
     PlantConfiguration.objects.filter(pk=configuration.pk).update(created_at=NOW)
-    reference = snapshot_for(system, target)
-    ForecastResult.objects.create(
-        snapshot=reference,
-        payload={"energy_kwh_m2": 3.5, "complete": True},
-        published_at=reference.collected_at,
+    reference = publish_snapshot(snapshot_for(system, target))
+    ForecastResult.objects.filter(snapshot=reference).update(
+        payload={"energy_kwh_m2": 3.5, "complete": True}
     )
     snapshot_for(system, target, power_kw=0.9, collected_at=NOW)
     run = ready_run(system, plant)
@@ -119,7 +161,7 @@ def test_eligible_archived_forecast_survives_a_later_configuration(
 ) -> None:
     system, plant = make_plant(monkeypatch)
     original_id = plant.current_configuration_id
-    snapshot_for(system, DAY)
+    publish_snapshot(snapshot_for(system, DAY))
     args = (system.member, system.tenant.pk, system.region.pk, plant.pk)
     archived = plant_forecast(*args, target_date=DAY, resolution_minutes=60)
     revise_plant(*args, name="Revised", dc_capacity_mw=260, export_limit_mw=200)
@@ -164,7 +206,7 @@ def test_projection_rechecks_current_configuration_after_calculation(
 ) -> None:
     system, plant = make_plant(monkeypatch)
     PlantConfiguration.objects.filter(plant=plant).update(created_at=NOW)
-    snapshot_for(system, DAY)
+    publish_snapshot(snapshot_for(system, DAY))
     original = forecasting._payload
 
     def changed(*args: Any, **kwargs: Any) -> dict[str, object]:
@@ -203,7 +245,7 @@ def test_projection_api_keeps_tenant_boundaries_and_rejects_corrupt_source(
 ) -> None:
     system, plant = make_plant(monkeypatch)
     PlantConfiguration.objects.filter(plant=plant).update(created_at=NOW)
-    source = snapshot_for(system, DAY)
+    source = publish_snapshot(snapshot_for(system, DAY))
     client = Client()
     client.force_login(system.member)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/"
@@ -240,7 +282,7 @@ def test_past_actuals_use_declared_configuration_without_backdating_or_replacing
     system, plant = make_plant(monkeypatch)
     assert plant.current_configuration_id is not None
     reference = actuals(system)
-    forecast_source = snapshot_for(system, DAY, power_kw=0.5)
+    forecast_source = publish_snapshot(snapshot_for(system, DAY, power_kw=0.5))
     args = (system.member, system.tenant.pk, system.region.pk, plant.pk)
     archived = plant_outlook(*args, target_date=DAY, resolution_minutes=30)
     archived_payload = archived["result"]
@@ -277,6 +319,57 @@ def test_past_actuals_use_declared_configuration_without_backdating_or_replacing
     assert PlantConfiguration.objects.get(pk=plant.current_configuration_id).created_at == NOW
     client.force_login(User.objects.create_user("unrelated-user"))
     assert client.get(path, {"date": DAY.isoformat(), "data_source": "auto"}).status_code == 403
+
+
+@pytest.mark.parametrize("creation", ["before_day", "during_day", "after_day"])
+def test_past_actuals_follow_configuration_at_day_start_after_binding_change(
+    monkeypatch: pytest.MonkeyPatch,
+    creation: str,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    old_configuration_id = plant.current_configuration_id
+    assert old_configuration_id is not None
+    if creation != "before_day":
+        start, end = local_day_bounds(DAY, system.binding.timezone)
+        PlantConfiguration.objects.filter(pk=old_configuration_id).update(
+            created_at=(start if creation == "during_day" else end) + timedelta(hours=1)
+        )
+    reference = actuals(system)
+    new_binding = SiteBinding.objects.get(pk=system.binding.pk)
+    new_binding.pk = None
+    new_binding.site_id = "new-site"
+    new_binding.save()
+    Region.objects.filter(pk=system.region.pk).update(approved_binding=new_binding)
+    revised = revise_plant(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        name="Revised",
+        dc_capacity_mw=130,
+        export_limit_mw=100,
+    )
+    assert revised.current_configuration_id != old_configuration_id
+    args = (system.member, system.tenant.pk, system.region.pk, plant.pk)
+    for source in ("auto", "estimated_actuals"):
+        past = plant_outlook(*args, target_date=DAY, resolution_minutes=30, source=source)
+        assert past["configuration_id"] == old_configuration_id
+        assert past["freshness"] == "stale"
+        payload = past["result"]
+        assert isinstance(payload, dict)
+        assert payload["provenance"]["snapshot_id"] == reference.pk
+        assert "estimated_actuals_not_metered" in payload["quality_flags"]
+        assert ("historical_configuration_assumed" in payload["quality_flags"]) == (
+            creation != "before_day"
+        )
+    replay = plant_outlook(
+        *args, target_date=DAY, resolution_minutes=30, source="estimated_actuals", as_of=NOW
+    )
+    assert replay["configuration_id"] == revised.current_configuration_id
+    assert replay["result"] is None
+    today = plant_outlook(*args, target_date=NOW.date(), resolution_minutes=30)
+    assert today["configuration_id"] == revised.current_configuration_id
+    assert today["result"] is None
 
 
 @pytest.mark.parametrize(
@@ -335,7 +428,7 @@ def test_missing_history_falls_back_only_when_automatic(monkeypatch: pytest.Monk
     system, plant = make_plant(monkeypatch)
     assert plant.current_configuration_id is not None
     args = (system.member, system.tenant.pk, system.region.pk, plant.pk)
-    snapshot_for(system, DAY)
+    publish_snapshot(snapshot_for(system, DAY))
     automatic = plant_outlook(
         *args, target_date=DAY, resolution_minutes=30, source="auto", as_of=NOW
     )

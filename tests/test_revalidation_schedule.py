@@ -3,8 +3,8 @@ from datetime import timedelta
 import pytest
 
 from pyracast.connections.operations import rotate_secret, validate_binding
-from pyracast.forecasts.jobs import collect
-from pyracast.forecasts.models import CollectionJob, RequestAttempt
+from pyracast.forecasts.jobs import claim, collect
+from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.regions.models import Region
 from pyracast.regions.operations import approve_region
@@ -60,6 +60,33 @@ def test_first_approval_after_cutoff_does_not_backfill_a_preapproval_slot() -> N
     assert enqueue_due(approval_time) == []
     assert list(CollectionJob.objects.values_list("pk", flat=True)) == [initial.pk]
     assert initial.scheduled_slot == approval_time
+
+
+def test_approval_acquisition_runs_outside_an_existing_schedule_without_enabling_other_slots() -> (
+    None
+):
+    system = make_system()
+    validate_binding(system.admin, system.binding.pk, FakeAdapter(), NOW - timedelta(hours=1))
+    CollectionSchedule.objects.create(
+        region=system.region,
+        enabled=True,
+        times=["09:15", "10:00"],
+        effective_from=NOW - timedelta(hours=2),
+    )
+    initial = approve_region(system.admin, system.region.pk, system.binding.pk, NOW)
+
+    assert collect(initial.pk, FakeAdapter(), calculate, NOW)
+    assert RequestAttempt.objects.filter(job=initial).count() == 1
+    later = CollectionJob.objects.create(
+        binding=system.binding,
+        endpoint="forecasts",
+        scheduled_slot=NOW + timedelta(minutes=1),
+        available_at=NOW + timedelta(minutes=1),
+        target_date=initial.target_date,
+    )
+    assert claim(later.pk, NOW + timedelta(minutes=1)) is None
+    later.refresh_from_db()
+    assert later.status == "stale"
 
 
 def test_scheduler_requires_durable_approval_history() -> None:

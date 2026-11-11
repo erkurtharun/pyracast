@@ -295,7 +295,7 @@ class EmptyInput(InputSerializer):
 class ForecastQuery(InputSerializer):
     date = serializers.DateField()
     data_source = serializers.ChoiceField(
-        choices=("auto", "forecast", "estimated_actuals"), default="forecast"
+        choices=("auto", "forecast", "estimated_actuals", "archived_forecast"), default="forecast"
     )
     resolution_minutes = serializers.ChoiceField(choices=(30, 60), default=30)
     as_of = AwareDateTime(required=False)

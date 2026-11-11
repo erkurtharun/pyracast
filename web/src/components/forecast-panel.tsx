@@ -1,5 +1,6 @@
 "use client";
 import { ScrollRegion } from "./scroll-region";
+import { WeatherReferenceCard } from "./weather-reference";
 import type { Forecast } from "@/lib/api";
 import { Empty, JsonDetails, Notice, Stat, Tag } from "./ui";
 import { CsvDownload } from "./csv-download";
@@ -169,7 +170,11 @@ export function ForecastPanel({
                         records={csvRows}
                         metadata={{
                             ...forecast,
-                            result: { ...result, intervals: undefined },
+                            result: {
+                                ...result,
+                                intervals: undefined,
+                                weather_reference: undefined,
+                            },
                             ...(scenario
                                 ? {
                                       outage_scenario: {
@@ -198,6 +203,25 @@ export function ForecastPanel({
                         ) && <Tag tone="warning">Needs validation</Tag>}
                 </div>
             </div>
+            {!electrical && result.weather_reference != null && (
+                <WeatherReferenceCard
+                    reference={
+                        result.weather_reference as Parameters<
+                            typeof WeatherReferenceCard
+                        >[0]["reference"]
+                    }
+                />
+            )}
+            {electrical &&
+                Array.isArray(result.quality_flags) &&
+                result.quality_flags.includes("archived_forecast") && (
+                    <Notice>
+                        Saved day-ahead forecast using configuration{" "}
+                        {forecast.configuration_id ?? "—"}. This archive is
+                        separate from the current outlook and metered
+                        production.
+                    </Notice>
+                )}
             {scenario?.status === "unknown_impact" && (
                 <Notice>
                     Capacity impact is unknown for some intervals; missing

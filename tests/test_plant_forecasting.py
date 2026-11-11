@@ -28,12 +28,12 @@ def test_native_clipping_zero_missingness_and_immutable_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    source = snapshot_for(system, DAY, power_kw=0)
+    source = publish_snapshot(snapshot_for(system, DAY, power_kw=0))
     source.normalized_intervals[0]["power_kw"] = 120 / 130
     source.normalized_intervals[1]["power_kw"] = 80 / 130
     source.save()
-    ForecastResult.objects.create(
-        snapshot=source, payload={"energy_kwh_m2": None, "complete": False}, published_at=NOW
+    ForecastResult.objects.filter(snapshot=source).update(
+        payload={"energy_kwh_m2": None, "complete": False}
     )
     result = plant_forecast(
         system.member,
@@ -88,22 +88,26 @@ def test_snapshot_selection_excludes_future_issue_collection_and_actuals(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    first = snapshot_for(system, DAY)
-    snapshot_for(system, DAY, power_kw=0.3, collected_at=first.collected_at)
-    snapshot_for(
-        system,
-        DAY,
-        power_kw=0.9,
-        collected_at=first.collected_at + timedelta(minutes=1),
-        issued_at=NOW,
+    first = publish_snapshot(snapshot_for(system, DAY))
+    publish_snapshot(snapshot_for(system, DAY, power_kw=0.3, collected_at=first.collected_at))
+    publish_snapshot(
+        snapshot_for(
+            system,
+            DAY,
+            power_kw=0.9,
+            collected_at=first.collected_at + timedelta(minutes=1),
+            issued_at=NOW,
+        )
     )
-    snapshot_for(system, DAY, power_kw=0.9, collected_at=NOW)
-    snapshot_for(
-        system,
-        DAY,
-        power_kw=0.9,
-        collected_at=first.collected_at + timedelta(minutes=2),
-        source_kind="estimated_actuals",
+    publish_snapshot(snapshot_for(system, DAY, power_kw=0.9, collected_at=NOW))
+    publish_snapshot(
+        snapshot_for(
+            system,
+            DAY,
+            power_kw=0.9,
+            collected_at=first.collected_at + timedelta(minutes=2),
+            source_kind="estimated_actuals",
+        )
     )
     result = plant_forecast(
         system.member,
@@ -174,7 +178,7 @@ def test_active_calibration_is_available_at_issuance(
     monkeypatch: pytest.MonkeyPatch, future_field: str | None
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    source = snapshot_for(system, DAY)
+    source = publish_snapshot(snapshot_for(system, DAY))
     run = ready_run(system, plant)
     activation = activate_calibration(
         system.member, system.tenant.pk, system.region.pk, plant.pk, run.pk
@@ -202,7 +206,7 @@ def test_historical_cached_result_survives_revision_but_new_output_cannot_publis
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    snapshot_for(system, DAY)
+    publish_snapshot(snapshot_for(system, DAY))
     original = plant_forecast(
         system.member,
         system.tenant.pk,
@@ -239,7 +243,7 @@ def test_configuration_change_during_calculation_cannot_publish(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    snapshot_for(system, DAY)
+    publish_snapshot(snapshot_for(system, DAY))
     original = forecast
 
     def change(*args: Any, **kwargs: Any) -> dict[str, object]:
@@ -277,7 +281,7 @@ def test_measurement_basis_determines_limits(monkeypatch: pytest.MonkeyPatch) ->
     configuration.inverter_capacity_mw = None
     assert power_limit(configuration) is None
     configuration.save()
-    snapshot_for(system, DAY)
+    publish_snapshot(snapshot_for(system, DAY))
     result = plant_forecast(
         system.member,
         system.tenant.pk,
@@ -334,11 +338,13 @@ def test_first_available_day_ahead_source_remains_stable_after_late_refresh(
 ) -> None:
     system, plant = make_plant(monkeypatch)
     acquired = datetime(2026, 11, 8, 13, 1, tzinfo=UTC)
-    old = snapshot_for(system, DAY, collected_at=acquired - timedelta(days=1))
-    first = snapshot_for(system, DAY, collected_at=acquired)
+    old = publish_snapshot(snapshot_for(system, DAY, collected_at=acquired - timedelta(days=1)))
+    first = publish_snapshot(snapshot_for(system, DAY, collected_at=acquired))
     first.job.scheduled_slot = acquired - timedelta(minutes=1)
     first.job.save()
-    snapshot_for(system, DAY, power_kw=0.9, collected_at=datetime(2026, 11, 8, 20, tzinfo=UTC))
+    publish_snapshot(
+        snapshot_for(system, DAY, power_kw=0.9, collected_at=datetime(2026, 11, 8, 20, tzinfo=UTC))
+    )
     unavailable = plant_forecast(
         system.member,
         system.tenant.pk,

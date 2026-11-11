@@ -66,7 +66,7 @@ def test_today_uses_latest_collection_without_changing_midnight_replay(
 ) -> None:
     system, plant = make_plant(monkeypatch)
     today = NOW.date()
-    original = snapshot_for(system, today, power_kw=0.1)
+    original = publish_snapshot(snapshot_for(system, today, power_kw=0.1))
     latest = publish_snapshot(snapshot_for(system, today, power_kw=0.2, collected_at=NOW))
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
     current = plant_outlook(*scope, target_date=today, resolution_minutes=30)

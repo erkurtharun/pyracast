@@ -56,6 +56,8 @@ class ForecastSnapshot(models.Model):
     coverage_start = models.DateTimeField(null=True, db_index=True)
     coverage_end = models.DateTimeField(null=True, db_index=True)
     available_at = models.DateTimeField(null=True)
+    weather_payload = models.JSONField(null=True)
+    weather_error = models.CharField(max_length=64, default="")
 
 
 class ForecastResult(models.Model):

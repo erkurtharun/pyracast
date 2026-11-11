@@ -2,6 +2,7 @@ import os
 from datetime import UTC, datetime
 
 import dramatiq
+from django.conf import settings
 from django.db import close_old_connections, connections
 from dramatiq import Actor, Broker
 from dramatiq.brokers.rabbitmq import RabbitmqBroker
@@ -11,13 +12,23 @@ from pyracast.forecasts.jobs import collect, pending_job_ids
 from pyracast.forecasts.models import CollectionJob
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.providers import adapter_for
+from pyracast.weather import OpenMeteoProvider
 
 
 def deliver(job_id: int) -> None:
     close_old_connections()
     try:
         job = CollectionJob.objects.select_related("binding__provider_account").get(pk=job_id)
-        collect(job_id, adapter_for(job.binding), calculate, datetime.now(UTC))
+        weather = (
+            OpenMeteoProvider(api_key=os.environ.get("PYRACAST_OPEN_METEO_API_KEY") or None)
+            if settings.PYRACAST_WEATHER_ENABLED
+            and job.binding.provider_account.provider == "solcast"
+            and job.endpoint == "forecasts"
+            else None
+        )
+        collect(
+            job_id, adapter_for(job.binding), calculate, datetime.now(UTC), weather_provider=weather
+        )
     finally:
         connections.close_all()
 

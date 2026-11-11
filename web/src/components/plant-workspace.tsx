@@ -40,6 +40,7 @@ export function PlantWorkspace({
     const [currentPlant, setCurrentPlant] = useState(plant);
     const [editing, setEditing] = useState(false);
     const yesterday = localDay(timezone, -1);
+    const today = localDay(timezone);
     const configuration = currentPlant.current_configuration;
     return (
         <>
@@ -154,7 +155,9 @@ export function PlantWorkspace({
                                 max={
                                     source === "estimated_actuals"
                                         ? yesterday
-                                        : undefined
+                                        : source === "archived_forecast"
+                                          ? today
+                                          : undefined
                                 }
                                 onChange={(event) =>
                                     setDate(event.target.value)
@@ -162,6 +165,7 @@ export function PlantWorkspace({
                             />
                         </label>
                         <DataSourceControl
+                            allowArchivedForecast
                             value={source}
                             onChange={(next) => {
                                 setSource(next);
@@ -170,6 +174,11 @@ export function PlantWorkspace({
                                     date > yesterday
                                 )
                                     setDate(yesterday);
+                                if (
+                                    next === "archived_forecast" &&
+                                    date > today
+                                )
+                                    setDate(today);
                             }}
                         />
                         <label className="field">
@@ -189,6 +198,11 @@ export function PlantWorkspace({
                     {source === "estimated_actuals" && date > yesterday ? (
                         <Notice>
                             Choose a completed local day for estimated actuals.
+                        </Notice>
+                    ) : source === "archived_forecast" && date > today ? (
+                        <Notice>
+                            Choose today or an earlier day for archived
+                            forecasts.
                         </Notice>
                     ) : (
                         <PlantForecast

@@ -11,6 +11,7 @@ from pyracast.irradiance import (
     estimate_intervals,
     integrate_day,
 )
+from pyracast.irradiance.weather_reference import summarize_weather, unavailable_weather
 
 
 def _interval(row: dict[str, object]) -> PowerInterval:
@@ -52,7 +53,7 @@ def calculate(binding: SiteBinding, target_date: date, data: ProviderData) -> di
     flags = set(result.quality_flags)
     if data.raw_payload.get("synthetic") is True:
         flags.add("synthetic_fixture")
-    return {
+    payload: dict[str, object] = {
         "region_id": binding.region_id,
         "local_date": result.local_date.isoformat(),
         "timezone": result.timezone,
@@ -96,3 +97,11 @@ def calculate(binding: SiteBinding, target_date: date, data: ProviderData) -> di
         "model_version": result.model_version,
         "quality_flags": sorted(flags),
     }
+    if data.source_kind == "forecast":
+        if data.weather is not None:
+            payload["weather_reference"] = summarize_weather(
+                data.weather, target_date, binding.timezone
+            )
+        elif data.weather_error:
+            payload["weather_reference"] = unavailable_weather(data.weather_error)
+    return payload

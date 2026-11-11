@@ -2008,8 +2008,9 @@ export interface operations {
                  * @description * `auto` - auto
                  *     * `forecast` - forecast
                  *     * `estimated_actuals` - estimated_actuals
+                 *     * `archived_forecast` - archived_forecast
                  */
-                data_source?: "auto" | "forecast" | "estimated_actuals";
+                data_source?: "auto" | "forecast" | "estimated_actuals" | "archived_forecast";
                 date: string;
                 /**
                  * @description * `30` - 30
