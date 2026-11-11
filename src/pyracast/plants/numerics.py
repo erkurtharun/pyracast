@@ -6,7 +6,7 @@ from math import ceil, isfinite
 from zoneinfo import ZoneInfo
 
 MODEL_VERSION = "reference-power-transfer-v1"
-POLICY_VERSION = "regularized-huber-v3"
+POLICY_VERSION = "regularized-huber-v4"
 DAYLIGHT_COVERAGE_POLICY = "whole-meter-intervals-cover-daylight-v1"
 type RequiredWindows = Mapping[date, tuple[tuple[datetime, datetime], ...]]
 FACTOR_MIN = 0.25
@@ -510,6 +510,92 @@ def _rolling_origin(
     return {"status": "diagnostic" if folds else "insufficient", "folds": folds}
 
 
+def _window_candidate(
+    rows: list[_Row],
+    days: list[date],
+    horizon: int,
+    normalization: float,
+    cap: float | None,
+) -> tuple[dict[str, object], tuple[float, float, int] | None]:
+    folds: list[dict[str, object]] = []
+    candidate: dict[str, object] = {
+        "lookback_days": horizon,
+        "status": "insufficient_history",
+        "folds": folds,
+    }
+    aggregate = dict.fromkeys(
+        ("interval_mae_mw", "bias_mw", "daily_mae_mwh", "daily_bias_mwh"), 0.0
+    )
+    hours = 0.0
+    evaluated_days = 0
+    for offset in (21, 14, 7):
+        evaluation = days[-offset : len(days) - offset + 7]
+        start = evaluation[0] - timedelta(days=horizon)
+        if days[0] > start:
+            return candidate, None
+        training_days = [day for day in days if start <= day < evaluation[0]]
+        training = _eligible([row for row in rows if row.day in training_days], cap)
+        if (
+            len(training_days) < 20
+            or not _support(training, training_days, normalization, cap)["sufficient"]
+        ):
+            candidate["status"] = "insufficient_training_support"
+            return candidate, None
+        factor = _fit(training, normalization, cap)
+        validation = [row for row in rows if row.day in evaluation]
+        metrics = _metrics(validation, factor, cap)
+        fold_hours = sum(row.hours for row in validation)
+        for metric in ("interval_mae_mw", "bias_mw"):
+            aggregate[metric] += metrics[metric] * fold_hours
+        for metric in ("daily_mae_mwh", "daily_bias_mwh"):
+            aggregate[metric] += metrics[metric] * len(evaluation)
+        hours += fold_hours
+        evaluated_days += len(evaluation)
+        folds.append(
+            {
+                "training_day_dates": [day.isoformat() for day in training_days],
+                "evaluation_day_dates": [day.isoformat() for day in evaluation],
+                "factor": factor,
+                "metrics": metrics,
+            }
+        )
+    for metric in ("interval_mae_mw", "bias_mw"):
+        aggregate[metric] /= hours
+    for metric in ("daily_mae_mwh", "daily_bias_mwh"):
+        aggregate[metric] /= evaluated_days
+    candidate.update({"status": "evaluated", "metrics": aggregate})
+    return candidate, (aggregate["interval_mae_mw"], aggregate["daily_mae_mwh"], horizon)
+
+
+def _adaptive_window(
+    rows: list[_Row],
+    days: list[date],
+    end: date,
+    normalization: float,
+    cap: float | None,
+) -> tuple[list[_Row], list[date], dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    ranked: list[tuple[float, float, int]] = []
+    for horizon in (30, 60, 90):
+        candidate, rank = _window_candidate(rows, days, horizon, normalization, cap)
+        candidates.append(candidate)
+        if rank is not None:
+            ranked.append(rank)
+    selection: dict[str, object] = {
+        "status": "insufficient",
+        "selected_lookback_days": None,
+        "candidates": candidates,
+        "selection_order": ["interval_mae_mw", "daily_mae_mwh", "lookback_days"],
+        "history_policy": "full-calendar-horizon-at-every-fold-v1",
+    }
+    if not ranked:
+        return rows, days, selection
+    horizon = min(ranked)[2]
+    selected_days = [day for day in days if day >= end - timedelta(days=horizon)]
+    selection.update({"status": "selected", "selected_lookback_days": horizon})
+    return [row for row in rows if row.day in selected_days], selected_days, selection
+
+
 def fit_calibration(
     samples: tuple[CalibrationSample, ...],
     *,
@@ -547,26 +633,37 @@ def fit_calibration(
         "incumbent_factor": incumbent_factor,
         "reasons": [],
         "rolling_origin": {"status": "insufficient", "folds": []},
+        "adaptive_window": {
+            "status": "insufficient",
+            "selected_lookback_days": None,
+            "candidates": [],
+        },
     }
     if len(days) < 7:
         report["reasons"] = ["insufficient_complete_days"]
         return FitResult("insufficient", None, "insufficient", report)
     holdout_count = 7 if len(days) >= 30 else max(2, ceil(len(days) * 0.2))
     holdout_days = days[-holdout_count:]
+    training_days = days[:-holdout_count]
     training = [row for row in rows if row.day not in holdout_days]
     validation = [row for row in rows if row.day in holdout_days]
+    report["development_day_dates"] = [day.isoformat() for day in training_days]
+    if len(days) >= 60:
+        training, training_days, report["adaptive_window"] = _adaptive_window(
+            training, training_days, holdout_days[0], normalization_mw, limit_mw
+        )
     informative = [row for row in training if any(power > 0 for power, _ in row.pieces)]
     eligible = _eligible(informative, limit_mw)
     exclusions["uninformative_training"] = len(training) - len(informative)
     exclusions["censored_training"] = len(informative) - len(eligible)
-    support = _support(eligible, days[:-holdout_count], normalization_mw, limit_mw)
+    support = _support(eligible, training_days, normalization_mw, limit_mw)
     report.update(
         {
-            "training_days": len(days) - holdout_count,
+            "training_days": len(training_days),
             "holdout_days": holdout_count,
             "fit_samples": len(eligible),
             "holdout_start": holdout_days[0].isoformat(),
-            "training_day_dates": [day.isoformat() for day in days[:-holdout_count]],
+            "training_day_dates": [day.isoformat() for day in training_days],
             "holdout_day_dates": [day.isoformat() for day in holdout_days],
             "training_support": support,
         }
@@ -590,7 +687,7 @@ def fit_calibration(
     )
     if len(days) >= 30:
         report["rolling_origin"] = _rolling_origin(
-            training, days[:-holdout_count], normalization_mw, limit_mw, incumbent_factor
+            training, training_days, normalization_mw, limit_mw, incumbent_factor
         )
     improves = all(
         candidate[metric] < baseline[metric] * (1 - MIN_IMPROVEMENT)

@@ -1,3 +1,4 @@
+from calendar import monthrange
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from threading import Barrier
@@ -11,8 +12,42 @@ from pyracast.plants.models import PlantConfiguration
 from pyracast.plants.operations import revise_plant
 from tests.test_domain import NOW
 from tests.test_metering import NEXT_NIGHT, connected
+from tests.test_metering_settlement import link_settlement
 
 pytestmark = pytest.mark.django_db(transaction=True)
+
+
+def test_existing_three_month_settlement_bootstrap_upgrades_once_without_more_realtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    link_settlement(monkeypatch)
+    EpiasCollectionJob.objects.filter(
+        source_kind="settlement_injection", target_day__lt=date(2026, 8, 1)
+    ).delete()
+    original = set(EpiasCollectionJob.objects.values_list("pk", flat=True))
+    assert len(original) == 93
+    identifiers = enqueue_due_epias_jobs(now=NOW + timedelta(minutes=1))
+    all_ids = set(EpiasCollectionJob.objects.values_list("pk", flat=True))
+    assert len(all_ids - original) == 9
+    assert len(identifiers) == 102
+    assert EpiasCollectionJob.objects.filter(source_kind="realtime_generation").count() == 90
+    assert EpiasCollectionJob.objects.filter(source_kind="settlement_injection").count() == 12
+    assert enqueue_due_epias_jobs(now=NOW + timedelta(minutes=2)) == []
+    assert set(EpiasCollectionJob.objects.values_list("pk", flat=True)) == all_ids
+
+
+def test_existing_initial_month_at_a_different_slot_does_not_duplicate_the_archive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    link_settlement(monkeypatch)
+    oldest = EpiasCollectionJob.objects.filter(source_kind="settlement_injection").earliest(
+        "target_day"
+    )
+    oldest.scheduled_for = NOW + timedelta(minutes=1)
+    oldest.save(update_fields=("scheduled_for",))
+    identifiers = set(EpiasCollectionJob.objects.values_list("pk", flat=True))
+    assert enqueue_due_epias_jobs(now=NOW + timedelta(minutes=2)) == []
+    assert set(EpiasCollectionJob.objects.values_list("pk", flat=True)) == identifiers
 
 
 def test_initial_history_covers_ninety_completed_market_days_once(
@@ -81,7 +116,7 @@ def test_existing_seven_day_connection_backfills_once_with_concurrent_schedulers
     assert EpiasCollectionJob.objects.count() == 97
 
 
-def test_initial_settlement_includes_fourth_month_when_ninety_days_require_it(
+def test_initial_settlement_covers_twelve_complete_months_without_extending_realtime(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, plant, linked = connected(monkeypatch)
@@ -96,18 +131,26 @@ def test_initial_settlement_includes_fourth_month_when_ninety_days_require_it(
     )
     linked.refresh_from_db()
     identifiers = enqueue_connection(linked, initial_at, initial=True)
-    assert len(identifiers) == 94
+    assert len(identifiers) == 102
+    assert EpiasCollectionJob.objects.filter(source_kind="realtime_generation").count() == 90
     assert list(
         EpiasCollectionJob.objects.filter(source_kind="settlement_injection")
         .order_by("target_day")
         .values_list("target_day", "period_end_day")
     ) == [
-        (date(2026, 1, 1), date(2026, 1, 31)),
-        (date(2026, 2, 1), date(2026, 2, 28)),
-        (date(2026, 3, 1), date(2026, 3, 31)),
-        (date(2026, 4, 1), date(2026, 4, 30)),
+        (date(year, month, 1), date(year, month, monthrange(year, month)[1]))
+        for year, month in [
+            *((2025, month) for month in range(5, 13)),
+            *((2026, month) for month in range(1, 5)),
+        ]
     ]
     assert (
         enqueue_connection(linked, initial_at + timedelta(minutes=1), initial=True) == identifiers
     )
-    assert EpiasCollectionJob.objects.count() == 94
+    enqueue_due_epias_jobs(now=initial_at + timedelta(minutes=2))
+    assert EpiasCollectionJob.objects.count() == 102
+    assert all(
+        job.period_end_day is not None
+        and 28 <= (job.period_end_day - job.target_day).days + 1 <= 31
+        for job in EpiasCollectionJob.objects.filter(source_kind="settlement_injection")
+    )

@@ -34,6 +34,8 @@ from pyracast.plants.numerics import (
 from pyracast.regions.models import Region
 from pyracast.solar import daylight_window
 
+AUTOMATIC_POOL_DAYS = 180
+
 
 def _matched_days(
     configuration: PlantConfiguration, observations: list[Measurement], now: datetime
@@ -110,7 +112,9 @@ def prepare_calibration(plant_id: int, now: datetime | None = None) -> Calibrati
         end_day = latest_measurement_day(configuration, day_start, moment, watermark)
         if end_day is None:
             return None
-        start, _ = local_day_bounds(end_day - timedelta(days=89), configuration.binding.timezone)
+        start, _ = local_day_bounds(
+            end_day - timedelta(days=AUTOMATIC_POOL_DAYS - 1), configuration.binding.timezone
+        )
         _, end = local_day_bounds(end_day, configuration.binding.timezone)
         rows, snapshot_ids = select_measurements(
             configuration, start, end, moment, observation_id_cutoff=watermark

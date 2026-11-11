@@ -22,6 +22,7 @@ from pyracast.plants.numerics import (
     CalibrationSample,
     PowerInterval,
     RequiredWindows,
+    evaluate_samples,
 )
 from pyracast.solar import DAYLIGHT_POLICY, daylight_window
 
@@ -87,6 +88,151 @@ def _observation_manifest(
     }
 
 
+def _reference_manifest(snapshot: ForecastSnapshot) -> dict[str, object]:
+    imported = snapshot.job.reference_import
+    return {
+        "snapshot_id": snapshot.pk,
+        "binding_id": snapshot.job.binding_id,
+        "source_kind": snapshot.source_kind,
+        "source_product": imported.source_settings["product"]
+        if imported is not None
+        else "rooftop_pv_power"
+        if snapshot.job.endpoint == "estimated_actuals"
+        else "unknown",
+        "reference_import": {
+            "id": imported.pk,
+            "sha256": imported.sha256,
+            "source_name": imported.source_name,
+            "imported_at": imported.imported_at.isoformat(),
+            "source_settings": imported.source_settings,
+        }
+        if imported is not None
+        else None,
+        "collected_at": snapshot.collected_at.isoformat(),
+        "available_at": cast(datetime, snapshot.available_at).isoformat(),
+        "issued_at": snapshot.issued_at.isoformat() if snapshot.issued_at else None,
+    }
+
+
+def _reported_dates(value: object) -> list[str] | None:
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        return None
+    try:
+        parsed = sorted({date.fromisoformat(item).isoformat() for item in value})
+    except ValueError:
+        return None
+    return parsed if len(parsed) == len(value) and set(parsed) == set(value) else None
+
+
+def current_source_validation(
+    manifest: dict[str, object], report: dict[str, object], binding_id: int
+) -> dict[str, object]:
+    included = _reported_dates(report.get("included_day_dates"))
+    training = _reported_dates(report.get("training_day_dates"))
+    holdout = _reported_dates(report.get("holdout_day_dates"))
+    selected = sorted(set(training or []) | set(holdout or []))
+    sources = manifest.get("sources")
+    current: list[str] = []
+    if (
+        isinstance(sources, dict)
+        and type(manifest.get("binding_id")) is int
+        and manifest["binding_id"] == binding_id
+    ):
+        for day in sorted(set(included or []) & set(selected)):
+            source = sources.get(day)
+            if (
+                isinstance(source, dict)
+                and type(source.get("snapshot_id")) is int
+                and source["snapshot_id"] > 0
+                and type(source.get("binding_id")) is int
+                and source.get("binding_id") == binding_id
+                and source.get("source_kind") == "estimated_actuals"
+                and source.get("source_product") == "rooftop_pv_power"
+                and "reference_import" in source
+                and source["reference_import"] is None
+            ):
+                current.append(day)
+    current_holdout = sorted(set(holdout or []) & set(current))
+    eligible = (
+        included is not None
+        and training is not None
+        and holdout is not None
+        and type(report.get("valid_days")) is int
+        and report["valid_days"] == len(included)
+        and type(report.get("training_days")) is int
+        and report["training_days"] == len(training)
+        and report.get("holdout_days") == 7
+        and len(holdout) == 7
+        and holdout == included[-7:]
+        and set(selected) <= set(included)
+        and all(day < holdout[0] for day in training)
+        and len(current) >= 30
+        and len(current) == len(selected)
+        and len(current_holdout) == 7
+    )
+    return {
+        "policy": "current-rooftop-pv-power-selected-30-days-final-7-v1",
+        "source_product": "rooftop_pv_power",
+        "valid_day_dates": current,
+        "valid_days": len(current),
+        "training_day_dates": sorted(set(training or []) & set(current)),
+        "training_days": len(set(training or []) & set(current)),
+        "holdout_day_dates": current_holdout,
+        "holdout_days": len(current_holdout),
+        "eligible": eligible,
+        "reference_basis": "modeled_estimated_actuals_not_measurements",
+    }
+
+
+def _select_reference_cohort(
+    samples: tuple[CalibrationSample, ...],
+    sources: dict[str, dict[str, object] | None],
+    required_windows: RequiredWindows,
+    configuration: PlantConfiguration,
+) -> tuple[set[int], RequiredWindows, dict[str, object]]:
+    products = ("rooftop_pv_power", "historical_rooftop_pv", "unknown")
+    groups: dict[str, list[int]] = {product: [] for product in products}
+    zone = ZoneInfo(configuration.binding.timezone)
+    for index, sample in enumerate(samples):
+        source = sources[sample.start.astimezone(zone).date().isoformat()]
+        product = cast(str, source["source_product"]) if source is not None else "unknown"
+        groups[product].append(index)
+    windows_by_product: dict[str, RequiredWindows] = {}
+    cohorts: dict[str, dict[str, object]] = {}
+    counts: dict[str, int] = {}
+    for product, indexes in groups.items():
+        days = {samples[index].start.astimezone(zone).date() for index in indexes}
+        windows = {day: windows for day, windows in required_windows.items() if day in days}
+        windows_by_product[product] = windows
+        evaluation = evaluate_samples(
+            tuple(samples[index] for index in indexes),
+            timezone=str(zone),
+            limit_mw=power_limit(configuration),
+            required_windows=windows,
+        )
+        counts[product] = cast(int, evaluation["valid_days"])
+        cohorts[product] = {
+            "complete_matched_days": counts[product],
+            "complete_matched_day_dates": evaluation["included_day_dates"],
+            "samples": len(indexes),
+        }
+    selected = next(
+        (product for product in products if counts[product] >= 7),
+        max(products, key=lambda product: counts[product]),
+    )
+    return (
+        set(groups[selected]),
+        windows_by_product[selected],
+        {
+            "policy": "single-product-native-first-seven-complete-days-v1",
+            "selected_product": selected,
+            "cohorts": cohorts,
+            "selected_samples": len(groups[selected]),
+            "excluded_samples": len(samples) - len(groups[selected]),
+        },
+    )
+
+
 def build_calibration_dataset(
     run: CalibrationRun, configuration: PlantConfiguration
 ) -> CalibrationDataset:
@@ -125,22 +271,14 @@ def build_calibration_dataset(
         key = day.isoformat()
         if key not in sources:
             if run.reference_snapshot_ids is not None:
-                snapshot = ForecastSnapshot.objects.filter(
-                    pk=run.reference_snapshot_ids.get(key)
-                ).first()
+                snapshot = (
+                    ForecastSnapshot.objects.select_related("job__reference_import")
+                    .filter(pk=run.reference_snapshot_ids.get(key))
+                    .first()
+                )
             else:
                 snapshot = select_actual_snapshot(configuration.binding, day, run.cutoff_at)
-            sources[key] = (
-                None
-                if snapshot is None
-                else {
-                    "snapshot_id": snapshot.pk,
-                    "source_kind": snapshot.source_kind,
-                    "collected_at": snapshot.collected_at.isoformat(),
-                    "available_at": cast(datetime, snapshot.available_at).isoformat(),
-                    "issued_at": snapshot.issued_at.isoformat() if snapshot.issued_at else None,
-                }
-            )
+            sources[key] = None if snapshot is None else _reference_manifest(snapshot)
             native_by_day[key] = (
                 () if snapshot is None else actual_power_intervals(snapshot, configuration)
             )
@@ -165,6 +303,11 @@ def build_calibration_dataset(
                 observation.quality,
             )
         )
+    selected, fit_windows, cohort = _select_reference_cohort(
+        tuple(samples), sources, required_windows, configuration
+    )
+    fit_samples = tuple(sample for index, sample in enumerate(samples) if index in selected)
+    fit_observations = [row for index, row in enumerate(observations) if index in selected]
     manifest: dict[str, object] = {
         "measurement_selection_policy": run.measurement_selection_policy,
         "incident_revision_ids": run.incident_revision_ids,
@@ -179,6 +322,8 @@ def build_calibration_dataset(
         "comparison_activation_id": run.comparison_activation_id,
         "incumbent_factor": incumbent_factor,
         "configuration_id": configuration.pk,
+        "configuration_declared_at": configuration.created_at.isoformat(),
+        "configuration_time_policy": "current-declaration-applied-retrospectively-v1",
         "binding_id": configuration.binding_id,
         "dc_capacity_mw": configuration.dc_capacity_mw,
         "limit_mw": power_limit(configuration),
@@ -189,6 +334,7 @@ def build_calibration_dataset(
         "window_end": run.window_end.isoformat(),
         "selection_policy": run.dataset_manifest.get("selection_policy", HISTORY_SELECTION_POLICY),
         "source_kind": "estimated_actuals",
+        "reference_cohort": cohort,
         "sources": sources,
         "observations": entries,
     }
@@ -196,16 +342,17 @@ def build_calibration_dataset(
         "recorded_after_cutoff": late,
         "unmatched_observations": unmatched,
         "unmatched_days": [day for day, source in sources.items() if source is None],
-        "selected_observations": len(entries),
+        "selected_observations": len(fit_samples),
+        "reference_cohort": cohort,
         "provisional_production": any(
             row.snapshot is not None and row.snapshot.source_kind == "realtime_generation"
-            for row in observations
+            for row in fit_observations
         ),
         "production_sources": sorted(
-            {row.source if row.snapshot else "manual" for row in observations}
+            {row.source if row.snapshot else "manual" for row in fit_observations}
         ),
     }
-    return CalibrationDataset(tuple(samples), manifest, report, required_windows, incumbent_factor)
+    return CalibrationDataset(fit_samples, manifest, report, fit_windows, incumbent_factor)
 
 
 def _comparison_factor(run: CalibrationRun) -> float:

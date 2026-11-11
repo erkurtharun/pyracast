@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta
+from calendar import monthrange
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
@@ -15,6 +16,7 @@ from pyracast.plants.operations import configuration_is_current
 from pyracast.regions.models import Region
 
 MARKET_ZONE = ZoneInfo("Europe/Istanbul")
+INITIAL_SETTLEMENT_MONTHS = 12
 
 
 def _daily_window(connection: EpiasConnection, now: datetime) -> tuple[datetime, datetime] | None:
@@ -87,12 +89,15 @@ def enqueue_connection(
             .exclude(scheduled_for=scheduled_for)
             .exists()
         )
-        oldest_day = today - timedelta(days=90)
-        minimum_months = 3 if initial or initial_settlement or today.weekday() == 0 else 2
+        minimum_months = (
+            INITIAL_SETTLEMENT_MONTHS
+            if initial or initial_settlement
+            else 3
+            if today.weekday() == 0
+            else 2
+        )
         offset = 0
-        while offset < minimum_months or (
-            (initial or initial_settlement) and month_end >= oldest_day
-        ):
+        while offset < minimum_months:
             month_start = month_end.replace(day=1)
             job, _ = EpiasCollectionJob.objects.get_or_create(
                 connection=connection,
@@ -163,15 +168,38 @@ def enqueue_due_epias_jobs(*, now: datetime | None = None) -> list[int]:
                 configuration = plant.current_configuration
                 if configuration is not None and current.enabled:
                     initial_slot = max(current.updated_at, configuration.created_at)
-                    oldest_day = initial_slot.astimezone(MARKET_ZONE).date() - timedelta(days=90)
-                    if not EpiasCollectionJob.objects.filter(
-                        connection=current,
-                        connection_revision=current.revision,
-                        configuration=configuration,
-                        source_kind="realtime_generation",
-                        target_day=oldest_day,
-                        scheduled_for=initial_slot,
-                    ).exists():
+                    initial_day = initial_slot.astimezone(MARKET_ZONE).date()
+                    oldest_day = initial_day - timedelta(days=90)
+                    first_month = (
+                        initial_day.year * 12 + initial_day.month - 1 - INITIAL_SETTLEMENT_MONTHS
+                    )
+                    year, month = divmod(first_month, 12)
+                    oldest_month = date(year, month + 1, 1)
+                    oldest_month_end = date(year, month + 1, monthrange(year, month + 1)[1])
+                    missing_settlement = (
+                        connection.settlement_plant_id is not None
+                        and not EpiasCollectionJob.objects.filter(
+                            connection=current,
+                            connection_revision=current.revision,
+                            configuration=configuration,
+                            source_kind="settlement_injection",
+                            target_day=oldest_month,
+                            period_end_day=oldest_month_end,
+                            provider_plant__id=current.settlement_plant_id,
+                            provider_plant__eic=current.eic,
+                        ).exists()
+                    )
+                    if (
+                        missing_settlement
+                        or not EpiasCollectionJob.objects.filter(
+                            connection=current,
+                            connection_revision=current.revision,
+                            configuration=configuration,
+                            source_kind="realtime_generation",
+                            target_day=oldest_day,
+                            scheduled_for=initial_slot,
+                        ).exists()
+                    ):
                         identifiers.extend(enqueue_connection(current, now, initial=True))
                 identifiers.extend(enqueue_connection(current, now))
     return list(dict.fromkeys(identifiers))

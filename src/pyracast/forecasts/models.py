@@ -1,5 +1,6 @@
 import uuid
 
+from django.conf import settings
 from django.db import models
 
 from pyracast.connections.models import ProviderAccount, SiteBinding
@@ -13,8 +14,28 @@ class CollectionSchedule(models.Model):
     effective_from = models.DateTimeField()
 
 
+class HistoricalReferenceImport(models.Model):
+    binding = models.ForeignKey(SiteBinding, on_delete=models.PROTECT)
+    sha256 = models.CharField(max_length=64)
+    source_name = models.CharField(max_length=255)
+    source_settings = models.JSONField()
+    imported_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    imported_at = models.DateTimeField()
+    interval_count = models.PositiveIntegerField()
+
+    class Meta:
+        constraints = (
+            models.UniqueConstraint(
+                fields=("binding", "sha256"), name="unique_historical_reference_import"
+            ),
+        )
+
+
 class CollectionJob(models.Model):
     binding = models.ForeignKey(SiteBinding, on_delete=models.PROTECT)
+    reference_import = models.ForeignKey(
+        HistoricalReferenceImport, on_delete=models.PROTECT, null=True
+    )
     endpoint = models.CharField(max_length=30, default="forecasts")
     scheduled_slot = models.DateTimeField()
     target_date = models.DateField()
@@ -30,7 +51,12 @@ class CollectionJob(models.Model):
     class Meta:
         constraints = (
             models.UniqueConstraint(
-                fields=("binding", "endpoint", "scheduled_slot"), name="unique_collection_slot"
+                fields=("binding", "endpoint", "scheduled_slot"),
+                condition=models.Q(reference_import__isnull=True),
+                name="unique_collection_slot",
+            ),
+            models.UniqueConstraint(
+                fields=("reference_import", "target_date"), name="unique_import_reference_day"
             ),
         )
 

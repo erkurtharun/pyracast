@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from django.db.models import Q, QuerySet
 
 from pyracast.epias import TIMEZONE
-from pyracast.forecasts.history import select_actual_snapshot
+from pyracast.forecasts.history import HISTORY_SELECTION_POLICY, select_actual_snapshot
 from pyracast.incidents.operations import pinned_incidents, select_incidents
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasConnection, EpiasSnapshot
@@ -280,7 +280,15 @@ def selection_fingerprint(
     for day in days:
         snapshot = select_actual_snapshot(configuration.binding, day, cutoff)
         references[day.isoformat()] = snapshot.pk if snapshot else None
-        reference_content[day.isoformat()] = snapshot.normalized_intervals if snapshot else None
+        reference_content[day.isoformat()] = (
+            {
+                "intervals": snapshot.normalized_intervals,
+                "endpoint": snapshot.job.endpoint,
+                "historical_import": snapshot.job.reference_import_id is not None,
+            }
+            if snapshot
+            else None
+        )
     values = [
         {
             "start": r.starts_at.isoformat(),
@@ -295,6 +303,7 @@ def selection_fingerprint(
     ]
     payload = {
         "policy": policy,
+        "reference_selection_policy": HISTORY_SELECTION_POLICY,
         "configuration": configuration.pk,
         "rows": values,
         "reference": reference_content,

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, type ReactNode } from "react";
 import { request, type Page } from "@/lib/api";
-export function useCollection<T>(url: string, refresh = 0) {
+export function useCollection<T>(url: string, refresh = 0, pollMs = 0) {
     const [state, setState] = useState<{
         data?: Page<T>;
         error?: string;
@@ -9,12 +9,13 @@ export function useCollection<T>(url: string, refresh = 0) {
     }>({ loading: true });
     useEffect(() => {
         let current = true;
-        async function load() {
+        let sequence = 0;
+        async function load(requestSequence: number) {
             const first = await request<Page<T>>(url);
             const rows = [...first.results];
             let next = first.next;
             const visited = new Set<string>();
-            while (next && current) {
+            while (next && current && requestSequence === sequence) {
                 const target = new URL(next, window.location.origin);
                 const path = target.pathname + target.search;
                 if (visited.has(path) || !target.pathname.startsWith("/api/"))
@@ -26,19 +27,26 @@ export function useCollection<T>(url: string, refresh = 0) {
                 rows.push(...page.results);
                 next = page.next;
             }
-            if (current)
+            if (current && requestSequence === sequence)
                 setState({
                     data: { ...first, results: rows, next: null },
                     loading: false,
                 });
         }
-        load().catch((error: Error) => {
-            if (current) setState({ error: error.message, loading: false });
-        });
+        const start = () => {
+            const requestSequence = ++sequence;
+            load(requestSequence).catch((error: Error) => {
+                if (current && requestSequence === sequence)
+                    setState({ error: error.message, loading: false });
+            });
+        };
+        start();
+        const timer = pollMs > 0 ? setInterval(start, pollMs) : undefined;
         return () => {
             current = false;
+            if (timer) clearInterval(timer);
         };
-    }, [url, refresh]);
+    }, [url, refresh, pollMs]);
     return state;
 }
 export function useResource<T>(url: string, refresh = 0, pollMs = 0) {

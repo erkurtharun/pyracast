@@ -280,7 +280,7 @@ class CalibrationSummaryOutput(CalibrationOutput):
 class ActivationOutput(serializers.ModelSerializer[CalibrationActivation]):
     configuration_id = serializers.IntegerField()
     calibration_id = serializers.IntegerField(allow_null=True)
-    actor_id = serializers.IntegerField()
+    actor_id = serializers.IntegerField(allow_null=True)
 
     class Meta:
         model = CalibrationActivation
@@ -290,6 +290,25 @@ class ActivationOutput(serializers.ModelSerializer[CalibrationActivation]):
 
 class EmptyInput(InputSerializer):
     pass
+
+
+class CalibrationAutomationInput(InputSerializer):
+    enabled = serializers.BooleanField()
+
+
+class AutomaticCalibrationAttemptOutput(serializers.Serializer[dict[str, Any]]):
+    calibration_id = serializers.IntegerField(allow_null=True)
+    status = serializers.ChoiceField(choices=("activated", "skipped"))
+    reason = serializers.CharField()
+    created_at = serializers.DateTimeField()
+
+
+class CalibrationAutomationOutput(serializers.Serializer[dict[str, Any]]):
+    enabled = serializers.BooleanField()
+    authorized = serializers.BooleanField()
+    configuration_id = serializers.IntegerField(allow_null=True)
+    next_check_at = serializers.DateTimeField(allow_null=True)
+    last_attempt = AutomaticCalibrationAttemptOutput(allow_null=True)
 
 
 class ForecastQuery(InputSerializer):

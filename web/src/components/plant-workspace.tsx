@@ -250,6 +250,7 @@ export function PlantWorkspace({
                         key={`calibration-${configuration.id}`}
                         base={base}
                         token={token}
+                        currentConfigurationId={configuration.id}
                         productionRevision={productionRevision}
                     />
                 </>

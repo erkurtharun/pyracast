@@ -173,7 +173,8 @@ npm --prefix web run api:generate
 Set `EPIAS_USERNAME` and `EPIAS_PASSWORD` in the ignored root `.env`, apply migrations,
 and restart the API and worker. In a plant's **Automatic production** tab, enter its
 EPİAŞ plant ID and EIC. The backend verifies their match and queues the previous
-90 completed Istanbul dates. Keep `dispatch --loop` and `worker --threads 4`
+90 completed Istanbul dates plus twelve completed months of settlement injection
+when its matching EIC is available. Keep `dispatch --loop` and `worker --threads 4`
 running; the independent 03:00 local collection reconciles seven dates for late or
 revised reports. Yesterday's incomplete or failed production retries at 30-minute
 intervals before 09:00, respecting longer provider retry hints. No Solcast request
@@ -184,7 +185,44 @@ Disconnect preserves saved acquisitions. Calibration uses manual net-export
 readings, then settlement injection, then provisional reported production under
 the [source policy](docs/IRRADIANCE.md). Later settlement values replace provisional
 hours in the current view and prepare a new calibration candidate. Prior fits
-remain unchanged; activation is explicit.
+remain unchanged. In **Calibration**, enable automatic calibration once to schedule
+daily checks and guarded activation. Disabling keeps the last good model; resetting
+to baseline disables automation. New configurations need fresh authorization.
+The fitter compares 30/60/90-day training windows before an untouched holdout.
+Automatic activation also needs sufficient current Hobby source evidence; imported
+historical data alone does not prove live-source accuracy. See the
+[calibration policy](docs/IRRADIANCE.md#production-calibration).
+
+An admin can archive an authorized Historical Rooftop PV JSON export without API
+quota. Supply a JSON manifest with these exact fields (use the verified source
+settings, not values inferred from its filename):
+
+```json
+{
+  "product": "historical_rooftop_pv",
+  "unit": "kW",
+  "timestamp_convention": "period_end",
+  "period": "PT30M",
+  "latitude": 37.80375,
+  "longitude": 34.460913,
+  "capacity_kw": 1000,
+  "dc_capacity_kw": 1000,
+  "tilt_degrees": 0,
+  "azimuth_degrees": 0,
+  "losses_percent": 0,
+  "mounting_type": "fixed",
+  "source_reference": "Authorized export settings verified by the operator"
+}
+```
+
+```text
+uv run --locked pyracast import_historical_reference --username ADMIN --tenant-id TENANT --region-id REGION --binding-id BINDING --power-file docs/export.json --manifest docs/export-settings.json
+```
+
+Run from the repository root; both canonical JSON paths must stay inside it.
+Existing acquisitions remain unchanged, and the archive records its actual
+import time. Corrected exports create new immutable acquisitions.
+
 Routine tests use synthetic and sanitized captured responses. Live checks are
 opt-in: set `PYRACAST_EPIAS_LIVE=1`, `EPIAS_LIVE_PLANT_ID` and `EPIAS_LIVE_EIC`, then
 run `uv run --locked pytest tests/test_epias_live.py --no-cov`.
@@ -330,8 +368,10 @@ uv run --locked pyracast activate_calibration --username YOUR_USER --plant-id PL
 ```
 
 Activation/rollback affect subsequent forecast issuance, preserving earlier results.
-No automatic activation or artificial accuracy percentage is provided. Historical
-meter data without matching archived estimated actuals yields `insufficient`.
+Manual activation also enables subsequent guarded automatic updates. Automatic
+activation follows the stricter source/holdout policy above; no artificial accuracy
+percentage is provided. Historical meter data without matching archived estimated
+actuals yields `insufficient`.
 The production journal selects one local day and shows only whole 30/60-minute
 intervals overlapping daylight. Night readings are not invented.
 The Forecast performance panel independently compares archived day-ahead inputs

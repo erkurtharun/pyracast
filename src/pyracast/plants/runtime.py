@@ -4,6 +4,7 @@ import dramatiq
 from django.db import close_old_connections, connections
 from dramatiq import Actor, Broker
 
+from pyracast.plants.automation import prepare_due_calibrations
 from pyracast.plants.training import pending_calibration_ids, run_calibration
 
 
@@ -22,7 +23,9 @@ def make_calibration_actor(broker: Broker) -> Actor[[int], None]:
 
 
 def dispatch_calibrations(actor: Actor[[int], None]) -> int:
-    identifiers = pending_calibration_ids(datetime.now(UTC))
+    now = datetime.now(UTC)
+    prepare_due_calibrations(now)
+    identifiers = pending_calibration_ids(now)
     for identifier in identifiers:
         actor.send(identifier)
     return len(identifiers)

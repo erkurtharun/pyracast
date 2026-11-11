@@ -22,6 +22,11 @@ class Plant(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
     deleted_at = models.DateTimeField(null=True, db_index=True)
+    automatic_calibration_enabled = models.BooleanField(default=False)
+    automatic_calibration_enabled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT, related_name="+"
+    )
+    next_calibration_check_at = models.DateTimeField(null=True, db_index=True)
 
 
 class PlantConfiguration(models.Model):
@@ -190,7 +195,7 @@ class CalibrationActivation(models.Model):
     plant = models.ForeignKey(Plant, on_delete=models.PROTECT)
     configuration = models.ForeignKey(PlantConfiguration, on_delete=models.PROTECT)
     calibration = models.ForeignKey(CalibrationRun, null=True, on_delete=models.PROTECT)
-    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT)
     created_at = models.DateTimeField(auto_now_add=True)
 
 

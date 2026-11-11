@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from django.db.models import Q
+from django.db.models import Case, IntegerField, Q, Value, When
 
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
@@ -11,7 +11,7 @@ from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.regions.models import Region
 
-HISTORY_SELECTION_POLICY = "latest-complete-estimated-actuals-v2"
+HISTORY_SELECTION_POLICY = "native-first-complete-estimated-actuals-v3"
 
 
 def select_actual_snapshot(
@@ -31,7 +31,18 @@ def select_actual_snapshot(
             available_at__lte=as_of,
         )
         .filter(Q(issued_at__isnull=True) | Q(issued_at__lte=as_of))
-        .order_by("-collected_at", "-available_at", "-pk")
+        .alias(
+            source_priority=Case(
+                When(
+                    job__endpoint="estimated_actuals",
+                    job__reference_import__isnull=True,
+                    then=Value(0),
+                ),
+                default=Value(1),
+                output_field=IntegerField(),
+            )
+        )
+        .order_by("source_priority", "-collected_at", "-available_at", "-pk")
     )
     latest = None
     for snapshot in candidates.iterator():

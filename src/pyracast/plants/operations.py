@@ -133,7 +133,18 @@ def _save_configuration(
     )
     plant.name = name.strip()
     plant.current_configuration = configuration
-    plant.save(update_fields=("name", "current_configuration"))
+    plant.automatic_calibration_enabled = False
+    plant.automatic_calibration_enabled_by = None
+    plant.next_calibration_check_at = None
+    plant.save(
+        update_fields=(
+            "name",
+            "current_configuration",
+            "automatic_calibration_enabled",
+            "automatic_calibration_enabled_by",
+            "next_calibration_check_at",
+        )
+    )
     CalibrationRun.objects.filter(plant=plant, status__in=("pending", "running")).update(
         status="superseded", completed_at=timezone.now(), lease_token=None, lease_expires_at=None
     )
@@ -437,7 +448,7 @@ def request_calibration(
 
 
 def _activate(
-    actor: User, plant: Plant, configuration: PlantConfiguration, run: CalibrationRun | None
+    actor: User | None, plant: Plant, configuration: PlantConfiguration, run: CalibrationRun | None
 ) -> CalibrationActivation:
     previous = (
         CalibrationActivation.objects.filter(plant=plant, configuration=configuration)
@@ -452,10 +463,61 @@ def _activate(
     PlantEvent.objects.create(
         plant=plant,
         actor=actor,
-        action="calibration_activated" if run else "calibration_reset",
-        details={"activation_id": activation.pk, "calibration_id": run.pk if run else None},
+        action=(
+            "calibration_automatically_activated"
+            if actor is None
+            else "calibration_activated"
+            if run
+            else "calibration_reset"
+        ),
+        details={
+            "activation_id": activation.pk,
+            "calibration_id": run.pk if run else None,
+            "configuration_id": configuration.pk,
+            "origin": "automatic" if actor is None else "manual",
+            "enabled_by_id": plant.automatic_calibration_enabled_by_id if actor is None else None,
+        },
     )
     return activation
+
+
+def _validate_activation(
+    plant: Plant, configuration: PlantConfiguration, run: CalibrationRun, now: datetime
+) -> None:
+    from pyracast.plants.incident_policy import incidents_unchanged
+    from pyracast.plants.measurements import production_identity_current
+
+    if not production_identity_current(run):
+        raise ValidationError("The production source changed; request a new calibration.")
+    if not incidents_unchanged(run, now):
+        raise ValidationError("The outage history changed; request a new calibration.")
+    current = (
+        CalibrationActivation.objects.filter(plant=plant, configuration=configuration)
+        .order_by("-created_at", "-pk")
+        .first()
+    )
+    if current is not None and current.calibration_id == run.pk:
+        return
+    if (current.pk if current else None) != run.comparison_activation_id:
+        raise ValidationError("The active calibration changed; request a new comparison.")
+    if (
+        run.binding_id != configuration.binding_id
+        or run.status != "ready"
+        or run.factor is None
+        or not isfinite(run.factor)
+        or run.factor <= 0
+        or run.completed_at is None
+        or run.completed_at > now
+        or run.cutoff_at > now
+        or run.assessment not in {"provisional", "evaluated"}
+        or not run.result.get("holdout_days")
+        or not run.result.get("candidate")
+        or not run.result.get("baseline")
+        or run.result.get("policy_version") != POLICY_VERSION
+        or run.dataset_manifest.get("selection_policy") != HISTORY_SELECTION_POLICY
+        or run.dataset_manifest.get("source_kind") != "estimated_actuals"
+    ):
+        raise ValidationError("Only a completed, held-out evaluated calibration can be activated.")
 
 
 def activate_calibration(
@@ -473,44 +535,11 @@ def activate_calibration(
         run = CalibrationRun.objects.get(
             pk=calibration_id, plant=plant, configuration=configuration
         )
-        from pyracast.plants.measurements import production_identity_current
-
-        if not production_identity_current(run):
-            raise ValidationError("The production source changed; request a new calibration.")
-        from pyracast.plants.incident_policy import incidents_unchanged
-
-        if not incidents_unchanged(run, timezone.now()):
-            raise ValidationError("The outage history changed; request a new calibration.")
-        current = (
-            CalibrationActivation.objects.filter(plant=plant, configuration=configuration)
-            .order_by("-created_at", "-pk")
-            .first()
-        )
-        if current is not None and current.calibration_id == run.pk:
-            return current
-        if (current.pk if current else None) != run.comparison_activation_id:
-            raise ValidationError("The active calibration changed; request a new comparison.")
         now = timezone.now()
-        if (
-            run.binding_id != configuration.binding_id
-            or run.status != "ready"
-            or run.factor is None
-            or not isfinite(run.factor)
-            or run.factor <= 0
-            or run.completed_at is None
-            or run.completed_at > now
-            or run.cutoff_at > now
-            or run.assessment not in {"provisional", "evaluated"}
-            or not run.result.get("holdout_days")
-            or not run.result.get("candidate")
-            or not run.result.get("baseline")
-            or run.result.get("policy_version") != POLICY_VERSION
-            or run.dataset_manifest.get("selection_policy") != HISTORY_SELECTION_POLICY
-            or run.dataset_manifest.get("source_kind") != "estimated_actuals"
-        ):
-            raise ValidationError(
-                "Only a completed, held-out evaluated calibration can be activated."
-            )
+        _validate_activation(plant, configuration, run, now)
+        from pyracast.plants.automation import update_automation
+
+        update_automation(plant, actor, enabled=True, now=now)
         return _activate(actor, plant, configuration, run)
 
 
@@ -525,4 +554,7 @@ def reset_calibration(
         plant = Plant.objects.select_for_update().get(
             pk=plant_id, region=region, deleted_at__isnull=True
         )
+        from pyracast.plants.automation import update_automation
+
+        update_automation(plant, actor, enabled=False, now=timezone.now())
         return _activate(actor, plant, _configuration(plant), None)

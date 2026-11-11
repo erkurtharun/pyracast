@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { request, type Calibration } from "@/lib/api";
+import { CalibrationAutomationPanel } from "./calibration-automation";
 import { CsvDownload } from "./csv-download";
 import { ScrollRegion } from "./scroll-region";
 import { Empty, JsonDetails, Notice, Stat, Tag, useCollection } from "./ui";
@@ -16,12 +17,15 @@ export function Calibrations({
     base,
     token,
     productionRevision,
+    currentConfigurationId,
 }: {
     base: string;
     token: string;
     productionRevision: number;
+    currentConfigurationId: number | null;
 }) {
     const [version, setVersion] = useState(0),
+        [automationPending, setAutomationPending] = useState(false),
         [detail, setDetail] = useState<DetailState>({ status: "idle" }),
         [actionState, setActionState] = useState<ActionState>({
             status: "idle",
@@ -37,6 +41,7 @@ export function Calibrations({
     const resource = useCollection<Calibration>(
         `${base}calibrations/`,
         version + productionRevision,
+        30_000,
     );
     async function action(url: string) {
         setActionState({ status: "pending" });
@@ -67,13 +72,24 @@ export function Calibrations({
     }
     return (
         <>
+            <CalibrationAutomationPanel
+                key={base}
+                base={base}
+                token={token}
+                refresh={version + productionRevision}
+                disabled={actionState.status === "pending"}
+                onPendingChange={setAutomationPending}
+                onChanged={() => setVersion((current) => current + 1)}
+            />
             <section className="panel">
                 <div className="section-heading">
                     <div>
                         <h2>Calibration history</h2>
                         <p className="fine">
                             Activate a ready fit or return future estimates to
-                            baseline.
+                            baseline. Activation applies to newly calculated
+                            outlooks; saved forecasts and recorded production
+                            stay unchanged.
                         </p>
                     </div>
                     <div className="button-group">
@@ -94,7 +110,10 @@ export function Calibrations({
                         </button>
                         <button
                             className="button secondary"
-                            disabled={actionState.status === "pending"}
+                            disabled={
+                                actionState.status === "pending" ||
+                                automationPending
+                            }
                             onClick={() => action(`${base}calibration/reset/`)}
                         >
                             Reset to baseline
@@ -140,6 +159,12 @@ export function Calibrations({
                                         </td>
                                         <td>
                                             <Tag>{run.status}</Tag>
+                                            {run.configuration_id !==
+                                                currentConfigurationId && (
+                                                <Tag>
+                                                    Previous configuration
+                                                </Tag>
+                                            )}
                                         </td>
                                         <td>
                                             {run.assessment}{" "}
@@ -165,22 +190,34 @@ export function Calibrations({
                                             >
                                                 View details
                                             </button>
-                                            {run.status === "ready" && (
-                                                <button
-                                                    className="text-button"
-                                                    disabled={
-                                                        actionState.status ===
-                                                        "pending"
-                                                    }
-                                                    onClick={() =>
-                                                        action(
-                                                            `${base}calibrations/${run.id}/activate/`,
-                                                        )
-                                                    }
-                                                >
-                                                    Activate
-                                                </button>
-                                            )}
+                                            {run.status === "ready" &&
+                                                run.configuration_id !==
+                                                    currentConfigurationId && (
+                                                    <span>
+                                                        Only the current
+                                                        configuration can be
+                                                        activated.
+                                                    </span>
+                                                )}
+                                            {run.status === "ready" &&
+                                                run.configuration_id ===
+                                                    currentConfigurationId && (
+                                                    <button
+                                                        className="text-button"
+                                                        disabled={
+                                                            actionState.status ===
+                                                                "pending" ||
+                                                            automationPending
+                                                        }
+                                                        onClick={() =>
+                                                            action(
+                                                                `${base}calibrations/${run.id}/activate/`,
+                                                            )
+                                                        }
+                                                    >
+                                                        Activate
+                                                    </button>
+                                                )}
                                         </td>
                                     </tr>
                                 ))}

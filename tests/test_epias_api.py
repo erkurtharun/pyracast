@@ -57,7 +57,9 @@ def test_epias_api_connects_archives_native_values_and_preserves_history_after_d
         )
     assert connected.status_code == 200, connected.content
     assert connected.json()["connected"] is True
-    assert connected.json()["pending_jobs"] == 93
+    assert connected.json()["pending_jobs"] == 102
+    assert EpiasCollectionJob.objects.filter(source_kind="realtime_generation").count() == 90
+    assert EpiasCollectionJob.objects.filter(source_kind="settlement_injection").count() == 12
     assert connected.json()["meter_basis"] == "unknown"
     job = EpiasCollectionJob.objects.order_by("-target_day").first()
     assert job is not None

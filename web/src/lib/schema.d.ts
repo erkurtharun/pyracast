@@ -180,6 +180,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibration/automation/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["tenants_regions_plants_calibration_automation_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["tenants_regions_plants_calibration_automation_partial_update"];
+        trace?: never;
+    };
     "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibration/reset/": {
         parameters: {
             query?: never;
@@ -492,9 +508,30 @@ export interface components {
             readonly id: number;
             configuration_id: number;
             calibration_id: number | null;
-            actor_id: number;
+            actor_id: number | null;
             /** Format: date-time */
             readonly created_at: string;
+        };
+        AutomaticCalibrationAttemptOutput: {
+            calibration_id: number | null;
+            status: components["schemas"]["AutomaticCalibrationAttemptOutputStatusEnum"];
+            reason: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        /**
+         * @description * `activated` - activated
+         *     * `skipped` - skipped
+         * @enum {string}
+         */
+        AutomaticCalibrationAttemptOutputStatusEnum: "activated" | "skipped";
+        CalibrationAutomationOutput: {
+            enabled: boolean;
+            authorized: boolean;
+            configuration_id: number | null;
+            /** Format: date-time */
+            next_check_at: string | null;
+            last_attempt: components["schemas"]["AutomaticCalibrationAttemptOutput"] | null;
         };
         CalibrationInput: {
             configuration_id: number;
@@ -1046,6 +1083,9 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["TrashedRegionOutput"][];
+        };
+        PatchedCalibrationAutomationInput: {
+            enabled?: boolean;
         };
         PatchedEmailInput: {
             /** Format: email */
@@ -1871,6 +1911,58 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    tenants_regions_plants_calibration_automation_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plant_id: number;
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalibrationAutomationOutput"];
+                };
+            };
+        };
+    };
+    tenants_regions_plants_calibration_automation_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plant_id: number;
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedCalibrationAutomationInput"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedCalibrationAutomationInput"];
+                "multipart/form-data": components["schemas"]["PatchedCalibrationAutomationInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalibrationAutomationOutput"];
+                };
             };
         };
     };

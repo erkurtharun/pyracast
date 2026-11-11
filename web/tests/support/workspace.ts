@@ -42,6 +42,7 @@ export async function mockApi(
     { anonymous = false, empty = false, failed = false } = {},
 ) {
     let signedIn = !anonymous;
+    let automationEnabled = false;
     await page.route("**/api/**", async (route) => {
         const path = new URL(route.request().url()).pathname,
             method = route.request().method();
@@ -102,7 +103,17 @@ export async function mockApi(
                 intervals: [],
                 observations: [],
             };
-        else if (path.endsWith("/calibrations/"))
+        else if (path.endsWith("/calibration/automation/")) {
+            if (method === "PATCH")
+                automationEnabled = route.request().postDataJSON().enabled;
+            data = {
+                enabled: automationEnabled,
+                authorized: automationEnabled,
+                configuration_id: automationEnabled ? 31 : null,
+                next_check_at: null,
+                last_attempt: null,
+            };
+        } else if (path.endsWith("/calibrations/"))
             data =
                 method === "POST"
                     ? {

@@ -4,6 +4,7 @@ from pyracast.api.trash import RestorePlantView
 from pyracast.incidents.api import CancelView, IncidentsView, IncidentView, ResolveView
 from pyracast.plants.api import (
     ActivateView,
+    CalibrationAutomationView,
     CalibrationsView,
     CalibrationView,
     ForecastView,
@@ -33,5 +34,6 @@ urlpatterns = [
     path("<int:plant_id>/calibrations/<int:calibration_id>/", CalibrationView.as_view()),
     path("<int:plant_id>/calibrations/<int:calibration_id>/activate/", ActivateView.as_view()),
     path("<int:plant_id>/calibration/reset/", ResetView.as_view()),
+    path("<int:plant_id>/calibration/automation/", CalibrationAutomationView.as_view()),
     path("<int:plant_id>/forecast/", ForecastView.as_view()),
 ]

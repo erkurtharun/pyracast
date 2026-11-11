@@ -7,9 +7,10 @@ import pytest
 from django.db import close_old_connections, connection
 from django.utils import timezone
 
-from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
+from pyracast.forecasts.models import ForecastSnapshot, HistoricalReferenceImport
 from pyracast.irradiance import local_day_bounds
-from pyracast.plants import training
+from pyracast.plants import measurements, training
 from pyracast.plants.calibration_data import build_calibration_dataset
 from pyracast.plants.models import (
     CalibrationActivation,
@@ -207,6 +208,77 @@ def test_current_policy_terminal_run_does_not_repeat_unchanged_data(
     assert CalibrationRun.objects.count() == 1
 
 
+@pytest.mark.parametrize("old_source", ["historical_import", "unknown_endpoint"])
+def test_current_source_transition_refits_once_but_identical_native_reacquisition_deduplicates(
+    monkeypatch: pytest.MonkeyPatch,
+    old_source: str,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    add_days(system, plant, 1, 7)
+    CalibrationRun.objects.all().delete()
+    target = date(2026, 11, 7)
+    old_snapshot = ForecastSnapshot.objects.get(job__target_date=target)
+    old_snapshot.collected_at = old_snapshot.available_at = NOW - timedelta(minutes=5)
+    old_snapshot.save()
+    if old_source == "historical_import":
+        old_snapshot.job.reference_import = HistoricalReferenceImport.objects.create(
+            binding=system.binding,
+            sha256="a" * 64,
+            source_name="authorized-export.json",
+            source_settings={"product": "historical_rooftop_pv"},
+            imported_by=system.admin,
+            imported_at=old_snapshot.collected_at,
+            interval_count=48,
+        )
+    old_snapshot.job.endpoint = old_source
+    old_snapshot.job.save()
+    historical_run = prepare_calibration(plant.pk)
+    assert historical_run is not None
+    historical_run.status = "rejected"
+    historical_run.result = {"policy_version": POLICY_VERSION}
+    historical_run.save()
+    native = actual_snapshot_for(system, target, collected_at=NOW - timedelta(minutes=4))
+    assert native.normalized_intervals == old_snapshot.normalized_intervals
+    current_run = prepare_calibration(plant.pk)
+    assert current_run is not None
+    assert current_run.input_fingerprint != historical_run.input_fingerprint
+    assert current_run.reference_snapshot_ids is not None
+    assert current_run.reference_snapshot_ids[target.isoformat()] == native.pk
+    current_run.status = "rejected"
+    current_run.result = {"policy_version": POLICY_VERSION}
+    current_run.save()
+    reacquired = actual_snapshot_for(system, target, collected_at=NOW - timedelta(minutes=3))
+    assert reacquired.normalized_intervals == native.normalized_intervals
+    assert prepare_calibration(plant.pk) is None
+    assert CalibrationRun.objects.count() == 2
+    current_run.refresh_from_db()
+    assert current_run.reference_snapshot_ids[target.isoformat()] == native.pk
+
+
+def test_reference_selection_policy_upgrade_refits_unchanged_values_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    monkeypatch.setattr(
+        measurements, "HISTORY_SELECTION_POLICY", "latest-complete-estimated-actuals-v2"
+    )
+    add_days(system, plant, 1, 7)
+    previous = CalibrationRun.objects.get()
+    previous.status = "rejected"
+    previous.result = {"policy_version": POLICY_VERSION}
+    previous.save()
+    monkeypatch.setattr(measurements, "HISTORY_SELECTION_POLICY", HISTORY_SELECTION_POLICY)
+    current = prepare_calibration(plant.pk)
+    assert current is not None
+    assert current.input_fingerprint != previous.input_fingerprint
+    assert current.reference_snapshot_ids == previous.reference_snapshot_ids
+    current.status = "rejected"
+    current.result = {"policy_version": POLICY_VERSION}
+    current.save()
+    assert prepare_calibration(plant.pk) is None
+    assert CalibrationRun.objects.count() == 2
+
+
 def test_unavailable_configuration_or_reference_does_not_schedule(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -387,3 +459,33 @@ def test_old_complete_history_uses_window_ending_at_latest_observation(
     assert run is not None
     assert run.window_start == date(2026, 11, 1)
     assert run.window_end == date(2026, 11, 7)
+
+
+def test_automatic_pool_preserves_180_days_for_inner_window_comparisons(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    assert plant.current_configuration_id is not None
+    for day in (date(2026, 5, 11), date(2026, 5, 12)):
+        actual_snapshot_for(system, day)
+        start, _ = local_day_bounds(day, system.binding.timezone)
+        import_observations(
+            system.member,
+            system.tenant.pk,
+            system.region.pk,
+            plant.pk,
+            configuration_id=plant.current_configuration_id,
+            unit="MWh",
+            observations=[
+                ObservationInput(
+                    start + timedelta(hours=hour), start + timedelta(hours=hour + 1), 26
+                )
+                for hour in range(24)
+            ],
+        )
+    add_days(system, plant, 1, 7)
+    run = CalibrationRun.objects.get()
+    assert (run.window_start, run.window_end) == (date(2026, 5, 12), date(2026, 11, 7))
+    assert run.reference_snapshot_ids is not None
+    assert len(run.reference_snapshot_ids) == 8
+    assert "2026-05-11" not in run.reference_snapshot_ids

@@ -12,8 +12,10 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from pyracast.accounts.models import Membership, Tenant
+from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.models import CollectionJob, ForecastSnapshot
 from pyracast.plants.models import CalibrationRun, Plant, PlantForecast, ProductionObservation
+from pyracast.plants.numerics import POLICY_VERSION
 from pyracast.plants.serializers import AwareDateTime, FiniteFloat
 from tests.test_domain import make_system
 from tests.test_plant_operations import publish_snapshot, saved_actuals
@@ -268,10 +270,18 @@ def test_calibration_pending_forecast_and_csrf() -> None:
         == 400
     )
     saved.dataset_manifest = {
-        "selection_policy": "latest-complete-estimated-actuals-v2",
+        "selection_policy": HISTORY_SELECTION_POLICY,
         "source_kind": "estimated_actuals",
     }
     saved.save(update_fields=("dataset_manifest",))
+    assert (
+        client.post(
+            detail + f"calibrations/{run['id']}/activate/", {}, content_type="application/json"
+        ).status_code
+        == 400
+    )
+    saved.result["policy_version"] = POLICY_VERSION
+    saved.save(update_fields=("result",))
     activation = client.post(
         detail + f"calibrations/{run['id']}/activate/", {}, content_type="application/json"
     )

@@ -53,6 +53,14 @@ test("journal date controls wait for the initial range before selecting a day", 
             data = paged([{ id: 1, name: "Date test tenant" }]);
         else if (path.endsWith("/regions/")) data = paged([region]);
         else if (path.endsWith("/plants/")) data = paged([plant]);
+        else if (path.endsWith("/calibration/automation/"))
+            data = {
+                enabled: false,
+                authorized: false,
+                configuration_id: null,
+                next_check_at: null,
+                last_attempt: null,
+            };
         else if (path.endsWith("/calibrations/")) data = paged([]);
         else if (path.endsWith("/performance/"))
             data = {

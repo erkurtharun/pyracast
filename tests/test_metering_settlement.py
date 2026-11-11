@@ -1,4 +1,5 @@
 import json
+from calendar import monthrange
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -86,10 +87,12 @@ def test_month_collection_splits_immutable_daily_sources_without_manual_observat
     linked = link_settlement(monkeypatch)
     assert linked.settlement_plant_id == 7001
     jobs = EpiasCollectionJob.objects.filter(source_kind="settlement_injection")
+    assert jobs.count() == 12
+    assert EpiasCollectionJob.objects.filter(source_kind="realtime_generation").count() == 90
+    assert jobs.earliest("target_day").target_day == date(2025, 11, 1)
     assert list(jobs.order_by("target_day").values_list("target_day", "period_end_day")) == [
-        (date(2026, 8, 1), date(2026, 8, 31)),
-        (date(2026, 9, 1), date(2026, 9, 30)),
-        (date(2026, 10, 1), date(2026, 10, 31)),
+        (date(year, month, 1), date(year, month, monthrange(year, month)[1]))
+        for year, month in [(2025, 11), (2025, 12), *((2026, month) for month in range(1, 11))]
     ]
     job = jobs.get(target_day=date(2026, 9, 1))
     prepared: list[int] = []
@@ -196,8 +199,14 @@ def test_existing_connections_resolve_eic_outside_locks_with_daily_bound_and_rev
     identifiers = enqueue_due_epias_jobs(now=NEXT_NIGHT + timedelta(hours=1))
     linked.refresh_from_db()
     assert linked.settlement_plant_id == (7001 if outcome == "resolved" else None)
-    expected_jobs = 97 if outcome == "revision_changed" else 10 if outcome == "resolved" else 7
+    expected_jobs = 97 if outcome == "revision_changed" else 19 if outcome == "resolved" else 7
     assert len(identifiers) == expected_jobs
+    if outcome == "resolved":
+        settlement_jobs = EpiasCollectionJob.objects.filter(source_kind="settlement_injection")
+        assert settlement_jobs.count() == 12
+        assert settlement_jobs.earliest("target_day").target_day == date(2025, 11, 1)
+        assert settlement_jobs.latest("target_day").period_end_day == date(2026, 10, 31)
+        assert EpiasCollectionJob.objects.filter(source_kind="realtime_generation").count() == 97
     if outcome != "revision_changed":
         assert enqueue_due_epias_jobs(now=NEXT_NIGHT + timedelta(hours=2)) == identifiers
         assert calls == [PROVIDER_PLANT.eic]

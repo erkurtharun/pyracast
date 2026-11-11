@@ -9,6 +9,7 @@ from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connection
 from django.utils import timezone
 
+from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants import training
@@ -425,7 +426,7 @@ def test_training_uses_latest_actuals_available_at_request_cutoff(
     assert run_calibration(run.pk, NOW)
     run.refresh_from_db()
     assert run.status == "ready"
-    assert run.dataset_manifest["selection_policy"] == "latest-complete-estimated-actuals-v2"
+    assert run.dataset_manifest["selection_policy"] == HISTORY_SELECTION_POLICY
     assert run.dataset_manifest["source_kind"] == "estimated_actuals"
     assert (
         sorted(value["snapshot_id"] for value in run.dataset_manifest["sources"].values())

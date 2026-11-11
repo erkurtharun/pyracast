@@ -1,6 +1,7 @@
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
+from pathlib import Path
 from threading import Barrier
 from typing import Literal
 
@@ -14,11 +15,13 @@ from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.connections.models import SiteBinding
+from pyracast.forecasts.historical_import import import_historical_reference
 from pyracast.forecasts.models import (
     CollectionJob,
     CollectionSchedule,
     ForecastResult,
     ForecastSnapshot,
+    HistoricalReferenceImport,
     RequestAttempt,
 )
 from pyracast.forecasts.scheduler import enqueue_due
@@ -43,6 +46,7 @@ from pyracast.trash import (
     trash_region,
 )
 from tests.test_domain import NOW, System
+from tests.test_historical_reference_import import power_file, source_settings, system_for_import
 from tests.test_plant_operations import make_plant, request_run, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -64,6 +68,65 @@ def sibling(system: System) -> tuple[Region, SiteBinding]:
     region.approved_binding = binding
     region.save()
     return region, binding
+
+
+def test_region_purge_removes_imported_reference_archive_and_preserves_other_owners(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    system = system_for_import(monkeypatch)
+    record = import_historical_reference(
+        system.admin,
+        system.tenant.pk,
+        system.region.pk,
+        system.binding.pk,
+        power_file(tmp_path),
+        source_settings(),
+        trusted_root=tmp_path,
+    )
+    assert ForecastSnapshot.objects.filter(job__reference_import=record).exists()
+    protected_records = []
+    for other_tenant in (False, True):
+        region, binding = sibling(system)
+        if other_tenant:
+            region.tenant = Tenant.objects.create(name="Other tenant")
+            region.save(update_fields=("tenant",))
+        other_import = HistoricalReferenceImport.objects.create(
+            binding=binding,
+            sha256="b" * 64,
+            source_name="other-reference.json",
+            source_settings={},
+            imported_by=system.admin,
+            imported_at=NOW,
+            interval_count=1,
+        )
+        job = CollectionJob.objects.create(
+            binding=binding,
+            reference_import=other_import,
+            endpoint="historical_import",
+            scheduled_slot=NOW,
+            target_date=NOW.date(),
+            available_at=NOW,
+        )
+        snapshot = ForecastSnapshot.objects.create(
+            job=job,
+            raw_payload={},
+            normalized_intervals=[],
+            collected_at=NOW,
+            source_kind="estimated_actuals",
+        )
+        protected_records.append((region.pk, binding.pk, other_import.pk, job.pk, snapshot.pk))
+    trash_region(system.member, system.tenant.pk, system.region.pk)
+    assert purge_expired(NOW + RETENTION) == {"regions": 1, "plants": 0}
+    assert not Region.objects.filter(pk=system.region.pk).exists()
+    assert not SiteBinding.objects.filter(pk=system.binding.pk).exists()
+    assert not HistoricalReferenceImport.objects.filter(pk=record.pk).exists()
+    assert not ForecastSnapshot.objects.filter(job__reference_import=record.pk).exists()
+    for region_id, binding_id, import_id, job_id, snapshot_id in protected_records:
+        assert Region.objects.filter(pk=region_id).exists()
+        assert SiteBinding.objects.filter(pk=binding_id).exists()
+        assert HistoricalReferenceImport.objects.filter(pk=import_id).exists()
+        assert CollectionJob.objects.filter(pk=job_id).exists()
+        assert ForecastSnapshot.objects.filter(pk=snapshot_id).exists()
 
 
 def linked_records(system: System, plant: Plant) -> tuple[ForecastSnapshot, ReminderPreference]:

@@ -160,7 +160,7 @@ domain [0.25, 2]. The one-dimensional solver considers every clipping breakpoint
 and each convex segment; it does not assume the entire capped objective is convex.
 These are versioned engineering defaults, not universal statistical constants.
 
-Policy `regularized-huber-v3` uses completed local days with complete, matched
+Policy `regularized-huber-v4` uses completed local days with complete, matched
 astronomical daylight coverage and `valid` observations. Select whole meter
 intervals with positive overlap with daylight; keep sunrise/sunset boundary slots
 and their full energy without prorating. Valid measurements must cover every
@@ -190,11 +190,21 @@ Fit only earlier days and do not refit on the holdout. Seven days can check the
 pipeline and support a **provisional** fit; a month covers more conditions but
 neither duration proves seasonal validity. Intervals within a day are correlated,
 so hundreds of half-hours are not hundreds of independent weather realizations.
-Collect up to 90 production days initially, while matched Solcast estimated-actual
-history grows through daily retrieval. Ninety matched days can cover more operating
-conditions, but do not guarantee a better fit; retain chronological validation and
-the same acceptance criteria. External historical weather files are not used by
-this reference-power calibration.
+Archive twelve completed months of settlement injection initially and 90 days of
+provisional reported production. Preserve every acquisition and its source identity.
+The automatic matching pool contains at most 180 calendar days ending on the latest
+recorded completed day; it supplies past origins for comparing shorter training
+windows rather than forcing one factor to explain six months. With sufficient
+development history, compare 30/60/90-calendar-day training windows on the same three
+chronological seven-day development blocks. Require each candidate window's full
+history and adequate support at every origin. Choose by duration-weighted interval
+MAE, then daily MAE, then the shorter window. Fit the selected window before the
+untouched final holdout; never refit on that holdout. Smaller datasets retain the
+single-window provisional policy and disclose insufficient window-selection evidence.
+Year boundaries and matching last year's calendar dates have no special weight.
+Retain operating regimes, capacity changes, meter definitions and known incidents;
+older commissioning data is useful context, not evidence for today's full capacity.
+External historical weather files are not used by this reference-power calibration.
 
 Report interval power MAE/bias (MW), per-day daylight-interval energy MAE/bias (MWh),
 included/excluded days, censored counts and the exact chronological split. These
@@ -211,8 +221,21 @@ activated; existing activation history remains valid. Rejected candidates cannot
 be activated; the current activation remains unchanged.
 The 1% margin is an operational acceptance rule, not a significance test. Confidence
 intervals are not estimated in this version; do not expose invented probability
-bands. No fit activates itself. Compare later unseen days and revisit performance
-across seasons before making accuracy or degradation claims.
+bands. Fitting and activation remain separate transactions. An authorized member can
+enable automatic calibration before an eligible fit exists. Daily durable checks and
+new acquisitions prepare fits without provider calls from the calibration worker.
+Automatic promotion requires at least 30 matched days, seven held-out days, and at
+least 1% improvement in both MAEs against the pinned incumbent as well as the baseline
+and bias guards above. The latest holdout day must be within seven completed calendar
+days and all seven must lie within the last fourteen days. These are operational
+freshness guards, not statistical confidence limits; an old native cohort cannot
+be promoted simply because a recent historical import triggered another fit.
+After a promotion, require seven entirely new holdout dates
+before another promotion. Rejection, insufficient evidence, revoked authority or a
+changed source/configuration/incident/incumbent preserves the last good selection.
+Disabling automation keeps that selection; resetting to baseline also disables it.
+Configuration changes disable the old authorization. Compare later unseen days and
+revisit performance across seasons before making accuracy or degradation claims.
 With at least 30 matched days, report up to three expanding-training, three-day
 evaluation folds within the training period. The final seven-day holdout is never
 included in these folds. They diagnose historical reference-transfer stability;
@@ -221,8 +244,9 @@ Report source-positive interval MAE separately, using whole meter intervals with
 positive reference power; it is not an astronomical daylight classification.
 
 The dataset pairs manual metered production or settlement injection with matching Solcast estimated actuals,
-never archived forecasts. Select the latest matching acquisition published by the
-request cutoff and retain its snapshot, source kind, collection/publication times,
+never archived forecasts. Prefer complete current Hobby acquisitions under the
+source-selection policy below, applying the request cutoff before ranking, and
+retain the snapshot, source kind, collection/publication times,
 configuration and dataset digest. Pin the selected reference and settlement
 snapshot IDs when requesting a new run; later acquisitions cannot enter its
 retries, even with a backdated timestamp. Existing legacy runs retain their
@@ -231,11 +255,51 @@ future production intervals are rejected at import. Importing an old measurement
 explicitly associates it with the declared configuration, without backdating that
 configuration. Do not mix periods with different capacities or meter definitions.
 
+An authorized historical rooftop PV export is a different source product from the
+Hobby Rooftop PV API. Never pool these products to fit one multiplier or to reach
+the minimum day count. Prefer the native Hobby cohort once it has seven complete
+valid matched days; otherwise use a sufficiently supported historical cohort for
+offline evidence. Legacy unknown products remain a separate cohort and cannot
+establish current Hobby validation. If no cohort has seven days, keep the fit
+insufficient. Record the chosen product, coverage counts and excluded samples;
+preserve the full pinned source manifest for audit.
+Import historical exports with an explicit settings manifest matching the
+approved binding, preserve native timestamps/means and the original payload digest,
+and record the actual import/publication time. Never infer settings from the filename
+or backdate availability. Automatic activation additionally needs 30 valid matched
+days from the current binding's native Hobby estimated-actuals endpoint, including
+all seven final holdout days; every selected training and holdout day must use that
+same product. Recompute this gate from the immutable per-day source
+manifest; historical exports alone cannot establish this source-transfer evidence.
+Declared configurations applied to older readings remain an explicit retrospective
+assumption. Neither source supplies measured irradiance labels.
+
+The authorized November 2026 case demonstrates why this gate matters: a three-phase
+solar-day correction improved held-out Historical Rooftop interval MAE from 8.320 to
+5.905 MW, but worsened the independent November 4–10 Hobby check from 10.989 to
+13.230 MW. Every predeclared scalar/three-phase candidate also failed that independent
+baseline comparison. On overlapping November 3 daylight intervals, normalized Hobby
+reference energy was about 30% higher than the historical product, without either
+source reaching the plant cap. Keep the shape model offline; these experiments do
+not justify an operational forecast improvement claim. The plant owner's
+[announcement](https://smartsolar.com.tr/HaberDetay.aspx?Id=5520) places full-capacity
+operation in March 2026, so January 1 is not a verified full-capacity boundary.
+Longer history and seasonal testing are supported by the
+[IEA forecasting evaluation guidance](https://www.iea-wind.org/wp-content/uploads/2022/06/IEAWind_Task36_Recommended_Practice_Part2_2nd_Edition_public.pdf)
+and [IEA PVPS solar-resource handbook](https://iea-pvps.org/wp-content/uploads/2024/09/Best-Practices-Handbook-for-the-Collection-and-Use-of-Solar-Resource-Data-for-Solar-Energy-Applications-Fourth-Edition-.pdf);
+they do not remove the need for local chronological and source-specific validation.
+
 The initial seven-day provider window can contain fewer than seven complete local
 days. Wait for enough matched days rather than relaxing the minimum. The new
-selection policy is `latest-complete-estimated-actuals-v2`: prefer the newest
-acquisition with complete valid reference PV power coverage of the selected local
-day, otherwise return the newest partial acquisition. Never merge vintages. This
+selection policy is `native-first-complete-estimated-actuals-v3`: prefer the newest
+native Hobby acquisition with complete valid reference PV power coverage of the
+selected local day. If none is complete, use the newest complete historical/legacy
+acquisition. If every acquisition is partial, prefer native Hobby before other
+products, preserving newest-first order within each group. Never merge vintages.
+A later historical import cannot hide an already complete native Hobby day. Include
+the selection policy and source lineage in the preparation fingerprint, so a
+product change re-evaluates eligibility even when power values are identical;
+repeated identical native acquisitions still deduplicate. This
 prevents the oldest day of a rolling 168-hour window from hiding an earlier whole
 day. Completion requires finite nonnegative power and contiguous, non-overlapping
 elapsed-time coverage, including valid nighttime zeroes and 23/25-hour local days;
@@ -253,11 +317,11 @@ estimated actuals does not establish improvement in future forecast accuracy.
 Meter entry requires matching archived estimated actuals for the entire interval.
 Saving at least seven days with complete valid matched daylight coverage automatically
 schedules fitting; daylight gaps and outage labels do not satisfy this threshold.
-Use a 90-day window ending on the latest recorded local day and elapsed durations, including DST
+Use a 180-day matching pool ending on the latest recorded local day and elapsed durations, including DST
 days. Capture both an observation timestamp cutoff and an ID watermark so readings
 saved during fitting cannot enter that dataset, even with identical timestamps.
 New readings remain saved and can prepare a subsequent candidate. Preparation never
-activates a factor automatically.
+activates a factor; the separately authorized promotion policy does.
 
 The versioned `astral-3.2-sea-level-v1` policy uses the apparent upper solar limb,
 standard refraction and a sea-level horizon, without terrain or shading inference.
@@ -376,7 +440,7 @@ unchanged repeated acquisitions do not trigger a new fit. Preserve the request's
 selected snapshot IDs separately for replay. Corrected inputs can prepare a new
 candidate, including settlement replacing provisional production with identical
 values. Completed fits and archived forecasts remain unchanged; new candidates
-still require explicit activation and the same statistical acceptance checks.
+require manual activation or separately authorized guarded automatic promotion.
 
 Solcast historical GHI/GTI are satellite/model-derived **estimated actuals**; they
 are not automatically on-site measurements. AWS is a distribution channel, not a

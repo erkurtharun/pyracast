@@ -1017,6 +1017,125 @@
                 }
             }
         },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibration/automation/": {
+            "get": {
+                "operationId": "tenants_regions_plants_calibration_automation_retrieve",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/CalibrationAutomationOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            },
+            "patch": {
+                "operationId": "tenants_regions_plants_calibration_automation_partial_update",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PatchedCalibrationAutomationInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PatchedCalibrationAutomationInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PatchedCalibrationAutomationInput"
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/CalibrationAutomationOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibration/reset/": {
             "post": {
                 "operationId": "tenants_regions_plants_calibration_reset_create",
@@ -2624,7 +2743,8 @@
                         "nullable": true
                     },
                     "actor_id": {
-                        "type": "integer"
+                        "type": "integer",
+                        "nullable": true
                     },
                     "created_at": {
                         "type": "string",
@@ -2638,6 +2758,74 @@
                     "configuration_id",
                     "created_at",
                     "id"
+                ]
+            },
+            "AutomaticCalibrationAttemptOutput": {
+                "type": "object",
+                "properties": {
+                    "calibration_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "status": {
+                        "$ref": "#/components/schemas/AutomaticCalibrationAttemptOutputStatusEnum"
+                    },
+                    "reason": {
+                        "type": "string"
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                },
+                "required": [
+                    "calibration_id",
+                    "created_at",
+                    "reason",
+                    "status"
+                ]
+            },
+            "AutomaticCalibrationAttemptOutputStatusEnum": {
+                "enum": [
+                    "activated",
+                    "skipped"
+                ],
+                "type": "string",
+                "description": "* `activated` - activated\n* `skipped` - skipped"
+            },
+            "CalibrationAutomationOutput": {
+                "type": "object",
+                "properties": {
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "authorized": {
+                        "type": "boolean"
+                    },
+                    "configuration_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "next_check_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "last_attempt": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/AutomaticCalibrationAttemptOutput"
+                            }
+                        ],
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "authorized",
+                    "configuration_id",
+                    "enabled",
+                    "last_attempt",
+                    "next_check_at"
                 ]
             },
             "CalibrationInput": {
@@ -4249,6 +4437,14 @@
                         "items": {
                             "$ref": "#/components/schemas/TrashedRegionOutput"
                         }
+                    }
+                }
+            },
+            "PatchedCalibrationAutomationInput": {
+                "type": "object",
+                "properties": {
+                    "enabled": {
+                        "type": "boolean"
                     }
                 }
             },

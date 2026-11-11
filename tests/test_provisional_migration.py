@@ -17,10 +17,10 @@ def test_existing_runs_keep_settlement_pins_and_policy_when_provisional_support_
 ) -> None:
     system, plant = make_plant(monkeypatch)
     old_target = [("plants", "0007_calibration_incident_evidence")]
-    new_target = [("plants", "0008_provisional_production_calibration")]
     executor = MigrationExecutor(connection)
-    executor.migrate(old_target)
+    current_targets = executor.loader.graph.leaf_nodes()
     try:
+        executor.migrate(old_target)
         old_run = executor.loader.project_state(old_target).apps.get_model(
             "plants", "CalibrationRun"
         )
@@ -39,7 +39,7 @@ def test_existing_runs_keep_settlement_pins_and_policy_when_provisional_support_
             dataset_sha256="frozen-evidence",
         )
     finally:
-        MigrationExecutor(connection).migrate(new_target)
+        MigrationExecutor(connection).migrate(current_targets)
     restored = CalibrationRun.objects.get(pk=prior.pk)
     assert restored.production_snapshot_ids == [41, 42]
     assert restored.measurement_selection_policy == LEGACY_MEASUREMENT_POLICY
@@ -47,3 +47,5 @@ def test_existing_runs_keep_settlement_pins_and_policy_when_provisional_support_
     assert restored.dataset_manifest == {"measurement_selection_policy": LEGACY_MEASUREMENT_POLICY}
     assert restored.dataset_sha256 == "frozen-evidence"
     assert CalibrationRun().measurement_selection_policy == MEASUREMENT_POLICY
+    plant.refresh_from_db()
+    assert plant.automatic_calibration_enabled is False

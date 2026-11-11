@@ -4,6 +4,8 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import cast
+from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -11,7 +13,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from pyracast.connections.models import ProviderAccount
-from pyracast.plants.calibration_data import build_calibration_dataset
+from pyracast.plants.calibration_data import build_calibration_dataset, current_source_validation
 from pyracast.plants.forecasting import power_limit
 from pyracast.plants.incident_policy import incidents_unchanged
 from pyracast.plants.measurements import production_identity_current
@@ -40,6 +42,13 @@ class _Lease:
     token: uuid.UUID
 
 
+def _prepare_followup(plant: Plant, run: CalibrationRun, now: datetime) -> None:
+    from pyracast.plants.automation import promote_automatic_calibration
+
+    promote_automatic_calibration(plant, run, now)
+    prepare_calibration(run.plant_id, now)
+
+
 def _claim(run_id: int, now: datetime) -> _Lease | None:
     started = time.monotonic()
     identity = CalibrationRun.objects.select_related("plant").filter(pk=run_id).first()
@@ -48,7 +57,8 @@ def _claim(run_id: int, now: datetime) -> _Lease | None:
     with transaction.atomic():
         if not Region.objects.select_for_update().filter(pk=identity.plant.region_id).exists():
             return None
-        if not Plant.objects.select_for_update().filter(pk=identity.plant_id).exists():
+        plant = Plant.objects.select_for_update().filter(pk=identity.plant_id).first()
+        if plant is None:
             return None
         run = CalibrationRun.objects.select_for_update().get(pk=run_id)
         now += timedelta(seconds=time.monotonic() - started)
@@ -93,7 +103,7 @@ def _claim(run_id: int, now: datetime) -> _Lease | None:
                 "lease_expires_at",
             )
         )
-        prepare_calibration(run.plant_id, now)
+        _prepare_followup(plant, run, now)
         return None
 
 
@@ -101,7 +111,7 @@ def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now:
     started = time.monotonic()
     with transaction.atomic():
         Region.objects.select_for_update().get(pk=lease.configuration.binding.region_id)
-        Plant.objects.select_for_update().get(pk=lease.run.plant_id)
+        plant = Plant.objects.select_for_update().get(pk=lease.run.plant_id)
         run = CalibrationRun.objects.select_for_update().get(pk=lease.run.pk)
         ProviderAccount.objects.select_for_update().get(
             pk=lease.configuration.binding.provider_account_id
@@ -148,7 +158,7 @@ def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now:
                 "dataset_sha256": run.dataset_sha256,
             },
         )
-        prepare_calibration(run.plant_id, now)
+        _prepare_followup(plant, run, now)
         return run.status != "superseded"
 
 
@@ -156,7 +166,7 @@ def _fail(lease: _Lease, now: datetime) -> None:
     started = time.monotonic()
     with transaction.atomic():
         Region.objects.select_for_update().get(pk=lease.configuration.binding.region_id)
-        Plant.objects.select_for_update().get(pk=lease.run.plant_id)
+        plant = Plant.objects.select_for_update().get(pk=lease.run.plant_id)
         run = CalibrationRun.objects.select_for_update().get(pk=lease.run.pk)
         now += timedelta(seconds=time.monotonic() - started)
         if (
@@ -181,7 +191,7 @@ def _fail(lease: _Lease, now: datetime) -> None:
             )
         )
         if run.status == "failed":
-            prepare_calibration(run.plant_id, now)
+            _prepare_followup(plant, run, now)
 
 
 def run_calibration(run_id: int, now: datetime | None = None) -> bool:
@@ -206,6 +216,20 @@ def run_calibration(run_id: int, now: datetime | None = None) -> bool:
         result.report["selection"] = dataset.selection
         result.report["provisional_production"] = dataset.selection["provisional_production"]
         result.report["production_sources"] = dataset.selection["production_sources"]
+        result.report["current_source_validation"] = current_source_validation(
+            dataset.manifest, result.report, lease.run.binding_id
+        )
+        declared_day = (
+            lease.configuration.created_at.astimezone(
+                ZoneInfo(lease.configuration.binding.timezone)
+            )
+            .date()
+            .isoformat()
+        )
+        dataset.manifest["retrospective_configuration_days"] = sum(
+            day < declared_day
+            for day in cast(list[str], result.report.get("included_day_dates", []))
+        )
         return _publish(
             lease, result, dataset.manifest, now + timedelta(seconds=time.monotonic() - start)
         )

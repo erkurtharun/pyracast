@@ -11,6 +11,7 @@ from django.db import close_old_connections, connection
 from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant
+from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.models import CollectionJob, ForecastResult, ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import (
@@ -140,7 +141,7 @@ def ready_run(system: System, plant: Plant) -> CalibrationRun:
         "candidate": {"daily_mae_mwh": 1},
     }
     run.dataset_manifest = {
-        "selection_policy": "latest-complete-estimated-actuals-v2",
+        "selection_policy": HISTORY_SELECTION_POLICY,
         "source_kind": "estimated_actuals",
     }
     run.save()
@@ -213,7 +214,11 @@ def test_concurrent_candidates_cannot_both_replace_the_same_incumbent(
     [
         {},
         {"selection_policy": "first-available-day-ahead-v1", "source_kind": "forecast"},
-        {"selection_policy": "latest-complete-estimated-actuals-v2", "source_kind": "forecast"},
+        {"selection_policy": HISTORY_SELECTION_POLICY, "source_kind": "forecast"},
+        {
+            "selection_policy": "latest-complete-estimated-actuals-v2",
+            "source_kind": "estimated_actuals",
+        },
     ],
 )
 def test_forecast_calibration_cannot_be_newly_activated(

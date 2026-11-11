@@ -6,6 +6,8 @@ export type LocationChangeRequest =
     components["schemas"]["LocationChangeOutput"];
 export type Plant = components["schemas"]["PlantOutput"];
 export type Calibration = components["schemas"]["CalibrationOutput"];
+export type CalibrationAutomation =
+    components["schemas"]["CalibrationAutomationOutput"];
 type RegionalForecast = components["schemas"]["ForecastOutput"];
 type ElectricalForecast = components["schemas"]["PlantForecastOutput"];
 export type Forecast = Pick<

@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from pyracast import trash
 from pyracast.accounts.operations import require_member
 from pyracast.plants import operations
+from pyracast.plants.automation import automation_status, set_calibration_automation
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import (
     CalibrationActivation,
@@ -22,6 +23,8 @@ from pyracast.plants.performance import forecast_performance
 from pyracast.plants.production import production_history
 from pyracast.plants.serializers import (
     ActivationOutput,
+    CalibrationAutomationInput,
+    CalibrationAutomationOutput,
     CalibrationInput,
     CalibrationOutput,
     CalibrationSummaryOutput,
@@ -213,6 +216,20 @@ class ResetView(ScopedView[CalibrationActivation]):
         data = EmptyInput(data=request.data)
         data.is_valid(raise_exception=True)
         return Response(ActivationOutput(operations.reset_calibration(*scope)).data)
+
+
+class CalibrationAutomationView(ScopedView[Plant]):
+    @extend_schema(responses=CalibrationAutomationOutput)
+    def get(self, request: Request, **kwargs: Any) -> Response:
+        return Response(CalibrationAutomationOutput(automation_status(self.plant())).data)
+
+    @extend_schema(request=CalibrationAutomationInput, responses=CalibrationAutomationOutput)
+    def patch(self, request: Request, **kwargs: Any) -> Response:
+        scope = self.scope()
+        data = CalibrationAutomationInput(data=request.data)
+        data.is_valid(raise_exception=True)
+        plant = set_calibration_automation(*scope, **data.validated_data)
+        return Response(CalibrationAutomationOutput(automation_status(plant)).data)
 
 
 class ForecastView(ScopedView[Plant]):
