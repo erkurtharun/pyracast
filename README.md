@@ -52,6 +52,37 @@ pinned to immutable commits. No auto-merge or deployment is configured.
 
 ## Run locally
 
+On the configured Windows development machine, double-click **`start.cmd`**.
+It checks PostgreSQL/RabbitMQ, installs locked dependencies when needed, applies
+migrations, starts the API, frontend, worker and dispatcher, then opens
+`http://127.0.0.1:3000`. Existing workspace processes are reused; a foreign process
+on ports 3000/8000 is an error, never terminated or assigned a different port.
+The first frontend installation takes longer; later starts reuse the lockfile cache.
+
+Double-click **`stop.cmd`** to stop the four application processes, or
+**`status.cmd`** to inspect them. Stop waits up to five minutes for active worker
+jobs. PostgreSQL and RabbitMQ are shared dependencies and remain running; database
+files are never deleted or reinitialized. Windows termination after the drain is
+bounded process termination, not a guarantee of graceful signal handling.
+For terminal use, from either Windows or Ubuntu:
+
+```text
+uv run --locked python -m scripts.dev start
+uv run --locked python -m scripts.dev status
+uv run --locked python -m scripts.dev stop
+```
+
+Use `stop --frontend-only` to close the interface while automatic collection keeps
+running. The launcher uses the existing root `.env`, uv and Node.js 26.13.0+.
+Logs and process identities are local to ignored `.dev/`; the process registry
+stores no passwords or connection URLs. A successful first start records existing native Windows dependency paths
+so stopped dependencies can be restarted using the same files. If those files are
+missing or no recipe exists, it fails rather than creating an empty database.
+On Ubuntu and for remote dependencies, provide running PostgreSQL/RabbitMQ using
+the setup below; automatic dependency recovery is Windows-only. The process
+launcher has native OS tests in CI; a Windows smoke run does not establish Linux
+dependency recovery. `start.cmd --no-browser` suppresses opening a browser.
+
 Provide PostgreSQL, copy `.env.example` to an ignored `.env` and fill its values.
 Every process loads `.env` from its working directory without overriding existing
 environment variables or expanding values. Start processes from the repository root.

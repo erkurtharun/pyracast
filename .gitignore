@@ -38,6 +38,7 @@ audit-requirements.txt
 local_settings.py
 
 # Local services and application data
+.dev/
 *.log
 *.pid
 db.sqlite3

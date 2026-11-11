@@ -24,11 +24,13 @@ dev = [
     "hypothesis>=6.170.15",
     "mypy",
     "pip-audit",
+    "psutil>=7.2.2",
     "pytest",
     "pytest-cov",
     "pytest-django>=4.14.0",
     "pytest-xdist>=3.8.0",
     "ruff",
+    "types-psutil>=7.2.2.20261111",
 ]
 
 [project.scripts]
