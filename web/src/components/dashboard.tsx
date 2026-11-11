@@ -45,11 +45,7 @@ export function Dashboard() {
             <main className="auth-page">
                 <div className="auth-card">
                     <Brand />
-                    <h1>
-                        Your next day,
-                        <br />
-                        in clearer light.
-                    </h1>
+                    <h1>Your workspace</h1>
                     {initial.error ? (
                         <>
                             <Notice error>{initial.error}</Notice>
@@ -71,20 +67,10 @@ export function Dashboard() {
             <main className="auth-page">
                 <div className="auth-card">
                     <Brand />
-                    <span className="eyebrow">
-                        SOLAR INTELLIGENCE, SIMPLIFIED
-                    </span>
-                    <h1>
-                        Your next day,
-                        <br />
-                        in clearer light.
-                    </h1>
-                    <p>
-                        Sign in to view your regions, explore forecasts and keep
-                        your solar plants on track.
-                    </p>
+                    <h1>Sign in</h1>
+                    <p>Access your solar workspace.</p>
                     <ActionForm
-                        submit="Sign in →"
+                        submit="Sign in"
                         onSubmit={async (data) =>
                             setSession(
                                 await request<Session>(
@@ -104,19 +90,8 @@ export function Dashboard() {
                         />
                     </ActionForm>
                     <p className="fine">
-                        Need access? Your workspace administrator can create
-                        your account.
+                        Contact your administrator for access.
                     </p>
-                </div>
-                <div className="auth-art" aria-hidden="true">
-                    <div className="sun" />
-                    <div className="horizon one" />
-                    <div className="horizon two" />
-                    <span>
-                        More clarity.
-                        <br />
-                        Better energy decisions.
-                    </span>
                 </div>
             </main>
         );
@@ -131,7 +106,24 @@ export function Dashboard() {
 function Brand() {
     return (
         <div className="brand">
-            <span aria-hidden="true">✳</span> pyracast
+            <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true">
+                <circle
+                    cx="14"
+                    cy="14"
+                    r="5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                />
+                <path
+                    d="M14 2v4m0 16v4M2 14h4m16 0h4M5.5 5.5l3 3m11 11 3 3m0-17-3 3m-11 11-3 3"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                />
+            </svg>{" "}
+            pyracast
             <span className="brand-dot">.</span>
         </div>
     );
@@ -157,7 +149,7 @@ function Workspace({
             </a>
             <aside className="sidebar">
                 <Brand />
-                <div className="workspace-label">YOUR WORKSPACE</div>
+                <div className="workspace-label">Workspace</div>
                 <label className="tenant-select">
                     <span className="sr-only">Workspace</span>
                     <select
@@ -177,38 +169,32 @@ function Workspace({
                 <nav aria-label="Main navigation">
                     <button
                         className={view === "regions" ? "active" : ""}
+                        aria-current={view === "regions" ? "page" : undefined}
                         onClick={() => setView("regions")}
                     >
                         <span aria-hidden="true">▦</span> Overview
                     </button>
                     <button
                         className={view === "trash" ? "active" : ""}
+                        aria-current={view === "trash" ? "page" : undefined}
                         onClick={() => setView("trash")}
                     >
                         Recycle bin
                     </button>
                     <button
                         className={view === "profile" ? "active" : ""}
+                        aria-current={view === "profile" ? "page" : undefined}
                         onClick={() => setView("profile")}
                     >
                         <span aria-hidden="true">⚙</span> Account settings
                     </button>
                 </nav>
-                <div className="sidebar-note">
-                    <span aria-hidden="true">☀</span>
-                    <strong>A brighter outlook</strong>
-                    <p>
-                        Your forecasts are collected from authorized sources.
-                        Freshness and coverage travel with every estimate.
-                    </p>
-                </div>
                 <div className="user-box">
                     <div className="avatar">
                         {session.user?.username.slice(0, 1).toUpperCase()}
                     </div>
                     <div>
                         <strong>{session.user?.username}</strong>
-                        <span>Workspace member</span>
                     </div>
                     <button
                         title="Sign out"
@@ -244,9 +230,7 @@ function Workspace({
                                   : "Account settings"}
                         </strong>
                     </span>
-                    <span className="topbar-label">
-                        <i /> Solar operations
-                    </span>
+                    <span className="topbar-label">{tenant?.name}</span>
                 </header>
                 <main id="main">
                     {logoutError && <Notice error>{logoutError}</Notice>}
@@ -255,24 +239,12 @@ function Workspace({
                         <>
                             <div className="page-heading">
                                 <div>
-                                    <span className="eyebrow">
-                                        MAKE IT YOURS
-                                    </span>
                                     <h1>Account settings</h1>
-                                    <p>
-                                        Keep your forecast delivery address up
-                                        to date.
-                                    </p>
                                 </div>
                             </div>
                             <section className="panel narrow">
-                                <h2>Profile & notifications</h2>
-                                <p>
-                                    Signed in as{" "}
-                                    <strong>{session.user?.username}</strong>.
-                                    Regions can use this email as their default
-                                    reminder address.
-                                </p>
+                                <h2>Email address</h2>
+                                <p>Default recipient for reminders.</p>
                                 <ActionForm
                                     submit="Save email address"
                                     onSubmit={async (data) =>
@@ -310,16 +282,11 @@ function Workspace({
                     ) : tenants.loading ? (
                         <p role="status">Loading your workspaces…</p>
                     ) : (
-                        <Empty title="Your workspace is waiting">
-                            Ask your administrator to add you to a tenant to get
-                            started.
+                        <Empty title="No workspace yet">
+                            Contact your administrator for access.
                         </Empty>
                     )}
                 </main>
-                <footer>
-                    PYRACAST{" "}
-                    <span>Solar forecasts. Thoughtfully delivered.</span>
-                </footer>
             </div>
         </div>
     );
@@ -360,12 +327,8 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
         <>
             <div className="page-heading">
                 <div>
-                    <span className="eyebrow">YOUR ENERGY, AT A GLANCE</span>
-                    <h1>A clearer outlook.</h1>
-                    <p>
-                        Welcome to {tenant.name}. View forecasts and manage your
-                        locations.
-                    </p>
+                    <h1>Overview</h1>
+                    <p>{tenant.name}</p>
                 </div>
                 <button
                     className="button"
@@ -375,24 +338,18 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
                 </button>
             </div>
             <div className="stats">
-                <Stat
-                    label="Regions on this page"
-                    value={rows.length}
-                    note="Your forecast locations"
-                />
+                <Stat label="Regions on this page" value={rows.length} />
                 <Stat
                     label="Approved regions"
                     value={
                         rows.filter((row) => row.status === "approved").length
                     }
-                    note="Ready for scheduled collection"
                 />
                 <Stat
                     label="Awaiting approval"
                     value={
                         rows.filter((row) => row.status === "pending").length
                     }
-                    note="Reviewed by your administrator"
                 />
             </div>
             {creating && (
@@ -400,10 +357,7 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
                     <div className="section-heading">
                         <div>
                             <h2>Request a region</h2>
-                            <p>
-                                Choose your location. Your administrator will
-                                connect and approve the source.
-                            </p>
+                            <p>New regions require approval.</p>
                         </div>
                     </div>
                     <ActionForm
@@ -470,11 +424,7 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
                                 {regions.data?.count ?? "—"}
                             </span>
                         </h2>
-                        <p>
-                            One place for forecasts, plants and timely updates.
-                        </p>
                     </div>
-                    <span className="fine">Select a region to explore →</span>
                 </div>
                 {regions.loading ? (
                     <p role="status">Loading regions…</p>
@@ -518,9 +468,8 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
                         ))}
                     </div>
                 ) : (
-                    <Empty title="Every forecast starts with a place">
-                        Request your first region to bring your solar outlook
-                        into focus.
+                    <Empty title="No regions yet">
+                        Request a region to get started.
                     </Empty>
                 )}
                 {(next === undefined ? regions.data?.next : next) && (
@@ -549,16 +498,6 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
                 )}
                 {pageError && <Notice error>{pageError}</Notice>}
             </section>
-            <div className="tip-strip">
-                <span aria-hidden="true">◷</span>
-                <div>
-                    <strong>A little ahead of tomorrow.</strong>
-                    <p>
-                        Open an approved region to choose when you receive fresh
-                        forecast emails.
-                    </p>
-                </div>
-            </div>
         </>
     );
 }

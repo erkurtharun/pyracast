@@ -69,15 +69,6 @@ export function ProductionHistory({
         };
     }, [query, version]);
     const ready = history && query === loadedQuery;
-    const time = (value: string) =>
-        new Intl.DateTimeFormat("en-GB", {
-            timeZone: history?.timezone,
-            hour: "2-digit",
-            minute: "2-digit",
-            timeZoneName: "short",
-        }).format(new Date(value));
-    const label = (start: string, end: string) =>
-        `${time(start)} – ${time(end)}`;
     const datedTime = (value: string) =>
         new Intl.DateTimeFormat("en-GB", {
             timeZone: history?.timezone,
@@ -98,6 +89,28 @@ export function ProductionHistory({
                   Boolean(drafts[`${row.starts_at}/${row.ends_at}`]?.energy),
           )
         : [];
+    const offsetFormatter = new Intl.DateTimeFormat("en-GB", {
+        timeZone: history?.timezone,
+        timeZoneName: "shortOffset",
+    });
+    const offsets = new Set(
+        visibleIntervals.flatMap((row) =>
+            [row.starts_at, row.ends_at].map(
+                (value) =>
+                    offsetFormatter
+                        .formatToParts(new Date(value))
+                        .find((part) => part.type === "timeZoneName")?.value,
+            ),
+        ),
+    );
+    const timeFormatter = new Intl.DateTimeFormat("en-GB", {
+        timeZone: history?.timezone,
+        hour: "2-digit",
+        minute: "2-digit",
+        ...(offsets.size > 1 ? { timeZoneName: "shortOffset" as const } : {}),
+    });
+    const time = (value: string) => timeFormatter.format(new Date(value));
+    const label = (start: string, end: string) => `${time(start)}–${time(end)}`;
     const pending = ready
         ? history.intervals.filter(
               (row) =>
@@ -164,13 +177,10 @@ export function ProductionHistory({
             <div className="section-heading">
                 <div>
                     <h2>Production journal</h2>
-                    <p>Enter meter readings for one day at a time.</p>
                 </div>
             </div>
             <p className="fine">
-                Historical estimated actuals provide comparison data. Complete
-                daylight coverage helps prepare a calibration candidate. Blank
-                entries stay missing; saved readings are permanent.
+                Blank entries stay missing. Saved readings are permanent.
             </p>
             <div className="journal-controls">
                 <div className="journal-date-nav">
@@ -241,6 +251,13 @@ export function ProductionHistory({
                 )
             ) : (
                 <>
+                    <details>
+                        <summary>Journal entry rules</summary>
+                        <p className="fine">
+                            Archived estimated actuals unlock entry. Complete
+                            daylight coverage helps prepare calibration.
+                        </p>
+                    </details>
                     <CsvDownload
                         label="Download production journal CSV"
                         filename={`production-journal-${history.start_date}-${history.end_date}`}
@@ -314,7 +331,7 @@ export function ProductionHistory({
                                 available for this day.
                             </p>
                         ) : (
-                            <div className="table-scroll">
+                            <div className="table-scroll" tabIndex={0}>
                                 <table className="journal-table">
                                     <caption>
                                         Meter entries · {resolution} minutes
@@ -383,7 +400,7 @@ export function ProductionHistory({
                                                         {row.observation
                                                             ? `${row.observation.quality} · ${row.observation.source}`
                                                             : row.can_enter
-                                                              ? "Missing · ready for your reading"
+                                                              ? "Not entered"
                                                               : (reasons[
                                                                     row.unavailable_reason ??
                                                                         ""
@@ -426,7 +443,7 @@ export function ProductionHistory({
                                     plant_id: history.plant_id,
                                 }}
                             />
-                            <div className="table-scroll">
+                            <div className="table-scroll" tabIndex={0}>
                                 <table>
                                     <caption>
                                         Saved readings · original intervals and

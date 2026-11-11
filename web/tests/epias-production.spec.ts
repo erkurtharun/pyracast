@@ -268,6 +268,9 @@ test("connects, displays partial reported production and disconnects", async ({
             "Provisional reported production is excluded from calibration. Use settlement injection (UEVM).",
         ),
     ).toBeVisible();
+    await page
+        .getByText("Connection settings and collection status", { exact: true })
+        .click();
     await page.getByRole("button", { name: "Disconnect collection" }).click();
     await expect(
         page.getByRole("button", { name: "Connect EPİAŞ" }),

@@ -35,8 +35,8 @@ export function DataSourceControl({
             </label>
             {value === "estimated_actuals" && (
                 <span className="fine">
-                    Estimated actuals are available only for completed local
-                    days.
+                    Completed local days only · model estimates, not meter
+                    readings.
                 </span>
             )}
         </>

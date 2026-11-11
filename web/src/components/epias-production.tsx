@@ -59,16 +59,15 @@ export function EpiasProduction({
     return (
         <section className="panel">
             <h2>Automatic production</h2>
-            <p>
-                Automatically reported hourly production from EPİAŞ. Archived
-                data remains available when collection is disconnected.
-            </p>
-            <p className="fine">
-                Automatic selection prefers settlement injection (UEVM), then
-                provisional reported production. Only settlement injection
-                matching the plant's net-export measurement point can enter
-                calibration.
-            </p>
+            <details>
+                <summary>Sources and calibration eligibility</summary>
+                <p className="fine">
+                    Automatic selection prefers settlement injection (UEVM),
+                    then provisional reported production. Only UEVM matching net
+                    export can enter calibration. Disconnecting collection
+                    retains the archive.
+                </p>
+            </details>
             {error && <Notice error>{error}</Notice>}
             {connection.loading ? (
                 <p role="status">Loading connection…</p>
@@ -83,42 +82,51 @@ export function EpiasProduction({
                                     <strong>
                                         {data.name || "EPİAŞ plant"}
                                     </strong>{" "}
-                                    · ID {data.provider_plant_id} · {data.eic}
-                                </p>
-                                <p className="fine">
-                                    Measurement point:{" "}
-                                    {data.meter_basis.replaceAll("_", " ")} ·
-                                    Archived days: {data.archived_days} ·
-                                    Pending jobs: {data.pending_jobs}
-                                </p>
-                                <p className="fine">
-                                    Last successful collection:{" "}
-                                    {data.last_success_at
-                                        ? new Date(
-                                              data.last_success_at,
-                                          ).toLocaleString()
-                                        : "Not yet collected"}
+                                    - Connected
                                 </p>
                                 {data.last_error && (
                                     <Notice error>
                                         Collection error: {data.last_error}
                                     </Notice>
                                 )}
-                                <div className="button-group">
-                                    <button
-                                        className="button secondary"
-                                        onClick={() => setEditing(true)}
-                                    >
-                                        Edit connection
-                                    </button>
-                                    <button
-                                        className="button secondary"
-                                        disabled={working}
-                                        onClick={disconnect}
-                                    >
-                                        Disconnect collection
-                                    </button>
-                                </div>
+                                <details>
+                                    <summary>
+                                        Connection settings and collection
+                                        status
+                                    </summary>
+                                    <p className="fine">
+                                        ID {data.provider_plant_id} - {data.eic}
+                                    </p>
+                                    <p className="fine">
+                                        Measurement point:{" "}
+                                        {data.meter_basis.replaceAll("_", " ")}{" "}
+                                        · Archived days: {data.archived_days} ·
+                                        Pending jobs: {data.pending_jobs}
+                                    </p>
+                                    <p className="fine">
+                                        Last successful collection:{" "}
+                                        {data.last_success_at
+                                            ? new Date(
+                                                  data.last_success_at,
+                                              ).toLocaleString()
+                                            : "Not yet collected"}
+                                    </p>
+                                    <div className="button-group">
+                                        <button
+                                            className="button secondary"
+                                            onClick={() => setEditing(true)}
+                                        >
+                                            Edit connection
+                                        </button>
+                                        <button
+                                            className="button secondary"
+                                            disabled={working}
+                                            onClick={disconnect}
+                                        >
+                                            Disconnect collection
+                                        </button>
+                                    </div>
+                                </details>
                             </>
                         )}
                         {(!data.connected || editing) && (
@@ -225,28 +233,39 @@ export function EpiasProduction({
                     </button>
                 </div>
             )}
-            <div className="button-group">
-                <button
-                    className="button secondary"
-                    onClick={() => setDate(shiftDay(date, -1))}
-                >
-                    Previous day
-                </button>
-                <label className="field">
-                    Archive date
-                    <input
-                        type="date"
-                        value={date}
-                        max={yesterday}
-                        onChange={(event) => {
-                            if (
-                                event.target.value &&
-                                event.target.value <= yesterday
-                            )
-                                setDate(event.target.value);
-                        }}
-                    />
-                </label>
+            <div className="forecast-controls">
+                <div className="archive-date-nav">
+                    <button
+                        className="button secondary"
+                        aria-label="Previous day"
+                        onClick={() => setDate(shiftDay(date, -1))}
+                    >
+                        <span aria-hidden="true">←</span>
+                    </button>
+                    <label className="field">
+                        Archive date
+                        <input
+                            type="date"
+                            value={date}
+                            max={yesterday}
+                            onChange={(event) => {
+                                if (
+                                    event.target.value &&
+                                    event.target.value <= yesterday
+                                )
+                                    setDate(event.target.value);
+                            }}
+                        />
+                    </label>
+                    <button
+                        className="button secondary"
+                        aria-label="Next day"
+                        disabled={date >= yesterday}
+                        onClick={() => setDate(shiftDay(date, 1))}
+                    >
+                        <span aria-hidden="true">→</span>
+                    </button>
+                </div>
                 <label className="field">
                     Production source
                     <select
@@ -262,13 +281,6 @@ export function EpiasProduction({
                         </option>
                     </select>
                 </label>
-                <button
-                    className="button secondary"
-                    disabled={date >= yesterday}
-                    onClick={() => setDate(shiftDay(date, 1))}
-                >
-                    Next day
-                </button>
                 <button
                     className="button secondary"
                     onClick={() => setRevision((value) => value + 1)}
@@ -349,8 +361,32 @@ function EpiasArchive({
                     <CsvDownload
                         filename={`epias-${selectedHistory.source_kind}-${selectedHistory.date}`}
                         records={rows}
-                        metadata={{ ...selectedHistory, readings: undefined }}
+                        metadata={{
+                            ...selectedHistory,
+                            readings: undefined,
+                        }}
                     />
+                    <details>
+                        <summary>Acquisition details</summary>
+                        <p className="fine">
+                            Collected{" "}
+                            {new Date(
+                                selectedHistory.snapshot.collected_at,
+                            ).toLocaleString()}
+                            {" - Published "}
+                            {new Date(
+                                selectedHistory.snapshot.available_at,
+                            ).toLocaleString()}
+                        </p>
+                        <p className="fine">
+                            Acquisition #{selectedHistory.snapshot.id} - Policy:{" "}
+                            {selectedHistory.snapshot.normalization_policy}
+                        </p>
+                        <p className="fine">
+                            Payload digest:{" "}
+                            {selectedHistory.snapshot.content_sha256}
+                        </p>
+                    </details>
                     <Notice>
                         {selectedHistory.calibration_eligible
                             ? "Settlement injection is eligible for calibration when valid interval coverage is complete."
@@ -360,21 +396,17 @@ function EpiasArchive({
                               "This production source is excluded from calibration because its measurement point does not match net export.")}
                     </Notice>
                     <p className="fine">
-                        Source: EPİAŞ ·{" "}
+                        EPİAŞ -{" "}
                         {sourceLabels[selectedHistory.source_kind ?? ""] ??
-                            "Reported production"}{" "}
-                        · Collected{" "}
-                        {new Date(
-                            selectedHistory.snapshot.collected_at,
-                        ).toLocaleString()}{" "}
-                        · Times shown in {selectedHistory.timezone}
+                            "Reported production"}
+                        {" - "}
+                        {selectedHistory.timezone}
                     </p>
                     {positiveRows.length > 0 &&
                         visibleRows.length < rows.length && (
                             <p className="fine">
-                                Showing the first through last positive
-                                interval, including gaps. CSV includes all
-                                intervals.
+                                Positive interval range, including gaps. CSV
+                                includes all hours.
                             </p>
                         )}
                     {!positiveRows.length &&
@@ -396,8 +428,8 @@ function EpiasArchive({
                             ? "Incomplete provider hours — total unavailable"
                             : `Sum of provider-reported hours: ${total.toLocaleString(undefined, { maximumFractionDigits: 3 })} MWh`}
                     </p>
-                    <div className="table-scroll">
-                        <table>
+                    <div className="table-scroll" tabIndex={0}>
+                        <table className="production-table">
                             <caption>EPİAŞ reported hourly production</caption>
                             <thead>
                                 <tr>

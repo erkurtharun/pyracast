@@ -135,11 +135,12 @@ export function ForecastPanel({
                             ? "Electrical generation"
                             : "Regional irradiance"}
                     </h2>
-                    <p>Local times in {forecast.timezone}</p>
+                    <p className="fine">
+                        {forecast.date} · {forecast.timezone}
+                    </p>
                     {forecast.source_kind === "estimated_actuals" && (
-                        <p>
-                            Estimated actuals. Satellite/model estimates, not
-                            meter readings.
+                        <p className="fine">
+                            Satellite/model estimates, not meter readings.
                         </p>
                     )}
                 </div>
@@ -169,16 +170,16 @@ export function ForecastPanel({
                         }}
                     />
                     <Tag>{forecast.freshness}</Tag>
+                    {Array.isArray(result.quality_flags) &&
+                        result.quality_flags.includes(
+                            "unvalidated_reference_transfer",
+                        ) && <Tag tone="warning">Needs validation</Tag>}
                 </div>
             </div>
-            {scenario && (
+            {scenario?.status === "unknown_impact" && (
                 <Notice>
-                    Normal capacity is the healthy-plant estimate. With outages
-                    reflects the recorded available capacity; it is an estimate,
-                    not a meter reading.
-                    {scenario.status === "unknown_impact"
-                        ? " Capacity impact is unknown for some intervals; missing affected values are not zero."
-                        : ""}
+                    Capacity impact is unknown for some intervals; missing
+                    affected values are not zero.
                 </Notice>
             )}
             {scenario &&
@@ -192,11 +193,8 @@ export function ForecastPanel({
                         ),
                     )) && (
                     <Notice>
-                        The plant configuration changed after an outage was
-                        reported. Open Outages, edit the report and confirm the
-                        remaining capacities for the current configuration. The
-                        affected estimate remains unknown until the report is
-                        confirmed.
+                        Configuration changed. Confirm remaining capacities in
+                        Outages to restore the affected estimate.
                     </Notice>
                 )}
             {electrical &&
@@ -212,8 +210,8 @@ export function ForecastPanel({
                 )}
             {result.complete !== true && (
                 <Notice>
-                    Partial coverage. The complete daily total is unavailable;
-                    the partial estimate only includes covered intervals.
+                    Partial coverage. Daily total unavailable; the partial
+                    estimate includes covered intervals only.
                 </Notice>
             )}
             <div className="stats forecast-stats">
@@ -235,24 +233,26 @@ export function ForecastPanel({
                         unit="MWh"
                     />
                 )}
-                {scenario && (
+                {scenario && scenario.result.complete !== true && (
                     <Stat
                         label="With outages · partial estimate"
                         value={scenario.result.partial_energy_mwh}
                         unit="MWh"
                     />
                 )}
-                <Stat
-                    label="Partial estimate"
-                    value={
-                        result[
-                            electrical
-                                ? "partial_energy_mwh"
-                                : "partial_energy_kwh_m2"
-                        ]
-                    }
-                    unit={electrical ? "MWh" : "kWh/m²"}
-                />
+                {result.complete !== true && (
+                    <Stat
+                        label="Partial estimate"
+                        value={
+                            result[
+                                electrical
+                                    ? "partial_energy_mwh"
+                                    : "partial_energy_kwh_m2"
+                            ]
+                        }
+                        unit={electrical ? "MWh" : "kWh/m²"}
+                    />
+                )}
                 <Stat
                     label="Coverage"
                     value={
@@ -297,9 +297,8 @@ export function ForecastPanel({
                     </div>
                     {scenario && (
                         <p className="fine">
-                            Green: normal capacity · Blue: with outages. Both
-                            series share the same MW axis; gaps mean unknown
-                            impact.
+                            Green: normal capacity · Blue: with outages · Gaps:
+                            unknown impact
                         </p>
                     )}
                     <div
@@ -338,7 +337,7 @@ export function ForecastPanel({
                         <summary>
                             View interval data ({rows.length} intervals)
                         </summary>
-                        <div className="table-scroll">
+                        <div className="table-scroll" tabIndex={0}>
                             <table>
                                 <caption className="sr-only">
                                     {forecast.source_kind ===
@@ -398,13 +397,18 @@ export function ForecastPanel({
                                                 </td>
                                             )}
                                             <td>
-                                                {row.quality_flags?.join(
-                                                    ", ",
-                                                ) || "—"}
+                                                {row.quality_flags
+                                                    ?.map((flag) =>
+                                                        flag.replaceAll(
+                                                            "_",
+                                                            " ",
+                                                        ),
+                                                    )
+                                                    .join(", ") || "—"}
                                                 {scenario &&
                                                 row.affected_quality_flags
                                                     ?.length
-                                                    ? `; with outages: ${row.affected_quality_flags.join(", ")}`
+                                                    ? `; with outages: ${row.affected_quality_flags.map((flag) => flag.replaceAll("_", " ")).join(", ")}`
                                                     : ""}
                                             </td>
                                         </tr>
@@ -415,8 +419,15 @@ export function ForecastPanel({
                     </details>
                 </>
             )}
-            <div className="provenance">
-                <strong>Source details</strong>
+            <details className="provenance">
+                <summary>Source & quality</summary>
+                {scenario && (
+                    <p className="fine">
+                        Normal capacity assumes a healthy plant. With outages
+                        uses reported remaining capacity. Both are estimates,
+                        not meter readings.
+                    </p>
+                )}
                 <p>
                     {forecast.collected_at
                         ? `Collected ${new Date(forecast.collected_at).toLocaleString("en", { timeZone: forecast.timezone })}. `
@@ -452,7 +463,7 @@ export function ForecastPanel({
                     }}
                     label="Source & configuration details"
                 />
-            </div>
+            </details>
         </>
     );
 }

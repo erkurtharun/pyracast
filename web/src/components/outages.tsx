@@ -58,10 +58,7 @@ export function Outages({
             <div className="section-heading">
                 <div>
                     <h2>Plant outages</h2>
-                    <p>
-                        Record an incident to compare normal capacity with
-                        available capacity.
-                    </p>
+                    <p>Track unavailable capacity and recovery.</p>
                 </div>
                 <button className="button" onClick={() => setEditor("new")}>
                     Report outage
@@ -74,16 +71,19 @@ export function Outages({
                     ? ` Plant timezone: ${timezone}.`
                     : ""}
             </p>
-            <p>
-                Keep simultaneous faults in one incident and enter the total
-                remaining plant capacity. Unknown impact stays unknown; it is
-                never treated as zero.
-            </p>
-            <p className="fine">
-                Edit corrects an existing report. If available capacity changes
-                during an outage, close this period and report the new operating
-                state.
-            </p>
+            <details>
+                <summary>How to report an outage</summary>
+                <p>
+                    Keep simultaneous faults in one incident and enter the total
+                    remaining plant capacity. Unknown impact stays unknown; it
+                    is never treated as zero.
+                </p>
+                <p className="fine">
+                    Edit corrects an existing report. If available capacity
+                    changes during an outage, close this period and report the
+                    new operating state.
+                </p>
+            </details>
             {editor && (
                 <section
                     aria-label={
@@ -149,15 +149,17 @@ export function Outages({
                 <Notice error>{resource.error}</Notice>
             ) : (
                 <>
-                    <CsvDownload
-                        label="Download outages CSV"
-                        filename="plant-outages"
-                        records={resource.data?.results ?? []}
-                        metadata={{
-                            timezone: deviceTimezone,
-                            plant_timezone: timezone,
-                        }}
-                    />
+                    <div className="toolbar">
+                        <CsvDownload
+                            label="Download outages CSV"
+                            filename="plant-outages"
+                            records={resource.data?.results ?? []}
+                            metadata={{
+                                timezone: deviceTimezone,
+                                plant_timezone: timezone,
+                            }}
+                        />
+                    </div>
                     {!resource.data?.results.length && (
                         <p>No outages recorded.</p>
                     )}
@@ -168,7 +170,7 @@ export function Outages({
                                 <Tag>{outage.status}</Tag>
                             </div>
                             <p>
-                                {outage.kind} · Started{" "}
+                                {outage.kind.replaceAll("_", " ")} · Started{" "}
                                 {format(outage.starts_at)}
                                 {outage.status === "cancelled"
                                     ? " · Cancelled entry"
@@ -176,25 +178,41 @@ export function Outages({
                                       ? ` · Resolved ${format(outage.ends_at)}`
                                       : " · Ongoing"}
                             </p>
-                            <p>
-                                Remaining capacity — panels:{" "}
-                                {outage.available_dc_mw ?? "unknown"} MW;
-                                inverter:{" "}
-                                {outage.available_inverter_mw ?? "unknown"} MW;
-                                grid export:{" "}
-                                {outage.available_export_mw ?? "unknown"} MW.
-                            </p>
+                            <dl className="stats">
+                                <div>
+                                    <dt>Available panels</dt>
+                                    <dd>
+                                        {outage.available_dc_mw == null
+                                            ? "Unknown"
+                                            : `${outage.available_dc_mw} MW`}
+                                    </dd>
+                                </div>
+                                <div>
+                                    <dt>Available inverter</dt>
+                                    <dd>
+                                        {outage.available_inverter_mw == null
+                                            ? "Unknown"
+                                            : `${outage.available_inverter_mw} MW`}
+                                    </dd>
+                                </div>
+                                <div>
+                                    <dt>Available export</dt>
+                                    <dd>
+                                        {outage.available_export_mw == null
+                                            ? "Unknown"
+                                            : `${outage.available_export_mw} MW`}
+                                    </dd>
+                                </div>
+                            </dl>
                             {outage.notes && <p>{outage.notes}</p>}
                             {outage.status === "active" &&
                                 currentConfigurationId &&
                                 outage.declared_configuration_id !==
                                     currentConfigurationId && (
                                     <Notice>
-                                        The plant configuration changed after
-                                        this report. Edit the report and confirm
-                                        the remaining capacities for the current
-                                        configuration. Until then, the outage
-                                        impact is unknown.
+                                        Configuration changed. Edit this report
+                                        to confirm remaining capacities. Outage
+                                        impact is unknown until confirmed.
                                     </Notice>
                                 )}
                             {outage.status !== "cancelled" && (
@@ -397,10 +415,7 @@ function OutageForm({
             {impact === "reduced" && (
                 <>
                     <p className="fine">
-                        Enter remaining available MW, not lost capacity. Leave a
-                        field blank when unknown. Disconnected panels also
-                        reduce available DC capacity; do not guess a loss
-                        percentage from an inverter fault.
+                        Enter remaining MW. Blank means unknown.
                     </p>
                     <div className="form-grid">
                         <Field
@@ -431,6 +446,14 @@ function OutageForm({
                             defaultValue={outage?.available_export_mw ?? ""}
                         />
                     </div>
+                    <details>
+                        <summary>Capacity entry help</summary>
+                        <p className="fine">
+                            Enter available capacity, not lost capacity.
+                            Disconnected panels reduce DC capacity. Do not infer
+                            a loss percentage from an inverter fault.
+                        </p>
+                    </details>
                 </>
             )}
             <label className="field">

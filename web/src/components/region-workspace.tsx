@@ -33,6 +33,7 @@ export function RegionWorkspace({
     onDeleted: () => void;
 }) {
     const [tab, setTab] = useState("forecast"),
+        [plantOpen, setPlantOpen] = useState(false),
         [date, setDate] = useState(() =>
             new Date().toLocaleDateString("en-CA", {
                 timeZone: region.timezone,
@@ -43,51 +44,66 @@ export function RegionWorkspace({
     const base = `/api/tenants/${tenant}/regions/${region.id}/`;
     return (
         <>
-            <button className="back-button" onClick={onBack}>
-                ← All regions
-            </button>
-            <div className="page-heading">
-                <div>
-                    <span className="eyebrow">REGION WORKSPACE</span>
-                    <h1>{region.name}</h1>
-                    <p>
-                        {region.latitude}°, {region.longitude}°{" "}
-                        <span className="separator">·</span> {region.timezone}
-                    </p>
-                </div>
-                <div className="button-group">
-                    <Tag>{region.status}</Tag>
-                    <MoveToRecycleBin
-                        kind="region"
-                        name={region.name}
-                        url={base}
-                        token={token}
-                        onDeleted={onDeleted}
-                    />
-                </div>
-            </div>
-            <nav className="tabs" aria-label="Region sections">
-                {[
-                    ["forecast", "Regional forecast"],
-                    ["plants", "Solar plants"],
-                    ["collection", "Data collection"],
-                    ["reminders", "Email reminders"],
-                ].map(([key, label]) => (
-                    <button
-                        key={key}
-                        aria-current={tab === key ? "page" : undefined}
-                        className={tab === key ? "active" : ""}
-                        onClick={() => setTab(key)}
-                    >
-                        {label}
+            {plantOpen ? (
+                <button
+                    className="context-label"
+                    aria-label={`Back to region: ${region.name}`}
+                    onClick={() => {
+                        setTab("forecast");
+                        setPlantOpen(false);
+                    }}
+                >
+                    {region.name}
+                </button>
+            ) : (
+                <>
+                    <button className="back-button" onClick={onBack}>
+                        ← All regions
                     </button>
-                ))}
-            </nav>
+                    <div className="page-heading">
+                        <div>
+                            <h1>{region.name}</h1>
+                            <p>
+                                {region.latitude}°, {region.longitude}°{" "}
+                                <span className="separator">·</span>{" "}
+                                {region.timezone}
+                            </p>
+                        </div>
+                        <div className="button-group">
+                            <Tag>{region.status}</Tag>
+                            <MoveToRecycleBin
+                                kind="region"
+                                name={region.name}
+                                url={base}
+                                token={token}
+                                onDeleted={onDeleted}
+                            />
+                        </div>
+                    </div>
+                    <nav className="tabs" aria-label="Region sections">
+                        {[
+                            ["forecast", "Regional forecast"],
+                            ["plants", "Solar plants"],
+                            ["collection", "Data collection"],
+                            ["reminders", "Email reminders"],
+                        ].map(([key, label]) => (
+                            <button
+                                key={key}
+                                aria-current={tab === key ? "page" : undefined}
+                                className={tab === key ? "active" : ""}
+                                onClick={() => setTab(key)}
+                            >
+                                {label}
+                            </button>
+                        ))}
+                    </nav>
+                </>
+            )}
             {tab === "forecast" ? (
                 <>
                     <div className="section-heading">
                         <div>
-                            <h2>Explore daily irradiance</h2>
+                            <h2>Regional forecast</h2>
                             <p>
                                 Daily irradiance at your region’s surface. Dates
                                 follow {region.timezone}.
@@ -132,7 +148,12 @@ export function RegionWorkspace({
                     )}
                 </>
             ) : tab === "plants" ? (
-                <Plants base={base} region={region} token={token} />
+                <Plants
+                    base={base}
+                    region={region}
+                    token={token}
+                    onSelectionChange={setPlantOpen}
+                />
             ) : tab === "collection" ? (
                 <CollectionSchedule base={base} region={region} token={token} />
             ) : (
@@ -168,10 +189,12 @@ function Plants({
     base,
     region,
     token,
+    onSelectionChange,
 }: {
     base: string;
     region: Region;
     token: string;
+    onSelectionChange: (selected: boolean) => void;
 }) {
     const [version, setVersion] = useState(0),
         [creating, setCreating] = useState(false),
@@ -191,11 +214,13 @@ function Plants({
                 onBack={() => {
                     setVersion((current) => current + 1);
                     setSelected(undefined);
+                    onSelectionChange(false);
                 }}
                 onDeleted={() => {
                     setDeleted((current) => [...current, selected.id]);
                     setVersion((current) => current + 1);
                     setSelected(undefined);
+                    onSelectionChange(false);
                 }}
             />
         );
@@ -203,11 +228,7 @@ function Plants({
         <section className="panel">
             <div className="section-heading">
                 <div>
-                    <h2>Your solar plants</h2>
-                    <p>
-                        Turn regional irradiance into an electrical generation
-                        outlook.
-                    </p>
+                    <h2>Solar plants</h2>
                 </div>
                 <button
                     className="button"
@@ -235,6 +256,7 @@ function Plants({
                         );
                         setVersion(version + 1);
                         setSelected(created);
+                        onSelectionChange(true);
                     }}
                 >
                     <PlantConfigurationFields />
@@ -250,7 +272,10 @@ function Plants({
                         <button
                             className="region-card"
                             key={plant.id}
-                            onClick={() => setSelected(plant)}
+                            onClick={() => {
+                                setSelected(plant);
+                                onSelectionChange(true);
+                            }}
                         >
                             <div className="region-card-top">
                                 <span
@@ -277,9 +302,8 @@ function Plants({
                     ))}
                 </div>
             ) : (
-                <Empty title="Room for your solar ambitions">
-                    Add a plant to explore electrical generation, import
-                    production and calibrate your estimates.
+                <Empty title="No plants yet">
+                    Add a plant to see its generation forecast.
                 </Empty>
             )}
         </section>

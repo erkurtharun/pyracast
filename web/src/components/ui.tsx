@@ -219,8 +219,24 @@ export function Stat({
         </div>
     );
 }
-export function Tag({ children }: { children: ReactNode }) {
-    return <span className="tag">{children}</span>;
+export function Tag({
+    children,
+    tone,
+}: {
+    children: ReactNode;
+    tone?: "neutral" | "success" | "warning" | "danger";
+}) {
+    const value = typeof children === "string" ? children.toLowerCase() : "";
+    const color =
+        tone ??
+        (["approved", "fresh", "ready", "active", "succeeded"].includes(value)
+            ? "success"
+            : ["pending", "stale", "provisional", "unknown"].includes(value)
+              ? "warning"
+              : ["failed", "rejected"].includes(value)
+                ? "danger"
+                : "neutral");
+    return <span className={`tag tag-${color}`}>{children}</span>;
 }
 export function JsonDetails({
     data,

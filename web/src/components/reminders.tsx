@@ -2,7 +2,7 @@
 import { useState } from "react";
 import type { components } from "@/lib/schema";
 import { request, type Region } from "@/lib/api";
-import { ActionForm, Empty, Field, Notice, Stat, Tag, useResource } from "./ui";
+import { ActionForm, Empty, Field, Notice, Tag, useResource } from "./ui";
 type Preference = components["schemas"]["ReminderOutput"];
 export function Reminders({
     base,
@@ -23,7 +23,7 @@ export function Reminders({
             <section className="panel">
                 <div className="section-heading">
                     <div>
-                        <h2>The right forecast. The right time.</h2>
+                        <h2>Email reminders</h2>
                         <p>
                             Choose when the latest saved forecast is emailed to
                             you.
@@ -100,30 +100,24 @@ export function Reminders({
                             : ""}
                         . Remove all times and pause to clear your schedule.
                     </p>
-                    <p className="fine">
-                        Emails use the latest saved forecast and show its
-                        collection time and age. Sending an email does not
-                        request new provider data. Daylight-saving gaps are
-                        skipped; repeated local times run once.
-                    </p>
+                    <details>
+                        <summary>Reminder details</summary>
+                        <p className="fine">
+                            Emails use the latest saved forecast and show its
+                            collection time and age; they do not request new
+                            provider data. Daylight-saving gaps are skipped and
+                            repeated local times run once. Daily limit:{" "}
+                            {data.quota?.daily_reminder_limit ?? "?"}. Provider
+                            queries per email:{" "}
+                            {data.quota?.queries_per_email ?? "?"}.
+                        </p>
+                    </details>
                 </ActionForm>
             </section>
-            <div className="stats">
-                <Stat
-                    label="Daily reminder limit"
-                    value={data.quota?.daily_reminder_limit}
-                    note="Per region, for your reminder schedule"
-                />
-                <Stat label="Scheduled times" value={data.times.length} />
-                <Stat
-                    label="Provider queries per email"
-                    value={data.quota?.queries_per_email}
-                />
-            </div>
-            <section className="panel">
-                <h2>Recent deliveries</h2>
+            <details className="panel">
+                <summary>Recent deliveries</summary>
                 {data.deliveries.length ? (
-                    <div className="table-scroll">
+                    <div className="table-scroll" tabIndex={0}>
                         <table>
                             <caption className="sr-only">
                                 Recent forecast email deliveries
@@ -185,12 +179,11 @@ export function Reminders({
                         </table>
                     </div>
                 ) : (
-                    <Empty title="Your inbox has a brighter future">
-                        Scheduled deliveries will appear here with their
-                        collection and delivery status.
+                    <Empty title="No deliveries yet">
+                        Scheduled deliveries appear here.
                     </Empty>
                 )}
-            </section>
+            </details>
         </>
     );
 }

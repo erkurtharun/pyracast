@@ -111,10 +111,8 @@ function ScheduleEditor({
     return (
         <>
             <section className="panel">
-                <h2>Data collection schedule</h2>
-                <p>
-                    Choose local times for collecting forecasts for this region.
-                </p>
+                <h2>Data collection</h2>
+                <p>Choose forecast collection times in {data.timezone}.</p>
                 <ActionForm
                     submit="Save collection schedule"
                     onSubmit={async (form) => {
@@ -208,61 +206,64 @@ function ScheduleEditor({
                         + Add time
                     </button>
                     <p className="fine">
-                        Each scheduled time requests a forecast. Previous-day
-                        production and Solcast historical estimates are
-                        collected separately at {data.history_local_time} in{" "}
-                        {data.timezone}. Missing or failed data is retried no
-                        more often than every {data.history_retry_minutes}{" "}
-                        minutes, before {data.history_retry_until_local}.
-                        Solcast retries preserve budget for scheduled forecasts.
-                        Disabling collection stops these automatic nightly jobs.
-                        Retries and connection validation can use more requests,
-                        and all regions using this provider account share its
-                        UTC daily quota. Email reminders do not request provider
-                        data.
+                        Previous-day production and historical estimates are
+                        collected at {data.history_local_time} ({data.timezone}
+                        ); this time cannot be changed. Missing or failed data
+                        is retried no more often than every{" "}
+                        {data.history_retry_minutes} minutes, until{" "}
+                        {data.history_retry_until_local}. Pausing collection
+                        stops these jobs.
                     </p>
-                    <p className="fine">
-                        Solcast historical estimates are modeled data. EPİAŞ
-                        daily reported production and later-published settlement
-                        injection remain separate records.
-                    </p>
+                    <details>
+                        <summary>Collection details</summary>
+                        <p className="fine">
+                            Historical estimate retries preserve requests for
+                            scheduled forecasts. Validation and retries can use
+                            additional requests. Email reminders do not request
+                            provider data. Solcast historical estimates are
+                            modeled; EPİAŞ reported production and settlement
+                            injection are separate records.
+                        </p>
+                    </details>
                 </ActionForm>
             </section>
-            <div className="stats">
-                <Stat
-                    label="Account daily request limit (UTC)"
-                    value={data.daily_request_limit}
-                />
-                <Stat
-                    label="Account requests used today (UTC)"
-                    value={data.used_today}
-                />
-                <Stat
-                    label="Tracked account budget remaining (UTC)"
-                    value={data.remaining_today}
-                />
-                <Stat
-                    label="Maximum forecast times per region"
-                    value={data.max_forecast_times}
-                />
-            </div>
-            <p className="fine">
-                UTC quota day: {data.quota_utc_day}. This is Pyracast's tracked
-                account usage, including validation and retries. Requests made
-                outside Pyracast are unknown, so the tracked remaining budget is
-                not a guarantee of provider quota. The UTC day resets at 00:00
-                UTC ({nextReset} in {data.timezone}).
-            </p>
-            {data.requests_by_outcome && (
-                <p className="fine">
-                    Tracked attempts: {data.requests_by_outcome.succeeded}{" "}
-                    succeeded, {data.requests_by_outcome.failed} failed,{" "}
-                    {data.requests_by_outcome.uncertain} uncertain.
-                </p>
-            )}
+            <section className="panel">
+                <h3>Account usage today (UTC)</h3>
+                <div className="stats">
+                    <Stat label="Requests used" value={data.used_today} />
+                    <Stat
+                        label="Tracked remaining"
+                        value={data.remaining_today}
+                    />
+                    <Stat
+                        label="Daily limit"
+                        value={data.daily_request_limit}
+                    />
+                </div>
+                <details>
+                    <summary>Usage details</summary>
+                    <p className="fine">
+                        UTC day: {data.quota_utc_day}; resets at 00:00 UTC (
+                        {nextReset} in {data.timezone}). Up to{" "}
+                        {data.max_forecast_times} forecast times can be set per
+                        region. This account is shared across its regions.
+                        Tracked usage includes validation and retries, but
+                        excludes requests made outside Pyracast, so remaining
+                        requests are not guaranteed.
+                    </p>
+                    {data.requests_by_outcome && (
+                        <p className="fine">
+                            Tracked attempts:{" "}
+                            {data.requests_by_outcome.succeeded} succeeded,{" "}
+                            {data.requests_by_outcome.failed} failed,{" "}
+                            {data.requests_by_outcome.uncertain} uncertain.
+                        </p>
+                    )}
+                </details>
+            </section>
             {data.recent_jobs?.length > 0 && (
-                <section className="panel">
-                    <h3>Recent collection jobs</h3>
+                <details className="panel">
+                    <summary>Recent collection jobs</summary>
                     <ul>
                         {data.recent_jobs.map((job) => (
                             <li key={job.id}>
@@ -284,7 +285,7 @@ function ScheduleEditor({
                             </li>
                         ))}
                     </ul>
-                </section>
+                </details>
             )}
         </>
     );

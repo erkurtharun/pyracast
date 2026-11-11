@@ -126,18 +126,23 @@ export function PlantConfigurationFields({
                     </>
                 )}
             </div>
-            <p className="fine">
-                DC nameplate is the panel rating. Inverter AC capacity is the
-                inverter rating; grid export limit is the permitted grid cap.
-                The measurement point identifies AC generation or net export.
-                Leave unknown values blank.
-            </p>
-            <p className="fine">
-                For fixed mounting, tilt is 0–90 degrees; azimuth is clockwise
-                from true north, from 0 up to but excluding 360 degrees.
-                Tracking details are not captured. The current estimate uses a
-                proxy that does not use these geometry fields.
-            </p>
+            <p className="fine">Leave unknown optional capacities blank.</p>
+            <details>
+                <summary>Capacity and mounting guide</summary>
+                <p className="fine">
+                    DC nameplate is the panel rating. Inverter AC capacity is
+                    the inverter rating; grid export limit is the permitted grid
+                    cap. The measurement point identifies AC generation or net
+                    export.
+                </p>
+                <p className="fine">
+                    For fixed mounting, tilt is 0–90 degrees; azimuth is
+                    clockwise from true north, from 0 up to but excluding 360
+                    degrees. Tracking details are not captured. The current
+                    estimate uses a proxy that does not use these geometry
+                    fields.
+                </p>
+            </details>
         </>
     );
 }

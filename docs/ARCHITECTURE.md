@@ -123,6 +123,8 @@ The dispatcher permanently purges expired definitions and their owned records in
 
 Serve the frontend and `/api/` through one origin. Django owns authentication and authorization; JSON session endpoints enforce CSRF even before login. Keep sessions in HttpOnly cookies and API responses private and non-cacheable. The frontend reads stored results and never handles provider credentials. Forwarded HTTPS headers are trusted only when explicitly enabled behind a private, trusted proxy. Rate-limit authentication at the deployment ingress.
 
+Keep the customer interface compact and responsive: primary values and actions stay visible; source details and extended guidance use disclosures. Preserve units, missing values, quality warnings and CSV access. Tables scroll within their own focusable region; navigation and forms fit narrow screens. Show the journal's local timezone once, retaining interval offsets when a daylight-saving transition makes local times ambiguous.
+
 Plant operations use the same tenant membership boundary. Configuration revisions pin the approved reference binding and distinguish DC nameplate, inverter AC capacity, grid export limit and the measurement point (`net_export` or `ac_generation`). Unknown capacities remain null. Changing the configuration supersedes pending calibration work; it does not rewrite historical forecasts or observations.
 Mounting metadata is also revisioned: unknown, fixed or tracking, with optional fixed-array tilt and clockwise-from-north azimuth. It is not consumed by the current reference-transfer proxy. In particular, a 100 MW grid export limit does not imply a 100 MW inverter rating.
 

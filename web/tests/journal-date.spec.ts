@@ -153,7 +153,7 @@ test("journal date controls wait for the initial range before selecting a day", 
     await expect(
         page.getByLabel("Production 2026-01-01T09:00:00Z"),
     ).toHaveCount(0);
-    await expect(page.getByText(/09:15 GMT\+3/)).toBeVisible();
+    await expect(page.getByText(/09:15/)).toBeVisible();
     const entry = page.getByLabel("Production 2026-01-07T09:00:00Z");
     await entry.fill("0");
     await expect(
@@ -163,11 +163,7 @@ test("journal date controls wait for the initial range before selecting a day", 
     await expect(
         page.getByLabel("Production 2026-01-06T09:00:00Z"),
     ).toHaveValue("");
-    await expect(
-        page.getByText(
-            "00:00 GMT+3 \u2013 01:00 GMT+3, 03:00 GMT+3 \u2013 00:00 GMT+3",
-        ),
-    ).toBeVisible();
+    await expect(page.getByText("00:00–01:00, 03:00–00:00")).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Save meter readings" }),
     ).toBeDisabled();

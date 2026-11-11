@@ -214,7 +214,10 @@ test("outage lifecycle preserves metadata, compares both scenarios and restores 
     await page.getByLabel("Available inverter AC capacity (MW)").fill("1");
     await page.getByRole("button", { name: "Save outage changes" }).click();
     await expect(
-        page.getByText(/Remaining capacity — panels: 2 MW/),
+        page
+            .locator("dl > div")
+            .filter({ hasText: "Available panels" })
+            .getByText("2 MW", { exact: true }),
     ).toBeVisible();
     await page
         .getByRole("button", { name: "Generation forecast", exact: true })
@@ -282,7 +285,7 @@ test("unknown impact remains missing and stale edits show a conflict", async ({
         available_export_mw: null,
     });
     await expect(
-        page.getByText(/The plant configuration changed after this report/),
+        page.getByText(/Configuration changed. Edit this report/),
     ).toBeVisible();
     await page
         .getByRole("button", { name: "Generation forecast", exact: true })
@@ -290,7 +293,7 @@ test("unknown impact remains missing and stale edits show a conflict", async ({
     await expect(page.getByText(/Capacity impact is unknown/)).toBeVisible();
     await expect(
         page.getByText(
-            /The plant configuration changed after an outage was reported/,
+            /Configuration changed. Confirm remaining capacities in Outages/,
         ),
     ).toBeVisible();
     await page.getByText(/View interval data/).click();

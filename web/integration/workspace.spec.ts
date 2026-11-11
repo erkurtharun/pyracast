@@ -16,9 +16,7 @@ test("a customer manages an approved region through the real API", async ({
     await page.getByLabel("Username").fill(process.env.BROWSER_USERNAME!);
     await page.getByLabel("Password").fill(process.env.BROWSER_PASSWORD!);
     await page.getByRole("button", { name: /sign in/i }).click();
-    await expect(
-        page.getByRole("heading", { name: "A clearer outlook." }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
 
     const forbidden = await page.evaluate(
         async ({ tenant, region }) => {
@@ -64,9 +62,7 @@ test("a customer manages an approved region through the real API", async ({
         .getByLabel("Forecast date")
         .fill(process.env.BROWSER_HISTORY_DATE!);
     await expect(
-        page.getByText(
-            "Estimated actuals. Satellite/model estimates, not meter readings.",
-        ),
+        page.getByText("Satellite/model estimates, not meter readings."),
     ).toBeVisible();
     await page.getByRole("button", { name: "Solar plants" }).click();
     await page.getByRole("button", { name: "+ Add a plant" }).click();
@@ -200,6 +196,7 @@ test("a customer manages an approved region through the real API", async ({
     ).toHaveCount(0);
     await expectFullForecastCsv(48);
     await page.getByLabel("Forecast date").fill(process.env.BROWSER_TODAY!);
+    await page.getByText("Source & quality", { exact: true }).click();
     await expect(
         page.getByText(
             /Model: reference-power-transfer-v1\. Configuration 1\./,
@@ -216,9 +213,7 @@ test("a customer manages an approved region through the real API", async ({
         .getByLabel("Forecast date")
         .fill(process.env.BROWSER_HISTORY_DATE!);
     await expect(
-        page.getByText(
-            "Estimated actuals. Satellite/model estimates, not meter readings.",
-        ),
+        page.getByText("Satellite/model estimates, not meter readings."),
     ).toBeVisible();
     await expect(
         page.getByText("View interval data (24 intervals)"),
@@ -241,11 +236,13 @@ test("a customer manages an approved region through the real API", async ({
     await expect(
         page.getByText("No EPİAŞ data has been archived for this day."),
     ).toBeVisible();
+    await page
+        .getByText("Sources and calibration eligibility", { exact: true })
+        .click();
     await expect(
-        page.getByText(
-            "Only settlement injection matching the plant's net-export measurement point can enter calibration.",
-            { exact: false },
-        ),
+        page.getByText("Only UEVM matching net export can enter calibration.", {
+            exact: false,
+        }),
     ).toBeVisible();
 
     await page
@@ -371,6 +368,7 @@ test("a customer manages an approved region through the real API", async ({
         .getByRole("button", { name: "Solar plants", exact: true })
         .click();
     await page.getByRole("button", { name: /Browser plant/ }).click();
+    await page.getByText("Plant actions", { exact: true }).click();
     await page
         .getByRole("button", { name: "Delete plant", exact: true })
         .click();

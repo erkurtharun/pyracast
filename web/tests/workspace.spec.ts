@@ -3,155 +3,8 @@ import AxeBuilder from "@axe-core/playwright";
 import { parseProduction } from "../src/lib/production";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
-const region = {
-    id: 11,
-    name: "Antalya solar park",
-    latitude: 36.9,
-    longitude: 30.7,
-    timezone: "Europe/Istanbul",
-    surface: "horizontal",
-    revision: 1,
-    status: "approved",
-};
-const plant = {
-    id: 21,
-    name: "East array",
-    region_id: 11,
-    created_at: "2026-01-01T00:00:00Z",
-    current_configuration: {
-        id: 31,
-        revision: 1,
-        binding_id: 1,
-        created_at: "2026-01-01T00:00:00Z",
-        dc_capacity_mw: 5,
-        inverter_capacity_mw: 4,
-        export_limit_mw: null,
-        measurement_basis: "net_export",
-    },
-};
-const user = { id: 1, username: "solar.user", email: "solar@example.test" };
-const paged = (results: unknown[]) => ({
-    results,
-    count: results.length,
-    next: null,
-    previous: null,
-});
-async function mockApi(
-    page: Page,
-    { anonymous = false, empty = false, failed = false } = {},
-) {
-    let signedIn = !anonymous;
-    await page.route("**/api/**", async (route) => {
-        const path = new URL(route.request().url()).pathname,
-            method = route.request().method();
-        let data: unknown;
-        if (path === "/api/session/login/") {
-            expect(route.request().headers()["x-csrftoken"]).toBe(
-                "anonymous-token",
-            );
-            signedIn = true;
-            data = { user, csrf_token: "signed-token" };
-        } else if (path === "/api/session/logout/") {
-            expect(route.request().headers()["x-csrftoken"]).toBe(
-                "signed-token",
-            );
-            signedIn = false;
-            data = { user: null, csrf_token: "anonymous-token" };
-        } else if (path === "/api/session/") {
-            data = {
-                user: signedIn ? user : null,
-                csrf_token: signedIn ? "signed-token" : "anonymous-token",
-            };
-        } else if (path === "/api/tenants/")
-            data = paged([{ id: 1, name: "Sunfield Energy" }]);
-        else if (path === "/api/tenants/1/regions/") {
-            if (failed) {
-                await route.fulfill({
-                    status: 503,
-                    json: {
-                        detail: "Forecast service is temporarily unavailable.",
-                    },
-                });
-                return;
-            }
-            data =
-                method === "POST"
-                    ? {
-                          ...region,
-                          ...route.request().postDataJSON(),
-                          status: "pending",
-                      }
-                    : paged(empty ? [] : [region]);
-        } else if (path.endsWith("/plants/"))
-            data = method === "POST" ? plant : paged([plant]);
-        else if (path.endsWith("/observations/")) {
-            expect(route.request().postDataJSON()).toMatchObject({
-                configuration_id: 31,
-                unit: "kWh",
-            });
-            data = { created: 1, existing: 0, count: 1, ids: [1] };
-        } else if (path.endsWith("/production/"))
-            data = {
-                timezone: region.timezone,
-                available_start_date: null,
-                available_end_date: null,
-                start_date: "2026-01-01",
-                end_date: "2026-01-07",
-                days: [],
-                intervals: [],
-                observations: [],
-            };
-        else if (path.endsWith("/calibrations/"))
-            data =
-                method === "POST"
-                    ? {
-                          id: 41,
-                          status: "pending",
-                          assessment: "pending",
-                          factor: null,
-                          result: {},
-                          dataset_sha256: "",
-                      }
-                    : paged([]);
-        else if (path.endsWith("/reminders/"))
-            data = {
-                enabled: false,
-                email: "",
-                times: ["08:00"],
-                effective_email: user.email,
-                timezone: region.timezone,
-                quota: { daily_reminder_limit: 10, queries_per_email: 0 },
-                deliveries: [],
-            };
-        else if (path.endsWith("/performance/"))
-            data = {
-                start_date: "2026-01-01",
-                end_date: "2026-01-01",
-                matched_days: 0,
-                requested_days: 1,
-                metrics: null,
-                baseline_metrics: null,
-                days: [],
-            };
-        else if (path.endsWith("/forecast/"))
-            data = {
-                region_id: 11,
-                date: "2026-01-01",
-                timezone: region.timezone,
-                status: "approved",
-                freshness: "missing",
-                result: null,
-                collected_at: null,
-                issued_at: null,
-                ...(path.includes("/plants/") && {
-                    configuration_id: 31,
-                    unavailable_reason: "forecast_unavailable",
-                }),
-            };
-        else throw new Error(`Unmocked API: ${method} ${path}`);
-        await route.fulfill({ json: data });
-    });
-}
+import { region, plant, user, paged, mockApi } from "./support/workspace";
+
 test("mock contract: signs in with CSRF, selects region, and signs out", async ({
     page,
 }) => {
@@ -160,9 +13,7 @@ test("mock contract: signs in with CSRF, selects region, and signs out", async (
     await page.getByLabel("Username", { exact: true }).fill(user.username);
     await page.getByLabel("Password", { exact: true }).fill("fixture-password");
     await page.getByRole("button", { name: "Sign in" }).click();
-    await expect(
-        page.getByRole("heading", { name: "A clearer outlook." }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
     await page.getByRole("button", { name: /Antalya solar park/ }).click();
     await expect(
         page.getByRole("heading", { name: "No forecast for this day yet" }),
@@ -619,15 +470,19 @@ test("region collection schedule validates and saves distinct local times", asyn
     await page.getByRole("button", { name: /Antalya solar park/ }).click();
     await page.getByRole("button", { name: "Data collection" }).click();
     await expect(
-        page.getByText(/collected separately at 03:00 in Europe\/Istanbul/),
+        page.getByText(
+            /at 03:00 \(Europe\/Istanbul\); this time cannot be changed/,
+        ),
     ).toBeVisible();
-    await expect(page.getByText(/30 minutes, before 09:00/)).toBeVisible();
     await expect(
-        page.getByText("Account requests used today (UTC)"),
+        page.getByText(/no more often than every 30 minutes, until 09:00/),
     ).toBeVisible();
+    await expect(page.getByText("Requests used")).toBeVisible();
+    await page.getByText("Usage details", { exact: true }).click();
     await expect(
         page.getByText(/Tracked attempts: 1 succeeded, 1 failed, 0 uncertain/),
     ).toBeVisible();
+    await page.getByText("Recent collection jobs", { exact: true }).click();
     await expect(page.getByText(/Provider request failed/)).toBeVisible();
     await expect(
         page.getByText(/Historical estimates - Succeeded/),
@@ -639,7 +494,7 @@ test("region collection schedule validates and saves distinct local times", asyn
         0,
     );
     await expect(
-        page.getByText(/not a guarantee of provider quota/),
+        page.getByText(/remaining requests are not guaranteed/),
     ).toBeVisible();
     await page
         .getByRole("button", { name: "Save collection schedule" })
@@ -672,9 +527,9 @@ test("region collection schedule validates and saves distinct local times", asyn
     await expect(
         page.getByLabel("Collection time 2 (Europe/Istanbul)"),
     ).toHaveValue("11:00");
-    await expect(
-        page.getByText("Account requests used today (UTC)").locator(".."),
-    ).toContainText("3");
+    await expect(page.getByText("Requests used").locator("..")).toContainText(
+        "3",
+    );
     await page.getByRole("button", { name: "+ Add time" }).click();
     await page.getByLabel("Collection time 3 (Europe/Istanbul)").fill("10:00");
     await page
@@ -694,8 +549,9 @@ test("region collection schedule validates and saves distinct local times", asyn
         page.getByLabel("Collection time 3 (Europe/Istanbul)"),
     ).toHaveCount(0);
     await page.getByRole("button", { name: "Email reminders" }).click();
+    await page.getByText("Reminder details", { exact: true }).click();
     await expect(
-        page.getByText(/Sending an email does not request new provider data/),
+        page.getByText(/do not request new provider data/),
     ).toBeVisible();
 });
 
@@ -751,7 +607,10 @@ test("regional and plant data sources identify estimated actuals and retain arch
     await page.getByLabel("Data source").selectOption("forecast");
     await expect.poll(() => sources.at(-1)).toBe("forecast");
     await page.getByRole("button", { name: "Calibration" }).click();
-    await expect(page.getByText(/historical estimated actuals/i)).toBeVisible();
+    await page.getByText("Journal entry rules", { exact: true }).click();
+    await expect(
+        page.getByText(/Archived estimated actuals unlock entry/i),
+    ).toBeVisible();
 });
 
 test("forecast crops edge zeros, retains gaps and downloads the full safe CSV", async ({
@@ -948,7 +807,10 @@ test("mock contract: saves cached forecast reminders without provider queries", 
         email: "",
         times: ["08:00", "17:30"],
     });
-    await expect(page.getByText("Provider queries per email")).toBeVisible();
+    await page.getByText("Reminder details", { exact: true }).click();
+    await expect(
+        page.getByText("Provider queries per email", { exact: false }),
+    ).toBeVisible();
 });
 test("mock contract: visible API error, empty state and accessible mobile layout", async ({
     page,
@@ -1082,6 +944,7 @@ test("mock contract: follows tenant pagination and keeps missing intervals visib
     });
     await page.getByRole("button", { name: /Antalya solar park/ }).click();
     await expect(page.getByRole("status")).toContainText("Partial coverage");
+    await page.getByText("Source & quality", { exact: true }).click();
     await expect(
         page.getByText("synthetic fixture", { exact: true }),
     ).toBeVisible();
@@ -1235,9 +1098,14 @@ test("forecast performance shows replay metrics, missing days and selected range
     await expect(
         page.getByRole("heading", { name: "Forecast performance" }),
     ).toBeVisible();
+    await page.getByText("Daily comparison (2 days)").click();
+    await page.getByText("Additional metrics & interpretation").click();
     await expect(
         page.getByText("Day-ahead forecast was not available"),
     ).toBeVisible();
+    await page
+        .getByText("How performance is measured", { exact: true })
+        .click();
     await expect(
         page.getByText("This does not establish", { exact: false }),
     ).toBeVisible();
@@ -1259,6 +1127,8 @@ test("forecast performance shows replay metrics, missing days and selected range
         .poll(() => lastQuery)
         .toContain("start_date=2026-11-01&end_date=2026-11-02");
     await expect.poll(() => lastQuery).toContain("daylight_only=true");
+    await page.getByText("Daily comparison (2 days)").click();
+    await page.getByText("Additional metrics & interpretation").click();
     await expect(page.getByRole("cell", { name: "8.5" })).toBeVisible();
     const download = page.waitForEvent("download");
     await page
@@ -1712,6 +1582,7 @@ for (const source of ["forecast", "estimated_actuals"] as const) {
                 { exact: true },
             ),
         ).toBeVisible();
+        await page.getByText("Source & quality", { exact: true }).click();
         await expect(
             page.getByText("historical configuration assumed", { exact: true }),
         ).toBeVisible();
@@ -1797,6 +1668,7 @@ for (const kind of ["region", "plant"] as const) {
                 .getByRole("button", { name: "Solar plants", exact: true })
                 .click();
             await page.getByRole("button", { name: /East array/ }).click();
+            await page.getByText("Plant actions", { exact: true }).click();
         }
         await page
             .getByRole("button", { name: `Delete ${kind}`, exact: true })
@@ -1805,9 +1677,7 @@ for (const kind of ["region", "plant"] as const) {
             name: `Delete ${kind} confirmation`,
         });
         await expect(confirmation).toContainText("30 days");
-        await expect(confirmation).toContainText(
-            "permanently deleted automatically",
-        );
+        await expect(confirmation).toContainText("permanently deleted");
         await confirmation
             .getByRole("button", { name: "Cancel", exact: true })
             .click();
@@ -1830,9 +1700,9 @@ for (const kind of ["region", "plant"] as const) {
         await expect(
             page.getByRole("heading", { name: "Recycle bin", exact: true }),
         ).toBeVisible();
-        const row = page.getByRole("row").filter({
-            has: page.getByRole("rowheader", {
-                name: entity.name,
+        const row = page.getByRole("listitem").filter({
+            has: page.getByRole("button", {
+                name: `Restore ${entity.name}`,
                 exact: true,
             }),
         });

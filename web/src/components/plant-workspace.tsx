@@ -69,14 +69,13 @@ export function PlantWorkspace({
             </button>
             <div className="section-heading">
                 <div>
-                    <h2>{currentPlant.name}</h2>
+                    <h1>{currentPlant.name}</h1>
                     <p>
                         Configuration {configuration?.revision ?? "—"} ·{" "}
                         {configuration?.measurement_basis.replaceAll("_", " ")}
                     </p>
                 </div>
                 <div className="button-group">
-                    <Tag>Solar plant</Tag>
                     <CsvDownload
                         label="Download plant CSV"
                         filename={`plant-${currentPlant.id}`}
@@ -89,16 +88,21 @@ export function PlantWorkspace({
                     >
                         {editing ? "Close configuration" : "Edit configuration"}
                     </button>
-                    <MoveToRecycleBin
-                        kind="plant"
-                        name={currentPlant.name}
-                        url={base}
-                        token={token}
-                        onDeleted={onDeleted}
-                    />
+                    <details>
+                        <summary>Plant actions</summary>
+                        <div className="button-group">
+                            <MoveToRecycleBin
+                                kind="plant"
+                                name={currentPlant.name}
+                                url={base}
+                                token={token}
+                                onDeleted={onDeleted}
+                            />
+                        </div>
+                    </details>
                 </div>
             </div>
-            <div className="stats">
+            <div className="stats capacity-stats">
                 <Stat
                     label="DC nameplate"
                     value={configuration?.dc_capacity_mw}
@@ -115,13 +119,6 @@ export function PlantWorkspace({
                     unit="MW"
                 />
             </div>
-            <p className="fine">
-                DC nameplate is the panel rating; inverter AC capacity is the
-                inverter rating; grid export limit is the permitted grid cap.
-                The measurement point identifies whether production is measured
-                at AC generation or net export. Unknown optional capacities
-                remain unspecified.
-            </p>
             {editing && configuration && (
                 <section className="panel">
                     <h2>Edit plant configuration</h2>
@@ -305,33 +302,36 @@ function Production({
         <section className="panel">
             <div className="section-heading">
                 <div>
-                    <h2>Bring your real production into view</h2>
+                    <h2>Import production CSV</h2>
                     <p>
-                        Import completed 30 or 60 minute energy observations for
-                        this configuration. Only intervals covered by archived
-                        estimated actuals can be imported. Check the Calibration
-                        journal for available dates.
+                        Import 30 or 60 minute readings covered by archived
+                        estimated actuals. Available dates are in the
+                        Calibration journal.
                     </p>
                 </div>
             </div>
-            <p>
-                Use a CSV with the exact header below. Timestamps need an
-                explicit timezone, energy must be non-negative, and intervals
-                cannot overlap. Each batch accepts up to 2,000 rows.
-            </p>
-            <div className="csv-example">
-                <code>
-                    starts_at,ends_at,energy,quality,source
-                    <br />
-                    2026-01-01T09:00:00+03:00,2026-01-01T09:30:00+03:00,250,valid,meter
-                </code>
-            </div>
-            <p className="fine">
-                Quality: valid, outage, curtailed, or invalid. Quoted CSV fields
-                may contain commas and line breaks. Units apply to the whole
-                batch. Exact replays are safe; conflicting records reject the
-                whole batch.
-            </p>
+            <details>
+                <summary>CSV format and import rules</summary>
+                <p>
+                    Use a CSV with the exact header below. Timestamps need an
+                    explicit timezone, energy must be non-negative, and
+                    intervals cannot overlap. Each batch accepts up to 2,000
+                    rows.
+                </p>
+                <div className="csv-example">
+                    <code>
+                        starts_at,ends_at,energy,quality,source
+                        <br />
+                        2026-01-01T09:00:00+03:00,2026-01-01T09:30:00+03:00,250,valid,meter
+                    </code>
+                </div>
+                <p className="fine">
+                    Quality: valid, outage, curtailed, or invalid. Quoted CSV
+                    fields may contain commas and line breaks. Units apply to
+                    the whole batch. Exact replays are safe; conflicting records
+                    reject the whole batch.
+                </p>
+            </details>
             <ActionForm
                 submit={`Import ${preview.length || ""} observations`}
                 onSubmit={async (data) => {
@@ -450,10 +450,9 @@ function Calibrations({
                 <div className="section-heading">
                     <div>
                         <h2>Calibration history</h2>
-                        <p>
-                            Ready fits can be activated explicitly. Older runs
-                            may need a new assessment before activation. Reset
-                            returns future estimates to the baseline.
+                        <p className="fine">
+                            Activate a ready fit or return future estimates to
+                            baseline.
                         </p>
                     </div>
                     <div className="button-group">
@@ -488,7 +487,7 @@ function Calibrations({
                 ) : resource.error ? (
                     <Notice error>{resource.error}</Notice>
                 ) : resource.data?.results.length ? (
-                    <div className="table-scroll">
+                    <div className="table-scroll" tabIndex={0}>
                         <table>
                             <caption className="sr-only">
                                 Calibration runs
@@ -556,10 +555,9 @@ function Calibrations({
                         </table>
                     </div>
                 ) : (
-                    <Empty title="Better estimates start with evidence">
-                        Fill the production journal. A candidate is prepared
-                        automatically once enough complete paired days are
-                        available.
+                    <Empty title="No calibration runs">
+                        Save complete paired days in the production journal to
+                        prepare a candidate automatically.
                     </Empty>
                 )}
                 {selected && (
@@ -681,7 +679,7 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
                 </p>
             )}
             {Object.keys(candidate).length > 0 && (
-                <div className="table-scroll">
+                <div className="table-scroll" tabIndex={0}>
                     <table>
                         <caption>
                             Held-out accuracy comparison — lower error is better

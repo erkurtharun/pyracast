@@ -44,20 +44,27 @@ export function ForecastPerformance({
             <div className="section-heading">
                 <div>
                     <h2>Forecast performance</h2>
-                    <p>
-                        Historical replay using archived day-ahead forecasts and
-                        the configuration and calibration available before each
-                        day. This does not establish that the plant prediction
-                        was published at the time.
-                    </p>
-                    <p>
-                        Results use measured intervals overlapping daylight, not
-                        estimated actuals or full-day totals. The complete
-                        daylight window must be covered. Dates are local to{" "}
-                        {timezone}; choose up to 90 completed days.
+                    <p className="fine">
+                        Day-ahead replay vs measured daylight production ·{" "}
+                        {timezone}
                     </p>
                 </div>
             </div>
+            <details>
+                <summary>How performance is measured</summary>
+                <p>
+                    Historical replay using archived day-ahead forecasts and the
+                    configuration and calibration available before each day.
+                    This does not establish that the plant prediction was
+                    published at the time.
+                </p>
+                <p>
+                    Results use measured intervals overlapping daylight, not
+                    estimated actuals or full-day totals. The complete daylight
+                    window must be covered. Dates are local to {timezone};
+                    choose up to 90 completed days.
+                </p>
+            </details>
             <form className="forecast-controls" onSubmit={load}>
                 <label className="field">
                     Start date
@@ -105,15 +112,17 @@ function PerformanceResults({
             ) : (
                 resource.data && (
                     <>
-                        <CsvDownload
-                            filename={`performance-${resource.data.start_date}-${resource.data.end_date}`}
-                            records={resource.data.days}
-                            metadata={{
-                                ...resource.data,
-                                days: undefined,
-                                timezone,
-                            }}
-                        />
+                        <div className="toolbar">
+                            <CsvDownload
+                                filename={`performance-${resource.data.start_date}-${resource.data.end_date}`}
+                                records={resource.data.days}
+                                metadata={{
+                                    ...resource.data,
+                                    days: undefined,
+                                    timezone,
+                                }}
+                            />
+                        </div>
                         <div className="stats">
                             <Stat
                                 label="Matched days"
@@ -132,86 +141,101 @@ function PerformanceResults({
                                 unit="MWh"
                             />
                             <Stat
-                                label="Baseline daylight energy error"
-                                value={
-                                    resource.data.baseline_metrics
-                                        ?.daily_mae_mwh
-                                }
-                                unit="MWh"
-                            />
-                            <Stat
                                 label="Daylight energy bias"
                                 value={resource.data.metrics?.daily_bias_mwh}
                                 unit="MWh"
                             />
-                            <Stat
-                                label="Generating-interval error"
-                                value={
-                                    resource.data.metrics
-                                        ?.source_positive_mae_mw
-                                }
-                                unit="MW"
-                            />
                         </div>
-                        <p className="fine">
-                            Bias and daily error are predicted minus measured.
-                            Generating-interval error is mean absolute error in
-                            intervals with positive forecast input. Uncertainty
-                            is not estimated.
-                        </p>
+                        <details>
+                            <summary>
+                                Additional metrics & interpretation
+                            </summary>
+                            <div className="stats">
+                                <Stat
+                                    label="Baseline daylight energy error"
+                                    value={
+                                        resource.data.baseline_metrics
+                                            ?.daily_mae_mwh
+                                    }
+                                    unit="MWh"
+                                />
+                                <Stat
+                                    label="Generating-interval error"
+                                    value={
+                                        resource.data.metrics
+                                            ?.source_positive_mae_mw
+                                    }
+                                    unit="MW"
+                                />
+                            </div>
+                            <p className="fine">
+                                Bias is predicted minus measured. Daily energy
+                                error is mean absolute error.
+                                Generating-interval error is mean absolute error
+                                in intervals with positive forecast input.
+                                Uncertainty is not estimated.
+                            </p>
+                        </details>
                         {!resource.data.metrics && (
                             <Notice>
                                 No matched days are available for this range.
                             </Notice>
                         )}
-                        <div className="table-scroll">
-                            <table>
-                                <caption>
-                                    Daylight replay: {resource.data.start_date}{" "}
-                                    to {resource.data.end_date}
-                                </caption>
-                                <thead>
-                                    <tr>
-                                        <th>Date</th>
-                                        <th>Status</th>
-                                        <th>Measured (MWh)</th>
-                                        <th>Predicted (MWh)</th>
-                                        <th>Error (MWh)</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {resource.data.days.map((day) => (
-                                        <tr key={day.date}>
-                                            <td>{day.date}</td>
-                                            <td>
-                                                {day.status === "matched"
-                                                    ? "Matched"
-                                                    : (day.reason &&
-                                                          (reasons[
-                                                              day.reason
-                                                          ] ??
-                                                              day.reason.replaceAll(
-                                                                  "_",
-                                                                  " ",
-                                                              ))) ||
-                                                      "Missing"}
-                                            </td>
-                                            <td>
-                                                {format(
-                                                    day.measured_energy_mwh,
-                                                )}
-                                            </td>
-                                            <td>
-                                                {format(
-                                                    day.predicted_energy_mwh,
-                                                )}
-                                            </td>
-                                            <td>{format(day.error_mwh)}</td>
+                        <details>
+                            <summary>
+                                Daily comparison ({resource.data.requested_days}{" "}
+                                days)
+                            </summary>
+                            <div className="table-scroll" tabIndex={0}>
+                                <table>
+                                    <caption>
+                                        Daylight replay:{" "}
+                                        {resource.data.start_date} to{" "}
+                                        {resource.data.end_date}
+                                    </caption>
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Status</th>
+                                            <th>Measured (MWh)</th>
+                                            <th>Predicted (MWh)</th>
+                                            <th>Error (MWh)</th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </div>
+                                    </thead>
+                                    <tbody>
+                                        {resource.data.days.map((day) => (
+                                            <tr key={day.date}>
+                                                <td>{day.date}</td>
+                                                <td>
+                                                    {day.status === "matched"
+                                                        ? "Matched"
+                                                        : (day.reason &&
+                                                              (reasons[
+                                                                  day.reason
+                                                              ] ??
+                                                                  day.reason.replaceAll(
+                                                                      "_",
+                                                                      " ",
+                                                                  ))) ||
+                                                          "Missing"}
+                                                </td>
+                                                <td>
+                                                    {format(
+                                                        day.measured_energy_mwh,
+                                                    )}
+                                                </td>
+                                                <td>
+                                                    {format(
+                                                        day.predicted_energy_mwh,
+                                                    )}
+                                                </td>
+                                                <td>{format(day.error_mwh)}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </details>
                     </>
                 )
             )}
