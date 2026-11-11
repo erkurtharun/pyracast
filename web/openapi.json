@@ -3094,6 +3094,11 @@
                         "type": "string",
                         "format": "date-time"
                     },
+                    "retry_until": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
                     "attempts": {
                         "type": "integer"
                     },
@@ -3107,6 +3112,7 @@
                     "endpoint",
                     "id",
                     "last_error",
+                    "retry_until",
                     "scheduled_slot",
                     "status"
                 ]
@@ -3180,6 +3186,15 @@
                     "history_requests_per_day": {
                         "type": "integer"
                     },
+                    "history_local_time": {
+                        "type": "string"
+                    },
+                    "history_retry_until_local": {
+                        "type": "string"
+                    },
+                    "history_retry_minutes": {
+                        "type": "integer"
+                    },
                     "max_forecast_times": {
                         "type": "integer"
                     }
@@ -3188,7 +3203,10 @@
                     "daily_request_limit",
                     "effective_from",
                     "enabled",
+                    "history_local_time",
                     "history_requests_per_day",
+                    "history_retry_minutes",
+                    "history_retry_until_local",
                     "max_forecast_times",
                     "quota_utc_day",
                     "recent_jobs",

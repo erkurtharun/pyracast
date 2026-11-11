@@ -567,6 +567,9 @@ test("region collection schedule validates and saves distinct local times", asyn
         used_today: 2,
         remaining_today: 8,
         history_requests_per_day: 1,
+        history_local_time: "03:00",
+        history_retry_until_local: "09:00",
+        history_retry_minutes: 30,
         max_forecast_times: 9,
         effective_from: "2026-01-01T00:00:00Z",
         quota_utc_day: "2026-01-01",
@@ -590,6 +593,15 @@ test("region collection schedule validates and saves distinct local times", asyn
                 attempts: 2,
                 last_error: "quota_exhausted",
             },
+            {
+                id: 3,
+                endpoint: "estimated_actuals",
+                status: "succeeded",
+                scheduled_slot: "2026-01-01T00:00:00Z",
+                available_at: "2026-01-01T00:00:00Z",
+                attempts: 1,
+                last_error: "history_incomplete",
+            },
         ],
     };
     await page.route("**/collection-schedule/", async (route) => {
@@ -606,7 +618,10 @@ test("region collection schedule validates and saves distinct local times", asyn
     await page.goto("/");
     await page.getByRole("button", { name: /Antalya solar park/ }).click();
     await page.getByRole("button", { name: "Data collection" }).click();
-    await expect(page.getByText(/first eligible time each day/)).toBeVisible();
+    await expect(
+        page.getByText(/collected separately at 03:00 in Europe\/Istanbul/),
+    ).toBeVisible();
+    await expect(page.getByText(/30 minutes, before 09:00/)).toBeVisible();
     await expect(
         page.getByText("Account requests used today (UTC)"),
     ).toBeVisible();
@@ -616,6 +631,9 @@ test("region collection schedule validates and saves distinct local times", asyn
     await expect(page.getByText(/Provider request failed/)).toBeVisible();
     await expect(
         page.getByText(/Historical estimates - Succeeded/),
+    ).toBeVisible();
+    await expect(
+        page.getByText(/Historical estimates - Partially collected/),
     ).toBeVisible();
     await expect(page.getByText(/Daily account budget exhausted/)).toHaveCount(
         0,

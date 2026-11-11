@@ -35,7 +35,7 @@ def test_revalidation_after_cutoff_recovers_tomorrows_job_without_duplicate_requ
 
     recovered = enqueue_due(recovery_time)
 
-    assert len(recovered) == 2
+    assert len(recovered) == 1
     if existing:
         assert recovered == existing
     job = CollectionJob.objects.get(pk=recovered[0])

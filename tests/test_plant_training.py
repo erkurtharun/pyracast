@@ -425,7 +425,7 @@ def test_training_uses_latest_actuals_available_at_request_cutoff(
     assert run_calibration(run.pk, NOW)
     run.refresh_from_db()
     assert run.status == "ready"
-    assert run.dataset_manifest["selection_policy"] == "latest-available-estimated-actuals-v1"
+    assert run.dataset_manifest["selection_policy"] == "latest-complete-estimated-actuals-v2"
     assert run.dataset_manifest["source_kind"] == "estimated_actuals"
     assert (
         sorted(value["snapshot_id"] for value in run.dataset_manifest["sources"].values())

@@ -25,7 +25,7 @@ from pyracast.metering.scheduler import enqueue_due_epias_jobs
 from pyracast.plants.models import Plant, ProductionObservation
 from pyracast.regions.models import Region
 from tests.test_domain import NOW
-from tests.test_metering import PROVIDER_PLANT, FixtureClient, connected, day_data
+from tests.test_metering import NEXT_NIGHT, PROVIDER_PLANT, FixtureClient, connected, day_data
 from tests.test_plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -133,7 +133,7 @@ def test_unpublished_and_partial_settlement_remain_missing_and_reconcile_in_next
     full = month_data(SETTLEMENT, job.target_day, date(2026, 9, 30))
     assert run_epias_job(job.pk, fetch=lambda *_: full, now=NOW)
     original = EpiasSnapshot.objects.get(job=job, target_day=date(2026, 9, 1))
-    identifiers = enqueue_due_epias_jobs(now=NOW + timedelta(days=1))
+    identifiers = enqueue_due_epias_jobs(now=NEXT_NIGHT)
     assert len(identifiers) == 9
     revised = EpiasCollectionJob.objects.get(
         pk__in=identifiers, source_kind="settlement_injection", target_day=job.target_day
@@ -152,7 +152,7 @@ def test_unpublished_and_partial_settlement_remain_missing_and_reconcile_in_next
         ]
     }
     partial = replace(full, readings=rows, raw_payload=json.dumps(raw))
-    assert not run_epias_job(revised.pk, fetch=lambda *_: partial, now=NOW + timedelta(days=1))
+    assert not run_epias_job(revised.pk, fetch=lambda *_: partial, now=NEXT_NIGHT)
     revised.refresh_from_db()
     assert revised.status == "awaiting_publication"
     assert revised.last_error == ("unpublished_data" if empty else "partial_data")
@@ -166,11 +166,11 @@ def test_unpublished_and_partial_settlement_remain_missing_and_reconcile_in_next
     assert original.complete
     assert len(original.readings) == 24
     assert latest.content_sha256 != original.content_sha256
-    next_ids = enqueue_due_epias_jobs(now=NOW + timedelta(days=2))
+    next_ids = enqueue_due_epias_jobs(now=NEXT_NIGHT + timedelta(days=1))
     assert len(next_ids) == 9
-    monday_ids = enqueue_due_epias_jobs(now=NOW + timedelta(days=7))
+    monday_ids = enqueue_due_epias_jobs(now=NEXT_NIGHT + timedelta(days=6))
     assert len(monday_ids) == 10
-    assert enqueue_due_epias_jobs(now=NOW + timedelta(days=7)) == monday_ids
+    assert enqueue_due_epias_jobs(now=NEXT_NIGHT + timedelta(days=6)) == monday_ids
 
 
 @pytest.mark.parametrize("outcome", ["resolved", "missing", "failure", "revision_changed"])
@@ -193,13 +193,13 @@ def test_existing_connections_resolve_eic_outside_locks_with_daily_bound_and_rev
             return None if outcome == "missing" else SETTLEMENT
 
     monkeypatch.setattr("pyracast.metering.scheduler.get_epias_client", lambda: Resolver())
-    identifiers = enqueue_due_epias_jobs(now=NOW + timedelta(days=1, hours=1))
+    identifiers = enqueue_due_epias_jobs(now=NEXT_NIGHT + timedelta(hours=1))
     linked.refresh_from_db()
     assert linked.settlement_plant_id == (7001 if outcome == "resolved" else None)
     expected_jobs = 97 if outcome == "revision_changed" else 10 if outcome == "resolved" else 7
     assert len(identifiers) == expected_jobs
     if outcome != "revision_changed":
-        assert enqueue_due_epias_jobs(now=NOW + timedelta(days=1, hours=2)) == identifiers
+        assert enqueue_due_epias_jobs(now=NEXT_NIGHT + timedelta(hours=2)) == identifiers
         assert calls == [PROVIDER_PLANT.eic]
     assert (linked.settlement_checked_at is None) == (outcome == "revision_changed")
 

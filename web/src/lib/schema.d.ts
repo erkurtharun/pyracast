@@ -689,6 +689,8 @@ export interface components {
             scheduled_slot: string;
             /** Format: date-time */
             available_at: string;
+            /** Format: date-time */
+            retry_until: string | null;
             attempts: number;
             last_error: string;
         };
@@ -712,6 +714,9 @@ export interface components {
             };
             recent_jobs: components["schemas"]["CollectionJobOutput"][];
             history_requests_per_day: number;
+            history_local_time: string;
+            history_retry_until_local: string;
+            history_retry_minutes: number;
             max_forecast_times: number;
         };
         ConfigurationOutput: {

@@ -405,3 +405,17 @@ def test_corrupt_history_cannot_return_a_fabricated_estimate(
             resolution_minutes=30,
             source="estimated_actuals",
         )
+
+
+def test_history_selection_preserves_complete_day_when_newer_rolling_window_is_partial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, _ = make_plant(monkeypatch)
+    complete = actuals(system, acquired=NOW - timedelta(hours=2))
+    partial = actuals(system)
+    partial.normalized_intervals = partial.normalized_intervals[6:]
+    partial.save()
+    assert select_actual_snapshot(system.binding, DAY, NOW) == complete
+    complete.normalized_intervals = complete.normalized_intervals[:-6]
+    complete.save()
+    assert select_actual_snapshot(system.binding, DAY, NOW) == partial

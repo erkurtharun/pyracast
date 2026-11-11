@@ -24,6 +24,10 @@ const errorLabels: Record<string, string> = {
     invalid_source_kind: "Unexpected provider data",
     calculation_failure: "Forecast calculation failed",
     history_not_supported: "Historical estimates unavailable",
+    history_incomplete: "Historical data is incomplete",
+    history_budget_reserved: "Remaining budget is reserved for forecasts",
+    retry_window_expired: "Morning retry window ended",
+    history_window_closed: "Morning retry window ended",
 };
 
 export function CollectionSchedule({
@@ -204,12 +208,23 @@ function ScheduleEditor({
                         + Add time
                     </button>
                     <p className="fine">
-                        Each scheduled time requests a forecast. The first
-                        eligible time each day also requests estimated actuals
-                        (one additional request). Retries and connection
-                        validation can use more requests, and all regions using
-                        this provider account share its UTC daily quota. Email
-                        reminders do not request provider data.
+                        Each scheduled time requests a forecast. Previous-day
+                        production and Solcast historical estimates are
+                        collected separately at {data.history_local_time} in{" "}
+                        {data.timezone}. Missing or failed data is retried no
+                        more often than every {data.history_retry_minutes}{" "}
+                        minutes, before {data.history_retry_until_local}.
+                        Solcast retries preserve budget for scheduled forecasts.
+                        Disabling collection stops these automatic nightly jobs.
+                        Retries and connection validation can use more requests,
+                        and all regions using this provider account share its
+                        UTC daily quota. Email reminders do not request provider
+                        data.
+                    </p>
+                    <p className="fine">
+                        Solcast historical estimates are modeled data. EPİAŞ
+                        daily reported production and later-published settlement
+                        injection remain separate records.
                     </p>
                 </ActionForm>
             </section>
@@ -252,8 +267,10 @@ function ScheduleEditor({
                         {data.recent_jobs.map((job) => (
                             <li key={job.id}>
                                 {endpointLabels[job.endpoint] ?? "Collection"} -{" "}
-                                {statusLabels[job.status] ??
-                                    "Status unavailable"}{" "}
+                                {job.last_error === "history_incomplete"
+                                    ? "Partially collected"
+                                    : (statusLabels[job.status] ??
+                                      "Status unavailable")}{" "}
                                 -{" "}
                                 {new Date(
                                     job.scheduled_slot ?? job.available_at,

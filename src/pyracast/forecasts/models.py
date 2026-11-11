@@ -20,6 +20,7 @@ class CollectionJob(models.Model):
     target_date = models.DateField()
     status = models.CharField(max_length=20, default="pending")
     available_at = models.DateTimeField()
+    retry_until = models.DateTimeField(null=True)
     lease_token = models.UUIDField(null=True)
     lease_expires_at = models.DateTimeField(null=True)
     attempts = models.PositiveIntegerField(default=0)
@@ -30,11 +31,6 @@ class CollectionJob(models.Model):
         constraints = (
             models.UniqueConstraint(
                 fields=("binding", "endpoint", "scheduled_slot"), name="unique_collection_slot"
-            ),
-            models.UniqueConstraint(
-                fields=("binding", "target_date"),
-                condition=models.Q(endpoint="estimated_actuals"),
-                name="unique_history_collection_day",
             ),
         )
 

@@ -35,6 +35,7 @@ class EpiasCollectionJob(models.Model):
     lease_expires_at = models.DateTimeField(null=True)
     attempts = models.PositiveSmallIntegerField(default=0)
     next_attempt_at = models.DateTimeField()
+    retry_until = models.DateTimeField(null=True)
     last_error = models.CharField(max_length=40, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 

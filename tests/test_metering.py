@@ -36,6 +36,7 @@ from tests.test_plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
 PROVIDER_PLANT = EpiasPlant(7, "40X0000000000001", "Solar plant", "Solar")
+NEXT_NIGHT = NOW + timedelta(hours=11)
 
 
 class FixtureClient:
@@ -167,7 +168,7 @@ def test_daily_reconciliation_preserves_acquisitions_and_history(
     requests = RequestAttempt.objects.count()
     assert run_epias_job(initial.pk, fetch=day_data, now=NOW)
     assert not run_epias_job(initial.pk, fetch=day_data, now=NOW)
-    next_day = NOW + timedelta(days=1, hours=1)
+    next_day = NEXT_NIGHT
     identifiers = enqueue_due_epias_jobs(now=next_day)
     assert len(identifiers) == 7
     assert enqueue_due_epias_jobs(now=next_day) == identifiers
@@ -238,9 +239,6 @@ def test_scheduler_respects_slots_and_rejects_naive_time(monkeypatch: pytest.Mon
     )
     assert enqueue_due_epias_jobs(now=NOW + timedelta(days=1)) == []
     schedule.enabled = True
-    schedule.times = []
-    schedule.save()
-    assert enqueue_due_epias_jobs(now=NOW + timedelta(days=1)) == []
     schedule.times = ["18:00", "16:00"]
     schedule.effective_from = NOW + timedelta(days=2)
     schedule.save()
@@ -262,7 +260,7 @@ def test_two_schedulers_create_only_seven_daily_jobs(monkeypatch: pytest.MonkeyP
         close_old_connections()
         try:
             barrier.wait(timeout=10)
-            return enqueue_due_epias_jobs(now=NOW + timedelta(days=1))
+            return enqueue_due_epias_jobs(now=NEXT_NIGHT)
         finally:
             connections.close_all()
 
@@ -272,28 +270,37 @@ def test_two_schedulers_create_only_seven_daily_jobs(monkeypatch: pytest.MonkeyP
     assert EpiasCollectionJob.objects.count() == 97
 
 
-def test_daily_slot_keeps_same_market_days_across_istanbul_midnight(
+def test_daily_slot_uses_region_night_independently_of_forecast_times(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, _, _ = connected(monkeypatch)
     Region.objects.filter(pk=system.region.pk).update(timezone="America/New_York")
     CollectionSchedule.objects.create(region=system.region, times=["14:00"], effective_from=NOW)
-    before_midnight = NOW + timedelta(hours=7, minutes=59)
-    after_midnight = NOW + timedelta(hours=8, minutes=1)
-    first = enqueue_due_epias_jobs(now=before_midnight)
+    before_slot = NEXT_NIGHT + timedelta(hours=7, minutes=59)
+    after_slot = NEXT_NIGHT + timedelta(hours=8)
+    assert enqueue_due_epias_jobs(now=before_slot) == []
+    first = enqueue_due_epias_jobs(now=after_slot)
     assert len(first) == 7
-    assert enqueue_due_epias_jobs(now=after_midnight) == first
+    assert enqueue_due_epias_jobs(now=after_slot + timedelta(minutes=1)) == first
     jobs = EpiasCollectionJob.objects.filter(pk__in=first)
-    assert set(jobs.values_list("scheduled_for", flat=True)) == {NOW + timedelta(hours=6)}
+    assert set(jobs.values_list("scheduled_for", flat=True)) == {NEXT_NIGHT + timedelta(hours=8)}
     assert set(jobs.values_list("target_day", flat=True)) == {
-        NOW.date() - timedelta(days=offset) for offset in range(1, 8)
+        NEXT_NIGHT.date() - timedelta(days=offset) for offset in range(1, 8)
     }
     assert EpiasCollectionJob.objects.count() == 97
 
 
-def test_duplicate_workers_only_one_external_acquisition(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("nightly", [False, True])
+def test_duplicate_workers_only_one_external_acquisition(
+    monkeypatch: pytest.MonkeyPatch, nightly: bool
+) -> None:
     connected(monkeypatch)
-    job_id = EpiasCollectionJob.objects.first()
+    identifiers = enqueue_due_epias_jobs(now=NEXT_NIGHT) if nightly else []
+    job_id = (
+        EpiasCollectionJob.objects.filter(pk__in=identifiers).first()
+        if nightly
+        else EpiasCollectionJob.objects.first()
+    )
     assert job_id is not None
     started = Event()
     release = Event()
@@ -307,7 +314,7 @@ def test_duplicate_workers_only_one_external_acquisition(monkeypatch: pytest.Mon
     def work() -> bool:
         close_old_connections()
         try:
-            return run_epias_job(job_id.pk, fetch=fetch, now=NOW)
+            return run_epias_job(job_id.pk, fetch=fetch, now=NEXT_NIGHT if nightly else NOW)
         finally:
             connections.close_all()
 

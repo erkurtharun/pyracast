@@ -59,7 +59,7 @@ Keep approval (`pending`, `approved`, `rejected`, `suspended`), connection healt
 - Store provider keys in a secret manager or authenticated encryption with keys outside the database. Accept credential changes through write-only admin inputs; redact secrets from responses, logs and audit payloads.
 - Reserve quota atomically by provider account and UTC day before each request, including validation and retries. Use a shared database ledger, bounded timeouts and retry backoff. Uncertain request outcomes consume budget conservatively; do not rotate accounts to evade limits.
 - Claim jobs with expiring leases and unique scheduling keys. Assume queue redelivery: persist results idempotently and recover interrupted work. Publish through a durable job/outbox record so a database commit cannot lose the collection request.
-- Members configure region-local daily collection times, initially 16:00. Each slot retrieves forecasts; the first eligible slot also retrieves estimated actuals, refreshing yesterday and recovering missed days from the available seven-day window. Request `hours=168` explicitly and archive completed intervals; each acquisition remains immutable. Both requests share the account's UTC quota with validation and retries. Configuration changes apply to future slots; they do not invent missed acquisitions. Use unique slots, skip DST gaps, choose the first repeated time and flag late acquisitions.
+- Members configure region-local daily forecast times, initially 16:00. Historical collection runs separately at 03:00, refreshing yesterday and recovering missed days from the available seven-day window. Request `hours=168` explicitly and archive completed intervals; each acquisition remains immutable. Historical transport failures, empty responses and incomplete previous days retry no sooner than 30 minutes later, before 09:00. Restart catch-up is allowed inside that night window; disabling collection stops new night work. Account-wide UTC quota reservations preserve the remaining scheduled forecast needs before admitting a night request. Quota exhaustion or reserved forecast budget never creates a rapid retry loop. Configuration changes apply to future forecast slots; they do not invent missed forecast acquisitions. Use unique slots, advance a nonexistent night start to the first valid half-hour before 09:00, choose the first repeated time and flag late acquisitions.
 - Do not hold database transactions open during external HTTP calls. Recheck binding revision and approval before publication. Multiple scheduler instances must not duplicate work.
 - Preserve forecast vintages and configuration/model versions. Expose stale or incomplete results explicitly. Monitor last successful collection, queue lag, provider errors, quota, solver failures and coverage; logs carry correlation IDs without credentials.
 
@@ -69,14 +69,17 @@ EPİAŞ production uses a separate `metering` app and durable `epias` queue. A t
 member links a plant by provider ID and EIC; server-side `EPIAS_USERNAME` and
 `EPIAS_PASSWORD` obtain a cached TGT without exposing credentials to the browser.
 Collect 90 completed Istanbul dates of reported production on connection or a new plant configuration,
-then reconcile the trailing seven dates at the region's first daily collection
-slot. Resolve the separate settlement plant ID by EIC and initially collect the
+then reconcile the trailing seven dates at the region's independent 03:00 nightly
+slot. The previous day's reported-production job retries incomplete or failed
+responses every 30 minutes before 09:00, respecting longer provider retry hints.
+Older correction dates and settlement jobs retain three attempts. All new daily
+jobs stop at the morning deadline or when collection is disabled; initial backfill
+remains independent. Resolve the separate settlement plant ID by EIC and initially collect the
 completed calendar months covering that 90-day window (at least three). Reconcile the previous two months daily
 and the third on Mondays. Monthly paginated requests produce daily immutable
 snapshots. Unpublished or partial settlement periods wait for the next scheduled
 reconciliation; they are not zero production. Jobs are independent of Solcast
-requests and its account quota. Three bounded attempts and expiring leases handle
-transport failures and redelivery.
+requests and its account quota. Expiring leases protect execution and redelivery.
 Initial jobs use a stable connection/configuration timestamp, so repeated dispatch
 does not duplicate the backfill. Existing connections receive the missing initial
 window. This collects available production history; Solcast rooftop estimated
@@ -152,7 +155,7 @@ The plant screen opens tomorrow in the region's timezone. Its automatic source p
 
 When a plant was first configured after the selected day began, the ordinary outlook can project that day's archived forecast using the current approved configuration and factor 1. Mark `historical_configuration_assumed`, retain the original day-ahead source cutoff and record configuration creation time. This is a temporary projection, not a new archived plant forecast. Explicit `as_of` queries remain strict; existing historical configurations and calibrated forecasts keep their original selection rules.
 
-`collection-schedule/` exposes multiple daily region-local times, recent collection outcomes and the shared account's tracked UTC budget. Count successful, failed and uncertain/reserved attempts, including validation, retries and operator checks; usage outside this application is unknown. One daily request is reserved in the per-region schedule limit for history; this is a planning limit, not a guaranteed allocation across regions. Snapshot coverage indexes support history lookup, and `available_at` records atomic publication separately from acquisition. Empty history remains missing and the next daily retrieval can recover it. Saving unchanged settings preserves the effective boundary and all jobs. Schedule edits retain already queued work at clocks still configured, cancel removed/disabled slots, and only generate newly added clocks after the change. An authorized in-flight response can still be archived if its binding remains current.
+`collection-schedule/` exposes multiple daily region-local forecast times, the fixed night window, recent collection outcomes and the shared account's tracked UTC budget. Count successful, failed and uncertain/reserved attempts, including validation, retries and operator checks; usage outside this application is unknown. One daily request is reserved in the per-region schedule limit for history; this is a planning limit, not a guaranteed allocation across regions or a promise of unlimited night retries. Snapshot coverage indexes support history lookup, and `available_at` records atomic publication separately from acquisition. Partial history remains readable and retries create new immutable acquisitions. Saving unchanged settings preserves the effective boundary and all jobs. Forecast edits retain night jobs and queued forecast work at clocks still configured, cancel removed forecast clocks, and only generate newly added forecast clocks after the change. Disabling collection cancels unclaimed night and forecast work. An authorized in-flight response can still be archived if its binding remains current.
 
 Implement in this order:
 

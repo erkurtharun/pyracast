@@ -140,7 +140,7 @@ def ready_run(system: System, plant: Plant) -> CalibrationRun:
         "candidate": {"daily_mae_mwh": 1},
     }
     run.dataset_manifest = {
-        "selection_policy": "latest-available-estimated-actuals-v1",
+        "selection_policy": "latest-complete-estimated-actuals-v2",
         "source_kind": "estimated_actuals",
     }
     run.save()
@@ -213,7 +213,7 @@ def test_concurrent_candidates_cannot_both_replace_the_same_incumbent(
     [
         {},
         {"selection_policy": "first-available-day-ahead-v1", "source_kind": "forecast"},
-        {"selection_policy": "latest-available-estimated-actuals-v1", "source_kind": "forecast"},
+        {"selection_policy": "latest-complete-estimated-actuals-v2", "source_kind": "forecast"},
     ],
 )
 def test_forecast_calibration_cannot_be_newly_activated(

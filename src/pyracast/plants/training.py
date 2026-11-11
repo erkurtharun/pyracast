@@ -248,7 +248,7 @@ def _dataset(
         "observation_id_cutoff": run.observation_id_cutoff,
         "window_start": run.window_start.isoformat(),
         "window_end": run.window_end.isoformat(),
-        "selection_policy": HISTORY_SELECTION_POLICY,
+        "selection_policy": run.dataset_manifest.get("selection_policy", HISTORY_SELECTION_POLICY),
         "source_kind": "estimated_actuals",
         "sources": sources,
         "observations": entries,

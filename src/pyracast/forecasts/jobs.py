@@ -10,6 +10,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
 
+from pyracast.collection_window import NIGHT_RETRY_DELAY
 from pyracast.connections.contracts import (
     Calculator,
     HistoryAdapter,
@@ -18,7 +19,13 @@ from pyracast.connections.contracts import (
     ProviderFailure,
 )
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.connections.operations import QuotaExhausted, reserve_request
+from pyracast.connections.operations import (
+    ForecastBudgetReserved,
+    HistoryWindowClosed,
+    QuotaExhausted,
+    reserve_request,
+)
+from pyracast.forecasts.coverage import history_day_complete
 from pyracast.forecasts.models import (
     CollectionJob,
     CollectionSchedule,
@@ -68,6 +75,13 @@ def claim(job_id: int, now: datetime) -> Lease | None:
         now += timedelta(seconds=time.monotonic() - started)
         if job.status in {"succeeded", "stale", "failed"} or job.available_at > now:
             return None
+        if job.retry_until is not None and now >= job.retry_until:
+            job.status = "failed"
+            job.last_error = "history_window_closed"
+            job.lease_token = None
+            job.lease_expires_at = None
+            job.save(update_fields=("status", "last_error", "lease_token", "lease_expires_at"))
+            return None
         if (
             job.status == "running"
             and job.lease_expires_at is not None
@@ -82,10 +96,13 @@ def claim(job_id: int, now: datetime) -> Lease | None:
             schedule is not None
             and (
                 not schedule.enabled
-                or job.scheduled_slot.astimezone(ZoneInfo(binding.region.timezone)).strftime(
-                    "%H:%M"
+                or (
+                    job.endpoint == "forecasts"
+                    and job.scheduled_slot.astimezone(ZoneInfo(binding.region.timezone)).strftime(
+                        "%H:%M"
+                    )
+                    not in schedule.times
                 )
-                not in schedule.times
             )
         ):
             job.status = "stale"
@@ -96,7 +113,11 @@ def claim(job_id: int, now: datetime) -> Lease | None:
         job.lease_token = token
         job.lease_expires_at = now + LEASE_DURATION
         job.attempts += 1
-        job.save(update_fields=("status", "lease_token", "lease_expires_at", "attempts"))
+        if job.retry_until is not None:
+            job.available_at = now + NIGHT_RETRY_DELAY
+        job.save(
+            update_fields=("status", "lease_token", "lease_expires_at", "attempts", "available_at")
+        )
         return Lease(job.pk, binding, job.target_date, token, job.endpoint)
 
 
@@ -106,11 +127,19 @@ def retry(lease: Lease, now: datetime, code: str, *, quota: bool = False) -> Non
         if job.lease_token != lease.token or job.status != "running":
             return
         job.last_error = code
-        job.status = "retry" if quota or job.attempts < 3 else "failed"
-        if quota:
+        if job.retry_until is not None:
+            job.available_at = now + NIGHT_RETRY_DELAY
+            if quota and code != "history_budget_reserved":
+                tomorrow = now.astimezone(UTC).date() + timedelta(days=1)
+                reset = datetime.combine(tomorrow, datetime.min.time(), tzinfo=UTC)
+                job.available_at = max(job.available_at, reset)
+            job.status = "retry" if job.available_at < job.retry_until else "failed"
+        elif quota:
+            job.status = "retry"
             tomorrow = now.astimezone(UTC).date() + timedelta(days=1)
             job.available_at = datetime.combine(tomorrow, datetime.min.time(), tzinfo=UTC)
         else:
+            job.status = "retry" if job.attempts < 3 else "failed"
             job.available_at = now + timedelta(seconds=30 * 2 ** min(job.attempts, 6))
         job.lease_token = None
         job.lease_expires_at = None
@@ -183,6 +212,28 @@ def publish(
             )
             job.status = "succeeded"
             job.last_error = ""
+            if (
+                job.endpoint == "estimated_actuals"
+                and job.retry_until is not None
+                and not history_day_complete(snapshot, job.target_date, binding.timezone)
+            ):
+                job.last_error = "history_incomplete"
+                available = now + NIGHT_RETRY_DELAY
+                schedule = CollectionSchedule.objects.filter(region_id=binding.region_id).first()
+                if available < job.retry_until:
+                    CollectionJob.objects.get_or_create(
+                        binding=binding,
+                        endpoint="estimated_actuals",
+                        scheduled_slot=available,
+                        defaults={
+                            "target_date": job.target_date,
+                            "available_at": available,
+                            "retry_until": job.retry_until,
+                            "status": "pending"
+                            if schedule is None or schedule.enabled
+                            else "stale",
+                        },
+                    )
         job.lease_token = None
         job.lease_expires_at = None
         job.save(update_fields=("status", "last_error", "lease_token", "lease_expires_at"))
@@ -231,13 +282,22 @@ def collect(job_id: int, adapter: ProviderAdapter, calculator: Calculator, now: 
                 else "forecast",
                 job=job,
             )
-        except QuotaExhausted:
+        except QuotaExhausted as exc:
             retry(
                 lease,
                 now + timedelta(seconds=time.monotonic() - started),
-                "quota_exhausted",
+                "history_window_closed"
+                if isinstance(exc, HistoryWindowClosed)
+                else "history_budget_reserved"
+                if isinstance(exc, ForecastBudgetReserved)
+                else "quota_exhausted",
                 quota=True,
             )
+            return False
+        request_at = now + timedelta(seconds=time.monotonic() - started)
+        if job.retry_until is not None and request_at >= job.retry_until:
+            RequestAttempt.objects.filter(pk=attempt.pk).update(outcome="failed")
+            retry(lease, request_at, "history_window_closed", quota=True)
             return False
         try:
             data = (

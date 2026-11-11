@@ -9,11 +9,20 @@ from django.utils import timezone
 from pyracast.accounts.operations import require_admin
 from pyracast.connections.contracts import ProviderAdapter, ProviderFailure
 from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.forecasts.budget import remaining_forecast_requests
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.regions.models import AuditEvent, Region
 
 
 class QuotaExhausted(Exception):
+    pass
+
+
+class ForecastBudgetReserved(QuotaExhausted):
+    pass
+
+
+class HistoryWindowClosed(QuotaExhausted):
     pass
 
 
@@ -97,10 +106,19 @@ def reserve_account_request(
     with transaction.atomic():
         account = ProviderAccount.objects.select_for_update().get(pk=account.pk)
         now += timedelta(seconds=time.monotonic() - started)
+        if job is not None and job.retry_until is not None and now >= job.retry_until:
+            raise HistoryWindowClosed
         utc_day = now.astimezone(UTC).date()
         used = RequestAttempt.objects.filter(provider_account=account, utc_day=utc_day).count()
         if not account.enabled or account.authorized_at is None or used >= account.daily_quota:
             raise QuotaExhausted
+        if (
+            job is not None
+            and job.retry_until is not None
+            and purpose == "estimated_actuals"
+            and used + 1 + remaining_forecast_requests(account, now) > account.daily_quota
+        ):
+            raise ForecastBudgetReserved
         return RequestAttempt.objects.create(
             provider_account=account,
             binding=binding,

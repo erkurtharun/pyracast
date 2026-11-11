@@ -33,8 +33,10 @@ def test_configured_minute_sets_local_slot_and_deduplicates() -> None:
     make_system(approved=True)
     assert enqueue_due(NOW + timedelta(minutes=29)) == []
     ids = enqueue_due(NOW + timedelta(minutes=30))
-    assert len(ids) == 2
+    assert len(ids) == 1
     job = CollectionJob.objects.get(pk=ids[0])
+    assert job.endpoint == "forecasts"
+    assert not CollectionJob.objects.filter(endpoint="estimated_actuals").exists()
     assert job.scheduled_slot == NOW + timedelta(minutes=30)
     assert job.target_date.isoformat() == "2026-11-10"
     assert enqueue_due(NOW + timedelta(hours=1)) == ids
@@ -42,7 +44,7 @@ def test_configured_minute_sets_local_slot_and_deduplicates() -> None:
 
 @pytest.mark.django_db(transaction=True)
 @override_settings(PYRACAST_CUTOFF_LOCAL=time(2, 30))
-def test_spring_gap_skips_nonexistent_cutoff() -> None:
+def test_spring_gap_skips_nonexistent_forecast_cutoff_but_collects_night_history() -> None:
     system = make_system(approved=True)
     Region.objects.filter(pk=system.region.pk).update(timezone="Europe/Berlin")
     SiteBinding.objects.filter(pk=system.binding.pk).update(
@@ -51,8 +53,10 @@ def test_spring_gap_skips_nonexistent_cutoff() -> None:
     CollectionJob.objects.filter(binding=system.binding).update(
         scheduled_slot=datetime(2026, 3, 28, 12, tzinfo=UTC)
     )
-    assert enqueue_due(datetime(2026, 3, 29, 1, 0, tzinfo=UTC)) == []
-    assert enqueue_due(datetime(2026, 3, 29, 1, 30, tzinfo=UTC)) == []
+    ids = enqueue_due(datetime(2026, 3, 29, 1, 0, tzinfo=UTC))
+    assert len(ids) == 1
+    assert CollectionJob.objects.get(pk=ids[0]).endpoint == "estimated_actuals"
+    assert enqueue_due(datetime(2026, 3, 29, 1, 30, tzinfo=UTC)) == ids
 
 
 @pytest.mark.django_db(transaction=True)

@@ -115,9 +115,11 @@ Provider calls happen outside transactions. Changed or suspended regions cannot
 publish through old bindings. Failed calculations can reuse an archived acquisition.
 
 In **Data collection**, choose daily local forecast times for each approved region.
-The first eligible time also makes one estimated-actuals request with `hours=168`,
-refreshing yesterday and retaining the available completed seven-day history.
-Both requests use the account's shared UTC quota. Keep the dispatcher and worker
+Previous-day history is collected independently at 03:00 local time with
+`hours=168`, retaining the available completed seven-day history. Missing or failed
+data retries no sooner than every 30 minutes before 09:00, with Solcast quota
+reserved for scheduled forecasts. Forecast and Solcast history requests share the account's UTC quota.
+Keep the dispatcher and worker
 running for scheduled collection; changing times does not fetch data in the web request.
 Email reminders use saved forecasts and make no provider requests.
 
@@ -169,13 +171,16 @@ npm --prefix web run api:generate
 Set `EPIAS_USERNAME` and `EPIAS_PASSWORD` in the ignored root `.env`, apply migrations,
 and restart the API and worker. In a plant's **Automatic production** tab, enter its
 EPİAŞ plant ID and EIC. The backend verifies their match and queues the previous
-seven completed Istanbul dates. Keep `dispatch --loop` and `worker --threads 4`
-running; the region's first collection time also schedules a daily seven-day refresh
-for late or revised reports. No Solcast request is needed for this archive.
+90 completed Istanbul dates. Keep `dispatch --loop` and `worker --threads 4`
+running; the independent 03:00 local collection reconciles seven dates for late or
+revised reports. Yesterday's incomplete or failed production retries at 30-minute
+intervals before 09:00, respecting longer provider retry hints. No Solcast request
+is needed for this archive.
 
 Reported hourly MWh and missing values remain separate from manual production.
-Disconnect preserves saved acquisitions. The measurement-point and hour-label
-contracts still need verification before these reports can enter calibration.
+Disconnect preserves saved acquisitions. Provisional reported production stays
+outside calibration; separately published settlement injection can supplement
+manual net-export readings under the [source policy](docs/IRRADIANCE.md).
 Routine tests use synthetic and sanitized captured responses. Live checks are
 opt-in: set `PYRACAST_EPIAS_LIVE=1`, `EPIAS_LIVE_PLANT_ID` and `EPIAS_LIVE_EIC`, then
 run `uv run --locked pytest tests/test_epias_live.py --no-cov`.

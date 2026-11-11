@@ -268,7 +268,7 @@ def test_calibration_pending_forecast_and_csrf() -> None:
         == 400
     )
     saved.dataset_manifest = {
-        "selection_policy": "latest-available-estimated-actuals-v1",
+        "selection_policy": "latest-complete-estimated-actuals-v2",
         "source_kind": "estimated_actuals",
     }
     saved.save(update_fields=("dataset_manifest",))

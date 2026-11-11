@@ -4,7 +4,9 @@ from zoneinfo import ZoneInfo
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models.functions import Greatest
 
+from pyracast.collection_window import nightly_window
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule
 from pyracast.notifications.schedule import local_slot
@@ -47,6 +49,33 @@ def enqueue_due(now: datetime, cutoff_hour: int | None = None) -> list[int]:
             effective_from = max(first_slot, schedule.effective_from) if schedule else first_slot
             zone = ZoneInfo(region.timezone)
             today = now.astimezone(zone).date()
+            window = nightly_window(today, region.timezone)
+            if window is not None and window[0] <= now < window[1]:
+                history, _ = CollectionJob.objects.get_or_create(
+                    binding=binding,
+                    endpoint="estimated_actuals",
+                    scheduled_slot=window[0],
+                    defaults={
+                        "target_date": today - timedelta(days=1),
+                        "available_at": now,
+                        "retry_until": window[1],
+                    },
+                )
+                CollectionJob.objects.filter(
+                    binding=binding,
+                    endpoint="estimated_actuals",
+                    target_date=today - timedelta(days=1),
+                    scheduled_slot__gte=window[0],
+                    retry_until=window[1],
+                    status="stale",
+                    forecastsnapshot__isnull=True,
+                ).update(
+                    status="pending",
+                    available_at=Greatest("available_at", now),
+                    lease_token=None,
+                    lease_expires_at=None,
+                )
+                jobs.append(history.pk)
             days: tuple[date, ...] = (today - timedelta(days=1), today)
             if schedule is None:
                 today_slot = local_slot(today, cutoff.strftime("%H:%M"), zone)
@@ -70,26 +99,4 @@ def enqueue_due(now: datetime, cutoff_hour: int | None = None) -> list[int]:
                         status="pending", available_at=now, lease_token=None, lease_expires_at=None
                     )
                     jobs.append(job.pk)
-                    if slot == slots[0]:
-                        history, _ = CollectionJob.objects.select_for_update().get_or_create(
-                            binding=binding,
-                            endpoint="estimated_actuals",
-                            target_date=day - timedelta(days=1),
-                            defaults={"scheduled_slot": slot, "available_at": now},
-                        )
-                        CollectionJob.objects.filter(
-                            pk=history.pk,
-                            status="stale",
-                            scheduled_slot__lt=effective_from,
-                            forecastsnapshot__isnull=True,
-                        ).update(scheduled_slot=slot)
-                        CollectionJob.objects.filter(
-                            pk=history.pk, status="stale", scheduled_slot__gte=effective_from
-                        ).update(
-                            status="pending",
-                            available_at=now,
-                            lease_token=None,
-                            lease_expires_at=None,
-                        )
-                        jobs.append(history.pk)
     return jobs

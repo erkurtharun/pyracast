@@ -9,6 +9,7 @@ from django.db import transaction
 from django.db.models import Count
 
 from pyracast.accounts.operations import require_member
+from pyracast.collection_window import HISTORY_CLOCK, HISTORY_END_CLOCK, NIGHT_RETRY_DELAY
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
 from pyracast.regions.models import AuditEvent, Region
@@ -67,6 +68,7 @@ def configure_schedule(
             binding__region=region, status__in=("pending", "retry")
         )
         if enabled:
+            unclaimed = unclaimed.filter(endpoint="forecasts")
             zone = ZoneInfo(region.timezone)
             retained = [
                 pk
@@ -109,6 +111,7 @@ def schedule_payload(schedule: CollectionSchedule, now: datetime) -> dict[str, o
                 "status",
                 "scheduled_slot",
                 "available_at",
+                "retry_until",
                 "attempts",
                 "last_error",
             )[:6]
@@ -128,5 +131,8 @@ def schedule_payload(schedule: CollectionSchedule, now: datetime) -> dict[str, o
         "requests_by_outcome": outcomes,
         "recent_jobs": recent,
         "history_requests_per_day": 1,
+        "history_local_time": HISTORY_CLOCK,
+        "history_retry_until_local": HISTORY_END_CLOCK,
+        "history_retry_minutes": int(NIGHT_RETRY_DELAY.total_seconds() / 60),
         "max_forecast_times": forecast_time_limit(limit),
     }

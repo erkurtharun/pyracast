@@ -1,21 +1,36 @@
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
+from pyracast.collection_window import nightly_window
 from pyracast.epias import EpiasError
 from pyracast.forecasts.models import CollectionSchedule
 from pyracast.metering.client import get_epias_client
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection
-from pyracast.notifications.schedule import local_slot
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import configuration_is_current
 from pyracast.regions.models import Region
 
 MARKET_ZONE = ZoneInfo("Europe/Istanbul")
+
+
+def _daily_window(connection: EpiasConnection, now: datetime) -> tuple[datetime, datetime] | None:
+    region = connection.plant.region
+    schedule = CollectionSchedule.objects.filter(region=region).first()
+    if schedule is not None and not schedule.enabled:
+        return None
+    window = nightly_window(now.astimezone(ZoneInfo(region.timezone)).date(), region.timezone)
+    if (
+        window is None
+        or not window[0] <= now < window[1]
+        or window[0] < connection.updated_at
+        or (schedule and window[0] < schedule.effective_from)
+    ):
+        return None
+    return window
 
 
 def enqueue_connection(
@@ -30,25 +45,15 @@ def enqueue_connection(
     ):
         return []
     scheduled_for = max(connection.updated_at, configuration.created_at) if initial else now
+    retry_until = None
     if scheduled_for > now:
         return []
     if not initial:
-        schedule = CollectionSchedule.objects.filter(region=plant.region).first()
-        if schedule is not None and (not schedule.enabled or not schedule.times):
+        window = _daily_window(connection, now)
+        if window is None:
             return []
-        clock = (
-            min(schedule.times) if schedule else settings.PYRACAST_CUTOFF_LOCAL.strftime("%H:%M")
-        )
-        slot = local_slot(
-            now.astimezone(ZoneInfo(plant.region.timezone)).date(),
-            clock,
-            ZoneInfo(plant.region.timezone),
-        )
-        if slot is None or slot > now or (schedule and slot < schedule.effective_from):
-            return []
-        if slot < connection.updated_at:
-            return []
-        scheduled_for = slot
+        scheduled_for = window[0]
+        retry_until = window[1]
     today = scheduled_for.astimezone(MARKET_ZONE).date()
     jobs = []
     for offset in range(1, 91 if initial else 8):
@@ -67,6 +72,7 @@ def enqueue_connection(
                     "short_name": "",
                 },
                 "next_attempt_at": now,
+                "retry_until": retry_until,
             },
         )
         jobs.append(job.pk)
@@ -104,6 +110,7 @@ def enqueue_connection(
                         "short_name": "",
                     },
                     "next_attempt_at": now,
+                    "retry_until": retry_until,
                 },
             )
             jobs.append(job.pk)
@@ -130,6 +137,7 @@ def enqueue_due_epias_jobs(*, now: datetime | None = None) -> list[int]:
             )
             and connection.plant.current_configuration is not None
             and configuration_is_current(connection.plant.current_configuration)
+            and _daily_window(connection, now) is not None
         )
         settlement_id = _resolve_settlement_id(connection) if check_settlement else None
         with transaction.atomic():

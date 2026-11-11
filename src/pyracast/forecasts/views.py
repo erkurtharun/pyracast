@@ -30,6 +30,7 @@ class CollectionJobOutput(serializers.Serializer[dict[str, object]]):
     status = serializers.CharField()
     scheduled_slot = serializers.DateTimeField()
     available_at = serializers.DateTimeField()
+    retry_until = serializers.DateTimeField(allow_null=True)
     attempts = serializers.IntegerField()
     last_error = serializers.CharField()
 
@@ -44,6 +45,9 @@ class CollectionScheduleOutput(CollectionScheduleInput):
     requests_by_outcome = serializers.DictField(child=serializers.IntegerField())
     recent_jobs = CollectionJobOutput(many=True)
     history_requests_per_day = serializers.IntegerField()
+    history_local_time = serializers.CharField()
+    history_retry_until_local = serializers.CharField()
+    history_retry_minutes = serializers.IntegerField()
     max_forecast_times = serializers.IntegerField()
 
 

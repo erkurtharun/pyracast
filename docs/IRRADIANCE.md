@@ -175,7 +175,18 @@ configuration. Do not mix periods with different capacities or meter definitions
 
 The initial seven-day provider window can contain fewer than seven complete local
 days. Wait for enough matched days rather than relaxing the minimum. The new
-selection policy is `latest-available-estimated-actuals-v1`; old forecast-based
+selection policy is `latest-complete-estimated-actuals-v2`: prefer the newest
+acquisition with complete valid reference PV power coverage of the selected local
+day, otherwise return the newest partial acquisition. Never merge vintages. This
+prevents the oldest day of a rolling 168-hour window from hiding an earlier whole
+day. Completion requires finite nonnegative power and contiguous, non-overlapping
+elapsed-time coverage, including valid nighttime zeroes and 23/25-hour local days;
+it does not require reconstructed GHI to be identifiable. Night collection starts
+at 03:00 and retries incomplete or failed input at 30-minute intervals before
+09:00, within the account's available budget after scheduled forecasts. Old
+requests retain pinned acquisitions; already active factors remain historical
+selections, while old-policy ready candidates require a new request before
+activation. Old forecast-based
 candidates cannot be newly activated as this calibration. Existing activation
 history remains readable. Activation applies only after its recorded time, so
 archived forecasts retain the factor available then. Holdout improvement against

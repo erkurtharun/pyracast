@@ -5,19 +5,20 @@ from django.db.models import Q
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import SiteBinding
+from pyracast.forecasts.coverage import history_day_complete
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.regions.models import Region
 
-HISTORY_SELECTION_POLICY = "latest-available-estimated-actuals-v1"
+HISTORY_SELECTION_POLICY = "latest-complete-estimated-actuals-v2"
 
 
 def select_actual_snapshot(
     binding: SiteBinding, target_date: date, as_of: datetime
 ) -> ForecastSnapshot | None:
     start, end = local_day_bounds(target_date, binding.timezone)
-    return (
+    candidates = (
         ForecastSnapshot.objects.select_related("job__binding__provider_account")
         .filter(
             job__binding=binding,
@@ -31,8 +32,14 @@ def select_actual_snapshot(
         )
         .filter(Q(issued_at__isnull=True) | Q(issued_at__lte=as_of))
         .order_by("-collected_at", "-available_at", "-pk")
-        .first()
     )
+    latest = None
+    for snapshot in candidates.iterator():
+        if latest is None:
+            latest = snapshot
+        if history_day_complete(snapshot, target_date, binding.timezone):
+            return snapshot
+    return latest
 
 
 def historical_irradiance(snapshot: ForecastSnapshot, target_date: date) -> dict[str, object]:

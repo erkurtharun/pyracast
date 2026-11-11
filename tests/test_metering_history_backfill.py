@@ -10,7 +10,7 @@ from pyracast.metering.scheduler import enqueue_connection, enqueue_due_epias_jo
 from pyracast.plants.models import PlantConfiguration
 from pyracast.plants.operations import revise_plant
 from tests.test_domain import NOW
-from tests.test_metering import connected
+from tests.test_metering import NEXT_NIGHT, connected
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -63,7 +63,7 @@ def test_existing_seven_day_connection_backfills_once_with_concurrent_schedulers
     EpiasCollectionJob.objects.filter(target_day__lt=NOW.date() - timedelta(days=7)).delete()
     assert EpiasCollectionJob.objects.count() == 7
     barrier = Barrier(2)
-    dispatch_at = NOW + timedelta(days=1)
+    dispatch_at = NEXT_NIGHT
 
     def dispatch() -> list[int]:
         close_old_connections()

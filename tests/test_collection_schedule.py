@@ -32,6 +32,7 @@ from tests.test_jobs import calculate
 from tests.test_providers import binding_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
+NIGHT = NOW.replace(hour=0)
 
 
 class HistoricalFixture(FixtureProvider):
@@ -56,23 +57,23 @@ def no_calculation(
 def test_daily_actuals_request_archives_seven_completed_days_per_immutable_vintage() -> None:
     system = make_system(approved=True)
     initial_forecast = CollectionJob.objects.get()
-    enqueue_due(NOW)
+    enqueue_due(NIGHT)
     history = CollectionJob.objects.get(endpoint="estimated_actuals")
-    provider = HistoricalFixture()
-    assert collect(history.pk, provider, no_calculation, NOW)
-    assert not collect(history.pk, provider, no_calculation, NOW)
+    provider = HistoricalFixture(NIGHT)
+    assert collect(history.pk, provider, no_calculation, NIGHT)
+    assert not collect(history.pk, provider, no_calculation, NIGHT)
     initial = ForecastSnapshot.objects.get(job=history)
     assert initial.source_kind == "estimated_actuals"
     assert len(initial.normalized_intervals) == 336
     assert initial.coverage_start == datetime(2026, 11, 1, 21, tzinfo=UTC)
     assert initial.coverage_end == datetime(2026, 11, 8, 21, tzinfo=UTC)
     assert initial.available_at is not None
-    assert initial.available_at >= NOW
+    assert initial.available_at >= NIGHT
     assert not ForecastResult.objects.exists()
     assert RequestAttempt.objects.filter(purpose="estimated_actuals").count() == 1
     assert collect(initial_forecast.pk, FakeAdapter(), calculate, NOW)
     assert ForecastResult.objects.count() == 1
-    enqueue_due(NOW + timedelta(days=1))
+    enqueue_due(NIGHT + timedelta(days=1))
     tomorrow = CollectionJob.objects.get(
         endpoint="estimated_actuals", target_date=date(2026, 11, 9)
     )
@@ -89,18 +90,18 @@ def test_daily_actuals_request_archives_seven_completed_days_per_immutable_vinta
 
 def test_failed_initial_history_is_backfilled_again_next_day() -> None:
     make_system(approved=True)
-    enqueue_due(NOW)
+    enqueue_due(NIGHT)
     first = CollectionJob.objects.get(endpoint="estimated_actuals")
 
     def unavailable() -> None:
         raise ProviderFailure("private provider message")
 
-    assert not collect(first.pk, HistoricalFixture(action=unavailable), no_calculation, NOW)
-    enqueue_due(NOW + timedelta(days=1))
+    assert not collect(first.pk, HistoricalFixture(action=unavailable), no_calculation, NIGHT)
+    enqueue_due(NIGHT + timedelta(days=1))
     next_job = CollectionJob.objects.get(
         endpoint="estimated_actuals", target_date=date(2026, 11, 9)
     )
-    provider = HistoricalFixture(NOW + timedelta(days=1))
+    provider = HistoricalFixture(NIGHT + timedelta(days=1))
     assert collect(next_job.pk, provider, no_calculation, provider.now)
     assert provider.days == [7]
     assert RequestAttempt.objects.filter(purpose="estimated_actuals", outcome="failed").count() == 1
@@ -110,7 +111,8 @@ def test_failed_initial_history_is_backfilled_again_next_day() -> None:
 @pytest.mark.parametrize("endpoint", ["forecasts", "estimated_actuals"])
 def test_successful_retry_clears_current_error_and_preserves_request_history(endpoint: str) -> None:
     make_system(approved=True)
-    enqueue_due(NOW)
+    enqueue_due(NIGHT)
+    moment = NIGHT if endpoint == "estimated_actuals" else NOW
     job = CollectionJob.objects.get(endpoint=endpoint)
 
     def unavailable() -> None:
@@ -121,7 +123,7 @@ def test_successful_retry_clears_current_error_and_preserves_request_history(end
         if endpoint == "estimated_actuals"
         else FakeAdapter(unavailable)
     )
-    assert not collect(job.pk, failing, calculate, NOW)
+    assert not collect(job.pk, failing, calculate, moment)
     job.refresh_from_db()
     assert job.status == "retry"
     assert job.last_error == "provider_failure"
@@ -141,14 +143,14 @@ def test_successful_retry_clears_current_error_and_preserves_request_history(end
 
 def test_history_restart_reuses_saved_snapshot_without_request() -> None:
     make_system(approved=True)
-    enqueue_due(NOW)
+    enqueue_due(NIGHT)
     history = CollectionJob.objects.get(endpoint="estimated_actuals")
-    lease = claim(history.pk, NOW)
+    lease = claim(history.pk, NIGHT)
     assert lease is not None
     data = HistoricalFixture().fetch_history(lease.binding, lease.target_date, 7)
-    snapshot = persist_snapshot(lease, data, NOW)
+    snapshot = persist_snapshot(lease, data, NIGHT)
     assert snapshot is not None
-    retry(lease, NOW, "interrupted")
+    retry(lease, NIGHT, "interrupted")
     history.refresh_from_db()
     assert collect(history.pk, FakeAdapter(), no_calculation, history.available_at)
     assert not RequestAttempt.objects.filter(job=history).exists()
@@ -159,9 +161,9 @@ def test_history_restart_reuses_saved_snapshot_without_request() -> None:
 
 def test_unsupported_and_mismatched_history_are_bounded_failures() -> None:
     make_system(approved=True)
-    enqueue_due(NOW)
+    enqueue_due(NIGHT)
     history = CollectionJob.objects.get(endpoint="estimated_actuals")
-    assert not collect(history.pk, FakeAdapter(), no_calculation, NOW)
+    assert not collect(history.pk, FakeAdapter(), no_calculation, NIGHT)
     history.refresh_from_db()
     assert history.last_error == "provider_failure"
 
@@ -177,10 +179,10 @@ def test_unsupported_and_mismatched_history_are_bounded_failures() -> None:
 
 def test_daily_history_keeps_completed_seven_day_window_and_preserves_raw() -> None:
     system = make_system(approved=True)
-    enqueue_due(NOW)
+    enqueue_due(NIGHT)
     initial = CollectionJob.objects.get(endpoint="estimated_actuals")
-    assert collect(initial.pk, HistoricalFixture(), no_calculation, NOW)
-    next_time = NOW + timedelta(days=1)
+    assert collect(initial.pk, HistoricalFixture(), no_calculation, NIGHT)
+    next_time = NIGHT + timedelta(days=1)
     enqueue_due(next_time)
     next_job = CollectionJob.objects.get(
         endpoint="estimated_actuals", target_date=date(2026, 11, 9)
@@ -240,12 +242,12 @@ def test_schedule_configuration_quota_and_effective_boundary() -> None:
     assert get_schedule(system.member, system.tenant.pk, system.region.pk, NOW).pk == configured.pk
     assert enqueue_due(NOW) == []
     ids = enqueue_due(NOW + timedelta(hours=2))
-    assert len(ids) == 2
+    assert len(ids) == 1
     assert CollectionJob.objects.get(pk=ids[0]).endpoint == "forecasts"
-    assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 1
+    assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 0
     tomorrow = enqueue_due(NOW + timedelta(days=1))
-    assert len(tomorrow) == 4
-    assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 2
+    assert len(tomorrow) == 2
+    assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 0
     configure_schedule(
         system.member, system.tenant.pk, system.region.pk, enabled=False, times=[], now=NOW
     )
@@ -283,7 +285,7 @@ def test_saving_unchanged_schedule_preserves_due_jobs_and_effective_boundary(sta
     assert saved.pk == schedule.pk
     assert saved.effective_from == NOW
     assert AuditEvent.objects.filter(action="collection_schedule_updated").count() == audit_count
-    assert CollectionJob.objects.filter(pk__in=job_ids, status=status, attempts=1).count() == 2
+    assert CollectionJob.objects.filter(pk__in=job_ids, status=status, attempts=1).count() == 1
     assert all(claim(job_id, later) is not None for job_id in job_ids)
 
 
@@ -299,14 +301,15 @@ def test_three_daily_slots_create_distinct_forecasts_and_one_history_acquisition
     )
     assert enqueue_due(NOW) == []
     morning = (NOW + timedelta(days=1)).replace(hour=6)
+    night = morning.replace(hour=0)
+    enqueue_due(night)
+    history = CollectionJob.objects.get(endpoint="estimated_actuals")
+    assert collect(history.pk, HistoricalFixture(night), no_calculation, night)
     for hour in range(3):
         slot = morning + timedelta(hours=hour)
         enqueue_due(slot)
         forecast = CollectionJob.objects.get(endpoint="forecasts", scheduled_slot=slot)
         assert collect(forecast.pk, HistoricalFixture(slot), calculate, slot)
-        if hour == 0:
-            history = CollectionJob.objects.get(endpoint="estimated_actuals")
-            assert collect(history.pk, HistoricalFixture(slot), no_calculation, slot)
     assert ForecastResult.objects.count() == 3
     assert ForecastSnapshot.objects.filter(source_kind="forecast").count() == 3
     assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 1
@@ -424,7 +427,7 @@ def test_disabled_or_removed_collection_time_cancels_unstarted_job() -> None:
     assert claim(initial.pk, NOW) is None
 
 
-def test_concurrent_schedulers_create_one_history_request_for_first_daily_slot() -> None:
+def test_concurrent_daytime_schedulers_create_forecasts_without_history() -> None:
     system = make_system(approved=True)
     configure_schedule(
         system.member,
@@ -448,12 +451,15 @@ def test_concurrent_schedulers_create_one_history_request_for_first_daily_slot()
         futures = [pool.submit(enqueue), pool.submit(enqueue)]
         assert futures[0].result(timeout=15) == futures[1].result(timeout=15)
     assert CollectionJob.objects.filter(endpoint="forecasts").count() == 2
-    assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 1
+    assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 0
 
 
 def test_forecast_and_history_share_atomic_account_quota() -> None:
     system = make_system(approved=True)
-    ids = enqueue_due(NOW)
+    forecast = CollectionJob.objects.get()
+    CollectionJob.objects.filter(pk=forecast.pk).update(available_at=NIGHT, scheduled_slot=NIGHT)
+    enqueue_due(NIGHT)
+    ids = list(CollectionJob.objects.values_list("pk", flat=True))
     ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=2)
     barrier = Barrier(2)
 
@@ -461,7 +467,7 @@ def test_forecast_and_history_share_atomic_account_quota() -> None:
         close_old_connections()
         try:
             barrier.wait(timeout=10)
-            return collect(job_id, HistoricalFixture(), calculate, NOW)
+            return collect(job_id, HistoricalFixture(), calculate, NIGHT)
         finally:
             connection.close()
 
@@ -469,7 +475,13 @@ def test_forecast_and_history_share_atomic_account_quota() -> None:
         futures = [pool.submit(run, job_id) for job_id in ids]
         assert sorted(future.result(timeout=15) for future in futures) == [False, True]
     assert RequestAttempt.objects.count() == 2
-    assert CollectionJob.objects.filter(status="retry", last_error="quota_exhausted").count() == 1
+    assert (
+        CollectionJob.objects.filter(
+            status__in=("failed", "retry"),
+            last_error__in=("quota_exhausted", "history_budget_reserved"),
+        ).count()
+        == 1
+    )
 
 
 def test_schedule_api_reads_updates_and_scopes_tenant() -> None:
@@ -495,20 +507,20 @@ def test_schedule_api_reads_updates_and_scopes_tenant() -> None:
 
 def test_empty_initial_actuals_response_does_not_finish_backfill() -> None:
     make_system(approved=True)
-    enqueue_due(NOW)
+    enqueue_due(NIGHT)
     first = CollectionJob.objects.get(endpoint="estimated_actuals")
 
     class Empty(HistoricalFixture):
         def fetch_history(self, binding: SiteBinding, target_date: date, days: int) -> ProviderData:
             return ProviderData(
-                {"estimated_actuals": []}, [], collected_at=NOW, source_kind="estimated_actuals"
+                {"estimated_actuals": []}, [], collected_at=NIGHT, source_kind="estimated_actuals"
             )
 
-    assert collect(first.pk, Empty(), no_calculation, NOW)
+    assert collect(first.pk, Empty(), no_calculation, NIGHT)
     snapshot = ForecastSnapshot.objects.get(job=first)
     assert snapshot.coverage_start is None
     assert snapshot.coverage_end is None
-    next_time = NOW + timedelta(days=1)
+    next_time = NIGHT + timedelta(days=1)
     enqueue_due(next_time)
     next_job = CollectionJob.objects.get(
         endpoint="estimated_actuals", target_date=date(2026, 11, 9)
@@ -539,25 +551,25 @@ def test_history_revalidation_rearms_stale_job_without_resetting_attempts() -> N
     from pyracast.connections.operations import rotate_secret, validate_binding
 
     system = make_system(approved=True)
-    enqueue_due(NOW)
+    enqueue_due(NIGHT)
     history = CollectionJob.objects.get(endpoint="estimated_actuals")
     rotate_secret(system.admin, system.account.pk, "env:REVALIDATED_KEY")
-    assert not collect(history.pk, HistoricalFixture(), no_calculation, NOW)
+    assert not collect(history.pk, HistoricalFixture(), no_calculation, NIGHT)
     history.refresh_from_db()
     assert history.status == "stale"
-    validate_binding(system.admin, system.binding.pk, FakeAdapter(), NOW + timedelta(minutes=1))
-    enqueue_due(NOW + timedelta(minutes=1))
+    validate_binding(system.admin, system.binding.pk, FakeAdapter(), NIGHT + timedelta(minutes=1))
+    enqueue_due(NIGHT + timedelta(minutes=1))
     history.refresh_from_db()
     assert history.status == "pending"
-    assert collect(history.pk, HistoricalFixture(), no_calculation, NOW + timedelta(minutes=1))
+    assert collect(history.pk, HistoricalFixture(), no_calculation, NIGHT + timedelta(minutes=1))
     assert RequestAttempt.objects.filter(job=history).count() == 1
 
 
 def test_reconfigured_first_slot_reschedules_cancelled_unacquired_history() -> None:
     system = make_system(approved=True)
-    enqueue_due(NOW)
+    enqueue_due(NIGHT)
     history = CollectionJob.objects.get(endpoint="estimated_actuals")
-    changed = NOW + timedelta(minutes=15)
+    changed = NIGHT + timedelta(minutes=15)
     configure_schedule(
         system.member,
         system.tenant.pk,
@@ -567,12 +579,12 @@ def test_reconfigured_first_slot_reschedules_cancelled_unacquired_history() -> N
         now=changed,
     )
     history.refresh_from_db()
-    assert history.status == "stale"
-    assert enqueue_due(changed) == []
-    new_slot = NOW + timedelta(hours=1)
+    assert history.status == "pending"
+    enqueue_due(changed)
+    new_slot = NIGHT + timedelta(hours=1)
     enqueue_due(new_slot)
     history.refresh_from_db()
-    assert history.scheduled_slot == new_slot
+    assert history.scheduled_slot == NIGHT
     assert history.status == "pending"
     assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 1
     assert collect(history.pk, HistoricalFixture(new_slot), no_calculation, new_slot)
@@ -605,10 +617,10 @@ def test_collection_api_rejects_unknown_fields_and_accepts_account_bound_schedul
 
 def test_reconfiguration_preserves_published_history_and_forecast_archives() -> None:
     system = make_system(approved=True)
-    enqueue_due(NOW)
+    enqueue_due(NIGHT)
     history = CollectionJob.objects.get(endpoint="estimated_actuals")
     forecast = CollectionJob.objects.get(endpoint="forecasts")
-    assert collect(history.pk, HistoricalFixture(), no_calculation, NOW)
+    assert collect(history.pk, HistoricalFixture(), no_calculation, NIGHT)
     assert collect(forecast.pk, FakeAdapter(), calculate, NOW)
     history_snapshot = ForecastSnapshot.objects.get(job=history)
     original = (
@@ -624,12 +636,12 @@ def test_reconfiguration_preserves_published_history_and_forecast_archives() -> 
         system.region.pk,
         enabled=True,
         times=["17:00"],
-        now=NOW + timedelta(minutes=15),
+        now=NIGHT + timedelta(minutes=15),
     )
-    enqueue_due(NOW + timedelta(hours=1))
+    enqueue_due(NIGHT + timedelta(hours=1))
     history.refresh_from_db()
     history_snapshot.refresh_from_db()
-    assert history.scheduled_slot == NOW
+    assert history.scheduled_slot == NIGHT
     assert history.status == "succeeded"
     assert (
         history_snapshot.raw_payload,
