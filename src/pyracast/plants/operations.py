@@ -142,6 +142,12 @@ def _save_configuration(
         action="configuration_created",
         details={"configuration_id": configuration.pk},
     )
+    from pyracast.metering.models import EpiasConnection
+    from pyracast.metering.scheduler import enqueue_connection
+
+    connection = EpiasConnection.objects.filter(plant=plant, enabled=True).first()
+    if connection is not None:
+        enqueue_connection(connection, timezone.now(), initial=True)
 
 
 def create_plant(
@@ -400,7 +406,10 @@ def request_calibration(
         rows, snapshot_ids = select_measurements(
             configuration, start, end, now, observation_id_cutoff=watermark
         )
-        fingerprint, reference_ids = selection_fingerprint(configuration, rows, now)
+        from pyracast.plants.incident_policy import incident_ids
+
+        incidents = incident_ids(configuration, start, end, now)
+        fingerprint, reference_ids = selection_fingerprint(configuration, rows, now, incidents)
         run = CalibrationRun.objects.create(
             plant=plant,
             configuration=configuration,
@@ -413,6 +422,7 @@ def request_calibration(
             observation_id_cutoff=watermark,
             settlement_snapshot_ids=snapshot_ids,
             reference_snapshot_ids=reference_ids,
+            incident_revision_ids=incidents,
             input_fingerprint=fingerprint,
         )
         PlantEvent.objects.create(
@@ -465,6 +475,10 @@ def activate_calibration(
 
         if not settlement_identity_current(run):
             raise ValidationError("The settlement source changed; request a new calibration.")
+        from pyracast.plants.incident_policy import incidents_unchanged
+
+        if not incidents_unchanged(run, timezone.now()):
+            raise ValidationError("The outage history changed; request a new calibration.")
         current = (
             CalibrationActivation.objects.filter(plant=plant, configuration=configuration)
             .order_by("-created_at", "-pk")

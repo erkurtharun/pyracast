@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.utils import timezone
 
 from pyracast.accounts.operations import require_member
@@ -16,6 +17,41 @@ from pyracast.regions.models import Region
 
 
 def plant_outlook(
+    actor: User,
+    tenant_id: int,
+    region_id: int,
+    plant_id: int,
+    *,
+    target_date: date,
+    resolution_minutes: int,
+    as_of: datetime | None = None,
+    source: str = "forecast",
+) -> dict[str, object]:
+    from pyracast.plants.incident_forecasts import incident_scenario
+
+    require_member(actor, tenant_id)
+    with transaction.atomic():
+        region = Region.objects.select_for_update().get(
+            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
+        )
+        Plant.objects.select_for_update().get(pk=plant_id, region=region, deleted_at__isnull=True)
+        result = _plant_outlook(
+            actor,
+            tenant_id,
+            region_id,
+            plant_id,
+            target_date=target_date,
+            resolution_minutes=resolution_minutes,
+            as_of=as_of,
+            source=source,
+        )
+        result["outage_scenario"] = incident_scenario(
+            result, target_date, resolution_minutes, as_of or timezone.now()
+        )
+        return result
+
+
+def _plant_outlook(
     actor: User,
     tenant_id: int,
     region_id: int,

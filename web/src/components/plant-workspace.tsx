@@ -24,6 +24,7 @@ import { MoveToRecycleBin } from "./recycle-bin";
 import { ForecastPanel } from "./forecast-panel";
 import { ForecastPerformance } from "./forecast-performance";
 import { EpiasProduction } from "./epias-production";
+import { Outages } from "./outages";
 import {
     PlantConfigurationFields,
     configurationInput,
@@ -56,6 +57,7 @@ export function PlantWorkspace({
         [resolution, setResolution] = useState("30"),
         [source, setSource] = useState<DataSource>("auto");
     const [productionRevision, setProductionRevision] = useState(0);
+    const [outageRevision, setOutageRevision] = useState(0);
     const [currentPlant, setCurrentPlant] = useState(plant);
     const [editing, setEditing] = useState(false);
     const yesterday = localDay(timezone, -1);
@@ -150,6 +152,7 @@ export function PlantWorkspace({
             <nav className="tabs" aria-label="Plant sections">
                 {[
                     ["forecast", "Generation forecast"],
+                    ["outages", "Outages"],
                     ["production", "Production import"],
                     ["automatic", "Automatic production"],
                     ["calibration", "Calibration"],
@@ -213,7 +216,7 @@ export function PlantWorkspace({
                         </Notice>
                     ) : (
                         <PlantForecast
-                            key={`${date}-${resolution}-${source}-${configuration?.id}`}
+                            key={`${date}-${resolution}-${source}-${configuration?.id}-${outageRevision}`}
                             url={`${base}forecast/?date=${date}&resolution_minutes=${resolution}&data_source=${source}`}
                         />
                     )}
@@ -223,6 +226,14 @@ export function PlantWorkspace({
                         timezone={timezone}
                     />
                 </>
+            ) : tab === "outages" ? (
+                <Outages
+                    currentConfigurationId={configuration?.id}
+                    base={base}
+                    token={token}
+                    timezone={timezone}
+                    onChanged={() => setOutageRevision((value) => value + 1)}
+                />
             ) : tab === "automatic" ? (
                 <EpiasProduction base={base} token={token} />
             ) : !configuration ? (

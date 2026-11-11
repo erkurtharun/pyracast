@@ -1667,6 +1667,372 @@
                 }
             }
         },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/": {
+            "get": {
+                "operationId": "tenants_regions_plants_outages_list",
+                "parameters": [
+                    {
+                        "name": "page",
+                        "required": false,
+                        "in": "query",
+                        "description": "A page number within the paginated result set.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PaginatedIncidentOutputList"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            },
+            "post": {
+                "operationId": "tenants_regions_plants_outages_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/IncidentInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/IncidentInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/IncidentInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IncidentOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/{incident_id}/": {
+            "put": {
+                "operationId": "tenants_regions_plants_outages_update",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "incident_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/IncidentUpdate"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/IncidentUpdate"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/IncidentUpdate"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IncidentOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/{incident_id}/cancel/": {
+            "post": {
+                "operationId": "tenants_regions_plants_outages_cancel_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "incident_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RevisionInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RevisionInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RevisionInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IncidentOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/{incident_id}/resolve/": {
+            "post": {
+                "operationId": "tenants_regions_plants_outages_resolve_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "incident_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ResolveInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ResolveInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ResolveInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/IncidentOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/performance/": {
             "get": {
                 "operationId": "tenants_regions_plants_performance_retrieve",
@@ -3227,6 +3593,207 @@
                     "id"
                 ]
             },
+            "IncidentInput": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "$ref": "#/components/schemas/KindEnum"
+                    },
+                    "title": {
+                        "type": "string",
+                        "maxLength": 200
+                    },
+                    "notes": {
+                        "type": "string",
+                        "default": "",
+                        "maxLength": 2000
+                    },
+                    "starts_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "ends_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "available_dc_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0,
+                        "nullable": true
+                    },
+                    "available_inverter_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0,
+                        "nullable": true
+                    },
+                    "available_export_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0,
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "kind",
+                    "starts_at",
+                    "title"
+                ]
+            },
+            "IncidentOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "revision": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "kind": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "title": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "notes": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "starts_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    },
+                    "ends_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "available_dc_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "available_inverter_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "available_export_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "declared_configuration_id": {
+                        "type": "integer"
+                    },
+                    "status": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    },
+                    "updated_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    }
+                },
+                "required": [
+                    "available_dc_mw",
+                    "available_export_mw",
+                    "available_inverter_mw",
+                    "created_at",
+                    "declared_configuration_id",
+                    "ends_at",
+                    "id",
+                    "kind",
+                    "notes",
+                    "revision",
+                    "starts_at",
+                    "status",
+                    "title",
+                    "updated_at"
+                ]
+            },
+            "IncidentUpdate": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "$ref": "#/components/schemas/KindEnum"
+                    },
+                    "title": {
+                        "type": "string",
+                        "maxLength": 200
+                    },
+                    "notes": {
+                        "type": "string",
+                        "default": "",
+                        "maxLength": 2000
+                    },
+                    "starts_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "ends_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "available_dc_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0,
+                        "nullable": true
+                    },
+                    "available_inverter_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0,
+                        "nullable": true
+                    },
+                    "available_export_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0,
+                        "nullable": true
+                    },
+                    "expected_revision": {
+                        "type": "integer",
+                        "minimum": 1
+                    }
+                },
+                "required": [
+                    "expected_revision",
+                    "kind",
+                    "starts_at",
+                    "title"
+                ]
+            },
+            "KindEnum": {
+                "enum": [
+                    "inverter",
+                    "panels",
+                    "grid",
+                    "other",
+                    "multiple"
+                ],
+                "type": "string",
+                "description": "* `inverter` - inverter\n* `panels` - panels\n* `grid` - grid\n* `other` - other\n* `multiple` - multiple"
+            },
             "LoginInput": {
                 "type": "object",
                 "properties": {
@@ -3457,6 +4024,37 @@
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/CalibrationSummaryOutput"
+                        }
+                    }
+                }
+            },
+            "PaginatedIncidentOutputList": {
+                "type": "object",
+                "required": [
+                    "count",
+                    "results"
+                ],
+                "properties": {
+                    "count": {
+                        "type": "integer",
+                        "example": 123
+                    },
+                    "next": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=4"
+                    },
+                    "previous": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=2"
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/IncidentOutput"
                         }
                     }
                 }
@@ -3925,6 +4523,9 @@
                         "nullable": true
                     },
                     "regional_irradiance": {
+                        "nullable": true
+                    },
+                    "outage_scenario": {
                         "nullable": true
                     }
                 },
@@ -4473,6 +5074,35 @@
                 ],
                 "type": "integer",
                 "description": "* `30` - 30\n* `60` - 60"
+            },
+            "ResolveInput": {
+                "type": "object",
+                "properties": {
+                    "expected_revision": {
+                        "type": "integer",
+                        "minimum": 1
+                    },
+                    "ends_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                },
+                "required": [
+                    "ends_at",
+                    "expected_revision"
+                ]
+            },
+            "RevisionInput": {
+                "type": "object",
+                "properties": {
+                    "expected_revision": {
+                        "type": "integer",
+                        "minimum": 1
+                    }
+                },
+                "required": [
+                    "expected_revision"
+                ]
             },
             "RotateSecretInput": {
                 "type": "object",

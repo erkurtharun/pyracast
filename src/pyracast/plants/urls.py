@@ -1,6 +1,7 @@
 from django.urls import path
 
 from pyracast.api.trash import RestorePlantView
+from pyracast.incidents.api import CancelView, IncidentsView, IncidentView, ResolveView
 from pyracast.plants.api import (
     ActivateView,
     CalibrationsView,
@@ -19,6 +20,10 @@ urlpatterns = [
     path("", PlantsView.as_view()),
     path("<int:plant_id>/", PlantView.as_view()),
     path("<int:plant_id>/restore/", RestorePlantView.as_view()),
+    path("<int:plant_id>/outages/", IncidentsView.as_view()),
+    path("<int:plant_id>/outages/<int:incident_id>/", IncidentView.as_view()),
+    path("<int:plant_id>/outages/<int:incident_id>/resolve/", ResolveView.as_view()),
+    path("<int:plant_id>/outages/<int:incident_id>/cancel/", CancelView.as_view()),
     path("<int:plant_id>/observations/", ObservationsView.as_view()),
     path("<int:plant_id>/production/", ProductionView.as_view()),
     path("<int:plant_id>/production-source/", EpiasConnectionView.as_view()),

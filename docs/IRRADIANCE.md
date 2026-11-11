@@ -76,6 +76,16 @@ at the native source interval **before** hourly aggregation: native powers 80 an
 120 MW over two half-hours with a 100 MW limit produce 90 MWh for the hour.
 Interval means cannot recover clipping at finer time resolution.
 
+Reported outage scenarios split native intervals at the reported boundaries.
+Scale the uncapped reference transfer by remaining DC/nameplate DC, then apply
+the calibration factor and the smaller applicable normal/remaining capacity cap.
+An export constraint applies only to a net-export target. Disconnected modules
+must be reflected in remaining DC; reducing only the inverter cap does not model
+their lost collection area. This is a conditional availability approximation,
+not a component-level electrical simulation. An unknown impact or an unconfirmed
+configuration change produces missing affected power. Explicit zero availability
+can establish zero electrical output even when reference power is missing.
+
 Integrate power over UTC overlap durations; preserve 23/25-hour local days. Missing
 power gives a null complete total with separate partial energy and coverage.
 Electrical zero is valid even when it cannot establish zero GHI. Do not derive
@@ -102,6 +112,11 @@ Night readings are optional and excluded from this scope, never synthesized as z
 Do not infer outages from low output alone. Exclude measurements at or above 98% of the known cap from
 training because clipping hides uncapped performance; retain valid clipped intervals
 in evaluation. Zero-source samples do not identify a multiplicative factor.
+An incident overlapping any part of a meter interval excludes that entire interval;
+the complete-day coverage rule can consequently exclude the day. Pin immutable
+incident revision IDs in the dataset. Later corrections preserve old fit evidence
+but invalidate its use until a new eligible fit is reviewed. Incident effects are
+not folded into the permanent performance multiplier.
 The policy also requires five training days with at least two
 hours of positive native source power that is not already clipped at the minimum
 factor. Each supported day must have normalized slope-squared exposure of at least
@@ -117,6 +132,11 @@ Fit only earlier days and do not refit on the holdout. Seven days can check the
 pipeline and support a **provisional** fit; a month covers more conditions but
 neither duration proves seasonal validity. Intervals within a day are correlated,
 so hundreds of half-hours are not hundreds of independent weather realizations.
+Collect up to 90 production days initially, while matched Solcast estimated-actual
+history grows through daily retrieval. Ninety matched days can cover more operating
+conditions, but do not guarantee a better fit; retain chronological validation and
+the same acceptance criteria. External historical weather files are not used by
+this reference-power calibration.
 
 Report interval power MAE/bias (MW), per-day daylight-interval energy MAE/bias (MWh),
 included/excluded days, censored counts and the exact chronological split. These

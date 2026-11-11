@@ -18,6 +18,7 @@ from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.availability import actual_power_intervals
 from pyracast.plants.forecasting import power_limit
+from pyracast.plants.incident_policy import incidents_unchanged
 from pyracast.plants.measurements import (
     MEASUREMENT_POLICY,
     select_measurements,
@@ -92,6 +93,7 @@ def _claim(run_id: int, now: datetime) -> _Lease | None:
             not configuration_is_current(configuration)
             or run.binding_id != configuration.binding_id
             or not settlement_identity_current(run)
+            or not incidents_unchanged(run, now)
         ):
             run.status = "superseded"
         elif run.attempts >= MAX_ATTEMPTS or run.cutoff_at > now:
@@ -145,6 +147,7 @@ def _dataset(
         run.cutoff_at,
         observation_id_cutoff=run.observation_id_cutoff,
         settlement_snapshot_ids=run.settlement_snapshot_ids,
+        incident_revision_ids=run.incident_revision_ids,
     )
     samples = []
     entries: list[dict[str, object]] = []
@@ -225,6 +228,8 @@ def _dataset(
         )
     manifest: dict[str, object] = {
         "measurement_selection_policy": MEASUREMENT_POLICY,
+        "incident_revision_ids": run.incident_revision_ids,
+        "incident_policy": "exclude-whole-overlapping-meter-interval-v1",
         "metric_scope": "daylight_intervals",
         "coverage_policy": DAYLIGHT_COVERAGE_POLICY,
         "daylight_policy": DAYLIGHT_POLICY,
@@ -261,6 +266,8 @@ def _incumbent_factor(run: CalibrationRun) -> float:
     activation = run.comparison_activation
     if activation is None or activation.calibration is None:
         return 1.0
+    if not incidents_unchanged(activation.calibration, run.cutoff_at):
+        return 1.0
     factor = activation.calibration.factor
     if factor is None:
         raise ValueError("The comparison calibration has no factor.")
@@ -291,6 +298,7 @@ def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now:
             not configuration_is_current(configuration)
             or run.binding_id != configuration.binding_id
             or not settlement_identity_current(run)
+            or not incidents_unchanged(run, now)
         ):
             run.status = "superseded"
         else:

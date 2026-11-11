@@ -32,6 +32,7 @@ Use conventional Django apps for accounts, regions, provider connections, foreca
 | CollectionJob, RequestAttempt | Scheduling, leases, quota reservations and execution history |
 | ForecastSnapshot, ForecastResult | Raw input, normalized intervals, derived output and model version |
 | Plant, PlantConfiguration | Region ownership and immutable DC/inverter/export capacity and meter-basis revisions |
+| PlantIncident, IncidentRevision | Non-overlapping operating periods, remaining capacities and immutable corrections |
 | ProductionObservation | Interval energy, quality, source, configuration and recording time |
 | EpiasConnection, EpiasCollectionJob, EpiasSnapshot | Plant identity, independent collection and immutable reported-production acquisitions |
 | CalibrationRun, CalibrationActivation | Durable fit, reproducible dataset, held-out evaluation and explicit activation history |
@@ -67,15 +68,20 @@ Keep approval (`pending`, `approved`, `rejected`, `suspended`), connection healt
 EPİAŞ production uses a separate `metering` app and durable `epias` queue. A tenant
 member links a plant by provider ID and EIC; server-side `EPIAS_USERNAME` and
 `EPIAS_PASSWORD` obtain a cached TGT without exposing credentials to the browser.
-Collect seven completed Istanbul dates of reported production on connection,
+Collect 90 completed Istanbul dates of reported production on connection or a new plant configuration,
 then reconcile the trailing seven dates at the region's first daily collection
 slot. Resolve the separate settlement plant ID by EIC and initially collect the
-previous three calendar months of UEVM. Reconcile the previous two months daily
+completed calendar months covering that 90-day window (at least three). Reconcile the previous two months daily
 and the third on Mondays. Monthly paginated requests produce daily immutable
 snapshots. Unpublished or partial settlement periods wait for the next scheduled
 reconciliation; they are not zero production. Jobs are independent of Solcast
 requests and its account quota. Three bounded attempts and expiring leases handle
 transport failures and redelivery.
+Initial jobs use a stable connection/configuration timestamp, so repeated dispatch
+does not duplicate the backfill. Existing connections receive the missing initial
+window. This collects available production history; Solcast rooftop estimated
+actuals still have a seven-day retrieval window and accumulate through daily
+acquisitions. Ninety production days do not imply 90 matched calibration days.
 Pin plant configuration, provider identity and connection revision; recheck active
 ownership/configuration before publishing. Disconnect stops future collection and
 retains the archive. Definition deletion uses the existing recycle-bin lifecycle.
@@ -116,6 +122,24 @@ Serve the frontend and `/api/` through one origin. Django owns authentication an
 
 Plant operations use the same tenant membership boundary. Configuration revisions pin the approved reference binding and distinguish DC nameplate, inverter AC capacity, grid export limit and the measurement point (`net_export` or `ac_generation`). Unknown capacities remain null. Changing the configuration supersedes pending calibration work; it does not rewrite historical forecasts or observations.
 Mounting metadata is also revisioned: unknown, fixed or tracking, with optional fixed-array tilt and clockwise-from-north azimuth. It is not consumed by the current reference-transfer proxy. In particular, a 100 MW grid export limit does not imply a 100 MW inverter rating.
+
+The plant's **Outages** tab records actual operating periods, their cause and
+optional remaining DC/inverter/export capacity in MW. Zero means unavailable;
+unknown values remain null. One combined period represents simultaneous causes,
+with PostgreSQL enforcing non-overlap. Edits correct the whole reported period;
+a change in operating capacity requires closing the old period and starting a new
+one. Tenant-scoped writes lock the plant and require the expected revision.
+Resolution and cancellation retain immutable evidence. Capacity reports must be
+reconfirmed after a plant configuration change before numerical use.
+
+Live outlooks show normal and conditional affected scenarios while an outage is
+active. Resolution restores the single current/future outlook; completed past
+days retain the historical scenario. Explicit `as_of` uses only incident revisions
+known then. Archived forecasts are not rewritten. Overlapping meter intervals
+are excluded from calibration without modifying saved readings. Fits pin incident
+revisions; relevant later corrections supersede pending work and prevent a stale
+factor from being activated or used in new outlooks. Preparation can create a new
+candidate when enough unaffected matched days remain.
 
 The production journal selects one completed local day at 30/60-minute resolution and shows whole meter intervals overlapping astronomical daylight. Astral calculates a sea-level horizon from immutable binding coordinates and timezone without provider requests. Previous/next controls preserve unsaved entries in memory; saved observations, including night and previous configurations, remain in a separate expandable list. The API retains explicit full-day/range access for integrations. New meter entries and CSV imports require complete matching archived estimated-actual coverage and the current approved plant configuration; forecasts do not unlock entry. The available window grows with the archive. Saved readings remain visible after configuration changes. Import energy in explicit MWh or kWh, with timezone-aware bounds and quality labels. Exact replays are idempotent; conflicting or overlapping records reject the entire batch. PostgreSQL exclusion constraints enforce non-overlap, requiring the `btree_gist` extension. An import contains at most 2,000 rows; larger histories use multiple batches. Observations are immutable in this version; corrections need an explicit replacement-history design before they can be supported safely.
 

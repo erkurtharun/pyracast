@@ -196,7 +196,8 @@ def test_existing_connections_resolve_eic_outside_locks_with_daily_bound_and_rev
     identifiers = enqueue_due_epias_jobs(now=NOW + timedelta(days=1, hours=1))
     linked.refresh_from_db()
     assert linked.settlement_plant_id == (7001 if outcome == "resolved" else None)
-    assert len(identifiers) == (10 if outcome == "resolved" else 7)
+    expected_jobs = 97 if outcome == "revision_changed" else 10 if outcome == "resolved" else 7
+    assert len(identifiers) == expected_jobs
     if outcome != "revision_changed":
         assert enqueue_due_epias_jobs(now=NOW + timedelta(days=1, hours=2)) == identifiers
         assert calls == [PROVIDER_PLANT.eic]

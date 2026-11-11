@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     "pyracast.connections",
     "pyracast.forecasts",
     "pyracast.plants",
+    "pyracast.incidents",
     "pyracast.notifications",
     "pyracast.metering",
 ]

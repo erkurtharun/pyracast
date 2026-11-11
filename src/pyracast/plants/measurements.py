@@ -1,6 +1,6 @@
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from math import isfinite
 from typing import Any
@@ -10,6 +10,7 @@ from django.db.models import QuerySet
 
 from pyracast.epias import TIMEZONE
 from pyracast.forecasts.history import select_actual_snapshot
+from pyracast.incidents.operations import pinned_incidents, select_incidents
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasConnection, EpiasSnapshot
 from pyracast.plants.models import CalibrationRun, PlantConfiguration, ProductionObservation
@@ -118,6 +119,7 @@ def select_measurements(
     *,
     observation_id_cutoff: int | None = None,
     settlement_snapshot_ids: list[int] | None = None,
+    incident_revision_ids: list[int] | None = None,
 ) -> tuple[list[Measurement], list[int]]:
     manual = ProductionObservation.objects.filter(
         configuration=configuration,
@@ -190,6 +192,22 @@ def select_measurements(
                     snapshot,
                 )
             )
+    incidents = (
+        select_incidents(configuration.plant_id, start, end, cutoff)
+        if incident_revision_ids is None
+        else pinned_incidents(configuration.plant_id, incident_revision_ids)
+    )
+    rows = [
+        replace(row, quality="outage")
+        if row.quality == "valid"
+        and any(
+            incident.starts_at < row.ends_at
+            and (incident.ends_at is None or incident.ends_at > row.starts_at)
+            for incident in incidents
+        )
+        else row
+        for row in rows
+    ]
     used = {row.snapshot.pk for row in rows if row.snapshot is not None}
     return sorted(rows, key=lambda r: (r.starts_at, r.pk or 0)), [
         snapshot.pk for snapshot in selected if snapshot.pk in used
@@ -197,7 +215,10 @@ def select_measurements(
 
 
 def selection_fingerprint(
-    configuration: PlantConfiguration, rows: list[Measurement], cutoff: datetime
+    configuration: PlantConfiguration,
+    rows: list[Measurement],
+    cutoff: datetime,
+    incident_revision_ids: list[int] | None = None,
 ) -> tuple[str, dict[str, int | None]]:
     zone = ZoneInfo(configuration.binding.timezone)
     days = sorted({r.starts_at.astimezone(zone).date() for r in rows})
@@ -224,6 +245,7 @@ def selection_fingerprint(
         "configuration": configuration.pk,
         "rows": values,
         "reference": reference_content,
+        "incident_revision_ids": incident_revision_ids or [],
     }
     digest = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()

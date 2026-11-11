@@ -83,6 +83,7 @@ def connect(plant: Plant, actor: User, client: FixtureClient | None = None) -> E
 
 
 def connected(monkeypatch: pytest.MonkeyPatch) -> tuple[System, Plant, EpiasConnection]:
+    monkeypatch.setattr("pyracast.metering.scheduler.get_epias_client", lambda: FixtureClient())
     system, plant = make_plant(monkeypatch)
     return system, plant, connect(plant, system.member)
 
@@ -157,9 +158,9 @@ def test_daily_reconciliation_preserves_acquisitions_and_history(
 ) -> None:
     system, plant, linked = connected(monkeypatch)
     assert linked.meter_basis == "unknown"
-    assert EpiasCollectionJob.objects.count() == 7
+    assert EpiasCollectionJob.objects.count() == 90
     assert {j.target_day for j in EpiasCollectionJob.objects.all()} == {
-        NOW.date() - timedelta(days=i) for i in range(1, 8)
+        NOW.date() - timedelta(days=i) for i in range(1, 91)
     }
     initial = EpiasCollectionJob.objects.order_by("-target_day").first()
     assert initial is not None
@@ -222,7 +223,7 @@ def test_daily_reconciliation_preserves_acquisitions_and_history(
     assert reconnected.revision == linked.revision + 1
     assert PlantEvent.objects.filter(plant=plant, action="epias_connected").count() == 2
     assert EpiasCollectionJob.objects.filter(status="superseded").exists()
-    assert EpiasCollectionJob.objects.filter(status="pending").count() == 7
+    assert EpiasCollectionJob.objects.filter(status="pending").count() == 90
 
 
 def test_scheduler_respects_slots_and_rejects_naive_time(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -268,7 +269,7 @@ def test_two_schedulers_create_only_seven_daily_jobs(monkeypatch: pytest.MonkeyP
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(lambda _: enqueue(), range(2)))
     assert results[0] == results[1]
-    assert EpiasCollectionJob.objects.count() == 14
+    assert EpiasCollectionJob.objects.count() == 97
 
 
 def test_daily_slot_keeps_same_market_days_across_istanbul_midnight(
@@ -287,7 +288,7 @@ def test_daily_slot_keeps_same_market_days_across_istanbul_midnight(
     assert set(jobs.values_list("target_day", flat=True)) == {
         NOW.date() - timedelta(days=offset) for offset in range(1, 8)
     }
-    assert EpiasCollectionJob.objects.count() == 14
+    assert EpiasCollectionJob.objects.count() == 97
 
 
 def test_duplicate_workers_only_one_external_acquisition(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -501,7 +502,7 @@ def test_reconnection_same_clock_starts_new_jobs_and_hides_previous_mapping(
     assert run_epias_job(job.pk, fetch=day_data, now=NOW)
     reconnected = connect(plant, system.member)
     assert reconnected.revision == linked.revision + 1
-    assert EpiasCollectionJob.objects.filter(status="pending").count() == 7
+    assert EpiasCollectionJob.objects.filter(status="pending").count() == 90
     assert get_epias_status(plant.pk, actor=system.member)["archived_days"] == 1
     EpiasConnection.objects.filter(pk=linked.pk).update(provider_plant_id=100, eic="new-eic")
     assert read_epias_history(plant.pk, actor=system.member) == []

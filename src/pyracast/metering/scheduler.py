@@ -29,7 +29,9 @@ def enqueue_connection(
         or not configuration_is_current(configuration)
     ):
         return []
-    scheduled_for = now
+    scheduled_for = max(connection.updated_at, configuration.created_at) if initial else now
+    if scheduled_for > now:
+        return []
     if not initial:
         schedule = CollectionSchedule.objects.filter(region=plant.region).first()
         if schedule is not None and (not schedule.enabled or not schedule.times):
@@ -49,7 +51,7 @@ def enqueue_connection(
         scheduled_for = slot
     today = scheduled_for.astimezone(MARKET_ZONE).date()
     jobs = []
-    for offset in range(1, 8):
+    for offset in range(1, 91 if initial else 8):
         job, _ = EpiasCollectionJob.objects.get_or_create(
             connection=connection,
             connection_revision=connection.revision,
@@ -79,7 +81,12 @@ def enqueue_connection(
             .exclude(scheduled_for=scheduled_for)
             .exists()
         )
-        for _offset in range(3 if initial or initial_settlement or today.weekday() == 0 else 2):
+        oldest_day = today - timedelta(days=90)
+        minimum_months = 3 if initial or initial_settlement or today.weekday() == 0 else 2
+        offset = 0
+        while offset < minimum_months or (
+            (initial or initial_settlement) and month_end >= oldest_day
+        ):
             month_start = month_end.replace(day=1)
             job, _ = EpiasCollectionJob.objects.get_or_create(
                 connection=connection,
@@ -101,6 +108,7 @@ def enqueue_connection(
             )
             jobs.append(job.pk)
             month_end = month_start - timedelta(days=1)
+            offset += 1
     return jobs
 
 
@@ -144,8 +152,21 @@ def enqueue_due_epias_jobs(*, now: datetime | None = None) -> list[int]:
                     current.settlement_plant_id = settlement_id
                     current.settlement_checked_at = now
                     current.save(update_fields=("settlement_plant_id", "settlement_checked_at"))
+                configuration = plant.current_configuration
+                if configuration is not None and current.enabled:
+                    initial_slot = max(current.updated_at, configuration.created_at)
+                    oldest_day = initial_slot.astimezone(MARKET_ZONE).date() - timedelta(days=90)
+                    if not EpiasCollectionJob.objects.filter(
+                        connection=current,
+                        connection_revision=current.revision,
+                        configuration=configuration,
+                        source_kind="realtime_generation",
+                        target_day=oldest_day,
+                        scheduled_for=initial_slot,
+                    ).exists():
+                        identifiers.extend(enqueue_connection(current, now, initial=True))
                 identifiers.extend(enqueue_connection(current, now))
-    return identifiers
+    return list(dict.fromkeys(identifiers))
 
 
 def _resolve_settlement_id(connection: EpiasConnection) -> int | None:

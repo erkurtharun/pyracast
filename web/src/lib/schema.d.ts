@@ -356,6 +356,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["tenants_regions_plants_outages_list"];
+        put?: never;
+        post: operations["tenants_regions_plants_outages_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/{incident_id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["tenants_regions_plants_outages_update"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/{incident_id}/cancel/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["tenants_regions_plants_outages_cancel_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/{incident_id}/resolve/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["tenants_regions_plants_outages_resolve_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/performance/": {
         parameters: {
             query?: never;
@@ -772,6 +836,71 @@ export interface components {
         IdentifierOutput: {
             id: number;
         };
+        IncidentInput: {
+            kind: components["schemas"]["KindEnum"];
+            title: string;
+            /** @default  */
+            notes: string;
+            /** Format: date-time */
+            starts_at: string;
+            /** Format: date-time */
+            ends_at?: string | null;
+            /** Format: double */
+            available_dc_mw?: number | null;
+            /** Format: double */
+            available_inverter_mw?: number | null;
+            /** Format: double */
+            available_export_mw?: number | null;
+        };
+        IncidentOutput: {
+            readonly id: number;
+            readonly revision: number;
+            readonly kind: string;
+            readonly title: string;
+            readonly notes: string;
+            /** Format: date-time */
+            readonly starts_at: string;
+            /** Format: date-time */
+            readonly ends_at: string | null;
+            /** Format: double */
+            readonly available_dc_mw: number | null;
+            /** Format: double */
+            readonly available_inverter_mw: number | null;
+            /** Format: double */
+            readonly available_export_mw: number | null;
+            declared_configuration_id: number;
+            readonly status: string;
+            /** Format: date-time */
+            readonly created_at: string;
+            /** Format: date-time */
+            readonly updated_at: string;
+        };
+        IncidentUpdate: {
+            kind: components["schemas"]["KindEnum"];
+            title: string;
+            /** @default  */
+            notes: string;
+            /** Format: date-time */
+            starts_at: string;
+            /** Format: date-time */
+            ends_at?: string | null;
+            /** Format: double */
+            available_dc_mw?: number | null;
+            /** Format: double */
+            available_inverter_mw?: number | null;
+            /** Format: double */
+            available_export_mw?: number | null;
+            expected_revision: number;
+        };
+        /**
+         * @description * `inverter` - inverter
+         *     * `panels` - panels
+         *     * `grid` - grid
+         *     * `other` - other
+         *     * `multiple` - multiple
+         * @enum {string}
+         */
+        KindEnum: "inverter" | "panels" | "grid" | "other" | "multiple";
         LoginInput: {
             username: string;
             password: string;
@@ -858,6 +987,21 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["CalibrationSummaryOutput"][];
+        };
+        PaginatedIncidentOutputList: {
+            /** @example 123 */
+            count: number;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?page=4
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?page=2
+             */
+            previous?: string | null;
+            results: components["schemas"]["IncidentOutput"][];
         };
         PaginatedObservationOutputList: {
             /** @example 123 */
@@ -1031,6 +1175,7 @@ export interface components {
             unavailable_reason: (components["schemas"]["UnavailableReasonEnum"] | components["schemas"]["NullEnum"]) | null;
             result: unknown;
             regional_irradiance: unknown;
+            outage_scenario?: unknown;
         };
         PlantInput: {
             name: string;
@@ -1183,6 +1328,14 @@ export interface components {
          * @enum {integer}
          */
         ResolutionMinutesEnum: 30 | 60;
+        ResolveInput: {
+            expected_revision: number;
+            /** Format: date-time */
+            ends_at: string;
+        };
+        RevisionInput: {
+            expected_revision: number;
+        };
         RotateSecretInput: {
             secret_reference: string;
         };
@@ -2064,6 +2217,151 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ObservationImportOutput"];
+                };
+            };
+        };
+    };
+    tenants_regions_plants_outages_list: {
+        parameters: {
+            query?: {
+                /** @description A page number within the paginated result set. */
+                page?: number;
+            };
+            header?: never;
+            path: {
+                plant_id: number;
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedIncidentOutputList"];
+                };
+            };
+        };
+    };
+    tenants_regions_plants_outages_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plant_id: number;
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IncidentInput"];
+                "application/x-www-form-urlencoded": components["schemas"]["IncidentInput"];
+                "multipart/form-data": components["schemas"]["IncidentInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentOutput"];
+                };
+            };
+        };
+    };
+    tenants_regions_plants_outages_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                incident_id: number;
+                plant_id: number;
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IncidentUpdate"];
+                "application/x-www-form-urlencoded": components["schemas"]["IncidentUpdate"];
+                "multipart/form-data": components["schemas"]["IncidentUpdate"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentOutput"];
+                };
+            };
+        };
+    };
+    tenants_regions_plants_outages_cancel_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                incident_id: number;
+                plant_id: number;
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RevisionInput"];
+                "application/x-www-form-urlencoded": components["schemas"]["RevisionInput"];
+                "multipart/form-data": components["schemas"]["RevisionInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentOutput"];
+                };
+            };
+        };
+    };
+    tenants_regions_plants_outages_resolve_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                incident_id: number;
+                plant_id: number;
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveInput"];
+                "application/x-www-form-urlencoded": components["schemas"]["ResolveInput"];
+                "multipart/form-data": components["schemas"]["ResolveInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentOutput"];
                 };
             };
         };

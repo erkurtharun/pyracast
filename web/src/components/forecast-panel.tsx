@@ -10,6 +10,16 @@ type Interval = {
     mean_power_mw?: number | null;
     energy_mwh?: number | null;
     quality_flags?: string[];
+    affected_mean_power_mw?: number | null;
+    affected_energy_mwh?: number | null;
+    affected_quality_flags?: string[];
+};
+type OutageScenario = {
+    evaluated_at: string;
+    status: "estimated" | "unknown_impact";
+    incident_revision_ids: number[];
+    incidents: Record<string, unknown>[];
+    result: Record<string, unknown>;
 };
 function number(value: unknown): string {
     return typeof value === "number"
@@ -54,10 +64,46 @@ export function ForecastPanel({
                 )}
             </>
         );
-    const result = forecast.result as Record<string, unknown>,
-        allRows = (
-            Array.isArray(result.intervals) ? result.intervals : []
-        ) as Interval[];
+    const scenario = electrical
+        ? (forecast as Forecast & { outage_scenario?: OutageScenario | null })
+              .outage_scenario
+        : null;
+    const result = forecast.result as Record<string, unknown>;
+    const affectedRows = (
+        scenario && Array.isArray(scenario.result.intervals)
+            ? scenario.result.intervals
+            : []
+    ) as Interval[];
+    const affectedByStart = new Map(
+        affectedRows.map((row) => [row.start, row]),
+    );
+    const allRows = (
+        Array.isArray(result.intervals) ? result.intervals : []
+    ).map((row: Interval) =>
+        scenario
+            ? {
+                  ...row,
+                  affected_mean_power_mw:
+                      affectedByStart.get(row.start)?.mean_power_mw ?? null,
+                  affected_energy_mwh:
+                      affectedByStart.get(row.start)?.energy_mwh ?? null,
+                  affected_quality_flags: affectedByStart.get(row.start)
+                      ?.quality_flags,
+              }
+            : row,
+    ) as Interval[];
+    const csvRows = scenario
+        ? allRows.map((row) => ({
+              start: row.start,
+              end: row.end,
+              normal_mean_power_mw: row.mean_power_mw,
+              normal_energy_mwh: row.energy_mwh,
+              affected_mean_power_mw: row.affected_mean_power_mw,
+              affected_energy_mwh: row.affected_energy_mwh,
+              normal_quality_flags: row.quality_flags,
+              affected_quality_flags: row.affected_quality_flags,
+          }))
+        : allRows;
     const metric = electrical ? "mean_power_mw" : "ghi_wm2",
         unit = electrical ? "MW" : "W/m²";
     const positiveRows = dataIntervalRange(
@@ -100,15 +146,59 @@ export function ForecastPanel({
                 <div className="button-group">
                     <CsvDownload
                         filename={`${electrical ? "plant" : "region"}-${forecast.date}-${forecast.source_kind}`}
-                        records={allRows}
+                        label={
+                            scenario
+                                ? "Download both scenarios CSV"
+                                : "Download CSV"
+                        }
+                        records={csvRows}
                         metadata={{
                             ...forecast,
                             result: { ...result, intervals: undefined },
+                            ...(scenario
+                                ? {
+                                      outage_scenario: {
+                                          ...scenario,
+                                          result: {
+                                              ...scenario.result,
+                                              intervals: undefined,
+                                          },
+                                      },
+                                  }
+                                : {}),
                         }}
                     />
                     <Tag>{forecast.freshness}</Tag>
                 </div>
             </div>
+            {scenario && (
+                <Notice>
+                    Normal capacity is the healthy-plant estimate. With outages
+                    reflects the recorded available capacity; it is an estimate,
+                    not a meter reading.
+                    {scenario.status === "unknown_impact"
+                        ? " Capacity impact is unknown for some intervals; missing affected values are not zero."
+                        : ""}
+                </Notice>
+            )}
+            {scenario &&
+                ((Array.isArray(scenario.result.quality_flags) &&
+                    scenario.result.quality_flags.includes(
+                        "outage_configuration_changed",
+                    )) ||
+                    affectedRows.some((row) =>
+                        row.quality_flags?.includes(
+                            "outage_configuration_changed",
+                        ),
+                    )) && (
+                    <Notice>
+                        The plant configuration changed after an outage was
+                        reported. Open Outages, edit the report and confirm the
+                        remaining capacities for the current configuration. The
+                        affected estimate remains unknown until the report is
+                        confirmed.
+                    </Notice>
+                )}
             {electrical &&
                 Array.isArray(result.quality_flags) &&
                 result.quality_flags.includes(
@@ -128,10 +218,30 @@ export function ForecastPanel({
             )}
             <div className="stats forecast-stats">
                 <Stat
-                    label={electrical ? "Daily energy" : "Daily solar energy"}
+                    label={
+                        scenario
+                            ? "Normal capacity · daily energy"
+                            : electrical
+                              ? "Daily energy"
+                              : "Daily solar energy"
+                    }
                     value={result[electrical ? "energy_mwh" : "energy_kwh_m2"]}
                     unit={electrical ? "MWh" : "kWh/m²"}
                 />
+                {scenario && (
+                    <Stat
+                        label="With outages · daily energy"
+                        value={scenario.result.energy_mwh}
+                        unit="MWh"
+                    />
+                )}
+                {scenario && (
+                    <Stat
+                        label="With outages · partial estimate"
+                        value={scenario.result.partial_energy_mwh}
+                        unit="MWh"
+                    />
+                )}
                 <Stat
                     label="Partial estimate"
                     value={
@@ -185,22 +295,37 @@ export function ForecastPanel({
                         </strong>
                         <span>{unit}</span>
                     </div>
+                    {scenario && (
+                        <p className="fine">
+                            Green: normal capacity · Blue: with outages. Both
+                            series share the same MW axis; gaps mean unknown
+                            impact.
+                        </p>
+                    )}
                     <div
                         className="chart"
                         role="img"
-                        aria-label={`${electrical ? "Power" : "Irradiance"} by interval. Full values are available in the following table. Missing values are gaps.`}
+                        aria-label={`${scenario ? "Normal capacity and with outages power" : electrical ? "Power" : "Irradiance"} by interval. Full values are available in the following table. Missing values are gaps.`}
                     >
                         {rows.map((row, index) => (
                             <div
                                 className={`chart-column ${row[metric] == null ? "missing" : ""}`}
                                 key={index}
-                                title={`${time(row.start)}: ${number(row[metric])} ${unit}`}
+                                title={`${time(row.start)}: ${scenario ? "normal capacity " : ""}${number(row[metric])} ${unit}${scenario ? `; with outages ${number(row.affected_mean_power_mw)} MW` : ""}`}
                             >
                                 <div
                                     style={{
                                         height: `${typeof row[metric] === "number" ? (row[metric]! / max) * 100 : 0}%`,
                                     }}
                                 />
+                                {scenario && (
+                                    <div
+                                        style={{
+                                            height: `${typeof row.affected_mean_power_mw === "number" ? (row.affected_mean_power_mw / max) * 100 : 0}%`,
+                                            background: "#3874a1",
+                                        }}
+                                    />
+                                )}
                             </div>
                         ))}
                     </div>
@@ -228,10 +353,22 @@ export function ForecastPanel({
                                         <th>End</th>
                                         <th>
                                             {electrical
-                                                ? "Mean power (MW)"
+                                                ? scenario
+                                                    ? "Normal capacity (MW)"
+                                                    : "Mean power (MW)"
                                                 : "Irradiance (W/m²)"}
                                         </th>
-                                        {electrical && <th>Energy (MWh)</th>}
+                                        {electrical && (
+                                            <th>
+                                                {scenario
+                                                    ? "Normal capacity energy (MWh)"
+                                                    : "Energy (MWh)"}
+                                            </th>
+                                        )}
+                                        {scenario && <th>With outages (MW)</th>}
+                                        {scenario && (
+                                            <th>With outages energy (MWh)</th>
+                                        )}
                                         <th>Quality</th>
                                     </tr>
                                 </thead>
@@ -246,10 +383,29 @@ export function ForecastPanel({
                                                     {number(row.energy_mwh)}
                                                 </td>
                                             )}
+                                            {scenario && (
+                                                <td>
+                                                    {number(
+                                                        row.affected_mean_power_mw,
+                                                    )}
+                                                </td>
+                                            )}
+                                            {scenario && (
+                                                <td>
+                                                    {number(
+                                                        row.affected_energy_mwh,
+                                                    )}
+                                                </td>
+                                            )}
                                             <td>
                                                 {row.quality_flags?.join(
                                                     ", ",
                                                 ) || "—"}
+                                                {scenario &&
+                                                row.affected_quality_flags
+                                                    ?.length
+                                                    ? `; with outages: ${row.affected_quality_flags.join(", ")}`
+                                                    : ""}
                                             </td>
                                         </tr>
                                     ))}

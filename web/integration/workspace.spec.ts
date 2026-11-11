@@ -123,6 +123,82 @@ test("a customer manages an approved region through the real API", async ({
         page.getByText("View interval data (24 intervals)"),
     ).toBeVisible();
     await expectFullForecastCsv(48);
+    const outageTimes = await page.evaluate(() => {
+        const localInput = (minutesAgo: number) => {
+            const date = new Date(Date.now() - minutesAgo * 60_000);
+            return new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+                .toISOString()
+                .slice(0, 16);
+        };
+        return { starts: localInput(10), ends: localInput(5) };
+    });
+    await page.getByRole("button", { name: "Outages", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Report outage", exact: true })
+        .click();
+    await page.getByLabel("Incident title").fill("Browser inverter outage");
+    await page
+        .getByLabel("Started at (device time)", { exact: true })
+        .fill(outageTimes.starts);
+    await page
+        .getByRole("button", { name: "Save outage", exact: true })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "Browser inverter outage" }),
+    ).toBeVisible();
+    await page
+        .getByRole("button", { name: "Generation forecast", exact: true })
+        .click();
+    await expect(
+        page.getByText("Normal capacity · daily energy", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByText("With outages · daily energy", { exact: true }),
+    ).toBeVisible();
+    const outageDownload = page.waitForEvent("download");
+    await page
+        .getByRole("button", { name: "Download both scenarios CSV" })
+        .click();
+    const outageCsv = Papa.parse<Record<string, string>>(
+        await readFile((await (await outageDownload).path())!, "utf8"),
+        { header: true, skipEmptyLines: true },
+    );
+    expect(outageCsv.errors).toEqual([]);
+    expect(outageCsv.data).toHaveLength(48);
+    expect(
+        outageCsv.data.some((row) => Number(row.normal_mean_power_mw) > 0),
+    ).toBe(true);
+    expect(
+        outageCsv.data.every(
+            (row) =>
+                row.affected_mean_power_mw === "0" &&
+                row.affected_energy_mwh === "0",
+        ),
+    ).toBe(true);
+    expect(outageCsv.data[0]["outage_scenario.incidents"]).toContain(
+        "Browser inverter outage",
+    );
+    await page.screenshot({
+        path: testInfo.outputPath("plant-outage-comparison-desktop.png"),
+        fullPage: true,
+    });
+    await page.getByRole("button", { name: "Outages", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Resolve outage", exact: true })
+        .click();
+    await page
+        .getByLabel("Resolved at (device time)", { exact: true })
+        .fill(outageTimes.ends);
+    await page.getByRole("button", { name: "Save resolution" }).click();
+    await expect(page.getByText("resolved", { exact: true })).toBeVisible();
+    await page
+        .getByRole("button", { name: "Generation forecast", exact: true })
+        .click();
+    await expect(page.getByText("Daily energy", { exact: true })).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: "Download both scenarios CSV" }),
+    ).toHaveCount(0);
+    await expectFullForecastCsv(48);
     await page.getByLabel("Forecast date").fill(process.env.BROWSER_TODAY!);
     await expect(
         page.getByText(

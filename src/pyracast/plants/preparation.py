@@ -122,7 +122,10 @@ def prepare_calibration(plant_id: int, now: datetime | None = None) -> Calibrati
         rows, snapshot_ids = select_measurements(
             configuration, window_start, window_end, moment, observation_id_cutoff=watermark
         )
-        fingerprint, reference_ids = selection_fingerprint(configuration, rows, moment)
+        from pyracast.plants.incident_policy import incident_ids
+
+        incidents = incident_ids(configuration, window_start, window_end, moment)
+        fingerprint, reference_ids = selection_fingerprint(configuration, rows, moment, incidents)
         comparison = (
             CalibrationActivation.objects.filter(plant=plant, configuration=configuration)
             .order_by("-created_at", "-pk")
@@ -138,6 +141,7 @@ def prepare_calibration(plant_id: int, now: datetime | None = None) -> Calibrati
             window_start__lte=days[0],
             window_end__gte=days[-1],
         )
+        previous = previous.filter(incident_revision_ids=incidents)
         if previous.filter(input_fingerprint=fingerprint).exists() or (
             latest is not None
             and not snapshot_ids
@@ -159,6 +163,7 @@ def prepare_calibration(plant_id: int, now: datetime | None = None) -> Calibrati
             observation_id_cutoff=watermark,
             settlement_snapshot_ids=snapshot_ids,
             reference_snapshot_ids=reference_ids,
+            incident_revision_ids=incidents,
             input_fingerprint=fingerprint,
         )
         PlantEvent.objects.create(

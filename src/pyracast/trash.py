@@ -16,6 +16,7 @@ from pyracast.forecasts.models import (
     ForecastSnapshot,
     RequestAttempt,
 )
+from pyracast.incidents.models import IncidentRevision, PlantIncident
 from pyracast.notifications.models import NotificationDelivery, ReminderPreference
 from pyracast.plants.models import (
     CalibrationActivation,
@@ -136,6 +137,8 @@ def restore_plant(actor: User, tenant_id: int, region_id: int, plant_id: int) ->
 
 
 def _purge_plant(plant: Plant) -> None:
+    IncidentRevision.objects.filter(incident__plant=plant).delete()
+    PlantIncident.objects.filter(plant=plant).delete()
     PlantForecast.objects.filter(configuration__plant=plant).delete()
     CalibrationRun.objects.filter(plant=plant).update(comparison_activation=None)
     CalibrationActivation.objects.filter(plant=plant).delete()

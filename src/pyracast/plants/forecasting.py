@@ -86,6 +86,8 @@ def select_snapshot(
 
 
 def calibration_at(configuration: PlantConfiguration, as_of: datetime) -> CalibrationRun | None:
+    from pyracast.plants.incident_policy import incidents_unchanged
+
     activation = (
         CalibrationActivation.objects.select_related("calibration")
         .filter(configuration=configuration, created_at__lte=as_of)
@@ -105,6 +107,7 @@ def calibration_at(configuration: PlantConfiguration, as_of: datetime) -> Calibr
         or run.completed_at > as_of
         or run.cutoff_at > as_of
         or run.created_at > as_of
+        or not incidents_unchanged(run, as_of)
     ):
         return None
     return run

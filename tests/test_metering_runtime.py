@@ -2,6 +2,7 @@ import os
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from threading import Barrier
 from types import SimpleNamespace
 from typing import cast
@@ -55,12 +56,15 @@ def test_runtime_factory_requires_credentials_and_caches_once(
 @pytest.mark.django_db(transaction=True)
 def test_epias_queue_redelivery_archives_once_per_job(monkeypatch: pytest.MonkeyPatch) -> None:
     connected(monkeypatch)
+    ready_ids = list(EpiasCollectionJob.objects.order_by("pk").values_list("pk", flat=True)[:2])
+    deferred = EpiasCollectionJob.objects.exclude(pk__in=ready_ids)
+    deferred.update(next_attempt_at=NOW + timedelta(days=1))
     monkeypatch.setattr("pyracast.metering.runtime.datetime", SimpleNamespace(now=lambda _: NOW))
     monkeypatch.setattr("pyracast.metering.jobs.get_epias_client", lambda: FixtureClient())
     broker = StubBroker()
     actor = make_epias_actor(broker)
-    assert dispatch_epias(actor) >= 7
-    assert dispatch_epias(actor) >= 7
+    assert dispatch_epias(actor) == 2
+    assert dispatch_epias(actor) == 2
     worker = Worker(broker, worker_threads=2, worker_timeout=100)
     worker.start()
     try:
@@ -69,9 +73,13 @@ def test_epias_queue_redelivery_archives_once_per_job(monkeypatch: pytest.Monkey
     finally:
         worker.stop()
         broker.close()
-    assert EpiasSnapshot.objects.count() == EpiasCollectionJob.objects.count()
-    assert set(EpiasCollectionJob.objects.values_list("status", flat=True)) == {"succeeded"}
-    assert set(EpiasCollectionJob.objects.values_list("attempts", flat=True)) == {1}
+    assert set(EpiasSnapshot.objects.values_list("job_id", flat=True)) == set(ready_ids)
+    assert EpiasSnapshot.objects.count() == len(ready_ids)
+    completed = EpiasCollectionJob.objects.filter(pk__in=ready_ids)
+    assert set(completed.values_list("status", flat=True)) == {"succeeded"}
+    assert set(completed.values_list("attempts", flat=True)) == {1}
+    assert set(deferred.values_list("status", flat=True)) == {"pending"}
+    assert set(deferred.values_list("attempts", flat=True)) == {0}
 
 
 @pytest.mark.skipif(
