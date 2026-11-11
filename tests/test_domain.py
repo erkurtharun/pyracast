@@ -24,6 +24,8 @@ from pyracast.regions.models import AuditEvent, Region
 from pyracast.regions.operations import (
     approve_region,
     configure_binding,
+    request_location_change,
+    review_location_change,
     submit_region,
     transition_region,
     update_region,
@@ -108,9 +110,6 @@ def test_tenant_and_platform_authorization() -> None:
             system.region.pk,
             other.pk,
             name="Other",
-            latitude=0,
-            longitude=0,
-            timezone="UTC",
         )
 
 
@@ -143,23 +142,22 @@ def test_region_names_are_bounded(name: str) -> None:
             system.region.pk,
             system.tenant.pk,
             name=name,
-            latitude=0,
-            longitude=0,
-            timezone="UTC",
         )
 
 
 def test_revision_invalidates_approval_and_preserves_previous_configuration() -> None:
     system = make_system(approved=True)
-    changed = update_region(
+    change = request_location_change(
         system.member,
         system.region.pk,
         system.tenant.pk,
-        name="New",
+        expected_revision=1,
         latitude=10,
         longitude=20,
         timezone="UTC",
     )
+    review_location_change(system.admin, change.pk, approve=True)
+    changed = Region.objects.get(pk=system.region.pk)
     assert (changed.revision, changed.status, changed.approved_binding_id) == (2, "pending", None)
     system.binding.refresh_from_db()
     assert (system.binding.latitude, system.binding.region_revision) == (40, 1)

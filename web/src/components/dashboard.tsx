@@ -310,7 +310,20 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
                 region={selected}
                 tenant={tenant.id}
                 token={token}
-                onBack={() => setSelected(undefined)}
+                onBack={() => {
+                    setVersion((current) => current + 1);
+                    setMore([]);
+                    setNext(undefined);
+                    setPageError("");
+                    setSelected(undefined);
+                }}
+                onUpdated={(region) => {
+                    setSelected(region);
+                    setVersion((current) => current + 1);
+                    setMore([]);
+                    setNext(undefined);
+                    setPageError("");
+                }}
                 onDeleted={() => {
                     setDeleted((current) => [...current, selected.id]);
                     setVersion((current) => current + 1);

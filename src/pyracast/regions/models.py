@@ -34,6 +34,55 @@ class Region(models.Model):
         )
 
 
+class RegionLocationChangeRequest(models.Model):
+    region = models.ForeignKey(Region, on_delete=models.CASCADE)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="region_location_requests"
+    )
+    base_revision = models.PositiveIntegerField()
+    latitude = models.FloatField()
+    longitude = models.FloatField()
+    timezone = models.CharField(max_length=100)
+    reason = models.CharField(max_length=1000, blank=True)
+    status = models.CharField(max_length=20, default="pending")
+    created_at = models.DateTimeField(auto_now_add=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        related_name="reviewed_region_location_requests",
+    )
+    reviewed_at = models.DateTimeField(null=True)
+
+    class Meta:
+        constraints = (
+            models.UniqueConstraint(
+                fields=("region",),
+                condition=models.Q(status="pending"),
+                name="one_pending_region_location_request",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(latitude__gte=-90, latitude__lte=90),
+                name="location_request_latitude",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(longitude__gte=-180, longitude__lte=180),
+                name="location_request_longitude",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(status="pending", reviewed_by__isnull=True, reviewed_at__isnull=True)
+                    | models.Q(
+                        status__in=("approved", "rejected"),
+                        reviewed_by__isnull=False,
+                        reviewed_at__isnull=False,
+                    )
+                ),
+                name="location_request_review_state",
+            ),
+        )
+
+
 class AuditEvent(models.Model):
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     region = models.ForeignKey(Region, on_delete=models.PROTECT, null=True)

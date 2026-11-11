@@ -1067,7 +1067,7 @@ test("performance hides stale CSV while a selected range is loading", async ({
     await page.getByRole("button", { name: /East array/ }).click();
     const performance = page.locator("section").filter({
         has: page.getByRole("heading", {
-            name: "Forecast performance",
+            name: "Production comparison",
             exact: true,
         }),
     });
@@ -1153,16 +1153,15 @@ test("forecast performance shows replay metrics, missing days and selected range
         .click();
     await page.getByRole("button", { name: /East array/ }).click();
     await expect(
-        page.getByRole("heading", { name: "Forecast performance" }),
+        page.getByRole("heading", { name: "Production comparison" }),
     ).toBeVisible();
-    await page.getByText("Daily comparison (2 days)").click();
+
     await page.getByText("Additional metrics & interpretation").click();
+    await page.getByText("Unavailable dates (1)", { exact: true }).click();
     await expect(
-        page.getByText("Day-ahead forecast was not available"),
+        page.getByText("Day-ahead forecast was not available: 1 day"),
     ).toBeVisible();
-    await page
-        .getByText("How performance is measured", { exact: true })
-        .click();
+    await page.getByText("How comparison is measured", { exact: true }).click();
     await expect(
         page.getByText("This does not establish", { exact: false }),
     ).toBeVisible();
@@ -1184,7 +1183,7 @@ test("forecast performance shows replay metrics, missing days and selected range
         .poll(() => lastQuery)
         .toContain("start_date=2026-11-01&end_date=2026-11-02");
     await expect.poll(() => lastQuery).toContain("daylight_only=true");
-    await page.getByText("Daily comparison (2 days)").click();
+
     await page.getByText("Additional metrics & interpretation").click();
     await expect(page.getByRole("cell", { name: "8.5" })).toBeVisible();
     const download = page.waitForEvent("download");

@@ -20,8 +20,8 @@ from pyracast.plants.models import (
     PlantForecast,
     ProductionObservation,
 )
-from pyracast.regions.models import AuditEvent, Region
-from pyracast.regions.operations import approve_region, transition_region
+from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest
+from pyracast.regions.operations import approve_region, review_location_change, transition_region
 
 
 class PlatformAdminSite(admin.AdminSite):
@@ -85,6 +85,43 @@ class RegionAdmin(ReadOnlyAdmin):
     def suspend(self, request: HttpRequest, queryset: QuerySet[Region]) -> None:
         for region in queryset.filter(deleted_at__isnull=True):
             transition_region(cast(User, request.user), region.pk, "suspended")
+
+
+@admin.register(RegionLocationChangeRequest, site=site)
+class RegionLocationChangeRequestAdmin(ReadOnlyAdmin):
+    list_display = ("id", "region", "status", "base_revision", "created_at", "reviewed_at")
+    list_filter = ("status",)
+    actions = ("approve", "reject")
+
+    def review(
+        self,
+        request: HttpRequest,
+        queryset: QuerySet[RegionLocationChangeRequest],
+        *,
+        approve: bool,
+    ) -> None:
+        for change in queryset.filter(region__deleted_at__isnull=True):
+            try:
+                review_location_change(cast(User, request.user), change.pk, approve=approve)
+            except ObjectDoesNotExist, ValidationError:
+                self.message_user(
+                    request,
+                    "The request is stale or already reviewed; review the current region.",
+                    level="ERROR",
+                )
+
+    @admin.action(
+        description="Approve location change (new binding validation and approval required)",
+        permissions=["view"],
+    )
+    def approve(
+        self, request: HttpRequest, queryset: QuerySet[RegionLocationChangeRequest]
+    ) -> None:
+        self.review(request, queryset, approve=True)
+
+    @admin.action(description="Reject location change", permissions=["view"])
+    def reject(self, request: HttpRequest, queryset: QuerySet[RegionLocationChangeRequest]) -> None:
+        self.review(request, queryset, approve=False)
 
 
 for model in (

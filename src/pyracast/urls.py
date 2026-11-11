@@ -10,6 +10,7 @@ from pyracast.api.views import (
     ApproveView,
     BindingView,
     ForecastView,
+    LocationChangeRequestsView,
     RegionsView,
     RegionView,
     RotateSecretView,
@@ -32,6 +33,10 @@ urlpatterns = [
     path("api/tenants/<int:tenant_id>/trash/plants/", TrashedPlantsView.as_view()),
     path("api/tenants/<int:tenant_id>/regions/", RegionsView.as_view()),
     path("api/tenants/<int:tenant_id>/regions/<int:region_id>/", RegionView.as_view()),
+    path(
+        "api/tenants/<int:tenant_id>/regions/<int:region_id>/location-change-requests/",
+        LocationChangeRequestsView.as_view(),
+    ),
     path(
         "api/tenants/<int:tenant_id>/regions/<int:region_id>/restore/",
         RestoreRegionView.as_view(),

@@ -5,306 +5,6 @@
         "version": "1.0.0"
     },
     "paths": {
-        "/api/platform/accounts/": {
-            "post": {
-                "operationId": "platform_accounts_create",
-                "tags": [
-                    "platform"
-                ],
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/AccountInput"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/AccountInput"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/AccountInput"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/IdentifierOutput"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            }
-        },
-        "/api/platform/accounts/{account_id}/rotate-secret/": {
-            "post": {
-                "operationId": "platform_accounts_rotate_secret_create",
-                "parameters": [
-                    {
-                        "in": "path",
-                        "name": "account_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    }
-                ],
-                "tags": [
-                    "platform"
-                ],
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/RotateSecretInput"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/RotateSecretInput"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/RotateSecretInput"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/IdentifierOutput"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            }
-        },
-        "/api/platform/bindings/{binding_id}/validate/": {
-            "post": {
-                "operationId": "platform_bindings_validate_create",
-                "parameters": [
-                    {
-                        "in": "path",
-                        "name": "binding_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    }
-                ],
-                "tags": [
-                    "platform"
-                ],
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/IdentifierOutput"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            }
-        },
-        "/api/platform/regions/{region_id}/approve/": {
-            "post": {
-                "operationId": "platform_regions_approve_create",
-                "parameters": [
-                    {
-                        "in": "path",
-                        "name": "region_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    }
-                ],
-                "tags": [
-                    "platform"
-                ],
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ApprovalInput"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ApprovalInput"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ApprovalInput"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/IdentifierOutput"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            }
-        },
-        "/api/platform/regions/{region_id}/bindings/": {
-            "post": {
-                "operationId": "platform_regions_bindings_create",
-                "parameters": [
-                    {
-                        "in": "path",
-                        "name": "region_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    }
-                ],
-                "tags": [
-                    "platform"
-                ],
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/BindingInput"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/BindingInput"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/BindingInput"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/IdentifierOutput"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            }
-        },
-        "/api/platform/regions/{region_id}/transition/": {
-            "post": {
-                "operationId": "platform_regions_transition_create",
-                "parameters": [
-                    {
-                        "in": "path",
-                        "name": "region_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    }
-                ],
-                "tags": [
-                    "platform"
-                ],
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/TransitionInput"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/TransitionInput"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/TransitionInput"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/RegionOutput"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            }
-        },
         "/api/session/": {
             "get": {
                 "operationId": "session_retrieve",
@@ -629,21 +329,81 @@
                     "content": {
                         "application/json": {
                             "schema": {
-                                "$ref": "#/components/schemas/RegionInput"
+                                "$ref": "#/components/schemas/RegionRenameInput"
                             }
                         },
                         "application/x-www-form-urlencoded": {
                             "schema": {
-                                "$ref": "#/components/schemas/RegionInput"
+                                "$ref": "#/components/schemas/RegionRenameInput"
                             }
                         },
                         "multipart/form-data": {
                             "schema": {
-                                "$ref": "#/components/schemas/RegionInput"
+                                "$ref": "#/components/schemas/RegionRenameInput"
                             }
                         }
                     },
                     "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/RegionOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            },
+            "patch": {
+                "operationId": "tenants_regions_partial_update",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PatchedRegionRenameInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PatchedRegionRenameInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PatchedRegionRenameInput"
+                            }
+                        }
+                    }
                 },
                 "security": [
                     {
@@ -861,6 +621,119 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/ForecastOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/location-change-requests/": {
+            "get": {
+                "operationId": "tenants_regions_location_change_requests_list",
+                "parameters": [
+                    {
+                        "name": "page",
+                        "required": false,
+                        "in": "query",
+                        "description": "A page number within the paginated result set.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PaginatedLocationChangeOutputList"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            },
+            "post": {
+                "operationId": "tenants_regions_location_change_requests_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": [
+                    "tenants"
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/LocationChangeInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/LocationChangeInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/LocationChangeInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/LocationChangeOutput"
                                 }
                             }
                         },
@@ -2039,6 +1912,20 @@
                 "parameters": [
                     {
                         "in": "query",
+                        "name": "comparison",
+                        "schema": {
+                            "enum": [
+                                "archived_forecast",
+                                "historical_model"
+                            ],
+                            "type": "string",
+                            "default": "archived_forecast",
+                            "minLength": 1
+                        },
+                        "description": "* `archived_forecast` - archived_forecast\n* `historical_model` - historical_model"
+                    },
+                    {
+                        "in": "query",
                         "name": "daylight_only",
                         "schema": {
                             "type": "boolean",
@@ -2721,39 +2608,6 @@
     },
     "components": {
         "schemas": {
-            "AccountInput": {
-                "type": "object",
-                "properties": {
-                    "provider": {
-                        "$ref": "#/components/schemas/ProviderEnum"
-                    },
-                    "external_account_id": {
-                        "type": "string",
-                        "maxLength": 200
-                    },
-                    "secret_reference": {
-                        "type": "string",
-                        "writeOnly": true,
-                        "maxLength": 250
-                    },
-                    "daily_quota": {
-                        "type": "integer",
-                        "maximum": 10,
-                        "minimum": 1,
-                        "default": 10
-                    },
-                    "authorization_reference": {
-                        "type": "string",
-                        "default": "",
-                        "maxLength": 500
-                    }
-                },
-                "required": [
-                    "external_account_id",
-                    "provider",
-                    "secret_reference"
-                ]
-            },
             "ActivationOutput": {
                 "type": "object",
                 "properties": {
@@ -2783,86 +2637,6 @@
                     "configuration_id",
                     "created_at",
                     "id"
-                ]
-            },
-            "ApprovalInput": {
-                "type": "object",
-                "properties": {
-                    "binding_id": {
-                        "type": "integer",
-                        "minimum": 1
-                    }
-                },
-                "required": [
-                    "binding_id"
-                ]
-            },
-            "BindingInput": {
-                "type": "object",
-                "properties": {
-                    "provider_account_id": {
-                        "type": "integer",
-                        "minimum": 1
-                    },
-                    "site_id": {
-                        "type": "string",
-                        "maxLength": 200
-                    },
-                    "capacity_kw": {
-                        "type": "number",
-                        "format": "double",
-                        "minimum": 0
-                    },
-                    "power_basis": {
-                        "allOf": [
-                            {
-                                "$ref": "#/components/schemas/PowerBasisEnum"
-                            }
-                        ],
-                        "default": "ac"
-                    },
-                    "capacity_basis": {
-                        "allOf": [
-                            {
-                                "$ref": "#/components/schemas/PowerBasisEnum"
-                            }
-                        ],
-                        "default": "ac"
-                    },
-                    "capacity_semantics_verified": {
-                        "type": "boolean"
-                    },
-                    "tilt_degrees": {
-                        "type": "number",
-                        "format": "double",
-                        "default": 0.0
-                    },
-                    "azimuth_degrees": {
-                        "type": "number",
-                        "format": "double",
-                        "default": 180.0
-                    },
-                    "losses_percent": {
-                        "type": "number",
-                        "format": "double",
-                        "default": 0.0
-                    },
-                    "installation_date": {
-                        "type": "string",
-                        "format": "date"
-                    },
-                    "settings_verification_reference": {
-                        "type": "string",
-                        "default": "",
-                        "maxLength": 500
-                    }
-                },
-                "required": [
-                    "capacity_kw",
-                    "capacity_semantics_verified",
-                    "installation_date",
-                    "provider_account_id",
-                    "site_id"
                 ]
             },
             "CalibrationInput": {
@@ -3216,6 +2990,14 @@
                     "timezone",
                     "used_today"
                 ]
+            },
+            "ComparisonEnum": {
+                "enum": [
+                    "archived_forecast",
+                    "historical_model"
+                ],
+                "type": "string",
+                "description": "* `archived_forecast` - archived_forecast\n* `historical_model` - historical_model"
             },
             "ConfigurationOutput": {
                 "type": "object",
@@ -3693,17 +3475,6 @@
                 "type": "string",
                 "description": "* `forecast` - forecast\n* `estimated_actuals` - estimated_actuals"
             },
-            "IdentifierOutput": {
-                "type": "object",
-                "properties": {
-                    "id": {
-                        "type": "integer"
-                    }
-                },
-                "required": [
-                    "id"
-                ]
-            },
             "IncidentInput": {
                 "type": "object",
                 "properties": {
@@ -3904,6 +3675,99 @@
                 ],
                 "type": "string",
                 "description": "* `inverter` - inverter\n* `panels` - panels\n* `grid` - grid\n* `other` - other\n* `multiple` - multiple"
+            },
+            "LocationChangeInput": {
+                "type": "object",
+                "properties": {
+                    "expected_revision": {
+                        "type": "integer",
+                        "minimum": 1
+                    },
+                    "latitude": {
+                        "type": "number",
+                        "format": "double",
+                        "maximum": 90,
+                        "minimum": -90
+                    },
+                    "longitude": {
+                        "type": "number",
+                        "format": "double",
+                        "maximum": 180,
+                        "minimum": -180
+                    },
+                    "timezone": {
+                        "type": "string",
+                        "maxLength": 100
+                    },
+                    "reason": {
+                        "type": "string",
+                        "default": "",
+                        "maxLength": 1000
+                    }
+                },
+                "required": [
+                    "expected_revision",
+                    "latitude",
+                    "longitude",
+                    "timezone"
+                ]
+            },
+            "LocationChangeOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "base_revision": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "latitude": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true
+                    },
+                    "longitude": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true
+                    },
+                    "timezone": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "reason": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "status": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    },
+                    "reviewed_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true,
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "base_revision",
+                    "created_at",
+                    "id",
+                    "latitude",
+                    "longitude",
+                    "reason",
+                    "reviewed_at",
+                    "status",
+                    "timezone"
+                ]
             },
             "LoginInput": {
                 "type": "object",
@@ -4170,6 +4034,37 @@
                     }
                 }
             },
+            "PaginatedLocationChangeOutputList": {
+                "type": "object",
+                "required": [
+                    "count",
+                    "results"
+                ],
+                "properties": {
+                    "count": {
+                        "type": "integer",
+                        "example": 123
+                    },
+                    "next": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=4"
+                    },
+                    "previous": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=2"
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/LocationChangeOutput"
+                        }
+                    }
+                }
+            },
             "PaginatedObservationOutputList": {
                 "type": "object",
                 "required": [
@@ -4366,6 +4261,15 @@
                     }
                 }
             },
+            "PatchedRegionRenameInput": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "maxLength": 200
+                    }
+                }
+            },
             "PerformanceDay": {
                 "type": "object",
                 "properties": {
@@ -4434,6 +4338,22 @@
                         "items": {
                             "type": "integer"
                         }
+                    },
+                    "provisional_snapshot_ids": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
+                    },
+                    "source_kind": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "historical_configuration_assumed": {
+                        "type": "boolean"
+                    },
+                    "provisional_production": {
+                        "type": "boolean"
                     }
                 },
                 "required": [
@@ -4444,12 +4364,16 @@
                     "date",
                     "error_mwh",
                     "factor",
+                    "historical_configuration_assumed",
                     "manual_observation_ids",
                     "measured_energy_mwh",
                     "predicted_energy_mwh",
+                    "provisional_production",
+                    "provisional_snapshot_ids",
                     "reason",
                     "settlement_snapshot_ids",
                     "snapshot_id",
+                    "source_kind",
                     "status"
                 ]
             },
@@ -4525,6 +4449,17 @@
                     "selection_policy": {
                         "type": "string"
                     },
+                    "comparison": {
+                        "$ref": "#/components/schemas/ComparisonEnum"
+                    },
+                    "measurement_policy": {
+                        "type": "string"
+                    },
+                    "configuration_created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
                     "measurement_basis": {
                         "type": "string",
                         "nullable": true
@@ -4570,6 +4505,8 @@
                 },
                 "required": [
                     "baseline_metrics",
+                    "comparison",
+                    "configuration_created_at",
                     "configuration_id",
                     "daylight_policy",
                     "days",
@@ -4578,6 +4515,7 @@
                     "evaluation_kind",
                     "matched_days",
                     "measurement_basis",
+                    "measurement_policy",
                     "metric_scope",
                     "metrics",
                     "plant_id",
@@ -4766,14 +4704,6 @@
                     "region_id"
                 ]
             },
-            "PowerBasisEnum": {
-                "enum": [
-                    "ac",
-                    "dc"
-                ],
-                "type": "string",
-                "description": "* `ac` - ac\n* `dc` - dc"
-            },
             "ProductionDayOutput": {
                 "type": "object",
                 "properties": {
@@ -4935,14 +4865,6 @@
                     "unavailable_reason"
                 ]
             },
-            "ProviderEnum": {
-                "enum": [
-                    "fixture",
-                    "solcast"
-                ],
-                "type": "string",
-                "description": "* `fixture` - fixture\n* `solcast` - solcast"
-            },
             "RegionInput": {
                 "type": "object",
                 "properties": {
@@ -5021,6 +4943,18 @@
                     "status",
                     "surface",
                     "timezone"
+                ]
+            },
+            "RegionRenameInput": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "maxLength": 200
+                    }
+                },
+                "required": [
+                    "name"
                 ]
             },
             "ReminderDeliveryOutput": {
@@ -5215,19 +5149,6 @@
                     "expected_revision"
                 ]
             },
-            "RotateSecretInput": {
-                "type": "object",
-                "properties": {
-                    "secret_reference": {
-                        "type": "string",
-                        "writeOnly": true,
-                        "maxLength": 250
-                    }
-                },
-                "required": [
-                    "secret_reference"
-                ]
-            },
             "SessionOutput": {
                 "type": "object",
                 "properties": {
@@ -5300,25 +5221,6 @@
                     "id",
                     "name"
                 ]
-            },
-            "TransitionInput": {
-                "type": "object",
-                "properties": {
-                    "status": {
-                        "$ref": "#/components/schemas/TransitionInputStatusEnum"
-                    }
-                },
-                "required": [
-                    "status"
-                ]
-            },
-            "TransitionInputStatusEnum": {
-                "enum": [
-                    "rejected",
-                    "suspended"
-                ],
-                "type": "string",
-                "description": "* `rejected` - rejected\n* `suspended` - suspended"
             },
             "TrashedPlantOutput": {
                 "type": "object",

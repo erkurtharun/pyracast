@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives
 
+from pyracast.api.public import public_source_data
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
 from pyracast.notifications.models import NotificationDelivery
@@ -40,7 +41,7 @@ def build_message(delivery: NotificationDelivery) -> EmailMultiAlternatives:
         if delivery.scheduled_for - snapshot.collected_at > timedelta(hours=24)
         else "Saved forecast is at most 24 hours old.",
         f"Binding revision: {binding.pk}:{binding.region_revision}",
-        f"Source: {binding.provider_account.provider}; dataset kind: forecast",
+        "Dataset kind: forecast",
         "Unvalidated irradiance proxy. This is incident solar energy, not plant electricity.",
         "Latest saved forecast at the scheduled time. No new provider request was made.",
     ]
@@ -53,7 +54,7 @@ def build_message(delivery: NotificationDelivery) -> EmailMultiAlternatives:
         *(f"<p>{escape(line)}</p>" for line in lines[1:]),
     ]
     for day in (today, today + timedelta(days=1)):
-        result = calculate(binding, day, data)
+        result = public_source_data(calculate(binding, day, data), technical=True)
         total = result["energy_kwh_m2"]
         total_text = "Unavailable (incomplete coverage)" if total is None else f"{total:.3f} kWh/m²"
         lines.extend(

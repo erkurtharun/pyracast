@@ -143,6 +143,9 @@ class PerformanceQuery(InputSerializer):
     start_date = serializers.DateField(required=False)
     end_date = serializers.DateField(required=False)
     daylight_only = serializers.BooleanField(default=False)
+    comparison = serializers.ChoiceField(
+        choices=("archived_forecast", "historical_model"), default="archived_forecast"
+    )
 
 
 class PerformanceMetrics(serializers.Serializer[dict[str, Any]]):
@@ -168,6 +171,10 @@ class PerformanceDay(serializers.Serializer[dict[str, Any]]):
     error_mwh = serializers.FloatField(allow_null=True)
     manual_observation_ids = serializers.ListField(child=serializers.IntegerField())
     settlement_snapshot_ids = serializers.ListField(child=serializers.IntegerField())
+    provisional_snapshot_ids = serializers.ListField(child=serializers.IntegerField())
+    source_kind = serializers.CharField(allow_null=True)
+    historical_configuration_assumed = serializers.BooleanField()
+    provisional_production = serializers.BooleanField()
 
 
 class PerformanceOutput(serializers.Serializer[dict[str, Any]]):
@@ -179,6 +186,9 @@ class PerformanceOutput(serializers.Serializer[dict[str, Any]]):
     evaluated_at = serializers.DateTimeField()
     evaluation_kind = serializers.CharField()
     selection_policy = serializers.CharField()
+    comparison = serializers.ChoiceField(choices=("archived_forecast", "historical_model"))
+    measurement_policy = serializers.CharField()
+    configuration_created_at = serializers.DateTimeField(allow_null=True)
     measurement_basis = serializers.CharField(allow_null=True)
     metric_scope = serializers.ChoiceField(choices=("daylight_intervals", "full_day"))
     daylight_policy = serializers.CharField(allow_null=True)

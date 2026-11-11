@@ -23,8 +23,11 @@ from pyracast.api.serializers import (
     ForecastOutput,
     ForecastQuery,
     IdentifierOutput,
+    LocationChangeInput,
+    LocationChangeOutput,
     RegionInput,
     RegionOutput,
+    RegionRenameInput,
     RotateSecretInput,
     TenantOutput,
     TransitionInput,
@@ -34,10 +37,11 @@ from pyracast.connections.operations import create_account, rotate_secret, valid
 from pyracast.forecasts.history import regional_history
 from pyracast.forecasts.models import ForecastResult
 from pyracast.providers import adapter_for
-from pyracast.regions.models import Region
+from pyracast.regions.models import Region, RegionLocationChangeRequest
 from pyracast.regions.operations import (
     approve_region,
     configure_binding,
+    request_location_change,
     submit_region,
     transition_region,
     update_region,
@@ -90,22 +94,55 @@ class RegionView(RegionsView):
     def get(self, request: Request, tenant_id: int, region_id: int = 0) -> Response:
         return Response(RegionOutput(get_object_or_404(self.get_queryset(), pk=region_id)).data)
 
-    @extend_schema(request=RegionInput, responses=RegionOutput)
+    @extend_schema(request=RegionRenameInput, responses=RegionOutput)
     def put(self, request: Request, tenant_id: int, region_id: int) -> Response:
         get_object_or_404(self.get_queryset(), pk=region_id)
-        data = RegionInput(data=request.data)
+        data = RegionRenameInput(data=request.data)
         data.is_valid(raise_exception=True)
         region = update_region(
             cast(User, request.user), region_id, tenant_id, **data.validated_data
         )
         return Response(RegionOutput(region).data)
 
+    @extend_schema(request=RegionRenameInput, responses=RegionOutput)
+    def patch(self, request: Request, tenant_id: int, region_id: int) -> Response:
+        return self.put(request, tenant_id, region_id)
+
     @extend_schema(responses={204: None})
     def delete(self, request: Request, tenant_id: int, region_id: int) -> Response:
         trash.trash_region(cast(User, request.user), tenant_id, region_id)
         return Response(status=204)
 
-    http_method_names = ("get", "put", "delete", "head", "options")
+    http_method_names = ("get", "put", "patch", "delete", "head", "options")
+
+
+class LocationChangeRequestsView(GenericAPIView[RegionLocationChangeRequest]):
+    serializer_class = LocationChangeOutput
+
+    def get_region(self) -> Region:
+        tenant_id = self.kwargs["tenant_id"]
+        require_member(cast(User, self.request.user), tenant_id)
+        return get_object_or_404(
+            Region, pk=self.kwargs["region_id"], tenant_id=tenant_id, deleted_at__isnull=True
+        )
+
+    def get_queryset(self) -> QuerySet[RegionLocationChangeRequest]:
+        return RegionLocationChangeRequest.objects.filter(region=self.get_region()).order_by("-id")
+
+    @extend_schema(responses=LocationChangeOutput(many=True))
+    def get(self, request: Request, tenant_id: int, region_id: int) -> Response:
+        page = self.paginate_queryset(self.get_queryset())
+        return self.get_paginated_response(LocationChangeOutput(page, many=True).data)
+
+    @extend_schema(request=LocationChangeInput, responses={201: LocationChangeOutput})
+    def post(self, request: Request, tenant_id: int, region_id: int) -> Response:
+        self.get_region()
+        data = LocationChangeInput(data=request.data)
+        data.is_valid(raise_exception=True)
+        change = request_location_change(
+            cast(User, request.user), region_id, tenant_id, **data.validated_data
+        )
+        return Response(LocationChangeOutput(change).data, status=201)
 
 
 class AccountView(APIView):

@@ -10,12 +10,14 @@ import { CsvDownload } from "./csv-download";
 type Performance = components["schemas"]["PerformanceOutput"];
 
 const reasons: Record<string, string> = {
+    estimated_actuals_not_available:
+        "Historical weather estimates are not available",
     configuration_not_available:
         "Configuration was not available before this day",
     forecast_not_available: "Day-ahead forecast was not available",
     incomplete_or_invalid_day:
-        "Production or forecast coverage is incomplete or invalid",
-    invalid_forecast_data: "Archived forecast data is invalid",
+        "Production or reference coverage is incomplete or invalid",
+    invalid_forecast_data: "Saved reference data is invalid",
 };
 const format = (value: number | null) =>
     value === null
@@ -33,40 +35,65 @@ export function ForecastPerformance({
 }) {
     const [start, setStart] = useState(() => localDay(timezone, -30));
     const [end, setEnd] = useState(() => localDay(timezone, -1));
-    const [url, setUrl] = useState(`${base}performance/?daylight_only=true`);
+    const [comparison, setComparison] = useState("historical_model");
+    const [url, setUrl] = useState(
+        `${base}performance/?daylight_only=true&comparison=historical_model`,
+    );
     function load(event: FormEvent) {
         event.preventDefault();
         setUrl(
-            `${base}performance/?${new URLSearchParams({ start_date: start, end_date: end, daylight_only: "true" })}`,
+            `${base}performance/?${new URLSearchParams({ start_date: start, end_date: end, daylight_only: "true", comparison })}`,
         );
     }
     return (
         <section className="panel">
             <div className="section-heading">
                 <div>
-                    <h2>Forecast performance</h2>
+                    <h2>Production comparison</h2>
                     <p className="fine">
-                        Day-ahead replay vs measured daylight production ·{" "}
-                        {timezone}
+                        Historical model or archived forecast vs daylight
+                        production · {timezone}
                     </p>
                 </div>
             </div>
             <details>
-                <summary>How performance is measured</summary>
+                <summary>How comparison is measured</summary>
                 <p>
-                    Historical replay using archived day-ahead forecasts and the
-                    configuration and calibration available before each day.
+                    Historical model comparison uses saved historical weather
+                    estimates with the current plant configuration and factor 1.
+                    It assumes that configuration for past dates and can include
+                    provisional reported production. It does not measure
+                    forecast accuracy or establish the production meter
+                    boundary.
+                </p>
+                <p>
+                    Archived forecast performance uses day-ahead forecasts and
+                    the configuration and calibration available before each day.
                     This does not establish that the plant prediction was
                     published at the time.
                 </p>
                 <p>
-                    Results use measured intervals overlapping daylight, not
-                    estimated actuals or full-day totals. The complete daylight
-                    window must be covered. Dates are local to {timezone};
-                    choose up to 90 completed days.
+                    Results compare production intervals overlapping daylight.
+                    Whole boundary intervals retain their energy. The complete
+                    daylight window must be covered. Dates are local to{" "}
+                    {timezone}; choose up to 90 completed days.
                 </p>
             </details>
             <form className="forecast-controls" onSubmit={load}>
+                <label className="field">
+                    Comparison
+                    <select
+                        value={comparison}
+                        onChange={(event) => setComparison(event.target.value)}
+                    >
+                        <option value="historical_model">
+                            Historical model
+                        </option>
+                        <option value="archived_forecast">
+                            Archived forecast performance
+                        </option>
+                    </select>
+                </label>
                 <label className="field">
                     Start date
                     <input
@@ -104,6 +131,17 @@ function PerformanceResults({
     timezone: string;
 }) {
     const resource = useResource<Performance>(url);
+    const matched =
+        resource.data?.days.filter((day) => day.status === "matched") ?? [];
+    const historical = resource.data?.comparison === "historical_model";
+    const missingReasons = new Map<string, number>();
+    for (const day of resource.data?.days ?? []) {
+        if (day.status === "matched") continue;
+        const reason =
+            (day.reason && reasons[day.reason]) ||
+            "Production or reference data is unavailable";
+        missingReasons.set(reason, (missingReasons.get(reason) ?? 0) + 1);
+    }
     return (
         <>
             {resource.loading ? (
@@ -124,119 +162,166 @@ function PerformanceResults({
                                 }}
                             />
                         </div>
-                        <div className="stats">
-                            <Stat
-                                label="Matched days"
-                                value={resource.data.matched_days}
-                            />
-                            <Stat
-                                label="Missing days"
-                                value={
-                                    resource.data.requested_days -
-                                    resource.data.matched_days
-                                }
-                            />
-                            <Stat
-                                label="Daylight energy error"
-                                value={resource.data.metrics?.daily_mae_mwh}
-                                unit="MWh"
-                            />
-                            <Stat
-                                label="Daylight energy bias"
-                                value={resource.data.metrics?.daily_bias_mwh}
-                                unit="MWh"
-                            />
-                        </div>
-                        <details>
-                            <summary>
-                                Additional metrics & interpretation
-                            </summary>
-                            <div className="stats">
-                                <Stat
-                                    label="Baseline daylight energy error"
-                                    value={
-                                        resource.data.baseline_metrics
-                                            ?.daily_mae_mwh
-                                    }
-                                    unit="MWh"
-                                />
-                                <Stat
-                                    label="Generating-interval error"
-                                    value={
-                                        resource.data.metrics
-                                            ?.source_positive_mae_mw
-                                    }
-                                    unit="MW"
-                                />
-                            </div>
+                        {resource.data.metrics && (
+                            <>
+                                <div className="stats">
+                                    <Stat
+                                        label="Matched days"
+                                        value={resource.data.matched_days}
+                                    />
+                                    <Stat
+                                        label="Missing days"
+                                        value={
+                                            resource.data.requested_days -
+                                            resource.data.matched_days
+                                        }
+                                    />
+                                    <Stat
+                                        label="Daylight energy error"
+                                        value={
+                                            resource.data.metrics?.daily_mae_mwh
+                                        }
+                                        unit="MWh"
+                                    />
+                                    <Stat
+                                        label="Daylight energy bias"
+                                        value={
+                                            resource.data.metrics
+                                                ?.daily_bias_mwh
+                                        }
+                                        unit="MWh"
+                                    />
+                                </div>
+                                <details>
+                                    <summary>
+                                        Additional metrics & interpretation
+                                    </summary>
+                                    <div className="stats">
+                                        <Stat
+                                            label="Baseline daylight energy error"
+                                            value={
+                                                resource.data.baseline_metrics
+                                                    ?.daily_mae_mwh
+                                            }
+                                            unit="MWh"
+                                        />
+                                        <Stat
+                                            label="Generating-interval error"
+                                            value={
+                                                resource.data.metrics
+                                                    ?.source_positive_mae_mw
+                                            }
+                                            unit="MW"
+                                        />
+                                    </div>
+                                    <p className="fine">
+                                        Bias is predicted minus measured. Daily
+                                        energy error is mean absolute error.
+                                        Generating-interval error is mean
+                                        absolute error in intervals with
+                                        positive reference input. Uncertainty is
+                                        not estimated.
+                                    </p>
+                                </details>
+                            </>
+                        )}
+                        {historical && matched.length > 0 && (
                             <p className="fine">
-                                Bias is predicted minus measured. Daily energy
-                                error is mean absolute error.
-                                Generating-interval error is mean absolute error
-                                in intervals with positive forecast input.
-                                Uncertainty is not estimated.
+                                Current configuration · factor 1 · retrospective
+                                model comparison.
+                                {matched.some(
+                                    (day) => day.provisional_production,
+                                ) &&
+                                    " Includes provisional reported production; meter boundary is unverified."}
                             </p>
-                        </details>
+                        )}
                         {!resource.data.metrics && (
                             <Notice>
-                                No matched days are available for this range.
+                                No complete production and reference pairs are
+                                available for this range. Select another range
+                                or check saved production data.
                             </Notice>
                         )}
-                        <details>
-                            <summary>
-                                Daily comparison ({resource.data.requested_days}{" "}
-                                days)
-                            </summary>
-                            <ScrollRegion label="Daily forecast comparison">
-                                <table>
-                                    <caption>
-                                        Daylight replay:{" "}
-                                        {resource.data.start_date} to{" "}
-                                        {resource.data.end_date}
-                                    </caption>
-                                    <thead>
-                                        <tr>
-                                            <th>Date</th>
-                                            <th>Status</th>
-                                            <th>Measured (MWh)</th>
-                                            <th>Predicted (MWh)</th>
-                                            <th>Error (MWh)</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {resource.data.days.map((day) => (
-                                            <tr key={day.date}>
-                                                <td>{day.date}</td>
-                                                <td>
-                                                    {day.status === "matched"
-                                                        ? "Matched"
-                                                        : (day.reason &&
-                                                              (reasons[
-                                                                  day.reason
-                                                              ] ??
-                                                                  day.reason.replaceAll(
-                                                                      "_",
-                                                                      " ",
-                                                                  ))) ||
-                                                          "Missing"}
-                                                </td>
-                                                <td>
-                                                    {format(
-                                                        day.measured_energy_mwh,
-                                                    )}
-                                                </td>
-                                                <td>
-                                                    {format(
-                                                        day.predicted_energy_mwh,
-                                                    )}
-                                                </td>
-                                                <td>{format(day.error_mwh)}</td>
+                        {matched.length > 0 && (
+                            <details open>
+                                <summary>
+                                    Daily comparison ({matched.length} days)
+                                </summary>
+                                <ScrollRegion label="Daily forecast comparison">
+                                    <table>
+                                        <caption>
+                                            {historical
+                                                ? "Historical daylight model"
+                                                : "Daylight replay"}
+                                            : {resource.data.start_date} to{" "}
+                                            {resource.data.end_date}
+                                        </caption>
+                                        <thead>
+                                            <tr>
+                                                <th>Date</th>
+                                                <th>Status</th>
+                                                <th>
+                                                    {historical
+                                                        ? "Measured / reported (MWh)"
+                                                        : "Measured (MWh)"}
+                                                </th>
+                                                <th>
+                                                    {historical
+                                                        ? "Model (MWh)"
+                                                        : "Predicted (MWh)"}
+                                                </th>
+                                                <th>Error (MWh)</th>
                                             </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </ScrollRegion>
-                        </details>
+                                        </thead>
+                                        <tbody>
+                                            {matched.map((day) => (
+                                                <tr key={day.date}>
+                                                    <td>{day.date}</td>
+                                                    <td>
+                                                        {day.provisional_production
+                                                            ? "Provisional production"
+                                                            : "Matched"}
+                                                    </td>
+                                                    <td>
+                                                        {format(
+                                                            day.measured_energy_mwh,
+                                                        )}
+                                                    </td>
+                                                    <td>
+                                                        {format(
+                                                            day.predicted_energy_mwh,
+                                                        )}
+                                                    </td>
+                                                    <td>
+                                                        {format(day.error_mwh)}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </ScrollRegion>
+                            </details>
+                        )}
+                        {missingReasons.size > 0 && (
+                            <details>
+                                <summary>
+                                    Unavailable dates (
+                                    {resource.data.requested_days -
+                                        resource.data.matched_days}
+                                    )
+                                </summary>
+                                <ul>
+                                    {[...missingReasons].map(
+                                        ([reason, count]) => (
+                                            <li key={reason}>
+                                                {reason}: {count}{" "}
+                                                {count === 1 ? "day" : "days"}
+                                            </li>
+                                        ),
+                                    )}
+                                </ul>
+                            </details>
+                        )}
                     </>
                 )
             )}

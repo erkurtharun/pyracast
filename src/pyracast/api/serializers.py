@@ -3,7 +3,7 @@ from typing import Any, cast
 from rest_framework import serializers
 
 from pyracast.accounts.models import Tenant
-from pyracast.regions.models import Region
+from pyracast.regions.models import Region, RegionLocationChangeRequest
 
 
 class InputSerializer(serializers.Serializer[dict[str, Any]]):
@@ -41,6 +41,35 @@ class RegionOutput(serializers.ModelSerializer[Region]):
             "surface",
             "revision",
             "status",
+        )
+        read_only_fields = fields
+
+
+class RegionRenameInput(InputSerializer):
+    name = serializers.CharField(max_length=200)
+
+
+class LocationChangeInput(InputSerializer):
+    expected_revision = serializers.IntegerField(min_value=1)
+    latitude = serializers.FloatField(min_value=-90, max_value=90)
+    longitude = serializers.FloatField(min_value=-180, max_value=180)
+    timezone = serializers.CharField(max_length=100)
+    reason = serializers.CharField(max_length=1000, required=False, default="", allow_blank=True)
+
+
+class LocationChangeOutput(serializers.ModelSerializer[RegionLocationChangeRequest]):
+    class Meta:
+        model = RegionLocationChangeRequest
+        fields = (
+            "id",
+            "base_revision",
+            "latitude",
+            "longitude",
+            "timezone",
+            "reason",
+            "status",
+            "created_at",
+            "reviewed_at",
         )
         read_only_fields = fields
 

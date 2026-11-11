@@ -4,102 +4,6 @@
  */
 
 export interface paths {
-    "/api/platform/accounts/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["platform_accounts_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/platform/accounts/{account_id}/rotate-secret/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["platform_accounts_rotate_secret_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/platform/bindings/{binding_id}/validate/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["platform_bindings_validate_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/platform/regions/{region_id}/approve/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["platform_regions_approve_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/platform/regions/{region_id}/bindings/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["platform_regions_bindings_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/platform/regions/{region_id}/transition/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["platform_regions_transition_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/session/": {
         parameters: {
             query?: never;
@@ -193,7 +97,7 @@ export interface paths {
         delete: operations["tenants_regions_destroy"];
         options?: never;
         head?: never;
-        patch?: never;
+        patch: operations["tenants_regions_partial_update"];
         trace?: never;
     };
     "/api/tenants/{tenant_id}/regions/{region_id}/collection-schedule/": {
@@ -222,6 +126,22 @@ export interface paths {
         get: operations["tenants_regions_forecast_retrieve"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tenants/{tenant_id}/regions/{region_id}/location-change-requests/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["tenants_regions_location_change_requests_list"];
+        put?: never;
+        post: operations["tenants_regions_location_change_requests_create"];
         delete?: never;
         options?: never;
         head?: never;
@@ -568,15 +488,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        AccountInput: {
-            provider: components["schemas"]["ProviderEnum"];
-            external_account_id: string;
-            secret_reference: string;
-            /** @default 10 */
-            daily_quota: number;
-            /** @default  */
-            authorization_reference: string;
-        };
         ActivationOutput: {
             readonly id: number;
             configuration_id: number;
@@ -584,39 +495,6 @@ export interface components {
             actor_id: number;
             /** Format: date-time */
             readonly created_at: string;
-        };
-        ApprovalInput: {
-            binding_id: number;
-        };
-        BindingInput: {
-            provider_account_id: number;
-            site_id: string;
-            /** Format: double */
-            capacity_kw: number;
-            /** @default ac */
-            power_basis: components["schemas"]["PowerBasisEnum"];
-            /** @default ac */
-            capacity_basis: components["schemas"]["PowerBasisEnum"];
-            capacity_semantics_verified: boolean;
-            /**
-             * Format: double
-             * @default 0
-             */
-            tilt_degrees: number;
-            /**
-             * Format: double
-             * @default 180
-             */
-            azimuth_degrees: number;
-            /**
-             * Format: double
-             * @default 0
-             */
-            losses_percent: number;
-            /** Format: date */
-            installation_date: string;
-            /** @default  */
-            settings_verification_reference: string;
         };
         CalibrationInput: {
             configuration_id: number;
@@ -719,6 +597,12 @@ export interface components {
             history_retry_minutes: number;
             max_forecast_times: number;
         };
+        /**
+         * @description * `archived_forecast` - archived_forecast
+         *     * `historical_model` - historical_model
+         * @enum {string}
+         */
+        ComparisonEnum: "archived_forecast" | "historical_model";
         ConfigurationOutput: {
             readonly id: number;
             binding_id: number;
@@ -866,9 +750,6 @@ export interface components {
          * @enum {string}
          */
         ForecastSourceKindEnum: "forecast" | "estimated_actuals";
-        IdentifierOutput: {
-            id: number;
-        };
         IncidentInput: {
             kind: components["schemas"]["KindEnum"];
             title: string;
@@ -934,6 +815,31 @@ export interface components {
          * @enum {string}
          */
         KindEnum: "inverter" | "panels" | "grid" | "other" | "multiple";
+        LocationChangeInput: {
+            expected_revision: number;
+            /** Format: double */
+            latitude: number;
+            /** Format: double */
+            longitude: number;
+            timezone: string;
+            /** @default  */
+            reason: string;
+        };
+        LocationChangeOutput: {
+            readonly id: number;
+            readonly base_revision: number;
+            /** Format: double */
+            readonly latitude: number;
+            /** Format: double */
+            readonly longitude: number;
+            readonly timezone: string;
+            readonly reason: string;
+            readonly status: string;
+            /** Format: date-time */
+            readonly created_at: string;
+            /** Format: date-time */
+            readonly reviewed_at: string | null;
+        };
         LoginInput: {
             username: string;
             password: string;
@@ -1036,6 +942,21 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["IncidentOutput"][];
         };
+        PaginatedLocationChangeOutputList: {
+            /** @example 123 */
+            count: number;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?page=4
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?page=2
+             */
+            previous?: string | null;
+            results: components["schemas"]["LocationChangeOutput"][];
+        };
         PaginatedObservationOutputList: {
             /** @example 123 */
             count: number;
@@ -1130,6 +1051,9 @@ export interface components {
             /** Format: email */
             email?: string;
         };
+        PatchedRegionRenameInput: {
+            name?: string;
+        };
         PerformanceDay: {
             /** Format: date */
             date: string;
@@ -1153,6 +1077,10 @@ export interface components {
             error_mwh: number | null;
             manual_observation_ids: number[];
             settlement_snapshot_ids: number[];
+            provisional_snapshot_ids: number[];
+            source_kind: string | null;
+            historical_configuration_assumed: boolean;
+            provisional_production: boolean;
         };
         /**
          * @description * `matched` - matched
@@ -1184,6 +1112,10 @@ export interface components {
             evaluated_at: string;
             evaluation_kind: string;
             selection_policy: string;
+            comparison: components["schemas"]["ComparisonEnum"];
+            measurement_policy: string;
+            /** Format: date-time */
+            configuration_created_at: string | null;
             measurement_basis: string | null;
             metric_scope: components["schemas"]["MetricScopeEnum"];
             daylight_policy: string | null;
@@ -1248,12 +1180,6 @@ export interface components {
             /** Format: date-time */
             readonly created_at: string;
         };
-        /**
-         * @description * `ac` - ac
-         *     * `dc` - dc
-         * @enum {string}
-         */
-        PowerBasisEnum: "ac" | "dc";
         ProductionDayOutput: {
             /** Format: date */
             date: string;
@@ -1296,12 +1222,6 @@ export interface components {
             can_enter: boolean;
             unavailable_reason: string | null;
         };
-        /**
-         * @description * `fixture` - fixture
-         *     * `solcast` - solcast
-         * @enum {string}
-         */
-        ProviderEnum: "fixture" | "solcast";
         RegionInput: {
             name: string;
             /** Format: double */
@@ -1321,6 +1241,9 @@ export interface components {
             readonly surface: string;
             readonly revision: number;
             readonly status: string;
+        };
+        RegionRenameInput: {
+            name: string;
         };
         ReminderDeliveryOutput: {
             id: number;
@@ -1369,9 +1292,6 @@ export interface components {
         RevisionInput: {
             expected_revision: number;
         };
-        RotateSecretInput: {
-            secret_reference: string;
-        };
         SessionOutput: {
             user: components["schemas"]["SessionUserOutput"] | null;
             csrf_token: string;
@@ -1391,15 +1311,6 @@ export interface components {
             readonly id: number;
             readonly name: string;
         };
-        TransitionInput: {
-            status: components["schemas"]["TransitionInputStatusEnum"];
-        };
-        /**
-         * @description * `rejected` - rejected
-         *     * `suspended` - suspended
-         * @enum {string}
-         */
-        TransitionInputStatusEnum: "rejected" | "suspended";
         TrashedPlantOutput: {
             readonly id: number;
             readonly name: string;
@@ -1443,160 +1354,6 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    platform_accounts_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AccountInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["AccountInput"];
-                "multipart/form-data": components["schemas"]["AccountInput"];
-            };
-        };
-        responses: {
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IdentifierOutput"];
-                };
-            };
-        };
-    };
-    platform_accounts_rotate_secret_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                account_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RotateSecretInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["RotateSecretInput"];
-                "multipart/form-data": components["schemas"]["RotateSecretInput"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IdentifierOutput"];
-                };
-            };
-        };
-    };
-    platform_bindings_validate_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                binding_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IdentifierOutput"];
-                };
-            };
-        };
-    };
-    platform_regions_approve_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                region_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ApprovalInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["ApprovalInput"];
-                "multipart/form-data": components["schemas"]["ApprovalInput"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IdentifierOutput"];
-                };
-            };
-        };
-    };
-    platform_regions_bindings_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                region_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BindingInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["BindingInput"];
-                "multipart/form-data": components["schemas"]["BindingInput"];
-            };
-        };
-        responses: {
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["IdentifierOutput"];
-                };
-            };
-        };
-    };
-    platform_regions_transition_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                region_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TransitionInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["TransitionInput"];
-                "multipart/form-data": components["schemas"]["TransitionInput"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RegionOutput"];
-                };
-            };
-        };
-    };
     session_retrieve: {
         parameters: {
             query?: never;
@@ -1792,9 +1549,9 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RegionInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["RegionInput"];
-                "multipart/form-data": components["schemas"]["RegionInput"];
+                "application/json": components["schemas"]["RegionRenameInput"];
+                "application/x-www-form-urlencoded": components["schemas"]["RegionRenameInput"];
+                "multipart/form-data": components["schemas"]["RegionRenameInput"];
             };
         };
         responses: {
@@ -1826,6 +1583,34 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    tenants_regions_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedRegionRenameInput"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedRegionRenameInput"];
+                "multipart/form-data": components["schemas"]["PatchedRegionRenameInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RegionOutput"];
+                };
             };
         };
     };
@@ -1905,6 +1690,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ForecastOutput"];
+                };
+            };
+        };
+    };
+    tenants_regions_location_change_requests_list: {
+        parameters: {
+            query?: {
+                /** @description A page number within the paginated result set. */
+                page?: number;
+            };
+            header?: never;
+            path: {
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedLocationChangeOutputList"];
+                };
+            };
+        };
+    };
+    tenants_regions_location_change_requests_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LocationChangeInput"];
+                "application/x-www-form-urlencoded": components["schemas"]["LocationChangeInput"];
+                "multipart/form-data": components["schemas"]["LocationChangeInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LocationChangeOutput"];
                 };
             };
         };
@@ -2402,6 +2240,11 @@ export interface operations {
     tenants_regions_plants_performance_retrieve: {
         parameters: {
             query?: {
+                /**
+                 * @description * `archived_forecast` - archived_forecast
+                 *     * `historical_model` - historical_model
+                 */
+                comparison?: "archived_forecast" | "historical_model";
                 daylight_only?: boolean;
                 end_date?: string;
                 start_date?: string;

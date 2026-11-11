@@ -452,7 +452,7 @@ test("a customer manages an approved region through the real API", async ({
         .getByRole("button", { name: "Generation forecast", exact: true })
         .click();
     await expect(
-        page.getByRole("heading", { name: "Forecast performance" }),
+        page.getByRole("heading", { name: "Production comparison" }),
     ).toBeVisible();
     await expect(page.getByText("Loading performance…")).toHaveCount(0);
     await page.screenshot({

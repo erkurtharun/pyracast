@@ -19,21 +19,25 @@ import { MoveToRecycleBin } from "./recycle-bin";
 import { Reminders } from "./reminders";
 import { CollectionSchedule } from "./collection-schedule";
 import { DataSourceControl, localDay, type DataSource } from "./data-source";
+import { RegionSettings } from "./region-settings";
 export function RegionWorkspace({
     region,
     tenant,
     token,
     onBack,
     onDeleted,
+    onUpdated,
 }: {
     region: Region;
     tenant: number;
     token: string;
     onBack: () => void;
     onDeleted: () => void;
+    onUpdated: (region: Region) => void;
 }) {
     const [tab, setTab] = useState("forecast"),
         [plantOpen, setPlantOpen] = useState(false),
+        [editing, setEditing] = useState(false),
         [date, setDate] = useState(() =>
             new Date().toLocaleDateString("en-CA", {
                 timeZone: region.timezone,
@@ -71,6 +75,12 @@ export function RegionWorkspace({
                         </div>
                         <div className="button-group">
                             <Tag>{region.status}</Tag>
+                            <button
+                                className="button secondary"
+                                onClick={() => setEditing(!editing)}
+                            >
+                                {editing ? "Close editor" : "Edit region"}
+                            </button>
                             <MoveToRecycleBin
                                 kind="region"
                                 name={region.name}
@@ -80,6 +90,17 @@ export function RegionWorkspace({
                             />
                         </div>
                     </div>
+                    {editing && (
+                        <RegionSettings
+                            region={region}
+                            base={base}
+                            token={token}
+                            onUpdated={(updated) => {
+                                onUpdated(updated);
+                                setEditing(false);
+                            }}
+                        />
+                    )}
                     <nav className="tabs" aria-label="Region sections">
                         {[
                             ["forecast", "Regional forecast"],

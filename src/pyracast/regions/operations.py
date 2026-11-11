@@ -5,11 +5,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone as django_timezone
 
 from pyracast.accounts.operations import require_admin, require_member
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.models import CollectionJob
-from pyracast.regions.models import AuditEvent, Region
+from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest
 
 
 def validate_location(latitude: float, longitude: float, timezone: str) -> None:
@@ -51,30 +52,119 @@ def update_region(
     tenant_id: int,
     *,
     name: str,
-    latitude: float,
-    longitude: float,
-    timezone: str,
 ) -> Region:
     require_member(actor, tenant_id)
-    validate_location(latitude, longitude, timezone)
     if not name.strip() or len(name) > 200:
         raise ValidationError("A region name of at most 200 characters is required.")
     with transaction.atomic():
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
+        if region.name == name.strip():
+            return region
         region.name = name.strip()
-        region.latitude = latitude
-        region.longitude = longitude
-        region.timezone = timezone
-        region.revision += 1
-        region.status = "pending"
-        region.approved_binding = None
-        region.save()
+        region.save(update_fields=("name",))
         AuditEvent.objects.create(
-            actor=actor, region=region, action="region_revised", revision=region.revision
+            actor=actor, region=region, action="region_renamed", revision=region.revision
         )
     return region
+
+
+def request_location_change(
+    actor: User,
+    region_id: int,
+    tenant_id: int,
+    *,
+    expected_revision: int,
+    latitude: float,
+    longitude: float,
+    timezone: str,
+    reason: str = "",
+) -> RegionLocationChangeRequest:
+    require_member(actor, tenant_id)
+    validate_location(latitude, longitude, timezone)
+    if len(reason) > 1000:
+        raise ValidationError("A reason of at most 1000 characters is required.")
+    with transaction.atomic():
+        region = Region.objects.select_for_update().get(
+            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
+        )
+        if region.revision != expected_revision:
+            raise ValidationError("region_revision_changed")
+        desired = (latitude, longitude, timezone, reason.strip())
+        pending = RegionLocationChangeRequest.objects.filter(
+            region=region, status="pending"
+        ).first()
+        if pending is not None:
+            if (
+                pending.base_revision == expected_revision
+                and (pending.latitude, pending.longitude, pending.timezone, pending.reason)
+                == desired
+            ):
+                return pending
+            raise ValidationError("location_change_already_pending")
+        if (region.latitude, region.longitude, region.timezone) == desired[:3]:
+            raise ValidationError("location_unchanged")
+        change = RegionLocationChangeRequest.objects.create(
+            region=region,
+            requested_by=actor,
+            base_revision=region.revision,
+            latitude=latitude,
+            longitude=longitude,
+            timezone=timezone,
+            reason=reason.strip(),
+        )
+        AuditEvent.objects.create(
+            actor=actor, region=region, action="location_change_requested", revision=region.revision
+        )
+        return change
+
+
+def review_location_change(
+    actor: User, request_id: int, *, approve: bool
+) -> RegionLocationChangeRequest:
+    require_admin(actor)
+    with transaction.atomic():
+        change = RegionLocationChangeRequest.objects.get(pk=request_id)
+        region = Region.objects.select_for_update().get(
+            pk=change.region_id, deleted_at__isnull=True
+        )
+        change.refresh_from_db()
+        status = "approved" if approve else "rejected"
+        if change.status == status:
+            return change
+        if change.status != "pending":
+            raise ValidationError("location_change_already_reviewed")
+        if approve:
+            if change.base_revision != region.revision:
+                raise ValidationError("region_revision_changed")
+            region.latitude = change.latitude
+            region.longitude = change.longitude
+            region.timezone = change.timezone
+            region.revision += 1
+            region.status = "pending"
+            region.approved_binding = None
+            region.save(
+                update_fields=(
+                    "latitude",
+                    "longitude",
+                    "timezone",
+                    "revision",
+                    "status",
+                    "approved_binding",
+                )
+            )
+        change.status = status
+        change.reviewed_by = actor
+        change.reviewed_at = django_timezone.now()
+        change.save(update_fields=("status", "reviewed_by", "reviewed_at"))
+        AuditEvent.objects.create(
+            actor=actor,
+            region=region,
+            action="location_change_approved" if approve else "location_change_rejected",
+            revision=region.revision,
+        )
+        return change
 
 
 def configure_binding(

@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
@@ -6,10 +6,11 @@ from django.core.exceptions import ValidationError
 from django.db.models import Q
 from django.utils import timezone
 
+from pyracast.forecasts.history import HISTORY_SELECTION_POLICY, select_actual_snapshot
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecasting import calibration_at, power_intervals, power_limit
-from pyracast.plants.measurement_policy import LEGACY_MEASUREMENT_POLICY
+from pyracast.plants.measurement_policy import LEGACY_MEASUREMENT_POLICY, MEASUREMENT_POLICY
 from pyracast.plants.measurements import Measurement, select_measurements
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.plants.numerics import (
@@ -80,6 +81,8 @@ def _day(
     day: date,
     observations: list[Measurement],
     required_windows: RequiredWindows | None,
+    comparison: str,
+    cutoff: datetime,
 ) -> tuple[dict[str, Any], tuple[CalibrationSample, ...], tuple[CalibrationSample, ...]]:
     result: dict[str, Any] = {
         "date": day,
@@ -96,17 +99,32 @@ def _day(
         "error_mwh": None,
         "manual_observation_ids": [],
         "settlement_snapshot_ids": [],
+        "provisional_snapshot_ids": [],
+        "source_kind": None,
+        "historical_configuration_assumed": False,
+        "provisional_production": False,
     }
     zone = configuration.binding.timezone
     start, end = local_day_bounds(day, zone)
-    if configuration.created_at >= start:
+    historical_model = comparison == "historical_model"
+    if not historical_model and configuration.created_at >= start:
         result["reason"] = "configuration_not_available"
         return result, (), ()
-    snapshot = _snapshot(configuration, day)
+    snapshot = (
+        select_actual_snapshot(configuration.binding, day, cutoff)
+        if historical_model
+        else _snapshot(configuration, day)
+    )
     if snapshot is None:
-        result["reason"] = "forecast_not_available"
+        result["reason"] = (
+            "estimated_actuals_not_available" if historical_model else "forecast_not_available"
+        )
         return result, (), ()
-    calibration = calibration_at(configuration, start - timedelta(microseconds=1))
+    calibration = (
+        None
+        if historical_model
+        else calibration_at(configuration, start - timedelta(microseconds=1))
+    )
     factor = cast(float, calibration.factor) if calibration is not None else 1.0
     result.update(
         snapshot_id=snapshot.pk,
@@ -114,6 +132,8 @@ def _day(
         available_at=snapshot.available_at,
         calibration_id=calibration.pk if calibration else None,
         factor=factor,
+        source_kind=snapshot.source_kind,
+        historical_configuration_assumed=historical_model and configuration.created_at >= start,
     )
     readings = [row for row in observations if row.starts_at >= start and row.ends_at <= end]
     try:
@@ -154,8 +174,20 @@ def _day(
             {row.pk for row in used_readings if row.snapshot is None and row.pk is not None}
         ),
         settlement_snapshot_ids=sorted(
-            {row.snapshot.pk for row in used_readings if row.snapshot is not None}
+            {
+                row.snapshot.pk
+                for row in used_readings
+                if row.snapshot is not None and row.source == "settlement_injection"
+            }
         ),
+        provisional_snapshot_ids=sorted(
+            {
+                row.snapshot.pk
+                for row in used_readings
+                if row.snapshot is not None and row.source == "realtime_generation"
+            }
+        ),
+        provisional_production=any(row.source == "realtime_generation" for row in used_readings),
     )
     return result, selected, baseline
 
@@ -166,7 +198,10 @@ def forecast_performance(
     start_date: date | None = None,
     end_date: date | None = None,
     daylight_only: bool = False,
+    comparison: str = "archived_forecast",
 ) -> dict[str, Any]:
+    if comparison not in ("archived_forecast", "historical_model"):
+        raise ValidationError("Unknown comparison mode.")
     configuration = (
         PlantConfiguration.objects.select_related("binding").get(
             pk=plant.current_configuration_id, plant=plant
@@ -190,8 +225,11 @@ def forecast_performance(
         raise ValidationError("Use 1 to 90 completed local days within the past year.")
     start, _ = local_day_bounds(start_date, zone)
     _, end = local_day_bounds(end_date, zone)
+    measurement_policy = (
+        MEASUREMENT_POLICY if comparison == "historical_model" else LEGACY_MEASUREMENT_POLICY
+    )
     observations = (
-        select_measurements(configuration, start, end, now, policy=LEGACY_MEASUREMENT_POLICY)[0]
+        select_measurements(configuration, start, end, now, policy=measurement_policy)[0]
         if configuration
         else []
     )
@@ -210,7 +248,12 @@ def forecast_performance(
     if configuration is not None:
         for offset in range((end_date - start_date).days + 1):
             day, chosen, reference = _day(
-                configuration, start_date + timedelta(days=offset), observations, required_windows
+                configuration,
+                start_date + timedelta(days=offset),
+                observations,
+                required_windows,
+                comparison,
+                now,
             )
             days.append(day)
             selected += chosen
@@ -218,7 +261,7 @@ def forecast_performance(
     evaluation = evaluate_samples(
         selected, timezone=zone, limit_mw=None, required_windows=required_windows
     )
-    comparison = evaluate_samples(
+    baseline_evaluation = evaluate_samples(
         baseline, timezone=zone, limit_mw=None, required_windows=required_windows
     )
     return {
@@ -228,15 +271,22 @@ def forecast_performance(
         "start_date": start_date,
         "end_date": end_date,
         "evaluated_at": now,
-        "evaluation_kind": "historical_input_replay",
-        "selection_policy": SELECTION_POLICY,
+        "evaluation_kind": "retrospective_model_comparison"
+        if comparison == "historical_model"
+        else "historical_input_replay",
+        "comparison": comparison,
+        "selection_policy": HISTORY_SELECTION_POLICY
+        if comparison == "historical_model"
+        else SELECTION_POLICY,
+        "measurement_policy": measurement_policy,
+        "configuration_created_at": configuration.created_at if configuration else None,
         "measurement_basis": configuration.measurement_basis if configuration else None,
         "metric_scope": "daylight_intervals" if daylight_only else "full_day",
         "daylight_policy": DAYLIGHT_POLICY if daylight_only else None,
         "matched_days": evaluation["valid_days"],
         "requested_days": (end_date - start_date).days + 1,
         "metrics": evaluation["metrics"],
-        "baseline_metrics": comparison["metrics"],
+        "baseline_metrics": baseline_evaluation["metrics"],
         "days": days,
         "uncertainty": "not_estimated",
     }

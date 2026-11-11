@@ -172,7 +172,9 @@ function ScheduleEditor({
                     {times.map((time, index) => (
                         <div className="button-group" key={index}>
                             <label className="field">
-                                Time {index + 1}
+                                <span className="sr-only">
+                                    Time {index + 1}
+                                </span>
                                 <input
                                     type="time"
                                     aria-label={`Collection time ${index + 1} (${data.timezone})`}
@@ -225,9 +227,9 @@ function ScheduleEditor({
                             Historical estimate retries preserve requests for
                             scheduled forecasts. Validation and retries can use
                             additional requests. Email reminders do not request
-                            provider data. Solcast historical estimates are
-                            modeled; EPİAŞ reported production and settlement
-                            injection are separate records.
+                            provider data. Historical estimates are modeled;
+                            EPİAŞ reported production and settlement injection
+                            are separate records.
                         </p>
                     </details>
                 </ActionForm>

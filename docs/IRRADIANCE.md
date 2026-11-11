@@ -246,6 +246,18 @@ identities, excluded-day reasons and aggregate MAE/bias. Missing days cannot bec
 zero errors. This diagnostic does not train or activate a model and does not produce
 confidence intervals from a short or selectively observed history.
 
+The separate `historical_model` comparison uses saved estimated actuals available
+at evaluation time and the currently declared configuration with factor 1. It may
+project dates before that configuration existed, marking the retrospective
+assumption; it never backdates a configuration or uses an active calibration.
+Manual measurements take priority over settlement injection and provisional
+reported production under the current measurement-selection policy. Preserve
+source snapshot IDs and provisional labels, and retain the same daylight,
+missingness and native clipping rules. This diagnostic compares historical model
+output with production; it is not forecast-accuracy evaluation or calibration
+validation. The frontend opens this mode; the API's default archived replay
+retains the preceding contract.
+
 ## Historical irradiance and measured performance
 
 EPİAŞ `realtime-generation` is archived as provider-reported hourly production,

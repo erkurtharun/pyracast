@@ -2,6 +2,8 @@ import type { components } from "./schema";
 export type Session = components["schemas"]["SessionOutput"];
 export type Tenant = components["schemas"]["TenantOutput"];
 export type Region = components["schemas"]["RegionOutput"];
+export type LocationChangeRequest =
+    components["schemas"]["LocationChangeOutput"];
 export type Plant = components["schemas"]["PlantOutput"];
 export type Calibration = components["schemas"]["CalibrationOutput"];
 type RegionalForecast = components["schemas"]["ForecastOutput"];

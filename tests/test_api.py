@@ -113,10 +113,10 @@ def test_tenant_isolation_and_read_only_ownership(customer: tuple[Client, User, 
         == 400
     )
     assert (
-        client.put(f"{base}{region_id}/", region_input(), content_type="application/json").json()[
-            "revision"
-        ]
-        == 2
+        client.put(
+            f"{base}{region_id}/", {"name": "Renamed"}, content_type="application/json"
+        ).json()["revision"]
+        == 1
     )
     assert (
         client.post(
@@ -176,7 +176,7 @@ def test_fixture_workflow_and_freshness(customer: tuple[Client, User, Tenant]) -
     assert admin_client.get("/admin/regions/region/").status_code == 200
     schema = client.get("/api/schema/?format=json")
     assert schema.status_code == 200
-    assert "/api/platform/accounts/" in schema.json()["paths"]
+    assert "/api/platform/accounts/" not in schema.json()["paths"]
 
 
 def test_mfa_and_admin_mutation_boundaries(customer: tuple[Client, User, Tenant]) -> None:
