@@ -319,6 +319,44 @@ def test_database_rejects_duplicate_canonical_account_and_membership() -> None:
         )
 
 
+def test_megawatt_reference_keeps_the_previous_capacity_revision() -> None:
+    system = make_system(approved=True)
+    replacement = configure_binding(
+        system.admin,
+        system.region.pk,
+        provider_account_id=system.account.pk,
+        site_id=system.binding.site_id,
+        capacity_kw=1000,
+        dc_capacity_kw=1000,
+        capacity_semantics_verified=True,
+    )
+    assert replacement.capacity_kw == replacement.dc_capacity_kw == 1000
+    assert replacement.tilt_degrees == replacement.azimuth_degrees == 0
+    assert replacement.losses_percent == 0
+    system.region.refresh_from_db()
+    assert replacement.region_revision == system.region.revision == 2
+    assert system.region.status == "pending"
+    assert system.region.approved_binding_id is None
+    system.binding.refresh_from_db()
+    assert system.binding.capacity_kw == 1
+    assert system.binding.dc_capacity_kw is None
+
+
+@pytest.mark.parametrize("dc_capacity_kw", [0, -1, float("nan"), float("inf"), True])
+def test_invalid_reference_dc_capacity_is_rejected(dc_capacity_kw: float) -> None:
+    system = make_system()
+    with pytest.raises(ValidationError, match="DC capacity"):
+        configure_binding(
+            system.admin,
+            system.region.pk,
+            provider_account_id=system.account.pk,
+            site_id="reference",
+            capacity_kw=1000,
+            dc_capacity_kw=dc_capacity_kw,
+            capacity_semantics_verified=True,
+        )
+
+
 def test_reconfiguring_a_binding_creates_new_revision_requiring_approval() -> None:
     system = make_system(approved=True)
     replacement = configure_binding(

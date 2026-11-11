@@ -32,11 +32,12 @@ class SiteBinding(models.Model):
     region_revision = models.PositiveIntegerField()
     site_id = models.CharField(max_length=200)
     capacity_kw = models.FloatField()
+    dc_capacity_kw = models.FloatField(null=True, blank=True)
     power_basis = models.CharField(max_length=2, default="ac")
     capacity_basis = models.CharField(max_length=2, default="ac")
     capacity_semantics_verified = models.BooleanField(default=False)
     tilt_degrees = models.FloatField(default=0)
-    azimuth_degrees = models.FloatField(default=180)
+    azimuth_degrees = models.FloatField(default=0)
     losses_percent = models.FloatField(default=0)
     installation_date = models.DateField(null=True)
     settings_verification_reference = models.CharField(max_length=500, default="")
@@ -51,5 +52,10 @@ class SiteBinding(models.Model):
     class Meta:
         constraints = (
             models.CheckConstraint(condition=models.Q(capacity_kw__gt=0), name="binding_capacity"),
+            models.CheckConstraint(
+                condition=models.Q(dc_capacity_kw__isnull=True)
+                | models.Q(dc_capacity_kw__gt=0, dc_capacity_kw__lt=float("inf")),
+                name="binding_dc_capacity",
+            ),
             models.CheckConstraint(condition=models.Q(tilt_degrees=0), name="horizontal_binding"),
         )

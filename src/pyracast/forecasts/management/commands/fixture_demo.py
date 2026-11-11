@@ -48,7 +48,8 @@ class Command(BaseCommand):
             region.pk,
             provider_account_id=account.pk,
             site_id="synthetic",
-            capacity_kw=1,
+            capacity_kw=1000,
+            dc_capacity_kw=1000,
             capacity_semantics_verified=True,
         )
         adapter = FixtureProvider()

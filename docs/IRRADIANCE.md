@@ -9,6 +9,7 @@ The reference for reconstruction is Solcast GHI from the same forecast issue, lo
 ## Provider inputs
 
 - Start with one authorized horizontal reference site per region: `tilt=0`. Record AC/DC capacity, azimuth, losses, installation date, coordinates, timezone and available snow/shading behavior. Confirm the saved settings and actual response schema. Do not assume 1 kW means 1 m² or that all losses can be disabled.
+- The current case reference uses 1000 kW AC and 1000 kW DC, `tilt=0`, `azimuth=0` and a 100% efficiency factor (`losses_percent=0`). Store the verified AC normalization capacity as `capacity_kw` and module nameplate as `dc_capacity_kw`; unknown historical DC capacity remains null. Changing provider settings requires a new binding revision, validation and approval. Preserve older capacities and snapshots; plant configurations must explicitly adopt the new binding before collection and calibration resume for them.
 - Hobby endpoints: `/rooftop_sites/{resource_id}/forecasts` and `/rooftop_sites/{resource_id}/estimated_actuals`. The current public contract documents 30-minute intervals, up to 10 requests per UTC day per account, two nearby arrays, forecasts through 14 days and estimated actuals for seven days. Represent entitlement explicitly and verify it for each authorized account.
 - Archive each acquired forecast vintage. Estimated actuals are not archived forecasts. Retain raw payload, collection time, provider issue time when available, interval bounds, units and configuration revision. Never invent an unavailable issue time.
 - Normalize source-specific units and timestamp conventions at the adapter boundary. Confirm central/quantile semantics rather than assuming the central value is P50 or an expectation.
@@ -22,6 +23,8 @@ Implement a replaceable estimator with typed inputs and outputs containing value
 3. Otherwise compare a small regularized/appropriately monotone calibration against the baseline using matched Solcast labels. Fit offline and deploy versioned artifacts; do not train inside requests or automatically replace a model after every refit.
 
 Solcast publicly describes an empirical AC model involving irradiance and air temperature. A PVWatts/NOCT/SAPM surrogate is not its verified inverse. Unknown losses, clipping and time aggregation can prevent exact recovery. Temperature or wind features must be available at forecast issuance and improve held-out results before adoption.
+
+For the 1000 kW AC reference, 600 kW of interval-mean source power gives a 600 W/m² proxy; a half-hour contributes 0.3 kWh/m². Continue dividing by each source binding's recorded capacity, including older 1 kW revisions. The 100% efficiency factor does not disable the empirical temperature response or dynamic snow losses.
 
 Preserve these limits:
 

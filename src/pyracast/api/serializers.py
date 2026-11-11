@@ -90,11 +90,12 @@ class BindingInput(InputSerializer):
     provider_account_id = serializers.IntegerField(min_value=1)
     site_id = serializers.CharField(max_length=200)
     capacity_kw = serializers.FloatField(min_value=0)
+    dc_capacity_kw = serializers.FloatField(min_value=0, allow_null=True, default=None)
     power_basis = serializers.ChoiceField(choices=("ac", "dc"), default="ac")
     capacity_basis = serializers.ChoiceField(choices=("ac", "dc"), default="ac")
     capacity_semantics_verified = serializers.BooleanField()
     tilt_degrees = serializers.FloatField(default=0)
-    azimuth_degrees = serializers.FloatField(default=180)
+    azimuth_degrees = serializers.FloatField(default=0)
     losses_percent = serializers.FloatField(default=0)
     installation_date = serializers.DateField(required=True)
     settings_verification_reference = serializers.CharField(

@@ -85,10 +85,13 @@ def calculate(binding: SiteBinding, target_date: date, data: ProviderData) -> di
         },
         "configuration": {
             "capacity_kw": configuration.capacity_kw,
+            "dc_capacity_kw": binding.dc_capacity_kw,
             "power_basis": configuration.power_basis,
             "capacity_basis": configuration.capacity_basis,
             "capacity_semantics_verified": configuration.capacity_semantics_verified,
             "tilt_degrees": configuration.tilt_degrees,
+            "azimuth_degrees": binding.azimuth_degrees,
+            "efficiency_factor_percent": 100 - binding.losses_percent,
         },
         "model_version": result.model_version,
         "quality_flags": sorted(flags),

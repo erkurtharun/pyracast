@@ -19,6 +19,7 @@ from pyracast.api.errors import exception_handler
 from pyracast.api.serializers import RegionInput
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderFailure
+from pyracast.connections.models import SiteBinding
 from pyracast.connections.operations import QuotaExhausted
 from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import CollectionJob, ForecastResult
@@ -262,6 +263,38 @@ def test_fixture_demo(settings: LazySettings) -> None:
     path = call_command("fixture_demo", "--username", "demo")
     assert "/forecast/?date=" in path
     assert ForecastResult.objects.get().payload["complete"] is True
+    reference = SiteBinding.objects.get()
+    assert reference.capacity_kw == reference.dc_capacity_kw == 1000
+    assert reference.azimuth_degrees == reference.tilt_degrees == reference.losses_percent == 0
+
+
+def test_binding_api_records_megawatt_reference_metadata(
+    customer: tuple[Client, User, Tenant],
+) -> None:
+    customer_client, _, tenant = customer
+    region_id = create_region(customer_client, tenant)
+    admin_client, _ = verified_admin()
+    previous_id = setup_binding(admin_client, region_id)
+    previous = SiteBinding.objects.get(pk=previous_id)
+    response = admin_client.post(
+        f"/api/platform/regions/{region_id}/bindings/",
+        {
+            "provider_account_id": previous.provider_account_id,
+            "site_id": previous.site_id,
+            "capacity_kw": 1000,
+            "dc_capacity_kw": 1000,
+            "capacity_semantics_verified": True,
+            "installation_date": "2026-11-01",
+        },
+        content_type="application/json",
+    )
+    assert response.status_code == 201
+    reference = SiteBinding.objects.get(pk=response.json()["id"])
+    assert reference.capacity_kw == reference.dc_capacity_kw == 1000
+    assert reference.azimuth_degrees == reference.tilt_degrees == reference.losses_percent == 0
+    previous.refresh_from_db()
+    assert previous.capacity_kw == 1
+    assert previous.dc_capacity_kw is None
 
 
 def test_admin_login_requires_password_and_totp() -> None:
