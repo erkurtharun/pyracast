@@ -81,7 +81,6 @@ def test_performance_replays_native_clipping_and_keeps_read_only(
         row["power_kw"] = (80 if index % 2 == 0 else 120) / 130
     publish(source)
     measurements(system, configuration, 90)
-    # This activation occurred after the forecast day and must not affect the replay.
     selected_factor(system, configuration, NOW)
     result = forecast_performance(plant, start_date=DAY, end_date=DAY)
     assert result["evaluation_kind"] == "historical_input_replay"

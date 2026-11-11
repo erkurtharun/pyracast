@@ -262,6 +262,63 @@ test("mock contract: imports validated production with explicit energy units", a
     ).toBeVisible();
 });
 
+test("CSV selection replaces validated rows and recovers after an invalid file", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.goto("/");
+    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await page
+        .getByRole("button", { name: "Solar plants", exact: true })
+        .click();
+    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByRole("button", { name: "Production import" }).click();
+    const input = page.getByLabel("Production CSV");
+    const select = (name: string, energy: string) =>
+        input.setInputFiles({
+            name,
+            mimeType: "text/csv",
+            buffer: Buffer.from(
+                `starts_at,ends_at,energy,quality,source\n2026-01-01T09:00:00+03:00,2026-01-01T09:30:00+03:00,${energy},valid,meter`,
+            ),
+        });
+    await select("first.csv", "250");
+    await expect(
+        page.getByText(/first.csv: 1 valid observations ready/),
+    ).toBeVisible();
+    await select("invalid.csv", "-1");
+    await expect(page.getByText(/valid observations ready/)).toHaveCount(0);
+    await expect(
+        page.getByRole("alert").filter({
+            hasText: "Row 2: energy must be a non-negative number.",
+        }),
+    ).toBeVisible();
+    await page
+        .getByRole("button", { name: "Import observations", exact: true })
+        .click();
+    await expect(
+        page.getByText("Choose and validate a CSV before importing."),
+    ).toBeVisible();
+    await select("replacement.csv", "777");
+    await expect(
+        page.getByText(/replacement.csv: 1 valid observations ready/),
+    ).toBeVisible();
+    await expect(
+        page.getByText("Row 2: energy must be a non-negative number."),
+    ).toHaveCount(0);
+    const imported = page.waitForRequest(
+        (request) =>
+            request.method() === "POST" &&
+            request.url().includes("/observations/"),
+    );
+    await page.getByRole("button", { name: "Import 1 observations" }).click();
+    expect((await imported).postDataJSON()).toMatchObject({
+        configuration_id: 31,
+        unit: "kWh",
+        observations: [{ energy: 777, source: "meter" }],
+    });
+});
+
 for (const staleRead of ["resolve", "reject"] as const) {
     for (const selection of ["new file", "clear"] as const) {
         test(`CSV ignores an old ${staleRead} after ${selection}`, async ({

@@ -9,6 +9,7 @@ from pyracast.incidents.models import PlantIncident
 from pyracast.incidents.operations import finish_incident, save_incident
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants import training
+from pyracast.plants.calibration_data import build_calibration_dataset
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.incident_policy import incidents_unchanged
 from pyracast.plants.measurements import select_measurements
@@ -158,7 +159,7 @@ def test_live_outlook_rejects_contaminated_factor_without_rewriting_saved_foreca
     with pytest.raises(ValidationError, match="outage history changed"):
         activate_calibration(*scope, ready.pk)
     new_run = request_run(system, plant)
-    assert training._incumbent_factor(new_run) == 1
+    assert build_calibration_dataset(new_run, new_run.configuration).incumbent_factor == 1
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=2))
     past = plant_outlook(*scope, target_date=target, resolution_minutes=60)
     past_payload = cast(dict[str, Any], past["result"])

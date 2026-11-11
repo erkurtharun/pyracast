@@ -10,6 +10,7 @@ from django.utils import timezone
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants import training
+from pyracast.plants.calibration_data import build_calibration_dataset
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
@@ -54,7 +55,6 @@ def add_days(
             day, system.binding.timezone, system.binding.latitude, system.binding.longitude
         ).windows
         while cursor < end:
-            # Alternate half-hour and hourly days to exercise mixed resolutions.
             duration = timedelta(minutes=30 if offset % 2 else 60)
             selected = any(cursor < stop and cursor + duration > begin for begin, stop in windows)
             if daylight_only and not selected:
@@ -278,10 +278,10 @@ def test_new_observations_during_active_run_are_queued_once_after_completion(
     if lease is None:
         assert training.run_calibration(first.pk, NOW)
     else:
-        samples, manifest, _ = training._dataset(lease)
-        assert samples
+        dataset = build_calibration_dataset(lease.run, lease.configuration)
+        assert dataset.samples
         assert training._publish(
-            lease, FitResult("insufficient", None, "insufficient", {}), manifest, NOW
+            lease, FitResult("insufficient", None, "insufficient", {}), dataset.manifest, NOW
         )
     first.refresh_from_db()
     second = CalibrationRun.objects.exclude(pk=first.pk).get()
@@ -344,8 +344,8 @@ def test_legacy_run_without_watermark_preserves_timestamp_cutoff(
     )
     lease = training._claim(run.pk, NOW)
     assert lease is not None
-    _, manifest, _ = training._dataset(lease)
-    entries = cast(list[dict[str, Any]], manifest["observations"])
+    dataset = build_calibration_dataset(lease.run, lease.configuration)
+    entries = cast(list[dict[str, Any]], dataset.manifest["observations"])
     selected = {entry["observation_id"] for entry in entries}
     assert first_new.pk in selected
     assert last_new.pk not in selected

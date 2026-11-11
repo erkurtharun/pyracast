@@ -1,7 +1,7 @@
 from typing import Any, cast
 
 from django.contrib.auth.models import User
-from django.db.models import QuerySet
+from django.db.models import Model, QuerySet
 from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema
 from rest_framework.generics import GenericAPIView
@@ -12,7 +12,12 @@ from pyracast import trash
 from pyracast.accounts.operations import require_member
 from pyracast.plants import operations
 from pyracast.plants.history import plant_outlook
-from pyracast.plants.models import CalibrationRun, Plant, ProductionObservation
+from pyracast.plants.models import (
+    CalibrationActivation,
+    CalibrationRun,
+    Plant,
+    ProductionObservation,
+)
 from pyracast.plants.performance import forecast_performance
 from pyracast.plants.production import production_history
 from pyracast.plants.serializers import (
@@ -36,10 +41,8 @@ from pyracast.plants.serializers import (
 from pyracast.regions.models import Region
 
 
-class ScopedView(GenericAPIView[Plant]):
-    serializer_class = PlantOutput
-
-    def get_queryset(self) -> QuerySet[Plant]:
+class ScopedView[ModelT: Model](GenericAPIView[ModelT]):
+    def plant_queryset(self) -> QuerySet[Plant]:
         tenant_id = self.kwargs["tenant_id"]
         require_member(cast(User, self.request.user), tenant_id)
         region = get_object_or_404(
@@ -52,7 +55,7 @@ class ScopedView(GenericAPIView[Plant]):
         )
 
     def plant(self) -> Plant:
-        return get_object_or_404(self.get_queryset(), pk=self.kwargs["plant_id"])
+        return get_object_or_404(self.plant_queryset(), pk=self.kwargs["plant_id"])
 
     def scope(self) -> tuple[User, int, int, int]:
         plant = self.plant()
@@ -64,7 +67,12 @@ class ScopedView(GenericAPIView[Plant]):
         )
 
 
-class PlantsView(ScopedView):
+class PlantsView(ScopedView[Plant]):
+    serializer_class = PlantOutput
+
+    def get_queryset(self) -> QuerySet[Plant]:
+        return self.plant_queryset()
+
     @extend_schema(responses=PlantOutput(many=True))
     def get(self, request: Request, **kwargs: Any) -> Response:
         page = self.paginate_queryset(self.get_queryset())
@@ -84,7 +92,9 @@ class PlantsView(ScopedView):
         return Response(PlantOutput(plant).data, status=201)
 
 
-class PlantView(ScopedView):
+class PlantView(ScopedView[Plant]):
+    serializer_class = PlantOutput
+
     @extend_schema(responses=PlantOutput)
     def get(self, request: Request, **kwargs: Any) -> Response:
         return Response(PlantOutput(self.plant()).data)
@@ -108,11 +118,13 @@ class PlantView(ScopedView):
         return Response(status=204)
 
 
-class ObservationsView(ScopedView):
+class ObservationsView(ScopedView[ProductionObservation]):
+    serializer_class = ObservationOutput
+
     @extend_schema(responses=ObservationOutput(many=True))
     def get(self, request: Request, **kwargs: Any) -> Response:
         rows = ProductionObservation.objects.filter(plant=self.plant()).order_by("starts_at", "id")
-        page = self.paginate_queryset(cast(Any, rows))
+        page = self.paginate_queryset(rows)
         return self.get_paginated_response(ObservationOutput(page, many=True).data)
 
     @extend_schema(request=ObservationImport, responses={201: ObservationImportOutput})
@@ -131,7 +143,7 @@ class ObservationsView(ScopedView):
         return Response(result, status=201)
 
 
-class ProductionView(ScopedView):
+class ProductionView(ScopedView[Plant]):
     @extend_schema(parameters=[ProductionQuery], responses=ProductionHistoryOutput)
     def get(self, request: Request, **kwargs: Any) -> Response:
         plant = self.plant()
@@ -140,7 +152,7 @@ class ProductionView(ScopedView):
         return Response(production_history(plant, **data.validated_data))
 
 
-class PerformanceView(ScopedView):
+class PerformanceView(ScopedView[Plant]):
     @extend_schema(parameters=[PerformanceQuery], responses=PerformanceOutput)
     def get(self, request: Request, **kwargs: Any) -> Response:
         plant = self.plant()
@@ -149,7 +161,9 @@ class PerformanceView(ScopedView):
         return Response(forecast_performance(plant, **data.validated_data))
 
 
-class CalibrationsView(ScopedView):
+class CalibrationsView(ScopedView[CalibrationRun]):
+    serializer_class = CalibrationSummaryOutput
+
     @extend_schema(responses=CalibrationSummaryOutput(many=True))
     def get(self, request: Request, **kwargs: Any) -> Response:
         rows = (
@@ -157,7 +171,7 @@ class CalibrationsView(ScopedView):
             .defer("dataset_manifest")
             .order_by("-created_at", "-id")
         )
-        page = self.paginate_queryset(cast(Any, rows))
+        page = self.paginate_queryset(rows)
         return self.get_paginated_response(CalibrationSummaryOutput(page, many=True).data)
 
     @extend_schema(request=CalibrationInput, responses={202: CalibrationOutput})
@@ -169,14 +183,18 @@ class CalibrationsView(ScopedView):
         return Response(CalibrationOutput(run).data, status=202)
 
 
-class CalibrationView(ScopedView):
+class CalibrationView(ScopedView[CalibrationRun]):
+    serializer_class = CalibrationOutput
+
     @extend_schema(responses=CalibrationOutput)
     def get(self, request: Request, **kwargs: Any) -> Response:
         run = get_object_or_404(CalibrationRun, plant=self.plant(), pk=kwargs["calibration_id"])
         return Response(CalibrationOutput(run).data)
 
 
-class ActivateView(ScopedView):
+class ActivateView(ScopedView[CalibrationActivation]):
+    serializer_class = ActivationOutput
+
     @extend_schema(request=EmptyInput, responses=ActivationOutput)
     def post(self, request: Request, **kwargs: Any) -> Response:
         scope = self.scope()
@@ -186,7 +204,9 @@ class ActivateView(ScopedView):
         return Response(ActivationOutput(activation).data)
 
 
-class ResetView(ScopedView):
+class ResetView(ScopedView[CalibrationActivation]):
+    serializer_class = ActivationOutput
+
     @extend_schema(request=EmptyInput, responses=ActivationOutput)
     def post(self, request: Request, **kwargs: Any) -> Response:
         scope = self.scope()
@@ -195,7 +215,7 @@ class ResetView(ScopedView):
         return Response(ActivationOutput(operations.reset_calibration(*scope)).data)
 
 
-class ForecastView(ScopedView):
+class ForecastView(ScopedView[Plant]):
     @extend_schema(parameters=[ForecastQuery], responses=PlantForecastOutput)
     def get(self, request: Request, **kwargs: Any) -> Response:
         scope = self.scope()

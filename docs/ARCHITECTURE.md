@@ -166,15 +166,6 @@ When a plant was first configured after the selected day began, the ordinary out
 
 `collection-schedule/` exposes multiple daily region-local forecast times, the fixed night window, recent collection outcomes and the shared account's tracked UTC budget. Count successful, failed and uncertain/reserved attempts, including validation, retries and operator checks; usage outside this application is unknown. One daily request is reserved in the per-region schedule limit for history; this is a planning limit, not a guaranteed allocation across regions or a promise of unlimited night retries. Snapshot coverage indexes support history lookup, and `available_at` records atomic publication separately from acquisition. Partial history remains readable and retries create new immutable acquisitions. Saving unchanged settings preserves the effective boundary and all jobs. Forecast edits retain night jobs and queued forecast work at clocks still configured, cancel removed forecast clocks, and only generate newly added forecast clocks after the change. Disabling collection cancels unclaimed night and forecast work. An authorized in-flight response can still be archived if its binding remains current.
 
-Implement in this order:
-
-1. Compatibility checks, locked environment, PostgreSQL, authentication and tenant isolation.
-2. Region request and admin approval flow using a fixture provider.
-3. Durable jobs, account quota, live provider adapter and immutable snapshots.
-4. The calculation contract in `IRRADIANCE.md`, results API and reference evaluation.
-5. Restart/concurrency/security tests, Windows/Ubuntu CI and reproducible startup instructions.
-6. Plant configuration, clipped interval generation, metered-production import, offline calibration, explicit activation/rollback and forecast provenance.
-
 Acceptance: a second tenant cannot access the first tenant's records; concurrent approvals/jobs preserve invariants; retries respect quota; restart/redelivery does not duplicate results; invalid secrets remain private; incomplete days are not reported as zero; both OS environments pass the implemented flows. Without live credentials or matched labels, finish the fixture-backed system and identify the unverified integration/accuracy boundary.
 
 ## Saved-forecast email reminders

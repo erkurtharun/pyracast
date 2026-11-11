@@ -1,4 +1,4 @@
-from typing import Any, cast
+from typing import Any
 
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers
@@ -63,12 +63,14 @@ class IncidentOutput(serializers.ModelSerializer[PlantIncident]):
         read_only_fields = fields
 
 
-class IncidentsView(ScopedView):
+class IncidentsView(ScopedView[PlantIncident]):
+    serializer_class = IncidentOutput
+
     @extend_schema(responses=IncidentOutput(many=True))
     def get(self, request: Request, **kwargs: Any) -> Response:
         rows = PlantIncident.objects.filter(plant=self.plant()).order_by("-starts_at", "-id")
-        page = self.paginate_queryset(rows)  # type: ignore[arg-type]
-        return self.get_paginated_response(IncidentOutput(cast(Any, page), many=True).data)
+        page = self.paginate_queryset(rows)
+        return self.get_paginated_response(IncidentOutput(page, many=True).data)
 
     @extend_schema(request=IncidentInput, responses={201: IncidentOutput})
     def post(self, request: Request, **kwargs: Any) -> Response:
@@ -79,7 +81,9 @@ class IncidentsView(ScopedView):
         return Response(IncidentOutput(row).data, status=201)
 
 
-class IncidentView(ScopedView):
+class IncidentView(ScopedView[PlantIncident]):
+    serializer_class = IncidentOutput
+
     @extend_schema(request=IncidentUpdate, responses=IncidentOutput)
     def put(self, request: Request, **kwargs: Any) -> Response:
         scope = self.scope()
@@ -91,7 +95,9 @@ class IncidentView(ScopedView):
         return Response(IncidentOutput(row).data)
 
 
-class ResolveView(ScopedView):
+class ResolveView(ScopedView[PlantIncident]):
+    serializer_class = IncidentOutput
+
     @extend_schema(request=ResolveInput, responses=IncidentOutput)
     def post(self, request: Request, **kwargs: Any) -> Response:
         scope = self.scope()
@@ -103,7 +109,9 @@ class ResolveView(ScopedView):
         return Response(IncidentOutput(row).data)
 
 
-class CancelView(ScopedView):
+class CancelView(ScopedView[PlantIncident]):
+    serializer_class = IncidentOutput
+
     @extend_schema(request=RevisionInput, responses=IncidentOutput)
     def post(self, request: Request, **kwargs: Any) -> Response:
         scope = self.scope()

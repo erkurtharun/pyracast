@@ -3,9 +3,7 @@ import json
 import time
 import uuid
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
-from typing import cast
-from zoneinfo import ZoneInfo
+from datetime import datetime, timedelta
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -13,34 +11,23 @@ from django.db.models import Q
 from django.utils import timezone
 
 from pyracast.connections.models import ProviderAccount
-from pyracast.forecasts.history import HISTORY_SELECTION_POLICY, select_actual_snapshot
-from pyracast.forecasts.models import ForecastSnapshot
-from pyracast.irradiance import local_day_bounds
-from pyracast.plants.availability import actual_power_intervals
+from pyracast.plants.calibration_data import build_calibration_dataset
 from pyracast.plants.forecasting import power_limit
 from pyracast.plants.incident_policy import incidents_unchanged
-from pyracast.plants.measurements import (
-    production_identity_current,
-    select_measurements,
-)
+from pyracast.plants.measurements import production_identity_current
 from pyracast.plants.models import (
     CalibrationRun,
     Plant,
     PlantConfiguration,
     PlantEvent,
-    ProductionObservation,
 )
 from pyracast.plants.numerics import (
-    DAYLIGHT_COVERAGE_POLICY,
-    CalibrationSample,
     FitResult,
-    PowerInterval,
     fit_calibration,
 )
 from pyracast.plants.operations import configuration_is_current
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.regions.models import Region
-from pyracast.solar import DAYLIGHT_POLICY, daylight_window
 
 LEASE_DURATION = timedelta(minutes=5)
 MAX_ATTEMPTS = 3
@@ -51,18 +38,6 @@ class _Lease:
     run: CalibrationRun
     configuration: PlantConfiguration
     token: uuid.UUID
-
-
-def _daylight_windows(lease: _Lease) -> dict[date, tuple[tuple[datetime, datetime], ...]]:
-    binding = lease.configuration.binding
-    day = lease.run.window_start
-    windows = {}
-    while day <= lease.run.window_end:
-        windows[day] = daylight_window(
-            day, binding.timezone, binding.latitude, binding.longitude
-        ).windows
-        day += timedelta(days=1)
-    return windows
 
 
 def _claim(run_id: int, now: datetime) -> _Lease | None:
@@ -120,176 +95,6 @@ def _claim(run_id: int, now: datetime) -> _Lease | None:
         )
         prepare_calibration(run.plant_id, now)
         return None
-
-
-def _dataset(
-    lease: _Lease,
-) -> tuple[tuple[CalibrationSample, ...], dict[str, object], dict[str, object]]:
-    run, configuration = lease.run, lease.configuration
-    zone = ZoneInfo(configuration.binding.timezone)
-    start, _ = local_day_bounds(run.window_start, str(zone))
-    _, end = local_day_bounds(run.window_end, str(zone))
-    candidates = ProductionObservation.objects.filter(
-        plant_id=run.plant_id,
-        configuration=configuration,
-        starts_at__gte=start,
-        ends_at__lte=end,
-    )
-    excluded = Q(recorded_at__gt=run.cutoff_at) | Q(ends_at__gt=run.cutoff_at)
-    if run.observation_id_cutoff is not None:
-        excluded |= Q(pk__gt=run.observation_id_cutoff)
-    late = candidates.filter(excluded).count()
-    observations, _ = select_measurements(
-        configuration,
-        start,
-        end,
-        run.cutoff_at,
-        observation_id_cutoff=run.observation_id_cutoff,
-        production_snapshot_ids=run.production_snapshot_ids,
-        policy=run.measurement_selection_policy,
-        incident_revision_ids=run.incident_revision_ids,
-    )
-    samples = []
-    entries: list[dict[str, object]] = []
-    sources: dict[str, dict[str, object] | None] = {}
-    native_by_day: dict[str, tuple[PowerInterval, ...]] = {}
-    unmatched = 0
-    for observation in observations:
-        day = observation.starts_at.astimezone(zone).date()
-        key = day.isoformat()
-        if key not in sources:
-            if run.reference_snapshot_ids is not None:
-                snapshot = ForecastSnapshot.objects.filter(
-                    pk=run.reference_snapshot_ids.get(key)
-                ).first()
-            else:
-                snapshot = select_actual_snapshot(configuration.binding, day, run.cutoff_at)
-            sources[key] = (
-                None
-                if snapshot is None
-                else {
-                    "snapshot_id": snapshot.pk,
-                    "source_kind": snapshot.source_kind,
-                    "collected_at": snapshot.collected_at.isoformat(),
-                    "available_at": cast(datetime, snapshot.available_at).isoformat(),
-                    "issued_at": snapshot.issued_at.isoformat() if snapshot.issued_at else None,
-                }
-            )
-            native_by_day[key] = (
-                () if snapshot is None else actual_power_intervals(snapshot, configuration)
-            )
-        pieces = tuple(
-            PowerInterval(
-                max(piece.start, observation.starts_at),
-                min(piece.end, observation.ends_at),
-                piece.power_mw,
-            )
-            for piece in native_by_day[key]
-            if piece.start < observation.ends_at and piece.end > observation.starts_at
-        )
-        entries.append(
-            {
-                "observation_id": observation.pk,
-                "production_snapshot_id": observation.snapshot.pk if observation.snapshot else None,
-                "production_digest": observation.snapshot.content_sha256
-                if observation.snapshot
-                else None,
-                "production_provider": observation.snapshot.provider_plant
-                if observation.snapshot
-                else None,
-                "production_source_kind": observation.snapshot.source_kind
-                if observation.snapshot
-                else None,
-                "production_basis": (
-                    "net_export"
-                    if observation.snapshot.source_kind == "settlement_injection"
-                    else "provisional_proxy"
-                )
-                if observation.snapshot
-                else None,
-                "start": observation.starts_at.isoformat(),
-                "end": observation.ends_at.isoformat(),
-                "energy_mwh": observation.energy_mwh,
-                "quality": observation.quality,
-                "source": observation.source,
-                "recorded_at": observation.recorded_at.isoformat(),
-                "day": key,
-                "intervals": [
-                    {
-                        "start": piece.start.isoformat(),
-                        "end": piece.end.isoformat(),
-                        "power_mw": piece.power_mw,
-                    }
-                    for piece in pieces
-                ],
-            }
-        )
-        if sources[key] is None:
-            unmatched += 1
-        samples.append(
-            CalibrationSample(
-                observation.starts_at,
-                observation.ends_at,
-                observation.energy_mwh,
-                pieces,
-                observation.quality,
-            )
-        )
-    manifest: dict[str, object] = {
-        "measurement_selection_policy": run.measurement_selection_policy,
-        "incident_revision_ids": run.incident_revision_ids,
-        "incident_policy": "exclude-whole-overlapping-meter-interval-v1",
-        "metric_scope": "daylight_intervals",
-        "coverage_policy": DAYLIGHT_COVERAGE_POLICY,
-        "daylight_policy": DAYLIGHT_POLICY,
-        "required_windows": {
-            day.isoformat(): [[start.isoformat(), end.isoformat()] for start, end in windows]
-            for day, windows in _daylight_windows(lease).items()
-        },
-        "comparison_activation_id": run.comparison_activation_id,
-        "incumbent_factor": _incumbent_factor(run),
-        "configuration_id": configuration.pk,
-        "binding_id": configuration.binding_id,
-        "dc_capacity_mw": configuration.dc_capacity_mw,
-        "limit_mw": power_limit(configuration),
-        "measurement_basis": configuration.measurement_basis,
-        "cutoff_at": run.cutoff_at.isoformat(),
-        "observation_id_cutoff": run.observation_id_cutoff,
-        "window_start": run.window_start.isoformat(),
-        "window_end": run.window_end.isoformat(),
-        "selection_policy": run.dataset_manifest.get("selection_policy", HISTORY_SELECTION_POLICY),
-        "source_kind": "estimated_actuals",
-        "sources": sources,
-        "observations": entries,
-    }
-    report: dict[str, object] = {
-        "recorded_after_cutoff": late,
-        "unmatched_observations": unmatched,
-        "unmatched_days": [day for day, source in sources.items() if source is None],
-        "selected_observations": len(entries),
-        "provisional_production": any(
-            row.snapshot is not None and row.snapshot.source_kind == "realtime_generation"
-            for row in observations
-        ),
-        "production_sources": sorted(
-            {row.source if row.snapshot else "manual" for row in observations}
-        ),
-    }
-    return tuple(samples), manifest, report
-
-
-def _incumbent_factor(run: CalibrationRun) -> float:
-    activation = run.comparison_activation
-    if activation is None or activation.calibration is None:
-        return 1.0
-    if not incidents_unchanged(
-        activation.calibration, run.cutoff_at
-    ) or not production_identity_current(activation.calibration):
-        return 1.0
-    factor = activation.calibration.factor
-    if factor is None:
-        raise ValueError("The comparison calibration has no factor.")
-    return factor
 
 
 def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now: datetime) -> bool:
@@ -388,20 +193,22 @@ def run_calibration(run_id: int, now: datetime | None = None) -> bool:
     if lease is None:
         return False
     try:
-        samples, manifest, selection = _dataset(lease)
+        dataset = build_calibration_dataset(lease.run, lease.configuration)
         result = fit_calibration(
-            samples,
+            dataset.samples,
             timezone=lease.configuration.binding.timezone,
             normalization_mw=lease.configuration.dc_capacity_mw,
             limit_mw=power_limit(lease.configuration),
-            incumbent_factor=_incumbent_factor(lease.run),
-            required_windows=_daylight_windows(lease),
+            incumbent_factor=dataset.incumbent_factor,
+            required_windows=dataset.required_windows,
         )
         result.report["comparison_activation_id"] = lease.run.comparison_activation_id
-        result.report["selection"] = selection
-        result.report["provisional_production"] = selection["provisional_production"]
-        result.report["production_sources"] = selection["production_sources"]
-        return _publish(lease, result, manifest, now + timedelta(seconds=time.monotonic() - start))
+        result.report["selection"] = dataset.selection
+        result.report["provisional_production"] = dataset.selection["provisional_production"]
+        result.report["production_sources"] = dataset.selection["production_sources"]
+        return _publish(
+            lease, result, dataset.manifest, now + timedelta(seconds=time.monotonic() - start)
+        )
     except ValueError, ArithmeticError, TypeError, KeyError:
         _fail(lease, now + timedelta(seconds=time.monotonic() - start))
         return False

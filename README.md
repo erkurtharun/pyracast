@@ -27,7 +27,7 @@ resolved stable application and development dependencies. Use
 `uv run --locked ruff format .` formats code.
 
 The check command runs formatting, Ruff, strict mypy and parallel pytest with branch
-coverage. The floor is 100%, measured on 2026-11-09; never lower it. Settings live in
+coverage. The required floor is 100%; never lower it. Settings live in
 `pyproject.toml`. The package smoke test only
 proves package installation/import; behavioral tests cover tenant isolation, MFA/CSRF,
 quota, leases, concurrent approvals, redelivery, stale revisions and numerical invariants
@@ -37,8 +37,7 @@ wheel outside the checkout on Windows and Ubuntu. CI uses GitHub-hosted
 no self-hosted runner or organization-specific reusable workflow is required.
 The uv policy blocks unlisted third-party source builds and explicitly permits the
 locked PyYAML and h5py builds required on CPython 3.15. Cached wheels may still be
-reused; first-party project builds remain permitted. No dependency or interpreter was
-downgraded.
+reused; first-party project builds remain permitted.
 
 CI audits locked runtime, optional scientific and development dependencies against
 public vulnerability advisories. To reproduce:
@@ -127,8 +126,8 @@ Email reminders use saved forecasts and make no provider requests.
 
 The independently running Next.js app is in `web/`. Use Node 26.13.0 LTS and npm;
 exact compatible stable versions live in `web/package.json` and `package-lock.json`.
-TypeScript 5.9.3 is currently the newest stable version accepted by the OpenAPI
-generator's peer dependency. Upgrades must preserve a valid dependency tree.
+The locked TypeScript version must satisfy the OpenAPI generator's peer dependency.
+Upgrades must preserve a valid dependency tree.
 
 Start Django on port 8000 with `PYRACAST_DEBUG=1`. Add
 `PYRACAST_CSRF_ORIGINS=http://localhost:3000 http://127.0.0.1:3000` to the ignored

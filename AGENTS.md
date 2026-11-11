@@ -9,6 +9,8 @@ Write code, documents and commits in English; explain progress and decisions in 
 - Use CPython 3.15.2 and uv. Lock stable compatible dependencies; commit the lockfile. Verify upgrades deliberately; never silently downgrade Python or use prereleases.
 - Prefer small cohesive functions, explicit boundaries, type hints and idiomatic framework features. Add abstractions only for actual needs.
 - Keep HTTP, persistence and queue details outside calculations. Validate external input; preserve units, missingness and provenance.
+- Keep views focused on access, input validation and serialization; place reusable selection and preparation policies in application functions. Use typed values at boundaries and avoid generic service or repository layers without a concrete need.
+- Give frontend components one workflow to own. Group state that changes together, use discriminated unions for mutually exclusive async states and derive values instead of keeping duplicate state.
 - Keep Windows and Ubuntu portability explicit and tested. Do not infer OS or live-provider support from mocks or metadata.
 - Keep comments only for non-obvious contracts, units, external limits or hazards. No narrative comments, boilerplate docstrings or commented-out code.
 - Keep one short source of truth per decision; update existing documents instead of creating routine reports or speculative plans.
