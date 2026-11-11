@@ -618,10 +618,12 @@ test("regional and plant data sources identify estimated actuals and retain arch
     await page.clock.setFixedTime(new Date("2026-03-28T12:00:00Z"));
     await mockApi(page);
     const sources: string[] = [];
+    const plantRequests: URL[] = [];
     await page.route("**/forecast/**", async (route) => {
         const url = new URL(route.request().url());
         const source = url.searchParams.get("data_source") ?? "missing";
         sources.push(source);
+        if (url.pathname.includes("/plants/")) plantRequests.push(url);
         await route.fulfill({
             json: {
                 timezone: region.timezone,
@@ -657,10 +659,34 @@ test("regional and plant data sources identify estimated actuals and retain arch
         .getByRole("button", { name: "Solar plants", exact: true })
         .click();
     await page.getByRole("button", { name: /East array/ }).click();
+    await expect(page.getByLabel("Resolution")).toHaveValue("60");
+    await expect
+        .poll(() =>
+            plantRequests.at(-1)?.searchParams.get("resolution_minutes"),
+        )
+        .toBe("60");
+    await expect
+        .poll(() => plantRequests.at(-1)?.searchParams.get("data_source"))
+        .toBe("auto");
+    await expect(
+        page.getByText("Satellite/model estimates, not meter readings."),
+    ).toHaveCount(0);
     await page.getByLabel("Forecast date").fill("2026-03-27");
+    await expect
+        .poll(() => plantRequests.at(-1)?.searchParams.get("date"))
+        .toBe("2026-03-27");
+    await expect
+        .poll(() => plantRequests.at(-1)?.searchParams.get("data_source"))
+        .toBe("auto");
     await expect(
         page.getByText("Satellite/model estimates, not meter readings."),
     ).toBeVisible();
+    await page.getByLabel("Resolution").selectOption("30");
+    await expect
+        .poll(() =>
+            plantRequests.at(-1)?.searchParams.get("resolution_minutes"),
+        )
+        .toBe("30");
     await page.getByLabel("Data source").selectOption("forecast");
     await expect.poll(() => sources.at(-1)).toBe("forecast");
     await page.getByRole("button", { name: "Calibration" }).click();

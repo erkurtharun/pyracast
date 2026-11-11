@@ -10,6 +10,7 @@ from django.utils import timezone
 from pyracast.accounts.operations import require_member
 from pyracast.forecasts.history import historical_irradiance, select_actual_snapshot
 from pyracast.irradiance import local_day_bounds
+from pyracast.plants.automatic_forecast import automatic_forecast
 from pyracast.plants.current_forecast import current_forecast
 from pyracast.plants.forecasting import (
     _payload,
@@ -84,7 +85,8 @@ def _plant_outlook(
         return archived_forecast(plant, target_date, resolution_minutes, now, as_of=as_of)
     if source == "forecast" or (source == "auto" and target_date >= today):
         if as_of is None and target_date >= today:
-            return current_forecast(plant, target_date, resolution_minutes, now)
+            selection = automatic_forecast if source == "auto" else current_forecast
+            return selection(plant, target_date, resolution_minutes, now)
         return _forecast_outlook(
             actor,
             tenant_id,
@@ -125,7 +127,7 @@ def _plant_outlook(
         if configuration is not None
         else None
     )
-    if snapshot is None and source == "auto":
+    if snapshot is None and source == "auto" and as_of is not None:
         return _forecast_outlook(
             actor,
             tenant_id,

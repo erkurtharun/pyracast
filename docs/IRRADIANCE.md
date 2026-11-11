@@ -126,6 +126,12 @@ assumes a uniform mean over a shorter duration. Preserve every contributing sour
 and apply the same pieces to normal and outage scenarios. This composition remains
 a forecast; it does not substitute estimated actuals or change day-ahead replays.
 
+Today's automatic reference-transition fallback selects one complete original
+day-ahead forecast under the compatibility rules in `ARCHITECTURE.md`. Preserve
+that source binding's normalization capacity and label the selection explicitly.
+Past-day automatic views select Solcast estimated actuals and preserve missing
+history as unavailable rather than substituting forecast power.
+
 Reported outage scenarios split native intervals at the reported boundaries.
 Scale the uncapped reference transfer by remaining DC/nameplate DC, then apply
 the calibration factor and the smaller applicable normal/remaining capacity cap.

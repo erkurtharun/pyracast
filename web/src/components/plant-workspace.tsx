@@ -33,7 +33,7 @@ export function PlantWorkspace({
 }) {
     const [tab, setTab] = useState("forecast"),
         [date, setDate] = useState(() => localDay(timezone, 1)),
-        [resolution, setResolution] = useState("30"),
+        [resolution, setResolution] = useState("60"),
         [source, setSource] = useState<DataSource>("auto");
     const [productionRevision, setProductionRevision] = useState(0);
     const [outageRevision, setOutageRevision] = useState(0);

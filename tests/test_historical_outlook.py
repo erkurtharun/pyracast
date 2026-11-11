@@ -68,9 +68,8 @@ def test_forecast_selection_uses_first_published_before_local_day(
     assert forecasting.select_snapshot(configuration, DAY, start - timedelta(minutes=31)) == later
 
 
-@pytest.mark.parametrize("source", ["forecast", "auto"])
 def test_new_plant_projects_saved_forecast_without_backdating_or_calibration(
-    monkeypatch: pytest.MonkeyPatch, source: str
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     target = DAY
     system, plant = make_plant(monkeypatch)
@@ -91,7 +90,7 @@ def test_new_plant_projects_saved_forecast_without_backdating_or_calibration(
         plant.pk,
         target_date=target,
         resolution_minutes=60,
-        source=source,
+        source="forecast",
     )
     assert result["source_kind"] == "forecast"
     assert result["freshness"] == "fresh"

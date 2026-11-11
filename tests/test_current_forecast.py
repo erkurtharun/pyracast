@@ -56,7 +56,12 @@ def test_daily_acquisitions_refresh_live_outlook_and_keep_day_ahead_replay(
     assert PlantForecast.objects.count() == 1
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=2))
     past = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, source=source)
-    assert past["result"] == archived_payload
+    if source == "auto":
+        assert past["source_kind"] == "estimated_actuals"
+        assert past["result"] is None
+        assert past["unavailable_reason"] == "estimated_actuals_unavailable"
+    else:
+        assert past["result"] == archived_payload
     assert PlantForecast.objects.get().payload == archived_payload
     assert RequestAttempt.objects.count() == requests
 
