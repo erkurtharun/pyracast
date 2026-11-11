@@ -1,4 +1,5 @@
 "use client";
+import { ScrollRegion } from "./scroll-region";
 import type { Forecast } from "@/lib/api";
 import { Empty, JsonDetails, Notice, Stat, Tag } from "./ui";
 import { CsvDownload } from "./csv-download";
@@ -358,7 +359,13 @@ export function ForecastPanel({
                         <summary>
                             View interval data ({rows.length} intervals)
                         </summary>
-                        <div className="table-scroll" tabIndex={0}>
+                        <ScrollRegion
+                            label={
+                                forecast.source_kind === "estimated_actuals"
+                                    ? "Estimated actual intervals"
+                                    : "Forecast intervals"
+                            }
+                        >
                             <table>
                                 <caption className="sr-only">
                                     {forecast.source_kind ===
@@ -436,7 +443,7 @@ export function ForecastPanel({
                                     ))}
                                 </tbody>
                             </table>
-                        </div>
+                        </ScrollRegion>
                     </details>
                 </>
             )}

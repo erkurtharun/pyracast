@@ -1,4 +1,5 @@
 "use client";
+import { ScrollRegion } from "./scroll-region";
 import { useRef, useState } from "react";
 import { CsvDownload } from "./csv-download";
 import {
@@ -487,7 +488,7 @@ function Calibrations({
                 ) : resource.error ? (
                     <Notice error>{resource.error}</Notice>
                 ) : resource.data?.results.length ? (
-                    <div className="table-scroll" tabIndex={0}>
+                    <ScrollRegion label="Calibration runs">
                         <table>
                             <caption className="sr-only">
                                 Calibration runs
@@ -566,7 +567,7 @@ function Calibrations({
                                 ))}
                             </tbody>
                         </table>
-                    </div>
+                    </ScrollRegion>
                 ) : (
                     <Empty title="No calibration runs">
                         Save complete paired days in the production journal to
@@ -704,7 +705,7 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
                 </p>
             )}
             {Object.keys(candidate).length > 0 && (
-                <div className="table-scroll" tabIndex={0}>
+                <ScrollRegion label="Held-out accuracy comparison">
                     <table>
                         <caption>
                             Held-out accuracy comparison — lower error is better
@@ -753,7 +754,7 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
                             ))}
                         </tbody>
                     </table>
-                </div>
+                </ScrollRegion>
             )}
             {Object.entries(exclusions).some(
                 ([, value]) => typeof value === "number" && value > 0,

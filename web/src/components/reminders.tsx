@@ -1,4 +1,5 @@
 "use client";
+import { ScrollRegion } from "./scroll-region";
 import { useState } from "react";
 import type { components } from "@/lib/schema";
 import { request, type Region } from "@/lib/api";
@@ -54,7 +55,11 @@ export function Reminders({
                             {
                                 enabled: form.get("enabled") === "on",
                                 email: form.get("email"),
-                                times: [...new Set(times)].sort(),
+                                times: [...new Set(times)].sort(
+                                    (a, b) =>
+                                        Number(a.replace(":", "")) -
+                                        Number(b.replace(":", "")),
+                                ),
                             },
                             token,
                         );
@@ -117,7 +122,7 @@ export function Reminders({
             <details className="panel">
                 <summary>Recent deliveries</summary>
                 {data.deliveries.length ? (
-                    <div className="table-scroll" tabIndex={0}>
+                    <ScrollRegion label="Recent forecast email deliveries">
                         <table>
                             <caption className="sr-only">
                                 Recent forecast email deliveries
@@ -177,7 +182,7 @@ export function Reminders({
                                 ))}
                             </tbody>
                         </table>
-                    </div>
+                    </ScrollRegion>
                 ) : (
                     <Empty title="No deliveries yet">
                         Scheduled deliveries appear here.

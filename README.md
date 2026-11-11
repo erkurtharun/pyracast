@@ -155,8 +155,11 @@ npm --prefix web exec -- playwright install chromium
 npm --prefix web run check
 ```
 
-The browser suite includes mocked error/empty-state and accessibility checks. CI
-also sets `PYRACAST_BROWSER_TEST=1` and runs
+The browser suite includes mocked error/empty-state and accessibility checks.
+CI measures authored frontend TypeScript with production-browser V8 coverage:
+`npm --prefix web run check:coverage` writes `web/coverage/lcov.info`. Unexecuted
+sources remain in the report. Source maps are enabled only for this isolated build.
+CI also sets `PYRACAST_BROWSER_TEST=1` and runs
 `uv run --locked python -m pytest tests/test_browser.py -n 1 --no-cov` against a
 real Django server and isolated PostgreSQL test database. No live provider or mail
 service is used. Regenerate the contract after API changes:
@@ -440,8 +443,10 @@ disabled in the project's Administration > Analysis Method. GitHub repository se
 | Variable | `SONAR_PROJECT_KEY` | `erkurtharun_pyracast` |
 | Variable | `SONAR_ENABLED` | `true`, after the values above are configured |
 
-The `Sonar quality gate` job consumes Ubuntu's `coverage.xml`, fetches full Git
-history and fails when the configured Sonar quality gate fails. Before enabling,
+The `Sonar quality gate` job analyzes backend and authored frontend sources, using
+Ubuntu's `coverage.xml` and `web/coverage/lcov.info`. Generated API types are excluded
+from analysis. It fetches full Git history and fails when the configured quality
+gate fails. Before enabling,
 the job is explicitly skipped; local checks still run. Fork and Dependabot PRs
 run verification without a Sonar token; merge-group events also skip analysis.
 Do not use `pull_request_target` to run untrusted PR code with secrets.

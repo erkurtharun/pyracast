@@ -130,11 +130,22 @@ jobs:
           npm --prefix web run api:generate
           git diff --exit-code -- web/openapi.json web/src/lib/schema.d.ts
       - run: npm run check
+        if: matrix.os == 'windows-latest'
+        working-directory: web
+      - run: npm run check:coverage
+        if: matrix.os == 'ubuntu-latest'
         working-directory: web
       - run: npm audit --audit-level=low
         working-directory: web
       - name: Exercise browser against Django and PostgreSQL
         run: uv run --locked --no-sync --no-build python -m pytest tests/test_browser.py -n 1 --no-cov
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          name: web-coverage
+          path: web/coverage/lcov.info
+          if-no-files-found: error
+          retention-days: 7
 
   scientific:
     name: Scientific (${{ matrix.os }})
@@ -176,7 +187,7 @@ jobs:
 
   sonar:
     name: Sonar quality gate
-    needs: [verify]
+    needs: [verify, web]
     if: >-
       vars.SONAR_ENABLED == 'true' &&
       github.event_name != 'merge_group' &&
@@ -192,6 +203,10 @@ jobs:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: coverage
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: web-coverage
+          path: web/coverage
       - name: Validate Sonar configuration
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

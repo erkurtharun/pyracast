@@ -22,11 +22,11 @@ from pyracast.plants.measurement_policy import (
 from pyracast.plants.models import CalibrationRun, PlantConfiguration, ProductionObservation
 
 
-def _source_kinds(policy: str) -> tuple[str, ...]:
+def _source_kinds(policy: str) -> list[str]:
     if policy == LEGACY_MEASUREMENT_POLICY:
-        return ("settlement_injection",)
+        return ["settlement_injection"]
     if policy == MEASUREMENT_POLICY:
-        return ("settlement_injection", "realtime_generation")
+        return ["settlement_injection", "realtime_generation"]
     raise ValueError("Unknown measurement selection policy")
 
 

@@ -1,4 +1,5 @@
 "use client";
+import { ScrollRegion } from "./scroll-region";
 
 import { useState, type FormEvent } from "react";
 import type { components } from "@/lib/schema";
@@ -186,7 +187,7 @@ function PerformanceResults({
                                 Daily comparison ({resource.data.requested_days}{" "}
                                 days)
                             </summary>
-                            <div className="table-scroll" tabIndex={0}>
+                            <ScrollRegion label="Daily forecast comparison">
                                 <table>
                                     <caption>
                                         Daylight replay:{" "}
@@ -234,7 +235,7 @@ function PerformanceResults({
                                         ))}
                                     </tbody>
                                 </table>
-                            </div>
+                            </ScrollRegion>
                         </details>
                     </>
                 )

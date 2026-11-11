@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./support/test";
 
 test("journal date controls wait for the initial range before selecting a day", async ({
     page,

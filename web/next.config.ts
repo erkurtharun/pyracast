@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 const config: NextConfig = {
     distDir: process.env.NEXT_DIST_DIR ?? ".next",
+    productionBrowserSourceMaps: process.env.PLAYWRIGHT_COVERAGE === "1",
     poweredByHeader: false,
     trailingSlash: true,
     async headers() {

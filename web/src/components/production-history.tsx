@@ -1,4 +1,5 @@
-﻿"use client";
+"use client";
+import { ScrollRegion } from "./scroll-region";
 import { useEffect, useState } from "react";
 import { CsvDownload } from "./csv-download";
 import { dataIntervalRange } from "@/lib/intervals";
@@ -331,7 +332,7 @@ export function ProductionHistory({
                                 available for this day.
                             </p>
                         ) : (
-                            <div className="table-scroll" tabIndex={0}>
+                            <ScrollRegion label="Meter entries">
                                 <table className="journal-table">
                                     <caption>
                                         Meter entries · {resolution} minutes
@@ -412,7 +413,7 @@ export function ProductionHistory({
                                         })}
                                     </tbody>
                                 </table>
-                            </div>
+                            </ScrollRegion>
                         )}
                         <div className="journal-save">
                             <span>
@@ -422,6 +423,7 @@ export function ProductionHistory({
                             </span>
                             <button
                                 className="button"
+                                type="submit"
                                 disabled={saving || !pending}
                             >
                                 {saving ? "Saving…" : "Save meter readings"}
@@ -443,7 +445,7 @@ export function ProductionHistory({
                                     plant_id: history.plant_id,
                                 }}
                             />
-                            <div className="table-scroll" tabIndex={0}>
+                            <ScrollRegion label="Saved production readings">
                                 <table>
                                     <caption>
                                         Saved readings · original intervals and
@@ -473,7 +475,7 @@ export function ProductionHistory({
                                         ))}
                                     </tbody>
                                 </table>
-                            </div>
+                            </ScrollRegion>
                         </details>
                     )}
                 </>

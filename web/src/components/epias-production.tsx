@@ -1,4 +1,5 @@
 "use client";
+import { ScrollRegion } from "./scroll-region";
 
 import { useState } from "react";
 import { request } from "@/lib/api";
@@ -445,7 +446,7 @@ function EpiasArchive({
                             ? "Incomplete provider hours — total unavailable"
                             : `Sum of provider-reported hours: ${total.toLocaleString(undefined, { maximumFractionDigits: 3 })} MWh`}
                     </p>
-                    <div className="table-scroll" tabIndex={0}>
+                    <ScrollRegion label="EPİAŞ reported hourly production">
                         <table className="production-table">
                             <caption>EPİAŞ reported hourly production</caption>
                             <thead>
@@ -487,7 +488,7 @@ function EpiasArchive({
                                 ))}
                             </tbody>
                         </table>
-                    </div>
+                    </ScrollRegion>
                 </>
             ) : (
                 <p>No EPİAŞ data has been archived for this day.</p>

@@ -183,8 +183,14 @@ class EpiasConnectionView(ScopedView):
         actor = cast(User, request.user)
         try:
             operations.connect_epias(plant.pk, actor=actor, **data.validated_data)
-        except EpiasError as exc:
-            return Response({"code": "epias_unavailable", "detail": str(exc)}, status=502)
+        except EpiasError:
+            return Response(
+                {
+                    "code": "epias_unavailable",
+                    "detail": "EPIAS connection is currently unavailable. Please try again later.",
+                },
+                status=502,
+            )
         return Response(
             EpiasConnectionOutput(operations.get_epias_status(plant.pk, actor=actor)).data
         )

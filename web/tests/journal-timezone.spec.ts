@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./support/test";
 import { mockApi, paged, region } from "./support/workspace";
 
 test("journal distinguishes repeated daylight-saving hours and compacts ordinary days", async ({

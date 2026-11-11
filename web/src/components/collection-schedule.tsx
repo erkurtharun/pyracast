@@ -132,11 +132,16 @@ function ScheduleEditor({
                             throw new Error(
                                 "Add at least one collection time.",
                             );
-                        const sorted = [...times].sort();
+                        const compareTimes = (a: string, b: string) =>
+                            Number(a.replace(":", "")) -
+                            Number(b.replace(":", ""));
+                        const sorted = [...times].sort(compareTimes);
                         if (
                             enabled === data.enabled &&
                             JSON.stringify(sorted) ===
-                                JSON.stringify([...data.times].sort())
+                                JSON.stringify(
+                                    [...data.times].sort(compareTimes),
+                                )
                         )
                             return;
                         await request(

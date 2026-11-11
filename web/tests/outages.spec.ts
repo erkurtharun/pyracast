@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "./support/test";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
 import AxeBuilder from "@axe-core/playwright";

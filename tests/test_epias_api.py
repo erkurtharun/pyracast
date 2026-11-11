@@ -103,15 +103,24 @@ def test_epias_api_connects_archives_native_values_and_preserves_history_after_d
     assert client.delete(source).status_code == 204
 
 
+@pytest.mark.parametrize(
+    "error_detail",
+    [
+        "credentials_unavailable",
+        "Provider failure: synthetic-private-ticket at /private/provider.py:42",
+    ],
+)
 def test_epias_api_validates_inputs_and_returns_safe_provider_errors(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    error_detail: str,
 ) -> None:
     client, base, plant = setup_plant()
     detail = f"{base}{plant['id']}/"
     source = detail + "production-source/"
 
     def unavailable() -> EpiasClient:
-        raise EpiasError("credentials_unavailable")
+        raise EpiasError(error_detail)
 
     monkeypatch.setattr(operations, "get_epias_client", unavailable)
     assert client.put(source, {}, content_type="application/json").status_code == 400
@@ -121,7 +130,11 @@ def test_epias_api_validates_inputs_and_returns_safe_provider_errors(
         content_type="application/json",
     )
     assert result.status_code == 502
-    assert result.json() == {"code": "epias_unavailable", "detail": "credentials_unavailable"}
+    assert result.json() == {
+        "code": "epias_unavailable",
+        "detail": "EPIAS connection is currently unavailable. Please try again later.",
+    }
+    assert error_detail not in caplog.text
     assert not EpiasConnection.objects.exists()
     assert client.get(detail + "reported-production/", {"date": "bad"}).status_code == 400
     assert client.get(detail + "reported-production/", {"data_source": "bad"}).status_code == 400
