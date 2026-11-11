@@ -117,7 +117,7 @@ def test_cli_writes_model_metrics_and_csv(tmp_path: Path) -> None:
     subprocess.run(  # noqa: S603
         [
             sys.executable,
-            "scripts/calibrate_irradiance.py",
+            str(Path("scripts/calibrate_irradiance.py").resolve()),
             "--power",
             str(paths[0]),
             "--weather",
@@ -132,6 +132,7 @@ def test_cli_writes_model_metrics_and_csv(tmp_path: Path) -> None:
         check=True,
         capture_output=True,
         text=True,
+        cwd=tmp_path,
     )
     model = json.loads((output / "model.json").read_text(encoding="utf-8"))
     metrics = json.loads((output / "metrics.json").read_text(encoding="utf-8"))
@@ -141,6 +142,41 @@ def test_cli_writes_model_metrics_and_csv(tmp_path: Path) -> None:
         csv_row = next(csv.DictReader(stream))
     assert csv_row["inverse_error_wm2"] == ""
     assert csv_row["partition"] == "train"
+
+
+@pytest.mark.parametrize("outside_input", ["power", "weather"])
+def test_cli_rejects_external_inputs_without_creating_output(
+    tmp_path: Path, outside_input: str
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    inside = workspace / "inside.json"
+    outside = tmp_path / "outside.json"
+    for path in (inside, outside):
+        path.write_text('{"estimated_actuals": []}', encoding="utf-8")
+    output = workspace / "out"
+    result = subprocess.run(  # noqa: S603
+        [
+            sys.executable,
+            str(Path("scripts/calibrate_irradiance.py").resolve()),
+            "--power",
+            str(outside if outside_input == "power" else inside),
+            "--weather",
+            str(outside if outside_input == "weather" else inside),
+            "--capacity-kw",
+            "1000",
+            "--output",
+            str(output),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=workspace,
+    )
+    assert result.returncode == 2
+    assert "Input must be an existing JSON file within the trusted directory" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not output.exists()
 
 
 def test_non_identifiable_holdout_reports_empty_metrics() -> None:

@@ -76,8 +76,17 @@ def _bounds(row: dict[str, Any], period: str, duration: timedelta) -> tuple[date
         raise ValueError("Invalid period_end") from exc
 
 
-def _load(path: Path) -> tuple[list[dict[str, Any]], str]:
-    raw = path.read_bytes()
+def _load(path: Path, trusted_root: Path) -> tuple[list[dict[str, Any]], str]:
+    try:
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(trusted_root)
+        if resolved.suffix.lower() != ".json" or not resolved.is_file():
+            raise ValueError("Invalid input file")
+        raw = resolved.read_bytes()
+    except OSError, ValueError:
+        raise ValueError(
+            "Input must be an existing JSON file within the trusted directory"
+        ) from None
     data = json.loads(raw)
     if not isinstance(data, dict) or not isinstance(data.get("estimated_actuals"), list):
         raise ValueError("Expected an estimated_actuals array")
@@ -115,9 +124,12 @@ def _weather(rows: list[dict[str, Any]]) -> list[WeatherInterval]:
     return result
 
 
-def load_pairs(power_path: Path, weather_path: Path) -> PairedDataset:
-    power_rows, power_hash = _load(power_path)
-    weather_rows, weather_hash = _load(weather_path)
+def load_pairs(
+    power_path: Path, weather_path: Path, *, trusted_root: Path | None = None
+) -> PairedDataset:
+    root = (Path.cwd() if trusted_root is None else trusted_root).resolve(strict=True)
+    power_rows, power_hash = _load(power_path, root)
+    weather_rows, weather_hash = _load(weather_path, root)
     powers = _power(power_rows)
     weather = _weather(weather_rows)
     samples: list[PairedInterval] = []

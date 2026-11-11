@@ -84,7 +84,9 @@ The CLI freezes the first 60% of complete local days for training, uses the next
 
 The authorized 2026-11-11 case paired 17,376 half-hours. Istanbul time has 361 complete local days and two partial boundary days. Training used 216 days (2025-11-06 through 2026-06-09), validation 72 and testing 73 (2026-08-21 through 2026-11-01). On 1,713 identifiable test intervals, GHI MAE was 1.3002 W/m² versus the baseline's 50.4214 W/m²; RMSE was 6.7675 W/m². Daily partial-energy MAE was 0.007262 versus 0.589119 kWh/m² on the same intervals. The test set contains no snow-covered intervals and 277 inverse estimates extrapolate beyond the fitted temperature range. The largest daily partial-energy error was +0.175536 kWh/m² on October 26; October 25 was +0.081967. Both remain in evaluation. These results establish historical model-output agreement at this site, not measured irradiance accuracy, seasonal universality or forecast equivalence.
 
-Run the reproducible case from the repository root:
+Run the reproducible case from the repository root. Both inputs must be existing
+JSON files whose canonical paths remain inside the command's working directory.
+Library callers can supply an explicit trusted root.
 
 ```text
 uv run --locked python scripts/calibrate_irradiance.py --power docs/json_37.80375_34.460913_fixed_0_0_1000_1.00_PT30M.json --weather docs/json_37.80375_34.460913_fixed_33_180_PT5M.json --capacity-kw 1000 --timezone Europe/Istanbul --output .codex/irradiance-model

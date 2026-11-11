@@ -36,7 +36,7 @@ def test_complete_utc_alignment_weighted_means_and_source_hashes(tmp_path: Path)
     rows = [weather(i) for i in range(6)]
     rows[0]["period_end"] = "2026-01-01T03:05:00+03:00"
     p, w = files(tmp_path, [power()], rows)
-    dataset = load_pairs(p, w)
+    dataset = load_pairs(p, w, trusted_root=tmp_path)
     assert dataset.power_sha256 == hashlib.sha256(p.read_bytes()).hexdigest()
     assert dataset.weather_sha256 == hashlib.sha256(w.read_bytes()).hexdigest()
     assert (dataset.unmatched_power_intervals, dataset.unmatched_weather_intervals) == (0, 0)
@@ -56,7 +56,7 @@ def test_gaps_and_unmatched_edges_are_counted(tmp_path: Path) -> None:
         if i != 8
     ]
     p, w = files(tmp_path, powers, rows)
-    result = load_pairs(p, w)
+    result = load_pairs(p, w, trusted_root=tmp_path)
     assert len(result.samples) == 2
     assert (result.unmatched_power_intervals, result.unmatched_weather_intervals) == (1, 7)
 
@@ -79,7 +79,7 @@ def test_gaps_and_unmatched_edges_are_counted(tmp_path: Path) -> None:
 def test_rejects_invalid_power_fields(tmp_path: Path, field: str, value: object) -> None:
     p, w = files(tmp_path, [power() | {field: value}], [])
     with pytest.raises(ValueError, match=r"Invalid|sorted|interval objects"):
-        load_pairs(p, w)
+        load_pairs(p, w, trusted_root=tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -97,7 +97,7 @@ def test_rejects_invalid_power_fields(tmp_path: Path, field: str, value: object)
 def test_rejects_invalid_weather_fields(tmp_path: Path, field: str, value: object) -> None:
     p, w = files(tmp_path, [], [weather(0, **{field: value})])
     with pytest.raises(ValueError, match=r"Invalid|sorted|interval objects"):
-        load_pairs(p, w)
+        load_pairs(p, w, trusted_root=tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -115,11 +115,81 @@ def test_rejects_overlapping_unsorted_or_non_object_rows(
 ) -> None:
     p, w = files(tmp_path, powers, weathers)
     with pytest.raises(ValueError, match=r"Invalid|sorted|interval objects"):
-        load_pairs(p, w)
+        load_pairs(p, w, trusted_root=tmp_path)
 
 
 def test_rejects_missing_array(tmp_path: Path) -> None:
     p, w = files(tmp_path, [], [])
     p.write_text("{}", encoding="utf-8")
     with pytest.raises(ValueError, match="estimated_actuals"):
-        load_pairs(p, w)
+        load_pairs(p, w, trusted_root=tmp_path)
+
+
+@pytest.mark.parametrize("outside_kind", ["relative_parent", "absolute", "sibling_prefix"])
+@pytest.mark.parametrize("outside_input", ["power", "weather"])
+def test_rejects_inputs_outside_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outside_kind: str, outside_input: str
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    sibling = tmp_path / "workspace-other"
+    sibling.mkdir()
+    p, w = files(workspace, [], [])
+    outside = (
+        sibling / "outside.json" if outside_kind == "sibling_prefix" else tmp_path / "outside.json"
+    )
+    outside.write_text('{"estimated_actuals": []}', encoding="utf-8")
+    selected = Path("../outside.json") if outside_kind == "relative_parent" else outside
+    monkeypatch.chdir(workspace)
+    with pytest.raises(ValueError, match="existing JSON file within the trusted directory"):
+        load_pairs(
+            selected if outside_input == "power" else p,
+            selected if outside_input == "weather" else w,
+        )
+
+
+def test_rejects_a_symlink_to_an_input_outside_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    p, _w = files(workspace, [], [])
+    outside = tmp_path / "outside.json"
+    outside.write_text('{"estimated_actuals": []}', encoding="utf-8")
+    link = workspace / "linked.json"
+    try:
+        link.symlink_to(outside)
+    except OSError as error:
+        if getattr(error, "winerror", None) == 1314:
+            pytest.skip("Windows symlink creation requires Developer Mode or privilege")
+        raise
+    monkeypatch.chdir(workspace)
+    with pytest.raises(ValueError, match="existing JSON file within the trusted directory"):
+        load_pairs(p, link)
+
+
+@pytest.mark.parametrize("invalid_kind", ["missing", "directory", "non_json"])
+def test_rejects_missing_non_file_and_non_json_inputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, invalid_kind: str
+) -> None:
+    _p, w = files(tmp_path, [], [])
+    invalid = tmp_path / ("input.txt" if invalid_kind == "non_json" else "input.json")
+    if invalid_kind == "directory":
+        invalid.mkdir()
+    elif invalid_kind == "non_json":
+        invalid.write_text('{"estimated_actuals": []}', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="existing JSON file within the trusted directory"):
+        load_pairs(invalid, w)
+
+
+def test_accepts_relative_and_absolute_json_inputs_inside_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    p, w = files(tmp_path, [], [])
+    monkeypatch.chdir(tmp_path)
+    result = load_pairs(Path(p.name), w)
+    assert result.samples == ()
+    assert result.unmatched_power_intervals == 0
+    assert result.unmatched_weather_intervals == 0
+    assert result.power_sha256 == hashlib.sha256(p.read_bytes()).hexdigest()

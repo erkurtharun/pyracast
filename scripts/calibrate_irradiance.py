@@ -16,9 +16,11 @@ def main() -> None:
     parser.add_argument("--timezone", default="Europe/Istanbul")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    result = calibrate(
-        load_pairs(args.power, args.weather), capacity_kw=args.capacity_kw, timezone=args.timezone
-    )
+    try:
+        pairs = load_pairs(args.power, args.weather)
+    except ValueError as error:
+        parser.error(str(error))
+    result = calibrate(pairs, capacity_kw=args.capacity_kw, timezone=args.timezone)
     args.output.mkdir(parents=True, exist_ok=True)
     model = {
         "schema_version": 1,
