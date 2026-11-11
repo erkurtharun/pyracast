@@ -1,6 +1,6 @@
 from datetime import UTC, date, datetime, timedelta
 from math import isfinite
-from typing import cast
+from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
@@ -37,13 +37,16 @@ def power_limit(configuration: PlantConfiguration) -> float | None:
 
 
 def power_intervals(
-    snapshot: ForecastSnapshot, configuration: PlantConfiguration
+    snapshot: ForecastSnapshot,
+    configuration: PlantConfiguration,
+    *,
+    source_intervals: tuple[dict[str, Any], ...] | None = None,
 ) -> tuple[PowerInterval, ...]:
     result = []
     capacity = configuration.binding.capacity_kw
     if not isfinite(capacity) or capacity <= 0:
         raise ValueError("Invalid reference capacity")
-    for row in snapshot.normalized_intervals:
+    for row in snapshot.normalized_intervals if source_intervals is None else source_intervals:
         start, end, power = row.get("start"), row.get("end"), row.get("power_kw")
         if not isinstance(start, str) or not isinstance(end, str):
             raise ValueError("Invalid source interval timestamps")
@@ -119,10 +122,12 @@ def _payload(
     calibration: CalibrationRun | None,
     target_date: date,
     resolution_minutes: int,
+    *,
+    source_intervals: tuple[dict[str, Any], ...] | None = None,
 ) -> dict[str, object]:
     start, end = local_day_bounds(target_date, configuration.binding.timezone)
     result = forecast(
-        power_intervals(snapshot, configuration),
+        power_intervals(snapshot, configuration, source_intervals=source_intervals),
         start=start,
         end=end,
         resolution_minutes=resolution_minutes,

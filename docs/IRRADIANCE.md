@@ -76,6 +76,15 @@ at the native source interval **before** hourly aggregation: native powers 80 an
 120 MW over two half-hours with a 100 MW limit produce 90 MWh for the hour.
 Interval means cannot recover clipping at finer time resolution.
 
+Current outlooks compose native forecast intervals under `latest-forecast-coverage-v2`.
+The newest acquisition owns its coverage window, including internal missing values;
+older acquisitions can fill only the remaining windows. Split native intervals at
+ownership boundaries before calibration, clipping and aggregation. Retain their
+mean values and original bounds, and flag `uniform_mean_proration` when a split
+assumes a uniform mean over a shorter duration. Preserve every contributing source
+and apply the same pieces to normal and outage scenarios. This composition remains
+a forecast; it does not substitute estimated actuals or change day-ahead replays.
+
 Reported outage scenarios split native intervals at the reported boundaries.
 Scale the uncapped reference transfer by remaining DC/nameplate DC, then apply
 the calibration factor and the smaller applicable normal/remaining capacity cap.

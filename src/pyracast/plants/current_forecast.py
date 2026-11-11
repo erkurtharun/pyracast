@@ -10,12 +10,11 @@ from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import ProviderAccount
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
+from pyracast.plants.forecast_sources import SELECTION_POLICY, apply_composition, compose_snapshots
 from pyracast.plants.forecasting import _payload, calibration_at
 from pyracast.plants.measurements import production_identity_current
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.plants.operations import configuration_is_current
-
-SELECTION_POLICY = "latest-available-forecast-v1"
 
 
 def current_forecast(
@@ -46,9 +45,10 @@ def current_forecast(
     calibration = None
     result = None
     irradiance = None
+    used_snapshots: list[ForecastSnapshot] = []
     if configuration is not None:
         start, end = local_day_bounds(target_date, configuration.binding.timezone)
-        snapshot = (
+        snapshots = list(
             ForecastSnapshot.objects.select_related("job")
             .filter(
                 job__binding_id=configuration.binding_id,
@@ -62,27 +62,44 @@ def current_forecast(
             )
             .filter(Q(issued_at__isnull=True) | Q(issued_at__lte=now))
             .order_by("-collected_at", "-available_at", "-pk")
-            .first()
         )
+        snapshot = snapshots[0] if snapshots else None
         calibration = calibration_at(configuration, now)
         if calibration is not None and not production_identity_current(calibration):
             calibration = None
         if snapshot is not None:
             try:
+                composition = compose_snapshots(snapshots, start, end)
+                used_snapshots = [
+                    source for source in snapshots if source.pk in composition.snapshot_ids
+                ]
                 result = _payload(
-                    configuration, snapshot, calibration, target_date, resolution_minutes
+                    configuration,
+                    snapshot,
+                    calibration,
+                    target_date,
+                    resolution_minutes,
+                    source_intervals=composition.intervals,
                 )
+                apply_composition(result, snapshots, composition)
                 irradiance = calculate(
                     configuration.binding,
                     target_date,
                     ProviderData(
                         raw_payload=snapshot.raw_payload,
-                        intervals=snapshot.normalized_intervals,
+                        intervals=list(composition.intervals),
                         issued_at=snapshot.issued_at,
                         collected_at=snapshot.collected_at,
                         source_kind="forecast",
                     ),
                 )
+                irradiance["provenance"] = {
+                    "snapshot_id": snapshot.pk,
+                    "binding_id": configuration.binding_id,
+                    "source_kind": "forecast",
+                }
+                cast(dict[str, object], irradiance["vintage"])["scope"] = "primary_forecast_source"
+                apply_composition(irradiance, snapshots, composition)
             except (ValueError, ArithmeticError) as exc:
                 raise ValidationError("calculation_out_of_range") from exc
             cast(dict[str, object], result["provenance"])["selection_policy"] = SELECTION_POLICY
@@ -105,7 +122,7 @@ def current_forecast(
         "freshness": "missing"
         if snapshot is None
         else "fresh"
-        if snapshot.collected_at >= now - timedelta(hours=24)
+        if all(source.collected_at >= now - timedelta(hours=24) for source in used_snapshots)
         else "stale",
         "unavailable_reason": "configuration_unavailable"
         if configuration is None

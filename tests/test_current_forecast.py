@@ -44,7 +44,7 @@ def test_daily_acquisitions_refresh_live_outlook_and_keep_day_ahead_replay(
         assert payload["provenance"]["snapshot_id"] == snapshot.pk
         assert payload["energy_mwh"] == pytest.approx(power * 3120)
         assert payload["intervals"][9]["mean_power_mw"] == pytest.approx(power * 130)
-    assert payload["provenance"]["selection_policy"] == "latest-available-forecast-v1"
+    assert payload["provenance"]["selection_policy"] == "latest-forecast-coverage-v2"
     assert not PlantForecast.objects.exists()
     archived = plant_outlook(
         *scope, target_date=DAY, resolution_minutes=60, source=source, as_of=acquired

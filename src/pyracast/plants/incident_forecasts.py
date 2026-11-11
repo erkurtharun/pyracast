@@ -5,6 +5,7 @@ from typing import Any, cast
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.incidents.operations import select_incidents
 from pyracast.irradiance import local_day_bounds
+from pyracast.plants.forecast_sources import apply_composition, replay_composition
 from pyracast.plants.forecasting import _payload, power_intervals, power_limit
 from pyracast.plants.incident_policy import incidents_unchanged
 from pyracast.plants.models import CalibrationRun, PlantConfiguration
@@ -25,6 +26,8 @@ def incident_scenario(
     snapshot = ForecastSnapshot.objects.get(
         pk=normal["provenance"]["snapshot_id"], job__binding_id=configuration.binding_id
     )
+    selected_sources = replay_composition(normal["provenance"], configuration, start, end)
+    source_intervals = selected_sources[0].intervals if selected_sources is not None else None
     if outlook["calibration_id"] is not None:
         calibration = CalibrationRun.objects.get(
             pk=outlook["calibration_id"], configuration=configuration
@@ -32,8 +35,17 @@ def incident_scenario(
         if not incidents_unchanged(calibration, known_at):
             normal = cast(
                 dict[str, Any],
-                _payload(configuration, snapshot, None, target_date, resolution_minutes),
+                _payload(
+                    configuration,
+                    snapshot,
+                    None,
+                    target_date,
+                    resolution_minutes,
+                    source_intervals=source_intervals,
+                ),
             )
+            if selected_sources is not None:
+                apply_composition(normal, selected_sources[1], selected_sources[0])
             normal["quality_flags"].append("calibration_invalidated_by_outage_history")
             outlook["result"] = normal
             outlook["calibration_id"] = None
@@ -60,7 +72,7 @@ def incident_scenario(
     )
     result = forecast(
         affected_power(
-            power_intervals(snapshot, configuration),
+            power_intervals(snapshot, configuration, source_intervals=source_intervals),
             limits,
             dc_capacity_mw=configuration.dc_capacity_mw,
             normal_limit_mw=power_limit(configuration),
@@ -84,6 +96,10 @@ def incident_scenario(
     result["factor"] = normal["factor"]
     result["limit_mw"] = normal["limit_mw"]
     result["configuration"] = normal["configuration"]
+    if selected_sources is not None:
+        source_ids = {row["start"]: row["source_snapshot_ids"] for row in normal["intervals"]}
+        for row in cast(list[dict[str, Any]], result["intervals"]):
+            row["source_snapshot_ids"] = source_ids[row["start"]]
     result["provenance"] = {
         **normal["provenance"],
         "scenario_policy": "reported-operating-limits-v1",

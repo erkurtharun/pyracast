@@ -10,6 +10,7 @@ type Interval = {
     mean_power_mw?: number | null;
     energy_mwh?: number | null;
     quality_flags?: string[];
+    source_snapshot_ids?: number[];
     affected_mean_power_mw?: number | null;
     affected_energy_mwh?: number | null;
     affected_quality_flags?: string[];
@@ -69,6 +70,12 @@ export function ForecastPanel({
               .outage_scenario
         : null;
     const result = forecast.result as Record<string, unknown>;
+    const mixedVintages =
+        Array.isArray(result.quality_flags) &&
+        result.quality_flags.includes("mixed_forecast_vintages");
+    const provenance = result.provenance as
+        | { source_snapshots?: { snapshot_id: number; collected_at: string }[] }
+        | undefined;
     const affectedRows = (
         scenario && Array.isArray(scenario.result.intervals)
             ? scenario.result.intervals
@@ -102,6 +109,7 @@ export function ForecastPanel({
               affected_energy_mwh: row.affected_energy_mwh,
               normal_quality_flags: row.quality_flags,
               affected_quality_flags: row.affected_quality_flags,
+              source_snapshot_ids: row.source_snapshot_ids,
           }))
         : allRows;
     const metric = electrical ? "mean_power_mw" : "ghi_wm2",
@@ -141,6 +149,11 @@ export function ForecastPanel({
                     {forecast.source_kind === "estimated_actuals" && (
                         <p className="fine">
                             Satellite/model estimates, not meter readings.
+                        </p>
+                    )}
+                    {mixedVintages && (
+                        <p className="fine">
+                            Includes intervals from earlier forecast updates.
                         </p>
                     )}
                 </div>
@@ -452,6 +465,22 @@ export function ForecastPanel({
                               : "Baseline (no active calibration)."
                           : ""}
                 </p>
+                {mixedVintages &&
+                    Array.isArray(provenance?.source_snapshots) && (
+                        <ul>
+                            {provenance.source_snapshots.map((source) => (
+                                <li key={source.snapshot_id}>
+                                    Forecast update {source.snapshot_id}:
+                                    collected{" "}
+                                    {new Date(
+                                        source.collected_at,
+                                    ).toLocaleString("en", {
+                                        timeZone: forecast.timezone,
+                                    })}
+                                </li>
+                            ))}
+                        </ul>
+                    )}
                 {Array.isArray(result.quality_flags) &&
                     result.quality_flags.length > 0 && (
                         <div className="tags">
