@@ -24,12 +24,25 @@ class CollectionScheduleInput(InputSerializer):
     )
 
 
+class CollectionJobOutput(serializers.Serializer[dict[str, object]]):
+    id = serializers.IntegerField()
+    endpoint = serializers.CharField()
+    status = serializers.CharField()
+    scheduled_slot = serializers.DateTimeField()
+    available_at = serializers.DateTimeField()
+    attempts = serializers.IntegerField()
+    last_error = serializers.CharField()
+
+
 class CollectionScheduleOutput(CollectionScheduleInput):
     timezone = serializers.CharField()
     effective_from = serializers.DateTimeField()
     daily_request_limit = serializers.IntegerField()
     used_today = serializers.IntegerField()
     remaining_today = serializers.IntegerField()
+    quota_utc_day = serializers.DateField()
+    requests_by_outcome = serializers.DictField(child=serializers.IntegerField())
+    recent_jobs = CollectionJobOutput(many=True)
     history_requests_per_day = serializers.IntegerField()
     max_forecast_times = serializers.IntegerField()
 

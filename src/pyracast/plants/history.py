@@ -10,6 +10,7 @@ from django.utils import timezone
 from pyracast.accounts.operations import require_member
 from pyracast.forecasts.history import historical_irradiance, select_actual_snapshot
 from pyracast.irradiance import local_day_bounds
+from pyracast.plants.current_forecast import current_forecast
 from pyracast.plants.forecasting import _payload, declared_forecast, plant_forecast
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.plants.operations import configuration_is_current
@@ -70,6 +71,8 @@ def _plant_outlook(
     if source not in {"auto", "forecast", "estimated_actuals"}:
         raise ValidationError("Unsupported data source.")
     if source == "forecast" or (source == "auto" and target_date >= today):
+        if as_of is None and target_date >= today:
+            return current_forecast(plant, target_date, resolution_minutes, now)
         return _forecast_outlook(
             actor,
             tenant_id,

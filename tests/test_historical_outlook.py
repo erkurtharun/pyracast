@@ -25,10 +25,10 @@ DAY = date(2026, 11, 8)
 
 
 @pytest.mark.parametrize("source", ["forecast", "auto"])
-@pytest.mark.parametrize("target", [DAY, NOW.date()])
 def test_new_plant_projects_saved_forecast_without_backdating_or_calibration(
-    monkeypatch: pytest.MonkeyPatch, source: str, target: date
+    monkeypatch: pytest.MonkeyPatch, source: str
 ) -> None:
+    target = DAY
     system, plant = make_plant(monkeypatch)
     configuration = plant.configurations.get()
     PlantConfiguration.objects.filter(pk=configuration.pk).update(created_at=NOW)

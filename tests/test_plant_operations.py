@@ -11,7 +11,7 @@ from django.db import close_old_connections, connection
 from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant
-from pyracast.forecasts.models import CollectionJob, ForecastSnapshot
+from pyracast.forecasts.models import CollectionJob, ForecastResult, ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import (
     CalibrationActivation,
@@ -91,6 +91,17 @@ def snapshot_for(
         issued_at=issued_at,
         source_kind=source_kind,
     )
+
+
+def publish_snapshot(snapshot: ForecastSnapshot) -> ForecastSnapshot:
+    snapshot.coverage_start = datetime.fromisoformat(snapshot.normalized_intervals[0]["start"])
+    snapshot.coverage_end = datetime.fromisoformat(snapshot.normalized_intervals[-1]["end"])
+    snapshot.available_at = snapshot.collected_at
+    snapshot.save()
+    snapshot.job.status = "succeeded"
+    snapshot.job.save(update_fields=["status"])
+    ForecastResult.objects.create(snapshot=snapshot, payload={}, published_at=snapshot.collected_at)
+    return snapshot
 
 
 def request_run(system: System, plant: Plant) -> CalibrationRun:

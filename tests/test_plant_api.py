@@ -16,7 +16,7 @@ from pyracast.forecasts.models import CollectionJob, ForecastSnapshot
 from pyracast.plants.models import CalibrationRun, Plant, PlantForecast, ProductionObservation
 from pyracast.plants.serializers import AwareDateTime, FiniteFloat
 from tests.test_domain import make_system
-from tests.test_plant_operations import saved_actuals
+from tests.test_plant_operations import publish_snapshot, saved_actuals
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -117,7 +117,7 @@ def test_new_plant_forecast_reports_unavailable_history_without_rejecting_capaci
     assert today.json()["result"] is None
     assert today.json()["regional_irradiance"] is None
     assert today.json()["timezone"] == "Europe/Istanbul"
-    assert datetime.fromisoformat(today.json()["as_of"]) == datetime(2026, 11, 9, 21, tzinfo=UTC)
+    assert datetime.fromisoformat(today.json()["as_of"]) == now
     tomorrow = client.get(detail, {"date": "2026-11-11", "resolution_minutes": "60"})
     assert tomorrow.status_code == 200
     assert tomorrow.json()["configuration_id"] == configuration["id"]
@@ -313,7 +313,7 @@ def test_forecast_resolution_caps_native_intervals() -> None:
     job = CollectionJob.objects.create(
         binding=configuration.binding, target_date=target, scheduled_slot=now, available_at=now
     )
-    ForecastSnapshot.objects.create(
+    snapshot = ForecastSnapshot.objects.create(
         job=job,
         source_kind="forecast",
         collected_at=now,
@@ -331,6 +331,7 @@ def test_forecast_resolution_caps_native_intervals() -> None:
             },
         ],
     )
+    publish_snapshot(snapshot)
     query = f"{detail}forecast/?date={target.isoformat()}"
     half = client.get(query + "&resolution_minutes=30")
     hour = client.get(query + "&resolution_minutes=60")

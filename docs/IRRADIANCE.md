@@ -200,6 +200,11 @@ daylight overlap. The journal hides night slots but retains original saved readi
 
 ## Archived forecast evaluation
 
+The live current/future outlook uses the latest eligible published forecast and
+current configuration/calibration. It can change at each collection time and is
+not written over a historical forecast. The archived evaluation below retains
+the separate day-ahead information cutoff; live intraday updates do not enter it.
+
 The plant performance endpoint replays archived day-ahead forecast inputs against
 meter energy for 1–90 completed local days. It uses only the current configuration's
 observations, and excludes days before that configuration existed. Select the first

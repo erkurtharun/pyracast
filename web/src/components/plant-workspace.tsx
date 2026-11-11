@@ -268,7 +268,7 @@ export function PlantWorkspace({
     );
 }
 function PlantForecast({ url }: { url: string }) {
-    const resource = useResource<Forecast>(url);
+    const resource = useResource<Forecast>(url, 0, 30_000);
     return (
         <section className="panel">
             {resource.loading ? (

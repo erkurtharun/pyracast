@@ -74,11 +74,19 @@ def claim(job_id: int, now: datetime) -> Lease | None:
             and (job.lease_expires_at > now)
         ):
             return None
-        binding = SiteBinding.objects.select_related("provider_account").get(pk=job.binding_id)
+        binding = SiteBinding.objects.select_related("provider_account", "region").get(
+            pk=job.binding_id
+        )
         schedule = CollectionSchedule.objects.filter(region_id=binding.region_id).first()
         if not binding_is_current(binding) or (
             schedule is not None
-            and (not schedule.enabled or job.scheduled_slot < schedule.effective_from)
+            and (
+                not schedule.enabled
+                or job.scheduled_slot.astimezone(ZoneInfo(binding.region.timezone)).strftime(
+                    "%H:%M"
+                )
+                not in schedule.times
+            )
         ):
             job.status = "stale"
             job.save(update_fields=("status",))
@@ -174,9 +182,10 @@ def publish(
                 available_at=now
             )
             job.status = "succeeded"
+            job.last_error = ""
         job.lease_token = None
         job.lease_expires_at = None
-        job.save(update_fields=("status", "lease_token", "lease_expires_at"))
+        job.save(update_fields=("status", "last_error", "lease_token", "lease_expires_at"))
         return job.status == "succeeded"
 
 

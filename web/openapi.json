@@ -3074,6 +3074,43 @@
                     "window_start"
                 ]
             },
+            "CollectionJobOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "endpoint": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "scheduled_slot": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "available_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "attempts": {
+                        "type": "integer"
+                    },
+                    "last_error": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "attempts",
+                    "available_at",
+                    "endpoint",
+                    "id",
+                    "last_error",
+                    "scheduled_slot",
+                    "status"
+                ]
+            },
             "CollectionScheduleInput": {
                 "type": "object",
                 "properties": {
@@ -3124,6 +3161,22 @@
                     "remaining_today": {
                         "type": "integer"
                     },
+                    "quota_utc_day": {
+                        "type": "string",
+                        "format": "date"
+                    },
+                    "requests_by_outcome": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "integer"
+                        }
+                    },
+                    "recent_jobs": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/CollectionJobOutput"
+                        }
+                    },
                     "history_requests_per_day": {
                         "type": "integer"
                     },
@@ -3137,7 +3190,10 @@
                     "enabled",
                     "history_requests_per_day",
                     "max_forecast_times",
+                    "quota_utc_day",
+                    "recent_jobs",
                     "remaining_today",
+                    "requests_by_outcome",
                     "times",
                     "timezone",
                     "used_today"

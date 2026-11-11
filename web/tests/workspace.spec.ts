@@ -506,26 +506,98 @@ for (const staleRead of ["resolve", "reject"] as const) {
         });
     }
 }
-test("region collection schedule saves local times separately from reminders", async ({
+test("open regional and plant forecasts refresh after new data arrives", async ({
     page,
 }) => {
+    await page.clock.install();
     await mockApi(page);
+    let revised = false;
+    await page.route("**/forecast/**", async (route) => {
+        await route.fulfill({
+            json: {
+                timezone: region.timezone,
+                freshness: "missing",
+                result: null,
+                unavailable_reason: revised
+                    ? "estimated_actuals_unavailable"
+                    : "forecast_unavailable",
+            },
+        });
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await expect(
+        page.getByRole("heading", { name: "No forecast for this day yet" }),
+    ).toBeVisible();
+    revised = true;
+    await page.clock.fastForward(30_000);
+    await expect(
+        page.getByRole("heading", {
+            name: "No estimated actuals for this day",
+        }),
+    ).toBeVisible();
+    revised = false;
+    await page
+        .getByRole("button", { name: "Solar plants", exact: true })
+        .click();
+    await page.getByRole("button", { name: /East array/ }).click();
+    await expect(
+        page.getByRole("heading", { name: "No forecast for this day yet" }),
+    ).toBeVisible();
+    revised = true;
+    await page.clock.fastForward(30_000);
+    await expect(
+        page.getByRole("heading", {
+            name: "No estimated actuals for this day",
+        }),
+    ).toBeVisible();
+});
+
+test("region collection schedule validates and saves distinct local times", async ({
+    page,
+}) => {
+    await page.clock.install();
+    await mockApi(page);
+    let saves = 0;
     let schedule = {
         enabled: true,
-        times: ["16:00"],
+        times: ["09:00"],
         timezone: region.timezone,
         daily_request_limit: 10,
-        used_today: 0,
-        remaining_today: 10,
+        used_today: 2,
+        remaining_today: 8,
         history_requests_per_day: 1,
         max_forecast_times: 9,
         effective_from: "2026-01-01T00:00:00Z",
+        quota_utc_day: "2026-01-01",
+        requests_by_outcome: { succeeded: 1, failed: 1, uncertain: 0 },
+        recent_jobs: [
+            {
+                id: 1,
+                endpoint: "forecasts",
+                status: "failed",
+                scheduled_slot: "2026-01-01T07:00:00Z",
+                available_at: "2026-01-01T07:00:00Z",
+                attempts: 1,
+                last_error: "provider_failure",
+            },
+            {
+                id: 2,
+                endpoint: "estimated_actuals",
+                status: "succeeded",
+                scheduled_slot: "2026-01-01T07:00:00Z",
+                available_at: "2026-01-01T07:00:00Z",
+                attempts: 2,
+                last_error: "quota_exhausted",
+            },
+        ],
     };
     await page.route("**/collection-schedule/", async (route) => {
         if (route.request().method() === "PUT") {
+            saves++;
             expect(route.request().postDataJSON()).toEqual({
                 enabled: true,
-                times: ["08:00", "16:00"],
+                times: ["09:00", "10:00", "11:00"],
             });
             schedule = { ...schedule, ...route.request().postDataJSON() };
         }
@@ -534,16 +606,75 @@ test("region collection schedule saves local times separately from reminders", a
     await page.goto("/");
     await page.getByRole("button", { name: /Antalya solar park/ }).click();
     await page.getByRole("button", { name: "Data collection" }).click();
-    await expect(page.getByText(/first scheduled time/i)).toBeVisible();
+    await expect(page.getByText(/first eligible time each day/)).toBeVisible();
+    await expect(
+        page.getByText("Account requests used today (UTC)"),
+    ).toBeVisible();
+    await expect(
+        page.getByText(/Tracked attempts: 1 succeeded, 1 failed, 0 uncertain/),
+    ).toBeVisible();
+    await expect(page.getByText(/Provider request failed/)).toBeVisible();
+    await expect(
+        page.getByText(/Historical estimates - Succeeded/),
+    ).toBeVisible();
+    await expect(page.getByText(/Daily account budget exhausted/)).toHaveCount(
+        0,
+    );
+    await expect(
+        page.getByText(/not a guarantee of provider quota/),
+    ).toBeVisible();
     await page
-        .getByLabel("Collection times (Europe/Istanbul)")
-        .fill("16:00, 08:00");
+        .getByRole("button", { name: "Save collection schedule" })
+        .click();
+    expect(saves).toBe(0);
+    await page.getByRole("button", { name: "+ Add time" }).click();
     await page
         .getByRole("button", { name: "Save collection schedule" })
         .click();
     await expect(
-        page.getByLabel("Collection times (Europe/Istanbul)"),
-    ).toHaveValue("08:00, 16:00");
+        page.getByText("Enter a valid time in every row."),
+    ).toBeVisible();
+    await page.getByLabel("Collection time 2 (Europe/Istanbul)").fill("09:00");
+    await page
+        .getByRole("button", { name: "Save collection schedule" })
+        .click();
+    await expect(
+        page.getByText("Each collection time must be unique."),
+    ).toBeVisible();
+    await page.getByLabel("Collection time 2 (Europe/Istanbul)").fill("11:00");
+    schedule.used_today = 3;
+    schedule.effective_from = "2026-01-01T00:00:30Z";
+    const refreshed = page.waitForResponse(
+        (response) =>
+            response.url().includes("/collection-schedule/") &&
+            response.request().method() === "GET",
+    );
+    await page.clock.fastForward(30_000);
+    await refreshed;
+    await expect(
+        page.getByLabel("Collection time 2 (Europe/Istanbul)"),
+    ).toHaveValue("11:00");
+    await expect(
+        page.getByText("Account requests used today (UTC)").locator(".."),
+    ).toContainText("3");
+    await page.getByRole("button", { name: "+ Add time" }).click();
+    await page.getByLabel("Collection time 3 (Europe/Istanbul)").fill("10:00");
+    await page
+        .getByRole("button", { name: "Save collection schedule" })
+        .click();
+    await expect(
+        page.getByLabel("Collection time 2 (Europe/Istanbul)"),
+    ).toHaveValue("10:00");
+    await expect(
+        page.getByLabel("Collection time 3 (Europe/Istanbul)"),
+    ).toHaveValue("11:00");
+    expect(saves).toBe(1);
+    await page
+        .getByRole("button", { name: "Remove collection time 3" })
+        .click();
+    await expect(
+        page.getByLabel("Collection time 3 (Europe/Istanbul)"),
+    ).toHaveCount(0);
     await page.getByRole("button", { name: "Email reminders" }).click();
     await expect(
         page.getByText(/Sending an email does not request new provider data/),

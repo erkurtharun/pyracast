@@ -26,7 +26,7 @@ from pyracast.forecasts.models import (
 from pyracast.forecasts.schedule import configure_schedule, get_schedule, schedule_payload
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.providers import FixtureProvider, SolcastProvider
-from pyracast.regions.models import Region
+from pyracast.regions.models import AuditEvent, Region
 from tests.test_domain import NOW, FakeAdapter, make_system
 from tests.test_jobs import calculate
 from tests.test_providers import binding_for
@@ -105,6 +105,38 @@ def test_failed_initial_history_is_backfilled_again_next_day() -> None:
     assert provider.days == [7]
     assert RequestAttempt.objects.filter(purpose="estimated_actuals", outcome="failed").count() == 1
     assert len(ForecastSnapshot.objects.get().normalized_intervals) == 336
+
+
+@pytest.mark.parametrize("endpoint", ["forecasts", "estimated_actuals"])
+def test_successful_retry_clears_current_error_and_preserves_request_history(endpoint: str) -> None:
+    make_system(approved=True)
+    enqueue_due(NOW)
+    job = CollectionJob.objects.get(endpoint=endpoint)
+
+    def unavailable() -> None:
+        raise ProviderFailure("private provider message")
+
+    failing = (
+        HistoricalFixture(action=unavailable)
+        if endpoint == "estimated_actuals"
+        else FakeAdapter(unavailable)
+    )
+    assert not collect(job.pk, failing, calculate, NOW)
+    job.refresh_from_db()
+    assert job.status == "retry"
+    assert job.last_error == "provider_failure"
+
+    assert collect(job.pk, HistoricalFixture(job.available_at), calculate, job.available_at)
+    job.refresh_from_db()
+    assert job.status == "succeeded"
+    assert job.last_error == ""
+    assert job.attempts == 2
+    assert list(
+        RequestAttempt.objects.filter(job=job)
+        .order_by("created_at", "pk")
+        .values_list("outcome", flat=True)
+    ) == ["failed", "succeeded"]
+    assert ForecastSnapshot.objects.get(job=job).available_at is not None
 
 
 def test_history_restart_reuses_saved_snapshot_without_request() -> None:
@@ -221,6 +253,112 @@ def test_schedule_configuration_quota_and_effective_boundary() -> None:
     assert claim(ids[0], NOW + timedelta(hours=2)) is None
 
 
+@pytest.mark.parametrize("status", ["pending", "retry"])
+def test_saving_unchanged_schedule_preserves_due_jobs_and_effective_boundary(status: str) -> None:
+    system = make_system(approved=True)
+    schedule = configure_schedule(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        enabled=True,
+        times=["17:00", "16:00"],
+        now=NOW,
+    )
+    enqueue_due(NOW)
+    jobs = CollectionJob.objects.filter(status="pending")
+    job_ids = list(jobs.values_list("pk", flat=True))
+    jobs.update(status=status, attempts=1, last_error="provider_failure")
+    audit_count = AuditEvent.objects.filter(action="collection_schedule_updated").count()
+    later = NOW + timedelta(minutes=2)
+
+    saved = configure_schedule(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        enabled=True,
+        times=["16:00", "17:00"],
+        now=later,
+    )
+
+    assert saved.pk == schedule.pk
+    assert saved.effective_from == NOW
+    assert AuditEvent.objects.filter(action="collection_schedule_updated").count() == audit_count
+    assert CollectionJob.objects.filter(pk__in=job_ids, status=status, attempts=1).count() == 2
+    assert all(claim(job_id, later) is not None for job_id in job_ids)
+
+
+def test_three_daily_slots_create_distinct_forecasts_and_one_history_acquisition() -> None:
+    system = make_system(approved=True)
+    configure_schedule(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        enabled=True,
+        times=["09:00", "10:00", "11:00"],
+        now=NOW,
+    )
+    assert enqueue_due(NOW) == []
+    morning = (NOW + timedelta(days=1)).replace(hour=6)
+    for hour in range(3):
+        slot = morning + timedelta(hours=hour)
+        enqueue_due(slot)
+        forecast = CollectionJob.objects.get(endpoint="forecasts", scheduled_slot=slot)
+        assert collect(forecast.pk, HistoricalFixture(slot), calculate, slot)
+        if hour == 0:
+            history = CollectionJob.objects.get(endpoint="estimated_actuals")
+            assert collect(history.pk, HistoricalFixture(slot), no_calculation, slot)
+    assert ForecastResult.objects.count() == 3
+    assert ForecastSnapshot.objects.filter(source_kind="forecast").count() == 3
+    assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 1
+    assert RequestAttempt.objects.filter(purpose="forecast").count() == 3
+    assert RequestAttempt.objects.filter(purpose="estimated_actuals").count() == 1
+
+
+@pytest.mark.parametrize("keep_due_time", [True, False])
+def test_schedule_edit_keeps_authorized_retry_and_only_creates_future_slots(
+    keep_due_time: bool,
+) -> None:
+    system = make_system(approved=True)
+    configure_schedule(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        enabled=True,
+        times=["09:00", "10:00"],
+        now=NOW,
+    )
+    due = (NOW + timedelta(days=1)).replace(hour=7)
+    enqueue_due(due)
+    job = CollectionJob.objects.get(endpoint="forecasts", scheduled_slot=due)
+    lease = claim(job.pk, due)
+    assert lease is not None
+    retry(lease, due, "provider_failure")
+    changed = due + timedelta(minutes=1)
+    times = ["08:00", "09:00", "11:00"] + (["10:00"] if keep_due_time else [])
+    configure_schedule(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        enabled=True,
+        times=times,
+        now=changed,
+    )
+    job.refresh_from_db()
+    assert job.status == ("retry" if keep_due_time else "stale")
+    assert job.attempts == 1
+    assert job.last_error == "provider_failure"
+    assert (claim(job.pk, due + timedelta(minutes=2)) is not None) is keep_due_time
+    assert enqueue_due(changed) == []
+    enqueue_due(due + timedelta(hours=1))
+    assert (
+        CollectionJob.objects.filter(
+            endpoint="forecasts", scheduled_slot=due + timedelta(hours=1)
+        ).count()
+        == 1
+    )
+    assert not CollectionJob.objects.filter(scheduled_slot=due - timedelta(hours=2)).exists()
+
+
 @pytest.mark.parametrize("times", [["16:00", "16:00"], ["1:00"], ["24:00"], ["16:00"] * 10])
 def test_schedule_rejects_invalid_or_excess_times(times: list[str]) -> None:
     system = make_system(approved=True)
@@ -270,7 +408,7 @@ def test_schedule_requires_approval_membership_and_aware_timestamp() -> None:
     )
 
 
-def test_schedule_changed_after_claim_cancels_unstarted_job() -> None:
+def test_disabled_or_removed_collection_time_cancels_unstarted_job() -> None:
     system = make_system(approved=True)
     initial = CollectionJob.objects.get()
     CollectionSchedule.objects.create(
@@ -281,7 +419,7 @@ def test_schedule_changed_after_claim_cancels_unstarted_job() -> None:
     assert initial.status == "stale"
     CollectionJob.objects.filter(pk=initial.pk).update(status="pending")
     CollectionSchedule.objects.filter(region=system.region).update(
-        enabled=True, effective_from=NOW + timedelta(seconds=1)
+        enabled=True, times=["17:00"], effective_from=NOW + timedelta(seconds=1)
     )
     assert claim(initial.pk, NOW) is None
 

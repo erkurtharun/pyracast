@@ -143,7 +143,7 @@ export function RegionWorkspace({
 }
 function RegionalForecast({ url }: { url: string }) {
     const [version, setVersion] = useState(0);
-    const resource = useResource<Forecast>(url, version);
+    const resource = useResource<Forecast>(url, version, 30_000);
     return (
         <section className="panel">
             {resource.loading ? (

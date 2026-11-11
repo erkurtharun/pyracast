@@ -18,7 +18,7 @@ from pyracast.plants.models import (
 from pyracast.plants.numerics import forecast
 from pyracast.plants.operations import activate_calibration, create_plant, revise_plant
 from tests.test_domain import NOW
-from tests.test_plant_operations import make_plant, ready_run, snapshot_for
+from tests.test_plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 9)
@@ -376,9 +376,11 @@ def test_first_available_day_ahead_source_remains_stable_after_late_refresh(
 
 
 @pytest.mark.parametrize("power_kw", [0.4, 2.0])
+@pytest.mark.parametrize("explicit_as_of", [False, True])
 def test_finite_capacity_overflow_returns_validation_without_saving_forecast(
     monkeypatch: pytest.MonkeyPatch,
     power_kw: float,
+    explicit_as_of: bool,
 ) -> None:
     system, _ = make_plant(monkeypatch)
     plant = create_plant(
@@ -389,12 +391,15 @@ def test_finite_capacity_overflow_returns_validation_without_saving_forecast(
         dc_capacity_mw=1e308,
     )
     target = DAY + timedelta(days=1)
-    snapshot_for(system, target, power_kw=power_kw, collected_at=NOW)
+    publish_snapshot(snapshot_for(system, target, power_kw=power_kw, collected_at=NOW))
     client = Client()
     client.force_login(system.member)
+    query = {"date": target.isoformat(), "resolution_minutes": "60"}
+    if explicit_as_of:
+        query["as_of"] = NOW.isoformat()
     response = client.get(
         f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/",
-        {"date": target.isoformat(), "resolution_minutes": "60"},
+        query,
     )
     assert response.status_code == 400
     assert response.json() == {"code": "invalid_request", "detail": ["calculation_out_of_range"]}

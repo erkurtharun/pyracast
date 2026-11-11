@@ -41,7 +41,7 @@ export function useCollection<T>(url: string, refresh = 0) {
     }, [url, refresh]);
     return state;
 }
-export function useResource<T>(url: string, refresh = 0) {
+export function useResource<T>(url: string, refresh = 0, pollMs = 0) {
     const [state, setState] = useState<{
         data?: T;
         error?: string;
@@ -49,17 +49,26 @@ export function useResource<T>(url: string, refresh = 0) {
     }>({ loading: true });
     useEffect(() => {
         let current = true;
-        request<T>(url)
-            .then((data) => {
-                if (current) setState({ data, loading: false });
-            })
-            .catch((error: Error) => {
-                if (current) setState({ error: error.message, loading: false });
-            });
+        let sequence = 0;
+        const load = () => {
+            const requestSequence = ++sequence;
+            request<T>(url)
+                .then((data) => {
+                    if (current && requestSequence === sequence)
+                        setState({ data, loading: false });
+                })
+                .catch((error: Error) => {
+                    if (current && requestSequence === sequence)
+                        setState({ error: error.message, loading: false });
+                });
+        };
+        load();
+        const timer = pollMs > 0 ? setInterval(load, pollMs) : undefined;
         return () => {
             current = false;
+            if (timer) clearInterval(timer);
         };
-    }, [url, refresh]);
+    }, [url, refresh, pollMs]);
     return state;
 }
 export function Notice({

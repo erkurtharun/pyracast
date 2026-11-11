@@ -16,7 +16,13 @@ from pyracast.plants.models import CalibrationRun, Plant, PlantForecast, Product
 from pyracast.plants.numerics import FitResult, fit_calibration
 from pyracast.plants.operations import activate_calibration, revise_plant
 from tests.test_domain import NOW, System
-from tests.test_plant_operations import make_plant, ready_run, request_run, snapshot_for
+from tests.test_plant_operations import (
+    make_plant,
+    publish_snapshot,
+    ready_run,
+    request_run,
+    snapshot_for,
+)
 from tests.test_plant_training import actual_snapshot_for, history
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -132,9 +138,10 @@ def test_live_outlook_rejects_contaminated_factor_without_rewriting_saved_foreca
     ready = ready_run(system, plant)
     activate_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk, ready.pk)
     target = date(2026, 11, 10)
-    snapshot_for(system, target, collected_at=NOW)
+    publish_snapshot(snapshot_for(system, target, collected_at=NOW))
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
     original = plant_outlook(*scope, target_date=target, resolution_minutes=60)
+    archived = plant_outlook(*scope, target_date=target, resolution_minutes=60, as_of=NOW)
     saved = PlantForecast.objects.get()
     assert cast(dict[str, Any], original["result"])["factor"] == 0.5
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=1))
@@ -142,18 +149,25 @@ def test_live_outlook_rejects_contaminated_factor_without_rewriting_saved_foreca
     incident(system, plant, start + timedelta(hours=9), start + timedelta(hours=10))
     current = plant_outlook(*scope, target_date=target, resolution_minutes=60)
     assert cast(dict[str, Any], current["result"])["factor"] == 1
-    assert (
-        "calibration_invalidated_by_outage_history"
-        in cast(dict[str, Any], current["result"])["quality_flags"]
-    )
+    assert current["calibration_id"] is None
+    assert "uncalibrated" in cast(dict[str, Any], current["result"])["quality_flags"]
     saved.refresh_from_db()
-    assert saved.payload == original["result"]
+    assert saved.payload == archived["result"]
     historical = plant_outlook(*scope, target_date=target, resolution_minutes=60, as_of=NOW)
     assert cast(dict[str, Any], historical["result"])["factor"] == 0.5
     with pytest.raises(ValidationError, match="outage history changed"):
         activate_calibration(*scope, ready.pk)
     new_run = request_run(system, plant)
     assert training._incumbent_factor(new_run) == 1
+    monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=2))
+    past = plant_outlook(*scope, target_date=target, resolution_minutes=60)
+    past_payload = cast(dict[str, Any], past["result"])
+    assert past_payload["factor"] == 1
+    assert past["calibration_id"] is None
+    assert "calibration_invalidated_by_outage_history" in past_payload["quality_flags"]
+    saved.refresh_from_db()
+    assert saved.payload == archived["result"]
+    assert PlantForecast.objects.count() == 1
 
 
 def test_outlook_shows_partial_outage_then_single_forecast_after_resolution(
@@ -162,7 +176,7 @@ def test_outlook_shows_partial_outage_then_single_forecast_after_resolution(
     system, plant = make_plant(monkeypatch)
     day = date(2026, 11, 9)
     start, _ = local_day_bounds(day, system.binding.timezone)
-    snapshot_for(system, day)
+    publish_snapshot(snapshot_for(system, day))
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
     outage = incident(system, plant, start + timedelta(hours=9, minutes=15), None)
     outlook = plant_outlook(*scope, target_date=day, resolution_minutes=60)
@@ -190,7 +204,7 @@ def test_unknown_or_changed_configuration_never_invents_affected_power(
 ) -> None:
     system, plant = make_plant(monkeypatch)
     day = date(2026, 11, 10)
-    snapshot_for(system, day, collected_at=NOW)
+    publish_snapshot(snapshot_for(system, day, collected_at=NOW))
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
     incident(system, plant, NOW - timedelta(hours=1), None, available_dc_mw=None)
     unknown = plant_outlook(*scope, target_date=day, resolution_minutes=30)

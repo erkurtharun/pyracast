@@ -12,7 +12,7 @@ from pyracast.plants import incident_forecasts
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.operations import activate_calibration
 from tests.test_domain import NOW
-from tests.test_plant_operations import make_plant, ready_run, snapshot_for
+from tests.test_plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -25,7 +25,7 @@ def test_outlook_serializes_incident_writes_until_scenario_is_complete(
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
     activate_calibration(*scope, ready.pk)
     target = date(2026, 11, 10)
-    snapshot_for(system, target, collected_at=NOW)
+    publish_snapshot(snapshot_for(system, target, collected_at=NOW))
     plant_outlook(*scope, target_date=target, resolution_minutes=60)
     reached_scenario = Event()
     finish_read = Event()

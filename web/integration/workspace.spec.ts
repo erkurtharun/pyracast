@@ -202,7 +202,7 @@ test("a customer manages an approved region through the real API", async ({
     await page.getByLabel("Forecast date").fill(process.env.BROWSER_TODAY!);
     await expect(
         page.getByText(
-            "Calculated from the archived forecast using the plant configuration entered later. No calibration is applied.",
+            /Model: reference-power-transfer-v1\. Configuration 1\./,
         ),
     ).toBeVisible();
     await expect(
@@ -328,13 +328,18 @@ test("a customer manages an approved region through the real API", async ({
     await page
         .getByRole("button", { name: "Data collection", exact: true })
         .click();
-    await page.getByLabel(/Collection times/).fill("09:00, 16:00");
+    await page.getByLabel("Collection time 1 (Europe/Istanbul)").fill("09:00");
+    await page.getByRole("button", { name: "+ Add time" }).click();
+    await page.getByLabel("Collection time 2 (Europe/Istanbul)").fill("16:00");
     await page
         .getByRole("button", { name: "Save collection schedule" })
         .click();
-    await expect(page.getByLabel(/Collection times/)).toHaveValue(
-        "09:00, 16:00",
-    );
+    await expect(
+        page.getByLabel("Collection time 1 (Europe/Istanbul)"),
+    ).toHaveValue("09:00");
+    await expect(
+        page.getByLabel("Collection time 2 (Europe/Istanbul)"),
+    ).toHaveValue("16:00");
     await page.getByRole("button", { name: "Email reminders" }).click();
     await page.getByLabel("Enable forecast emails for this region").check();
     await page.getByLabel(/Delivery times/).fill("10:00");
@@ -369,9 +374,15 @@ test("a customer manages an approved region through the real API", async ({
     await page
         .getByRole("button", { name: "Delete plant", exact: true })
         .click();
+    const plantDeleted = page.waitForResponse(
+        (response) =>
+            response.request().method() === "DELETE" &&
+            /\/plants\/\d+\/$/.test(new URL(response.url()).pathname),
+    );
     await page
         .getByRole("button", { name: "Move plant to recycle bin" })
         .click();
+    expect((await plantDeleted).ok()).toBeTruthy();
     await expect(
         page.getByRole("button", { name: /Browser plant/ }),
     ).toHaveCount(0);

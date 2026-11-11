@@ -681,6 +681,17 @@ export interface components {
             readonly result: unknown;
             readonly dataset_sha256: string;
         };
+        CollectionJobOutput: {
+            id: number;
+            endpoint: string;
+            status: string;
+            /** Format: date-time */
+            scheduled_slot: string;
+            /** Format: date-time */
+            available_at: string;
+            attempts: number;
+            last_error: string;
+        };
         CollectionScheduleInput: {
             enabled: boolean;
             times: string[];
@@ -694,6 +705,12 @@ export interface components {
             daily_request_limit: number;
             used_today: number;
             remaining_today: number;
+            /** Format: date */
+            quota_utc_day: string;
+            requests_by_outcome: {
+                [key: string]: number;
+            };
+            recent_jobs: components["schemas"]["CollectionJobOutput"][];
             history_requests_per_day: number;
             max_forecast_times: number;
         };
