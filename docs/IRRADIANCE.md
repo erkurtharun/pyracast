@@ -52,6 +52,30 @@ Primary metrics are daily kWh/m² MAE and signed bias against matched Solcast fo
 
 Return region/date/timezone, surface, interval bounds and GHI, daily/partial energy, completeness, source vintage, collection time, binding/model revision and quality flags. Tests cover unit conversion, local midnight/DST, missingness, overlap, solver validity and selection of information available at issuance. Keep the pure calculation core free of network/database access.
 
+## Offline conditional reconstruction
+
+`scripts/calibrate_irradiance.py` pairs Historical Rooftop PV `PT30M` power with six contiguous `PT5M` irradiance/weather intervals. Match explicit UTC bounds, not array positions or filename geometry. Required weather fields are `ghi`, `air_temp` and `snow_soiling_rooftop`; the tilted `gti` field is not the horizontal reference. The operator must establish matching coordinates, horizontal geometry, capacity and loss settings. Unmatched intervals remain counted, never filled.
+
+The fitted forward approximation is `F(g,t) = c0 + c1*g + c2*t + c3*g*t + c4*g² + c5*t²`, with `g = GHI/1000`, `t = (air_temp_c-25)/25`, capacity `C` in kW and snow transmission `q = 1-snow_loss_fraction`. Fit `P/C` against the native five-minute means of `q*[1,g,t,g*t,g²,t²]` using scaled QR with reorthogonalization and rank checks. Fit only positive-power intervals whose six native GHI values exceed 25 W/m² and transmissions are at least 0.05, outside the low-light zero-output domain. These are explicit engineering support guards, not universal physical thresholds or confidence levels.
+
+For application with half-hour mean weather, set `a=c4`, `b=c1+c3*t`, `d=c0+c2*t+c5*t²`, and `y=P/(C*q)`. The ascending solution is:
+
+`GHI = 1000 * 2*(y-d) / (b + sqrt(b² - 4*a*(d-y)))`
+
+This rationalized expression also handles a linear model without cancellation. Require a positive derivative throughout the declared GHI support domain and a finite supported root; check the forward residual. Return the local sensitivity `dGHI/dP = 1000/(C*q*(b+2*a*g))`. Reject missing weather, opaque or poorly transmitting snow, known capped power and unsupported roots. Never infer clipping solely because power equals or exceeds nameplate. The 1400 W/m² support limit is an implementation domain, not a physical upper bound. Flag temperatures outside the fitted range. Zero power is not identifiable unless a caller supplies an explicit night classification; the offline workflow does not derive night from target GHI.
+
+Five-minute variance and covariance are not available from a half-hour mean. In general `mean(F(g,t))` differs from `F(mean(g),mean(t))`, and varying snow introduces further covariance. Consequently this is a **conditional point approximation**, not an exact inverse or a rigorous irradiance bound. Native GHI is used to fit and evaluate, never as an inverse input. Temperature and snow must be available at the relevant acquisition/forecast time. Without them, the conditional model is unavailable; the live Hobby adapter continues to expose the separate unvalidated power/capacity baseline.
+
+The CLI freezes the first 60% of complete local days for training, uses the next 20% for validation and the remainder for testing, and never refits on the test period. It writes `model.json`, `metrics.json` and `predictions.csv`, with source SHA-256 digests, coefficient version, support limits, chronology, missingness and per-interval flags. Its daily metric is **partial energy over the same identifiable intervals** for both methods; it does not validate complete daily totals or future forecasts. The input files and generated case artifacts remain local.
+
+The authorized 2026-11-11 case paired 17,376 half-hours. Istanbul time has 361 complete local days and two partial boundary days. Training used 216 days (2025-11-06 through 2026-06-09), validation 72 and testing 73 (2026-08-21 through 2026-11-01). On 1,713 identifiable test intervals, GHI MAE was 1.3002 W/m² versus the baseline's 50.4214 W/m²; RMSE was 6.7675 W/m². Daily partial-energy MAE was 0.007262 versus 0.589119 kWh/m² on the same intervals. The test set contains no snow-covered intervals and 277 inverse estimates extrapolate beyond the fitted temperature range. The largest daily partial-energy error was +0.175536 kWh/m² on October 26; October 25 was +0.081967. Both remain in evaluation. These results establish historical model-output agreement at this site, not measured irradiance accuracy, seasonal universality or forecast equivalence.
+
+Run the reproducible case from the repository root:
+
+```text
+uv run --locked python scripts/calibrate_irradiance.py --power docs/json_37.80375_34.460913_fixed_0_0_1000_1.00_PT30M.json --weather docs/json_37.80375_34.460913_fixed_33_180_PT5M.json --capacity-kw 1000 --timezone Europe/Istanbul --output .codex/irradiance-model
+```
+
 ## Plant electrical generation
 
 Keep incident solar energy (kWh/m²) separate from plant electricity (MWh). The initial
