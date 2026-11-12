@@ -101,7 +101,9 @@ def test_purged_queue_identifiers_are_ignored() -> None:
     assert not process_notification(987654321, NOW)
 
 
-def test_dispatch_runs_purge_and_continues_all_queues(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_dispatch_prioritizes_notifications_and_continues_all_queues(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[str] = []
     broker = Mock()
     monkeypatch.setattr(dispatch_command, "make_broker", lambda: broker)
@@ -117,10 +119,10 @@ def test_dispatch_runs_purge_and_continues_all_queues(monkeypatch: pytest.Monkey
         monkeypatch.setattr(dispatch_command, name, lambda actor, name=name: calls.append(name))
     dispatch_command.Command().handle(loop=False, poll_seconds=60.0)
     assert calls == [
-        "purge",
+        "dispatch_notifications",
         "dispatch",
         "dispatch_calibrations",
-        "dispatch_notifications",
+        "purge",
         "dispatch_epias",
     ]
     broker.close.assert_called_once_with()
