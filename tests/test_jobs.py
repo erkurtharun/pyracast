@@ -252,7 +252,7 @@ def test_stale_binding_is_rejected_before_network(change: str) -> None:
     elif change == "revision":
         Region.objects.filter(pk=system.region.pk).update(revision=2)
     elif change == "credential":
-        rotate_secret(system.admin, system.account.pk, "env:NEW_KEY")
+        rotate_secret(system.admin, system.account.pk, "test-only-new-key")
     else:
         ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=False)
     job = CollectionJob.objects.get()
@@ -452,7 +452,7 @@ def test_publication_holds_account_lock_against_credential_rotation(
                 with connection.cursor() as cursor:
                     cursor.execute("SET LOCAL lock_timeout = '100ms'")
                 with pytest.raises(OperationalError):
-                    rotate_secret(system.admin, system.account.pk, "env:NEW_KEY")
+                    rotate_secret(system.admin, system.account.pk, "test-only-new-key")
         finally:
             rotation_blocked.set()
             connection.close()

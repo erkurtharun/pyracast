@@ -20,9 +20,18 @@ At bootstrap, verify and lock the latest stable compatible dependencies and cont
 Celery has no supported native Windows runtime. Selecting Celery would require an explicit Linux-container/WSL worker contract; it must not be presented as native Windows support.
 
 Build versioned artifacts from the committed dependency locks and promote those
-artifacts between environments. Deployment-specific configuration and credentials
-come from environment variables; the ignored working-directory `.env` is a local
-convenience that never overrides an existing variable. Run migrations as a separate
+artifacts between environments. Deployment-specific infrastructure configuration and
+shared service credentials enter through environment variables; the ignored
+working-directory `.env` is a local convenience that never overrides an existing
+variable. Plant-specific Solcast account selection, encrypted API keys, resource IDs
+and reference settings are administrator-managed database records. EPİAŞ's shared
+transparency-service login and Open-Meteo's optional commercial service key remain
+deployment credentials; plant EPİAŞ identifiers and weather coordinates remain in
+database records. Production secret storage supplies runtime values without placing
+them in images or source control, following the deployment/application boundary in
+[Twelve-Factor](https://12factor.net/config) and the access and lifecycle controls in
+[OWASP Secrets Management](https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html).
+Run migrations as a separate
 release command using the same application version and its dedicated database role.
 API, worker and dispatcher processes retain no authoritative workflow state locally:
 PostgreSQL owns jobs, leases, results and sessions, and RabbitMQ transports deliveries.
@@ -52,7 +61,7 @@ Use conventional Django apps for accounts, regions, provider connections, foreca
 | --- | --- |
 | Tenant, User, Membership | Customer ownership and permitted actions |
 | Region | Tenant, coordinates, IANA timezone and approval state |
-| ProviderAccount | Provider identity, secret reference, entitlement and account-wide quota |
+| ProviderAccount | Canonical provider identity, encrypted API key, entitlement and account-wide quota |
 | SiteBinding | Region-to-provider-account/site mapping and immutable configuration revisions |
 | CollectionJob, RequestAttempt | Scheduling, leases, quota reservations and execution history |
 | ForecastSnapshot, ForecastResult | Raw input, normalized intervals, derived output and model version |
@@ -113,13 +122,19 @@ Members can rename a region without changing its revision or approval. Location 
 - Keep one authentication authority: django-allauth browser sessions, with no app-token endpoints or separate password login. Platform admin and API actions require active superuser status and MFA evidence bound to the current user and a live authenticator. Administrators require a TOTP factor provisioned through the trusted operator command before login; password possession cannot bootstrap an administrative factor. Upgrades remove an empty legacy OTP table but stop if any legacy device exists, requiring verified factor migration instead of reducing MFA to password/email enrollment. Reauthentication protects security changes, and recovery codes are one-use and shown once. MFA secrets use authenticated encryption with an HKDF context distinct from provider credentials.
 - Derive tenant access from authenticated membership. Scope list/detail/create/update operations, worker jobs and cache keys. Tenant ownership is not a trusted request field. Django admin does not provide tenant isolation automatically.
 - Store provider keys in a secret manager or authenticated encryption with keys outside the database. Accept credential changes through write-only admin inputs; redact secrets from responses, logs and audit payloads.
-  The OTP-protected administration setup page supports existing authorized accounts
+  The MFA-protected administration setup page supports existing authorized accounts
   or a new private account, followed by explicit connection validation and approval.
   Pasted keys use Fernet authenticated encryption, with an HKDF-SHA256 key derived
   from the externally configured Django secret and a versioned application context.
-  Environment references remain supported. Key rotation can decrypt with configured
-  secret-key fallbacks; re-save provider keys under the new primary key before
-  removing the old fallback. Back up the external keys separately from the database.
+  Solcast inputs are write-only raw API keys; persistence accepts encrypted credentials
+  and never resolves environment references. Existing-account key changes require
+  explicit confirmation and invalidate validation for every binding on that account
+  without replacing the canonical identity or resetting quota. Migration preserves
+  encrypted credentials and rejects unresolved legacy Solcast references. Key rotation
+  can decrypt with configured secret-key fallbacks; `reencrypt_secrets` rewrites stored
+  credentials under the new primary key before the old fallback is removed. Back up
+  the external keys separately from the database. This protects database-only
+  disclosure, not compromise of the application host that holds the decryption key.
 - Reserve quota atomically by provider account and UTC day before each request, including validation and retries. Use a shared database ledger, bounded timeouts and retry backoff. Uncertain request outcomes consume budget conservatively; do not rotate accounts to evade limits.
 - Claim jobs with expiring leases and unique scheduling keys. Assume queue redelivery: persist results idempotently and recover interrupted work. Publish through a durable job/outbox record so a database commit cannot lose the collection request.
 - Members configure region-local daily forecast times, initially 16:00. Historical collection runs separately at 03:00, refreshing yesterday and recovering missed days from the available seven-day window. Request `hours=168` explicitly and archive completed intervals; each acquisition remains immutable. Historical transport failures, empty responses and incomplete previous days retry no sooner than 30 minutes later, before 09:00. Restart catch-up is allowed inside that night window; disabling collection stops new night work. Account-wide UTC quota reservations preserve the remaining scheduled forecast needs before admitting a night request. Quota exhaustion or reserved forecast budget never creates a rapid retry loop. Configuration changes apply to future forecast slots; they do not invent missed forecast acquisitions. Use unique slots, advance a nonexistent night start to the first valid half-hour before 09:00, choose the first repeated time and flag late acquisitions.
@@ -294,8 +309,12 @@ counts as activity. Sessions predating the lifetime markers fail closed. API
 responses are private and non-cacheable. The frontend reads stored results and
 never handles provider credentials. A fixed public HTTPS origin determines
 security-email navigation. Verification and recovery codes expire after ten minutes,
-allow at most three attempts and are bound to the initiating browser session. Real SMTP delivery is a deployment requirement,
-separate from mocked mail validation. Email replacements require reauthentication
+allow at most three attempts and are bound to the initiating browser session. Real
+SMTP delivery is a production requirement, separate from mocked mail validation.
+Local development may explicitly select Django's console backend with
+`PYRACAST_EMAIL_BACKEND=console` and `PYRACAST_DEBUG=1`; messages, including usable
+verification codes, go to private local process logs. Console mail in production or
+an unknown backend stops startup. Email replacements require reauthentication
 and verification; password changes invalidate other sessions. Administrator recovery
 code access and regeneration require explicit MFA reauthentication within five minutes,
 bound to a still-enrolled factor; password reauthentication is insufficient.

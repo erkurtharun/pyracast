@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
@@ -10,13 +12,25 @@ from pyracast.admin_forms import BindingActionForm, ProviderSetupForm
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import rotate_secret
+from pyracast.connections.secrets import decrypt_api_key, encrypt_secret
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.plants.models import Plant, PlantSubmission
 from pyracast.regions.models import AuditEvent, Region
 from tests.test_api import verified_admin
-from tests.test_domain import FakeAdapter, System, make_system, secret_ref
+from tests.test_domain import FakeAdapter, System, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
+
+
+def admin_system() -> System:
+    system = make_system()
+    system.account.provider = "solcast"
+    system.account.encrypted_api_key = encrypt_secret("original-fixture-key")
+    system.account.save(update_fields=("provider", "encrypted_api_key"))
+    system.binding.installation_date = date(2020, 1, 1)
+    system.binding.settings_verification_reference = "Verified synthetic site settings"
+    system.binding.save(update_fields=("installation_date", "settings_verification_reference"))
+    return system
 
 
 def setup_url(system: System) -> str:
@@ -31,7 +45,6 @@ def setup_input(system: System, **changes: object) -> dict[str, object]:
         "account_mode": "existing",
         "existing_account": f"{system.account.pk}:{system.account.credential_revision}",
         "api_key": "",
-        "secret_reference": "",
         "daily_quota": 10,
         "site_id": "solar-resource",
         "capacity_kw": 1000,
@@ -71,14 +84,19 @@ def submitted_plant(system: System) -> Plant:
 def test_admin_can_review_configure_validate_and_approve_without_exposing_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    system = make_system()
+    system = admin_system()
     plant = submitted_plant(system)
     client, _ = verified_admin()
+    original_account_id = system.account.pk
+    original_ciphertext = system.account.encrypted_api_key
     response = client.get(setup_url(system))
     assert response.status_code == 200
     assert b"Customer solar park" in response.content
     assert b"4.2" in response.content
-    assert system.account.secret_reference.encode() not in response.content
+    assert b"Solcast setup for this plant" in response.content
+    assert b"shared key and quota" in response.content
+    assert b"every plant using the selected account" in response.content
+    assert system.account.encrypted_api_key.encode() not in response.content
     listing = client.get("/admin/regions/region/")
     assert setup_url(system).encode() in listing.content
     detail = client.get(f"/admin/regions/region/{system.region.pk}/change/")
@@ -104,11 +122,14 @@ def test_admin_can_review_configure_validate_and_approve_without_exposing_key(
     system.account = system.binding.provider_account
     assert system.account.provider == "solcast"
     assert system.account.external_account_id == "new-owner"
-    assert system.account.secret_reference.startswith("encrypted:v1:")
-    assert key not in system.account.secret_reference
+    assert system.account.encrypted_api_key.startswith("encrypted:v1:")
+    assert key not in system.account.encrypted_api_key
+    assert (
+        ProviderAccount.objects.get(pk=original_account_id).encrypted_api_key == original_ciphertext
+    )
     page = client.get(setup_url(system))
     assert key.encode() not in page.content
-    assert system.account.secret_reference.encode() not in page.content
+    assert system.account.encrypted_api_key.encode() not in page.content
     assert page.context["can_approve"] is False
     assert client.post(setup_url(system), action_input(system, "approve")).status_code == 400
     monkeypatch.setattr("pyracast.admin.adapter_for", lambda binding: FakeAdapter())
@@ -127,7 +148,7 @@ def test_admin_can_review_configure_validate_and_approve_without_exposing_key(
 
 @pytest.mark.parametrize("identity", ["anonymous", "member", "staff", "unverified_admin"])
 def test_setup_requires_superuser_and_mfa(identity: str) -> None:
-    system = make_system()
+    system = admin_system()
     client = Client()
     if identity != "anonymous":
         user = User.objects.create_user(
@@ -142,7 +163,7 @@ def test_setup_requires_superuser_and_mfa(identity: str) -> None:
 
 
 def test_setup_csrf_deleted_regions_and_missing_binding_states() -> None:
-    system = make_system()
+    system = admin_system()
     client, _ = verified_admin()
     csrf_client = Client(enforce_csrf_checks=True)
     csrf_client.cookies = client.cookies
@@ -162,6 +183,41 @@ def test_setup_csrf_deleted_regions_and_missing_binding_states() -> None:
     assert client.get(setup_url(system)).status_code == 404
 
 
+def test_provider_setup_requires_a_private_key_and_offers_no_environment_reference() -> None:
+    system = admin_system()
+    fixture_account = ProviderAccount.objects.create(
+        provider="fixture", external_account_id="fixture-only-account"
+    )
+    client, _ = verified_admin()
+    page = client.get(setup_url(system))
+    assert page.status_code == 200
+    assert b'name="secret_reference"' not in page.content
+    assert b"fixture-only-account" not in page.content
+    forged = client.post(
+        setup_url(system),
+        setup_input(
+            system, existing_account=f"{fixture_account.pk}:{fixture_account.credential_revision}"
+        ),
+    )
+    assert forged.status_code == 400
+    assert "existing_account" in forged.context["setup_form"].errors
+    obsolete_reference = "env:SHOULD_NOT_BE_ACCEPTED"
+    response = client.post(
+        setup_url(system),
+        setup_input(
+            system,
+            account_mode="new",
+            existing_account="",
+            external_account_id="new-account",
+            authorization_reference="Authorized service use",
+            secret_reference=obsolete_reference,
+            api_key="",
+        ),
+    )
+    assert response.status_code == 400
+    assert "api_key" in response.context["setup_form"].errors
+
+
 @pytest.mark.parametrize(
     ("changes", "field"),
     [
@@ -170,9 +226,7 @@ def test_setup_csrf_deleted_regions_and_missing_binding_states() -> None:
             "api_key",
         ),
         ({"existing_account": ""}, "existing_account"),
-        ({"api_key": "never-render-this", "secret_reference": "env:ALTERNATIVE"}, "api_key"),
-        ({"secret_reference": "raw-key-must-not-appear"}, "secret_reference"),
-        ({"secret_reference": "env:bad-reference"}, "secret_reference"),
+        ({"api_key": "never-render-this"}, "confirm_key_rotation"),
         ({"capacity_kw": "nan"}, "capacity_kw"),
         ({"capacity_semantics_verified": ""}, "capacity_semantics_verified"),
         ({"account_mode": "invalid"}, "account_mode"),
@@ -182,22 +236,20 @@ def test_invalid_setup_preserves_safe_fields_and_never_renders_secrets(
     changes: dict[str, object],
     field: str,
 ) -> None:
-    system = make_system()
+    system = admin_system()
     client, _ = verified_admin()
     response = client.post(setup_url(system), setup_input(system, **changes))
     assert response.status_code == 400
     assert field in response.context["setup_form"].errors
     assert b"never-render-this" not in response.content
-    assert b"raw-key-must-not-appear" not in response.content
-    assert b"bad-reference" not in response.content
     assert ProviderAccount.objects.count() == SiteBinding.objects.count() == 1
 
 
 def test_existing_key_can_be_rotated_and_invalid_site_rolls_back_rotation() -> None:
-    system = make_system()
+    system = admin_system()
     client, _ = verified_admin()
     response = client.post(
-        setup_url(system), setup_input(system, secret_reference=secret_ref("REPLACED"))
+        setup_url(system), setup_input(system, api_key="replacement-key", confirm_key_rotation=True)
     )
     assert response.status_code == 302
     system.account.refresh_from_db()
@@ -206,7 +258,7 @@ def test_existing_key_can_be_rotated_and_invalid_site_rolls_back_rotation() -> N
         region=system.region, region_revision=system.region.revision
     )
     assert system.account.credential_revision == 2
-    assert system.account.secret_reference == secret_ref("REPLACED")
+    assert decrypt_api_key(system.account.encrypted_api_key) == "replacement-key"
     assert client.post(setup_url(system), setup_input(system)).status_code == 302
     system.region.refresh_from_db()
     system.account.refresh_from_db()
@@ -217,17 +269,17 @@ def test_existing_key_can_be_rotated_and_invalid_site_rolls_back_rotation() -> N
     assert (
         client.post(
             setup_url(system),
-            setup_input(system, secret_reference=secret_ref("ROLLBACK"), capacity_kw=0),
+            setup_input(system, api_key="rollback-key", confirm_key_rotation=True, capacity_kw=0),
         ).status_code
         == 400
     )
     system.account.refresh_from_db()
-    assert system.account.secret_reference == secret_ref("REPLACED")
+    assert decrypt_api_key(system.account.encrypted_api_key) == "replacement-key"
     assert SiteBinding.objects.count() == 3
 
 
 def test_stale_setup_and_action_revisions_are_rejected() -> None:
-    system = make_system()
+    system = admin_system()
     client, _ = verified_admin()
     assert (
         client.post(setup_url(system), setup_input(system, expected_revision=999)).status_code
@@ -250,7 +302,7 @@ def test_stale_setup_and_action_revisions_are_rejected() -> None:
     assert not RequestAttempt.objects.exists()
     form = ProviderSetupForm(setup_input(system))
     assert form.is_valid(), form.errors
-    rotate_secret(system.admin, system.account.pk, "env:ROTATED")
+    rotate_secret(system.admin, system.account.pk, "rotated-key")
     with pytest.raises(ValidationError, match="account changed"):
         form.configure(system.admin, system.region)
     action = BindingActionForm(action_input(system, "validate"))
@@ -262,10 +314,11 @@ def test_stale_setup_and_action_revisions_are_rejected() -> None:
 
 
 def test_new_account_duplicate_identity_is_not_silently_reused() -> None:
-    system = make_system()
+    system = admin_system()
     client, _ = verified_admin()
     system.account.provider = "solcast"
     system.account.save(update_fields=("provider",))
+    original_key = system.account.encrypted_api_key
     response = client.post(
         setup_url(system),
         setup_input(
@@ -279,13 +332,44 @@ def test_new_account_duplicate_identity_is_not_silently_reused() -> None:
     assert response.status_code == 400
     assert ProviderAccount.objects.count() == 1
     system.account.refresh_from_db()
-    assert system.account.secret_reference == secret_ref()
+    assert system.account.encrypted_api_key == original_key
+
+
+def test_setup_rechecks_selected_account_provider_under_lock() -> None:
+    system = admin_system()
+    form = ProviderSetupForm(setup_input(system))
+    assert form.is_valid(), form.errors
+    system.account.provider = "fixture"
+    system.account.save(update_fields=("provider",))
+    with pytest.raises(ProviderAccount.DoesNotExist):
+        form.configure(system.admin, system.region)
+    assert SiteBinding.objects.count() == 1
+
+
+def test_invalid_new_account_key_is_rejected_without_being_rendered() -> None:
+    system = admin_system()
+    client, _ = verified_admin()
+    invalid_key = "invalid key with spaces"
+    response = client.post(
+        setup_url(system),
+        setup_input(
+            system,
+            account_mode="new",
+            existing_account="",
+            external_account_id="new-account",
+            authorization_reference="Authorized service use",
+            api_key=invalid_key,
+        ),
+    )
+    assert response.status_code == 400
+    assert invalid_key.encode() not in response.content
+    assert ProviderAccount.objects.count() == 1
 
 
 def test_validation_failures_and_quota_exhaustion_are_safe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    system = make_system()
+    system = admin_system()
     client, _ = verified_admin()
 
     def fail() -> None:
@@ -307,7 +391,7 @@ def test_validation_failures_and_quota_exhaustion_are_safe(
 
 
 def test_initial_setup_duplicate_post_does_not_replace_the_first_binding() -> None:
-    system = make_system()
+    system = admin_system()
     client, _ = verified_admin()
     region = Region.objects.create(
         tenant=system.tenant,

@@ -4,6 +4,8 @@ from django.contrib.auth.models import User
 from django.db.models import QuerySet
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.decorators import method_decorator
+from django.views.decorators.debug import sensitive_post_parameters, sensitive_variables
 from drf_spectacular.utils import extend_schema
 from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import BasePermission
@@ -141,21 +143,25 @@ class LocationChangeRequestsView(GenericAPIView[RegionLocationChangeRequest]):
         return Response(LocationChangeOutput(change).data, status=201)
 
 
+@method_decorator(sensitive_post_parameters("api_key"), name="dispatch")
 class AccountView(APIView):
     permission_classes = (PlatformAdmin,)
 
     @extend_schema(request=AccountInput, responses={201: IdentifierOutput})
+    @sensitive_variables()
     def post(self, request: Request) -> Response:
         data = AccountInput(data=request.data)
         data.is_valid(raise_exception=True)
-        account = create_account(cast(User, request.user), **data.validated_data)
+        account = create_account(cast(User, request.user), require_new=True, **data.validated_data)
         return Response({"id": account.pk}, status=201)
 
 
+@method_decorator(sensitive_post_parameters("api_key"), name="dispatch")
 class RotateSecretView(APIView):
     permission_classes = (PlatformAdmin,)
 
     @extend_schema(request=RotateSecretInput, responses=IdentifierOutput)
+    @sensitive_variables()
     def post(self, request: Request, account_id: int) -> Response:
         data = RotateSecretInput(data=request.data)
         data.is_valid(raise_exception=True)

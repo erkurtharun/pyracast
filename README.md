@@ -85,24 +85,49 @@ launcher has native OS tests in CI; a Windows smoke run does not establish Linux
 dependency recovery. `start.cmd --no-browser` suppresses opening a browser.
 
 Provide PostgreSQL, copy `.env.example` to an ignored `.env` and fill its values.
-Every process loads `.env` from its working directory without overriding existing
-environment variables or expanding values. Start processes from the repository root.
+Every process loads the ignored local-development `.env` from its working directory
+without overriding existing environment variables or expanding values. Start processes
+from the repository root. Plant-specific Solcast accounts, API keys, resource IDs and
+reference settings belong to the MFA-protected admin and database, not `.env`.
 Alternatively, use `$env:NAME='value'`
 in PowerShell or `export NAME='value'` in a POSIX shell. These settings apply to each
 API, dispatcher and worker process.
 
-| Variable | Local development value |
-| --- | --- |
-| `PGHOST` | `127.0.0.1` |
-| `PGPORT` | `55432` for the helper below, otherwise your database port |
-| `PGDATABASE`, `PGUSER` | `pyracast` |
-| `PGPASSWORD` | Your PostgreSQL password |
-| `PYRACAST_SECRET_KEY` | A long random application secret, shared between processes |
-| `PYRACAST_SECRET_KEY_FALLBACKS` | Optional space-separated previous keys during rotation; retain until stored provider credentials have been re-saved under the new primary key |
-| `PYRACAST_DEBUG` | `1` for local HTTP only |
-| `PYRACAST_HOSTS` | `localhost,127.0.0.1` |
-| `PYRACAST_CUTOFF_LOCAL` | `16:00` (local `HH:MM`) |
-| `PYRACAST_RABBITMQ_URL` | Your authorized AMQP connection URL |
+| Setting | Local development | Production value and source |
+| --- | --- | --- |
+| `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD` | Loopback development PostgreSQL; the helper below uses port `55432` | Direct PostgreSQL endpoint and restricted credentials supplied by the database operator |
+| `PYRACAST_SECRET_KEY` | Long random development secret shared between processes | Separate random production secret, stored outside the database and source control |
+| `PYRACAST_SECRET_KEY_FALLBACKS` | Empty unless rotating keys | Previous keys retained until `reencrypt_secrets` completes |
+| `PYRACAST_DEBUG` | `1` | `0` |
+| `PYRACAST_HOSTS` | `localhost,127.0.0.1` | Actual public hostname from the hosting/DNS configuration |
+| `PYRACAST_PUBLIC_ORIGIN`, `PYRACAST_CSRF_ORIGINS` | `http://127.0.0.1:3000`; allow the chosen local frontend origins | Public HTTPS origin served by the configured TLS gateway |
+| `PYRACAST_TRUST_PROXY`, `PYRACAST_TRUSTED_PROXY_CIDRS` | `0`, empty | Enable only with known immediate proxy networks and the documented header-overwrite contract |
+| `PYRACAST_EMAIL_BACKEND` | `console` with `DEBUG=1`; messages appear in local logs | `smtp`; console mode is rejected at startup |
+| `PYRACAST_EMAIL_HOST`, `PYRACAST_EMAIL_PORT`, `PYRACAST_EMAIL_TLS`, `PYRACAST_EMAIL_SSL` | Not needed for console mail | Connection and encryption settings supplied by the selected SMTP provider |
+| `PYRACAST_EMAIL_USER`, `PYRACAST_EMAIL_PASSWORD`, `PYRACAST_FROM_EMAIL` | No SMTP credentials needed | Provider-issued credentials and an authorized sender identity |
+| `PYRACAST_RABBITMQ_URL` | Local development broker | Broker endpoint and credentials supplied by the operator |
+| `PYRACAST_CUTOFF_LOCAL` | `16:00` initial schedule default | Initial local-time default; each plant's saved schedule remains in the database |
+
+No public domain or email provider is needed for local development. Before production,
+obtain the real domain/TLS origin and SMTP connection, credentials and sender from the
+chosen providers; placeholders do not establish delivery. Run
+`uv run --locked pyracast check --deploy --fail-level ERROR` with production settings.
+
+`EPIAS_USERNAME` and `EPIAS_PASSWORD` authenticate the platform's shared
+[transparency-service session](https://seffaflik.epias.com.tr/electricity-service/technical/en/index.html#_adding_security_information_to_requests).
+Each plant's EPİAŞ identifiers and EIC remain in its database connection.
+`PYRACAST_OPEN_METEO_API_KEY` is the platform's optional commercial weather-service key;
+`PYRACAST_WEATHER_ENABLED` controls that shared service, while request coordinates come
+from the plant's binding. These service credentials are not tenant-specific Solcast keys.
+Open-Meteo's free endpoint is for evaluation; commercial operation requires the
+[appropriate subscription](https://open-meteo.com/en/pricing) or disabling weather.
+
+Environment variables are the application's deployment injection interface, not a
+secret vault. Production operators should source secrets from restricted runtime
+secret storage and keep them out of images, repositories and diagnostic exports.
+This boundary follows [Twelve-Factor configuration](https://12factor.net/config),
+[Django deployment guidance](https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/)
+and [OWASP secret lifecycle guidance](https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html).
 
 For an isolated **development/test** PostgreSQL instance, run
 `uv run --locked python scripts/start_postgres.py`. It downloads checksum-pinned
@@ -147,12 +172,17 @@ for production roles, large-table changes and recovery requirements.
 ```text
 uv run --locked pyracast migrate
 uv run --locked pyracast createsuperuser
+uv run --locked pyracast provision_admin_mfa --username YOUR_SUPERUSER --email admin@example.com
 uv run --locked pyracast fixture_demo --username YOUR_SUPERUSER
 uv run --locked pyracast runserver --noreload
 ```
 
-`fixture_demo` prints the saved forecast URL. Sign in at `/auth/login/`, then open
-that URL. This development command executes the durable job directly; it does not
+Enroll the private URI printed by `provision_admin_mfa` in your authenticator.
+Start the [customer interface](#customer-interface) and sign in at
+`http://127.0.0.1:3000/`; complete the email-code and TOTP steps. Console mail exposes
+local verification codes in the API terminal, or `.dev/api.log` with the launcher.
+`fixture_demo` prints the saved forecast URL to open after sign-in. This development
+command executes the durable job directly; it does not
 test RabbitMQ. The synthetic day yields 7.2 kWh/m² and carries `synthetic_fixture`
 and `unvalidated` flags. It is not a Solcast forecast or an accuracy reference.
 
@@ -251,11 +281,13 @@ the schema records the production session-cookie name. In PowerShell:
 
 ```powershell
 $env:PYRACAST_DEBUG = "0"
+$env:PYRACAST_EMAIL_BACKEND = "smtp"
 uv run --locked pyracast spectacular --validate --fail-on-warn --format openapi-json --file web/openapi.json
 npm --prefix web run api:generate
 ```
 
-On Ubuntu, run the schema command with `PYRACAST_DEBUG=0` in its environment,
+On Ubuntu, run the schema command with `PYRACAST_DEBUG=0` and
+`PYRACAST_EMAIL_BACKEND=smtp` in its environment,
 then run `npm --prefix web run api:generate`.
 
 ## Automatic plant production
@@ -329,7 +361,14 @@ outcome. Emails use the latest saved forecast; they make no Solcast requests.
 Timing, plan limits, stale-data and retry contracts are in
 [ARCHITECTURE.md](docs/ARCHITECTURE.md#saved-forecast-email-reminders).
 
-Set `PYRACAST_EMAIL_HOST`, `PYRACAST_EMAIL_PORT`, `PYRACAST_EMAIL_USER`,
+For local development, `.env.example` selects `PYRACAST_EMAIL_BACKEND=console`.
+Verification/reset codes and reminder messages are written to the sending process's
+stdout; the launcher captures account mail in `.dev/api.log` and reminder mail in
+`.dev/worker.log`. These private development logs contain usable codes, and messages
+are not delivered to an inbox. Console mail requires `PYRACAST_DEBUG=1` and is
+[Django's development backend](https://docs.djangoproject.com/en/6.1/topics/email/#console-backend).
+
+For real delivery, set `PYRACAST_EMAIL_BACKEND=smtp`, `PYRACAST_EMAIL_HOST`, `PYRACAST_EMAIL_PORT`, `PYRACAST_EMAIL_USER`,
 `PYRACAST_EMAIL_PASSWORD`, and `PYRACAST_FROM_EMAIL` in ignored `.env` for your
 authorized SMTP service. STARTTLS defaults to port 587; implicit TLS uses port 465,
 `PYRACAST_EMAIL_TLS=0` and `PYRACAST_EMAIL_SSL=1`. Django's `MAILERS` configuration
@@ -369,8 +408,8 @@ fixture command provisions its own tenant membership.
 | `.../plants/{plant}/calibration/reset/` | POST `{}` to restore the baseline |
 | `.../plants/{plant}/forecast/?date=YYYY-MM-DD&resolution_minutes=60` | Electrical interval/daily energy and separate regional irradiance |
 | `.../plants/{plant}/performance/?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD` | Archived day-ahead input replay against meter energy, up to 90 completed days |
-| `/api/platform/accounts/` | POST canonical authorized account and write-only secret reference |
-| `/api/platform/accounts/{account}/rotate-secret/` | POST write-only `secret_reference`; revalidation required |
+| `/api/platform/accounts/` | POST canonical authorized account and write-only `api_key` |
+| `/api/platform/accounts/{account}/rotate-secret/` | POST write-only `api_key`; shared-account revalidation required |
 | `/api/platform/regions/{region}/bindings/` | POST immutable reference configuration |
 | `/api/platform/bindings/{binding}/validate/` | POST quota-counted access validation |
 | `/api/platform/regions/{region}/approve/` | POST `{ "binding_id": 1 }` |
@@ -383,7 +422,8 @@ Sign in by email. New accounts must verify ownership before receiving an authent
 session; company membership is never inferred from an email address or company name.
 Passwords require at least 15 characters and use Argon2; existing PBKDF2 hashes are
 upgraded on successful authentication. Recovery and email changes require email
-delivery. Configure SMTP before enabling public registration, then run
+delivery. Local console mail exposes development codes in `.dev/api.log`.
+Configure SMTP before enabling public registration, then run
 `uv run --locked pyracast check --deploy --fail-level ERROR`. Configuration checks
 and mocked mail tests do not prove inbox delivery.
 
@@ -449,20 +489,29 @@ Location → Technical details → Review. Each location supports one active pla
 The request remains visible while an administrator sets up and approves its data
 connection. The customer's workspace never requests provider credentials.
 
-In `/admin/`, open **Regions → Review and set up** for the submitted plant. Check
+In `/admin/`, open **Regions → Review and set up → Solcast setup for this plant**. Check
 the location and technical details, select an existing authorized account or add
 a new Solcast account, save the reference settings, then **Validate connection**
 and **Approve plant**. Validation makes a provider request within the existing quota;
 saving a form does not. Approval queues collection for the worker.
 
 Solcast accounts require an `authorization_reference` documenting permission to use
-that account for this service. The admin form accepts a write-only API key, encrypted
-in the database with a key derived from `PYRACAST_SECRET_KEY`. Keep this external
+that account for this service. The admin form and protected API accept a write-only
+`api_key`; the server encrypts it in `ProviderAccount.encrypted_api_key`. The resource
+ID and reference settings live in the plant's immutable binding. There is no Solcast
+environment-variable fallback. Encryption uses a key derived from `PYRACAST_SECRET_KEY`. Keep this external
 secret with your backups. During rotation, retain the old key in
-`PYRACAST_SECRET_KEY_FALLBACKS`, re-save each stored provider key under the new primary
-key, and then remove the fallback. Alternatively, set `secret_reference` to an
-environment name such as `env:PYRACAST_SOLCAST_REFERENCE` and supply its value outside
-the database.
+`PYRACAST_SECRET_KEY_FALLBACKS`, run `uv run --locked pyracast reencrypt_secrets`,
+and then remove the fallback. Before upgrading an older database, convert existing
+environment references to encrypted credentials on their original canonical accounts;
+the migration refuses unresolved Solcast references rather than discarding credentials.
+The previous version's protected admin can save an existing key as encrypted data
+before applying that migration; preserve a verified backup until the upgrade succeeds.
+Leaving the API key blank preserves the selected account's key. Changing an existing
+account's key requires explicit confirmation because every plant using that account
+shares the credential and quota.
+Encryption protects database dumps and backups when the application secret is kept
+separate; it does not protect credentials from a compromised application host.
 Credential rotation uses the protected API or `connections.operations.rotate_secret`
 and invalidates previous validation without resetting quota. Account creation and
 rotation write atomic audit events without secret values or references. Canonical account identity remains
@@ -627,15 +676,16 @@ and [metadata](tests/fixtures/solcast_estimated_actuals.metadata.json) preserve
 that response. Collection trims incomplete local days and retains both acquisitions;
 neither this response nor the electrical proxy establishes measured irradiance accuracy.
 
-For another explicitly enabled live check, first register the canonical authorized
-Solcast account with `secret_reference=env:SOLCAST_API_KEY`, then run:
+For another explicitly enabled live check, first configure the plant's authorized
+Solcast account, encrypted key and resource ID in the admin, then select its binding:
 
 ```text
-uv run --locked python scripts/check_solcast.py --live --account-id ACCOUNT_ID --kind settings
-uv run --locked python scripts/check_solcast.py --live --account-id ACCOUNT_ID --kind forecast
+uv run --locked python scripts/check_solcast.py --live --binding-id BINDING_ID --kind settings
+uv run --locked python scripts/check_solcast.py --live --binding-id BINDING_ID --kind forecast
 ```
 
-The tool loads `SOLCAST_API_KEY` and `SOLCAST_RESOURCE_ID` from `.env`, reserves the
+The tool reads the selected binding's resource ID and its account's encrypted key,
+reserves the
 shared account/UTC-day budget before HTTP, sends no automatic retries and permits
 each check kind only once per UTC day. Sanitized artifacts go to ignored
 `.codex/solcast/`; filenames include the attempt ID to preserve separate acquisitions.

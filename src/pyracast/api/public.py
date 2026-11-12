@@ -12,6 +12,8 @@ _PRIVATE_FIELDS = frozenset(
         "resource_id",
         "resource_ids",
         "secret_reference",
+        "encrypted_api_key",
+        "api_key",
         "authorization_reference",
         "credential_revision",
         "raw_payload",

@@ -41,7 +41,6 @@ class Command(BaseCommand):
             actor,
             provider="fixture",
             external_account_id="fixture-demo",
-            secret_reference="env:FIXTURE",  # noqa: S106 -- reference name, no secret value.
         )
         binding = configure_binding(
             actor,

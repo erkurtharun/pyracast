@@ -553,7 +553,7 @@ def test_history_revalidation_rearms_stale_job_without_resetting_attempts() -> N
     system = make_system(approved=True)
     enqueue_due(NIGHT)
     history = CollectionJob.objects.get(endpoint="estimated_actuals")
-    rotate_secret(system.admin, system.account.pk, "env:REVALIDATED_KEY")
+    rotate_secret(system.admin, system.account.pk, "test-only-revalidated-key")
     assert not collect(history.pk, HistoricalFixture(), no_calculation, NIGHT)
     history.refresh_from_db()
     assert history.status == "stale"

@@ -24,7 +24,7 @@ def test_revalidation_after_cutoff_recovers_tomorrows_job_without_duplicate_requ
     cutoff = NOW + timedelta(days=1)
     recovery_time = cutoff + timedelta(hours=1)
     existing = enqueue_due(cutoff) if existing_stale_job else []
-    rotate_secret(system.admin, system.account.pk, "env:REVALIDATED_KEY")
+    rotate_secret(system.admin, system.account.pk, "test-only-revalidated-key")
     assert enqueue_due(cutoff) == []
     if existing:
         assert not collect(existing[0], FakeAdapter(), calculate, cutoff)
@@ -107,7 +107,7 @@ def test_revalidation_does_not_reset_a_failed_jobs_retry_budget() -> None:
     CollectionJob.objects.filter(pk=existing[0]).update(
         status="failed", attempts=3, last_error="provider_failure"
     )
-    rotate_secret(system.admin, system.account.pk, "env:REVALIDATED_KEY")
+    rotate_secret(system.admin, system.account.pk, "test-only-revalidated-key")
     validate_binding(system.admin, system.binding.pk, FakeAdapter(), cutoff + timedelta(hours=1))
 
     assert enqueue_due(cutoff + timedelta(hours=1)) == existing

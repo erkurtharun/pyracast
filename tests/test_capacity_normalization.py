@@ -7,6 +7,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import Client
 
 from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.connections.secrets import encrypt_secret
 from pyracast.forecasts.capacity_normalization import normalize_reference_capacity
 from pyracast.forecasts.history import select_actual_snapshot
 from pyracast.forecasts.models import ForecastSnapshot, ReferenceCapacityNormalization
@@ -21,7 +22,9 @@ pytestmark = pytest.mark.django_db(transaction=True)
 
 def scaled_system(monkeypatch: pytest.MonkeyPatch) -> tuple[System, SiteBinding]:
     system, _ = make_plant(monkeypatch)
-    ProviderAccount.objects.filter(pk=system.account.pk).update(provider="solcast")
+    ProviderAccount.objects.filter(pk=system.account.pk).update(
+        provider="solcast", encrypted_api_key=encrypt_secret("test-only-solcast-key")
+    )
     SiteBinding.objects.filter(pk=system.binding.pk).update(
         settings_verification_reference="Verified original Hobby settings"
     )

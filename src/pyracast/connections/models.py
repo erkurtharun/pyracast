@@ -8,7 +8,7 @@ from pyracast.regions.models import Region
 class ProviderAccount(models.Model):
     provider = models.CharField(max_length=30)
     external_account_id = models.CharField(max_length=200)
-    secret_reference = models.CharField(max_length=2048)
+    encrypted_api_key = models.CharField(max_length=2048, blank=True, default="")
     daily_quota = models.PositiveIntegerField(default=10)
     enabled = models.BooleanField(default=True)
     credential_revision = models.PositiveIntegerField(default=1)
@@ -22,6 +22,11 @@ class ProviderAccount(models.Model):
                 canonical_account_identity("provider"),
                 canonical_account_identity("external_account_id"),
                 name="canonical_provider_account",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(provider="fixture", encrypted_api_key="")
+                | models.Q(encrypted_api_key__startswith="encrypted:v1:"),
+                name="provider_account_encrypted_api_key",
             ),
         )
 

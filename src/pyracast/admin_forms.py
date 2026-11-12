@@ -9,7 +9,6 @@ from django.views.decorators.debug import sensitive_variables
 from pyracast.api.serializers import BindingInput
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import create_account, rotate_secret
-from pyracast.connections.secrets import encrypt_secret
 from pyracast.regions.models import Region
 from pyracast.regions.operations import configure_binding
 
@@ -18,30 +17,28 @@ class ProviderSetupForm(forms.Form):
     expected_revision = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
     expected_binding_id = forms.IntegerField(min_value=1, required=False, widget=forms.HiddenInput)
     account_mode = forms.ChoiceField(
-        label="Provider account",
+        label="Solcast account for this plant",
         choices=(
-            ("existing", "Use an existing authorized account"),
-            ("new", "Add a Solcast account"),
+            ("existing", "Use an existing account (shared key and quota)"),
+            ("new", "Add this plant's Solcast account"),
         ),
     )
-    existing_account = forms.ChoiceField(required=False, label="Existing account")
+    existing_account = forms.ChoiceField(required=False, label="Existing Solcast account")
     external_account_id = forms.CharField(
-        required=False, max_length=200, label="New account identity"
+        required=False, max_length=200, label="New Solcast account identity"
     )
     api_key = forms.CharField(
         required=False,
         max_length=1024,
         strip=False,
         widget=forms.PasswordInput(render_value=False, attrs={"autocomplete": "new-password"}),
-        label="API key",
-        help_text="Write only. Leave blank to keep an existing account's key.",
+        label="Solcast API key",
+        help_text="Write only. Required for a new account; leave blank to keep an existing key.",
     )
-    secret_reference = forms.CharField(
+    confirm_key_rotation = forms.BooleanField(
         required=False,
-        max_length=250,
-        widget=forms.PasswordInput(render_value=False, attrs={"autocomplete": "off"}),
-        label="Environment secret reference (alternative to API key)",
-        help_text="Use env:VARIABLE_NAME when a key is already managed in the server environment.",
+        label="Confirm replacement of the selected account's key",
+        help_text="A replacement affects every plant using the selected account.",
     )
     authorization_reference = forms.CharField(
         required=False,
@@ -49,7 +46,13 @@ class ProviderSetupForm(forms.Form):
         label="New account service authorization reference",
         help_text="Record the authorization permitting this account to be used by this service.",
     )
-    daily_quota = forms.IntegerField(min_value=1, max_value=10, initial=10)
+    daily_quota = forms.IntegerField(
+        min_value=1,
+        max_value=10,
+        initial=10,
+        label="New account daily request limit",
+        help_text="Existing accounts retain their shared limit.",
+    )
     site_id = forms.CharField(max_length=200, label="Solcast resource ID")
     capacity_kw = forms.FloatField(min_value=0, label="Reference capacity (kW)")
     dc_capacity_kw = forms.FloatField(
@@ -71,7 +74,7 @@ class ProviderSetupForm(forms.Form):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        accounts = ProviderAccount.objects.filter(enabled=True).order_by(
+        accounts = ProviderAccount.objects.filter(provider="solcast", enabled=True).order_by(
             "provider", "external_account_id"
         )
         cast(forms.ChoiceField, self.fields["existing_account"]).choices = [
@@ -88,23 +91,20 @@ class ProviderSetupForm(forms.Form):
 
     def clean(self) -> dict[str, Any]:
         data = super().clean() or {}
-        if data.get("api_key") and data.get("secret_reference"):
-            self.add_error("api_key", "Enter an API key or an environment reference, not both.")
         if data.get("account_mode") == "new":
             for name in ("external_account_id", "authorization_reference"):
                 if not data.get(name):
                     self.add_error(name, "This is required for a new account.")
-            if not data.get("api_key") and not data.get("secret_reference"):
-                self.add_error(
-                    "api_key", "Enter a key or an environment reference for the new account."
-                )
+            if not data.get("api_key"):
+                self.add_error("api_key", "Enter an API key for the new account.")
         elif data.get("account_mode") == "existing" and not data.get("existing_account"):
             self.add_error("existing_account", "Select an authorized provider account.")
-        if data.get("secret_reference") and (
-            not data["secret_reference"].startswith("env:")
-            or not data["secret_reference"][4:].isidentifier()
+        if (
+            data.get("account_mode") == "existing"
+            and data.get("api_key")
+            and not data.get("confirm_key_rotation")
         ):
-            self.add_error("secret_reference", "Use env:VARIABLE_NAME.")
+            self.add_error("confirm_key_rotation", "Confirm replacing the shared account key.")
         return data
 
     @sensitive_variables()
@@ -122,31 +122,25 @@ class ProviderSetupForm(forms.Form):
             )
             if current_binding_id != data["expected_binding_id"]:
                 raise ValidationError("The provider setup changed. Reload this page before saving.")
-            reference = (
-                encrypt_secret(data["api_key"]) if data["api_key"] else data["secret_reference"]
-            )
             if data["account_mode"] == "new":
                 account = create_account(
                     actor,
                     provider="solcast",
                     external_account_id=data["external_account_id"],
-                    secret_reference=reference,
+                    api_key=data["api_key"],
                     daily_quota=data["daily_quota"],
                     authorization_reference=data["authorization_reference"],
+                    require_new=True,
                 )
-                if account.secret_reference != reference:
-                    raise ValidationError(
-                        "This account already exists. Select the existing account."
-                    )
             else:
                 account_id, revision = data["existing_account"].split(":")
                 account = ProviderAccount.objects.select_for_update().get(
-                    pk=account_id, enabled=True
+                    pk=account_id, provider="solcast", enabled=True
                 )
                 if account.credential_revision != int(revision):
                     raise ValidationError("The account changed. Reload this page before saving.")
-                if reference:
-                    rotate_secret(actor, account.pk, reference)
+                if data["api_key"]:
+                    rotate_secret(actor, account.pk, data["api_key"])
             serializer = BindingInput(
                 data={
                     "provider_account_id": account.pk,

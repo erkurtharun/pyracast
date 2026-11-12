@@ -11,6 +11,7 @@ from pyracast import runtime
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import SiteBinding
+from pyracast.connections.secrets import encrypt_secret
 from pyracast.forecasts import jobs
 from pyracast.forecasts.jobs import LEASE_DURATION, collect
 from pyracast.forecasts.models import (
@@ -222,7 +223,8 @@ def test_runtime_only_enriches_enabled_hobby_forecasts(
 ) -> None:
     system = make_system(approved=True)
     system.account.provider = "solcast"
-    system.account.save(update_fields=("provider",))
+    system.account.encrypted_api_key = encrypt_secret("test-only-solcast-key")
+    system.account.save(update_fields=("provider", "encrypted_api_key"))
     job = CollectionJob.objects.get()
     job.endpoint = endpoint
     job.save(update_fields=("endpoint",))

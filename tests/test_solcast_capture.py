@@ -10,27 +10,48 @@ import pytest
 from django.db import connections
 from django.utils import timezone
 
+from pyracast.accounts.models import Tenant
 from pyracast.connections.contracts import ProviderError
-from pyracast.connections.models import ProviderAccount
+from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import QuotaExceededError, reserve_account_request
+from pyracast.connections.secrets import encrypt_secret
 from pyracast.forecasts.models import RequestAttempt
 from pyracast.providers import normalize_payload
+from pyracast.regions.models import Region
 from scripts import check_solcast
 
 
+def make_binding(account: ProviderAccount, site_id: str = "synthetic-site") -> SiteBinding:
+    region = Region.objects.create(
+        tenant=Tenant.objects.create(name="Capture tenant"),
+        name="Capture site",
+        latitude=37.8,
+        longitude=34.46,
+        timezone="Europe/Istanbul",
+    )
+    return SiteBinding.objects.create(
+        region=region,
+        region_revision=region.revision,
+        provider_account=account,
+        site_id=site_id,
+        capacity_kw=1000,
+        latitude=region.latitude,
+        longitude=region.longitude,
+        timezone=region.timezone,
+    )
+
+
 @pytest.fixture
-def capture_account(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> ProviderAccount:
+def capture_binding(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> SiteBinding:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("SOLCAST_API_KEY", "synthetic-capture-credential")
-    monkeypatch.setenv("SOLCAST_RESOURCE_ID", "synthetic-site")
-    reference = "env:SOLCAST_API_KEY"
-    return ProviderAccount.objects.create(
+    account = ProviderAccount.objects.create(
         provider="solcast",
         external_account_id="authorized-test-account",
-        secret_reference=reference,
+        encrypted_api_key=encrypt_secret("synthetic-capture-credential"),
         authorized_at=timezone.now(),
         daily_quota=3,
     )
+    return make_binding(account)
 
 
 def forecast_payload() -> dict[str, object]:
@@ -53,7 +74,7 @@ def forecast_payload() -> dict[str, object]:
 @pytest.mark.django_db
 @pytest.mark.parametrize("absolute", [True, False])
 def test_capture_rejects_output_outside_cwd_before_creating_files_or_consuming_quota(
-    capture_account: ProviderAccount,
+    capture_binding: SiteBinding,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     absolute: bool,
@@ -69,7 +90,7 @@ def test_capture_rejects_output_outside_cwd_before_creating_files_or_consuming_q
 
     with pytest.raises(ValueError, match="current working directory"):
         check_solcast.capture(
-            capture_account, "forecast", output, transport=httpx.MockTransport(reject_request)
+            capture_binding, "forecast", output, transport=httpx.MockTransport(reject_request)
         )
 
     assert not outside.exists()
@@ -79,7 +100,7 @@ def test_capture_rejects_output_outside_cwd_before_creating_files_or_consuming_q
 @pytest.mark.django_db
 @pytest.mark.parametrize("form", ["absolute", "relative", "parent_inside"])
 def test_capture_accepts_canonical_output_inside_cwd(
-    capture_account: ProviderAccount, tmp_path: Path, form: str
+    capture_binding: SiteBinding, tmp_path: Path, form: str
 ) -> None:
     output = tmp_path / "captures"
     if form == "relative":
@@ -88,7 +109,7 @@ def test_capture_accepts_canonical_output_inside_cwd(
         output = Path("nested/../captures")
     transport = httpx.MockTransport(lambda _: httpx.Response(200, json=forecast_payload()))
 
-    target = check_solcast.capture(capture_account, "forecast", output, transport=transport)
+    target = check_solcast.capture(capture_binding, "forecast", output, transport=transport)
 
     assert target.parent == tmp_path / "captures"
     assert target.is_file()
@@ -98,7 +119,7 @@ def test_capture_accepts_canonical_output_inside_cwd(
 
 @pytest.mark.django_db
 def test_capture_rejects_directory_symlink_escaping_cwd_before_consuming_quota(
-    capture_account: ProviderAccount, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    capture_binding: SiteBinding, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -118,7 +139,7 @@ def test_capture_rejects_directory_symlink_escaping_cwd_before_consuming_quota(
 
     with pytest.raises(ValueError, match="current working directory"):
         check_solcast.capture(
-            capture_account, "forecast", link, transport=httpx.MockTransport(reject_request)
+            capture_binding, "forecast", link, transport=httpx.MockTransport(reject_request)
         )
 
     assert list(outside.iterdir()) == []
@@ -127,37 +148,91 @@ def test_capture_rejects_directory_symlink_escaping_cwd_before_consuming_quota(
 
 @pytest.mark.django_db(transaction=True)
 def test_capture_preserves_other_account_artifact(
-    capture_account: ProviderAccount, tmp_path: Path
+    capture_binding: SiteBinding, tmp_path: Path
 ) -> None:
-    transport = httpx.MockTransport(lambda request: httpx.Response(200, json=forecast_payload()))
-    first = check_solcast.capture(capture_account, "forecast", tmp_path, transport=transport)
+    authorizations: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        authorizations.append(request.headers["Authorization"])
+        return httpx.Response(200, json=forecast_payload())
+
+    transport = httpx.MockTransport(handle)
+    first = check_solcast.capture(capture_binding, "forecast", tmp_path, transport=transport)
     other = ProviderAccount.objects.create(
         provider="solcast",
         external_account_id="other-authorized-test-account",
-        secret_reference=capture_account.secret_reference,
+        encrypted_api_key=encrypt_secret("other-capture-credential"),
         authorized_at=timezone.now(),
     )
-    second = check_solcast.capture(other, "forecast", tmp_path, transport=transport)
+    second = check_solcast.capture(make_binding(other), "forecast", tmp_path, transport=transport)
     assert first != second
     assert first.is_file()
     assert second.is_file()
     assert first.read_text() == second.read_text()
+    assert authorizations == [
+        "Bearer synthetic-capture-credential",
+        "Bearer other-capture-credential",
+    ]
 
 
 @pytest.mark.django_db(transaction=True)
-def test_capture_rechecks_rotated_reference_before_reserving(
-    capture_account: ProviderAccount, tmp_path: Path
+def test_capture_uses_current_database_key_and_site_ignoring_environment(
+    capture_binding: SiteBinding, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    reference = "env:OTHER_KEY"
-    ProviderAccount.objects.filter(pk=capture_account.pk).update(secret_reference=reference)
+    monkeypatch.setenv("SOLCAST_API_KEY", "unrelated-environment-key")
+    monkeypatch.setenv("SOLCAST_RESOURCE_ID", "unrelated-environment-site")
+    ProviderAccount.objects.filter(pk=capture_binding.provider_account_id).update(
+        encrypted_api_key=encrypt_secret("rotated-database-key"), credential_revision=2
+    )
 
-    def unexpected_request(request: httpx.Request) -> httpx.Response:
-        pytest.fail("Stale credential references must not send requests")
+    def handle(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == "Bearer rotated-database-key"
+        assert request.url.path == "/rooftop_sites/synthetic-site/forecasts"
+        return httpx.Response(200, json=forecast_payload())
 
-    with pytest.raises(ValueError, match="Solcast account"):
-        check_solcast.capture(
-            capture_account, "forecast", tmp_path, transport=httpx.MockTransport(unexpected_request)
-        )
+    check_solcast.capture(
+        capture_binding, "forecast", tmp_path, transport=httpx.MockTransport(handle)
+    )
+    assert RequestAttempt.objects.get().binding_id == capture_binding.pk
+
+
+@pytest.mark.django_db
+def test_capture_allows_each_binding_within_the_shared_account_budget(
+    capture_binding: SiteBinding, tmp_path: Path
+) -> None:
+    other = make_binding(capture_binding.provider_account, "other-resource")
+    requested_paths: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requested_paths.append(request.url.path)
+        return httpx.Response(200, json=forecast_payload())
+
+    transport = httpx.MockTransport(handle)
+    check_solcast.capture(capture_binding, "forecast", tmp_path, transport=transport)
+    check_solcast.capture(other, "forecast", tmp_path, transport=transport)
+
+    assert requested_paths == [
+        "/rooftop_sites/synthetic-site/forecasts",
+        "/rooftop_sites/other-resource/forecasts",
+    ]
+    assert (
+        RequestAttempt.objects.filter(provider_account=capture_binding.provider_account).count()
+        == 2
+    )
+    with pytest.raises(ValueError, match="already attempted today"):
+        check_solcast.capture(other, "forecast", tmp_path, transport=transport)
+
+
+@pytest.mark.django_db
+def test_capture_rejects_a_superseded_binding_before_consuming_quota(
+    capture_binding: SiteBinding, tmp_path: Path
+) -> None:
+    Region.objects.filter(pk=capture_binding.region_id).update(revision=2)
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, json=forecast_payload()))
+
+    with pytest.raises(SiteBinding.DoesNotExist):
+        check_solcast.capture(capture_binding, "forecast", tmp_path, transport=transport)
+
     assert not RequestAttempt.objects.exists()
 
 
@@ -165,7 +240,7 @@ def test_capture_cli_requires_explicit_live_flag(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(
-        sys, "argv", ["check_solcast.py", "--account-id", "1", "--kind", "settings"]
+        sys, "argv", ["check_solcast.py", "--binding-id", "1", "--kind", "settings"]
     )
 
     def reject_setup() -> None:
@@ -252,7 +327,7 @@ def test_captured_forecast_fixture_preserves_documented_intervals_and_missing_is
 
 @pytest.mark.django_db(transaction=True)
 def test_capture_persists_budget_before_http_and_saves_sanitized_output(
-    capture_account: ProviderAccount,
+    capture_binding: SiteBinding,
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
     capsys: pytest.CaptureFixture[str],
@@ -281,7 +356,7 @@ def test_capture_persists_budget_before_http_and_saves_sanitized_output(
         )
 
     target = check_solcast.capture(
-        capture_account, "forecast", tmp_path, transport=httpx.MockTransport(handle)
+        capture_binding, "forecast", tmp_path, transport=httpx.MockTransport(handle)
     )
 
     assert json.loads(target.read_text(encoding="utf-8")) == check_solcast.sanitize(
@@ -303,9 +378,9 @@ def test_capture_persists_budget_before_http_and_saves_sanitized_output(
 
 @pytest.mark.django_db
 def test_capture_shares_account_budget_and_prevents_duplicate_daily_kind(
-    capture_account: ProviderAccount, tmp_path: Path
+    capture_binding: SiteBinding, tmp_path: Path
 ) -> None:
-    reserve_account_request(capture_account, timezone.now(), purpose="validation")
+    reserve_account_request(capture_binding.provider_account, timezone.now(), purpose="validation")
 
     def handle(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/rooftop_sites":
@@ -315,17 +390,19 @@ def test_capture_shares_account_budget_and_prevents_duplicate_daily_kind(
         return httpx.Response(200, json=forecast_payload())
 
     transport = httpx.MockTransport(handle)
-    check_solcast.capture(capture_account, "settings", tmp_path, transport=transport)
+    check_solcast.capture(capture_binding, "settings", tmp_path, transport=transport)
     with pytest.raises(ValueError, match="already attempted today"):
-        check_solcast.capture(capture_account, "settings", tmp_path, transport=transport)
-    check_solcast.capture(capture_account, "forecast", tmp_path, transport=transport)
+        check_solcast.capture(capture_binding, "settings", tmp_path, transport=transport)
+    check_solcast.capture(capture_binding, "forecast", tmp_path, transport=transport)
     assert sorted(RequestAttempt.objects.values_list("purpose", flat=True)) == [
         "inspect_forecast",
         "inspect_settings",
         "validation",
     ]
     with pytest.raises(QuotaExceededError):
-        reserve_account_request(capture_account, timezone.now(), purpose="collection")
+        reserve_account_request(
+            capture_binding.provider_account, timezone.now(), purpose="collection"
+        )
 
 
 @pytest.mark.django_db
@@ -333,7 +410,7 @@ def test_capture_shares_account_budget_and_prevents_duplicate_daily_kind(
     "failure", ["status", "timeout", "json", "schema", "body_secret", "header_secret"]
 )
 def test_failed_capture_is_private_consumes_quota_and_is_not_retried(
-    capture_account: ProviderAccount, tmp_path: Path, failure: str
+    capture_binding: SiteBinding, tmp_path: Path, failure: str
 ) -> None:
     requests: list[httpx.Request] = []
 
@@ -357,19 +434,19 @@ def test_failed_capture_is_private_consumes_quota_and_is_not_retried(
 
     transport = httpx.MockTransport(handle)
     with pytest.raises(ProviderError, match="no retry was made") as caught:
-        check_solcast.capture(capture_account, "forecast", tmp_path, transport=transport)
+        check_solcast.capture(capture_binding, "forecast", tmp_path, transport=transport)
     assert "synthetic-capture-credential" not in str(caught.value)
     assert caught.value.__suppress_context__
     assert RequestAttempt.objects.get().outcome == "failed"
     assert not list(tmp_path.iterdir())
     with pytest.raises(ValueError, match="already attempted today"):
-        check_solcast.capture(capture_account, "forecast", tmp_path, transport=transport)
+        check_solcast.capture(capture_binding, "forecast", tmp_path, transport=transport)
     assert len(requests) == 1
 
 
 @pytest.mark.django_db
 def test_output_failure_preserves_consumed_quota_and_daily_guard(
-    capture_account: ProviderAccount, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    capture_binding: SiteBinding, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def fail_write(path: Path, data: str, **kwargs: object) -> int:
         raise OSError("Simulated full disk")
@@ -378,7 +455,10 @@ def test_output_failure_preserves_consumed_quota_and_daily_guard(
     transport = httpx.MockTransport(lambda _: httpx.Response(200, json=forecast_payload()))
 
     with pytest.raises(OSError, match="Simulated full disk"):
-        check_solcast.capture(capture_account, "forecast", tmp_path, transport=transport)
-    assert RequestAttempt.objects.filter(provider_account=capture_account).count() == 1
+        check_solcast.capture(capture_binding, "forecast", tmp_path, transport=transport)
+    assert (
+        RequestAttempt.objects.filter(provider_account=capture_binding.provider_account).count()
+        == 1
+    )
     with pytest.raises(ValueError, match="already attempted today"):
-        check_solcast.capture(capture_account, "forecast", tmp_path, transport=transport)
+        check_solcast.capture(capture_binding, "forecast", tmp_path, transport=transport)

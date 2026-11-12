@@ -127,7 +127,7 @@ class RegionAdmin(ReadOnlyAdmin):
             reverse("admin:regions_region_setup", args=(obj.pk,)),
         )
 
-    @method_decorator(sensitive_post_parameters("api_key", "secret_reference"))
+    @method_decorator(sensitive_post_parameters("api_key"))
     @sensitive_variables()
     def setup(self, request: HttpRequest, object_id: int) -> HttpResponse:
         region = get_object_or_404(

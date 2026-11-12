@@ -77,7 +77,7 @@ def setup_binding(client: Client, region_id: int) -> int:
         {
             "provider": "fixture",
             "external_account_id": "canonical",
-            "secret_reference": "env:FIXTURE",
+            "api_key": "",
         },
         content_type="application/json",
     )

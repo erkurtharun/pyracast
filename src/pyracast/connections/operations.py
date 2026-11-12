@@ -6,12 +6,13 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Value
 from django.utils import timezone
+from django.views.decorators.debug import sensitive_variables
 
 from pyracast.accounts.operations import require_admin
 from pyracast.connections.contracts import ProviderAdapter, ProviderError
 from pyracast.connections.identity import canonical_account_identity
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.connections.secrets import validate_secret_reference
+from pyracast.connections.secrets import encrypt_secret
 from pyracast.forecasts.budget import remaining_forecast_requests
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.regions.models import AuditEvent, Region
@@ -29,21 +30,25 @@ class HistoryWindowClosedError(QuotaExceededError):
     pass
 
 
+@sensitive_variables()
 def create_account(
     actor: User,
     *,
     provider: str,
     external_account_id: str,
-    secret_reference: str,
+    api_key: str = "",
     daily_quota: int = 10,
     authorization_reference: str = "",
+    require_new: bool = False,
 ) -> ProviderAccount:
     require_admin(actor)
     provider = provider.strip().casefold()
     identity = external_account_id.strip()
     if provider not in {"fixture", "solcast"} or not identity:
         raise ValidationError("Invalid provider account identity.")
-    validate_secret_reference(secret_reference)
+    if provider == "solcast" and not api_key:
+        raise ValidationError({"api_key": "An API key is required for a Solcast account."})
+    encrypted_api_key = encrypt_secret(api_key) if api_key else ""
     if daily_quota < 1 or daily_quota > 10:
         raise ValidationError("Account quota must be between 1 and 10.")
     authorization_reference = authorization_reference.strip()
@@ -61,13 +66,15 @@ def create_account(
             defaults={
                 "provider": provider,
                 "external_account_id": canonical_account_identity(Value(identity)),
-                "secret_reference": secret_reference,
+                "encrypted_api_key": encrypted_api_key,
                 "daily_quota": daily_quota,
                 "authorization_reference": authorization_reference or "fixture-development-only",
                 "authorized_by": actor,
                 "authorized_at": timezone.now(),
             },
         )
+        if not created and require_new:
+            raise ValidationError("This account already exists. Select the existing account.")
         if created:
             account.refresh_from_db(fields=("provider", "external_account_id"))
             AuditEvent.objects.create(
@@ -79,14 +86,15 @@ def create_account(
     return account
 
 
-def rotate_secret(actor: User, account_id: int, secret_reference: str) -> None:
+@sensitive_variables()
+def rotate_secret(actor: User, account_id: int, api_key: str) -> None:
     require_admin(actor)
-    validate_secret_reference(secret_reference)
+    encrypted_api_key = encrypt_secret(api_key)
     with transaction.atomic():
         account = ProviderAccount.objects.select_for_update().get(pk=account_id)
-        account.secret_reference = secret_reference
+        account.encrypted_api_key = encrypted_api_key
         account.credential_revision += 1
-        account.save(update_fields=("secret_reference", "credential_revision"))
+        account.save(update_fields=("encrypted_api_key", "credential_revision"))
         AuditEvent.objects.create(
             actor=actor,
             provider_account=account,

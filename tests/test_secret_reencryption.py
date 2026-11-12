@@ -7,7 +7,7 @@ from django.core.management.base import CommandError
 from django.test import override_settings
 
 from pyracast.accounts.mfa import MFAAdapter
-from pyracast.connections.secrets import encrypt_secret, resolve_solcast_secret
+from pyracast.connections.secrets import decrypt_api_key, encrypt_secret
 from tests.test_domain import make_system
 
 pytestmark = pytest.mark.django_db
@@ -19,8 +19,8 @@ NEW_KEY = "test-only-" + "new-master-key"
 def test_secret_rotation_preserves_credentials_and_recovery_code_state(migrated: bool) -> None:
     system = make_system()
     with override_settings(SECRET_KEY=OLD_KEY, SECRET_KEY_FALLBACKS=[]):
-        system.account.secret_reference = encrypt_secret("provider-key")
-        system.account.save(update_fields=["secret_reference"])
+        system.account.encrypted_api_key = encrypt_secret("provider-key")
+        system.account.save(update_fields=["encrypted_api_key"])
         totp = Authenticator.objects.create(
             user=system.admin, type="totp", data={"secret": MFAAdapter().encrypt("totp-seed")}
         )
@@ -39,7 +39,7 @@ def test_secret_rotation_preserves_credentials_and_recovery_code_state(migrated:
         system.account.refresh_from_db()
         totp.refresh_from_db()
         codes.refresh_from_db()
-        assert resolve_solcast_secret(system.account.secret_reference) == "provider-key"
+        assert decrypt_api_key(system.account.encrypted_api_key) == "provider-key"
         assert system.account.credential_revision == original_revision
         assert MFAAdapter().decrypt(totp.data["secret"]) == "totp-seed"
         if migrated:
@@ -52,22 +52,22 @@ def test_secret_rotation_preserves_credentials_and_recovery_code_state(migrated:
 
 def test_invalid_secret_rolls_back_all_reencryption_without_echoing_values() -> None:
     system = make_system()
-    system.account.secret_reference = encrypt_secret("provider-key")
-    system.account.save(update_fields=["secret_reference"])
-    original = system.account.secret_reference
+    system.account.encrypted_api_key = encrypt_secret("provider-key")
+    system.account.save(update_fields=["encrypted_api_key"])
+    original = system.account.encrypted_api_key
     Authenticator.objects.create(user=system.admin, type="totp", data={"secret": "corrupted"})
     with pytest.raises(CommandError, match="No changes were committed") as error:
         call_command("reencrypt_secrets", stdout=StringIO())
     assert "corrupted" not in str(error.value)
     system.account.refresh_from_db()
-    assert system.account.secret_reference == original
+    assert system.account.encrypted_api_key == original
 
 
-def test_environment_credentials_are_not_rewritten() -> None:
+def test_empty_fixture_credentials_are_not_rewritten() -> None:
     system = make_system()
-    original = system.account.secret_reference
+    original = system.account.encrypted_api_key
     output = StringIO()
     call_command("reencrypt_secrets", stdout=output)
     system.account.refresh_from_db()
-    assert system.account.secret_reference == original
+    assert system.account.encrypted_api_key == original
     assert output.getvalue() == "Re-encrypted 0 provider credentials and 0 MFA authenticators.\n"

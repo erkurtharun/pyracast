@@ -13,7 +13,7 @@ from pyracast.forecasts.models import (
     RequestAttempt,
 )
 from pyracast.regions.models import Region
-from tests.test_domain import NOW, make_system, secret_ref
+from tests.test_domain import NOW, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -60,9 +60,7 @@ def test_binding_rejects_invalid_physical_metadata(
 def test_request_account_and_job_must_match_the_binding() -> None:
     system = make_system(approved=True)
     job = CollectionJob.objects.get(binding=system.binding)
-    account = ProviderAccount.objects.create(
-        provider="fixture", external_account_id="other", secret_reference=secret_ref("OTHER")
-    )
+    account = ProviderAccount.objects.create(provider="fixture", external_account_id="other")
     other_binding = SiteBinding.objects.create(
         region=system.region,
         region_revision=system.region.revision + 1,

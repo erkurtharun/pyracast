@@ -76,13 +76,15 @@ class LocationChangeOutput(serializers.ModelSerializer[RegionLocationChangeReque
 class AccountInput(InputSerializer):
     provider = serializers.ChoiceField(choices=("fixture", "solcast"))
     external_account_id = serializers.CharField(max_length=200)
-    secret_reference = serializers.CharField(max_length=2048, write_only=True)
+    api_key = serializers.CharField(
+        max_length=1024, write_only=True, trim_whitespace=False, allow_blank=True, default=""
+    )
     daily_quota = serializers.IntegerField(min_value=1, max_value=10, default=10)
     authorization_reference = serializers.CharField(max_length=500, required=False, default="")
 
 
 class RotateSecretInput(InputSerializer):
-    secret_reference = serializers.CharField(max_length=2048, write_only=True)
+    api_key = serializers.CharField(max_length=1024, write_only=True, trim_whitespace=False)
 
 
 class BindingInput(InputSerializer):

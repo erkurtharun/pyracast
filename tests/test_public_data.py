@@ -9,6 +9,7 @@ from rest_framework.test import APIRequestFactory
 from pyracast.api.public import public_source_data
 from pyracast.api.renderers import CustomerJSONRenderer
 from pyracast.connections.models import ProviderAccount
+from pyracast.connections.secrets import encrypt_secret
 from pyracast.forecasts.models import CollectionJob, ForecastResult, ForecastSnapshot
 from pyracast.notifications.mail import build_message
 from pyracast.plants.models import CalibrationRun
@@ -122,7 +123,9 @@ def test_saved_forecast_email_hides_weather_provider_in_all_alternatives() -> No
     assert delivery.snapshot is not None
     account = delivery.snapshot.job.binding.provider_account
     ProviderAccount.objects.filter(pk=account.pk).update(
-        provider="solcast", external_account_id="private-account"
+        provider="solcast",
+        external_account_id="private-account",
+        encrypted_api_key=encrypt_secret("test-only-solcast-key"),
     )
     account.refresh_from_db()
     message = build_message(delivery)
@@ -252,3 +255,25 @@ def test_archived_forecast_hides_provider_identity_without_rewriting_archive() -
     snapshot.refresh_from_db()
     assert saved.payload == payload
     assert snapshot.raw_payload == raw
+
+
+@pytest.mark.parametrize("technical", [False, True])
+def test_provider_credentials_are_removed_from_nested_public_data(technical: bool) -> None:
+    assert public_source_data(
+        {
+            "name": "Plant",
+            "nested": {
+                "api_key": "test-only-raw-key",
+                "encrypted_api_key": "test-only-ciphertext",
+                "secret_reference": "env:OBSOLETE",
+                "value": 1,
+            },
+        },
+        technical=technical,
+    ) == {"name": "Plant", "nested": {"value": 1}}
+
+
+def test_provider_accounts_are_not_registered_in_admin() -> None:
+    from pyracast.admin import site
+
+    assert not site.is_registered(ProviderAccount)

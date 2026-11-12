@@ -26,7 +26,7 @@ def test_revising_an_approved_plant_requires_a_current_validated_binding_and_kee
     elif change == "approval_revoked":
         Region.objects.filter(pk=system.region.pk).update(status="suspended")
     else:
-        rotate_secret(system.admin, system.account.pk, "env:ROTATED_TEST_KEY")
+        rotate_secret(system.admin, system.account.pk, "test-only-rotated-key")
 
     client = Client()
     client.force_login(system.member)

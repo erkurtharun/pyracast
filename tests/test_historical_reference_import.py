@@ -17,6 +17,7 @@ from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
 from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.connections.secrets import encrypt_secret
 from pyracast.forecasts.coverage import history_day_complete
 from pyracast.forecasts.historical_import import (
     HistoricalSourceSettings,
@@ -62,7 +63,9 @@ def source_settings(**updates: Any) -> HistoricalSourceSettings:
 def system_for_import(monkeypatch: pytest.MonkeyPatch) -> System:
     monkeypatch.setattr(timezone, "now", lambda: NOW)
     system = make_system(approved=True)
-    ProviderAccount.objects.filter(pk=system.account.pk).update(provider="solcast")
+    ProviderAccount.objects.filter(pk=system.account.pk).update(
+        provider="solcast", encrypted_api_key=encrypt_secret("test-only-solcast-key")
+    )
     SiteBinding.objects.filter(pk=system.binding.pk).update(
         dc_capacity_kw=1, settings_verification_reference="Verified test model settings"
     )

@@ -41,7 +41,7 @@
       {% endfor %}
     </section>
     <section class="setup-section" aria-labelledby="provider-title">
-      <h2 id="provider-title">2. Private provider setup</h2>
+      <h2 id="provider-title">2. Solcast setup for this plant</h2>
       {% if binding %}
         <dl class="setup-facts setup-current">
           <div><dt>Account</dt><dd>{{ binding.provider_account.provider }} · {{ binding.provider_account.external_account_id }}</dd></div>
@@ -49,7 +49,7 @@
           <div><dt>Connection</dt><dd>{{ binding.health|capfirst }} · key revision {{ binding.provider_account.credential_revision }}</dd></div>
           <div><dt>Last validation</dt><dd>{{ binding.validated_at|default_if_none:"Not validated" }}</dd></div>
         </dl>
-        <p>Saving a replacement creates a new pending location revision and requires validation and approval again. Replacing an existing account's key affects every location using that account.</p>
+        <p>Saving a replacement creates a new pending location revision and requires validation and approval again. The selected account's key and daily quota are shared by all plants using that account.</p>
       {% endif %}
       <form method="post" class="setup-form">
         {% csrf_token %}
@@ -69,7 +69,7 @@
     </section>
     <section class="setup-section" aria-labelledby="approval-title">
       <h2 id="approval-title">3. Validate and approve</h2>
-      <p>Validation makes an authorized provider request and uses the account's shared daily quota. Approval queues the first forecast; customers see data after it has been saved.</p>
+      <p>Validation makes an authorized Solcast request and uses the selected account's daily quota. Approval queues the first forecast; customers see data after it has been saved.</p>
       {{ action_form.errors }}
       {% if binding %}
         <form method="post" class="setup-actions">

@@ -220,9 +220,14 @@ SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
 LOGIN_URL = "/"
 LOGIN_REDIRECT_URL = "/"
+_email_backend = os.environ.get("PYRACAST_EMAIL_BACKEND", "smtp")
+if _email_backend not in {"smtp", "console"}:
+    raise ImproperlyConfigured("PYRACAST_EMAIL_BACKEND must be smtp or console.")
+if _email_backend == "console" and not DEBUG:
+    raise ImproperlyConfigured("PYRACAST_EMAIL_BACKEND=console requires PYRACAST_DEBUG=1.")
 MAILERS = {
     "default": {
-        "BACKEND": "django.core.mail.backends.smtp.EmailBackend",
+        "BACKEND": f"django.core.mail.backends.{_email_backend}.EmailBackend",
         "OPTIONS": {
             "host": os.environ.get("PYRACAST_EMAIL_HOST", "localhost"),
             "port": int(os.environ.get("PYRACAST_EMAIL_PORT", "587")),
@@ -231,7 +236,9 @@ MAILERS = {
             "use_tls": os.environ.get("PYRACAST_EMAIL_TLS", "1") == "1",
             "use_ssl": os.environ.get("PYRACAST_EMAIL_SSL", "0") == "1",
             "timeout": 15,
-        },
+        }
+        if _email_backend == "smtp"
+        else {},
     },
 }
 DEFAULT_FROM_EMAIL = os.environ.get("PYRACAST_FROM_EMAIL", "Pyracast <noreply@localhost>")

@@ -36,8 +36,8 @@ NOW = datetime(2026, 11, 9, 13, tzinfo=UTC)
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
-def secret_ref(name: str = "TEST_KEY") -> str:
-    return f"env:{name}"
+def provider_key(name: str = "TEST_KEY") -> str:
+    return f"test-only-{name}"
 
 
 class FakeAdapter:
@@ -72,9 +72,7 @@ def make_system(*, approved: bool = False) -> System:
     region = submit_region(
         member, tenant.pk, name="Site", latitude=40, longitude=29, timezone="Europe/Istanbul"
     )
-    account = create_account(
-        admin, provider="fixture", external_account_id="customer", secret_reference=secret_ref()
-    )
+    account = create_account(admin, provider="fixture", external_account_id="customer", api_key="")
     binding = configure_binding(
         admin,
         region.pk,
@@ -199,8 +197,8 @@ def test_invalid_bindings_are_rejected(options: dict[str, Any]) -> None:
     [
         {"provider": "unknown"},
         {"external_account_id": " "},
-        {"secret_reference": "literal"},
-        {"secret_reference": "env:bad-name"},
+        {"api_key": "a b"},
+        {"api_key": "x" * 1025},
         {"daily_quota": 0},
         {"daily_quota": 11},
     ],
@@ -210,7 +208,7 @@ def test_account_input_validation(options: dict[str, Any]) -> None:
     arguments: dict[str, Any] = {
         "provider": "fixture",
         "external_account_id": "another",
-        "secret_reference": "env:TEST_KEY",
+        "api_key": provider_key(),
     }
     arguments.update(options)
     with pytest.raises(ValidationError):
@@ -223,19 +221,19 @@ def test_canonical_accounts_share_quota_and_rotation_invalidates_validation() ->
         system.admin,
         provider=" FIXTURE ",
         external_account_id=" CUSTOMER ",
-        secret_reference=secret_ref("OTHER_KEY"),
+        api_key=provider_key("OTHER_KEY"),
     )
     assert duplicate.pk == system.account.pk
-    assert duplicate.secret_reference == secret_ref()
-    rotate_secret(system.admin, system.account.pk, "env:NEW_KEY")
+    assert duplicate.encrypted_api_key == ""
+    rotate_secret(system.admin, system.account.pk, "test-only-new-key")
     system.account.refresh_from_db()
     assert system.account.credential_revision == 2
     with pytest.raises(ValidationError):
         approve_region(system.admin, system.region.pk, system.binding.pk, NOW)
     with pytest.raises(ValidationError):
-        rotate_secret(system.admin, system.account.pk, "raw-secret")
+        rotate_secret(system.admin, system.account.pk, "")
     with pytest.raises(ValidationError):
-        rotate_secret(system.admin, system.account.pk, "env:bad-name")
+        rotate_secret(system.admin, system.account.pk, "bad key")
 
 
 def test_validation_failure_consumes_quota_without_secret_in_audit() -> None:
@@ -260,7 +258,7 @@ def test_validation_rechecks_configuration_after_network(change: str) -> None:
         if change == "revision":
             Region.objects.filter(pk=system.region.pk).update(revision=2)
         else:
-            rotate_secret(system.admin, system.account.pk, "env:NEW_KEY")
+            rotate_secret(system.admin, system.account.pk, "test-only-new-key")
 
     with pytest.raises(ValidationError):
         validate_binding(system.admin, system.binding.pk, FakeAdapter(mutate), NOW)
@@ -314,7 +312,7 @@ def test_database_rejects_duplicate_canonical_account_and_membership() -> None:
         ProviderAccount.objects.create(
             provider=" FIXTURE ",
             external_account_id="CUSTOMER",
-            secret_reference=secret_ref("OTHER"),
+            encrypted_api_key="",
         )
 
 
@@ -385,21 +383,21 @@ def test_live_account_requires_recorded_service_authorization() -> None:
             system.admin,
             provider="solcast",
             external_account_id="live-account",
-            secret_reference=secret_ref(),
+            api_key=provider_key(),
         )
     with pytest.raises(ValidationError):
         create_account(
             system.admin,
             provider="solcast",
             external_account_id="live-account",
-            secret_reference=secret_ref(),
+            api_key=provider_key(),
             authorization_reference="x" * 501,
         )
     live = create_account(
         system.admin,
         provider="solcast",
         external_account_id="live-account",
-        secret_reference=secret_ref(),
+        api_key=provider_key(),
         authorization_reference="service-grant-42",
     )
     assert live.authorization_reference == "service-grant-42"
@@ -416,7 +414,7 @@ def test_live_binding_requires_explicit_operator_settings_attestation() -> None:
         system.admin,
         provider="solcast",
         external_account_id="live",
-        secret_reference=secret_ref(),
+        api_key=provider_key(),
         authorization_reference="service-grant",
     )
     options: dict[str, Any] = {

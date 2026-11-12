@@ -10,6 +10,7 @@ from django.test import Client
 
 from pyracast.connections.models import ProviderAccount
 from pyracast.connections.operations import create_account, rotate_secret
+from pyracast.connections.secrets import decrypt_api_key
 from pyracast.forecasts.models import RequestAttempt
 from pyracast.regions.models import AuditEvent
 from pyracast.regions.operations import approve_region
@@ -19,22 +20,28 @@ from tests.test_domain import NOW, make_system
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
-def test_account_creation_is_idempotent_and_audited_without_credentials() -> None:
+def test_account_creation_rejects_duplicate_identity_without_rotating_credentials() -> None:
     client, actor = verified_admin()
-    reference = "env:PYRACAST_SOLCAST_FIRST"
+    reference = "test-only-first-key"
     data = {
         "provider": "fixture",
         "external_account_id": "canonical",
-        "secret_reference": reference,
+        "api_key": reference,
     }
 
     first = client.post("/api/platform/accounts/", data, content_type="application/json")
-    duplicate = client.post("/api/platform/accounts/", data, content_type="application/json")
+    duplicate = client.post(
+        "/api/platform/accounts/",
+        {**data, "api_key": "test-only-discarded-key"},
+        content_type="application/json",
+    )
 
     assert first.status_code == 201
-    assert duplicate.json() == first.json()
+    assert duplicate.status_code == 400
     account = ProviderAccount.objects.get()
     assert first.json() == {"id": account.pk}
+    assert decrypt_api_key(account.encrypted_api_key) == reference
+    assert account.credential_revision == 1
     event = AuditEvent.objects.get(provider_account=account)
     assert event.actor_id == actor.pk
     assert event.region_id is None
@@ -47,17 +54,17 @@ def test_account_creation_is_idempotent_and_audited_without_credentials() -> Non
 def test_rotation_is_write_only_invalidates_validation_and_preserves_account_quota() -> None:
     system = make_system(approved=True)
     client, actor = verified_admin()
-    reference = "env:PYRACAST_SOLCAST_REPLACEMENT"
+    reference = "test-only-replacement-key"
     attempts = list(RequestAttempt.objects.values())
     quota = system.account.daily_quota
     path = f"/api/platform/accounts/{system.account.pk}/rotate-secret/"
 
-    response = client.post(path, {"secret_reference": reference}, content_type="application/json")
+    response = client.post(path, {"api_key": reference}, content_type="application/json")
 
     assert response.status_code == 200
     assert response.json() == {"id": system.account.pk}
     system.account.refresh_from_db()
-    assert system.account.secret_reference == reference
+    assert decrypt_api_key(system.account.encrypted_api_key) == reference
     assert system.account.credential_revision == 2
     assert system.account.daily_quota == quota
     assert list(RequestAttempt.objects.values()) == attempts
@@ -92,7 +99,7 @@ def test_rotation_requires_platform_administrator_with_mfa(identity: str) -> Non
 
     response = client.post(
         f"/api/platform/accounts/{system.account.pk}/rotate-secret/",
-        {"secret_reference": "env:REPLACEMENT"},
+        {"api_key": "test-only-replacement"},
         content_type="application/json",
     )
 
@@ -106,7 +113,7 @@ def test_rotation_requires_csrf_for_session_authentication() -> None:
     system = make_system()
     client, _ = verified_admin(enforce_csrf_checks=True)
     path = f"/api/platform/accounts/{system.account.pk}/rotate-secret/"
-    data = {"secret_reference": "env:REPLACEMENT"}
+    data = {"api_key": "test-only-replacement"}
 
     assert client.post(path, data, content_type="application/json").status_code == 403
     token = client.get("/api/session/").json()["csrf_token"]
@@ -127,6 +134,10 @@ def test_rotation_requires_csrf_for_session_authentication() -> None:
         {"secret_reference": "synthetic-raw-credential"},
         {"secret_reference": "env:invalid-name"},
         {"secret_reference": "env:VALID", "api_key": "synthetic-raw-credential"},
+        {"api_key": ""},
+        {"api_key": "a b"},
+        {"api_key": "x" * 1025},
+        {"encrypted_api_key": "encrypted:v1:invalid"},
         {},
     ],
 )
@@ -153,7 +164,7 @@ def test_rotation_of_missing_account_returns_private_not_found() -> None:
 
     response = client.post(
         "/api/platform/accounts/999999/rotate-secret/",
-        {"secret_reference": "env:REPLACEMENT"},
+        {"api_key": "test-only-replacement"},
         content_type="application/json",
     )
 
@@ -167,7 +178,7 @@ def test_account_mutation_rolls_back_if_audit_insert_fails(
     monkeypatch: pytest.MonkeyPatch, operation: str
 ) -> None:
     system = make_system()
-    original_reference = system.account.secret_reference
+    original_reference = system.account.encrypted_api_key
     insert = AuditEvent.objects.create
 
     def reject_audit(**values: Any) -> AuditEvent:
@@ -182,17 +193,17 @@ def test_account_mutation_rolls_back_if_audit_insert_fails(
                 system.admin,
                 provider="fixture",
                 external_account_id="rollback-account",
-                secret_reference=original_reference,
+                api_key=original_reference,
             )
         else:
-            rotate_secret(system.admin, system.account.pk, "env:ROLLBACK")
+            rotate_secret(system.admin, system.account.pk, "test-only-rollback")
 
     with pytest.raises(IntegrityError):
         mutate_account()
 
     assert not ProviderAccount.objects.filter(external_account_id="rollback-account").exists()
     system.account.refresh_from_db()
-    assert system.account.secret_reference == original_reference
+    assert system.account.encrypted_api_key == original_reference
     assert system.account.credential_revision == 1
 
 
@@ -208,13 +219,16 @@ def test_concurrent_rotations_have_serial_credential_revisions_and_audits() -> N
             connections.close_all()
 
     with ThreadPoolExecutor(max_workers=2) as executor:
-        futures = [executor.submit(rotate, f"env:ROTATION_{number}") for number in (1, 2)]
+        futures = [executor.submit(rotate, f"test-only-rotation-{number}") for number in (1, 2)]
         for future in futures:
             future.result(timeout=10)
 
     system.account.refresh_from_db()
     assert system.account.credential_revision == 3
-    assert system.account.secret_reference in {"env:ROTATION_1", "env:ROTATION_2"}
+    assert decrypt_api_key(system.account.encrypted_api_key) in {
+        "test-only-rotation-1",
+        "test-only-rotation-2",
+    }
     assert list(
         AuditEvent.objects.filter(provider_account=system.account, action="provider_secret_rotated")
         .order_by("revision")
@@ -234,3 +248,19 @@ def test_audit_event_database_constraint_requires_exactly_one_target(targets: st
             action="invalid_target",
             revision=1,
         )
+
+
+def test_solcast_creation_without_key_returns_private_validation_error() -> None:
+    client, _ = verified_admin()
+    response = client.post(
+        "/api/platform/accounts/",
+        {
+            "provider": "solcast",
+            "external_account_id": "missing-key",
+            "api_key": "",
+            "authorization_reference": "test-only-authorized",
+        },
+        content_type="application/json",
+    )
+    assert response.status_code == 400
+    assert not ProviderAccount.objects.exists()

@@ -8,20 +8,21 @@ import pytest
 
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.connections.secrets import encrypt_secret
 from pyracast.providers import FixtureProvider, SolcastProvider, adapter_for, normalize_payload
 
 TARGET = date(2026, 11, 10)
 
 
 def binding_for(provider: str = "solcast") -> SiteBinding:
-    reference = "env:PYRACAST_SOLCAST_TEST"
+    reference = encrypt_secret("test-credential")
     return SiteBinding(
         id=7,
         region_id=8,
         region_revision=1,
         provider_account=ProviderAccount(
             provider=provider,
-            secret_reference=reference,
+            encrypted_api_key=reference,
         ),
         site_id="site-1",
         capacity_kw=2,
@@ -141,14 +142,8 @@ def test_adapter_selection() -> None:
         adapter_for(binding_for("unknown"))
 
 
-@pytest.mark.parametrize("variable", ["PYRACAST_SOLCAST_TEST", "SOLCAST_API_KEY"])
-def test_request_uses_fixed_https_origin_header_auth_and_bounded_timeout(
-    monkeypatch: pytest.MonkeyPatch,
-    variable: str,
-) -> None:
-    monkeypatch.setenv(variable, "test-credential")
+def test_request_uses_fixed_https_origin_header_auth_and_bounded_timeout() -> None:
     binding = binding_for()
-    binding.provider_account.secret_reference = f"env:{variable}"
 
     def handle(request: httpx.Request) -> httpx.Response:
         assert request.url.scheme == "https"
@@ -173,24 +168,19 @@ def test_request_uses_fixed_https_origin_header_auth_and_bounded_timeout(
 @pytest.mark.parametrize(
     ("reference", "site", "code"),
     [
-        ("literal-secret", "site-1", "invalid_secret_reference"),
-        ("env:HOME", "site-1", "invalid_secret_reference"),
-        ("env:SOLCAST_API_KEY_OTHER", "site-1", "invalid_secret_reference"),
-        ("env:PYRACAST_SOLCAST_lowercase", "site-1", "invalid_secret_reference"),
-        ("env:PYRACAST_SOLCAST_", "site-1", "invalid_secret_reference"),
-        ("env:PYRACAST_SOLCAST_ABSENT", "site-1", "missing_provider_secret"),
-        ("env:SOLCAST_API_KEY", "site-1", "missing_provider_secret"),
-        ("env:PYRACAST_SOLCAST_TEST", "../site", "invalid_site_id"),
+        ("literal-secret", "site-1", "invalid_provider_secret"),
+        ("env:SOLCAST_API_KEY", "site-1", "invalid_provider_secret"),
+        ("encrypted:v1:invalid", "site-1", "invalid_provider_secret"),
+        ("", "site-1", "invalid_provider_secret"),
+        (None, "../site", "invalid_site_id"),
     ],
 )
 def test_credentials_and_site_ids_are_validated_before_transport(
-    monkeypatch: pytest.MonkeyPatch, reference: str, site: str, code: str
+    reference: str | None, site: str, code: str
 ) -> None:
-    monkeypatch.setenv("PYRACAST_SOLCAST_TEST", "test-credential")
-    monkeypatch.delenv("PYRACAST_SOLCAST_ABSENT", raising=False)
-    monkeypatch.delenv("SOLCAST_API_KEY", raising=False)
     binding = binding_for()
-    binding.provider_account.secret_reference = reference
+    if reference is not None:
+        binding.provider_account.encrypted_api_key = reference
     binding.site_id = site
     with pytest.raises(ProviderError, match=code):
         SolcastProvider().fetch(binding, TARGET)

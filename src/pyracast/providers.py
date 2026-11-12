@@ -9,7 +9,7 @@ import httpx
 
 from pyracast.connections.contracts import ProviderAdapter, ProviderData, ProviderError
 from pyracast.connections.models import SiteBinding
-from pyracast.connections.secrets import resolve_solcast_secret
+from pyracast.connections.secrets import decrypt_api_key
 
 
 def normalize_payload(
@@ -135,7 +135,7 @@ class SolcastProvider:
     def _request(
         self, binding: SiteBinding, endpoint: Literal["forecasts", "estimated_actuals"]
     ) -> ProviderData:
-        secret = resolve_solcast_secret(binding.provider_account.secret_reference)
+        secret = decrypt_api_key(binding.provider_account.encrypted_api_key)
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", binding.site_id):
             raise ProviderError("invalid_site_id")
         try:

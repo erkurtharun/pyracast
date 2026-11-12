@@ -16,7 +16,7 @@ from pyracast.connections.operations import (
 )
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.regions.operations import configure_binding
-from tests.test_domain import NOW, make_system, secret_ref
+from tests.test_domain import NOW, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -97,7 +97,7 @@ def test_prebinding_reservations_recheck_account_authorization(state: str) -> No
 def test_reservations_reject_mismatched_account_binding_and_job() -> None:
     system = make_system()
     other_account = ProviderAccount.objects.create(
-        provider="fixture", external_account_id="another", secret_reference=secret_ref("ANOTHER")
+        provider="fixture", external_account_id="another"
     )
     with pytest.raises(ValidationError, match="provider account"):
         reserve_account_request(other_account, NOW, purpose="forecast", binding=system.binding)

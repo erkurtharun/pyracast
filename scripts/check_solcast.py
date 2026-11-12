@@ -9,7 +9,7 @@ import django
 import httpx
 
 if TYPE_CHECKING:
-    from pyracast.connections.models import ProviderAccount
+    from pyracast.connections.models import SiteBinding
 
 
 SITE_FIELDS = (
@@ -53,18 +53,20 @@ def sanitize(payload: object, kind: str, site_id: str) -> dict[str, object]:
 
 
 def capture(
-    account: ProviderAccount,
+    binding: SiteBinding,
     kind: str,
     output: Path,
     *,
     transport: httpx.BaseTransport | None = None,
 ) -> Path:
     from django.db import transaction
+    from django.db.models import F
     from django.utils import timezone
 
     from pyracast.connections.contracts import ProviderError
-    from pyracast.connections.models import ProviderAccount
+    from pyracast.connections.models import ProviderAccount, SiteBinding
     from pyracast.connections.operations import reserve_account_request
+    from pyracast.connections.secrets import decrypt_api_key
     from pyracast.forecasts.models import RequestAttempt
     from pyracast.providers import _contains_secret
 
@@ -74,22 +76,27 @@ def capture(
     output = output.resolve()
     if not output.is_relative_to(workspace):
         raise ValueError("Output must stay within the current working directory.")
-    secret = os.environ.get("SOLCAST_API_KEY", "")
-    site_id = os.environ.get("SOLCAST_RESOURCE_ID", "")
-    if not secret or not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", site_id):
-        raise ValueError("SOLCAST_API_KEY and a valid SOLCAST_RESOURCE_ID are required.")
+    binding = SiteBinding.objects.get(
+        pk=binding.pk,
+        region__deleted_at__isnull=True,
+        region_revision=F("region__revision"),
+    )
+    site_id = binding.site_id
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", site_id):
+        raise ValueError("A valid resource ID in the saved binding is required.")
     output.mkdir(parents=True, exist_ok=True)
     purpose = "inspect_" + kind
     with transaction.atomic():
-        account = ProviderAccount.objects.select_for_update().get(pk=account.pk)
-        if account.provider != "solcast" or account.secret_reference != "env:SOLCAST_API_KEY":  # noqa: S105 -- environment variable name.
-            raise ValueError("A Solcast account using env:SOLCAST_API_KEY is required.")
+        account = ProviderAccount.objects.select_for_update().get(pk=binding.provider_account_id)
+        if account.provider != "solcast":
+            raise ValueError("A Solcast binding is required.")
+        secret = decrypt_api_key(account.encrypted_api_key)
         now = timezone.now()
         if RequestAttempt.objects.filter(
-            provider_account=account, utc_day=now.date(), purpose=purpose
+            provider_account=account, binding=binding, utc_day=now.date(), purpose=purpose
         ).exists():
             raise ValueError("This check was already attempted today; use the saved fixture.")
-        attempt = reserve_account_request(account, now, purpose=purpose)
+        attempt = reserve_account_request(account, now, purpose=purpose, binding=binding)
     path = "/rooftop_sites" if kind == "settings" else f"/rooftop_sites/{site_id}/forecasts"
     try:
         with httpx.Client(
@@ -149,7 +156,7 @@ def main() -> None:
     parser.add_argument(
         "--live", action="store_true", help="Explicitly enable a live provider request."
     )
-    parser.add_argument("--account-id", type=int, required=True)
+    parser.add_argument("--binding-id", type=int, required=True)
     parser.add_argument("--kind", choices=("settings", "forecast"), required=True)
     parser.add_argument(
         "--output",
@@ -162,10 +169,10 @@ def main() -> None:
         parser.error("Live requests require --live.")
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "pyracast.settings")
     django.setup()
-    from pyracast.connections.models import ProviderAccount
+    from pyracast.connections.models import SiteBinding
 
     try:
-        target = capture(ProviderAccount.objects.get(pk=args.account_id), args.kind, args.output)
+        target = capture(SiteBinding.objects.get(pk=args.binding_id), args.kind, args.output)
     except Exception as error:
         raise SystemExit(
             f"Live check stopped ({type(error).__name__}); no automatic retry."

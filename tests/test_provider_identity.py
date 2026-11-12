@@ -12,8 +12,9 @@ from pyracast.connections.operations import (
     create_account,
     reserve_account_request,
 )
+from pyracast.connections.secrets import decrypt_api_key, encrypt_secret
 from pyracast.regions.models import AuditEvent
-from tests.test_domain import NOW, secret_ref
+from tests.test_domain import NOW, provider_key
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -36,7 +37,7 @@ def test_raw_provider_variants_share_one_account_and_quota(
     existing = ProviderAccount.objects.create(
         provider="\xa0FIXTURE\t",
         external_account_id=original,
-        secret_reference=secret_ref(),
+        encrypted_api_key=encrypt_secret(provider_key()),
         daily_quota=1,
         authorized_by=admin,
         authorized_at=NOW,
@@ -45,11 +46,11 @@ def test_raw_provider_variants_share_one_account_and_quota(
         admin,
         provider="fixture",
         external_account_id=equivalent,
-        secret_reference=secret_ref("OTHER"),
+        api_key=provider_key("OTHER"),
         daily_quota=10,
     )
     assert duplicate.pk == existing.pk
-    assert duplicate.secret_reference == secret_ref()
+    assert decrypt_api_key(duplicate.encrypted_api_key) == provider_key()
     assert duplicate.daily_quota == 1
     assert not AuditEvent.objects.filter(action="provider_account_created").exists()
     reserve_account_request(existing, NOW, purpose="validation")
@@ -57,7 +58,9 @@ def test_raw_provider_variants_share_one_account_and_quota(
         reserve_account_request(duplicate, NOW, purpose="validation")
     with pytest.raises(IntegrityError, match="canonical_provider_account"), transaction.atomic():
         ProviderAccount.objects.create(
-            provider="fixture", external_account_id=equivalent, secret_reference=secret_ref("OTHER")
+            provider="fixture",
+            external_account_id=equivalent,
+            encrypted_api_key=encrypt_secret(provider_key("OTHER")),
         )
     assert ProviderAccount.objects.count() == 1
     assert original.strip().casefold() == expected
@@ -69,14 +72,14 @@ def test_new_account_identity_uses_database_unicode_casefold(
 ) -> None:
     admin = User.objects.create(username="admin", is_superuser=True)
     created = create_account(
-        admin, provider="fixture", external_account_id=original, secret_reference=secret_ref()
+        admin, provider="fixture", external_account_id=original, api_key=provider_key()
     )
     assert created.external_account_id == expected
     assert created.provider == "fixture"
     assert original.strip().casefold() == expected
     assert (
         create_account(
-            admin, provider="fixture", external_account_id=equivalent, secret_reference=secret_ref()
+            admin, provider="fixture", external_account_id=equivalent, api_key=provider_key()
         ).pk
         == created.pk
     )
@@ -86,7 +89,7 @@ def test_dotted_and_dotless_turkish_identities_keep_distinct_accounts() -> None:
     admin = User.objects.create(username="admin", is_superuser=True)
     accounts = [
         create_account(
-            admin, provider="fixture", external_account_id=identity, secret_reference=secret_ref()
+            admin, provider="fixture", external_account_id=identity, api_key=provider_key()
         )
         for identity in ("I", "\u0130", "\u0131")
     ]
@@ -105,7 +108,7 @@ def test_concurrent_unicode_account_creation_keeps_one_quota_identity() -> None:
                 admin,
                 provider="fixture",
                 external_account_id=identity,
-                secret_reference=secret_ref(),
+                api_key=provider_key(),
                 daily_quota=1,
             ).pk
         finally:
@@ -143,10 +146,12 @@ def test_canonical_index_migration_refuses_legacy_duplicate_accounts() -> None:
             "connections", "ProviderAccount"
         )
         first = accounts.objects.create(
-            provider="fixture", external_account_id="Stra\u00dfe", secret_reference=secret_ref()
+            provider="fixture", external_account_id="Stra\u00dfe", secret_reference=provider_key()
         )
         second = accounts.objects.create(
-            provider="fixture", external_account_id="STRASSE", secret_reference=secret_ref("OTHER")
+            provider="fixture",
+            external_account_id="STRASSE",
+            secret_reference=provider_key("OTHER"),
         )
         with pytest.raises(IntegrityError, match="canonical_provider_account"):
             MigrationExecutor(connection).migrate(current)

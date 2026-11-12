@@ -9,7 +9,7 @@ from django.views.decorators.debug import sensitive_variables
 from pyracast.accounts.mfa import MFAAdapter
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount
-from pyracast.connections.secrets import PREFIX, encrypt_secret, resolve_solcast_secret
+from pyracast.connections.secrets import decrypt_api_key, encrypt_secret
 
 
 class Command(BaseCommand):
@@ -33,11 +33,9 @@ class Command(BaseCommand):
 @transaction.atomic
 def reencrypt_secrets() -> tuple[int, int]:
     providers = 0
-    for account in ProviderAccount.objects.select_for_update().filter(
-        secret_reference__startswith=PREFIX
-    ):
-        account.secret_reference = encrypt_secret(resolve_solcast_secret(account.secret_reference))
-        account.save(update_fields=["secret_reference"])
+    for account in ProviderAccount.objects.select_for_update().exclude(encrypted_api_key=""):
+        account.encrypted_api_key = encrypt_secret(decrypt_api_key(account.encrypted_api_key))
+        account.save(update_fields=["encrypted_api_key"])
         providers += 1
     adapter = MFAAdapter()
     authenticators = 0
