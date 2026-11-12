@@ -162,6 +162,8 @@ Application database connections use a five-second connection timeout, a
 five-second PostgreSQL lock timeout and a 60-second statement timeout, including
 the authentication cache connection. The release migration command temporarily
 uses its explicit migration limits and restores the application limits afterward.
+Test database creation and removal use a separate five-minute statement timeout;
+application and authentication-cache sessions keep their normal limits during tests.
 SMTP sockets use a 15-second timeout. These are connection and individual
 operation limits; business deadlines are checked separately after database waits.
 
