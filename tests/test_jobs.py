@@ -240,7 +240,8 @@ def test_failure_backoff_starts_after_the_failed_operation_finishes(
 
     job.refresh_from_db()
     assert job.status == "retry"
-    assert NOW + timedelta(seconds=150) <= job.available_at < NOW + timedelta(seconds=181)
+    delay = 330 if failure == "provider" else 150
+    assert NOW + timedelta(seconds=delay) <= job.available_at < NOW + timedelta(seconds=delay + 31)
     assert pending_job_ids(NOW + timedelta(seconds=90)) == []
 
 

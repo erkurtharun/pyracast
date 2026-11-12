@@ -1,6 +1,7 @@
 from copy import deepcopy
 from datetime import UTC, date, datetime, timedelta
 from importlib import import_module
+from json import dumps, loads
 from typing import cast
 
 import pytest
@@ -12,6 +13,7 @@ from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import CollectionJob, ForecastResult, ForecastSnapshot
 from pyracast.forecasts.projections import prepare_daily_payloads, saved_day_payload
+from pyracast.irradiance import local_day_bounds
 from tests.test_domain import NOW, FakeAdapter, make_system
 
 
@@ -216,6 +218,16 @@ def test_a_full_day_cannot_be_mislabeled_as_partial() -> None:
     assert saved_day_payload(snapshot, day) is None
 
 
+@pytest.mark.parametrize("day", [date(2026, 11, 11), date(2026, 11, 12)])
+def test_saved_summary_must_match_the_energy_in_its_interval_csv(day: date) -> None:
+    snapshot = saved_snapshot()
+    payload = snapshot.forecastresult.daily_payloads[day.isoformat()]
+    payload["partial_energy_kwh_m2"] = 0
+    if payload["complete"]:
+        payload["energy_kwh_m2"] = 0
+    assert saved_day_payload(snapshot, day) is None
+
+
 def test_native_intervals_may_cross_local_day_boundaries() -> None:
     snapshot = saved_snapshot()
     snapshot.binding.timezone = "Asia/Kathmandu"
@@ -251,6 +263,49 @@ def test_saved_day_validation_preserves_dst_day_length() -> None:
     assert result is not None
     assert result["energy_kwh_m2"] == 12.5
     assert result["valid_coverage_seconds"] == 90000
+
+
+@pytest.mark.parametrize(
+    ("zone", "day", "hours"),
+    [
+        ("Europe/London", date(2026, 3, 29), 23),
+        ("Europe/London", date(2026, 10, 25), 25),
+        ("Asia/Kathmandu", date(2026, 11, 11), 24),
+    ],
+)
+@pytest.mark.parametrize("missing", [False, True])
+def test_nonround_calculated_intervals_survive_saved_json_validation(
+    zone: str,
+    day: date,
+    hours: int,
+    missing: bool,
+) -> None:
+    snapshot = saved_snapshot()
+    snapshot.binding.timezone = zone
+    start, end = local_day_bounds(day, zone)
+    left = start - timedelta(minutes=17, microseconds=321)
+    data = ProviderData({}, [], collected_at=left)
+    while left < end:
+        right = left + timedelta(minutes=37, seconds=13, microseconds=123456)
+        index = len(data.intervals)
+        data.intervals.append(
+            {
+                "start": left.isoformat(),
+                "end": right.isoformat(),
+                "power_kw": None if missing and index == 3 else 0.123456789 + index / 311,
+            }
+        )
+        left = right
+    payload = calculate(snapshot.binding, day, data)
+    snapshot.forecastresult.daily_payloads = {day.isoformat(): loads(dumps(payload))}
+    snapshot.forecastresult.payload = {}
+    result = saved_day_payload(snapshot, day)
+    assert result == payload
+    assert result is not None
+    assert result["complete"] is not missing
+    assert result["coverage_seconds"] == pytest.approx(hours * 3600)
+    assert (result["energy_kwh_m2"] is None) is missing
+    assert "prorated_interval_mean" in cast(list[str], result["quality_flags"])
 
 
 def test_spring_clock_change_can_put_a_72_hour_horizon_in_five_local_dates() -> None:

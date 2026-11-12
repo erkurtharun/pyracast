@@ -63,6 +63,7 @@ class Command(BaseCommand):
                         else:
                             error_code = ""
                         try:
+                            close_old_connections()
                             record_dispatch_phase(name, timezone.now(), error_code)
                         except Exception as error:
                             failures.append("monitoring")

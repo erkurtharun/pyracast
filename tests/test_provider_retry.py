@@ -44,7 +44,11 @@ def test_pathological_hint_saturates_to_the_last_representable_instant(
     monkeypatch.setattr("pyracast.provider_retry.secrets.randbelow", lambda _: 30)
     delay = retry_after_seconds(header)
     assert delay is not None
-    assert next_retry_at(NOW, 1, delay) == datetime.max.replace(tzinfo=UTC)
+    retry_at = next_retry_at(NOW, 1, delay)
+    assert retry_at == datetime.max.replace(tzinfo=UTC) - timedelta(days=1)
+    from zoneinfo import ZoneInfo
+
+    assert retry_at.astimezone(ZoneInfo("Europe/Istanbul")).year == 9999
 
 
 @pytest.mark.django_db(transaction=True)
@@ -73,6 +77,8 @@ def test_pathological_throttling_hint_remains_a_durable_safe_deferral() -> None:
         system.account, ProviderError("private", status_code=429, retry_after_seconds=delay), NOW
     )
     system.account.refresh_from_db()
-    assert system.account.request_blocked_until == datetime.max.replace(tzinfo=UTC)
+    assert system.account.request_blocked_until == datetime.max.replace(tzinfo=UTC) - timedelta(
+        days=1
+    )
     with pytest.raises(RequestDeferredError):
         reserve_account_request(system.account, NOW + timedelta(days=365), purpose="validation")

@@ -1,9 +1,13 @@
 from rest_framework import serializers
 
+from pyracast.notifications.operations import RECIPIENT_MAX_LENGTH
+
 
 class ReminderInput(serializers.Serializer[dict[str, object]]):
     enabled = serializers.BooleanField()
-    recipients = serializers.ListField(child=serializers.EmailField())
+    recipients = serializers.ListField(
+        child=serializers.EmailField(max_length=RECIPIENT_MAX_LENGTH)
+    )
     times = serializers.ListField(
         child=serializers.RegexField(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"), max_length=1440
     )

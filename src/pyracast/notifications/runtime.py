@@ -27,8 +27,11 @@ def make_notification_actor(broker: Broker) -> Actor[[int], None]:
 
 def dispatch_notifications(actor: Actor[[int], None], now: datetime | None = None) -> int:
     timestamp = now or datetime.now(UTC)
-    enqueue_due(timestamp)
-    ids = pending_notification_ids(timestamp)
-    for delivery_id in ids:
-        actor.send(delivery_id)
+    try:
+        enqueue_due(timestamp)
+    finally:
+        close_old_connections()
+        ids = pending_notification_ids(timestamp)
+        for delivery_id in ids:
+            actor.send(delivery_id)
     return len(ids)

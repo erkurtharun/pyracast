@@ -72,6 +72,10 @@ DATABASES = {
         "HOST": os.environ.get("PGHOST", "127.0.0.1"),
         "PORT": os.environ.get("PGPORT", "5432"),
         "CONN_MAX_AGE": 60,
+        "OPTIONS": {
+            "connect_timeout": 5,
+            "options": "-c lock_timeout=5s -c statement_timeout=60s",
+        },
     }
 }
 DATABASES["auth_cache"] = {

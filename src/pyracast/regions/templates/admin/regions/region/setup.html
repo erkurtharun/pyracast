@@ -50,6 +50,17 @@
           <div><dt>Last validation</dt><dd>{{ binding.validated_at|default_if_none:"Not validated" }}</dd></div>
         </dl>
         <p>Saving a replacement creates a new pending location revision and requires validation and approval again. The selected account's key and daily quota are shared by all plants using that account.</p>
+        {% if binding.provider_account.request_blocked_until %}
+          <h3>Provider request delay</h3>
+          <p>Wait until {{ binding.provider_account.request_blocked_until }}. Clear this delay only after confirming recovery with the provider. The daily request budget is preserved.</p>
+          <form method="post" class="setup-form">
+            {% csrf_token %}
+            {% for field in action_form.hidden_fields %}{{ field }}{% endfor %}
+            <p>{{ action_form.provider_recovered }} {{ action_form.provider_recovered.label_tag }}</p>
+            {{ action_form.provider_recovered.errors }}
+            <button type="submit" name="action" value="clear_cooldown" class="setup-button">Clear confirmed provider delay</button>
+          </form>
+        {% endif %}
       {% endif %}
       <form method="post" class="setup-form">
         {% csrf_token %}

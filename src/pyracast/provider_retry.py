@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 
 _MAX_RETRY_SECONDS = (datetime.max - datetime.min) // timedelta(seconds=1)
+MAX_RETRY_AT = datetime.max.replace(tzinfo=UTC) - timedelta(days=1)
 
 
 def retry_after_seconds(value: str | None) -> int | None:
@@ -24,6 +25,10 @@ def retryable_status(status: int) -> bool:
     return status in {408, 425, 429} or (500 <= status < 600 and status not in {501, 505})
 
 
+def rate_limit_retry_after(retry_after: int | None) -> int:
+    return 900 if retry_after is None else retry_after
+
+
 def retry_delay(
     attempts: int, retry_after: int | None = None, *, minimum_seconds: int = 0
 ) -> timedelta:
@@ -37,8 +42,10 @@ def next_retry_at(
     now: datetime, attempts: int, retry_after: int | None = None, *, minimum_seconds: int = 0
 ) -> datetime:
     try:
-        return now.astimezone(UTC) + retry_delay(
-            attempts, retry_after, minimum_seconds=minimum_seconds
+        return min(
+            now.astimezone(UTC)
+            + retry_delay(attempts, retry_after, minimum_seconds=minimum_seconds),
+            MAX_RETRY_AT,
         )
     except OverflowError:
-        return datetime.max.replace(tzinfo=UTC)
+        return MAX_RETRY_AT

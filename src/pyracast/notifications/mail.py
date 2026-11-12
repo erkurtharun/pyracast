@@ -40,6 +40,8 @@ def build_message(
     prepared_at: datetime | None = None,
 ) -> EmailMultiAlternatives:
     if delivery.prepared_message is not None:
+        if delivery.prepared_message.get("format") == "plain":
+            return build_unavailable_message(delivery, prepared_at or delivery.scheduled_for)[0]
         return _restore_message(delivery, cast(dict[str, str], delivery.prepared_message))
     snapshot = delivery.snapshot
     binding = delivery.binding
@@ -147,6 +149,35 @@ def build_message(
     )
 
 
+def build_unavailable_message(
+    delivery: NotificationDelivery, prepared_at: datetime
+) -> tuple[EmailMultiAlternatives, dict[str, str]]:
+    existing = delivery.prepared_message
+    payload = (
+        cast(dict[str, str], existing)
+        if isinstance(existing, dict) and existing.get("format") == "plain"
+        else {
+            "format": "plain",
+            "subject": "Pyracast forecast unavailable",
+            "body": (
+                "Tomorrow's saved forecast could not be prepared. "
+                "No forecast energy total is available.\n"
+                f"Scheduled reminder: {delivery.scheduled_for.isoformat()}\n"
+                "Please check the plant page for collection status."
+            ),
+            "kind": "unavailable",
+            "prepared_at": prepared_at.isoformat(),
+        }
+    )
+    return EmailMultiAlternatives(
+        subject=payload["subject"],
+        body=payload["body"],
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        to=[delivery.recipient],
+        headers={"Message-ID": f"<pyracast-reminder-{delivery.pk}@notifications.pyracast>"},
+    ), payload
+
+
 def _restore_message(
     delivery: NotificationDelivery, payload: dict[str, str]
 ) -> EmailMultiAlternatives:
@@ -203,6 +234,8 @@ def send_message(
             count = backend.send_messages([message])
         except smtplib.SMTPRecipientsRefused as error:
             codes = [response[0] for response in error.recipients.values()]
+            if not codes or any(not 400 <= code < 600 for code in codes):
+                _raise_rejection(-1)
             _raise_rejection(450 if any(400 <= code < 500 for code in codes) else 550)
         except (smtplib.SMTPSenderRefused, smtplib.SMTPDataError, smtplib.SMTPHeloError) as error:
             _raise_rejection(error.smtp_code)
@@ -217,5 +250,7 @@ def send_message(
 
 
 def _raise_rejection(code: int) -> Never:
+    if not 400 <= code < 600:
+        raise smtplib.SMTPException("The mail server returned an invalid transaction response.")
     failure = NotSentError if 400 <= code < 500 else PermanentlyNotSentError
     raise failure("The mail server rejected the message.") from None

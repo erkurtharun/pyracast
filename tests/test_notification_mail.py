@@ -1,15 +1,36 @@
 import smtplib
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from runpy import run_path
+from threading import Barrier, get_ident
 
 import pytest
+from django.core import mail
 from django.core.mail import EmailMultiAlternatives
+from django.core.mail.backends.smtp import EmailBackend
 from django.test import override_settings
 
+from pyracast import settings as project_settings
 from pyracast.notifications.mail import (
     NotSentError,
     PermanentlyNotSentError,
     SendCancelledError,
     send_message,
 )
+
+
+def test_default_smtp_configuration_has_a_bounded_socket_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PYRACAST_EMAIL_BACKEND", "smtp")
+    configuration = run_path(str(Path(project_settings.__file__)))
+    mailer = configuration["MAILERS"]["default"]
+    assert mailer["BACKEND"] == "django.core.mail.backends.smtp.EmailBackend"
+    with override_settings(MAILERS=configuration["MAILERS"]):
+        backend = mail.mailers["default"]
+    assert isinstance(backend, EmailBackend)
+    assert backend.timeout == 15
+    assert backend.connection is None
 
 
 @pytest.fixture
@@ -53,6 +74,12 @@ class SMTP:
         ("open", smtplib.SMTPAuthenticationError(535, b"secret"), NotSentError),
         ("open", smtplib.SMTPNotSupportedError(), NotSentError),
         ("send", smtplib.SMTPRecipientsRefused({"to@example.com": (450, b"wait")}), NotSentError),
+        ("send", smtplib.SMTPRecipientsRefused({}), smtplib.SMTPException),
+        (
+            "send",
+            smtplib.SMTPRecipientsRefused({"to@example.com": (-1, b"bad")}),
+            smtplib.SMTPException,
+        ),
         (
             "send",
             smtplib.SMTPRecipientsRefused({"to@example.com": (550, b"secret")}),
@@ -60,6 +87,8 @@ class SMTP:
         ),
         ("send", smtplib.SMTPDataError(451, b"wait"), NotSentError),
         ("send", smtplib.SMTPDataError(554, b"secret"), PermanentlyNotSentError),
+        ("send", smtplib.SMTPDataError(-1, b"malformed"), smtplib.SMTPException),
+        ("send", smtplib.SMTPDataError(250, b"malformed"), smtplib.SMTPException),
         (
             "send",
             smtplib.SMTPSenderRefused(550, b"secret", "from@example.com"),
@@ -141,3 +170,30 @@ def test_smtp_does_not_send_when_the_open_connection_loses_transmission_authorit
     assert smtp.closed
     if isinstance(caught.value, NotSentError):
         assert caught.value.code == "mail_preparation_failed"
+
+
+def test_configured_mailer_lookups_create_independent_backends_without_connecting() -> None:
+    barrier = Barrier(2)
+
+    def inspect_backend() -> tuple[int, EmailBackend, EmailBackend]:
+        first, second = mail.mailers["default"], mail.mailers["default"]
+        assert isinstance(first, EmailBackend)
+        assert isinstance(second, EmailBackend)
+        barrier.wait(timeout=10)
+        return get_ident(), first, second
+
+    with (
+        override_settings(
+            MAILERS={
+                "default": {
+                    "BACKEND": "django.core.mail.backends.smtp.EmailBackend",
+                    "OPTIONS": {"host": "localhost", "timeout": 15},
+                }
+            }
+        ),
+        ThreadPoolExecutor(max_workers=2) as pool,
+    ):
+        results = list(pool.map(lambda _: inspect_backend(), range(2)))
+    assert len({thread for thread, _, _ in results}) == 2
+    assert len({id(backend) for _, first, second in results for backend in (first, second)}) == 4
+    assert all(backend.connection is None for _, *backends in results for backend in backends)

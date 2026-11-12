@@ -20,13 +20,13 @@ def normalize_payload(
     collected_at: datetime | None = None,
 ) -> ProviderData:
     if endpoint not in ("forecasts", "estimated_actuals"):
-        raise ProviderError("invalid_provider_endpoint")
+        raise ProviderError("invalid_provider_endpoint", retryable=False)
     if not isinstance(payload, dict) or not isinstance(payload.get(endpoint), list):
-        raise ProviderError("invalid_provider_schema")
+        raise ProviderError("invalid_provider_schema", retryable=False)
     intervals: list[dict[str, object]] = []
     for row in payload[endpoint]:
         if not isinstance(row, dict) or row.get("period") != "PT30M":
-            raise ProviderError("invalid_provider_interval")
+            raise ProviderError("invalid_provider_interval", retryable=False)
         try:
             end = datetime.fromisoformat(row["period_end"])
             if end.utcoffset() is None:
@@ -39,11 +39,12 @@ def normalize_payload(
             if power is not None and not math.isfinite(power):
                 raise ValueError("Nonfinite power")
             end = end.astimezone(UTC)
+            start = end - timedelta(minutes=30)
         except KeyError, TypeError, ValueError, OverflowError:
-            raise ProviderError("invalid_provider_interval") from None
+            raise ProviderError("invalid_provider_interval", retryable=False) from None
         intervals.append(
             {
-                "start": (end - timedelta(minutes=30)).isoformat(),
+                "start": start.isoformat(),
                 "end": end.isoformat(),
                 "power_kw": power,
                 "sunlight": "unknown",
@@ -52,7 +53,7 @@ def normalize_payload(
     try:
         json.dumps(payload, allow_nan=False)
     except TypeError, ValueError:
-        raise ProviderError("invalid_provider_schema") from None
+        raise ProviderError("invalid_provider_schema", retryable=False) from None
     # The Hobby response does not promise an issue timestamp or P50 semantics.
     return ProviderData(
         raw_payload=cast(dict[str, object], payload.copy()),

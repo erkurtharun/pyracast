@@ -1,16 +1,52 @@
 import re
 from datetime import datetime
+from typing import cast
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
-from django.db import transaction
+from django.db import models, transaction
 
 from pyracast.accounts.models import Membership
 from pyracast.accounts.operations import require_member
-from pyracast.forecasts.jobs import binding_is_current
-from pyracast.notifications.models import NotificationSettings, ReminderPreference
+from pyracast.notifications.eligibility import binding_can_notify
+from pyracast.notifications.models import (
+    NotificationDelivery,
+    NotificationSettings,
+    ReminderPreference,
+)
 from pyracast.regions.models import Region
+
+RECIPIENT_MAX_LENGTH = cast(int, NotificationDelivery._meta.get_field("recipient").max_length)
+
+
+def validate_recipient(address: str) -> None:
+    if len(address) > RECIPIENT_MAX_LENGTH:
+        raise ValidationError(
+            f"Recipient addresses cannot exceed {RECIPIENT_MAX_LENGTH} characters."
+        )
+    validate_email(address)
+
+
+def invalid_reminder_recipient_count() -> int:
+    invalid = 0
+    members = Membership.objects.filter(
+        tenant_id=models.OuterRef("region__tenant_id"), user_id=models.OuterRef("user_id")
+    )
+    for preference in ReminderPreference.objects.filter(
+        models.Exists(members),
+        enabled=True,
+        user__is_active=True,
+        region__deleted_at__isnull=True,
+        region__status="approved",
+        region__approved_binding__provider_account__enabled=True,
+    ).select_related("user"):
+        try:
+            for address in effective_recipients(preference):
+                validate_recipient(address)
+        except ValidationError, TypeError:
+            invalid += 1
+    return invalid
 
 
 def recipient_limit(*, lock: bool = False) -> int:
@@ -27,7 +63,7 @@ def effective_recipients(preference: ReminderPreference) -> list[str]:
 def normalize_recipients(recipients: list[str]) -> list[str]:
     normalized = [address.strip() for address in recipients]
     for address in normalized:
-        validate_email(address)
+        validate_recipient(address)
     if len({address.casefold() for address in normalized}) != len(normalized):
         raise ValidationError("Recipient addresses must be distinct (case-insensitive).")
     return normalized
@@ -107,8 +143,8 @@ def configure_reminders(
                 raise ValidationError("Reminder times must use HH:MM.")
         if enabled:
             if not addresses:
-                validate_email(actor.email)
-            if not times or binding is None or not binding_is_current(binding):
+                validate_recipient(actor.email)
+            if not times or binding is None or not binding_can_notify(binding):
                 raise ValidationError(
                     "An approved current region and at least one time are required."
                 )

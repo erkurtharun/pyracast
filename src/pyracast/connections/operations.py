@@ -15,7 +15,7 @@ from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.secrets import encrypt_secret
 from pyracast.forecasts.budget import remaining_forecast_requests
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
-from pyracast.provider_retry import next_retry_at
+from pyracast.provider_retry import next_retry_at, rate_limit_retry_after
 from pyracast.regions.models import AuditEvent, Region
 
 
@@ -173,7 +173,7 @@ def record_provider_failure(account: ProviderAccount, error: ProviderError, now:
         if error.status_code == 401:
             current.authentication_failed_revision = account.credential_revision
         else:
-            blocked_until = next_retry_at(now, 1, error.retry_after_seconds)
+            blocked_until = next_retry_at(now, 1, rate_limit_retry_after(error.retry_after_seconds))
             current.request_blocked_until = max(current.request_blocked_until or now, blocked_until)
         current.save(update_fields=("authentication_failed_revision", "request_blocked_until"))
 
@@ -213,6 +213,45 @@ def validate_binding(
         binding.validated_credential_revision = account.credential_revision
         binding.health = "healthy"
         binding.save(update_fields=("validated_at", "validated_credential_revision", "health"))
+        if (
+            region.status == "approved"
+            and region.approved_binding_id == binding.pk
+            and account.enabled
+            and account.authorized_at is not None
+        ):
+            recovered_at = now + timedelta(seconds=time.monotonic() - started)
+            latest = (
+                CollectionJob.objects.select_for_update()
+                .filter(
+                    binding=binding,
+                    endpoint="forecasts",
+                    reference_import__isnull=True,
+                    scheduled_slot__lte=recovered_at,
+                )
+                .order_by("-scheduled_slot", "-pk")
+                .first()
+            )
+            if (
+                latest is not None
+                and latest.status == "failed"
+                and latest.last_error == "provider_authentication_failed"
+            ):
+                latest.status = "pending"
+                latest.available_at = recovered_at
+                latest.attempts = 0
+                latest.last_error = ""
+                latest.lease_token = None
+                latest.lease_expires_at = None
+                latest.save(
+                    update_fields=(
+                        "status",
+                        "available_at",
+                        "attempts",
+                        "last_error",
+                        "lease_token",
+                        "lease_expires_at",
+                    )
+                )
         attempt.outcome = "succeeded"
         attempt.save(update_fields=("outcome",))
         AuditEvent.objects.create(

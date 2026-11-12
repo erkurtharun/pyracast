@@ -109,7 +109,8 @@ def _valid_day(value: object, binding: SiteBinding, target_date: date) -> bool:
         elif value.get("energy_kwh_m2") is not None or valid == duration:
             return False
         previous = start
-        interval_coverage = interval_valid = 0.0
+        interval_coverage = interval_valid = timedelta()
+        interval_energy = 0.0
         for row in value["intervals"]:
             if not isinstance(row, dict) or not _flags(row.get("quality_flags")):
                 return False
@@ -118,14 +119,16 @@ def _valid_day(value: object, binding: SiteBinding, target_date: date) -> bool:
             if not previous <= left < right <= end:
                 return False
             if row.get("ghi_wm2") is not None:
-                _number(row["ghi_wm2"])
-                interval_valid += (right - left).total_seconds()
-            interval_coverage += (right - left).total_seconds()
+                ghi = _number(row["ghi_wm2"])
+                interval_valid += right - left
+                interval_energy += ghi * ((right - left).total_seconds() / 3_600_000)
+            interval_coverage += right - left
             previous = right
         if (
-            interval_coverage != coverage
-            or interval_valid != valid
+            interval_coverage.total_seconds() != coverage
+            or interval_valid.total_seconds() != valid
             or not isclose(fraction, valid / duration, abs_tol=1e-12)
+            or not isclose(partial, interval_energy, abs_tol=1e-12)
         ):
             return False
     except ValueError, ArithmeticError:

@@ -237,8 +237,12 @@ uv run --locked pyracast check_delivery_health
 ```
 
 The command prints aggregate JSON and exits nonzero for missing/stale dispatcher
-heartbeats, overdue work, provider credential failures or failed/uncertain deliveries.
-It includes the last 24 hours of failures; successful older-forecast fallback is
+heartbeats, overdue work, provider credential failures or cooldowns, missed delivery
+deadlines, failed/uncertain deliveries, and incomplete next-day forecasts. Enabled
+plants without a successful forecast acquisition in 26 hours also require attention.
+An administrator can clear an account's provider delay from plant setup after
+confirming recovery with the provider; the action is audited and preserves quota.
+The check includes the last 24 hours of failures; successful older-forecast fallback is
 reported separately. **Admin → Notifications → Notification deliveries** shows
 individual outcomes. In production, supervise and restart the dispatcher and both
 worker processes, and route failed health checks to an independent monitoring

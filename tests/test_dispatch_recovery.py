@@ -51,5 +51,8 @@ def test_dispatch_reconnects_after_its_postgresql_session_is_terminated(
         call_command("dispatch")
     assert len(sessions) == 2
     assert sessions[0] != sessions[1]
+    failed = DispatcherStatus.objects.get(phase="notifications")
+    assert failed.last_error == "OperationalError"
+    assert failed.succeeded_at is None
     assert DispatcherStatus.objects.get(phase="calibration").succeeded_at is not None
     broker.close.assert_called_once()

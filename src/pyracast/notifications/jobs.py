@@ -1,3 +1,4 @@
+import logging
 import secrets
 import time
 import uuid
@@ -8,7 +9,7 @@ from zoneinfo import ZoneInfo
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMultiAlternatives
 from django.core.validators import validate_email
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -19,6 +20,7 @@ from pyracast.notifications.mail import (
     PermanentlyNotSentError,
     SendCancelledError,
     build_message,
+    build_unavailable_message,
     send_message,
 )
 from pyracast.notifications.models import NotificationDelivery
@@ -32,6 +34,7 @@ from pyracast.notifications.scheduler import MAX_LATENESS
 from pyracast.regions.models import Region
 
 LEASE_DURATION = timedelta(minutes=5)
+logger = logging.getLogger(__name__)
 
 
 def _eligible(delivery: NotificationDelivery, limit: int) -> bool:
@@ -99,7 +102,10 @@ def _mark_transmit(delivery_id: int, token: uuid.UUID, now: datetime) -> bool:
             _recover_interrupted(delivery, now)
             return False
         if not eligible or now - delivery.scheduled_for > MAX_LATENESS:
-            delivery.status, delivery.last_error = "skipped", "authority_or_deadline_changed"
+            delivery.status = "skipped"
+            delivery.last_error = (
+                "preference_or_authority_changed" if not eligible else "delivery_deadline_exceeded"
+            )
             delivery.lease_token = None
             delivery.lease_expires_at = None
             delivery.save()
@@ -116,6 +122,7 @@ def process_notification(
     sender: Callable[[EmailMultiAlternatives], None] | None = None,
 ) -> bool:
     started = time.monotonic()
+    entered_at = now
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
     with transaction.atomic():
@@ -123,6 +130,7 @@ def process_notification(
         delivery = _locked_delivery(delivery_id)
         if delivery is None:
             return False
+        now = entered_at + timedelta(seconds=time.monotonic() - started)
         if delivery.status == "sending":
             if delivery.lease_expires_at is None or delivery.lease_expires_at <= now:
                 _recover_interrupted(delivery, now)
@@ -145,14 +153,28 @@ def process_notification(
             delivery.save()
             return False
         delivery.recipient = recipient
-        if not prepare_delivery(delivery, now):
-            return False
         try:
+            if not prepare_delivery(delivery, now):
+                return False
             message = build_message(delivery)
-        except ValueError, ArithmeticError:
-            delivery.status, delivery.last_error = "unavailable", "calculation_failure"
-            delivery.save()
-            return False
+        except DatabaseError:
+            raise
+        except Exception as error:
+            logger.warning(
+                "notification_preparation_failed delivery_id=%s error_type=%s",
+                delivery.pk,
+                type(error).__name__,
+            )
+            message, delivery.prepared_message = build_unavailable_message(delivery, now)
+            delivery.snapshot = None
+            NotificationDelivery.objects.filter(
+                preference__region_id=delivery.preference.region_id,
+                binding_id=delivery.binding_id,
+                scheduled_for=delivery.scheduled_for,
+                attempts=0,
+                status__in=("pending", "retry"),
+                prepared_message__isnull=True,
+            ).update(snapshot=None, prepared_message=delivery.prepared_message)
         token = uuid.uuid4()
         delivery.status, delivery.lease_token = "sending", token
         delivery.lease_expires_at = now + LEASE_DURATION
@@ -163,7 +185,7 @@ def process_notification(
 
         def before_send() -> bool:
             return _mark_transmit(
-                delivery_id, token, now + timedelta(seconds=time.monotonic() - started)
+                delivery_id, token, entered_at + timedelta(seconds=time.monotonic() - started)
             )
 
         if sender is None:
@@ -177,7 +199,7 @@ def process_notification(
     except PermanentlyNotSentError:
         status, error_code = "failed", "mail_rejected"
     except NotSentError as error:
-        completed_at = now + timedelta(seconds=time.monotonic() - started)
+        completed_at = entered_at + timedelta(seconds=time.monotonic() - started)
         retry_at = completed_at + timedelta(
             seconds=min(60 * 2 ** (delivery.attempts - 1), 1800) + secrets.randbelow(31)
         )

@@ -136,11 +136,20 @@ Members can rename a region without changing its revision or approval. Location 
   the external keys separately from the database. This protects database-only
   disclosure, not compromise of the application host that holds the decryption key.
 - Reserve quota atomically by provider account and UTC day before each request, including validation and retries. Uncertain request outcomes consume budget conservatively; do not rotate accounts to evade limits. Solcast HTTP 429 records a shared account cooldown; HTTP 401 blocks new requests for the failing credential revision until key rotation. These gates stop request admission without disabling access to previously authorized saved forecasts. HTTP 403 is a permanent failure of that request, not an account-wide credential verdict.
-- PostgreSQL owns retry scheduling, attempt budgets and leases. Dramatiq actors retain `max_retries=0`; HTTP adapters make one ledger-accounted request per attempt. Retry transport failures, HTTP 408/425/429 and transient 5xx responses; other HTTP failures, including 501/505, require a later configuration or service change. Preserve safe error codes and `Retry-After`, accepting delta seconds or an HTTP date as a minimum delay without shortening long hints. Add 0–30 seconds of jitter to bounded exponential backoff. Forecast jobs allow three execution attempts, including interrupted lease recovery; admission waits consume neither a request nor an execution attempt. A newer configured forecast slot supersedes older unclaimed work, preventing an outage from replaying an obsolete backlog. Account quota and forecast reservations still apply to every actual retry.
+  Credential rotation preserves account cooldowns. A 429 without a usable retry
+  hint waits at least 15 minutes. An audited administrative reset requires the
+  operator to confirm provider recovery and changes neither request usage nor
+  authentication state. Successful validation can re-arm the latest approved
+  forecast job that failed authentication, without clearing its request ledger.
+- PostgreSQL owns retry scheduling, attempt budgets and leases. Dramatiq actors retain `max_retries=0`; HTTP adapters make one ledger-accounted request per attempt. Retry transport failures, HTTP 408/425/429 and transient 5xx responses; other HTTP failures, including 501/505, require a later configuration or service change. Preserve safe error codes and `Retry-After`, accepting delta seconds or an HTTP date as a minimum delay without shortening long hints. Add 0–30 seconds of jitter to bounded exponential backoff. Forecast jobs allow three execution attempts, including interrupted lease recovery; admission waits consume neither a request nor an execution attempt. Transient forecast-provider failures wait at least four and then eight minutes, so a five-minute outage can recover within the 15-minute preparation grace without increasing the three-request budget; calculation failures retain separate backoff. A newer configured forecast slot supersedes older unclaimed work, preventing an outage from replaying an obsolete backlog. Account quota and forecast reservations still apply to every actual retry.
 - Claim jobs with expiring leases and unique scheduling keys. Assume queue redelivery: persist results idempotently and recover interrupted work. Publish through a durable job/outbox record so a database commit cannot lose the collection request. Keep HTTP connection/read/write/pool limits distinct from job and business deadlines: HTTPX timeouts bound individual I/O waits, and Dramatiq's best-effort time limit is not a hard network deadline.
 - Members configure region-local daily forecast times, initially 16:00. Historical collection runs separately at 03:00, refreshing yesterday and recovering missed days from the available seven-day window. Request `hours=168` explicitly and archive completed intervals; each acquisition remains immutable. Historical transport failures, empty responses and incomplete previous days retry no sooner than 30 minutes later, before 09:00. Restart catch-up is allowed inside that night window; disabling collection stops new night work. Account-wide UTC quota reservations preserve the remaining scheduled forecast needs before admitting a night request. Quota exhaustion or reserved forecast budget never creates a rapid retry loop. Configuration changes apply to future forecast slots; they do not invent missed forecast acquisitions. Use unique slots, advance a nonexistent night start to the first valid half-hour before 09:00, choose the first repeated time and flag late acquisitions.
 - Do not hold database transactions open during external HTTP calls. Recheck binding revision and approval before publication. Multiple scheduler instances must not duplicate work.
 - Preserve forecast vintages and configuration/model versions. Expose stale or incomplete results explicitly. Monitor last successful collection, queue lag, provider errors, quota, solver failures and coverage; logs carry correlation IDs without credentials.
+
+Provider latency and dispatcher polling can extend retry times beyond the preparation
+grace; the reminder then uses its saved fallback at the fixed cutoff while collection
+continues independently.
 
 The dispatcher isolates scheduling and publishing phases so a provider or broker
 failure in one queue does not prevent the remaining phases from running. Failed
@@ -149,12 +158,21 @@ deliveries still pass through its lease. Deployment supervision must restart fai
 processes and monitor dispatcher progress and overdue work independently of the
 email channel it protects.
 
+Application database connections use a five-second connection timeout, a
+five-second PostgreSQL lock timeout and a 60-second statement timeout, including
+the authentication cache connection. The release migration command temporarily
+uses its explicit migration limits and restores the application limits afterward.
+SMTP sockets use a 15-second timeout. These are connection and individual
+operation limits; business deadlines are checked separately after database waits.
+
 `DispatcherStatus` records each phase's last attempt, success and safe error code.
 `check_delivery_health --max-lag-minutes 5` emits JSON and fails for missing, stale
 or failed phases, overdue ready jobs, expired or missing active leases, recent
-failed/uncertain/unavailable or incomplete tomorrow deliveries, credential blocks
-and mail authentication failures. Complete saved-forecast fallback and provider
-cooldowns remain informational. This check needs a working database; monitoring
+failed/uncertain/unavailable or incomplete tomorrow deliveries, missed delivery
+deadlines, EPİAŞ failures, credential blocks, account cooldowns and mail
+authentication failures. Enabled approved regions without a successful forecast
+in 26 hours are unhealthy. Complete saved-forecast fallback remains informational.
+This check needs a working database; monitoring
 must also treat failure to execute it as unhealthy. Run the mailer with
 `worker --queues notifications --threads 2`, separately from the default collection,
 calibration and EPİAŞ queues. Restart all workers during rollout: an older worker
@@ -441,12 +459,15 @@ Successful collection saves `ForecastResult.daily_payloads` for the local dates
 covered by its elapsed 72-hour acquisition horizon, including DST boundaries, in
 the same publication transaction as the canonical target-day result. Failure to
 calculate a supplemental day omits only that day. Email rendering performs no
-numerical calculation or provider request, so a later solver failure cannot destroy
+model recomputation or provider request, so a later solver failure cannot destroy
 previously saved usable outputs. Validate saved dates, binding identity, finite
-values, interval coverage and completeness before selection. Migration
+values, interval coverage, energy consistency and completeness before selection. Migration
 `forecasts.0017` copies only an existing result's matching original target day;
 additional historical days are not recalculated or backdated. The wider fallback
 window becomes available after subsequent successful collections.
+An unexpected rendering failure freezes a minimal plain-text unavailable notice,
+using an independent message builder; retries preserve that same notice. Database
+failures leave durable unsent work for later recovery.
 
 Use region IANA timezones, skip nonexistent DST times and use the first occurrence
 of repeated times. Catch up at most two hours; older slots are recorded without
@@ -466,12 +487,15 @@ Known non-acceptance allows at most eight attempts within the two-hour delivery
 window, with exponential delay capped at 30 minutes plus 0–30 seconds of jitter.
 Connection/authentication failures and explicit temporary SMTP rejection are safe
 to retry; authentication failures retain a separate operational error code.
-Permanent transaction rejection fails the delivery. Lost acknowledgments,
+Permanent transaction rejection fails the delivery. Invalid SMTP reply codes
+cannot establish rejection and remain uncertain. Lost acknowledgments,
 disconnects or timeouts during transmission remain uncertain. A deterministic
 Message-ID aids reconciliation but does not establish recipient deduplication.
 `sent` means the configured mail backend acknowledged acceptance, not inbox
 delivery; delivery, bounce and complaint tracking require a separately configured
 mail provider integration. Provider and mail errors never expose credentials.
+Each Django `mailers["default"]` lookup creates a fresh backend instance, so the
+notification worker's threads do not share an SMTP connection.
 
 ## Primary references
 
@@ -481,3 +505,4 @@ mail provider integration. Provider and mail errors never expose credentials.
 - [django-allauth headless](https://docs.allauth.org/en/latest/headless/), [NIST SP 800-63B-4](https://pages.nist.gov/800-63-4/sp800-63b.html), [OWASP authentication guidance](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html).
 - [AWS retries and jitter](https://builder.aws.com/content/3EumjoZascWd1oZiEgL8ORlv3qE/timeouts-retries-and-backoff-with-jitter), [Google retry strategy](https://docs.cloud.google.com/storage/docs/retry-strategy), [Microsoft transient fault handling](https://learn.microsoft.com/en-us/azure/architecture/best-practices/transient-faults).
 - [HTTPX transport retries](https://www.python-httpx.org/advanced/transports/), [HTTPX timeouts](https://www.python-httpx.org/advanced/timeouts/), [Dramatiq retries and time limits](https://dramatiq.io/guide.html), [Python SMTP acceptance](https://docs.python.org/3/library/smtplib.html), [Amazon SES delivery outcomes](https://docs.aws.amazon.com/ses/latest/dg/send-email-concepts-deliverability.html).
+- [Django mailer construction](https://github.com/django/django/blob/stable/6.1.x/django/core/mail/handler.py), [PostgreSQL connection limits](https://www.postgresql.org/docs/current/libpq-connect.html), [PostgreSQL constraint timing](https://www.postgresql.org/docs/current/sql-set-constraints.html).

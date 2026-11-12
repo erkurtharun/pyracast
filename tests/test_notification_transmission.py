@@ -78,14 +78,22 @@ def test_reclaimed_connection_cannot_transmit_after_a_new_lease(
 
 
 @pytest.mark.parametrize("failure", [False, True])
-def test_late_smtp_response_resolves_the_original_uncertain_lease(failure: bool) -> None:
+def test_late_smtp_response_resolves_the_original_uncertain_lease(
+    failure: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     delivery = ready()
+    clock = [0.0]
+    monkeypatch.setattr(
+        "pyracast.notifications.jobs.time", SimpleNamespace(monotonic=lambda: clock[0])
+    )
 
     def late_response(message: EmailMultiAlternatives) -> None:
         delivery.refresh_from_db()
         token = delivery.lease_token
         assert delivery.transmit_started_at is not None
-        assert not process_notification(delivery.pk, SLOT + LEASE_DURATION)
+        clock[0] = LEASE_DURATION.total_seconds() + 1
+        assert not process_notification(delivery.pk, SLOT + LEASE_DURATION + timedelta(seconds=1))
         delivery.refresh_from_db()
         assert delivery.status == "uncertain"
         assert delivery.lease_token == token
@@ -128,7 +136,11 @@ def test_open_connection_does_not_authorize_a_changed_delivery(
     if change in {"authority", "deadline"}:
         delivery.refresh_from_db()
         assert delivery.status == "skipped"
-        assert delivery.last_error == "authority_or_deadline_changed"
+        assert delivery.last_error == (
+            "preference_or_authority_changed"
+            if change == "authority"
+            else "delivery_deadline_exceeded"
+        )
 
 
 @pytest.mark.parametrize("exhausted", [False, True])
@@ -223,7 +235,7 @@ def test_authority_lock_wait_cannot_move_transmission_past_its_deadline(
     assert not process_notification(delivery.pk, SLOT + MAX_LATENESS - timedelta(seconds=1))
     assert not OpeningBackend.sent
     delivery.refresh_from_db()
-    assert delivery.last_error == "authority_or_deadline_changed"
+    assert delivery.last_error == "delivery_deadline_exceeded"
 
 
 def test_database_failure_before_transmission_is_a_known_non_send(

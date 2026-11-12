@@ -5,7 +5,11 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-    dependencies: ClassVar = [("notifications", "0005_remove_redundant_reminder_email")]
+    dependencies: ClassVar = [
+        ("notifications", "0005_remove_redundant_reminder_email"),
+        ("forecasts", "0012_forecastsnapshot_binding_and_more"),
+        ("regions", "0001_initial"),
+    ]
 
     operations: ClassVar = [
         migrations.AddField(
@@ -45,4 +49,6 @@ class Migration(migrations.Migration):
             "WHERE status IN ('sending', 'uncertain')",
             migrations.RunSQL.noop,
         ),
+        # Flush backfill FK checks before the schema editor creates the binding index.
+        migrations.RunSQL("SET CONSTRAINTS ALL IMMEDIATE", migrations.RunSQL.noop),
     ]

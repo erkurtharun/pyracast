@@ -1,10 +1,12 @@
 from datetime import datetime, timedelta
 
-from django.db.models import F, Q
+from django.db.models import F, OuterRef, Q, Subquery
 
 from pyracast.connections.models import ProviderAccount
-from pyracast.forecasts.models import CollectionJob, DispatcherStatus
+from pyracast.forecasts.models import CollectionJob, DispatcherStatus, ForecastSnapshot
+from pyracast.metering.models import EpiasCollectionJob
 from pyracast.notifications.models import NotificationDelivery
+from pyracast.notifications.operations import invalid_reminder_recipient_count
 from pyracast.regions.models import Region
 
 
@@ -35,7 +37,32 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
             "approved_binding__provider_account_id"
         ),
     )
+    active_regions = Region.objects.filter(
+        status="approved", deleted_at__isnull=True, approved_binding__provider_account__enabled=True
+    ).exclude(collectionschedule__enabled=False)
+    latest_forecast = (
+        ForecastSnapshot.objects.filter(
+            binding_id=OuterRef("approved_binding_id"),
+            source_kind="forecast",
+            job__status="succeeded",
+            forecastresult__isnull=False,
+        )
+        .order_by("-collected_at")
+        .values("collected_at")[:1]
+    )
+    stale_regions = active_regions.annotate(latest_acquisition=Subquery(latest_forecast)).filter(
+        Q(latest_acquisition__isnull=True) | Q(latest_acquisition__lt=now - timedelta(hours=26))
+    )
+    metering = EpiasCollectionJob.objects.filter(plant__deleted_at__isnull=True)
     counters = {
+        "invalid_reminder_recipients": invalid_reminder_recipient_count(),
+        "unvalidated_provider_credentials": active_regions.exclude(
+            approved_binding__validated_credential_revision=F(
+                "approved_binding__provider_account__credential_revision"
+            )
+        ).count(),
+        "regions_without_recent_forecasts": stale_regions.count(),
+        "provider_cooldowns": accounts.filter(request_blocked_until__gt=now).count(),
         "overdue_collections": collections.filter(
             status__in=("pending", "retry"), available_at__lt=cutoff
         ).count(),
@@ -54,6 +81,18 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
         "failed_notifications": deliveries.filter(
             status__in=("failed", "uncertain", "unavailable"), scheduled_for__gte=recent
         ).count(),
+        "missed_notifications": deliveries.filter(
+            status__in=("skipped", "failed"),
+            last_error__in=("missed_schedule", "delivery_deadline_exceeded"),
+            scheduled_for__gte=recent,
+        ).count(),
+        "overdue_metering": metering.filter(
+            status__in=("pending", "retry"), next_attempt_at__lt=cutoff
+        ).count(),
+        "interrupted_metering": metering.filter(
+            Q(lease_expires_at__lte=now) | Q(lease_expires_at__isnull=True), status="running"
+        ).count(),
+        "failed_metering": metering.filter(status="failed", scheduled_for__gte=recent).count(),
         "unavailable_forecasts": deliveries.filter(
             prepared_message__kind="unavailable", scheduled_for__gte=recent
         ).count(),
@@ -76,5 +115,4 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
             prepared_message__kind__in=("saved_complete", "saved_partial"),
             scheduled_for__gte=recent,
         ).count(),
-        "provider_cooldowns": accounts.filter(request_blocked_until__gt=now).count(),
     }

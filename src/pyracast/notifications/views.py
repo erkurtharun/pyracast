@@ -19,6 +19,23 @@ from pyracast.notifications.operations import (
 from pyracast.notifications.serializers import ReminderInput, ReminderOutput
 
 
+def _source_age(delivery: NotificationDelivery, now: datetime) -> float | None:
+    if delivery.snapshot is None:
+        return None
+    basis = delivery.sent_at or now
+    if delivery.prepared_message:
+        prepared_at = delivery.prepared_message.get("prepared_at")
+        if isinstance(prepared_at, str):
+            try:
+                prepared = datetime.fromisoformat(prepared_at)
+            except ValueError:
+                pass
+            else:
+                if prepared.utcoffset() is not None:
+                    basis = prepared
+    return max(0.0, (basis - delivery.snapshot.collected_at).total_seconds())
+
+
 def preference_payload(preference: ReminderPreference, now: datetime) -> dict[str, object]:
     recipients = effective_recipients(preference)
     limit = recipient_limit()
@@ -48,12 +65,8 @@ def preference_payload(preference: ReminderPreference, now: datetime) -> dict[st
             "late": delivery.sent_at - delivery.scheduled_for > timedelta(seconds=60)
             if delivery.sent_at
             else None,
-            "source_age_seconds": (now - delivery.snapshot.collected_at).total_seconds()
-            if delivery.snapshot
-            else None,
-            "stale": now - delivery.snapshot.collected_at > timedelta(hours=24)
-            if delivery.snapshot
-            else None,
+            "source_age_seconds": (age := _source_age(delivery, now)),
+            "stale": age > timedelta(hours=24).total_seconds() if age is not None else None,
             "sent_at": delivery.sent_at,
         }
         for delivery in NotificationDelivery.objects.filter(preference_id=preference.pk)

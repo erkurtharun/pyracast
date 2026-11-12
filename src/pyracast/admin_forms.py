@@ -163,6 +163,11 @@ class BindingActionForm(forms.Form):
     expected_revision = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
     binding_id = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
     credential_revision = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
+    expected_cooldown_until = forms.DateTimeField(required=False, widget=forms.HiddenInput)
+    provider_recovered = forms.BooleanField(
+        required=False,
+        label="The provider has confirmed that this account can make requests again.",
+    )
 
     def current_binding(self, region: Region) -> SiteBinding:
         data = self.cleaned_data

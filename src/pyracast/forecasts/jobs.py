@@ -7,7 +7,6 @@ from datetime import UTC, date, datetime, timedelta
 from typing import cast
 from zoneinfo import ZoneInfo
 
-from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
@@ -39,9 +38,9 @@ from pyracast.forecasts.models import (
 )
 from pyracast.forecasts.projections import prepare_daily_payloads
 from pyracast.forecasts.sources import snapshot_data
-from pyracast.forecasts.timing import latest_forecast_slot
+from pyracast.forecasts.timing import effective_forecast_schedule, latest_forecast_slot
 from pyracast.irradiance import local_day_bounds
-from pyracast.provider_retry import next_retry_at
+from pyracast.provider_retry import next_retry_at, rate_limit_retry_after
 from pyracast.regions.models import Region
 from pyracast.weather import OpenMeteoProvider, WeatherError, serialize_weather
 
@@ -83,7 +82,16 @@ def claim(job_id: int, now: datetime) -> Lease | None:
         if job is None:
             return None
         now += timedelta(seconds=time.monotonic() - started)
-        if job.status in {"succeeded", "stale", "failed"} or job.available_at > now:
+        cleared_cooldown = (
+            job.status == "retry"
+            and job.last_error == "provider_throttled"
+            and CollectionJob.objects.filter(
+                pk=job.pk, binding__provider_account__request_blocked_until__isnull=True
+            ).exists()
+        )
+        if job.status in {"succeeded", "stale", "failed"} or (
+            job.available_at > now and not cleared_cooldown
+        ):
             return None
         if job.retry_until is not None and now >= job.retry_until:
             job.status = "failed"
@@ -109,16 +117,23 @@ def claim(job_id: int, now: datetime) -> Lease | None:
             pk=job.binding_id
         )
         schedule = CollectionSchedule.objects.filter(region_id=binding.region_id).first()
-        times = (
-            schedule.times
-            if schedule is not None
-            else [settings.PYRACAST_CUTOFF_LOCAL.strftime("%H:%M")]
+        first_slot = (
+            CollectionJob.objects.filter(
+                binding=binding, endpoint="forecasts", reference_import__isnull=True
+            )
+            .order_by("scheduled_slot", "pk")
+            .values_list("scheduled_slot", flat=True)
+            .first()
         )
-        latest_slot = latest_forecast_slot(
-            now,
-            binding.timezone,
-            times[: max(binding.provider_account.daily_quota - 1, 0)],
-            schedule.effective_from if schedule is not None else job.scheduled_slot,
+        timing = effective_forecast_schedule(
+            first_slot=first_slot,
+            schedule=schedule,
+            daily_quota=binding.provider_account.daily_quota,
+        )
+        latest_slot = (
+            latest_forecast_slot(now, binding.timezone, timing.times, timing.effective_from)
+            if timing is not None
+            else None
         )
         if (
             job.endpoint == "forecasts"
@@ -140,7 +155,7 @@ def claim(job_id: int, now: datetime) -> Lease | None:
                     and job.scheduled_slot.astimezone(ZoneInfo(binding.region.timezone)).strftime(
                         "%H:%M"
                     )
-                    not in schedule.times
+                    not in (timing.times if timing is not None else ())
                     # Approval creates one immediate acquisition outside existing clocks.
                     and (
                         job.scheduled_slot < schedule.effective_from
@@ -161,6 +176,8 @@ def claim(job_id: int, now: datetime) -> Lease | None:
         job.lease_token = token
         job.lease_expires_at = now + LEASE_DURATION
         job.attempts += 1
+        if cleared_cooldown:
+            job.available_at = now
         if job.retry_until is not None:
             job.available_at = now + NIGHT_RETRY_DELAY
         job.save(
@@ -178,6 +195,7 @@ def retry(
     retryable: bool = True,
     retry_after_seconds: int | None = None,
     waiting: bool = False,
+    provider_transient: bool = False,
 ) -> None:
     with transaction.atomic():
         job = CollectionJob.objects.select_for_update().get(pk=lease.job_id)
@@ -206,6 +224,8 @@ def retry(
             job.available_at = datetime.combine(tomorrow, datetime.min.time(), tzinfo=UTC)
         else:
             job.status = "retry" if job.attempts < 3 else "failed"
+            if provider_transient and job.endpoint == "forecasts":
+                retry_after_seconds = max(retry_after_seconds or 0, 120 * 2 ** min(job.attempts, 6))
             job.available_at = next_retry_at(now, job.attempts, retry_after_seconds)
         job.lease_token = None
         job.lease_expires_at = None
@@ -466,9 +486,16 @@ def collect(
             retry(
                 lease,
                 now + timedelta(seconds=time.monotonic() - started),
-                "provider_failure",
+                "provider_authentication_failed"
+                if exc.status_code == 401
+                else "provider_throttled"
+                if exc.status_code == 429
+                else "provider_failure",
                 retryable=exc.retryable,
-                retry_after_seconds=exc.retry_after_seconds,
+                retry_after_seconds=rate_limit_retry_after(exc.retry_after_seconds)
+                if exc.status_code == 429
+                else exc.retry_after_seconds,
+                provider_transient=exc.retryable and exc.status_code != 429,
             )
             return False
         except Exception as exc:
@@ -508,7 +535,10 @@ def collect(
     data = snapshot_data(snapshot)
     try:
         payload = calculator(lease.binding, lease.target_date, data)
-    except ValueError, ArithmeticError:
+    except Exception as exc:
+        logger.warning(
+            "Forecast calculation failed job_id=%s error_type=%s", lease.job_id, type(exc).__name__
+        )
         retry(lease, now + timedelta(seconds=time.monotonic() - started), "calculation_failure")
         return False
     daily_payloads = prepare_daily_payloads(
@@ -526,7 +556,13 @@ def collect(
 def pending_job_ids(now: datetime, limit: int = 100) -> list[int]:
     return list(
         CollectionJob.objects.filter(
-            available_at__lte=now, binding__region__deleted_at__isnull=True
+            Q(available_at__lte=now)
+            | Q(
+                status="retry",
+                last_error="provider_throttled",
+                binding__provider_account__request_blocked_until__isnull=True,
+            ),
+            binding__region__deleted_at__isnull=True,
         )
         .filter(Q(status__in=("pending", "retry")) | Q(status="running", lease_expires_at__lte=now))
         .order_by("available_at", "pk")

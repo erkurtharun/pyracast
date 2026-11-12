@@ -6,6 +6,7 @@ from django.db.models import Q
 
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule, ForecastSnapshot
 from pyracast.forecasts.projections import saved_day_payload
+from pyracast.forecasts.timing import effective_forecast_schedule, latest_forecast_slot
 from pyracast.notifications.mail import build_message, message_payload
 from pyracast.notifications.models import NotificationDelivery
 
@@ -35,13 +36,32 @@ def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
         reference_import__isnull=True,
         scheduled_slot=delivery.scheduled_for,
     ).first()
-    schedule = CollectionSchedule.objects.filter(
-        region_id=binding.region_id, enabled=True, effective_from__lte=delivery.scheduled_for
-    ).first()
-    clock = delivery.scheduled_for.astimezone(ZoneInfo(binding.timezone)).strftime("%H:%M")
-    due = schedule is not None and clock in schedule.times
+    schedule = CollectionSchedule.objects.filter(region_id=binding.region_id).first()
+    first_slot = (
+        CollectionJob.objects.filter(
+            binding=binding, endpoint="forecasts", reference_import__isnull=True
+        )
+        .order_by("scheduled_slot")
+        .values_list("scheduled_slot", flat=True)
+        .first()
+    )
+    timing = effective_forecast_schedule(
+        first_slot=first_slot, schedule=schedule, daily_quota=binding.provider_account.daily_quota
+    )
+    due = (
+        timing is not None
+        and latest_forecast_slot(
+            delivery.scheduled_for, binding.timezone, timing.times, timing.effective_from
+        )
+        == delivery.scheduled_for
+    )
     if now < deadline and (
-        (job is not None and job.status in {"pending", "running", "retry"}) or (job is None and due)
+        (
+            job is not None
+            and job.status in {"pending", "running", "retry"}
+            and (job.status != "retry" or job.available_at < deadline)
+        )
+        or (job is None and due)
     ):
         delivery.available_at = min(now + timedelta(seconds=30), deadline)
         delivery.save(update_fields=("available_at",))
@@ -60,13 +80,18 @@ def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
             forecastresult__published_at__lte=cutoff,
         )
         .filter(
+            Q(forecastresult__daily_payloads__has_key=tomorrow.isoformat())
+            | Q(forecastresult__payload__local_date=tomorrow.isoformat())
+        )
+        .filter(
             Q(
                 collected_at__lte=delivery.scheduled_for,
                 forecastresult__published_at__lte=delivery.scheduled_for,
             )
             | Q(job__scheduled_slot=delivery.scheduled_for, job__reference_import__isnull=True)
         )
-        .select_related("forecastresult")
+        .select_related("forecastresult", "binding", "job")
+        .defer("raw_payload", "normalized_intervals", "weather_payload")
         .order_by("-collected_at", "-pk")
     ):
         result = saved_day_payload(candidate, tomorrow)

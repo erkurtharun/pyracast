@@ -68,8 +68,9 @@ def test_actuals_are_distinct_from_archived_forecasts() -> None:
     assert result.source_kind == "estimated_actuals"
     assert result.collected_at is not None
     assert result.collected_at.utcoffset() is not None
-    with pytest.raises(ProviderError, match="endpoint"):
+    with pytest.raises(ProviderError, match="endpoint") as caught:
         normalize_payload(raw, cast(Literal["forecasts", "estimated_actuals"], "wrong"))
+    assert caught.value.retryable is False
 
 
 def test_captured_seven_day_actuals_preserves_source_and_interval_bounds() -> None:
@@ -90,8 +91,9 @@ def test_captured_seven_day_actuals_preserves_source_and_interval_bounds() -> No
 
 @pytest.mark.parametrize("payload", [None, [], {}, {"forecasts": {}}, {"forecasts": None}])
 def test_invalid_top_level_schemas_are_rejected(payload: object) -> None:
-    with pytest.raises(ProviderError, match="schema"):
+    with pytest.raises(ProviderError, match="schema") as caught:
         normalize_payload(payload)
+    assert caught.value.retryable is False
 
 
 @pytest.mark.parametrize(
@@ -104,6 +106,7 @@ def test_invalid_top_level_schemas_are_rejected(payload: object) -> None:
         {"period": "PT30M", "period_end": None},
         {"period": "PT30M", "period_end": "invalid"},
         {"period": "PT30M", "period_end": "2026-11-10T00:30:00"},
+        {"period": "PT30M", "period_end": "0001-01-01T00:00:00+00:00"},
         {"period": "PT30M", "period_end": "2026-11-10T00:30:00Z", "pv_estimate": True},
         {"period": "PT30M", "period_end": "2026-11-10T00:30:00Z", "pv_estimate": "1.2"},
         {"period": "PT30M", "period_end": "2026-11-10T00:30:00Z", "pv_estimate": float("nan")},
@@ -112,14 +115,16 @@ def test_invalid_top_level_schemas_are_rejected(payload: object) -> None:
     ],
 )
 def test_invalid_rows_are_rejected(row: object) -> None:
-    with pytest.raises(ProviderError, match="interval"):
+    with pytest.raises(ProviderError, match="interval") as caught:
         normalize_payload({"forecasts": [row]})
+    assert caught.value.retryable is False
 
 
 @pytest.mark.parametrize("metadata", [object(), float("nan")])
 def test_non_json_metadata_is_rejected(metadata: object) -> None:
-    with pytest.raises(ProviderError, match="schema"):
+    with pytest.raises(ProviderError, match="schema") as caught:
         normalize_payload({"forecasts": [], "metadata": metadata})
+    assert caught.value.retryable is False
 
 
 def test_fixture_is_explicitly_synthetic_and_supports_dst_days() -> None:

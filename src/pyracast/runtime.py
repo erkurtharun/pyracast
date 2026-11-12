@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import UTC, datetime
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -11,9 +12,11 @@ from dramatiq.brokers.rabbitmq import RabbitmqBroker
 from pyracast.calculation import calculate
 from pyracast.forecasts.jobs import collect, pending_job_ids
 from pyracast.forecasts.models import CollectionJob
-from pyracast.forecasts.scheduler import enqueue_due
+from pyracast.forecasts.scheduler import CollectionSchedulingError, enqueue_due
 from pyracast.providers import adapter_for
 from pyracast.weather import OpenMeteoProvider
+
+logger = logging.getLogger(__name__)
 
 
 def deliver(job_id: int) -> None:
@@ -57,8 +60,18 @@ def make_broker() -> RabbitmqBroker:
 
 def dispatch(actor: Actor[[int], None]) -> int:
     now = datetime.now(UTC)
-    enqueue_due(now)
+    failed = False
+    try:
+        enqueue_due(now)
+    except Exception as exc:
+        failed = True
+        logger.warning("Collection scheduling incomplete error_type=%s", type(exc).__name__)
+        close_old_connections()
     job_ids = pending_job_ids(now)
     for job_id in job_ids:
         actor.send(job_id)
+    if failed:
+        raise CollectionSchedulingError(
+            "Collection scheduling failed; pending jobs were dispatched."
+        )
     return len(job_ids)

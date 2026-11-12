@@ -25,6 +25,7 @@ from pyracast.connections.operations import (
     RequestDeferredError,
     validate_binding,
 )
+from pyracast.connections.recovery import clear_provider_cooldown
 from pyracast.forecasts.models import (
     CollectionJob,
     DispatcherStatus,
@@ -217,10 +218,16 @@ class RegionAdmin(ReadOnlyAdmin):
                 "credential_revision": binding.provider_account.credential_revision
                 if binding
                 else None,
+                "expected_cooldown_until": (
+                    binding.provider_account.request_blocked_until.isoformat()
+                    if binding and binding.provider_account.request_blocked_until is not None
+                    else ""
+                ),
             },
         )
         if request.method == "POST":
             action = request.POST.get("action")
+            action_form.fields["provider_recovered"].required = action == "clear_cooldown"
             form = setup_form if action == "configure" else action_form
             if form.is_valid():
                 try:
@@ -230,7 +237,7 @@ class RegionAdmin(ReadOnlyAdmin):
                         message = (
                             "Private provider setup saved. Validate the connection before approval."
                         )
-                    elif action in {"validate", "approve"}:
+                    elif action in {"validate", "approve", "clear_cooldown"}:
                         current = action_form.current_binding(region)
                         if action == "validate":
                             validate_binding(
@@ -239,6 +246,19 @@ class RegionAdmin(ReadOnlyAdmin):
                             message = (
                                 "The current provider connection is validated. "
                                 "The plant can now be approved."
+                            )
+                        elif action == "clear_cooldown":
+                            clear_provider_cooldown(
+                                actor,
+                                current.provider_account_id,
+                                action_form.cleaned_data["credential_revision"],
+                                expected_blocked_until=action_form.cleaned_data[
+                                    "expected_cooldown_until"
+                                ],
+                            )
+                            message = (
+                                "Provider wait cleared. Queued collection can resume "
+                                "within the remaining quota."
                             )
                         else:
                             approve_region(actor, region.pk, current.pk, timezone.now())
