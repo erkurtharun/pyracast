@@ -62,11 +62,13 @@ def test_database_key_migration_blocks_unresolved_live_references(reference: str
         live = accounts.objects.create(
             provider="solcast", external_account_id="unresolved", secret_reference=reference
         )
-        with pytest.raises(RuntimeError, match="Transfer every Solcast API key") as failure:
-            MigrationExecutor(connection).migrate(current)
-        assert "SOLCAST_API_KEY" not in str(failure.value)
-        assert accounts.objects.get(pk=live.pk).secret_reference == reference
-        accounts.objects.filter(pk=live.pk).delete()
+        try:
+            with pytest.raises(RuntimeError, match="Transfer every Solcast API key") as failure:
+                MigrationExecutor(connection).migrate(current)
+            assert "SOLCAST_API_KEY" not in str(failure.value)
+            assert accounts.objects.get(pk=live.pk).secret_reference == reference
+        finally:
+            accounts.objects.filter(pk=live.pk).delete()
     finally:
         MigrationExecutor(connection).migrate(current)
 

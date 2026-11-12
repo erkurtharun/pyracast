@@ -36,7 +36,13 @@ def test_invalid_keys_are_rejected(raw: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "reference", ["encrypted:v1:invalid", "encrypted:v1:" + "x" * 2048, "plaintext"]
+    "reference",
+    [
+        "encrypted:v1:invalid",
+        "encrypted:v1:invalid-\u0131-token",
+        "encrypted:v1:" + "x" * 2048,
+        "plaintext",
+    ],
 )
 def test_invalid_references_are_rejected_without_echoing_secret(reference: str) -> None:
     with pytest.raises(ProviderError) as failure:

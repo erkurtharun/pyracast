@@ -27,12 +27,13 @@ def test_account_creation_rejects_duplicate_identity_without_rotating_credential
         "provider": "fixture",
         "external_account_id": "canonical",
         "api_key": reference,
+        "daily_quota": 1,
     }
 
     first = client.post("/api/platform/accounts/", data, content_type="application/json")
     duplicate = client.post(
         "/api/platform/accounts/",
-        {**data, "api_key": "test-only-discarded-key"},
+        {**data, "api_key": "test-only-discarded-key", "daily_quota": 10},
         content_type="application/json",
     )
 
@@ -42,6 +43,8 @@ def test_account_creation_rejects_duplicate_identity_without_rotating_credential
     assert first.json() == {"id": account.pk}
     assert decrypt_api_key(account.encrypted_api_key) == reference
     assert account.credential_revision == 1
+    assert account.daily_quota == 1
+    assert "test-only-discarded-key" not in duplicate.content.decode()
     event = AuditEvent.objects.get(provider_account=account)
     assert event.actor_id == actor.pk
     assert event.region_id is None
@@ -169,7 +172,7 @@ def test_rotation_of_missing_account_returns_private_not_found() -> None:
     )
 
     assert response.status_code == 404
-    assert "REPLACEMENT" not in response.content.decode()
+    assert "test-only-replacement" not in response.content.decode()
     assert not AuditEvent.objects.exists()
 
 

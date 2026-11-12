@@ -634,8 +634,9 @@ The latest resolved scientific stack is available as the `scientific` extra:
 pvlib 0.16.1, NumPy 2.5.4, pandas 3.1.1, SciPy 1.18.1 and h5py 3.16.0. h5py has no
 CPython 3.15 Windows/Ubuntu x64 wheel. CI builds it against checksum-pinned official
 [HDF5 2.2.0 archives](https://github.com/HDFGroup/hdf5/releases/tag/2.2.0) in a temporary
-environment on native Windows and Ubuntu 24.04. Both builds and the pvlib smoke
-calculation passed. Reproduce this check with a C compiler installed:
+environment on GitHub-hosted Windows and Ubuntu runners. A previous Windows and
+Ubuntu 24.04 run passed both builds and the pvlib smoke calculation. Reproduce
+this check with a C compiler installed:
 
 ```text
 uv run --no-project --python 3.15.2 python scripts/check_scientific.py

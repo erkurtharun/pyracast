@@ -5,11 +5,13 @@ import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier, local
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from allauth.account.models import EmailAddress
 from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
+from allauth.mfa.totp.internal import auth as totp_auth
 from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
 from django.contrib.auth.models import User
 from django.core import mail
@@ -447,18 +449,23 @@ def test_totp_and_recovery_codes_gate_login_and_cannot_be_replayed(
 
 
 @pytest.mark.parametrize("method", ["totp", "recovery_codes"])
-def test_eight_parallel_sessions_can_use_a_second_factor_only_once(method: str) -> None:
+def test_eight_parallel_sessions_can_use_a_second_factor_only_once(
+    method: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     user = member()
     secret = generate_totp_secret()
     TOTP.activate(user, secret)
     recovery = RecoveryCodes.activate(user)
-    code = totp_code(secret, time.time()) if method == "totp" else recovery.generate_codes()[0]
     clients = [Client(enforce_csrf_checks=True) for _ in range(8)]
     for client in clients:
         assert (
             submit(client, "auth/login", {"email": user.email, "password": PASSWORD}).status_code
             == 401
         )
+    verification_at = time.time()
+    # The real PostgreSQL single-use race must not depend on crossing a TOTP period.
+    monkeypatch.setattr(totp_auth, "time", SimpleNamespace(time=lambda: verification_at))
+    code = totp_code(secret, verification_at) if method == "totp" else recovery.generate_codes()[0]
     barrier = Barrier(8)
 
     def authenticate(client: Client) -> int:

@@ -27,5 +27,5 @@ class MFAAdapter(DefaultMFAAdapter):
             raise PermissionDenied("Authenticator could not be verified.")
         try:
             return secret_cipher(KEY_CONTEXT).decrypt(encrypted_text[len(PREFIX) :]).decode()
-        except InvalidToken, UnicodeDecodeError:
+        except InvalidToken, ValueError:
             raise PermissionDenied("Authenticator could not be verified.") from None

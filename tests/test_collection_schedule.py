@@ -203,16 +203,12 @@ def test_daily_history_keeps_completed_seven_day_window_and_preserves_raw() -> N
 
 
 @pytest.mark.parametrize("days", [1, 7])
-def test_solcast_actuals_explicitly_requests_seven_day_window(
-    monkeypatch: pytest.MonkeyPatch,
-    days: int,
-) -> None:
-    monkeypatch.setenv("PYRACAST_SOLCAST_TEST", "test-only-token")
+def test_solcast_actuals_explicitly_requests_seven_day_window(days: int) -> None:
 
     def handle(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/rooftop_sites/site-1/estimated_actuals"
         assert dict(request.url.params) == {"format": "json", "hours": "168"}
-        assert request.headers["Authorization"] == "Bearer test-only-token"
+        assert request.headers["Authorization"] == "Bearer test-credential"
         return httpx.Response(200, json={"estimated_actuals": []})
 
     data = SolcastProvider(httpx.MockTransport(handle)).fetch_history(

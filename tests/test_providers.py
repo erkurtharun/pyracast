@@ -187,10 +187,7 @@ def test_credentials_and_site_ids_are_validated_before_transport(
 
 
 @pytest.mark.parametrize("status", [302, 401, 429, 500])
-def test_http_errors_never_expose_provider_body_or_follow_redirects(
-    monkeypatch: pytest.MonkeyPatch, status: int
-) -> None:
-    monkeypatch.setenv("PYRACAST_SOLCAST_TEST", "test-credential")
+def test_http_errors_never_expose_provider_body_or_follow_redirects(status: int) -> None:
 
     def handle(request: httpx.Request) -> httpx.Response:
         assert request.url.host == "api.solcast.com.au"
@@ -204,8 +201,7 @@ def test_http_errors_never_expose_provider_body_or_follow_redirects(
     assert caught.value.__suppress_context__
 
 
-def test_timeouts_are_redacted(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PYRACAST_SOLCAST_TEST", "test-credential")
+def test_timeouts_are_redacted() -> None:
 
     def handle(request: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("test-credential", request=request)
@@ -223,10 +219,7 @@ def test_timeouts_are_redacted(monkeypatch: pytest.MonkeyPatch) -> None:
         b'{"forecasts":[],"test-\\u0063redential":"hidden"}',
     ],
 )
-def test_malformed_or_secret_echoing_success_bodies_are_rejected(
-    monkeypatch: pytest.MonkeyPatch, body: bytes
-) -> None:
-    monkeypatch.setenv("PYRACAST_SOLCAST_TEST", "test-credential")
+def test_malformed_or_secret_echoing_success_bodies_are_rejected(body: bytes) -> None:
 
     def handle(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, content=body)

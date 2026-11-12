@@ -34,7 +34,7 @@ def test_mfa_key_rotation_requires_fallback_until_secrets_are_reencrypted() -> N
             adapter.decrypt(ciphertext)
 
 
-@pytest.mark.parametrize("value", [SECRET, PREFIX + "invalid", ""])
+@pytest.mark.parametrize("value", [SECRET, PREFIX + "invalid", PREFIX + "invalid-\u0131-token", ""])
 def test_mfa_rejects_plaintext_and_corrupted_secrets_without_echoing_them(value: str) -> None:
     with pytest.raises(PermissionDenied) as error:
         MFAAdapter().decrypt(value)

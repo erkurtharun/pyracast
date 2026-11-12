@@ -24,5 +24,5 @@ def decrypt_api_key(encrypted: str) -> str:
         raise ProviderError("invalid_provider_secret")
     try:
         return secret_cipher(KEY_CONTEXT).decrypt(encrypted[len(PREFIX) :]).decode("utf-8")
-    except InvalidToken, UnicodeDecodeError:
+    except InvalidToken, ValueError:
         raise ProviderError("invalid_provider_secret") from None
