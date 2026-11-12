@@ -141,6 +141,28 @@ def test_smtp_quit_failure_does_not_discard_confirmed_acceptance(smtp: type[SMTP
     assert smtp.closed
 
 
+def test_zero_backend_deliveries_are_reported_as_known_non_acceptance(
+    smtp: type[SMTP], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(EmailBackend, "_send", lambda self, message: False)
+    with (
+        override_settings(
+            MAILERS={
+                "default": {
+                    "BACKEND": "django.core.mail.backends.smtp.EmailBackend",
+                    "OPTIONS": {"host": "localhost"},
+                }
+            }
+        ),
+        pytest.raises(NotSentError, match="did not send"),
+    ):
+        send_message(
+            EmailMultiAlternatives(subject="Forecast", body="Saved", to=["to@example.com"])
+        )
+    assert smtp.accepted == 0
+    assert smtp.closed
+
+
 @pytest.mark.parametrize("failed_check", [False, True])
 def test_smtp_does_not_send_when_the_open_connection_loses_transmission_authority(
     smtp: type[SMTP],
