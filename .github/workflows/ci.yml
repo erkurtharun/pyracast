@@ -126,6 +126,8 @@ jobs:
       - run: npx --no-install playwright install --with-deps chromium
         working-directory: web
       - name: Verify API schema and generated types
+        env:
+          PYRACAST_DEBUG: "0"
         run: |
           uv run --locked --no-sync --no-build pyracast spectacular --validate --fail-on-warn --format openapi-json --file web/openapi.json
           npm --prefix web run api:generate

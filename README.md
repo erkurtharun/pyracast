@@ -246,12 +246,17 @@ sources remain in the report. Source maps are enabled only for this isolated bui
 CI also sets `PYRACAST_BROWSER_TEST=1` and runs
 `uv run --locked python -m pytest tests/test_browser.py -n 1 --no-cov` against a
 real Django server and isolated PostgreSQL test database. No live provider or mail
-service is used. Regenerate the contract after API changes:
+service is used. Regenerate the contract after API changes with debug disabled so
+the schema records the production session-cookie name. In PowerShell:
 
-```text
+```powershell
+$env:PYRACAST_DEBUG = "0"
 uv run --locked pyracast spectacular --validate --fail-on-warn --format openapi-json --file web/openapi.json
 npm --prefix web run api:generate
 ```
+
+On Ubuntu, run the schema command with `PYRACAST_DEBUG=0` in its environment,
+then run `npm --prefix web run api:generate`.
 
 ## Automatic plant production
 
