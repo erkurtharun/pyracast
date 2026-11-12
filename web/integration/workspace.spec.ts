@@ -370,11 +370,37 @@ test("a customer manages one plant site through the real API", async ({
     await page.getByRole("button", { name: "Email reminders" }).click();
     await page.getByLabel("Enable forecast emails for this plant").check();
     await page.getByLabel(/Delivery times/).fill("10:00");
-    await page.getByLabel("Email address (optional override)").fill("");
+    await page.getByLabel("Email address 1", { exact: true }).fill("");
     await page.getByRole("button", { name: "Save reminders" }).click();
     await expect(page.getByText(/member@example.com/)).toBeVisible();
     await expect(page.getByLabel(/Delivery times/)).toHaveValue("10:00");
     await expect(page.getByText("Enabled", { exact: true })).toBeVisible();
+    await page
+        .getByLabel("Email address 1", { exact: true })
+        .fill("forecast-one@example.test");
+    await page.getByRole("button", { name: "Add address" }).click();
+    await page
+        .getByLabel("Email address 2", { exact: true })
+        .fill("forecast-two@example.test");
+    const remindersSaved = page.waitForResponse(
+        (response) =>
+            response.request().method() === "PUT" &&
+            response.url().endsWith("/reminders/"),
+    );
+    await page.getByRole("button", { name: "Save reminders" }).click();
+    expect((await remindersSaved).ok()).toBeTruthy();
+    await page.reload();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Email reminders", exact: true })
+        .click();
+    await expect(
+        page.getByLabel("Email address 1", { exact: true }),
+    ).toHaveValue("forecast-one@example.test");
+    await expect(
+        page.getByLabel("Email address 2", { exact: true }),
+    ).toHaveValue("forecast-two@example.test");
+    await expect(page.getByLabel(/Delivery times/)).toHaveValue("10:00");
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({
         path: testInfo.outputPath("reminders-mobile.png"),

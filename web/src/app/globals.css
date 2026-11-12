@@ -628,6 +628,26 @@ button.context-label:hover {
     min-height: 18px;
     accent-color: var(--teal);
 }
+.reminder-recipients {
+    margin: 24px 0;
+}
+.reminder-recipients legend {
+    font-size: 14px;
+    font-weight: 600;
+}
+.recipient-row {
+    display: flex;
+    align-items: end;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+.recipient-row .field {
+    flex: 1;
+    margin-bottom: 0;
+}
+.recipient-row > button {
+    flex-shrink: 0;
+}
 .form-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

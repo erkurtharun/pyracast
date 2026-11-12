@@ -1390,6 +1390,7 @@ export interface components {
         };
         ReminderDeliveryOutput: {
             id: number;
+            recipient: string;
             /** Format: date-time */
             scheduled_for: string;
             status: string;
@@ -1406,6 +1407,7 @@ export interface components {
         ReminderInput: {
             enabled: boolean;
             email?: string;
+            recipients?: string[];
             times: string[];
         };
         ReminderOutput: {
@@ -1413,6 +1415,12 @@ export interface components {
             email: string;
             times: string[];
             effective_email: string;
+            recipients: string[];
+            effective_recipients: string[];
+            recipient_limit: number;
+            recipient_count: number;
+            recipient_slots_remaining: number;
+            recipient_limit_exceeded: boolean;
             timezone: string;
             quota: components["schemas"]["ReminderQuotaOutput"] | null;
             deliveries: components["schemas"]["ReminderDeliveryOutput"][];

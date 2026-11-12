@@ -8,6 +8,11 @@ from pyracast.accounts.models import Membership
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.notifications.models import NotificationDelivery, ReminderPreference
+from pyracast.notifications.operations import (
+    effective_recipients,
+    recipient_limit,
+    region_recipient_count,
+)
 from pyracast.notifications.schedule import local_slot
 from pyracast.regions.models import Region
 
@@ -39,14 +44,32 @@ def enqueue_due(now: datetime) -> list[int]:
                 if slot is None or slot > now or slot < preference.effective_from:
                     continue
                 with transaction.atomic():
+                    limit = recipient_limit(lock=True)
                     locked_region = Region.objects.select_for_update().filter(pk=region.pk).first()
+                    current = (
+                        ReminderPreference.objects.select_related("user")
+                        .filter(pk=preference.pk)
+                        .first()
+                    )
                     if (
                         locked_region is None
+                        or current is None
                         or not binding_is_current(binding)
-                        or not ReminderPreference.objects.filter(
-                            pk=preference.pk, enabled=True, effective_from__lte=slot
-                        ).exists()
+                        or not current.enabled
+                        or current.effective_from > slot
+                        or clock not in current.times[: binding.provider_account.daily_quota]
                     ):
+                        continue
+                    recipients = effective_recipients(current)
+                    if region_recipient_count(locked_region) > limit:
+                        continue
+                    existing_ids = list(
+                        NotificationDelivery.objects.filter(preference=current, scheduled_for=slot)
+                        .order_by("pk")
+                        .values_list("pk", flat=True)
+                    )
+                    if existing_ids:
+                        ids.extend(existing_ids)
                         continue
                     snapshot = (
                         ForecastSnapshot.objects.filter(
@@ -59,24 +82,25 @@ def enqueue_due(now: datetime) -> list[int]:
                         .order_by("-collected_at", "-pk")
                         .first()
                     )
-                    delivery, _ = NotificationDelivery.objects.get_or_create(
-                        preference=preference,
-                        scheduled_for=slot,
-                        defaults={
-                            "snapshot": snapshot,
-                            "recipient": preference.email or preference.user.email,
-                            "available_at": now,
-                            "status": "skipped"
-                            if now - slot > MAX_LATENESS
-                            else "pending"
-                            if snapshot is not None
-                            else "unavailable",
-                            "last_error": "missed_schedule"
-                            if now - slot > MAX_LATENESS
-                            else ""
-                            if snapshot is not None
-                            else "no_saved_forecast",
-                        },
-                    )
-                    ids.append(delivery.pk)
+                    for recipient in recipients:
+                        delivery, _ = NotificationDelivery.objects.get_or_create(
+                            preference=current,
+                            scheduled_for=slot,
+                            recipient=recipient,
+                            defaults={
+                                "snapshot": snapshot,
+                                "available_at": now,
+                                "status": "skipped"
+                                if now - slot > MAX_LATENESS
+                                else "pending"
+                                if snapshot is not None
+                                else "unavailable",
+                                "last_error": "missed_schedule"
+                                if now - slot > MAX_LATENESS
+                                else ""
+                                if snapshot is not None
+                                else "no_saved_forecast",
+                            },
+                        )
+                        ids.append(delivery.pk)
     return ids

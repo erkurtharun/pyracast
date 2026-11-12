@@ -22,6 +22,7 @@ from pyracast.connections.contracts import ProviderFailure
 from pyracast.connections.models import SiteBinding
 from pyracast.connections.operations import QuotaExhausted, validate_binding
 from pyracast.forecasts.models import CollectionJob, ForecastResult, RequestAttempt
+from pyracast.notifications.models import NotificationSettings
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
@@ -65,6 +66,18 @@ class ReadOnlyAdmin(AdminBase):
 
     def has_change_permission(self, request: HttpRequest, obj: Any = None) -> bool:
         return False
+
+    def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
+        return False
+
+
+@admin.register(NotificationSettings, site=site)
+class NotificationSettingsAdmin(AdminBase):
+    fields = ("max_recipients",)
+    list_display = ("max_recipients",)
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return not NotificationSettings.objects.exists()
 
     def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
         return False

@@ -113,4 +113,5 @@ def test_browser_against_live_django(live_server: Any) -> None:
     reminder = ReminderPreference.objects.get(user=system.member, region=system.region)
     assert reminder.enabled
     assert reminder.email == ""
+    assert reminder.recipients == ["forecast-one@example.test", "forecast-two@example.test"]
     assert reminder.times == ["10:00"]

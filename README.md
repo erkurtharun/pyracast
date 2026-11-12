@@ -261,9 +261,13 @@ run `uv run --locked pytest tests/test_epias_live.py --no-cov`.
 
 ## Email reminders
 
-Choose an approved region's **Email reminders** tab, enter local delivery times,
-and optionally override its recipient. Otherwise the address in **Account settings**
-is used. Emails use the latest saved forecast; they make no Solcast requests.
+Open an approved plant's **Settings → Email reminders**, enter local delivery times,
+and add recipient addresses. An empty list uses the address in **Account settings**.
+Each plant shares a limit of five distinct recipients across its members; an operator
+can change the global limit in **Admin → Notifications → Email reminder settings →
+Max recipients**. Reducing the limit retains saved addresses and pauses oversized
+plants until members reduce their lists. Each recipient has a separate delivery
+outcome. Emails use the latest saved forecast; they make no Solcast requests.
 Timing, plan limits, stale-data and retry contracts are in
 [ARCHITECTURE.md](docs/ARCHITECTURE.md#saved-forecast-email-reminders).
 

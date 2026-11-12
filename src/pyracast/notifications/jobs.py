@@ -13,13 +13,20 @@ from pyracast.accounts.models import Membership
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.notifications.mail import NotSentError, build_message, send_message
 from pyracast.notifications.models import NotificationDelivery
+from pyracast.notifications.operations import (
+    effective_recipients,
+    recipient_limit,
+    region_recipient_count,
+)
 from pyracast.notifications.scheduler import MAX_LATENESS
+from pyracast.regions.models import Region
 
 LEASE_DURATION = timedelta(minutes=5)
 
 
-def _eligible(delivery: NotificationDelivery) -> bool:
+def _eligible(delivery: NotificationDelivery, limit: int) -> bool:
     preference = delivery.preference
+    recipients = effective_recipients(preference)
     return (
         delivery.snapshot is not None
         and delivery.snapshot.source_kind == "forecast"
@@ -27,7 +34,8 @@ def _eligible(delivery: NotificationDelivery) -> bool:
         and delivery.snapshot.forecastresult.published_at <= delivery.scheduled_for
         and preference.enabled
         and preference.user.is_active
-        and delivery.recipient == (preference.email or preference.user.email)
+        and delivery.recipient in recipients
+        and region_recipient_count(preference.region) <= limit
         and preference.effective_from <= delivery.scheduled_for
         and preference.region_id == delivery.snapshot.job.binding.region_id
         and delivery.scheduled_for.astimezone(ZoneInfo(preference.region.timezone)).strftime(
@@ -50,6 +58,16 @@ def process_notification(
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
     with transaction.atomic():
+        limit = recipient_limit(lock=True)
+        region_id = (
+            NotificationDelivery.objects.filter(pk=delivery_id)
+            .values_list("preference__region_id", flat=True)
+            .first()
+        )
+        if region_id is None:
+            return False
+        if Region.objects.select_for_update().filter(pk=region_id).first() is None:
+            return False
         delivery = NotificationDelivery.objects.select_for_update().filter(pk=delivery_id).first()
         if delivery is None:
             return False
@@ -60,7 +78,7 @@ def process_notification(
             return False
         if delivery.status not in {"pending", "retry"} or delivery.available_at > now:
             return False
-        if not _eligible(delivery):
+        if not _eligible(delivery, limit):
             delivery.status, delivery.last_error = "skipped", "preference_or_authority_changed"
             delivery.save()
             return False

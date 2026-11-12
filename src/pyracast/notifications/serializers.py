@@ -3,7 +3,8 @@ from rest_framework import serializers
 
 class ReminderInput(serializers.Serializer[dict[str, object]]):
     enabled = serializers.BooleanField()
-    email = serializers.EmailField(allow_blank=True, default="")
+    email = serializers.EmailField(allow_blank=True, required=False)
+    recipients = serializers.ListField(child=serializers.EmailField(), required=False)
     times = serializers.ListField(
         child=serializers.RegexField(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"), max_length=1440
     )
@@ -16,6 +17,7 @@ class ReminderQuotaOutput(serializers.Serializer[dict[str, object]]):
 
 class ReminderDeliveryOutput(serializers.Serializer[dict[str, object]]):
     id = serializers.IntegerField()
+    recipient = serializers.EmailField(allow_blank=True)
     scheduled_for = serializers.DateTimeField()
     status = serializers.CharField()
     last_error = serializers.CharField(allow_blank=True)
@@ -31,6 +33,12 @@ class ReminderOutput(serializers.Serializer[dict[str, object]]):
     email = serializers.EmailField(allow_blank=True)
     times = serializers.ListField(child=serializers.CharField())
     effective_email = serializers.CharField()
+    recipients = serializers.ListField(child=serializers.EmailField())
+    effective_recipients = serializers.ListField(child=serializers.CharField())
+    recipient_limit = serializers.IntegerField()
+    recipient_count = serializers.IntegerField()
+    recipient_slots_remaining = serializers.IntegerField()
+    recipient_limit_exceeded = serializers.BooleanField()
     timezone = serializers.CharField()
     quota = ReminderQuotaOutput(allow_null=True)
     deliveries = ReminderDeliveryOutput(many=True)

@@ -2,6 +2,7 @@ from typing import Any, cast
 
 from django.contrib.auth import authenticate, login, logout
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from django.middleware.csrf import get_token, rotate_token
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
@@ -17,6 +18,7 @@ from rest_framework.views import APIView
 
 from pyracast.accounts.registration import register_company
 from pyracast.api.serializers import InputSerializer
+from pyracast.notifications.operations import recipient_limit
 
 
 class BrowserSessionAuthentication(SessionAuthentication):
@@ -82,8 +84,10 @@ class SessionView(BrowserSessionView):
         data = EmailInput(data=request.data)
         data.is_valid(raise_exception=True)
         user = request.user
-        user.email = data.validated_data["email"]
-        user.save(update_fields=["email"])
+        with transaction.atomic():
+            recipient_limit(lock=True)
+            user.email = data.validated_data["email"]
+            user.save(update_fields=["email"])
         return session_response(request)
 
 

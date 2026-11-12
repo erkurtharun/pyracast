@@ -9,11 +9,20 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from pyracast.notifications.models import NotificationDelivery, ReminderPreference
-from pyracast.notifications.operations import configure_reminders, get_preference
+from pyracast.notifications.operations import (
+    configure_reminders,
+    effective_recipients,
+    get_preference,
+    recipient_limit,
+    region_recipient_count,
+)
 from pyracast.notifications.serializers import ReminderInput, ReminderOutput
 
 
 def preference_payload(preference: ReminderPreference, now: datetime) -> dict[str, object]:
+    recipients = effective_recipients(preference)
+    limit = recipient_limit()
+    count = region_recipient_count(preference.region)
     binding = preference.region.approved_binding
     quota: dict[str, object] | None = None
     if binding is not None:
@@ -25,6 +34,7 @@ def preference_payload(preference: ReminderPreference, now: datetime) -> dict[st
     deliveries = [
         {
             "id": delivery.pk,
+            "recipient": delivery.recipient,
             "scheduled_for": delivery.scheduled_for,
             "status": delivery.status,
             "last_error": delivery.last_error,
@@ -49,6 +59,12 @@ def preference_payload(preference: ReminderPreference, now: datetime) -> dict[st
         "email": preference.email,
         "times": preference.times,
         "effective_email": preference.email or preference.user.email,
+        "recipients": preference.recipients or ([preference.email] if preference.email else []),
+        "effective_recipients": recipients,
+        "recipient_limit": limit,
+        "recipient_count": count,
+        "recipient_slots_remaining": max(0, limit - count),
+        "recipient_limit_exceeded": count > limit,
         "timezone": preference.region.timezone,
         "quota": quota,
         "deliveries": deliveries,

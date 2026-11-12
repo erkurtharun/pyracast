@@ -1,8 +1,34 @@
 from django.conf import settings
+from django.core.validators import MinValueValidator
 from django.db import models
 
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.regions.models import Region
+
+
+class NotificationSettings(models.Model):
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    max_recipients = models.PositiveSmallIntegerField(
+        default=5,
+        validators=[MinValueValidator(1)],
+        help_text=(
+            "Global distinct recipient limit per plant across all members. Lowering it pauses "
+            "reminders at plants exceeding the limit until their recipient lists are revised."
+        ),
+    )
+
+    class Meta:
+        verbose_name = "email reminder settings"
+        verbose_name_plural = "email reminder settings"
+        constraints = (
+            models.CheckConstraint(
+                condition=models.Q(pk=1), name="singleton_notification_settings"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(max_recipients__gte=1),
+                name="positive_notification_recipient_limit",
+            ),
+        )
 
 
 class ReminderPreference(models.Model):
@@ -10,6 +36,7 @@ class ReminderPreference(models.Model):
     region = models.ForeignKey(Region, on_delete=models.CASCADE)
     enabled = models.BooleanField(default=False)
     email = models.EmailField(blank=True, default="")
+    recipients = models.JSONField(default=list)
     times = models.JSONField(default=list)
     effective_from = models.DateTimeField()
 
@@ -35,6 +62,7 @@ class NotificationDelivery(models.Model):
     class Meta:
         constraints = (
             models.UniqueConstraint(
-                fields=("preference", "scheduled_for"), name="unique_reminder_delivery_slot"
+                fields=("preference", "scheduled_for", "recipient"),
+                name="unique_reminder_recipient_slot",
             ),
         )

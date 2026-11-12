@@ -5205,6 +5205,18 @@
                     "id": {
                         "type": "integer"
                     },
+                    "recipient": {
+                        "oneOf": [
+                            {
+                                "type": "string",
+                                "format": "email"
+                            },
+                            {
+                                "type": "string",
+                                "maxLength": 0
+                            }
+                        ]
+                    },
                     "scheduled_for": {
                         "type": "string",
                         "format": "date-time"
@@ -5244,6 +5256,7 @@
                     "id",
                     "last_error",
                     "late",
+                    "recipient",
                     "scheduled_for",
                     "sent_at",
                     "source_age_seconds",
@@ -5261,14 +5274,20 @@
                         "oneOf": [
                             {
                                 "type": "string",
-                                "format": "email",
-                                "default": ""
+                                "format": "email"
                             },
                             {
                                 "type": "string",
                                 "maxLength": 0
                             }
                         ]
+                    },
+                    "recipients": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "format": "email"
+                        }
                     },
                     "times": {
                         "type": "array",
@@ -5308,6 +5327,31 @@
                     "effective_email": {
                         "type": "string"
                     },
+                    "recipients": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "format": "email"
+                        }
+                    },
+                    "effective_recipients": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "recipient_limit": {
+                        "type": "integer"
+                    },
+                    "recipient_count": {
+                        "type": "integer"
+                    },
+                    "recipient_slots_remaining": {
+                        "type": "integer"
+                    },
+                    "recipient_limit_exceeded": {
+                        "type": "boolean"
+                    },
                     "timezone": {
                         "type": "string"
                     },
@@ -5329,9 +5373,15 @@
                 "required": [
                     "deliveries",
                     "effective_email",
+                    "effective_recipients",
                     "email",
                     "enabled",
                     "quota",
+                    "recipient_count",
+                    "recipient_limit",
+                    "recipient_limit_exceeded",
+                    "recipient_slots_remaining",
+                    "recipients",
                     "times",
                     "timezone"
                 ]

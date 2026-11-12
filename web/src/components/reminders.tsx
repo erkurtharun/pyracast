@@ -1,10 +1,98 @@
 "use client";
 import { ScrollRegion } from "./scroll-region";
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { components } from "@/lib/schema";
 import { request, type Region } from "@/lib/api";
 import { ActionForm, Empty, Field, Notice, Tag, useResource } from "./ui";
 type Preference = components["schemas"]["ReminderOutput"];
+function RecipientFields({ data }: { data: Preference }) {
+    const prefix = useId();
+    const [rows, setRows] = useState(() =>
+        (data.recipients.length ? data.recipients : [""]).map((value, id) => ({
+            id,
+            value,
+        })),
+    );
+    const count = rows.filter((row) => row.value.trim()).length;
+    return (
+        <fieldset className="reminder-recipients">
+            <legend>Email recipients</legend>
+            <p className="fine">
+                {count} of {data.recipient_limit} addresses. Leave all addresses
+                empty to use your account email
+                {!data.recipients.length && data.effective_recipients.length
+                    ? ` (${data.effective_recipients.join(", ")})`
+                    : ""}
+                .
+            </p>
+            <p className="fine">
+                Saved plant recipients: {data.recipient_count} of{" "}
+                {data.recipient_limit}. {data.recipient_slots_remaining} new
+                address slots remaining. This limit is shared by all plant
+                members; an address already on the plant does not use another
+                slot.
+            </p>
+            {data.recipient_limit_exceeded && (
+                <Notice>
+                    Sending is paused because the plant exceeds the current
+                    limit of {data.recipient_limit} recipients. Reduce saved
+                    recipient lists to resume.
+                </Notice>
+            )}
+            {rows.map((row, index) => (
+                <div className="recipient-row" key={row.id}>
+                    <label className="field" htmlFor={`${prefix}-${row.id}`}>
+                        Email address {index + 1}
+                        <input
+                            id={`${prefix}-${row.id}`}
+                            name="recipients"
+                            type="email"
+                            value={row.value}
+                            onChange={(event) =>
+                                setRows(
+                                    rows.map((item) =>
+                                        item.id === row.id
+                                            ? {
+                                                  ...item,
+                                                  value: event.target.value,
+                                              }
+                                            : item,
+                                    ),
+                                )
+                            }
+                        />
+                    </label>
+                    <button
+                        className="button secondary"
+                        type="button"
+                        aria-label={`Remove email address ${index + 1}`}
+                        onClick={() =>
+                            setRows(rows.filter((item) => item.id !== row.id))
+                        }
+                    >
+                        Remove
+                    </button>
+                </div>
+            ))}
+            <button
+                className="button secondary"
+                type="button"
+                disabled={rows.length >= data.recipient_limit}
+                onClick={() =>
+                    setRows([
+                        ...rows,
+                        {
+                            id: Math.max(-1, ...rows.map((row) => row.id)) + 1,
+                            value: "",
+                        },
+                    ])
+                }
+            >
+                Add address
+            </button>
+        </fieldset>
+    );
+}
 export function Reminders({
     base,
     region,
@@ -30,7 +118,11 @@ export function Reminders({
                             you.
                         </p>
                     </div>
-                    <Tag>{data.enabled ? "Enabled" : "Paused"}</Tag>
+                    <Tag>
+                        {data.enabled && !data.recipient_limit_exceeded
+                            ? "Enabled"
+                            : "Paused"}
+                    </Tag>
                 </div>
                 <ActionForm
                     key={JSON.stringify(data)}
@@ -49,12 +141,36 @@ export function Reminders({
                             throw new Error(
                                 "Enter times as HH:MM, separated by commas.",
                             );
+                        const recipients = form
+                            .getAll("recipients")
+                            .map((value) => String(value).trim())
+                            .filter(Boolean);
+                        const enabled = form.get("enabled") === "on";
+                        if (
+                            enabled &&
+                            recipients.length > data.recipient_limit &&
+                            !(
+                                data.recipient_limit_exceeded &&
+                                recipients.length < data.recipients.length
+                            )
+                        )
+                            throw new Error(
+                                `Use at most ${data.recipient_limit} email addresses.`,
+                            );
+                        if (
+                            new Set(
+                                recipients.map((email) => email.toLowerCase()),
+                            ).size !== recipients.length
+                        )
+                            throw new Error(
+                                "Enter each email address only once.",
+                            );
                         await request(
                             `${base}reminders/`,
                             "PUT",
                             {
-                                enabled: form.get("enabled") === "on",
-                                email: form.get("email"),
+                                enabled,
+                                recipients,
                                 times: [...new Set(times)].sort(
                                     (a, b) =>
                                         Number(a.replace(":", "")) -
@@ -81,30 +197,18 @@ export function Reminders({
                             approved.
                         </Notice>
                     )}
-                    <div className="form-grid">
-                        <Field
-                            label={`Delivery times (${region.timezone})`}
-                            name="times"
-                            defaultValue={data.times.join(", ")}
-                            placeholder="08:00, 14:30"
-                            required={false}
-                        />
-                        <Field
-                            label="Email address (optional override)"
-                            name="email"
-                            type="email"
-                            defaultValue={data.email}
-                            required={false}
-                        />
-                    </div>
+                    <Field
+                        label={`Delivery times (${region.timezone})`}
+                        name="times"
+                        defaultValue={data.times.join(", ")}
+                        placeholder="08:00, 14:30"
+                        required={false}
+                    />
                     <p className="fine">
-                        Separate times with commas. Leave email empty to use
-                        your account email
-                        {data.effective_email
-                            ? ` (${data.effective_email})`
-                            : ""}
-                        . Remove all times and pause to clear your schedule.
+                        Separate times with commas. Remove all times and pause
+                        to clear your schedule.
                     </p>
+                    <RecipientFields data={data} />
                     <details>
                         <summary>Reminder details</summary>
                         <p className="fine">
@@ -130,6 +234,7 @@ export function Reminders({
                             <thead>
                                 <tr>
                                     <th>Scheduled ({region.timezone})</th>
+                                    <th>Recipient</th>
                                     <th>Status</th>
                                     <th>Collected</th>
                                     <th>Data age</th>
@@ -147,6 +252,7 @@ export function Reminders({
                                                 timeZone: region.timezone,
                                             })}
                                         </td>
+                                        <td>{row.recipient}</td>
                                         <td>
                                             <Tag>{row.status}</Tag>
                                         </td>

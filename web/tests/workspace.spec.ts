@@ -902,7 +902,7 @@ test("mock contract: saves cached forecast reminders without provider queries", 
     await page.getByRole("button", { name: "Save reminders" }).click();
     expect((await outgoing).postDataJSON()).toEqual({
         enabled: true,
-        email: "",
+        recipients: [],
         times: ["08:00", "17:30"],
     });
     await page.getByText("Reminder details", { exact: true }).click();
