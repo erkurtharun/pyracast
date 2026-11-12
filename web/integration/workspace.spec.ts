@@ -8,12 +8,14 @@ test("a customer manages one plant site through the real API", async ({
 }, testInfo) => {
     test.setTimeout(60_000);
     await page.goto("/");
-    await expect(page.getByLabel("Username")).toBeVisible();
+    await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
     await page.screenshot({
         path: testInfo.outputPath("login-desktop.png"),
         fullPage: true,
     });
-    await page.getByLabel("Username").fill(process.env.BROWSER_USERNAME!);
+    await page
+        .getByLabel("Email", { exact: true })
+        .fill(process.env.BROWSER_EMAIL!);
     await page.getByLabel("Password").fill(process.env.BROWSER_PASSWORD!);
     await page
         .locator("form")

@@ -7,8 +7,6 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connections, transaction
 from django.test import Client
-from django_otp import DEVICE_ID_SESSION_KEY
-from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from pyracast.connections.models import ProviderAccount
 from pyracast.connections.operations import create_account, rotate_secret
@@ -106,22 +104,17 @@ def test_rotation_requires_platform_administrator_with_mfa(identity: str) -> Non
 
 def test_rotation_requires_csrf_for_session_authentication() -> None:
     system = make_system()
-    _, user = verified_admin()
-    client = Client(enforce_csrf_checks=True)
-    client.force_login(user)
-    session = client.session
-    session[DEVICE_ID_SESSION_KEY] = TOTPDevice.objects.get(user=user).persistent_id
-    session.save()
+    client, _ = verified_admin(enforce_csrf_checks=True)
     path = f"/api/platform/accounts/{system.account.pk}/rotate-secret/"
     data = {"secret_reference": "env:REPLACEMENT"}
 
     assert client.post(path, data, content_type="application/json").status_code == 403
-    assert client.get("/auth/login/").status_code == 200
+    token = client.get("/api/session/").json()["csrf_token"]
     response = client.post(
         path,
         data,
         content_type="application/json",
-        HTTP_X_CSRFTOKEN=client.cookies["csrftoken"].value,
+        HTTP_X_CSRFTOKEN=token,
     )
 
     assert response.status_code == 200

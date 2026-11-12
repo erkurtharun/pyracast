@@ -17,54 +17,6 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch: operations["session_partial_update"];
-        trace?: never;
-    };
-    "/api/session/login/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["session_login_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/session/logout/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["session_logout_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/session/register/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["session_register_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
         patch?: never;
         trace?: never;
     };
@@ -929,10 +881,6 @@ export interface components {
             /** Format: date-time */
             readonly reviewed_at: string | null;
         };
-        LoginInput: {
-            username: string;
-            password: string;
-        };
         /**
          * @description * `net_export` - Net export
          *     * `ac_generation` - AC generation
@@ -1161,10 +1109,6 @@ export interface components {
         PatchedCalibrationAutomationInput: {
             enabled?: boolean;
         };
-        PatchedEmailInput: {
-            /** Format: email */
-            email?: string;
-        };
         PatchedRegionRenameInput: {
             name?: string;
         };
@@ -1370,13 +1314,6 @@ export interface components {
         RegionRenameInput: {
             name: string;
         };
-        RegistrationInput: {
-            username: string;
-            password: string;
-            company_name: string;
-            /** Format: email */
-            email: string;
-        };
         ReminderDeliveryOutput: {
             id: number;
             recipient: string;
@@ -1538,100 +1475,6 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SessionOutput"];
-                };
-            };
-        };
-    };
-    session_partial_update: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["PatchedEmailInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["PatchedEmailInput"];
-                "multipart/form-data": components["schemas"]["PatchedEmailInput"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SessionOutput"];
-                };
-            };
-        };
-    };
-    session_login_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LoginInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["LoginInput"];
-                "multipart/form-data": components["schemas"]["LoginInput"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SessionOutput"];
-                };
-            };
-        };
-    };
-    session_logout_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SessionOutput"];
-                };
-            };
-        };
-    };
-    session_register_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RegistrationInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["RegistrationInput"];
-                "multipart/form-data": components["schemas"]["RegistrationInput"];
-            };
-        };
-        responses: {
-            201: {
                 headers: {
                     [name: string]: unknown;
                 };

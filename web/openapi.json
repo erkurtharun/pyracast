@@ -21,140 +21,6 @@
                         "description": ""
                     }
                 }
-            },
-            "patch": {
-                "operationId": "session_partial_update",
-                "tags": ["session"],
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/PatchedEmailInput"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/PatchedEmailInput"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/PatchedEmailInput"
-                            }
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/SessionOutput"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            }
-        },
-        "/api/session/login/": {
-            "post": {
-                "operationId": "session_login_create",
-                "tags": ["session"],
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/LoginInput"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/LoginInput"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/LoginInput"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/SessionOutput"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            }
-        },
-        "/api/session/logout/": {
-            "post": {
-                "operationId": "session_logout_create",
-                "tags": ["session"],
-                "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/SessionOutput"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            }
-        },
-        "/api/session/register/": {
-            "post": {
-                "operationId": "session_register_create",
-                "tags": ["session"],
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/RegistrationInput"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/RegistrationInput"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/RegistrationInput"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "responses": {
-                    "201": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/SessionOutput"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
             }
         },
         "/api/tenants/": {
@@ -3943,21 +3809,6 @@
                     "timezone"
                 ]
             },
-            "LoginInput": {
-                "type": "object",
-                "properties": {
-                    "username": {
-                        "type": "string",
-                        "maxLength": 150
-                    },
-                    "password": {
-                        "type": "string",
-                        "writeOnly": true,
-                        "maxLength": 1024
-                    }
-                },
-                "required": ["password", "username"]
-            },
             "MeasurementBasisEnum": {
                 "enum": ["net_export", "ac_generation"],
                 "type": "string",
@@ -4400,16 +4251,6 @@
                 "properties": {
                     "enabled": {
                         "type": "boolean"
-                    }
-                }
-            },
-            "PatchedEmailInput": {
-                "type": "object",
-                "properties": {
-                    "email": {
-                        "type": "string",
-                        "format": "email",
-                        "maxLength": 254
                     }
                 }
             },
@@ -5152,30 +4993,6 @@
                     }
                 },
                 "required": ["name"]
-            },
-            "RegistrationInput": {
-                "type": "object",
-                "properties": {
-                    "username": {
-                        "type": "string",
-                        "maxLength": 150
-                    },
-                    "password": {
-                        "type": "string",
-                        "writeOnly": true,
-                        "maxLength": 1024
-                    },
-                    "company_name": {
-                        "type": "string",
-                        "maxLength": 200
-                    },
-                    "email": {
-                        "type": "string",
-                        "format": "email",
-                        "maxLength": 254
-                    }
-                },
-                "required": ["company_name", "email", "password", "username"]
             },
             "ReminderDeliveryOutput": {
                 "type": "object",

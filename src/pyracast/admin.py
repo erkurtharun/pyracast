@@ -7,16 +7,16 @@ from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.template.response import TemplateResponse
-from django.urls import URLPattern, path, reverse
+from django.urls import URLPattern, URLResolver, path, reverse
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.utils.html import format_html
 from django.utils.safestring import SafeString
 from django.views.decorators.debug import sensitive_post_parameters, sensitive_variables
-from django_otp.admin import OTPAdminSite
 from rest_framework.exceptions import ValidationError as APIValidationError
 
 from pyracast.accounts.models import Tenant
+from pyracast.accounts.security import has_verified_mfa
 from pyracast.admin_forms import BindingActionForm, ProviderSetupForm
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import SiteBinding
@@ -39,15 +39,34 @@ from pyracast.regions.operations import approve_region, review_location_change, 
 
 
 class PlatformAdminSite(admin.AdminSite):
-    login_form = OTPAdminSite.login_form
-    login_template = OTPAdminSite.login_template
-
     def has_permission(self, request: HttpRequest) -> bool:
         return bool(
             super().has_permission(request)
             and request.user.is_superuser
-            and getattr(request.user, "is_verified", lambda: False)()
+            and has_verified_mfa(request)
         )
+
+    def login(
+        self, request: HttpRequest, extra_context: dict[str, Any] | None = None
+    ) -> HttpResponse:
+        if self.has_permission(request):
+            return redirect("admin:index")
+        return redirect("/?next=/admin/")
+
+    def get_urls(self) -> list[URLPattern | URLResolver]:
+        return [
+            path(
+                "password_change/", self.admin_view(self.account_security), name="password_change"
+            ),
+            *[
+                url
+                for url in super().get_urls()
+                if not isinstance(url, URLPattern) or url.name != "password_change"
+            ],
+        ]
+
+    def account_security(self, request: HttpRequest) -> HttpResponse:
+        return redirect("/?account=security")
 
 
 site = PlatformAdminSite(name="admin")

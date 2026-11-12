@@ -6,6 +6,7 @@ const config = (phase: string): NextConfig => ({
     productionBrowserSourceMaps: process.env.PLAYWRIGHT_COVERAGE === "1",
     poweredByHeader: false,
     trailingSlash: true,
+    skipTrailingSlashRedirect: true,
     async headers() {
         return [
             {
@@ -28,6 +29,10 @@ const config = (phase: string): NextConfig => ({
     async rewrites() {
         if (phase !== PHASE_DEVELOPMENT_SERVER) return [];
         return [
+            {
+                source: "/api/auth/:path*",
+                destination: `${process.env.DJANGO_API_ORIGIN ?? "http://127.0.0.1:8000"}/api/auth/:path*`,
+            },
             {
                 source: "/api/:path*/",
                 destination: `${process.env.DJANGO_API_ORIGIN ?? "http://127.0.0.1:8000"}/api/:path*/`,

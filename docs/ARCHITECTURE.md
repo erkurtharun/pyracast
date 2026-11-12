@@ -80,10 +80,13 @@ Forecast snapshots pin their job's binding under a composite foreign key, suppor
 ## Approval flow
 
 Company registration creates a non-staff user, a new tenant and its initial membership
-in one transaction. It never joins an existing company by name or email. Browser
-registration uses the same CSRF-protected session boundary as login, configured
-Django password validation and session rotation. Protect registration and login
-with ingress rate limits in deployment.
+in one transaction. It never joins an existing company by name or email. The
+django-allauth browser API owns registration, email verification, login, recovery,
+reauthentication, MFA and session management. Email ownership is mandatory before
+login. Django validates passwords with a 15-character minimum and common-password
+screening, hashes new passwords with Argon2 and rotates session identifiers on login.
+Mutations enforce CSRF before authentication. Allauth's account and IP rate limits
+share an atomic PostgreSQL JSON/TTL cache; ingress limits additionally protect capacity.
 
 Customers navigate a single plant portfolio. Location and technical details are
 collected in three short steps with a review before submission. A plant has one
@@ -107,7 +110,7 @@ Members can rename a region without changing its revision or approval. Location 
 
 ## Reliability and security
 
-- Authenticate with maintained Django mechanisms; use secure sessions and CSRF protection for browser access unless an existing identity provider requires another supported integration. Restrict platform-admin actions and protect admin access with MFA.
+- Keep one authentication authority: django-allauth browser sessions, with no app-token endpoints or separate password login. Platform admin and API actions require active superuser status and MFA evidence bound to the current user and a live authenticator. Administrators require a TOTP factor provisioned through the trusted operator command before login; password possession cannot bootstrap an administrative factor. Upgrades remove an empty legacy OTP table but stop if any legacy device exists, requiring verified factor migration instead of reducing MFA to password/email enrollment. Reauthentication protects security changes, and recovery codes are one-use and shown once. MFA secrets use authenticated encryption with an HKDF context distinct from provider credentials.
 - Derive tenant access from authenticated membership. Scope list/detail/create/update operations, worker jobs and cache keys. Tenant ownership is not a trusted request field. Django admin does not provide tenant isolation automatically.
 - Store provider keys in a secret manager or authenticated encryption with keys outside the database. Accept credential changes through write-only admin inputs; redact secrets from responses, logs and audit payloads.
   The OTP-protected administration setup page supports existing authorized accounts
@@ -283,7 +286,42 @@ Members can move their region or plant definitions to a tenant-scoped recycle bi
 
 The dispatcher permanently purges expired definitions and their owned records in bounded transactional batches. Restore is unavailable at the deadline even if a purge batch is pending. Retain shared provider accounts and account request-attempt counters without deleted region/job links, so deletion cannot reset quota. Preserve historical data during the recovery period; deleting a definition is separate from replacing a forecast vintage.
 
-Serve the frontend and `/api/` through one origin. Django owns authentication and authorization; JSON session endpoints enforce CSRF even before login. Keep sessions in HttpOnly cookies and API responses private and non-cacheable. The frontend reads stored results and never handles provider credentials. Forwarded HTTPS headers are trusted only when explicitly enabled behind a private, trusted proxy. Rate-limit authentication at the deployment ingress.
+Serve the frontend and `/api/` through one origin. Django owns authentication and
+authorization; the allauth browser API enforces CSRF even before login. Sessions
+use HttpOnly, SameSite=Lax cookies, with Secure and a `__Host-` prefix in production.
+Revoke sessions after 12 hours or 30 minutes without requests; automatic polling
+counts as activity. Sessions predating the lifetime markers fail closed. API
+responses are private and non-cacheable. The frontend reads stored results and
+never handles provider credentials. A fixed public HTTPS origin determines
+security-email navigation. Verification and recovery codes expire after ten minutes,
+allow at most three attempts and are bound to the initiating browser session. Real SMTP delivery is a deployment requirement,
+separate from mocked mail validation. Email replacements require reauthentication
+and verification; password changes invalidate other sessions. Administrator recovery
+code access and regeneration require explicit MFA reauthentication within five minutes,
+bound to a still-enrolled factor; password reauthentication is insufficient.
+
+Requests sharing a valid session cookie serialize through a PostgreSQL advisory
+lock around session loading and response saving. This prevents concurrent code
+attempts or ordinary polling from overwriting security state. Acquisition waits
+at most five seconds before returning HTTP 429 with `Retry-After`; provider calls
+do not hold a database transaction. The default database connection must remain
+on one PostgreSQL session throughout the request: use a direct connection or an
+external session pool, never transaction-pooled PgBouncer. Django's built-in
+connection pool is rejected. Connection loss fails closed and releases the lock.
+
+Forwarded headers are accepted only from explicitly configured immediate proxy
+CIDRs. The gateway must overwrite the scheme and single client IP, while direct
+untrusted peers cannot supply either identity. Authentication rate limits use
+strongly consistent PostgreSQL cache reads and conditional upserts for atomic
+addition, retain live entries without eviction, clean expired entries in bounded
+batches and propagate database failures. The cache uses a dedicated autocommit
+connection to the same database so application rollbacks cannot reset limits or
+used OTP codes; the database clock owns TTL expiry. IPv4-mapped addresses share the
+IPv4 identity and allauth groups IPv6 limits by /64 while audit logs retain the full
+validated address. No process-local cache or alternate login
+may bypass these limits. Keep ingress rate limits and scheduled session cleanup in
+deployment. Size PostgreSQL connection capacity for both persistent application
+and authentication-cache connections per serving thread.
 
 Keep the customer interface compact and responsive: primary values and actions stay visible; source details and extended guidance use disclosures. Preserve units, missing values, quality warnings and CSV access. Tables scroll within their own focusable region; navigation and forms fit narrow screens. Show the journal's local timezone once, retaining interval offsets when a daylight-saving transition makes local times ambiguous.
 
@@ -350,3 +388,4 @@ Use region IANA timezones, skip nonexistent DST times and use the first occurren
 - [The Twelve-Factor App](https://12factor.net/), [Django design philosophies](https://docs.djangoproject.com/en/6.1/misc/design-philosophies/), [PEP 8](https://peps.python.org/pep-0008/).
 - [Python 3.15.2](https://www.python.org/downloads/release/python-3152/), [Django 6.1.3](https://docs.djangoproject.com/en/6.1/releases/6.1.3/), [DRF releases](https://www.django-rest-framework.org/community/release-notes/).
 - [pvlib](https://pvlib-python.readthedocs.io/en/stable/), [Dramatiq releases](https://pypi.org/project/dramatiq/), [Dramatiq platform history](https://dramatiq.io/changelog.html), [Celery Windows limitation](https://docs.celeryq.dev/en/stable/faq.html#does-celery-support-windows).
+- [django-allauth headless](https://docs.allauth.org/en/latest/headless/), [NIST SP 800-63B-4](https://pages.nist.gov/800-63-4/sp800-63b.html), [OWASP authentication guidance](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html).

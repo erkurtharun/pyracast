@@ -10,7 +10,7 @@ test("mock contract: signs in with CSRF, selects region, and signs out", async (
 }) => {
     await mockApi(page, { anonymous: true });
     await page.goto("/");
-    await page.getByLabel("Username", { exact: true }).fill(user.username);
+    await page.getByLabel("Email", { exact: true }).fill(user.email);
     await page.getByLabel("Password", { exact: true }).fill("fixture-password");
     await page.locator("form").getByRole("button", { name: "Sign in" }).click();
     await expect(

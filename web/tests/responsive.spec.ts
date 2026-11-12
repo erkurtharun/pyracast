@@ -386,13 +386,13 @@ test("mobile sign in keeps visible controls and keyboard focus", async ({
     await page.setViewportSize({ width: 320, height: 640 });
     await mockApi(page, { anonymous: true });
     await page.goto("/");
-    await page.getByLabel("Username", { exact: true }).waitFor();
+    await page.getByLabel("Email", { exact: true }).waitFor();
     await page
         .getByRole("navigation", { name: "Account access" })
         .getByRole("button", { name: "Create account" })
         .focus();
     await page.keyboard.press("Tab");
-    await expect(page.getByLabel("Username", { exact: true })).toBeFocused();
+    await expect(page.getByLabel("Email", { exact: true })).toBeFocused();
     await page.keyboard.press("Tab");
     await expect(page.getByLabel("Password", { exact: true })).toBeFocused();
     await fits(page, "Sign in", true);

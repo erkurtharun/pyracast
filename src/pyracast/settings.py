@@ -3,6 +3,7 @@ import re
 from datetime import time
 
 from django.core.exceptions import ImproperlyConfigured
+from django.utils.csp import CSP
 
 from pyracast.environment import load_environment
 
@@ -29,8 +30,11 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "django.contrib.admin",
     "django.contrib.postgres",
-    "django_otp",
-    "django_otp.plugins.otp_totp",
+    "allauth",
+    "allauth.account",
+    "allauth.mfa",
+    "allauth.headless",
+    "allauth.usersessions",
     "rest_framework",
     "drf_spectacular",
     "pyracast.accounts",
@@ -43,13 +47,19 @@ INSTALLED_APPS = [
     "pyracast.metering",
 ]
 MIDDLEWARE = [
+    "pyracast.accounts.middleware.TrustedProxyHeaders",
     "django.middleware.security.SecurityMiddleware",
+    "django.middleware.csp.ContentSecurityPolicyMiddleware",
     "pyracast.api.middleware.PrivateAPIResponses",
+    "pyracast.accounts.session_lock.SessionRequestSerialization",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
-    "django_otp.middleware.OTPMiddleware",
+    "pyracast.accounts.middleware.PrivilegedAuthenticatorEnrollment",
+    "pyracast.accounts.middleware.SessionLifetime",
+    "allauth.account.middleware.AccountMiddleware",
+    "allauth.usersessions.middleware.UserSessionsMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -64,6 +74,11 @@ DATABASES = {
         "CONN_MAX_AGE": 60,
     }
 }
+DATABASES["auth_cache"] = {
+    **DATABASES["default"],
+    "ATOMIC_REQUESTS": False,
+    "TEST": {"MIRROR": "default"},
+}
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
@@ -71,6 +86,7 @@ TEMPLATES = [
         "OPTIONS": {
             "context_processors": [
                 "django.template.context_processors.request",
+                "django.template.context_processors.csp",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
             ]
@@ -79,10 +95,73 @@ TEMPLATES = [
 ]
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 15},
+    },
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
-    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
+PASSWORD_HASHERS = [
+    "django.contrib.auth.hashers.Argon2PasswordHasher",
+    "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+]
+AUTHENTICATION_BACKENDS = ["pyracast.accounts.authentication.AuthenticationBackend"]
+ACCOUNT_ADAPTER = "pyracast.accounts.adapters.AccountAdapter"
+ACCOUNT_LOGIN_METHODS = {"email"}
+ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
+ACCOUNT_SIGNUP_FORM_CLASS = "pyracast.accounts.forms.CompanySignupForm"
+ACCOUNT_EMAIL_VERIFICATION = "mandatory"
+ACCOUNT_EMAIL_VERIFICATION_SUPPORTS_RESEND = 3
+ACCOUNT_EMAIL_VERIFICATION_BY_CODE_ENABLED = True
+ACCOUNT_EMAIL_VERIFICATION_BY_CODE_TIMEOUT = 600
+ACCOUNT_EMAIL_VERIFICATION_BY_CODE_MAX_ATTEMPTS = 3
+ACCOUNT_PASSWORD_RESET_BY_CODE_ENABLED = True
+ACCOUNT_PASSWORD_RESET_BY_CODE_TIMEOUT = 600
+ACCOUNT_PASSWORD_RESET_BY_CODE_MAX_ATTEMPTS = 3
+ACCOUNT_UNIQUE_EMAIL = True
+ACCOUNT_CHANGE_EMAIL = True
+ACCOUNT_PREVENT_ENUMERATION = True
+ACCOUNT_EMAIL_NOTIFICATIONS = True
+ACCOUNT_REAUTHENTICATION_REQUIRED = True
+ACCOUNT_REAUTHENTICATION_TIMEOUT = 300
+ACCOUNT_SESSION_REMEMBER = False
+ACCOUNT_LOGOUT_ON_PASSWORD_CHANGE = True
+ACCOUNT_LOGIN_ON_EMAIL_CONFIRMATION = False
+ACCOUNT_LOGIN_ON_PASSWORD_RESET = False
+PASSWORD_RESET_TIMEOUT = 3600
+HEADLESS_ONLY = True
+HEADLESS_CLIENTS = ("browser",)
+PYRACAST_PUBLIC_ORIGIN = os.environ.get("PYRACAST_PUBLIC_ORIGIN", "http://127.0.0.1:3000").rstrip(
+    "/"
+)
+HEADLESS_FRONTEND_URLS = {
+    "account_login": f"{PYRACAST_PUBLIC_ORIGIN}/",
+    "account_confirm_email": f"{PYRACAST_PUBLIC_ORIGIN}/",
+    "account_reset_password": f"{PYRACAST_PUBLIC_ORIGIN}/",
+    "account_reset_password_from_key": f"{PYRACAST_PUBLIC_ORIGIN}/",
+    "account_signup": f"{PYRACAST_PUBLIC_ORIGIN}/",
+}
+MFA_SUPPORTED_TYPES = ["totp", "recovery_codes"]
+MFA_ADAPTER = "pyracast.accounts.mfa.MFAAdapter"
+MFA_REAUTHENTICATION_REQUIRED = True
+MFA_RECOVERY_CODES_SHOW_ONCE = True
+MFA_TOTP_ISSUER = "Pyracast"
+USERSESSIONS_TRACK_ACTIVITY = True
+ACCOUNT_RATE_LIMITS = {
+    "login": "20/m/ip",
+    "login_failed": "10/10m/ip,5/10m/key",
+    "signup": "5/h/ip",
+    "reset_password": "5/h/ip,3/h/key",
+    "reset_password_from_key": "10/h/ip",
+    "confirm_email": "1/3m/key",
+}
+CACHES = {
+    "default": {
+        "BACKEND": "pyracast.accounts.cache.AuthenticationCache",
+        "LOCATION": "pyracast_authentication_cache",
+        "KEY_PREFIX": "pyracast-auth",
+    }
+}
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.SessionAuthentication"],
     "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
@@ -114,14 +193,33 @@ SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_NAME = "sessionid" if DEBUG else "__Host-pyracast-sessionid"
+CSRF_COOKIE_NAME = "csrftoken" if DEBUG else "__Host-pyracast-csrftoken"
+SESSION_COOKIE_AGE = 12 * 60 * 60
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+PYRACAST_SESSION_IDLE_SECONDS = 30 * 60
+CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_HTTPONLY = True
+SECURE_REFERRER_POLICY = "same-origin"
+SECURE_CSP = {
+    "default-src": [CSP.SELF],
+    "script-src": [CSP.SELF, CSP.NONCE],
+    "style-src": [CSP.SELF, CSP.NONCE],
+    "object-src": [CSP.NONE],
+    "base-uri": [CSP.NONE],
+    "frame-ancestors": [CSP.NONE],
+    "form-action": [CSP.SELF],
+}
 SECURE_SSL_REDIRECT = not DEBUG
-SECURE_PROXY_SSL_HEADER = (
-    ("HTTP_X_FORWARDED_PROTO", "https") if os.environ.get("PYRACAST_TRUST_PROXY") == "1" else None
-)
+PYRACAST_TRUST_PROXY = os.environ.get("PYRACAST_TRUST_PROXY") == "1"
+PYRACAST_TRUSTED_PROXY_CIDRS = os.environ.get("PYRACAST_TRUSTED_PROXY_CIDRS", "").split()
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https") if PYRACAST_TRUST_PROXY else None
+ALLAUTH_TRUSTED_CLIENT_IP_HEADER = "X-Real-IP" if PYRACAST_TRUST_PROXY else None
 SECURE_HSTS_SECONDS = 31536000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
-LOGIN_REDIRECT_URL = "/api/tenants/"
+LOGIN_URL = "/"
+LOGIN_REDIRECT_URL = "/"
 MAILERS = {
     "default": {
         "BACKEND": "django.core.mail.backends.smtp.EmailBackend",

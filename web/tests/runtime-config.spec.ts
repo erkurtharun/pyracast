@@ -11,10 +11,15 @@ test("only the development server proxies API requests", async () => {
 
     expect(await development.rewrites?.()).toEqual([
         {
+            source: "/api/auth/:path*",
+            destination: `${process.env.DJANGO_API_ORIGIN ?? "http://127.0.0.1:8000"}/api/auth/:path*`,
+        },
+        {
             source: "/api/:path*/",
             destination: `${process.env.DJANGO_API_ORIGIN ?? "http://127.0.0.1:8000"}/api/:path*/`,
         },
     ]);
+    expect(development.skipTrailingSlashRedirect).toBe(true);
     for (const phase of [PHASE_PRODUCTION_BUILD, PHASE_PRODUCTION_SERVER]) {
         expect(await config(phase).rewrites?.()).toEqual([]);
     }

@@ -48,18 +48,27 @@ export async function mockApi(
         const path = new URL(route.request().url()).pathname,
             method = route.request().method();
         let data: unknown;
-        if (path === "/api/session/login/") {
+        if (path === "/api/auth/browser/v1/auth/session" && method === "GET") {
+            data = {
+                status: 401,
+                data: { flows: [] },
+                meta: { is_authenticated: false },
+            };
+        } else if (path === "/api/auth/browser/v1/auth/login") {
             expect(route.request().headers()["x-csrftoken"]).toBe(
                 "anonymous-token",
             );
             signedIn = true;
-            data = { user, csrf_token: "signed-token" };
-        } else if (path === "/api/session/logout/") {
+            data = { status: 200, meta: { is_authenticated: true } };
+        } else if (
+            path === "/api/auth/browser/v1/auth/session" &&
+            method === "DELETE"
+        ) {
             expect(route.request().headers()["x-csrftoken"]).toBe(
                 "signed-token",
             );
             signedIn = false;
-            data = { user: null, csrf_token: "anonymous-token" };
+            data = { status: 401, meta: { is_authenticated: false } };
         } else if (path === "/api/session/") {
             data = {
                 user: signedIn ? user : null,

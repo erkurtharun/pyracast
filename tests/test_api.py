@@ -1,6 +1,16 @@
 from datetime import date
+from time import time
 
 import pytest
+from allauth.account.internal.flows.login import record_authentication
+from allauth.account.models import EmailAddress
+from allauth.mfa.models import Authenticator
+from allauth.mfa.totp.internal.auth import (
+    TOTP,
+    format_hotp_value,
+    generate_totp_secret,
+    hotp_value,
+)
 from django.conf import LazySettings
 from django.contrib.auth.models import AnonymousUser, User
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
@@ -8,9 +18,6 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import Client, RequestFactory
 from django.utils import timezone
-from django_otp import DEVICE_ID_SESSION_KEY
-from django_otp.oath import totp
-from django_otp.plugins.otp_totp.models import TOTPDevice
 from rest_framework.exceptions import ValidationError as APIValidationError
 
 from pyracast.accounts.models import Membership, Tenant
@@ -39,14 +46,16 @@ def customer() -> tuple[Client, User, Tenant]:
     return client, user, tenant
 
 
-def verified_admin() -> tuple[Client, User]:
+def verified_admin(*, enforce_csrf_checks: bool = False) -> tuple[Client, User]:
     user = User.objects.create_user(username="operator", is_superuser=True, is_staff=True)
-    device = TOTPDevice.objects.create(user=user, name="operator", confirmed=True)
-    client = Client()
+    authenticator = Authenticator.objects.create(user=user, type="totp", data={})
+    client = Client(enforce_csrf_checks=enforce_csrf_checks)
     client.force_login(user)
-    session = client.session
-    session[DEVICE_ID_SESSION_KEY] = device.persistent_id
-    session.save()
+    request = RequestFactory().get("/admin/")
+    request.user = user
+    request.session = client.session
+    record_authentication(request, user, method="mfa", type="totp", id=authenticator.pk)
+    request.session.save()
     return client, user
 
 
@@ -130,7 +139,12 @@ def test_tenant_isolation_and_read_only_ownership(customer: tuple[Client, User, 
     csrf.force_login(user)
     assert csrf.post(base, region_input(), content_type="application/json").status_code == 403
     assert (
-        csrf.post("/auth/login/", {"username": "customer", "password": "test"}).status_code == 403
+        csrf.post(
+            "/api/auth/browser/v1/auth/login",
+            {"email": "customer@example.com", "password": "test"},
+            content_type="application/json",
+        ).status_code
+        == 403
     )
 
 
@@ -297,18 +311,33 @@ def test_binding_api_records_megawatt_reference_metadata(
     assert previous.dc_capacity_kw is None
 
 
+@pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 def test_admin_login_requires_password_and_totp() -> None:
     password = "test-only-" + "x" * 40
-    user = User.objects.create_superuser(username="mfa-login", password=password)
-    device = TOTPDevice.objects.create(user=user, name="initial", confirmed=True)
+    user = User.objects.create_superuser(
+        username="mfa-login", email="operator@example.com", password=password
+    )
+    EmailAddress.objects.create(user=user, email=user.email, primary=True, verified=True)
+    secret = generate_totp_secret()
+    TOTP.activate(user, secret)
     client = Client(enforce_csrf_checks=True)
-    assert client.get("/admin/login/").status_code == 200
-    token = client.cookies["csrftoken"].value
-    credentials = {"username": user.username, "password": password, "csrfmiddlewaretoken": token}
-    assert client.post("/admin/login/", credentials).status_code == 200
+    token = client.get("/api/session/").json()["csrf_token"]
+    response = client.post(
+        "/api/auth/browser/v1/auth/login",
+        {"email": user.email, "password": password},
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=token,
+    )
+    assert response.status_code == 401
+    assert not response.json()["meta"]["is_authenticated"]
     assert client.get("/admin/").status_code == 302
-    credentials["otp_token"] = str(totp(device.bin_key)).zfill(6)
-    credentials["otp_device"] = device.persistent_id
-    response = client.post("/admin/login/", credentials)
-    assert response.status_code == 302, response.context["form"].errors
+    assert client.get("/api/platform/accounts/").status_code == 403
+    response = client.post(
+        "/api/auth/browser/v1/auth/2fa/authenticate",
+        {"code": format_hotp_value(hotp_value(secret, int(time()) // 30))},
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=token,
+    )
+    assert response.status_code == 200, response.json()
     assert client.get("/admin/").status_code == 200
+    assert client.get("/api/platform/accounts/").status_code == 405

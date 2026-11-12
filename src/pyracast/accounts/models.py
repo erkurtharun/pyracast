@@ -14,3 +14,12 @@ class Membership(models.Model):
         constraints = (
             models.UniqueConstraint(fields=("tenant", "user"), name="unique_tenant_membership"),
         )
+
+
+class AuthenticationCacheEntry(models.Model):
+    cache_key = models.CharField(max_length=255, primary_key=True)
+    value = models.JSONField()
+    expires = models.DateTimeField(null=True, db_index=True)
+
+    class Meta:
+        db_table = "pyracast_authentication_cache"

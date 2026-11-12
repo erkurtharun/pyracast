@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { request, type Session, type Tenant } from "@/lib/api";
 import {
     ActionForm,
@@ -14,6 +15,8 @@ import {
 import { RegionWorkspace } from "./region-workspace";
 import { PlantOnboarding, type PlantSite } from "./plant-onboarding";
 import { Auth } from "./auth";
+import { authRequest } from "@/lib/auth-api";
+import { AccountSecurity } from "./account-security";
 import { PlantIcon } from "./plant-icon";
 import { RecycleBin } from "./recycle-bin";
 
@@ -100,9 +103,12 @@ function Workspace({
     session: Session;
     onSession: (value: Session) => void;
 }) {
+    const searchParams = useSearchParams();
     const tenants = useCollection<Tenant>("/api/tenants/");
     const [selected, setSelected] = useState<number>(),
-        [view, setView] = useState<"regions" | "profile" | "trash">("regions"),
+        [view, setView] = useState<"regions" | "profile" | "trash">(
+            searchParams.get("account") === "security" ? "profile" : "regions",
+        ),
         [logoutError, setLogoutError] = useState("");
     const tenant =
         tenants.data?.results.find((row) => row.id === selected) ??
@@ -173,13 +179,13 @@ function Workspace({
                         aria-label="Sign out"
                         onClick={async () => {
                             try {
+                                await authRequest(
+                                    "auth/session",
+                                    "DELETE",
+                                    session.csrf_token,
+                                );
                                 onSession(
-                                    await request<Session>(
-                                        "/api/session/logout/",
-                                        "POST",
-                                        {},
-                                        session.csrf_token,
-                                    ),
+                                    await request<Session>("/api/session/"),
                                 );
                             } catch (error) {
                                 setLogoutError((error as Error).message);
@@ -216,28 +222,84 @@ function Workspace({
                             </div>
                             <section className="panel narrow">
                                 <h2>Email address</h2>
-                                <p>Default recipient for reminders.</p>
+                                <p>
+                                    Current address: {session.user?.email}. A
+                                    new address replaces it after verification.
+                                </p>
                                 <ActionForm
-                                    submit="Save email address"
-                                    onSubmit={async (data) =>
+                                    submit="Send verification code"
+                                    onSubmit={async (data) => {
+                                        const result = await authRequest(
+                                            "account/email",
+                                            "POST",
+                                            session.csrf_token,
+                                            { email: data.get("email") },
+                                        );
+                                        if (
+                                            result.status === 401 &&
+                                            !result.meta?.is_authenticated
+                                        ) {
+                                            onSession(
+                                                await request<Session>(
+                                                    "/api/session/",
+                                                ),
+                                            );
+                                            throw new Error(
+                                                "Your session has expired. Please sign in again.",
+                                            );
+                                        }
+                                        if (result.status === 401)
+                                            throw new Error(
+                                                "Please confirm your identity and try again.",
+                                            );
+                                    }}
+                                >
+                                    <Field
+                                        label="New email address"
+                                        name="email"
+                                        type="email"
+                                    />
+                                </ActionForm>
+                                <ActionForm
+                                    submit="Verify new email"
+                                    onSubmit={async (data) => {
+                                        const result = await authRequest(
+                                            "auth/email/verify",
+                                            "POST",
+                                            session.csrf_token,
+                                            { key: data.get("key") },
+                                        );
+                                        if (result.status === 401) {
+                                            if (!result.meta?.is_authenticated)
+                                                onSession(
+                                                    await request<Session>(
+                                                        "/api/session/",
+                                                    ),
+                                                );
+                                            throw new Error(
+                                                result.meta?.is_authenticated
+                                                    ? "Please confirm your identity and try again."
+                                                    : "Your session has expired. Please sign in again.",
+                                            );
+                                        }
                                         onSession(
                                             await request<Session>(
                                                 "/api/session/",
-                                                "PATCH",
-                                                { email: data.get("email") },
-                                                session.csrf_token,
                                             ),
-                                        )
-                                    }
+                                        );
+                                    }}
                                 >
                                     <Field
-                                        label="Default email address"
-                                        name="email"
-                                        type="email"
-                                        defaultValue={session.user?.email}
+                                        label="Email verification code"
+                                        name="key"
+                                        autoComplete="one-time-code"
                                     />
                                 </ActionForm>
                             </section>
+                            <AccountSecurity
+                                token={session.csrf_token}
+                                onSession={onSession}
+                            />
                         </>
                     ) : tenant && view === "trash" ? (
                         <RecycleBin

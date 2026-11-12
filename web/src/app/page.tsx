@@ -1,4 +1,7 @@
 import { Dashboard } from "@/components/dashboard";
-export default function Page() {
+import { connection } from "next/server";
+
+export default async function Page() {
+    await connection();
     return <Dashboard />;
 }

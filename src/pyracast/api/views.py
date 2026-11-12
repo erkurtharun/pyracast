@@ -14,6 +14,7 @@ from rest_framework.views import APIView
 from pyracast import trash
 from pyracast.accounts.models import Tenant
 from pyracast.accounts.operations import require_member
+from pyracast.accounts.security import has_verified_mfa
 from pyracast.api.serializers import (
     AccountInput,
     ApprovalInput,
@@ -48,9 +49,7 @@ from pyracast.regions.operations import (
 class PlatformAdmin(BasePermission):
     def has_permission(self, request: Request, view: APIView) -> bool:
         user = request.user
-        return bool(
-            user.is_active and user.is_superuser and getattr(user, "is_verified", lambda: False)()
-        )
+        return bool(user.is_active and user.is_superuser and has_verified_mfa(request._request))
 
 
 class TenantsView(GenericAPIView[Tenant]):

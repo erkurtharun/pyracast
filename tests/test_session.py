@@ -1,143 +1,146 @@
+from collections.abc import Iterator
+from typing import Any
+
 import pytest
+from allauth.account.models import EmailAddress
+from django.conf import settings
 from django.contrib.auth.models import User
-from django.test import Client
+from django.test import Client, override_settings
 
-pytestmark = pytest.mark.django_db
-
+pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 PASSWORD = "test-only-" + "x" * 40
+AUTH = "/api/auth/browser/v1/"
+
+
+@pytest.fixture(autouse=True)
+def local_mail() -> Iterator[None]:
+    with override_settings(
+        MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
+    ):
+        yield
+
+
+def member(*, email: str = "member@example.com", active: bool = True) -> User:
+    user = User.objects.create_user(
+        username=email, email=email, password=PASSWORD, is_active=active
+    )
+    EmailAddress.objects.create(user=user, email=email, primary=True, verified=True)
+    return user
+
+
+def submit(client: Client, path: str, data: dict[str, Any]) -> Any:
+    token = client.get("/api/session/").json()["csrf_token"]
+    return client.post(AUTH + path, data, content_type="application/json", HTTP_X_CSRFTOKEN=token)
 
 
 def test_session_login_logout_and_csrf_rotation() -> None:
-    user = User.objects.create_user(username="member", password=PASSWORD, email="a@example.com")
+    user = member()
     client = Client(enforce_csrf_checks=True)
     initial_response = client.get("/api/session/")
-    assert "no-store" in initial_response.headers["Cache-Control"]
-    assert "private" in initial_response.headers["Cache-Control"]
     initial = initial_response.json()
     assert initial["user"] is None
+    assert "no-store" in initial_response.headers["Cache-Control"]
+    assert "private" in initial_response.headers["Cache-Control"]
+    credentials = {"email": user.email, "password": PASSWORD}
     assert (
-        client.post(
-            "/api/session/login/",
-            {"username": "member", "password": PASSWORD},
-            content_type="application/json",
-        ).status_code
+        client.post(AUTH + "auth/login", credentials, content_type="application/json").status_code
         == 403
     )
-    response = client.post(
-        "/api/session/login/",
-        {"username": "member", "password": PASSWORD},
-        content_type="application/json",
-        HTTP_X_CSRFTOKEN=initial["csrf_token"],
-    )
-    assert response.status_code == 200
-    assert "no-store" in response.headers["Cache-Control"]
-    logged_in = response.json()
-    assert logged_in["user"] == {"id": user.pk, "username": "member", "email": "a@example.com"}
-    assert client.get("/api/session/").json()["user"] == logged_in["user"]
-    assert client.cookies["sessionid"]["httponly"]
-    assert client.post("/api/session/logout/").status_code == 403
+    assert submit(client, "auth/login", credentials).status_code == 200
+    assert client.cookies[settings.SESSION_COOKIE_NAME]["httponly"]
+    logged_in = client.get("/api/session/").json()
+    assert logged_in["user"] == {"id": user.pk, "username": user.username, "email": user.email}
     assert (
-        client.post("/api/session/logout/", HTTP_X_CSRFTOKEN=initial["csrf_token"]).status_code
+        client.delete(AUTH + "auth/session", HTTP_X_CSRFTOKEN=initial["csrf_token"]).status_code
         == 403
     )
-    response = client.post("/api/session/logout/", HTTP_X_CSRFTOKEN=logged_in["csrf_token"])
-    assert response.status_code == 200
-    assert response.json()["user"] is None
-    assert (
-        client.post("/api/session/logout/", HTTP_X_CSRFTOKEN=logged_in["csrf_token"]).status_code
-        == 403
-    )
+    replay = Client()
+    replay.cookies[settings.SESSION_COOKIE_NAME] = client.cookies[
+        settings.SESSION_COOKIE_NAME
+    ].value
+    response = client.delete(AUTH + "auth/session", HTTP_X_CSRFTOKEN=logged_in["csrf_token"])
+    assert response.status_code == 401
     assert client.get("/api/session/").json()["user"] is None
+    assert replay.get("/api/session/").json()["user"] is None
 
 
 @pytest.mark.parametrize(
-    ("username", "password"),
-    [("member", "wrong"), ("missing", PASSWORD), ("disabled", PASSWORD)],
+    ("email", "password"),
+    [
+        ("member@example.com", "wrong"),
+        ("missing@example.com", PASSWORD),
+    ],
 )
-def test_invalid_credentials_are_generic(username: str, password: str) -> None:
-    User.objects.create_user(username="member", password=PASSWORD)
-    User.objects.create_user(username="disabled", password=PASSWORD, is_active=False)
+def test_invalid_credentials_are_generic(email: str, password: str) -> None:
+    member()
     client = Client(enforce_csrf_checks=True)
-    token = client.get("/api/session/").json()["csrf_token"]
-    response = client.post(
-        "/api/session/login/",
-        {"username": username, "password": password},
-        content_type="application/json",
-        HTTP_X_CSRFTOKEN=token,
-    )
-    assert response.status_code == 403
-    assert response.json() == {"code": "http_403", "detail": {"detail": "Invalid credentials."}}
+    response = submit(client, "auth/login", {"email": email, "password": password})
+    assert response.status_code == 400
+    assert response.json()["errors"] == [
+        {
+            "message": "The email address and/or password you specified are not correct.",
+            "code": "email_password_mismatch",
+            "param": "password",
+        }
+    ]
     assert client.get("/api/session/").json()["user"] is None
 
 
-def test_email_update_requires_session_csrf_and_valid_address() -> None:
-    user = User.objects.create_user(username="member", password=PASSWORD, email="a@example.com")
+def test_inactive_account_cannot_create_a_session() -> None:
+    user = member(active=False)
     client = Client(enforce_csrf_checks=True)
-    token = client.get("/api/session/").json()["csrf_token"]
+    response = submit(client, "auth/login", {"email": user.email, "password": PASSWORD})
+    assert response.status_code == 401
+    assert not response.json()["meta"]["is_authenticated"]
+    assert client.get("/api/session/").json()["user"] is None
+
+
+def test_password_change_requires_current_password_and_invalidates_all_sessions() -> None:
+    user = member()
+    first, second = Client(enforce_csrf_checks=True), Client(enforce_csrf_checks=True)
+    for client in (first, second):
+        assert (
+            submit(client, "auth/login", {"email": user.email, "password": PASSWORD}).status_code
+            == 200
+        )
     assert (
-        client.patch(
-            "/api/session/",
-            {"email": "b@example.com"},
-            content_type="application/json",
-            HTTP_X_CSRFTOKEN=token,
-        ).status_code
-        == 403
-    )
-    login_response = client.post(
-        "/api/session/login/",
-        {"username": "member", "password": PASSWORD},
-        content_type="application/json",
-        HTTP_X_CSRFTOKEN=token,
-    )
-    token = login_response.json()["csrf_token"]
-    assert (
-        client.patch(
-            "/api/session/", {"email": "b@example.com"}, content_type="application/json"
-        ).status_code
-        == 403
-    )
-    assert (
-        client.patch(
-            "/api/session/",
-            {"email": "bad"},
-            content_type="application/json",
-            HTTP_X_CSRFTOKEN=token,
+        submit(
+            first,
+            "account/password/change",
+            {"current_password": "wrong", "new_password": PASSWORD + "new"},
         ).status_code
         == 400
     )
-    user.refresh_from_db()
-    assert user.email == "a@example.com"
-    response = client.patch(
-        "/api/session/",
-        {"email": "b@example.com"},
-        content_type="application/json",
-        HTTP_X_CSRFTOKEN=token,
+    assert (
+        submit(
+            first,
+            "account/password/change",
+            {"current_password": PASSWORD, "new_password": "short"},
+        ).status_code
+        == 400
     )
-    assert response.status_code == 200
-    assert response.json()["user"]["email"] == "b@example.com"
-    user.refresh_from_db()
-    assert user.email == "b@example.com"
+    response = submit(
+        first,
+        "account/password/change",
+        {"current_password": PASSWORD, "new_password": PASSWORD + "new"},
+    )
+    assert response.status_code == 401
+    assert first.get("/api/session/").json()["user"] is None
+    assert second.get("/api/session/").json()["user"] is None
+    assert (
+        submit(first, "auth/login", {"email": user.email, "password": PASSWORD}).status_code == 400
+    )
+    assert (
+        submit(first, "auth/login", {"email": user.email, "password": PASSWORD + "new"}).status_code
+        == 200
+    )
 
 
-def test_login_input_is_bounded_and_rejects_unknown_fields() -> None:
-    client = Client(enforce_csrf_checks=True)
-    token = client.get("/api/session/").json()["csrf_token"]
-    for data in (
-        {"username": "member", "password": "x" * 1025},
-        {"username": "member", "password": PASSWORD, "extra": "value"},
-    ):
-        response = client.post(
-            "/api/session/login/", data, content_type="application/json", HTTP_X_CSRFTOKEN=token
-        )
-        assert response.status_code == 400
-        assert response.json()["code"] == "http_400"
-
-
-def test_session_schema_requires_cookie_for_email_update() -> None:
+def test_session_schema_exposes_only_projection() -> None:
     client = Client()
-    client.force_login(User.objects.create_user(username="member"))
+    client.force_login(member())
     response = client.get("/api/schema/?format=json")
     assert response.status_code == 200
     session = response.json()["paths"]["/api/session/"]
-    assert not session["get"].get("security")
-    assert session["patch"]["security"] == [{"cookieAuth": []}]
+    assert "get" in session
+    assert "patch" not in session

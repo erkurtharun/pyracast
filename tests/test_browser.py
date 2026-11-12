@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -6,10 +7,16 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from allauth.account.models import EmailAddress
+from allauth.mfa.models import Authenticator
+from allauth.mfa.totp.internal.auth import generate_totp_secret
 from django.contrib.auth.models import User
+from django.db import transaction
 from django.test import override_settings
 from django.utils import timezone
 
+from pyracast.accounts.adapters import AccountAdapter
+from pyracast.accounts.mfa import MFAAdapter
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.calculation import calculate
 from pyracast.connections.operations import validate_binding
@@ -23,7 +30,7 @@ from tests.test_domain import FakeAdapter, make_system
 from tests.test_plant_operations import publish_snapshot, snapshot_for
 
 pytestmark = [
-    pytest.mark.django_db(transaction=True),
+    pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"]),
     pytest.mark.skipif(
         os.environ.get("PYRACAST_BROWSER_TEST") != "1",
         reason="requires PYRACAST_BROWSER_TEST=1, Node dependencies, and Playwright Chromium",
@@ -31,7 +38,9 @@ pytestmark = [
 ]
 
 
-def test_browser_against_live_django(live_server: Any) -> None:
+def test_browser_against_live_django(
+    live_server: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     npm = shutil.which("npm.cmd" if os.name == "nt" else "npm")
     assert npm is not None, "Node and npm are required for the browser integration test"
     system = make_system()
@@ -39,6 +48,39 @@ def test_browser_against_live_django(live_server: Any) -> None:
     system.member.set_password(password)
     system.member.email = "member@example.com"
     system.member.save(update_fields=["password", "email"])
+    EmailAddress.objects.create(
+        user=system.member, email=system.member.email, primary=True, verified=True
+    )
+    admin_secret = generate_totp_secret()
+    system.admin.is_staff = True
+    system.admin.email = "browser-admin@example.com"
+    system.admin.set_password(password)
+    system.admin.save(update_fields=["is_staff", "email", "password"])
+    EmailAddress.objects.create(
+        user=system.admin, email=system.admin.email, primary=True, verified=True
+    )
+    Authenticator.objects.create(
+        user=system.admin, type="totp", data={"secret": MFAAdapter().encrypt(admin_secret)}
+    )
+    mailbox = tmp_path / "auth-mailbox.json"
+    mailbox.write_text("[]", encoding="utf-8")
+    messages: list[dict[str, str]] = []
+    send_mail = AccountAdapter.send_mail
+
+    def capture_mail(
+        adapter: AccountAdapter, template_prefix: str, email: str, context: dict[str, Any]
+    ) -> None:
+        send_mail(adapter, template_prefix, email, context)
+        code = context.get("code")
+        if isinstance(code, str):
+
+            def capture_code() -> None:
+                messages.append({"email": email, "template": template_prefix, "code": code})
+                mailbox.write_text(json.dumps(messages), encoding="utf-8")
+
+            transaction.on_commit(capture_code)
+
+    monkeypatch.setattr(AccountAdapter, "send_mail", capture_mail)
     now = timezone.now()
     validate_binding(system.admin, system.binding.pk, FakeAdapter(), now)
     job = approve_region(system.admin, system.region.pk, system.binding.pk, now)
@@ -67,8 +109,15 @@ def test_browser_against_live_django(live_server: Any) -> None:
     )
     env = os.environ | {
         "DJANGO_API_ORIGIN": live_server.url,
-        "BROWSER_USERNAME": system.member.username,
+        "BROWSER_EMAIL": system.member.email,
         "BROWSER_PASSWORD": password,
+        "BROWSER_SECURITY_EMAIL": "security@example.com",
+        "BROWSER_SECURITY_PASSWORD": password,
+        "BROWSER_AUTH_MAILBOX": str(mailbox),
+        "BROWSER_ADMIN_EMAIL": system.admin.email,
+        "BROWSER_ADMIN_PASSWORD": password,
+        "BROWSER_ADMIN_TOTP_SEED": admin_secret,
+        "BROWSER_ADMIN_ORIGIN": live_server.url,
         "BROWSER_DATE": job.target_date.isoformat(),
         "BROWSER_TODAY": (job.target_date - timedelta(days=1)).isoformat(),
         "BROWSER_HISTORY_DATE": history_date.isoformat(),
@@ -79,6 +128,10 @@ def test_browser_against_live_django(live_server: Any) -> None:
         CSRF_TRUSTED_ORIGINS=["http://127.0.0.1:3101"],
         SESSION_COOKIE_SECURE=False,
         CSRF_COOKIE_SECURE=False,
+        SESSION_COOKIE_NAME="sessionid",
+        CSRF_COOKIE_NAME="csrftoken",
+        PYRACAST_PUBLIC_ORIGIN="http://127.0.0.1:3101",
+        MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}},
         SECURE_SSL_REDIRECT=False,
     ):
         subprocess.run(  # noqa: S603 -- npm is resolved locally and arguments are fixed.
@@ -86,7 +139,7 @@ def test_browser_against_live_django(live_server: Any) -> None:
             cwd=Path(__file__).resolve().parent.parent,
             env=env,
             check=True,
-            timeout=180,
+            timeout=240,
         )
     plant = Plant.objects.select_related("current_configuration").get(
         region=system.region, name="Browser plant"

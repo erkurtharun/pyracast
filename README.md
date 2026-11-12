@@ -223,9 +223,16 @@ Frontend text is English.
 For production, run `npm --prefix web run build` and `npm --prefix web start` behind
 an HTTPS gateway. Route `/api/` to Django on the same public origin; production routing
 does not embed the API origin, so the same build can be promoted. Disable gateway
-caching for authenticated responses and rate-limit login attempts. If the gateway
-terminates TLS, set `PYRACAST_TRUST_PROXY=1` only when it strips and sets
-`X-Forwarded-Proto` and the Django service is reachable only through trusted infrastructure.
+caching for authenticated responses and apply ingress limits to `/api/auth/`.
+Set `PYRACAST_PUBLIC_ORIGIN` to the public HTTPS origin; security-email navigation
+uses that configured origin. Verification and recovery use short-lived, limited-attempt
+codes bound to the initiating browser session, keeping credentials out of URLs.
+If the gateway terminates TLS, set
+`PYRACAST_TRUST_PROXY=1` and explicitly list its immediate source networks in
+`PYRACAST_TRUSTED_PROXY_CIDRS` (space-separated CIDRs). The gateway must overwrite
+`X-Forwarded-Proto` with one scheme and `X-Real-IP` with one client address, and
+Django must be reachable only through that gateway. The application removes
+forwarded headers from other peers and rejects ambiguous trusted-proxy values.
 
 ```text
 npm --prefix web exec -- playwright install chromium
@@ -339,8 +346,9 @@ fixture command provisions its own tenant membership.
 
 | Route | Operation |
 | --- | --- |
-| `/api/session/register/` | POST company name, username, email and password; CSRF required |
-| `/api/tenants/` | GET the authenticated user's memberships; default login destination |
+| `/api/session/` | GET the current user and masked CSRF token |
+| `/api/auth/browser/v1/` | allauth browser authentication, verified signup, recovery, MFA and session management; CSRF required for mutations |
+| `/api/tenants/` | GET the authenticated user's memberships |
 | `/api/tenants/{tenant}/sites/` | GET the paginated plant portfolio; POST location and technical details atomically |
 | `/api/tenants/{tenant}/sites/{region}/` | GET the combined location, approval and plant record |
 | `/api/tenants/{tenant}/regions/` | GET paginated regions; POST region request |
@@ -365,12 +373,71 @@ fixture command provisions its own tenant membership.
 | `/api/schema/?format=json` | Authenticated OpenAPI document |
 | `/admin/` | MFA-protected plant review, private provider setup, validation and approval |
 
-Platform operations require an active superuser and a verified OTP session. Enroll
-the initial superuser's TOTP device through the trusted local Django shell before
-admin login: create a confirmed `django_otp.plugins.otp_totp.models.TOTPDevice` for
-that user and transfer its `config_url` to their authenticator through a private
-channel. Treat the enrollment URI as a secret. Password-only sessions cannot call
-platform operations. Sessions enforce CSRF on writes; use the CSRF cookie/header.
+Authentication uses django-allauth's browser API and Django database sessions.
+Sign in by email. New accounts must verify ownership before receiving an authenticated
+session; company membership is never inferred from an email address or company name.
+Passwords require at least 15 characters and use Argon2; existing PBKDF2 hashes are
+upgraded on successful authentication. Recovery and email changes require email
+delivery. Configure SMTP before enabling public registration, then run
+`uv run --locked pyracast check --deploy --fail-level ERROR`. Configuration checks
+and mocked mail tests do not prove inbox delivery.
+
+Use **Account security** to change passwords, verify a replacement email, manage
+TOTP and one-time recovery codes, and revoke sessions. Sensitive changes require
+recent explicit reauthentication. Administrator recovery codes additionally require
+an authenticator or recovery-code confirmation within the last five minutes;
+password confirmation alone cannot reveal or replace them. Platform operations require an active superuser
+and MFA evidence for a still-enrolled authenticator belonging to that user.
+`/admin/login/` redirects to the same sign-in flow; it has no separate password
+form. Administrators cannot sign in without an enrolled TOTP factor or use customer
+TOTP enrollment. Provision their first factor through a trusted operator terminal:
+
+```text
+uv run --locked pyracast provision_admin_mfa --username YOUR_ADMIN --email admin@example.com
+```
+
+For a legacy account without an allauth email identity, `--email` is mandatory;
+it binds an unverified address and never trusts the old `User.email` value as proof
+of ownership. Conflicting addresses and existing identity replacements are rejected.
+The command prints a private authenticator enrollment URI and stores the secret
+encrypted. Transfer that URI securely; it must never enter logs or tickets. The
+command refuses to replace an existing factor. Administrators then verify their
+email, sign in with password and TOTP, confirm their authenticator again, and generate
+recovery codes in Account security.
+The admin's password-change link also uses Account security and its reauthentication
+policy. Django's admin pages enforce a CSP with same-origin assets and script/style
+nonces, without unrestricted inline scripts.
+
+Existing sessions without the new lifetime markers are revoked. Migration
+`accounts.0003` removes an empty legacy django-otp table but refuses to proceed if
+any device exists. Deployments with old factors must migrate and verify them before
+upgrading; a password and email must never replace an enrolled factor. Operators
+without an existing factor use trusted provisioning before signing in, then save
+recovery codes privately.
+Accounts lacking a unique usable email require trusted operator correction before
+sign-in. Do not discard old factors or mark addresses verified as a migration shortcut.
+MFA secrets use authenticated encryption with a key context separate from provider
+credentials; secret-key fallback rotation requires re-encryption before removing
+the fallback key. After configuring the new primary secret and retaining the old
+key in `PYRACAST_SECRET_KEY_FALLBACKS`, run `uv run --locked pyracast reencrypt_secrets`
+to rewrap provider and MFA secrets, then remove the old fallback only after verification.
+
+Sessions expire after 12 hours or 30 minutes without requests; regular dashboard
+polling counts as activity. Browser cookies are HttpOnly, SameSite=Lax and, in
+production, Secure with a `__Host-` prefix. Authentication responses are private
+and non-cacheable. Obtain the CSRF token from `/api/session/` and submit it in
+`X-CSRFToken`; the CSRF cookie is also HttpOnly. Run Django's `clearsessions`
+command regularly to remove expired database sessions.
+
+Allauth's per-account and per-IP rate limits share an atomic JSON/TTL cache in
+PostgreSQL. Migrations create its table; no Redis service is required. Concurrent
+cache additions use a conditional PostgreSQL upsert, live entries are never evicted,
+and writes remove expired entries in bounded batches. A dedicated autocommit connection
+to the same database preserves attempts and used OTP codes when application transactions
+roll back; TTL expiry uses the database clock. Database failures propagate
+instead of bypassing authentication controls. Ingress limits remain necessary to
+protect the application and database from large request floods.
+Database pooling must preserve the [session serialization contract](docs/ARCHITECTURE.md#api-and-delivery).
 
 Companies can create an account from the sign-in page, then add a plant through
 Location → Technical details → Review. Each location supports one active plant.
