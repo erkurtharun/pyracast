@@ -9,8 +9,10 @@ from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.core import mail
 from django.db import IntegrityError, connections
+from django.http import HttpRequest
 from django.test import Client, override_settings
 
+from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.accounts.signup import CompanySignupInput
 from tests.test_auth_lifecycle import submit
@@ -210,6 +212,10 @@ def test_concurrent_signup_for_one_mailbox_can_be_recovered_by_its_owner(
     clean_email = CompanySignupInput.clean_email
     save = EmailAddress.save
 
+    # A username collision would block the second transaction before the email barrier.
+    def distinct_username(adapter: AccountAdapter, request: HttpRequest, user: User) -> None:
+        user.username = "mailbox-race-" + request.headers["X-Registration-Order"]
+
     def synchronized_email(form: CompanySignupInput) -> str:
         email: str = clean_email(form)
         validation.wait(timeout=10)
@@ -221,6 +227,7 @@ def test_concurrent_signup_for_one_mailbox_can_be_recovered_by_its_owner(
         save(address, *args, **kwargs)
 
     monkeypatch.setattr(CompanySignupInput, "clean_email", synchronized_email)
+    monkeypatch.setattr(AccountAdapter, "populate_username", distinct_username)
     monkeypatch.setattr(EmailAddress, "save", synchronized_address_save)
 
     def register(order: str) -> int:
@@ -241,6 +248,10 @@ def test_concurrent_signup_for_one_mailbox_can_be_recovered_by_its_owner(
         statuses = list(pool.map(register, ("first", "second")))
     assert all(status in {401, 429} for status in statuses)
     assert User.objects.count() == 3
+    assert set(User.objects.exclude(username="owner").values_list("username", flat=True)) == {
+        "mailbox-race-first",
+        "mailbox-race-second",
+    }
     assert EmailAddress.objects.filter(primary=True, verified=False).count() == 2
     assert Tenant.objects.count() == Membership.objects.count() == 2
     assert not EmailAddress.objects.filter(verified=True).exists()
