@@ -3,9 +3,12 @@ from typing import Any
 
 import pytest
 from allauth.account.models import EmailAddress
+from allauth.mfa.models import Authenticator
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.test import Client, override_settings
+
+from tests.test_api import verified_admin
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 PASSWORD = "test-only-" + "x" * 40
@@ -49,7 +52,12 @@ def test_session_login_logout_and_csrf_rotation() -> None:
     assert submit(client, "auth/login", credentials).status_code == 200
     assert client.cookies[settings.SESSION_COOKIE_NAME]["httponly"]
     logged_in = client.get("/api/session/").json()
-    assert logged_in["user"] == {"id": user.pk, "username": user.username, "email": user.email}
+    assert logged_in["user"] == {
+        "id": user.pk,
+        "username": user.username,
+        "email": user.email,
+        "can_admin": False,
+    }
     assert (
         client.delete(AUTH + "auth/session", HTTP_X_CSRFTOKEN=initial["csrf_token"]).status_code
         == 403
@@ -144,3 +152,19 @@ def test_session_schema_exposes_only_projection() -> None:
     session = response.json()["paths"]["/api/session/"]
     assert "get" in session
     assert "patch" not in session
+
+
+def test_session_administration_access_tracks_live_role_and_mfa() -> None:
+    client, user = verified_admin()
+    assert client.get("/api/session/").json()["user"]["can_admin"] is True
+    user.is_staff = False
+    user.save(update_fields=["is_staff"])
+    assert client.get("/api/session/").json()["user"]["can_admin"] is False
+    user.is_staff = True
+    user.is_superuser = False
+    user.save(update_fields=["is_staff", "is_superuser"])
+    assert client.get("/api/session/").json()["user"]["can_admin"] is False
+    user.is_superuser = True
+    user.save(update_fields=["is_superuser"])
+    Authenticator.objects.filter(user=user).delete()
+    assert client.get("/api/session/").json()["user"]["can_admin"] is False

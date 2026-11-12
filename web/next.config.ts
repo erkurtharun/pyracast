@@ -30,6 +30,14 @@ const config = (phase: string): NextConfig => ({
         if (phase !== PHASE_DEVELOPMENT_SERVER) return [];
         return [
             {
+                source: "/admin/:path*/",
+                destination: `${process.env.DJANGO_API_ORIGIN ?? "http://127.0.0.1:8000"}/admin/:path*/`,
+            },
+            {
+                source: "/static/:path*",
+                destination: `${process.env.DJANGO_API_ORIGIN ?? "http://127.0.0.1:8000"}/static/:path*`,
+            },
+            {
                 source: "/api/auth/:path*",
                 destination: `${process.env.DJANGO_API_ORIGIN ?? "http://127.0.0.1:8000"}/api/auth/:path*`,
             },

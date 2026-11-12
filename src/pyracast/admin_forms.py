@@ -47,6 +47,7 @@ class ProviderSetupForm(forms.Form):
         help_text="Record the authorization permitting this account to be used by this service.",
     )
     daily_quota = forms.IntegerField(
+        required=False,
         min_value=1,
         max_value=10,
         initial=10,
@@ -92,8 +93,8 @@ class ProviderSetupForm(forms.Form):
     def clean(self) -> dict[str, Any]:
         data = super().clean() or {}
         if data.get("account_mode") == "new":
-            for name in ("external_account_id", "authorization_reference"):
-                if not data.get(name):
+            for name in ("external_account_id", "authorization_reference", "daily_quota"):
+                if not data.get(name) and name not in self.errors:
                     self.add_error(name, "This is required for a new account.")
             if not data.get("api_key"):
                 self.add_error("api_key", "Enter an API key for the new account.")

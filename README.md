@@ -456,7 +456,12 @@ an authenticator or recovery-code confirmation within the last five minutes;
 password confirmation alone cannot reveal or replace them. Platform operations require an active superuser
 and MFA evidence for a still-enrolled authenticator belonging to that user.
 `/admin/login/` redirects to the same sign-in flow; it has no separate password
-form. Administrators cannot sign in without an enrolled TOTP factor or use customer
+form. After authentication, administrators open `/admin/` automatically. Locally,
+use `http://127.0.0.1:3000/admin/`; the development server proxies both the workspace
+and its assets to Django. **Customer workspace** returns to the plant portfolio;
+**Administration** returns to the management workspace. In production, route
+`/admin/`, `/api/` and Django's `/static/` through the same public origin.
+Administrators cannot sign in without an enrolled TOTP factor or use customer
 TOTP enrollment. Provision their first factor through a trusted operator terminal:
 
 ```text
@@ -511,7 +516,9 @@ Location → Technical details → Review. Each location supports one active pla
 The request remains visible while an administrator sets up and approves its data
 connection. The customer's workspace never requests provider credentials.
 
-In `/admin/`, open **Regions → Review and set up → Solcast setup for this plant**. Check
+In `/admin/`, open a pending review from **Overview**, or search **Plants** by
+plant or company. **Operations** shows saved collection and email outcomes;
+**Settings** controls the shared email recipient limit. Open a plant and check
 the location and technical details, select an existing authorized account or add
 a new Solcast account, save the reference settings, then **Validate connection**
 and **Approve plant**. Validation makes a provider request within the existing quota;

@@ -1,10 +1,11 @@
 from typing import TYPE_CHECKING, Any, cast
 
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.contrib.auth import logout
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db.models import QuerySet
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseNotAllowed
 from django.shortcuts import get_object_or_404, redirect
 from django.template.response import TemplateResponse
 from django.urls import URLPattern, URLResolver, path, reverse
@@ -18,6 +19,14 @@ from rest_framework.exceptions import ValidationError as APIValidationError
 from pyracast.accounts.models import Tenant
 from pyracast.accounts.security import has_verified_mfa
 from pyracast.admin_forms import BindingActionForm, ProviderSetupForm
+from pyracast.admin_workspace import (
+    ReviewDecisionForm,
+    operations_context,
+    overview_context,
+    plant_list_context,
+    review_context,
+    settings_context,
+)
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import SiteBinding
 from pyracast.connections.operations import (
@@ -65,18 +74,120 @@ class PlatformAdminSite(admin.AdminSite):
 
     def get_urls(self) -> list[URLPattern | URLResolver]:
         return [
+            path("plants/", self.admin_view(self.plants), name="workspace_plants"),
+            path("logout/", self.admin_view(self.workspace_logout), name="logout"),
+            path("plants/<int:object_id>/", self.admin_view(self.plant), name="workspace_plant"),
+            path(
+                "plants/<int:object_id>/decision/",
+                self.admin_view(self.decision),
+                name="workspace_decision",
+            ),
+            path("operations/", self.admin_view(self.operations), name="workspace_operations"),
+            path("settings/", self.admin_view(self.settings), name="workspace_settings"),
             path(
                 "password_change/", self.admin_view(self.account_security), name="password_change"
             ),
             *[
                 url
                 for url in super().get_urls()
-                if not isinstance(url, URLPattern) or url.name != "password_change"
+                if not isinstance(url, URLPattern) or url.name not in {"password_change", "logout"}
             ],
         ]
 
+    def workspace_response(
+        self,
+        request: HttpRequest,
+        section: str,
+        title: str,
+        context: dict[str, Any],
+        *,
+        status: int = 200,
+    ) -> TemplateResponse:
+        return TemplateResponse(
+            request,
+            f"admin/workspace/{section}.html",
+            {
+                **self.each_context(request),
+                "workspace_section": section,
+                "title": title,
+                **context,
+            },
+            status=status,
+        )
+
+    def index(
+        self, request: HttpRequest, extra_context: dict[str, Any] | None = None
+    ) -> TemplateResponse:
+        return self.workspace_response(
+            request, "overview", "Overview", {**overview_context(), **(extra_context or {})}
+        )
+
+    def plants(self, request: HttpRequest) -> HttpResponse:
+        context = plant_list_context(
+            request.GET.get("q", "").strip()[:200],
+            request.GET.get("status", ""),
+            request.GET.get("page", "1"),
+        )
+        query = request.GET.copy()
+        query.pop("page", None)
+        context["pagination_query"] = query.urlencode()
+        return self.workspace_response(request, "plants", "Plants", context)
+
+    def plant(self, request: HttpRequest, object_id: int) -> HttpResponse:
+        return cast(RegionAdmin, self._registry[Region]).setup(request, object_id)
+
+    def operations(self, request: HttpRequest) -> HttpResponse:
+        return self.workspace_response(request, "operations", "Operations", operations_context())
+
+    def settings(self, request: HttpRequest) -> HttpResponse:
+        if request.method not in {"GET", "POST"}:
+            return HttpResponseNotAllowed(("GET", "POST"))
+        context = settings_context(request.POST if request.method == "POST" else None)
+        form = context["settings_form"]
+        if request.method == "POST" and form.is_valid():
+            try:
+                form.apply(cast(User, request.user))
+            except ValidationError:
+                form.add_error(None, "The settings changed. Reload this page before saving.")
+            else:
+                messages.success(request, "Email reminder settings saved.")
+                return redirect("admin:workspace_settings")
+        return self.workspace_response(
+            request,
+            "settings",
+            "Settings",
+            context,
+            status=400 if request.method == "POST" else 200,
+        )
+
+    def decision(self, request: HttpRequest, object_id: int) -> HttpResponse:
+        if request.method != "POST":
+            return HttpResponseNotAllowed(("POST",))
+        get_object_or_404(Region, pk=object_id, deleted_at__isnull=True)
+        form = ReviewDecisionForm(request.POST)
+        if form.is_valid():
+            try:
+                form.apply(cast(User, request.user), object_id)
+            except ObjectDoesNotExist, ValidationError:
+                messages.error(
+                    request, "The review could not be applied. Reload and review the current plant."
+                )
+            else:
+                messages.success(request, "Plant review saved.")
+        else:
+            messages.error(
+                request, "Choose a review action and reload the current plant before continuing."
+            )
+        return redirect("admin:workspace_plant", object_id=object_id)
+
     def account_security(self, request: HttpRequest) -> HttpResponse:
         return redirect("/?account=security")
+
+    def workspace_logout(self, request: HttpRequest) -> HttpResponse:
+        if request.method != "POST":
+            return HttpResponseNotAllowed(("POST",))
+        logout(request)
+        return redirect("/")
 
 
 site = PlatformAdminSite(name="admin")
@@ -290,8 +401,10 @@ class RegionAdmin(ReadOnlyAdmin):
                     )
                 else:
                     self.message_user(request, message)
-                    return redirect("admin:regions_region_setup", object_id=region.pk)
-        plants = Plant.objects.filter(region=region, deleted_at__isnull=True)
+                    return redirect("admin:workspace_plant", object_id=region.pk)
+        plants = Plant.objects.filter(region=region, deleted_at__isnull=True).select_related(
+            "current_configuration"
+        )
         submissions = PlantSubmission.objects.filter(plant__in=plants).select_related(
             "plant", "submitted_by"
         )
@@ -300,12 +413,19 @@ class RegionAdmin(ReadOnlyAdmin):
             "admin/regions/region/setup.html",
             {
                 **self.admin_site.each_context(request),
+                **review_context(region.pk),
+                "workspace_section": "plants",
                 "title": f"Review and set up {region.name}",
                 "opts": self.model._meta,
                 "region": region,
                 "plants": plants,
                 "submissions": submissions,
                 "binding": binding,
+                "active_provider_delay": bool(
+                    binding
+                    and binding.provider_account.request_blocked_until
+                    and binding.provider_account.request_blocked_until > timezone.now()
+                ),
                 "setup_form": setup_form,
                 "action_form": action_form,
                 "can_approve": bool(
@@ -314,6 +434,11 @@ class RegionAdmin(ReadOnlyAdmin):
                     and binding.validated_credential_revision
                     == binding.provider_account.credential_revision
                     and binding.provider_account.enabled
+                    and binding.provider_account.authorized_at is not None
+                    and (
+                        binding.provider_account.provider != "solcast"
+                        or (binding.settings_verification_reference and binding.installation_date)
+                    )
                 ),
             },
             status=400 if request.method == "POST" else 200,

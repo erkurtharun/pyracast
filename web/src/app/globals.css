@@ -156,7 +156,8 @@ textarea:focus-visible,
     gap: 7px;
     margin-top: 30px;
 }
-.sidebar nav button {
+.sidebar nav button,
+.sidebar nav a {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -168,8 +169,10 @@ textarea:focus-visible,
     background: transparent;
     color: #c3d2c8;
     font-weight: 550;
+    text-decoration: none;
 }
-.sidebar nav button:hover {
+.sidebar nav button:hover,
+.sidebar nav a:hover {
     background: #ffffff0d;
     color: #fff;
 }
@@ -1482,11 +1485,12 @@ pre,
         grid-column: 1/-1;
         grid-row: 2;
         display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
         gap: 4px;
         margin: 0;
     }
-    .sidebar nav button {
+    .sidebar nav button,
+    .sidebar nav a {
         justify-content: center;
         text-align: center;
         padding: 7px 5px;

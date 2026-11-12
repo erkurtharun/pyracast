@@ -21,10 +21,18 @@ import { PlantIcon } from "./plant-icon";
 import { RecycleBin } from "./recycle-bin";
 
 export function Dashboard() {
+    const searchParams = useSearchParams();
     const [version, setVersion] = useState(0),
         [session, setSession] = useState<Session>();
     const initial = useResource<Session>("/api/session/", version);
     const current = session ?? initial.data;
+    const enterAdministration =
+        current?.user?.can_admin &&
+        searchParams.get("workspace") !== "customer" &&
+        searchParams.get("account") !== "security";
+    useEffect(() => {
+        if (enterAdministration) window.location.replace("/admin/");
+    }, [enterAdministration]);
     useEffect(() => {
         if (!current) return;
         const refresh = () => {
@@ -63,6 +71,12 @@ export function Dashboard() {
             </main>
         );
     if (!current.user) return <Auth session={current} onSession={setSession} />;
+    if (enterAdministration)
+        return (
+            <main className="auth-page">
+                <p role="status">Opening administration…</p>
+            </main>
+        );
     return (
         <Workspace
             key={current.user.id}
@@ -145,6 +159,9 @@ function Workspace({
                     </select>
                 </label>
                 <nav aria-label="Main navigation">
+                    {session.user?.can_admin && (
+                        <a href="/admin/">Administration</a>
+                    )}
                     <button
                         className={view === "regions" ? "active" : ""}
                         aria-current={view === "regions" ? "page" : undefined}

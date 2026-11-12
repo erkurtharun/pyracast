@@ -240,7 +240,7 @@ test("requires the second factor before opening the workspace", async ({
 test("sign in only follows the permitted admin return path", async ({
     page,
 }) => {
-    await mockApi(page, { anonymous: true });
+    await mockApi(page, { anonymous: true, admin: true });
     await page.route("**/admin/", (route) =>
         route.fulfill({ contentType: "text/html", body: "<h1>Admin</h1>" }),
     );
@@ -251,6 +251,51 @@ test("sign in only follows the permitted admin return path", async ({
         .fill("Test-only-cobalt-79!");
     await page.locator("form").getByRole("button", { name: "Sign in" }).click();
     await expect(page.getByRole("heading", { name: "Admin" })).toBeVisible();
+});
+
+test("an administrator opens administration by default", async ({ page }) => {
+    await mockApi(page, { admin: true });
+    await page.route("**/admin/", (route) =>
+        route.fulfill({
+            contentType: "text/html",
+            body: "<h1>Administration</h1>",
+        }),
+    );
+    await page.goto("/");
+    await expect(
+        page.getByRole("heading", { name: "Administration" }),
+    ).toBeVisible();
+});
+
+test("an administrator can choose the customer workspace and return", async ({
+    page,
+}) => {
+    await mockApi(page, { admin: true });
+    await page.goto("/?workspace=customer");
+    await expect(
+        page.getByRole("heading", { name: "Your solar portfolio" }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("link", { name: "Administration" }),
+    ).toHaveAttribute("href", "/admin/");
+    await page.goto("/?account=security");
+    await expect(
+        page.getByRole("heading", { name: "Account settings", exact: true }),
+    ).toBeVisible();
+    expect(new URL(page.url()).search).toBe("?account=security");
+});
+
+test("a customer cannot enter administration through a return parameter", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.goto("/?next=%2Fadmin%2F");
+    await expect(
+        page.getByRole("heading", { name: "Your solar portfolio" }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("link", { name: "Administration" }),
+    ).toHaveCount(0);
 });
 
 test("sign in ignores an external return path", async ({ page }) => {

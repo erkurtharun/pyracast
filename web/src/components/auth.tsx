@@ -20,13 +20,6 @@ export function Auth({
 
     async function finish(result: AuthResult) {
         if (result.meta?.is_authenticated) {
-            if (
-                new URLSearchParams(window.location.search).get("next") ===
-                "/admin/"
-            ) {
-                window.location.assign("/admin/");
-                return;
-            }
             onSession(await request<Session>("/api/session/"));
             return;
         }

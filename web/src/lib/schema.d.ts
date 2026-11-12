@@ -1376,6 +1376,7 @@ export interface components {
             id: number;
             username: string;
             email: string;
+            readonly can_admin: boolean;
         };
         SiteInput: {
             name: string;

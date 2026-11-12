@@ -5241,9 +5241,13 @@
                                 "maxLength": 0
                             }
                         ]
+                    },
+                    "can_admin": {
+                        "type": "boolean",
+                        "readOnly": true
                     }
                 },
-                "required": ["email", "id", "username"]
+                "required": ["can_admin", "email", "id", "username"]
             },
             "SiteInput": {
                 "type": "object",

@@ -174,10 +174,14 @@ def test_setup_csrf_deleted_regions_and_missing_binding_states() -> None:
     response = client.get(reverse("admin:regions_region_setup", args=(region.pk,)))
     assert response.status_code == 200
     assert b"No plant has been submitted" in response.content
-    assert b"Save the private provider setup to continue" in response.content
+    assert (
+        b'<span class="step-state">To do</span><span class="step-name">Plant submitted</span>'
+        in response.content
+    )
+    assert b"Save the private connection to continue" in response.content
     Plant.objects.create(region=region, name="Legacy plant")
     response = client.get(reverse("admin:regions_region_setup", args=(region.pk,)))
-    assert b"no pending technical submission" in response.content
+    assert b"No saved technical configuration or customer submission" in response.content
     system.region.deleted_at = timezone.now()
     system.region.save(update_fields=("deleted_at",))
     assert client.get(setup_url(system)).status_code == 404

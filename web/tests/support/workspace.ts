@@ -29,6 +29,7 @@ export const user = {
     id: 1,
     username: "solar.user",
     email: "solar@example.test",
+    can_admin: false,
 };
 export const paged = (results: unknown[]) => ({
     results,
@@ -38,7 +39,7 @@ export const paged = (results: unknown[]) => ({
 });
 export async function mockApi(
     page: Page,
-    { anonymous = false, empty = false, failed = false } = {},
+    { anonymous = false, empty = false, failed = false, admin = false } = {},
 ) {
     let signedIn = !anonymous;
     let automationEnabled = false;
@@ -71,7 +72,7 @@ export async function mockApi(
             data = { status: 401, meta: { is_authenticated: false } };
         } else if (path === "/api/session/") {
             data = {
-                user: signedIn ? user : null,
+                user: signedIn ? { ...user, can_admin: admin } : null,
                 csrf_token: signedIn ? "signed-token" : "anonymous-token",
             };
         } else if (path === "/api/tenants/")

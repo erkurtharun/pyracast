@@ -105,6 +105,20 @@ Administrative provider identity and credentials never enter customer forms.
 The open portfolio and plant workspace refresh saved records every 30 seconds,
 so approval becomes visible without reloading or consuming provider quota.
 
+Administrators use a task-oriented workspace at `/admin/`: Overview for outstanding
+reviews, Plants for searchable company and plant records, Operations for collection
+and email outcomes, and Settings for the shared recipient limit. Custom Django
+views and templates reuse the existing permission, form and application-operation
+boundaries. Database model lists are not the primary navigation. Plant approval,
+connection health and the last saved forecast acquisition remain separate facts.
+Connection setup, validation and approval remain explicit steps; validation consumes
+provider quota. Lists read saved records without contacting providers or refreshing
+unsaved forms. Email service acceptance is distinguished from an unknown outcome.
+The session projection exposes current MFA-verified administration access for
+navigation; every administration request independently enforces authorization.
+Administrators land in this workspace by default and can explicitly enter the
+customer workspace or account security without being redirected back.
+
 1. A tenant member submits a plant, coordinates, IANA timezone and technical declaration together through `sites/`; the location and plant commit atomically with state `pending`. Customer submissions never contain provider credentials. Existing locations without a plant can complete setup through the scoped plant endpoint.
 2. A platform admin records the authorized provider account and site binding. The backend validates credentials and site settings within that account's quota.
 3. One shared approval operation checks permissions and the validated configuration revision, then atomically records `approved`, materializes the plant's immutable binding-backed configuration, records an audit event and creates the first pending collection job. A pending plant's technical declaration remains editable until approval; the approved declaration remains available afterwards while subsequent technical changes create configuration revisions.
@@ -340,7 +354,9 @@ Members can move their region or plant definitions to a tenant-scoped recycle bi
 
 The dispatcher permanently purges expired definitions and their owned records in bounded transactional batches. Restore is unavailable at the deadline even if a purge batch is pending. Retain shared provider accounts and account request-attempt counters without deleted region/job links, so deletion cannot reset quota. Preserve historical data during the recovery period; deleting a definition is separate from replacing a forecast vintage.
 
-Serve the frontend and `/api/` through one origin. Django owns authentication and
+Serve the frontend, `/api/`, `/admin/` and Django's `/static/` assets through one
+origin. The Next.js development server proxies Django routes and assets; the
+production gateway owns this routing. Django owns authentication and
 authorization; the allauth browser API enforces CSRF even before login. Sessions
 use HttpOnly, SameSite=Lax cookies, with Secure and a `__Host-` prefix in production.
 Revoke sessions after 12 hours or 30 minutes without requests; automatic polling
@@ -501,6 +517,7 @@ notification worker's threads do not share an SMTP connection.
 
 ## Primary references
 
+- [Django custom administration views](https://docs.djangoproject.com/en/6.1/ref/contrib/admin/), [Cloudscape resource views](https://cloudscape.design/patterns/resource-management/view/), [GOV.UK check answers](https://design-system.service.gov.uk/patterns/check-answers/), [USWDS responsive tables](https://designsystem.digital.gov/components/table/).
 - [The Twelve-Factor App](https://12factor.net/), [Django design philosophies](https://docs.djangoproject.com/en/6.1/misc/design-philosophies/), [PEP 8](https://peps.python.org/pep-0008/).
 - [Python 3.15.2](https://www.python.org/downloads/release/python-3152/), [Django 6.1.3](https://docs.djangoproject.com/en/6.1/releases/6.1.3/), [DRF releases](https://www.django-rest-framework.org/community/release-notes/).
 - [pvlib](https://pvlib-python.readthedocs.io/en/stable/), [Dramatiq releases](https://pypi.org/project/dramatiq/), [Dramatiq platform history](https://dramatiq.io/changelog.html), [Celery Windows limitation](https://docs.celeryq.dev/en/stable/faq.html#does-celery-support-windows).

@@ -22,10 +22,20 @@ from pyracast.calculation import calculate
 from pyracast.connections.operations import validate_binding
 from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule
-from pyracast.notifications.models import ReminderPreference
+from pyracast.notifications.models import (
+    NotificationDelivery,
+    NotificationSettings,
+    ReminderPreference,
+)
 from pyracast.plants.models import CalibrationRun, Plant, ProductionObservation
+from pyracast.plants.sites import submit_site
 from pyracast.providers import FixtureProvider
-from pyracast.regions.operations import approve_region, submit_region
+from pyracast.regions.operations import (
+    approve_region,
+    configure_binding,
+    request_location_change,
+    submit_region,
+)
 from tests.test_domain import FakeAdapter, make_system
 from tests.test_plant_operations import publish_snapshot, snapshot_for
 
@@ -107,6 +117,54 @@ def test_browser_against_live_django(
         longitude=29,
         timezone="Europe/Istanbul",
     )
+    review_region = submit_site(
+        outsider,
+        other_tenant.pk,
+        name="Review solar plant",
+        latitude=39.5,
+        longitude=28.5,
+        timezone="Europe/Istanbul",
+        dc_capacity_mw=12,
+        inverter_capacity_mw=10,
+        mounting_type="fixed",
+        surface_tilt=25,
+        surface_azimuth=180,
+    )
+    review_binding = configure_binding(
+        system.admin,
+        review_region.pk,
+        provider_account_id=system.account.pk,
+        site_id="review-plant",
+        capacity_kw=1,
+        capacity_semantics_verified=True,
+    )
+    validate_binding(system.admin, review_binding.pk, FakeAdapter(), now)
+    location_change = request_location_change(
+        outsider,
+        review_region.pk,
+        other_tenant.pk,
+        expected_revision=review_region.revision,
+        latitude=39.6,
+        longitude=28.6,
+        timezone="Europe/Istanbul",
+        reason="Confirm the revised survey coordinates.",
+    )
+    review_reminder = ReminderPreference.objects.create(
+        user=outsider,
+        region=review_region,
+        recipients=["operations-recipient@example.test"],
+        times=["10:00"],
+        effective_from=now,
+    )
+    NotificationDelivery.objects.create(
+        preference=review_reminder,
+        recipient="operations-recipient@example.test",
+        status="uncertain",
+        scheduled_for=now - timedelta(minutes=5),
+        available_at=now,
+        attempts=1,
+        last_error="smtp_uncertain",
+    )
     env = os.environ | {
         "DJANGO_API_ORIGIN": live_server.url,
         "BROWSER_EMAIL": system.member.email,
@@ -118,6 +176,7 @@ def test_browser_against_live_django(
         "BROWSER_ADMIN_PASSWORD": password,
         "BROWSER_ADMIN_TOTP_SEED": admin_secret,
         "BROWSER_ADMIN_ORIGIN": live_server.url,
+        "BROWSER_REVIEW_REGION": str(review_region.pk),
         "BROWSER_DATE": job.target_date.isoformat(),
         "BROWSER_TODAY": (job.target_date - timedelta(days=1)).isoformat(),
         "BROWSER_HISTORY_DATE": history_date.isoformat(),
@@ -167,3 +226,8 @@ def test_browser_against_live_django(
     assert reminder.enabled
     assert reminder.recipients == ["forecast-one@example.test", "forecast-two@example.test"]
     assert reminder.times == ["10:00"]
+    review_region.refresh_from_db()
+    location_change.refresh_from_db()
+    assert review_region.status == "approved"
+    assert location_change.status == "rejected"
+    assert NotificationSettings.objects.get().max_recipients == 6
