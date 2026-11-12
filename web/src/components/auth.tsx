@@ -260,7 +260,7 @@ export function Auth({
                                             : "new-password"
                                     }
                                     minLength={
-                                        mode === "login" ? undefined : 15
+                                        mode === "login" ? undefined : 12
                                     }
                                     maxLength={1024}
                                 />

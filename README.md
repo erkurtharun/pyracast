@@ -442,7 +442,7 @@ fixture command provisions its own tenant membership.
 Authentication uses django-allauth's browser API and Django database sessions.
 Sign in by email. New accounts must verify ownership before receiving an authenticated
 session; company membership is never inferred from an email address or company name.
-Passwords require at least 15 characters and use Argon2; existing PBKDF2 hashes are
+Passwords require at least 12 characters and use Argon2; existing PBKDF2 hashes are
 upgraded on successful authentication. Recovery and email changes require email
 delivery. Local console mail exposes development codes in `.dev/api.log`.
 Configure SMTP before enabling public registration, then run

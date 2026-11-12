@@ -118,7 +118,7 @@ def test_signup_requires_verification_before_tenant_access() -> None:
         {"company_name": " "},
         {"company_name": "x" * 201},
         {"email": "invalid"},
-        {"password": "aB!57mQ8nP4z"},
+        {"password": "aB!57mQ8nP4"},
     ],
 )
 def test_registration_rejects_invalid_input_without_partial_records(
@@ -130,6 +130,16 @@ def test_registration_rejects_invalid_input_without_partial_records(
     assert not Tenant.objects.exists()
     assert not Membership.objects.exists()
     assert not EmailAddress.objects.exists()
+
+
+def test_registration_accepts_a_twelve_character_password() -> None:
+    response = signup(Client(enforce_csrf_checks=True), {"password": "aB!57mQ8nP4z"})
+
+    assert response.status_code == 401
+    assert any(flow["id"] == "verify_email" for flow in response.json()["data"]["flows"])
+    user = User.objects.get(email="owner@example.com")
+    assert user.check_password("aB!57mQ8nP4z")
+    assert not EmailAddress.objects.get(user=user).verified
 
 
 @override_settings(ACCOUNT_RATE_LIMITS={"confirm_email": "100/m/key"})

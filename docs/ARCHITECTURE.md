@@ -92,7 +92,7 @@ Company registration creates a non-staff user, a new tenant and its initial memb
 in one transaction. It never joins an existing company by name or email. The
 django-allauth browser API owns registration, email verification, login, recovery,
 reauthentication, MFA and session management. Email ownership is mandatory before
-login. Django validates passwords with a 15-character minimum and common-password
+login. Django validates passwords with a 12-character minimum and common-password
 screening, hashes new passwords with Argon2 and rotates session identifiers on login.
 Mutations enforce CSRF before authentication. Allauth's account and IP rate limits
 share an atomic PostgreSQL JSON/TTL cache; ingress limits additionally protect capacity.
