@@ -15,6 +15,7 @@ from pyracast.forecasts.models import (
     ForecastResult,
     ForecastSnapshot,
     HistoricalReferenceImport,
+    ReferenceCapacityNormalization,
     RequestAttempt,
 )
 from pyracast.incidents.models import IncidentRevision, PlantIncident
@@ -167,6 +168,7 @@ def _purge_region(region: Region, plants: list[Plant]) -> None:
     RequestAttempt.objects.filter(
         Q(binding__region=region) | Q(job__binding__region=region)
     ).update(job=None, binding=None)
+    ReferenceCapacityNormalization.objects.filter(target_binding__region=region).delete()
     ForecastResult.objects.filter(snapshot__job__binding__region=region).delete()
     ForecastSnapshot.objects.filter(job__binding__region=region).delete()
     CollectionJob.objects.filter(binding__region=region).delete()

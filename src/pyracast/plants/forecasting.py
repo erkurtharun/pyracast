@@ -12,6 +12,7 @@ from django.utils import timezone
 
 from pyracast.accounts.operations import require_member
 from pyracast.connections.models import ProviderAccount
+from pyracast.forecasts.capacity_normalization import normalization_provenance
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.models import ForecastResult, ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
@@ -170,6 +171,7 @@ def _payload(
         else SELECTION_POLICY,
         "snapshot_id": snapshot.pk,
         "binding_id": configuration.binding_id,
+        "capacity_normalization": normalization_provenance(snapshot),
         "source_kind": snapshot.source_kind,
         "collected_at": snapshot.collected_at.isoformat(),
         "scheduled_slot": snapshot.job.scheduled_slot.isoformat(),

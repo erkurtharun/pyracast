@@ -267,12 +267,31 @@ Import historical exports with an explicit settings manifest matching the
 approved binding, preserve native timestamps/means and the original payload digest,
 and record the actual import/publication time. Never infer settings from the filename
 or backdate availability. Automatic activation additionally needs 30 valid matched
-days from the current binding's native Hobby estimated-actuals endpoint, including
+days from the current binding's native Hobby estimated actuals or explicitly
+authorized capacity-normalized copies of that same product, including
 all seven final holdout days; every selected training and holdout day must use that
 same product. Recompute this gate from the immutable per-day source
 manifest; historical exports alone cannot establish this source-transfer evidence.
 Declared configurations applied to older readings remain an explicit retrospective
 assumption. Neither source supplies measured irradiance labels.
+
+For a confirmed capacity-only change, use `normalize_reference_capacity` with
+explicit source/target binding IDs and an operator authorization reference. Archive
+derived copies under the current binding using `P_new = P_old * C_new / C_old`.
+Keep the original snapshots, binding capacities and raw provider payload unchanged;
+the normalization record identifies the raw payload's original capacity, both
+snapshot IDs, the scale, operator and declaration. Unknown original DC capacity
+remains unknown. Other model inputs must match, and known DC/AC ratios must agree.
+Never convert Historical Rooftop exports into Hobby records or normalize a copy
+again. Preserve acquisition/issue times, set derived availability/publication to
+the actual conversion time, and recalculate saved results at the target capacity.
+This does not rewrite previous forecasts, calibrations or metered production.
+Legacy snapshots without an availability timestamp qualify only when an existing
+saved result proves publication before conversion; preserve the unknown original
+availability and publish the derived copy at conversion time.
+Native complete acquisitions precede authorized scaled copies, which precede
+historical exports. Calibration reports count native and normalized support
+separately; normalization creates no additional observed days or API requests.
 
 The authorized November 2026 case demonstrates why this gate matters: a three-phase
 solar-day correction improved held-out Historical Rooftop interval MAE from 8.320 to

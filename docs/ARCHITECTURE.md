@@ -37,6 +37,7 @@ Use conventional Django apps for accounts, regions, provider connections, foreca
 | EpiasConnection, EpiasCollectionJob, EpiasSnapshot | Plant identity, independent collection and immutable reported-production acquisitions |
 | CalibrationRun, CalibrationActivation | Durable fit, reproducible dataset, held-out evaluation and audited manual/automatic activation history |
 | HistoricalReferenceImport | Authorized source settings, immutable export digest and actual acquisition time |
+| ReferenceCapacityNormalization | Authorized capacity-only copies, original source lineage and conversion availability |
 | PlantForecast, PlantEvent | Immutable electrical result and audited plant operations |
 | ReminderPreference, NotificationDelivery | Per-user region email schedules, pinned saved forecasts and durable delivery outcomes |
 | AuditEvent | Actor, action, target and timestamp for privileged changes |

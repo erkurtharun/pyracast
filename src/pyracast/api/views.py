@@ -243,7 +243,7 @@ class ForecastView(RegionsView):
                 published_at__lte=now,
             )
             .filter(Q(snapshot__issued_at__isnull=True) | Q(snapshot__issued_at__lte=now))
-            .order_by("-snapshot__collected_at")
+            .order_by("-snapshot__collected_at", "-published_at", "-pk")
             .first()
         )
         fresh = (

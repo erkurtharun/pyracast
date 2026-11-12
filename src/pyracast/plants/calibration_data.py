@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from django.db.models import Q
 
+from pyracast.forecasts.capacity_normalization import normalization_provenance
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY, select_actual_snapshot
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
@@ -90,6 +91,8 @@ def _observation_manifest(
 
 def _reference_manifest(snapshot: ForecastSnapshot) -> dict[str, object]:
     imported = snapshot.job.reference_import
+    normalization = normalization_provenance(snapshot)
+    original = snapshot.capacity_normalization.source_snapshot if normalization else snapshot
     return {
         "snapshot_id": snapshot.pk,
         "binding_id": snapshot.job.binding_id,
@@ -97,8 +100,9 @@ def _reference_manifest(snapshot: ForecastSnapshot) -> dict[str, object]:
         "source_product": imported.source_settings["product"]
         if imported is not None
         else "rooftop_pv_power"
-        if snapshot.job.endpoint == "estimated_actuals"
+        if original.job.endpoint == "estimated_actuals" and original.job.reference_import_id is None
         else "unknown",
+        "capacity_normalization": normalization,
         "reference_import": {
             "id": imported.pk,
             "sha256": imported.sha256,
@@ -133,6 +137,7 @@ def current_source_validation(
     selected = sorted(set(training or []) | set(holdout or []))
     sources = manifest.get("sources")
     current: list[str] = []
+    normalized: list[str] = []
     if (
         isinstance(sources, dict)
         and type(manifest.get("binding_id")) is int
@@ -152,6 +157,8 @@ def current_source_validation(
                 and source["reference_import"] is None
             ):
                 current.append(day)
+                if isinstance(source.get("capacity_normalization"), dict):
+                    normalized.append(day)
     current_holdout = sorted(set(holdout or []) & set(current))
     eligible = (
         included is not None
@@ -171,10 +178,12 @@ def current_source_validation(
         and len(current_holdout) == 7
     )
     return {
-        "policy": "current-rooftop-pv-power-selected-30-days-final-7-v1",
+        "policy": "current-or-authorized-scale-rooftop-selected-30-final-7-v2",
         "source_product": "rooftop_pv_power",
         "valid_day_dates": current,
         "valid_days": len(current),
+        "native_valid_days": len(current) - len(normalized),
+        "capacity_normalized_valid_days": len(normalized),
         "training_day_dates": sorted(set(training or []) & set(current)),
         "training_days": len(set(training or []) & set(current)),
         "holdout_day_dates": current_holdout,

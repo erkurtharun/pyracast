@@ -5,13 +5,14 @@ from django.db.models import Case, IntegerField, Q, Value, When
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import SiteBinding
+from pyracast.forecasts.capacity_normalization import normalization_provenance
 from pyracast.forecasts.coverage import history_day_complete
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.regions.models import Region
 
-HISTORY_SELECTION_POLICY = "native-first-complete-estimated-actuals-v3"
+HISTORY_SELECTION_POLICY = "native-then-authorized-scale-complete-actuals-v4"
 
 
 def select_actual_snapshot(
@@ -38,7 +39,12 @@ def select_actual_snapshot(
                     job__reference_import__isnull=True,
                     then=Value(0),
                 ),
-                default=Value(1),
+                When(
+                    job__endpoint="scaled_estimated_actuals",
+                    capacity_normalization__source_snapshot__job__endpoint="estimated_actuals",
+                    then=Value(1),
+                ),
+                default=Value(2),
                 output_field=IntegerField(),
             )
         )
@@ -54,7 +60,7 @@ def select_actual_snapshot(
 
 
 def historical_irradiance(snapshot: ForecastSnapshot, target_date: date) -> dict[str, object]:
-    return calculate(
+    result = calculate(
         snapshot.job.binding,
         target_date,
         ProviderData(
@@ -65,6 +71,8 @@ def historical_irradiance(snapshot: ForecastSnapshot, target_date: date) -> dict
             source_kind="estimated_actuals",
         ),
     )
+    result["reference_capacity_normalization"] = normalization_provenance(snapshot)
+    return result
 
 
 def regional_history(region: Region, target_date: date, as_of: datetime) -> dict[str, object]:

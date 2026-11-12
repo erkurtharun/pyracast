@@ -90,3 +90,31 @@ class ForecastResult(models.Model):
     snapshot = models.OneToOneField(ForecastSnapshot, on_delete=models.PROTECT)
     payload = models.JSONField()
     published_at = models.DateTimeField()
+
+
+class ReferenceCapacityNormalization(models.Model):
+    source_snapshot = models.ForeignKey(
+        ForecastSnapshot, on_delete=models.PROTECT, related_name="normalized_copies"
+    )
+    snapshot = models.OneToOneField(
+        ForecastSnapshot, on_delete=models.PROTECT, related_name="capacity_normalization"
+    )
+    target_binding = models.ForeignKey(SiteBinding, on_delete=models.PROTECT)
+    source_capacity_kw = models.FloatField()
+    target_capacity_kw = models.FloatField()
+    factor = models.FloatField()
+    authorized_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    authorization_reference = models.CharField(max_length=1000)
+    created_at = models.DateTimeField()
+
+    class Meta:
+        constraints = (
+            models.UniqueConstraint(
+                fields=("source_snapshot", "target_binding"),
+                name="unique_reference_capacity_normalization",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(factor__gt=0, factor__lt=float("inf")),
+                name="finite_positive_reference_scale",
+            ),
+        )
