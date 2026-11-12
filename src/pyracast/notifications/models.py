@@ -2,6 +2,7 @@ from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
 
+from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.regions.models import Region
 
@@ -55,6 +56,10 @@ class NotificationDelivery(models.Model):
     lease_expires_at = models.DateTimeField(null=True)
     recipient = models.EmailField(blank=True, default="")
     snapshot = models.ForeignKey(ForecastSnapshot, on_delete=models.PROTECT, null=True)
+    binding = models.ForeignKey(SiteBinding, on_delete=models.PROTECT, null=True)
+    preparation_deadline = models.DateTimeField(null=True)
+    prepared_message = models.JSONField(null=True)
+    transmit_started_at = models.DateTimeField(null=True)
     sent_at = models.DateTimeField(null=True)
     last_error = models.CharField(max_length=40, default="")
 

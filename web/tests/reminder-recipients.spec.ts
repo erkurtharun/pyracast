@@ -20,6 +20,7 @@ async function reminderApi(
     limit = 5,
     otherRecipientCount = 0,
     enabled = false,
+    delivery: Record<string, unknown> = {},
 ) {
     await mockApi(page);
     let saved = { enabled, recipients, times: ["08:00"] };
@@ -58,12 +59,57 @@ async function reminderApi(
                         status: "sent",
                         late: false,
                         last_error: "",
+                        forecast_status: null,
+                        forecast_complete: null,
+                        ...delivery,
                     },
                 ],
             },
         });
     });
 }
+
+for (const [kind, label] of [
+    ["saved_complete", "Saved forecast"],
+    ["saved_partial", "Partial forecast"],
+    ["unavailable", "No forecast available"],
+]) {
+    test(`delivered ${kind} is distinguished from mail acceptance`, async ({
+        page,
+    }) => {
+        await reminderApi(page, [], 5, 0, true, { forecast_status: kind });
+        await openReminders(page);
+        await page.getByText("Recent deliveries", { exact: true }).click();
+        await expect(
+            page.getByText("Accepted by mail service", { exact: true }),
+        ).toBeVisible();
+        await expect(page.getByText(label, { exact: true })).toBeVisible();
+    });
+}
+
+test("uncertain acceptance explains the duplicate risk without exposing internal codes", async ({
+    page,
+}) => {
+    await reminderApi(page, [], 5, 0, true, {
+        status: "uncertain",
+        last_error: "mail_outcome_uncertain",
+        sent_at: null,
+    });
+    await openReminders(page);
+    await page.getByText("Recent deliveries", { exact: true }).click();
+    await expect(
+        page.getByText("Acceptance unconfirmed", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByText(
+            "Check the mail service before resending to avoid a duplicate.",
+            { exact: true },
+        ),
+    ).toBeVisible();
+    await expect(
+        page.getByText("mail_outcome_uncertain", { exact: true }),
+    ).toHaveCount(0);
+});
 
 test("five recipients can be added, removed, saved and reloaded at 320px", async ({
     page,

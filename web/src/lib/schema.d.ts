@@ -1321,6 +1321,8 @@ export interface components {
             scheduled_for: string;
             status: string;
             last_error: string;
+            forecast_status: string | null;
+            forecast_complete: boolean | null;
             /** Format: date-time */
             collected_at: string | null;
             late: boolean | null;

@@ -18,6 +18,7 @@ from pyracast.metering.client import get_epias_client
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import configuration_is_current
+from pyracast.provider_retry import next_retry_at
 from pyracast.regions.models import Region
 
 Fetcher = Callable[[EpiasPlant, date], EpiasDay]
@@ -132,6 +133,7 @@ def _finish_failure(
     retry_after: int | None,
     *,
     error: str = "epias_provider_failure",
+    retryable: bool = True,
 ) -> None:
     started = time.monotonic()
     with transaction.atomic():
@@ -140,13 +142,19 @@ def _finish_failure(
         if job is None or not _owns(job, lease, now):
             return
         job.last_error = error
-        if job.retry_until is not None:
-            delay = max(NIGHT_RETRY_DELAY, timedelta(seconds=max(retry_after or 0, 0)))
-            _schedule_retry(job, now, delay)
+        if not retryable:
+            job.status = "failed"
+        elif job.retry_until is not None:
+            retry_at = next_retry_at(
+                now,
+                job.attempts,
+                retry_after,
+                minimum_seconds=int(NIGHT_RETRY_DELAY.total_seconds()),
+            )
+            _schedule_retry(job, now, retry_at - now)
         else:
             job.status = "pending" if job.attempts < 3 else "failed"
-            delay_seconds = max(30 * 2**job.attempts, min(retry_after or 0, 86400))
-            job.next_attempt_at = now + timedelta(seconds=delay_seconds)
+            job.next_attempt_at = next_retry_at(now, job.attempts, retry_after)
         if not _current(job):
             job.status = "superseded"
         job.lease_token = None
@@ -286,7 +294,12 @@ def run_epias_job(
         return _publish(lease, data, now + timedelta(seconds=time.monotonic() - started))
     except Exception as exc:
         retry_after = exc.retry_after_seconds if isinstance(exc, EpiasError) else None
-        _finish_failure(lease, now + timedelta(seconds=time.monotonic() - started), retry_after)
+        _finish_failure(
+            lease,
+            now + timedelta(seconds=time.monotonic() - started),
+            retry_after,
+            retryable=exc.retryable if isinstance(exc, EpiasError) else True,
+        )
         return False
 
 

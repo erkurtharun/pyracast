@@ -201,9 +201,10 @@ run these in separate terminals:
 ```text
 uv run --locked pyracast dispatch --loop
 uv run --locked pyracast worker --threads 4
+uv run --locked pyracast worker --queues notifications --threads 2
 ```
 
-The dispatcher scans durable forecast, EPİAŞ production, calibration and notification jobs every 60 seconds. Queue publication can be
+The dispatcher scans durable forecast, EPİAŞ production, calibration and notification jobs every 60 seconds. Run the notification worker as a separate process so provider waits and calibration cannot occupy its threads. The local launcher starts and stops this process as `mailer`. Queue publication can be
 repeated; database leases and unique results govern execution. Solcast requests, validation
 and retries share one account/UTC-day budget. Unknown request outcomes consume quota.
 Provider calls happen outside transactions. Changed or suspended regions cannot
@@ -227,6 +228,23 @@ reserved for scheduled forecasts. Forecast and Solcast history requests share th
 Keep the dispatcher and worker
 running for scheduled collection; changing times does not fetch data in the web request.
 Email reminders use saved forecasts and make no provider requests.
+
+Dispatcher phases recover independently and record their last outcome in
+**Admin → Forecasts → Dispatcher statuses**. Monitor them from a separate process:
+
+```text
+uv run --locked pyracast check_delivery_health
+```
+
+The command prints aggregate JSON and exits nonzero for missing/stale dispatcher
+heartbeats, overdue work, provider credential failures or failed/uncertain deliveries.
+It includes the last 24 hours of failures; successful older-forecast fallback is
+reported separately. **Admin → Notifications → Notification deliveries** shows
+individual outcomes. In production, supervise and restart the dispatcher and both
+worker processes, and route failed health checks to an independent monitoring
+channel. An alert sent through the same failing SMTP service cannot establish
+recovery. Inspect the mail provider's acceptance records before resending an
+`uncertain` delivery; SMTP acceptance is not proof of inbox delivery.
 
 ## Customer interface
 
@@ -364,7 +382,7 @@ Timing, plan limits, stale-data and retry contracts are in
 For local development, `.env.example` selects `PYRACAST_EMAIL_BACKEND=console`.
 Verification/reset codes and reminder messages are written to the sending process's
 stdout; the launcher captures account mail in `.dev/api.log` and reminder mail in
-`.dev/worker.log`. These private development logs contain usable codes, and messages
+`.dev/mailer.log`. These private development logs contain usable codes, and messages
 are not delivered to an inbox. Console mail requires `PYRACAST_DEBUG=1` and is
 [Django's development backend](https://docs.djangoproject.com/en/6.1/topics/email/#console-backend).
 

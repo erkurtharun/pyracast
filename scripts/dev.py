@@ -18,7 +18,8 @@ from pyracast.environment import load_environment
 from scripts.dev_dependencies import ensure_dependencies
 
 ROOT = Path(__file__).resolve().parents[1]
-ROLES = ("api", "worker", "dispatcher", "frontend")
+ROLES = ("api", "worker", "mailer", "dispatcher", "frontend")
+BACKGROUND_ROLES = ("worker", "mailer", "dispatcher")
 PORTS = {"api": 8000, "frontend": 3000}
 CHILDREN: list[subprocess.Popen[bytes]] = []
 
@@ -81,12 +82,16 @@ def process_role(process: psutil.Process, root: Path) -> str | None:
             Path(arg).name.lower() in ("pyracast", "pyracast.exe") for arg in args
         )
         if cwd == root and backend:
-            for token, role in (
+            for command_name, role in (
                 ("runserver", "api"),
                 ("worker", "worker"),
                 ("dispatch", "dispatcher"),
             ):
-                if token in args:
+                if command_name in args:
+                    if command_name == "worker" and "--queues" in args:
+                        queue_index = args.index("--queues") + 1
+                        if args[queue_index : queue_index + 1] == ["notifications"]:
+                            return "mailer"
                     return role
         if (
             cwd in (root, root / "web")
@@ -166,7 +171,7 @@ def stop_file_path(root: Path, role: str) -> Path:
 
 
 def process_stop_file(root: Path, role: str, process: psutil.Process) -> Path | None:
-    if role not in ("worker", "dispatcher"):
+    if role not in BACKGROUND_ROLES:
         return None
     stop_file = stop_file_path(root, role)
     args = process.cmdline()
@@ -275,7 +280,7 @@ def wait_ready(process: psutil.Process, role: str, timeout: float = 90) -> None:
 
 def start(root: Path, state: dict[str, Any]) -> None:
     existing = {role: discover(root, role) for role in ROLES}
-    for role in ("worker", "dispatcher"):
+    for role in BACKGROUND_ROLES:
         process = existing[role]
         if process is not None:
             stop_file = process_stop_file(root, role, process)
@@ -294,6 +299,16 @@ def start(root: Path, state: dict[str, Any]) -> None:
         "api": [sys.executable, "-m", "django", "runserver", "127.0.0.1:8000", "--noreload"],
         "frontend": frontend_command(root, running=existing["frontend"] is not None),
         "worker": [sys.executable, "-m", "django", "worker", "--threads", "4"],
+        "mailer": [
+            sys.executable,
+            "-m",
+            "django",
+            "worker",
+            "--threads",
+            "2",
+            "--queues",
+            "notifications",
+        ],
         "dispatcher": [sys.executable, "-m", "django", "dispatch", "--loop"],
     }
     print("Applying database migrations...", flush=True)
@@ -307,7 +322,7 @@ def start(root: Path, state: dict[str, Any]) -> None:
                     raise RuntimeError(
                         f"Port {PORTS[role]} belongs to another process; {role} was not started."
                     )
-                if role in ("worker", "dispatcher"):
+                if role in BACKGROUND_ROLES:
                     stop_file = stop_file_path(root, role)
                     stop_file.unlink(missing_ok=True)
                     args = [*args, "--stop-file", str(stop_file)]
@@ -377,13 +392,15 @@ def wait_for_jobs(timeout: float = 300) -> None:
 
 
 def stop(root: Path, state: dict[str, Any], frontend_only: bool = False) -> None:
-    for role in ("frontend",) if frontend_only else ("frontend", "dispatcher", "worker", "api"):
+    for role in (
+        ("frontend",) if frontend_only else ("frontend", "dispatcher", "mailer", "worker", "api")
+    ):
         record = state["processes"].get(role, {})
         process = recorded_process(root, role, record)
         if process is not None:
             print(f"Stopping {role} (up to five minutes for background work)...", flush=True)
             if not stop_cooperatively(root, role, process):
-                if role == "worker":
+                if role in ("worker", "mailer"):
                     wait_for_jobs()
                 terminate_tree(process)
         state["processes"].pop(role, None)

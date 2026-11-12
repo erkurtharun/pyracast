@@ -242,7 +242,7 @@ def test_schedule_configuration_quota_and_effective_boundary() -> None:
     assert CollectionJob.objects.get(pk=ids[0]).endpoint == "forecasts"
     assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 0
     tomorrow = enqueue_due(NOW + timedelta(days=1))
-    assert len(tomorrow) == 2
+    assert len(tomorrow) == 1
     assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 0
     configure_schedule(
         system.member, system.tenant.pk, system.region.pk, enabled=False, times=[], now=NOW

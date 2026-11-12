@@ -20,9 +20,18 @@ from pyracast.accounts.security import has_verified_mfa
 from pyracast.admin_forms import BindingActionForm, ProviderSetupForm
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import SiteBinding
-from pyracast.connections.operations import QuotaExceededError, validate_binding
-from pyracast.forecasts.models import CollectionJob, ForecastResult, RequestAttempt
-from pyracast.notifications.models import NotificationSettings
+from pyracast.connections.operations import (
+    QuotaExceededError,
+    RequestDeferredError,
+    validate_binding,
+)
+from pyracast.forecasts.models import (
+    CollectionJob,
+    DispatcherStatus,
+    ForecastResult,
+    RequestAttempt,
+)
+from pyracast.notifications.models import NotificationDelivery, NotificationSettings
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
@@ -100,6 +109,40 @@ class NotificationSettingsAdmin(AdminBase):
 
     def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
         return False
+
+
+@admin.register(DispatcherStatus, site=site)
+class DispatcherStatusAdmin(ReadOnlyAdmin):
+    list_display = ("phase", "attempted_at", "succeeded_at", "last_error")
+
+
+@admin.register(NotificationDelivery, site=site)
+class NotificationDeliveryAdmin(ReadOnlyAdmin):
+    list_display = (
+        "id",
+        "recipient",
+        "scheduled_for",
+        "status",
+        "attempts",
+        "last_error",
+        "sent_at",
+    )
+    list_filter = ("status",)
+    search_fields = ("recipient", "preference__region__name")
+    fields = (
+        "preference",
+        "recipient",
+        "scheduled_for",
+        "status",
+        "available_at",
+        "attempts",
+        "binding",
+        "snapshot",
+        "preparation_deadline",
+        "transmit_started_at",
+        "sent_at",
+        "last_error",
+    )
 
 
 @admin.register(Region, site=site)
@@ -202,6 +245,13 @@ class RegionAdmin(ReadOnlyAdmin):
                             message = "Plant approved. The first saved forecast is being prepared."
                     else:
                         raise ValidationError("Choose a setup action.")
+                except RequestDeferredError as error:
+                    form.add_error(
+                        None,
+                        "Update the private API key before validating this connection again."
+                        if error.available_at is None
+                        else "The provider is limiting requests. Wait before validating again.",
+                    )
                 except QuotaExceededError:
                     form.add_error(
                         None, "The provider's request budget is unavailable. Try validation later."

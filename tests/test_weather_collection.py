@@ -230,6 +230,7 @@ def test_runtime_only_enriches_enabled_hobby_forecasts(
     job.save(update_fields=("endpoint",))
     settings.PYRACAST_WEATHER_ENABLED = enabled
     monkeypatch.setenv("PYRACAST_OPEN_METEO_API_KEY", "artificial-weather-key")
+    monkeypatch.setattr(runtime, "datetime", SimpleNamespace(now=lambda _: NOW))
     monkeypatch.setattr(runtime, "adapter_for", lambda binding: HistoricalFixture())
     weather = WeatherFixture()
 

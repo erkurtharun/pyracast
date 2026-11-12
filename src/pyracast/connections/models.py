@@ -12,6 +12,8 @@ class ProviderAccount(models.Model):
     daily_quota = models.PositiveIntegerField(default=10)
     enabled = models.BooleanField(default=True)
     credential_revision = models.PositiveIntegerField(default=1)
+    request_blocked_until = models.DateTimeField(null=True)
+    authentication_failed_revision = models.PositiveIntegerField(null=True)
     authorization_reference = models.CharField(max_length=500, default="")
     authorized_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True)
     authorized_at = models.DateTimeField(null=True)

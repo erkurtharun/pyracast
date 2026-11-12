@@ -5,6 +5,45 @@ import type { components } from "@/lib/schema";
 import { request, type Region } from "@/lib/api";
 import { ActionForm, Empty, Field, Notice, Tag, useResource } from "./ui";
 type Preference = components["schemas"]["ReminderOutput"];
+const deliveryLabels: Record<string, string> = {
+    pending: "Preparing",
+    retry: "Retry scheduled",
+    sending: "Sending",
+    sent: "Accepted by mail service",
+    failed: "Not sent",
+    uncertain: "Acceptance unconfirmed",
+    skipped: "Skipped",
+    cancelled: "Cancelled",
+    unavailable: "Forecast unavailable",
+};
+const forecastLabels: Record<string, string> = {
+    current: "New forecast",
+    saved_complete: "Saved forecast",
+    saved_partial: "Partial forecast",
+    unavailable: "No forecast available",
+};
+const deliveryDetails: Record<string, string> = {
+    mail_not_sent:
+        "The mail service was unavailable. Retry is bounded by the delivery window.",
+    mail_rejected:
+        "The mail service rejected the message. Check the recipient and mail settings.",
+    mail_authentication_failed:
+        "Mail service credentials need administrator attention. Delivery will retry within the sending window.",
+    interrupted_connection:
+        "The connection was interrupted before sending. A retry is scheduled.",
+    authority_or_deadline_changed:
+        "Sending stopped because access changed or the delivery window ended.",
+    mail_outcome_uncertain:
+        "Check the mail service before resending to avoid a duplicate.",
+    interrupted_send:
+        "Sending was interrupted. Check mail service acceptance before resending.",
+    missed_schedule: "The delivery window has ended.",
+    mail_deadline_exceeded:
+        "The mail service did not accept the message within the delivery window.",
+    preference_or_authority_changed: "Delivery settings or access changed.",
+    missing_recipient: "No valid email address is available.",
+    no_saved_forecast: "No saved forecast covers the requested day.",
+};
 function RecipientFields({ data }: { data: Preference }) {
     const prefix = useId();
     const [rows, setRows] = useState(() =>
@@ -254,7 +293,17 @@ export function Reminders({
                                         </td>
                                         <td>{row.recipient}</td>
                                         <td>
-                                            <Tag>{row.status}</Tag>
+                                            <Tag>
+                                                {deliveryLabels[row.status] ??
+                                                    row.status}
+                                            </Tag>
+                                            {row.forecast_status && (
+                                                <div className="fine">
+                                                    {forecastLabels[
+                                                        row.forecast_status
+                                                    ] ?? "Forecast unavailable"}
+                                                </div>
+                                            )}
                                         </td>
                                         <td>
                                             {row.collected_at
@@ -282,7 +331,12 @@ export function Reminders({
                                         </td>
                                         <td>
                                             {row.late ? "Late delivery. " : ""}
-                                            {row.last_error || "—"}
+                                            {row.last_error
+                                                ? (deliveryDetails[
+                                                      row.last_error
+                                                  ] ??
+                                                  "Delivery needs attention.")
+                                                : "—"}
                                         </td>
                                     </tr>
                                 ))}

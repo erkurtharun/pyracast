@@ -1,3 +1,5 @@
+import secrets
+import time
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -8,16 +10,24 @@ from django.core.mail import EmailMultiAlternatives
 from django.core.validators import validate_email
 from django.db import transaction
 from django.db.models import Q
+from django.utils import timezone
 
 from pyracast.accounts.models import Membership
-from pyracast.forecasts.jobs import binding_is_current
-from pyracast.notifications.mail import NotSentError, build_message, send_message
+from pyracast.notifications.eligibility import binding_can_notify
+from pyracast.notifications.mail import (
+    NotSentError,
+    PermanentlyNotSentError,
+    SendCancelledError,
+    build_message,
+    send_message,
+)
 from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.operations import (
     effective_recipients,
     recipient_limit,
     region_recipient_count,
 )
+from pyracast.notifications.preparation import prepare_delivery
 from pyracast.notifications.scheduler import MAX_LATENESS
 from pyracast.regions.models import Region
 
@@ -28,25 +38,75 @@ def _eligible(delivery: NotificationDelivery, limit: int) -> bool:
     preference = delivery.preference
     recipients = effective_recipients(preference)
     return (
-        delivery.snapshot is not None
-        and delivery.snapshot.source_kind == "forecast"
-        and delivery.snapshot.collected_at <= delivery.scheduled_for
-        and delivery.snapshot.forecastresult.published_at <= delivery.scheduled_for
+        delivery.binding is not None
         and preference.enabled
         and preference.user.is_active
         and delivery.recipient in recipients
         and region_recipient_count(preference.region) <= limit
         and preference.effective_from <= delivery.scheduled_for
-        and preference.region_id == delivery.snapshot.job.binding.region_id
+        and preference.region_id == delivery.binding.region_id
         and delivery.scheduled_for.astimezone(ZoneInfo(preference.region.timezone)).strftime(
             "%H:%M"
         )
-        in preference.times[: delivery.snapshot.job.binding.provider_account.daily_quota]
+        in preference.times[: delivery.binding.provider_account.daily_quota]
         and Membership.objects.filter(
             user=preference.user, tenant_id=preference.region.tenant_id
         ).exists()
-        and binding_is_current(delivery.snapshot.job.binding)
+        and binding_can_notify(delivery.binding)
     )
+
+
+def _recover_interrupted(delivery: NotificationDelivery, now: datetime) -> None:
+    # Legacy sends have no prepared content and cannot prove that transmission was unstarted.
+    if delivery.transmit_started_at is not None or delivery.prepared_message is None:
+        delivery.status, delivery.last_error = "uncertain", "interrupted_send"
+    else:
+        delivery.status = (
+            "retry"
+            if delivery.attempts < 8 and now < delivery.scheduled_for + MAX_LATENESS
+            else "failed"
+        )
+        delivery.last_error = "interrupted_connection"
+        delivery.available_at = now
+        delivery.lease_token = None
+        delivery.lease_expires_at = None
+    delivery.save()
+
+
+def _locked_delivery(delivery_id: int) -> NotificationDelivery | None:
+    region_id = (
+        NotificationDelivery.objects.filter(pk=delivery_id)
+        .values_list("preference__region_id", flat=True)
+        .first()
+    )
+    if region_id is None:
+        return None
+    if Region.objects.select_for_update().filter(pk=region_id).first() is None:
+        return None
+    return NotificationDelivery.objects.select_for_update().filter(pk=delivery_id).first()
+
+
+def _mark_transmit(delivery_id: int, token: uuid.UUID, now: datetime) -> bool:
+    started = time.monotonic()
+    with transaction.atomic():
+        limit = recipient_limit(lock=True)
+        delivery = _locked_delivery(delivery_id)
+        if delivery is None or delivery.status != "sending" or delivery.lease_token != token:
+            return False
+        eligible = _eligible(delivery, limit)
+        now += timedelta(seconds=time.monotonic() - started)
+        if delivery.lease_expires_at is None or delivery.lease_expires_at <= now:
+            _recover_interrupted(delivery, now)
+            return False
+        if not eligible or now - delivery.scheduled_for > MAX_LATENESS:
+            delivery.status, delivery.last_error = "skipped", "authority_or_deadline_changed"
+            delivery.lease_token = None
+            delivery.lease_expires_at = None
+            delivery.save()
+            return False
+        delivery.transmit_started_at = now
+        delivery.save(update_fields=("transmit_started_at",))
+        return True
 
 
 def process_notification(
@@ -55,26 +115,17 @@ def process_notification(
     *,
     sender: Callable[[EmailMultiAlternatives], None] | None = None,
 ) -> bool:
+    started = time.monotonic()
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
     with transaction.atomic():
         limit = recipient_limit(lock=True)
-        region_id = (
-            NotificationDelivery.objects.filter(pk=delivery_id)
-            .values_list("preference__region_id", flat=True)
-            .first()
-        )
-        if region_id is None:
-            return False
-        if Region.objects.select_for_update().filter(pk=region_id).first() is None:
-            return False
-        delivery = NotificationDelivery.objects.select_for_update().filter(pk=delivery_id).first()
+        delivery = _locked_delivery(delivery_id)
         if delivery is None:
             return False
         if delivery.status == "sending":
             if delivery.lease_expires_at is None or delivery.lease_expires_at <= now:
-                delivery.status, delivery.last_error = "uncertain", "interrupted_send"
-                delivery.save()
+                _recover_interrupted(delivery, now)
             return False
         if delivery.status not in {"pending", "retry"} or delivery.available_at > now:
             return False
@@ -94,6 +145,8 @@ def process_notification(
             delivery.save()
             return False
         delivery.recipient = recipient
+        if not prepare_delivery(delivery, now):
+            return False
         try:
             message = build_message(delivery)
         except ValueError, ArithmeticError:
@@ -103,26 +156,52 @@ def process_notification(
         token = uuid.uuid4()
         delivery.status, delivery.lease_token = "sending", token
         delivery.lease_expires_at = now + LEASE_DURATION
+        delivery.transmit_started_at = None
         delivery.attempts += 1
         delivery.save()
     try:
-        (sender or send_message)(message)
-    except NotSentError:
-        status = "retry" if delivery.attempts < 3 else "failed"
-        error = "mail_not_sent"
+
+        def before_send() -> bool:
+            return _mark_transmit(
+                delivery_id, token, now + timedelta(seconds=time.monotonic() - started)
+            )
+
+        if sender is None:
+            send_message(message, before_send=before_send)
+        elif before_send():
+            sender(message)
+        else:
+            return False
+    except SendCancelledError:
+        return False
+    except PermanentlyNotSentError:
+        status, error_code = "failed", "mail_rejected"
+    except NotSentError as error:
+        completed_at = now + timedelta(seconds=time.monotonic() - started)
+        retry_at = completed_at + timedelta(
+            seconds=min(60 * 2 ** (delivery.attempts - 1), 1800) + secrets.randbelow(31)
+        )
+        status = (
+            "retry"
+            if delivery.attempts < 8 and retry_at < delivery.scheduled_for + MAX_LATENESS
+            else "failed"
+        )
+        error_code = error.code
     except Exception:  # SMTP acceptance may have succeeded before an exception reached the caller.
-        status, error = "uncertain", "mail_outcome_uncertain"
+        status, error_code = "uncertain", "mail_outcome_uncertain"
     else:
-        status, error = "sent", ""
-    NotificationDelivery.objects.filter(pk=delivery_id, lease_token=token, status="sending").update(
+        status, error_code = "sent", ""
+    updated = NotificationDelivery.objects.filter(
+        pk=delivery_id, lease_token=token, status__in=("sending", "uncertain")
+    ).update(
         status=status,
-        last_error=error,
-        sent_at=now if status == "sent" else None,
-        available_at=now + timedelta(seconds=60),
+        last_error=error_code,
+        sent_at=timezone.now() if status == "sent" else None,
+        available_at=retry_at if status == "retry" else now,
         lease_token=None,
         lease_expires_at=None,
     )
-    return status == "sent"
+    return status == "sent" and bool(updated)
 
 
 def pending_notification_ids(now: datetime, limit: int = 100) -> list[int]:

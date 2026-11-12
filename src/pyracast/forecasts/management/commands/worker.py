@@ -16,6 +16,12 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser: Any) -> None:
         parser.add_argument("--threads", type=int, default=4)
+        parser.add_argument(
+            "--queues",
+            nargs="+",
+            choices=("default", "calibration", "epias", "notifications"),
+            default=("default", "calibration", "epias"),
+        )
         parser.add_argument("--stop-file", type=Path)
 
     def handle(self, *args: Any, **options: Any) -> None:
@@ -31,7 +37,7 @@ class Command(BaseCommand):
                 make_calibration_actor(broker)
                 make_notification_actor(broker)
                 make_epias_actor(broker)
-                worker = Worker(broker, worker_threads=threads)
+                worker = Worker(broker, worker_threads=threads, queues=set(options["queues"]))
                 try:
                     worker.start()
                     shutdown.wait()

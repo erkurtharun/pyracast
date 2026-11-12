@@ -61,6 +61,8 @@ def test_shutdown_finishes_active_work_and_closes_broker(
             command.make_calibration_actor = MagicMock()
             command.make_notification_actor = MagicMock()
             command.make_epias_actor = MagicMock()
+            if role == "dispatch":
+                command.record_dispatch_phase = MagicMock()
 
             if role == "worker":
                 @dramatiq.actor(broker=broker, max_retries=0)
@@ -83,7 +85,7 @@ def test_shutdown_finishes_active_work_and_closes_broker(
                         record("stopped")
 
                 command.Worker = ObservedWorker
-                command.Command().handle(threads=1, stop_file=root / "stop")
+                command.Command().handle(threads=1, queues=["default"], stop_file=root / "stop")
             else:
                 command.make_actor = MagicMock()
                 command.purge_expired = lambda: record("ready")

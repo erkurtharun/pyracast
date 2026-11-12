@@ -1,16 +1,16 @@
 import json
-import math
 import re
 import time
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from email.utils import parsedate_to_datetime
 from threading import Lock
 from typing import Literal, cast
 from zoneinfo import ZoneInfo
 
 import httpx
+
+from pyracast.provider_retry import retry_after_seconds, retryable_status
 
 AUTH_URL = "https://giris.epias.com.tr/cas/v1/tickets"
 BASE_URL = "https://seffaflik.epias.com.tr/electricity-service/v1/generation/data"
@@ -19,9 +19,12 @@ SourceKind = Literal["realtime_generation", "settlement_injection"]
 
 
 class EpiasError(Exception):
-    def __init__(self, code: str, *, retry_after_seconds: int | None = None) -> None:
+    def __init__(
+        self, code: str, *, retry_after_seconds: int | None = None, retryable: bool = True
+    ) -> None:
         super().__init__(code)
         self.retry_after_seconds = retry_after_seconds
+        self.retryable = retryable
 
 
 @dataclass(frozen=True)
@@ -59,20 +62,6 @@ class EpiasDay:
     unit: str = "MWh"
     source_kind: SourceKind = "realtime_generation"
     end_day: date | None = None
-
-
-def _retry_after(value: str | None) -> int | None:
-    if value is None or len(value) > 128:
-        return None
-    try:
-        seconds = (
-            int(value)
-            if value.isascii() and value.isdecimal()
-            else math.ceil((parsedate_to_datetime(value) - datetime.now(UTC)).total_seconds())
-        )
-    except ValueError, TypeError, OverflowError:
-        return None
-    return max(0, min(86400, seconds))
 
 
 def _has_secret(value: object, secrets: tuple[str, ...]) -> bool:
@@ -196,8 +185,10 @@ class EpiasClient:
                 self._ticket = ""
             raise EpiasError(
                 "epias_request_failed",
+                retryable=retryable_status(response.status_code)
+                or (response.status_code == 401 and url != AUTH_URL),
                 retry_after_seconds=(
-                    _retry_after(response.headers.get("Retry-After"))
+                    retry_after_seconds(response.headers.get("Retry-After"))
                     if response.status_code in (429, 503)
                     else None
                 ),

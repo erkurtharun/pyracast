@@ -7,6 +7,36 @@ from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.regions.models import Region
 
 
+class DispatcherStatus(models.Model):
+    class Phase(models.TextChoices):
+        COLLECTION = "collection"
+        NOTIFICATIONS = "notifications"
+        CALIBRATION = "calibration"
+        RETENTION = "retention"
+        METERING = "metering"
+
+    phase = models.CharField(max_length=20, primary_key=True, choices=Phase)
+    attempted_at = models.DateTimeField()
+    succeeded_at = models.DateTimeField(null=True)
+    last_error = models.CharField(max_length=100, blank=True, default="")
+
+    class Meta:
+        constraints = (
+            models.CheckConstraint(
+                condition=models.Q(
+                    phase__in=(
+                        "collection",
+                        "notifications",
+                        "calibration",
+                        "retention",
+                        "metering",
+                    )
+                ),
+                name="dispatcher_phase_valid",
+            ),
+        )
+
+
 class CollectionSchedule(models.Model):
     region = models.OneToOneField(Region, on_delete=models.CASCADE)
     enabled = models.BooleanField(default=True)
@@ -150,6 +180,7 @@ class ForecastSnapshot(models.Model):
 class ForecastResult(models.Model):
     snapshot = models.OneToOneField(ForecastSnapshot, on_delete=models.PROTECT)
     payload = models.JSONField()
+    daily_payloads = models.JSONField(default=dict)
     published_at = models.DateTimeField()
 
 

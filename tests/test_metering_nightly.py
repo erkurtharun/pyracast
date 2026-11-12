@@ -89,7 +89,8 @@ def test_nightly_transport_failures_honor_half_hour_and_longer_retry_after(
 
     assert not run_epias_job(job.pk, fetch=fail, now=NEXT_NIGHT)
     job.refresh_from_db()
-    assert job.next_attempt_at == NEXT_NIGHT + timedelta(seconds=max(1800, retry_after or 0))
+    minimum = NEXT_NIGHT + timedelta(seconds=max(1800, retry_after or 0))
+    assert minimum <= job.next_attempt_at < minimum + timedelta(seconds=31)
     assert job.status == ("failed" if retry_after == 86400 else "pending")
     assert job.last_error == "epias_provider_failure"
     assert not EpiasSnapshot.objects.filter(job=job).exists()
@@ -117,7 +118,10 @@ def test_older_daily_reconciliation_retains_three_attempt_cap(
         assert not run_epias_job(job.pk, fetch=fetch, now=now)
         job.refresh_from_db()
         assert job.attempts == attempt
-        assert job.next_attempt_at == now + timedelta(minutes=30)
+        if transport:
+            assert now + timedelta(minutes=30) <= job.next_attempt_at < now + timedelta(minutes=31)
+        else:
+            assert job.next_attempt_at == now + timedelta(minutes=30)
         assert job.status == ("pending" if attempt < 3 else "failed")
         now = job.next_attempt_at
     assert not run_epias_job(job.pk, fetch=fetch, now=now)

@@ -15,6 +15,8 @@ from django.test import override_settings
 from rest_framework.test import APIClient
 
 from pyracast.accounts.models import Membership, Tenant
+from pyracast.calculation import calculate
+from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import ProviderAccount
 from pyracast.forecasts.models import (
     CollectionJob,
@@ -27,7 +29,7 @@ from pyracast.notifications.jobs import (
     pending_notification_ids,
     process_notification,
 )
-from pyracast.notifications.mail import NotSentError, send_message
+from pyracast.notifications.mail import NotSentError, PermanentlyNotSentError, send_message
 from pyracast.notifications.models import (
     NotificationDelivery,
     NotificationSettings,
@@ -82,17 +84,37 @@ def saved(system: System, when: datetime = NOW) -> ForecastSnapshot:
         raw_payload={},
         normalized_intervals=[
             {
-                "start": when.isoformat(),
-                "end": (when + timedelta(minutes=30)).isoformat(),
+                "start": (SLOT + timedelta(days=offset)).isoformat(),
+                "end": (SLOT + timedelta(days=offset, minutes=30)).isoformat(),
                 "power_kw": 0.3,
                 "sunlight": "day",
-            },
+            }
+            for offset in (0, 1)
         ],
         collected_at=when,
         source_kind="forecast",
     )
-    ForecastResult.objects.create(snapshot=snapshot, payload={}, published_at=when)
+    cache_saved_days(snapshot, when)
     return snapshot
+
+
+def cache_saved_days(snapshot: ForecastSnapshot, when: datetime = NOW) -> None:
+    data = ProviderData(
+        snapshot.raw_payload,
+        snapshot.normalized_intervals,
+        snapshot.issued_at,
+        snapshot.collected_at,
+        source_kind="forecast",
+    )
+    days = (
+        SLOT.astimezone(ZoneInfo(snapshot.binding.timezone)).date() + timedelta(days=offset)
+        for offset in (0, 1)
+    )
+    payloads = {day.isoformat(): calculate(snapshot.binding, day, data) for day in days}
+    ForecastResult.objects.update_or_create(
+        snapshot=snapshot,
+        defaults={"payload": {}, "daily_payloads": payloads, "published_at": when},
+    )
 
 
 def ready() -> NotificationDelivery:
@@ -109,7 +131,7 @@ def test_saved_delivery_pins_vintage_recipient_and_never_fetches() -> None:
     requests, jobs = RequestAttempt.objects.count(), CollectionJob.objects.count()
     ids = enqueue_due(SLOT)
     assert enqueue_due(SLOT) == ids
-    future = saved(system, SLOT + timedelta(minutes=1))
+    future = saved(system, SLOT + timedelta(minutes=2))
     assert process_notification(ids[0], SLOT + timedelta(minutes=2))
     assert not process_notification(ids[0], SLOT + timedelta(minutes=3))
     delivery = NotificationDelivery.objects.get(pk=ids[0])
@@ -261,9 +283,10 @@ def test_override_and_no_saved_forecast_are_explicit() -> None:
     )
     ids = enqueue_due(SLOT)
     delivery = NotificationDelivery.objects.get(pk=ids[0])
-    assert delivery.status == "unavailable"
-    assert delivery.last_error == "no_saved_forecast"
+    assert delivery.status == "pending"
     assert delivery.recipient == "override@example.com"
+    assert process_notification(delivery.pk, SLOT)
+    assert "Tomorrow's forecast is unavailable" in mail.outbox[0].body
     saved(system)
     assert enqueue_due(SLOT) == ids
     assert not process_notification(delivery.pk, SLOT)
@@ -291,11 +314,8 @@ def test_calendar_dst_gaps_folds_and_midnight() -> None:
         "disabled",
         "preference",
         "recipient",
-        "no_snapshot",
+        "binding",
         "wrong_region",
-        "source_kind",
-        "future_snapshot",
-        "future_publish",
         "quota",
     ],
 )
@@ -321,23 +341,13 @@ def test_worker_rechecks_authority_and_snapshot(change: str) -> None:
     elif change == "recipient":
         NotificationDelivery.objects.filter(pk=delivery.pk).update(recipient="")
         User.objects.filter(pk=preference.user_id).update(email="")
-    elif change == "no_snapshot":
-        NotificationDelivery.objects.filter(pk=delivery.pk).update(snapshot=None)
+    elif change == "binding":
+        NotificationDelivery.objects.filter(pk=delivery.pk).update(binding=None)
     elif change == "wrong_region":
         region = Region.objects.create(
             tenant=preference.region.tenant, name="Other", latitude=0, longitude=0, timezone="UTC"
         )
         ReminderPreference.objects.filter(pk=preference.pk).update(region=region)
-    elif change == "source_kind":
-        ForecastSnapshot.objects.filter(pk=snapshot.pk).update(source_kind="estimated_actuals")
-    elif change == "future_snapshot":
-        ForecastSnapshot.objects.filter(pk=snapshot.pk).update(
-            collected_at=SLOT + timedelta(seconds=1)
-        )
-    elif change == "future_publish":
-        ForecastResult.objects.filter(snapshot=snapshot).update(
-            published_at=SLOT + timedelta(seconds=1)
-        )
     else:
         ProviderAccount.objects.filter(pk=snapshot.job.binding.provider_account_id).update(
             daily_quota=0
@@ -347,36 +357,35 @@ def test_worker_rechecks_authority_and_snapshot(change: str) -> None:
     assert delivery.status == "skipped"
 
 
-@pytest.mark.parametrize("mode", ["safe", "uncertain", "calculation"])
-def test_delivery_failure_and_retry_policy(mode: str) -> None:
+@pytest.mark.parametrize("mode", ["safe", "uncertain", "permanent"])
+def test_delivery_failure_and_retry_policy(mode: str, monkeypatch: pytest.MonkeyPatch) -> None:
     delivery = ready()
-    if mode == "calculation":
-        assert delivery.snapshot is not None
-        ForecastSnapshot.objects.filter(pk=delivery.snapshot.pk).update(
-            normalized_intervals=[{"start": 7}]
-        )
-        assert not process_notification(delivery.pk, SLOT)
-        delivery.refresh_from_db()
-        assert (delivery.status, delivery.last_error) == ("unavailable", "calculation_failure")
-        return
+    monkeypatch.setattr("pyracast.notifications.jobs.secrets.randbelow", lambda bound: 0)
 
     def fail(message: EmailMultiAlternatives) -> None:
         assert not connection.in_atomic_block
         if mode == "safe":
             raise NotSentError
+        if mode == "permanent":
+            raise PermanentlyNotSentError
         raise TimeoutError
 
     assert not process_notification(delivery.pk, SLOT, sender=fail)
     delivery.refresh_from_db()
-    assert delivery.status == ("retry" if mode == "safe" else "uncertain")
+    assert (
+        delivery.status == {"safe": "retry", "uncertain": "uncertain", "permanent": "failed"}[mode]
+    )
     if mode == "safe":
         assert not process_notification(delivery.pk, SLOT + timedelta(seconds=30), sender=fail)
-        assert pending_notification_ids(SLOT + timedelta(seconds=60)) == [delivery.pk]
-        assert not process_notification(delivery.pk, SLOT + timedelta(seconds=60), sender=fail)
-        assert not process_notification(delivery.pk, SLOT + timedelta(seconds=120), sender=fail)
-        delivery.refresh_from_db()
+        assert pending_notification_ids(delivery.available_at) == [delivery.pk]
+        assert not process_notification(delivery.pk, delivery.available_at, sender=fail)
+        for attempt in range(3, 9):
+            delivery.refresh_from_db()
+            assert not process_notification(delivery.pk, delivery.available_at, sender=fail)
+            delivery.refresh_from_db()
+            assert delivery.attempts == attempt
         assert delivery.status == "failed"
-        assert delivery.attempts == 3
+        assert delivery.attempts == 8
 
 
 def test_interrupted_sending_never_retries_ambiguous_delivery() -> None:
@@ -418,6 +427,7 @@ def test_full_summary_preserves_units_and_escapes_html() -> None:
     ]
     snapshot.issued_at = NOW - timedelta(hours=1)
     snapshot.save()
+    cache_saved_days(snapshot)
     delivery_id = enqueue_due(SLOT)[0]
     assert process_notification(delivery_id, SLOT)
     message = mail.outbox[0]
@@ -735,7 +745,8 @@ def test_multiple_recipient_outcomes_are_independent_and_private() -> None:
         "retry@example.com": "retry",
         "unknown@example.com": "uncertain",
     }
-    assert pending_notification_ids(SLOT + timedelta(minutes=1)) == [ids[1]]
+    retry = NotificationDelivery.objects.get(pk=ids[1])
+    assert pending_notification_ids(retry.available_at) == [ids[1]]
     assert len(mail.outbox) == 1
     payload = preference_payload(preference, SLOT)
     assert isinstance(payload["deliveries"], list)

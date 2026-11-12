@@ -20,6 +20,8 @@ class ReminderDeliveryOutput(serializers.Serializer[dict[str, object]]):
     scheduled_for = serializers.DateTimeField()
     status = serializers.CharField()
     last_error = serializers.CharField(allow_blank=True)
+    forecast_status = serializers.CharField(allow_null=True)
+    forecast_complete = serializers.BooleanField(allow_null=True)
     collected_at = serializers.DateTimeField(allow_null=True)
     late = serializers.BooleanField(allow_null=True)
     source_age_seconds = serializers.FloatField(allow_null=True)

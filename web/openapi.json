@@ -5022,6 +5022,14 @@
                     "last_error": {
                         "type": "string"
                     },
+                    "forecast_status": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "forecast_complete": {
+                        "type": "boolean",
+                        "nullable": true
+                    },
                     "collected_at": {
                         "type": "string",
                         "format": "date-time",
@@ -5048,6 +5056,8 @@
                 },
                 "required": [
                     "collected_at",
+                    "forecast_complete",
+                    "forecast_status",
                     "id",
                     "last_error",
                     "late",

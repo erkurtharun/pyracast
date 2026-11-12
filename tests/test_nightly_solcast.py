@@ -375,13 +375,14 @@ def test_unknown_history_transport_outcome_consumes_budget_and_waits_half_hour()
     def interrupted() -> None:
         raise RuntimeError("Worker stopped after a possible outbound request")
 
-    with pytest.raises(RuntimeError, match="Worker stopped"):
-        collect(job.pk, HistoricalFixture(NIGHT, interrupted), no_calculation, NIGHT)
+    assert not collect(job.pk, HistoricalFixture(NIGHT, interrupted), no_calculation, NIGHT)
+    job.refresh_from_db()
+    assert (job.status, job.last_error) == ("retry", "provider_unexpected_failure")
     assert RequestAttempt.objects.filter(job=job, outcome="uncertain").count() == 1
     assert not collect(
         job.pk, HistoricalFixture(NIGHT), no_calculation, NIGHT + timedelta(minutes=6)
     )
-    resumed = NIGHT + timedelta(minutes=31)
+    resumed = job.available_at
     assert collect(job.pk, HistoricalFixture(resumed), no_calculation, resumed)
     assert RequestAttempt.objects.filter(job=job).count() == 2
 

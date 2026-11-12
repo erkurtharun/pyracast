@@ -45,7 +45,8 @@ def cooperative_process(
             sys.executable,
             "-m",
             "django",
-            "dispatch" if role == "dispatcher" else role,
+            "dispatch" if role == "dispatcher" else "worker" if role == "mailer" else role,
+            *(["--queues", "notifications"] if role == "mailer" else []),
             "--stop-file",
             str(root / ".dev" / f"{role}.stop"),
         ],
@@ -158,7 +159,7 @@ def test_stale_pid_identity_does_not_stop_the_live_process(
     assert launcher.read_state(root)["processes"] == {}
 
 
-@pytest.mark.parametrize("role", ["worker", "dispatcher"])
+@pytest.mark.parametrize("role", ["worker", "mailer", "dispatcher"])
 def test_launcher_waits_for_cooperative_worker_exit(tmp_path: Path, role: str) -> None:
     root = tmp_path.resolve()
     with cooperative_process(root, role) as process:
@@ -437,12 +438,12 @@ def test_failed_dispatcher_start_requests_worker_shutdown_and_preserves_timeout_
     api = fake_processes(root, "runserver")
     frontend = fake_processes(root / "web", "frontend")
     (root / ".dev").mkdir()
-    for role in ("worker", "dispatcher"):
+    for role in ("worker", "mailer", "dispatcher"):
         (root / ".dev" / f"{role}.stop").touch()
     (root / "django.py").write_text(
         "import os, sys, time\n"
         "from pathlib import Path\n"
-        "role = sys.argv[1]\n"
+        "role = 'mailer' if '--queues' in sys.argv else sys.argv[1]\n"
         "stop = Path(sys.argv[sys.argv.index('--stop-file') + 1])\n"
         "Path('ready-' + role).write_text(str(os.getpid()))\n"
         f"while (role == 'worker' and {not acknowledge!r}) or not stop.exists():\n"
@@ -479,7 +480,7 @@ def test_failed_dispatcher_start_requests_worker_shutdown_and_preserves_timeout_
     startup_failure = failure_type("dispatcher startup failed")
 
     def ready(process: psutil.Process, role: str) -> None:
-        if role in ("worker", "dispatcher"):
+        if role in ("worker", "mailer", "dispatcher"):
             command = "dispatch" if role == "dispatcher" else role
             wait_for_marker(root / f"ready-{command}")
             assert not (root / ".dev" / f"{role}.stop").exists()

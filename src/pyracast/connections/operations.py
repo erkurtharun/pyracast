@@ -15,6 +15,7 @@ from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.secrets import encrypt_secret
 from pyracast.forecasts.budget import remaining_forecast_requests
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
+from pyracast.provider_retry import next_retry_at
 from pyracast.regions.models import AuditEvent, Region
 
 
@@ -28,6 +29,12 @@ class ForecastBudgetReservedError(QuotaExceededError):
 
 class HistoryWindowClosedError(QuotaExceededError):
     pass
+
+
+class RequestDeferredError(QuotaExceededError):
+    def __init__(self, available_at: datetime | None) -> None:
+        super().__init__("Provider requests are temporarily unavailable.")
+        self.available_at = available_at
 
 
 @sensitive_variables()
@@ -123,6 +130,10 @@ def reserve_account_request(
         now += timedelta(seconds=time.monotonic() - started)
         if job is not None and job.retry_until is not None and now >= job.retry_until:
             raise HistoryWindowClosedError
+        if account.authentication_failed_revision == account.credential_revision:
+            raise RequestDeferredError(None)
+        if account.request_blocked_until is not None and account.request_blocked_until > now:
+            raise RequestDeferredError(account.request_blocked_until)
         utc_day = now.astimezone(UTC).date()
         used = RequestAttempt.objects.filter(provider_account=account, utc_day=utc_day).count()
         if not account.enabled or account.authorized_at is None or used >= account.daily_quota:
@@ -152,9 +163,25 @@ def reserve_request(
     )
 
 
+def record_provider_failure(account: ProviderAccount, error: ProviderError, now: datetime) -> None:
+    if error.status_code not in {401, 429}:
+        return
+    with transaction.atomic():
+        current = ProviderAccount.objects.select_for_update().get(pk=account.pk)
+        if current.credential_revision != account.credential_revision:
+            return
+        if error.status_code == 401:
+            current.authentication_failed_revision = account.credential_revision
+        else:
+            blocked_until = next_retry_at(now, 1, error.retry_after_seconds)
+            current.request_blocked_until = max(current.request_blocked_until or now, blocked_until)
+        current.save(update_fields=("authentication_failed_revision", "request_blocked_until"))
+
+
 def validate_binding(
     actor: User, binding_id: int, adapter: ProviderAdapter, now: datetime
 ) -> SiteBinding:
+    started = time.monotonic()
     require_admin(actor)
     binding = SiteBinding.objects.select_related("provider_account").get(
         pk=binding_id, region__deleted_at__isnull=True
@@ -166,9 +193,12 @@ def validate_binding(
     attempt = reserve_request(binding, now, purpose="validation")
     try:
         adapter.validate(binding)
-    except ProviderError:
+    except ProviderError as exc:
         RequestAttempt.objects.filter(pk=attempt.pk).update(outcome="failed")
         SiteBinding.objects.filter(pk=binding.pk).update(health="error")
+        record_provider_failure(
+            binding.provider_account, exc, now + timedelta(seconds=time.monotonic() - started)
+        )
         raise
     with transaction.atomic():
         region = Region.objects.select_for_update().get(pk=binding.region_id)

@@ -16,7 +16,7 @@ const statusLabels: Record<string, string> = {
     succeeded: "Succeeded",
     retry: "Retry scheduled",
     failed: "Failed",
-    stale: "Cancelled after settings changed",
+    stale: "Superseded or no longer eligible",
 };
 const errorLabels: Record<string, string> = {
     provider_failure: "Provider request failed",
@@ -28,6 +28,12 @@ const errorLabels: Record<string, string> = {
     history_budget_reserved: "Remaining budget is reserved for forecasts",
     retry_window_expired: "Morning retry window ended",
     history_window_closed: "Morning retry window ended",
+    provider_authentication_failed:
+        "Connection credentials need administrator attention",
+    provider_throttled: "Waiting for the provider's request limit to reset",
+    provider_rejected: "The provider rejected this request",
+    attempts_exhausted: "Retry limit reached",
+    superseded_forecast_slot: "Replaced by the latest scheduled collection",
 };
 
 export function CollectionSchedule({

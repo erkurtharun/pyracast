@@ -19,7 +19,18 @@ class ProviderData:
 
 
 class ProviderError(Exception):
-    pass
+    def __init__(
+        self,
+        code: str,
+        *,
+        retryable: bool = True,
+        retry_after_seconds: int | None = None,
+        status_code: int | None = None,
+    ) -> None:
+        super().__init__(code)
+        self.retryable = retryable
+        self.retry_after_seconds = retry_after_seconds
+        self.status_code = status_code
 
 
 class ProviderAdapter(Protocol):

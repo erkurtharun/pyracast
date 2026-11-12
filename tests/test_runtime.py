@@ -1,6 +1,7 @@
 import signal
 from pathlib import Path
 from unittest.mock import MagicMock
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from django.core.management import CommandError, call_command
@@ -13,10 +14,20 @@ from pyracast.shutdown import ShutdownRequest
 from tests.test_domain import make_system
 
 
+@pytest.fixture(autouse=True)
+def isolated_dispatch_monitoring(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "pyracast.forecasts.management.commands.dispatch.record_dispatch_phase", MagicMock()
+    )
+
+
 @pytest.mark.django_db(transaction=True)
-def test_stub_queue_duplicate_delivery_is_idempotent() -> None:
+def test_stub_queue_duplicate_delivery_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
     make_system(approved=True)
     job = CollectionJob.objects.get()
+    monkeypatch.setattr(
+        runtime, "datetime", MagicMock(now=MagicMock(return_value=job.scheduled_slot))
+    )
     broker = StubBroker()
     actor = runtime.make_actor(broker)
     worker = Worker(broker, worker_threads=1, worker_timeout=100)
@@ -56,10 +67,36 @@ def test_rabbitmq_broker_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(runtime, "RabbitmqBroker", constructor)
     monkeypatch.setenv("PYRACAST_RABBITMQ_URL", "amqp://example.invalid/test")
     runtime.make_broker()
-    constructor.assert_called_once_with(url="amqp://example.invalid/test", confirm_delivery=True)
+    parameters = parse_qs(urlsplit(constructor.call_args.kwargs["url"]).query)
+    assert parameters == {
+        "socket_timeout": ["5"],
+        "stack_timeout": ["10"],
+        "blocked_connection_timeout": ["10"],
+        "heartbeat": ["30"],
+        "connection_attempts": ["1"],
+    }
+    assert constructor.call_args.kwargs["confirm_delivery"] is True
     monkeypatch.delenv("PYRACAST_RABBITMQ_URL")
     runtime.make_broker()
-    assert constructor.call_args.kwargs["url"] == "amqp://guest:guest@127.0.0.1:5672/%2F"
+    assert constructor.call_args.kwargs["url"].startswith("amqp://guest:guest@127.0.0.1:5672/%2F?")
+
+
+def test_rabbitmq_failover_urls_preserve_explicit_parameters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "PYRACAST_RABBITMQ_URL",
+        "amqp://node1.invalid/?heartbeat=60;amqp://node2.invalid/?socket_timeout=8",
+    )
+    broker = runtime.make_broker()
+    first, second = broker.parameters
+    assert first.host == "node1.invalid"
+    assert first.heartbeat == 60
+    assert first.socket_timeout == 5
+    assert second.host == "node2.invalid"
+    assert second.socket_timeout == 8
+    assert second.blocked_connection_timeout == 10
+    broker.close()
 
 
 def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -114,7 +151,9 @@ def test_worker_command_stops_on_interrupt(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(command, "Worker", create_worker)
     monkeypatch.setattr(ShutdownRequest, "wait", MagicMock(side_effect=KeyboardInterrupt))
     call_command("worker", threads=2)
-    create_worker.assert_called_once_with(broker, worker_threads=2)
+    create_worker.assert_called_once_with(
+        broker, worker_threads=2, queues={"default", "calibration", "epias"}
+    )
     calibration_registration.assert_called_once_with(broker)
     notification_registration.assert_called_once_with(broker)
     epias_registration.assert_called_once_with(broker)
@@ -123,6 +162,26 @@ def test_worker_command_stops_on_interrupt(monkeypatch: pytest.MonkeyPatch) -> N
     broker.close.assert_called_once()
     with pytest.raises(CommandError, match="positive"):
         call_command("worker", threads=0)
+
+
+def test_notification_worker_consumes_only_its_queue(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pyracast.forecasts.management.commands import worker as command
+
+    broker, worker = MagicMock(), MagicMock()
+    monkeypatch.setattr(command, "make_broker", lambda: broker)
+    for factory in (
+        "make_actor",
+        "make_calibration_actor",
+        "make_notification_actor",
+        "make_epias_actor",
+    ):
+        monkeypatch.setattr(command, factory, MagicMock())
+    constructor = MagicMock(return_value=worker)
+    monkeypatch.setattr(command, "Worker", constructor)
+    monkeypatch.setattr(ShutdownRequest, "wait", MagicMock(side_effect=KeyboardInterrupt))
+    call_command("worker", threads=2, queues=["notifications"])
+    constructor.assert_called_once_with(broker, worker_threads=2, queues={"notifications"})
+    worker.stop.assert_called_once()
 
 
 @pytest.mark.parametrize("command_name", ["worker", "dispatch"])

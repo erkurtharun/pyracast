@@ -10,6 +10,7 @@ import httpx
 from pyracast.connections.contracts import ProviderAdapter, ProviderData, ProviderError
 from pyracast.connections.models import SiteBinding
 from pyracast.connections.secrets import decrypt_api_key
+from pyracast.provider_retry import retry_after_seconds, retryable_status
 
 
 def normalize_payload(
@@ -149,7 +150,15 @@ class SolcastProvider:
                     headers={"Authorization": f"Bearer {secret}"},
                     params={"format": "json", "hours": 72 if endpoint == "forecasts" else 168},
                 )
-                response.raise_for_status()
+                if not response.is_success:
+                    raise ProviderError(
+                        "provider_request_failed",
+                        retryable=retryable_status(response.status_code),
+                        retry_after_seconds=retry_after_seconds(response.headers.get("Retry-After"))
+                        if response.status_code in {429, 503}
+                        else None,
+                        status_code=response.status_code,
+                    ) from None
                 if secret in response.text:
                     raise ProviderError("unsafe_provider_response")
                 payload = response.json()

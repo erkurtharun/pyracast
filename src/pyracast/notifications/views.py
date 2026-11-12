@@ -38,6 +38,12 @@ def preference_payload(preference: ReminderPreference, now: datetime) -> dict[st
             "scheduled_for": delivery.scheduled_for,
             "status": delivery.status,
             "last_error": delivery.last_error,
+            "forecast_status": delivery.prepared_message.get("kind")
+            if delivery.prepared_message
+            else None,
+            "forecast_complete": delivery.prepared_message.get("tomorrow_complete")
+            if delivery.prepared_message
+            else None,
             "collected_at": delivery.snapshot.collected_at if delivery.snapshot else None,
             "late": delivery.sent_at - delivery.scheduled_for > timedelta(seconds=60)
             if delivery.sent_at

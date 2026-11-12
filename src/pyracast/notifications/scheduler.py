@@ -5,8 +5,8 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from pyracast.accounts.models import Membership
-from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.models import NotificationDelivery, ReminderPreference
 from pyracast.notifications.operations import (
     effective_recipients,
@@ -17,6 +17,7 @@ from pyracast.notifications.schedule import local_slot
 from pyracast.regions.models import Region
 
 MAX_LATENESS = timedelta(hours=2)
+PREPARATION_GRACE = timedelta(minutes=15)
 
 
 def enqueue_due(now: datetime) -> list[int]:
@@ -30,7 +31,7 @@ def enqueue_due(now: datetime) -> list[int]:
         if (
             not preference.user.is_active
             or binding is None
-            or not binding_is_current(binding)
+            or not binding_can_notify(binding)
             or not Membership.objects.filter(
                 user=preference.user, tenant_id=region.tenant_id
             ).exists()
@@ -54,7 +55,7 @@ def enqueue_due(now: datetime) -> list[int]:
                     if (
                         locked_region is None
                         or current is None
-                        or not binding_is_current(binding)
+                        or not binding_can_notify(binding)
                         or not current.enabled
                         or current.effective_from > slot
                         or clock not in current.times[: binding.provider_account.daily_quota]
@@ -89,17 +90,13 @@ def enqueue_due(now: datetime) -> list[int]:
                             recipient=recipient,
                             defaults={
                                 "snapshot": snapshot,
+                                "binding": binding,
+                                "preparation_deadline": slot + PREPARATION_GRACE,
                                 "available_at": now,
-                                "status": "skipped"
-                                if now - slot > MAX_LATENESS
-                                else "pending"
-                                if snapshot is not None
-                                else "unavailable",
+                                "status": "skipped" if now - slot > MAX_LATENESS else "pending",
                                 "last_error": "missed_schedule"
                                 if now - slot > MAX_LATENESS
-                                else ""
-                                if snapshot is not None
-                                else "no_saved_forecast",
+                                else "",
                             },
                         )
                         ids.append(delivery.pk)

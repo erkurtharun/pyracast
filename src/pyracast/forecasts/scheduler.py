@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timedelta
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
@@ -9,7 +9,7 @@ from django.db.models.functions import Greatest
 from pyracast.collection_window import nightly_window
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule
-from pyracast.notifications.schedule import local_slot
+from pyracast.forecasts.timing import latest_forecast_slot
 from pyracast.regions.models import Region
 
 
@@ -76,27 +76,31 @@ def enqueue_due(now: datetime, cutoff_hour: int | None = None) -> list[int]:
                     lease_expires_at=None,
                 )
                 jobs.append(history.pk)
-            days: tuple[date, ...] = (today - timedelta(days=1), today)
-            if schedule is None:
-                today_slot = local_slot(today, cutoff.strftime("%H:%M"), zone)
-                days = (today - timedelta(days=1),) if today_slot and today_slot > now else (today,)
-            for day in days:
-                slots = [
-                    slot
-                    for clock in times
-                    if (slot := local_slot(day, clock, zone)) is not None and slot >= effective_from
-                ]
-                for slot in slots:
-                    if slot > now or slot < effective_from:
-                        continue
-                    job, _ = CollectionJob.objects.get_or_create(
-                        binding=binding,
-                        endpoint="forecasts",
-                        scheduled_slot=slot,
-                        defaults={"target_date": day + timedelta(days=1), "available_at": now},
-                    )
-                    CollectionJob.objects.filter(pk=job.pk, status="stale").update(
-                        status="pending", available_at=now, lease_token=None, lease_expires_at=None
-                    )
-                    jobs.append(job.pk)
+            slot = latest_forecast_slot(now, region.timezone, times, effective_from)
+            if slot is None:
+                continue
+            CollectionJob.objects.filter(
+                binding=binding,
+                endpoint="forecasts",
+                scheduled_slot__lt=slot,
+                status__in=("pending", "retry"),
+            ).update(
+                status="stale",
+                last_error="forecast_superseded",
+                lease_token=None,
+                lease_expires_at=None,
+            )
+            job, _ = CollectionJob.objects.get_or_create(
+                binding=binding,
+                endpoint="forecasts",
+                scheduled_slot=slot,
+                defaults={
+                    "target_date": slot.astimezone(zone).date() + timedelta(days=1),
+                    "available_at": now,
+                },
+            )
+            CollectionJob.objects.filter(pk=job.pk, status="stale").update(
+                status="pending", available_at=now, lease_token=None, lease_expires_at=None
+            )
+            jobs.append(job.pk)
     return jobs

@@ -1,0 +1,330 @@
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
+import pytest
+from django.contrib.auth.models import User
+from django.core import mail
+from django.core.mail import EmailMultiAlternatives
+
+from pyracast.accounts.models import Membership
+from pyracast.connections.models import ProviderAccount
+from pyracast.forecasts.models import (
+    CollectionJob,
+    CollectionSchedule,
+    ForecastResult,
+    ForecastSnapshot,
+)
+from pyracast.irradiance import local_day_bounds
+from pyracast.notifications.jobs import process_notification
+from pyracast.notifications.mail import NotSentError
+from pyracast.notifications.models import NotificationDelivery
+from pyracast.notifications.operations import configure_reminders
+from pyracast.notifications.scheduler import PREPARATION_GRACE, enqueue_due
+from pyracast.notifications.views import preference_payload
+from pyracast.regions.models import Region
+from tests.test_domain import NOW, System
+from tests.test_notifications import SLOT, cache_saved_days, configured, memory_mail, saved
+
+pytestmark = pytest.mark.django_db(transaction=True)
+__all__ = ["memory_mail"]
+
+
+def complete_saved(system: System, when: datetime = NOW) -> ForecastSnapshot:
+    snapshot = saved(system, when)
+    start, _ = local_day_bounds(
+        SLOT.astimezone(ZoneInfo(system.region.timezone)).date(), system.binding.timezone
+    )
+    snapshot.normalized_intervals = [
+        {
+            "start": (start + timedelta(hours=hour)).isoformat(),
+            "end": (start + timedelta(hours=hour + 1)).isoformat(),
+            "power_kw": 0.3,
+            "sunlight": "day",
+        }
+        for hour in range(48)
+    ]
+    snapshot.save()
+    cache_saved_days(snapshot, when)
+    return snapshot
+
+
+@pytest.mark.parametrize("state", ["pending", "running", "retry", "missing"])
+def test_same_clock_collection_waits_without_spending_mail_attempts_then_uses_publication(
+    state: str,
+) -> None:
+    system, _ = configured()
+    old = complete_saved(system)
+    CollectionSchedule.objects.create(
+        region=system.region, times=["10:00"], enabled=True, effective_from=NOW
+    )
+    job = None
+    if state != "missing":
+        job = CollectionJob.objects.create(
+            binding=system.binding,
+            scheduled_slot=SLOT,
+            target_date=(SLOT + timedelta(days=1)).date(),
+            available_at=SLOT,
+            status=state,
+        )
+    delivery_id = enqueue_due(SLOT)[0]
+    assert not process_notification(delivery_id, SLOT)
+    delivery = NotificationDelivery.objects.get(pk=delivery_id)
+    assert delivery.status == "pending"
+    assert delivery.attempts == 0
+    assert delivery.prepared_message is None
+    assert not mail.outbox
+    when = SLOT + timedelta(minutes=5)
+    fresh = complete_saved(system, when)
+    if job is not None:
+        CollectionJob.objects.filter(pk=fresh.job_id).update(
+            scheduled_slot=SLOT + timedelta(seconds=1)
+        )
+        ForecastSnapshot.objects.filter(pk=fresh.pk).update(job=job)
+        CollectionJob.objects.filter(pk=job.pk).update(status="succeeded")
+    else:
+        CollectionJob.objects.filter(pk=fresh.job_id).update(scheduled_slot=SLOT)
+    assert process_notification(delivery_id, when + timedelta(minutes=1))
+    delivery = NotificationDelivery.objects.get(pk=delivery_id)
+    assert delivery.snapshot_id == fresh.pk != old.pk
+    assert isinstance(delivery.prepared_message, dict)
+    assert delivery.prepared_message["kind"] == "current"
+    assert "age at preparation: 0:01:00" in mail.outbox[0].body
+    assert "2026-11-11" in mail.outbox[0].subject
+
+
+@pytest.mark.parametrize("job_state", ["failed", "stale", "succeeded"])
+def test_terminal_collection_prepares_immediately_using_older_complete_forecast(
+    job_state: str,
+) -> None:
+    system, _ = configured()
+    old = complete_saved(system)
+    CollectionJob.objects.create(
+        binding=system.binding,
+        scheduled_slot=SLOT,
+        target_date=(SLOT + timedelta(days=1)).date(),
+        available_at=SLOT,
+        status=job_state,
+    )
+    delivery_id = enqueue_due(SLOT)[0]
+    assert process_notification(delivery_id, SLOT)
+    delivery = NotificationDelivery.objects.get(pk=delivery_id)
+    assert delivery.snapshot_id == old.pk
+    assert isinstance(delivery.prepared_message, dict)
+    assert delivery.prepared_message["kind"] == "saved_complete"
+    assert "freshness is reduced" in mail.outbox[0].body
+
+
+def test_latest_partial_or_invalid_cache_cannot_hide_complete_saved_tomorrow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, _ = configured()
+    old = complete_saved(system)
+    partial = saved(system, SLOT - timedelta(minutes=10))
+    bad = saved(system, SLOT - timedelta(minutes=5))
+    ForecastResult.objects.filter(snapshot=bad).update(
+        daily_payloads={"2026-11-11": {"energy_kwh_m2": "NaN"}}
+    )
+    ForecastSnapshot.objects.filter(pk=old.pk).update(
+        normalized_intervals=[{"invalid": "archived source is not recalculated"}]
+    )
+
+    def broken(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("Calculation is unavailable")
+
+    monkeypatch.setattr("pyracast.calculation.calculate", broken)
+    delivery_id = enqueue_due(SLOT)[0]
+    assert process_notification(delivery_id, SLOT)
+    delivery = NotificationDelivery.objects.get(pk=delivery_id)
+    assert delivery.snapshot_id == old.pk != partial.pk != bad.pk
+    assert "7.200 kWh/m²" in mail.outbox[0].body
+
+
+def test_restart_respects_fixed_publication_cutoff_and_hard_send_deadline() -> None:
+    system, _ = configured()
+    old = complete_saved(system)
+    late = complete_saved(system, SLOT + PREPARATION_GRACE + timedelta(seconds=1))
+    CollectionJob.objects.filter(pk=late.job_id).update(scheduled_slot=SLOT)
+    delivery_id = enqueue_due(SLOT + timedelta(minutes=90))[0]
+    assert process_notification(delivery_id, SLOT + timedelta(minutes=90))
+    delivery = NotificationDelivery.objects.get(pk=delivery_id)
+    assert delivery.snapshot_id == old.pk
+    assert delivery.preparation_deadline == SLOT + PREPARATION_GRACE
+
+
+def test_missing_due_job_waits_only_to_fixed_deadline_then_sends_honest_unavailable() -> None:
+    system, _ = configured()
+    CollectionSchedule.objects.create(
+        region=system.region, times=["10:00"], enabled=True, effective_from=NOW
+    )
+    delivery_id = enqueue_due(SLOT)[0]
+    assert not process_notification(delivery_id, SLOT + PREPARATION_GRACE - timedelta(seconds=1))
+    delivery = NotificationDelivery.objects.get(pk=delivery_id)
+    assert delivery.available_at == SLOT + PREPARATION_GRACE
+    assert process_notification(delivery_id, SLOT + PREPARATION_GRACE)
+    delivery.refresh_from_db()
+    assert delivery.snapshot_id is None
+    assert delivery.binding_id == system.binding.pk
+    assert isinstance(delivery.prepared_message, dict)
+    assert delivery.prepared_message["kind"] == "unavailable"
+    assert "Tomorrow's forecast is unavailable" in mail.outbox[0].body
+    assert "7.200" not in mail.outbox[0].body
+
+
+def test_credentials_rotated_or_auth_failed_preserves_approved_archived_email() -> None:
+    system, _ = configured()
+    snapshot = complete_saved(system)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(
+        credential_revision=2, authentication_failed_revision=2
+    )
+    delivery_id = enqueue_due(SLOT)[0]
+    assert process_notification(delivery_id, SLOT)
+    assert NotificationDelivery.objects.get(pk=delivery_id).snapshot_id == snapshot.pk
+
+
+def test_all_members_recipients_and_retries_keep_the_same_prepared_content() -> None:
+    system, _ = configured()
+    old = complete_saved(system)
+    member = User.objects.create(username="second-reminder", email="second@example.com")
+    Membership.objects.create(user=member, tenant=system.tenant)
+    configure_reminders(
+        member,
+        system.tenant.pk,
+        system.region.pk,
+        enabled=True,
+        recipients=[],
+        times=["10:00"],
+        now=NOW,
+    )
+    ids = enqueue_due(SLOT)
+
+    def fail(message: EmailMultiAlternatives) -> None:
+        raise NotSentError
+
+    assert not process_notification(ids[0], SLOT, sender=fail)
+    first = NotificationDelivery.objects.get(pk=ids[0])
+    second = NotificationDelivery.objects.get(pk=ids[1])
+    assert first.prepared_message == second.prepared_message
+    assert "second@example.com" not in str(first.prepared_message)
+    complete_saved(system, SLOT - timedelta(minutes=1))
+    Region.objects.filter(pk=system.region.pk).update(name="Changed after preparation")
+    assert process_notification(second.pk, SLOT + timedelta(seconds=1))
+    assert process_notification(first.pk, first.available_at)
+    first.refresh_from_db()
+    second.refresh_from_db()
+    assert first.snapshot_id == second.snapshot_id == old.pk
+    assert first.prepared_message == second.prepared_message
+    assert mail.outbox[0].body == mail.outbox[1].body
+    assert mail.outbox[0].to != mail.outbox[1].to
+
+
+def test_partial_tomorrow_survives_missing_today_and_does_not_invent_daily_total() -> None:
+    system, _ = configured()
+    saved(system)
+    newer = saved(system, SLOT - timedelta(minutes=1))
+    result = newer.forecastresult
+    result.daily_payloads.pop("2026-11-10")
+    result.save()
+    delivery_id = enqueue_due(SLOT)[0]
+    assert process_notification(delivery_id, SLOT)
+    delivery = NotificationDelivery.objects.get(pk=delivery_id)
+    assert delivery.snapshot_id == newer.pk
+    assert isinstance(delivery.prepared_message, dict)
+    assert delivery.prepared_message["kind"] == "saved_partial"
+    assert "Unavailable (no usable saved coverage)" in mail.outbox[0].body
+    assert "Unavailable (incomplete coverage)" in mail.outbox[0].body
+    assert "Available partial energy: 0.15" in mail.outbox[0].body
+
+
+def test_legacy_unprepared_recipient_reuses_existing_slot_content() -> None:
+    system, preference = configured()
+    snapshot = complete_saved(system)
+    delivery_id = enqueue_due(SLOT)[0]
+    assert process_notification(delivery_id, SLOT)
+    extra = NotificationDelivery.objects.create(
+        preference=preference,
+        binding=system.binding,
+        snapshot=snapshot,
+        scheduled_for=SLOT,
+        recipient="legacy@example.com",
+        available_at=SLOT,
+    )
+    preference.recipients = ["legacy@example.com"]
+    preference.save()
+    assert process_notification(extra.pk, SLOT)
+    original = NotificationDelivery.objects.get(pk=delivery_id)
+    extra.refresh_from_db()
+    assert original.prepared_message == extra.prepared_message
+    assert mail.outbox[0].body == mail.outbox[1].body
+
+
+def test_legacy_preparation_uses_slot_cutoff_without_grace() -> None:
+    system, _ = configured()
+    old = complete_saved(system)
+    delivery_id = enqueue_due(SLOT)[0]
+    NotificationDelivery.objects.filter(pk=delivery_id).update(preparation_deadline=None)
+    newer = complete_saved(system, SLOT + timedelta(seconds=30))
+    CollectionJob.objects.filter(pk=newer.job_id).update(scheduled_slot=SLOT)
+    assert process_notification(delivery_id, SLOT + timedelta(minutes=1))
+    assert NotificationDelivery.objects.get(pk=delivery_id).snapshot_id == old.pk
+
+
+@pytest.mark.parametrize(
+    "change", ["actuals", "future_acquisition", "late_publication", "failed_job"]
+)
+def test_ineligible_archived_sources_send_unavailable_without_exposing_their_values(
+    change: str,
+) -> None:
+    system, _ = configured()
+    snapshot = complete_saved(system)
+    if change == "actuals":
+        ForecastSnapshot.objects.filter(pk=snapshot.pk).update(source_kind="estimated_actuals")
+    elif change == "future_acquisition":
+        ForecastSnapshot.objects.filter(pk=snapshot.pk).update(
+            collected_at=SLOT + timedelta(seconds=1)
+        )
+    elif change == "late_publication":
+        ForecastResult.objects.filter(snapshot=snapshot).update(
+            published_at=SLOT + PREPARATION_GRACE + timedelta(seconds=1)
+        )
+    else:
+        CollectionJob.objects.filter(pk=snapshot.job_id).update(status="failed")
+    delivery_id = enqueue_due(SLOT)[0]
+    assert process_notification(delivery_id, SLOT + timedelta(minutes=1))
+    delivery = NotificationDelivery.objects.get(pk=delivery_id)
+    assert delivery.snapshot_id is None
+    assert "Tomorrow's forecast is unavailable" in mail.outbox[0].body
+    assert "7.200" not in mail.outbox[0].body
+
+
+def test_same_slot_partial_forecast_exposes_incomplete_saved_data_status() -> None:
+    system, preference = configured()
+    snapshot = saved(system, SLOT + timedelta(minutes=1))
+    delivery_id = enqueue_due(SLOT)[0]
+    before = preference_payload(preference, SLOT)["deliveries"]
+    assert isinstance(before, list)
+    assert before[0]["forecast_status"] is None
+    assert before[0]["forecast_complete"] is None
+    assert process_notification(delivery_id, SLOT + timedelta(minutes=2))
+    delivery = NotificationDelivery.objects.get(pk=delivery_id)
+    assert delivery.snapshot_id == snapshot.pk
+    assert isinstance(delivery.prepared_message, dict)
+    assert delivery.prepared_message["kind"] == "saved_partial"
+    assert delivery.prepared_message["tomorrow_complete"] is False
+    after = preference_payload(preference, SLOT + timedelta(minutes=2))["deliveries"]
+    assert isinstance(after, list)
+    assert after[0]["status"] == "sent"
+    assert after[0]["forecast_status"] == "saved_partial"
+    assert after[0]["forecast_complete"] is False
+
+
+@pytest.mark.parametrize("complete", [True, False])
+def test_delivery_api_separates_complete_and_unavailable_forecasts(complete: bool) -> None:
+    system, preference = configured()
+    if complete:
+        complete_saved(system)
+    delivery_id = enqueue_due(SLOT)[0]
+    assert process_notification(delivery_id, SLOT)
+    payload = preference_payload(preference, SLOT)["deliveries"]
+    assert isinstance(payload, list)
+    assert payload[0]["forecast_status"] == ("saved_complete" if complete else "unavailable")
+    assert payload[0]["forecast_complete"] is complete

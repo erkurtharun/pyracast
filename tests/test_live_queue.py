@@ -3,6 +3,7 @@ import time
 import uuid
 from datetime import timedelta
 from threading import Thread
+from types import SimpleNamespace
 
 import dramatiq
 import pytest
@@ -23,7 +24,8 @@ from tests.test_domain import NOW, make_system
     reason="requires a configured RabbitMQ server and PYRACAST_LIVE_QUEUE=1",
 )
 @pytest.mark.django_db(transaction=True)
-def test_rabbitmq_delivery_publishes_forecast() -> None:
+def test_rabbitmq_delivery_publishes_forecast(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(runtime, "datetime", SimpleNamespace(now=lambda _: NOW))
     make_system(approved=True)
     job = CollectionJob.objects.get()
     broker = runtime.make_broker()
@@ -54,7 +56,10 @@ def test_rabbitmq_delivery_publishes_forecast() -> None:
     reason="requires a configured RabbitMQ server and PYRACAST_LIVE_QUEUE=1",
 )
 @pytest.mark.django_db(transaction=True)
-def test_rabbitmq_actuals_redelivery_archives_once_with_one_provider_request() -> None:
+def test_rabbitmq_actuals_redelivery_archives_once_with_one_provider_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runtime, "datetime", SimpleNamespace(now=lambda _: NOW))
     system = make_system(approved=True)
     job = CollectionJob.objects.create(
         binding=system.binding,

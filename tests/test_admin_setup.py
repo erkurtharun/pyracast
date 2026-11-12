@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from django.contrib.auth.models import User
@@ -388,6 +388,30 @@ def test_validation_failures_and_quota_exhaustion_are_safe(
     assert response.status_code == 400
     assert b"request budget is unavailable" in response.content
     assert RequestAttempt.objects.count() == 1
+
+
+@pytest.mark.parametrize("authentication_failure", [True, False])
+def test_admin_connection_admission_explains_credential_or_rate_limit_action(
+    monkeypatch: pytest.MonkeyPatch, authentication_failure: bool
+) -> None:
+    system = admin_system()
+    client, _ = verified_admin()
+    system.account.authorized_at = timezone.now()
+    if authentication_failure:
+        system.account.authentication_failed_revision = system.account.credential_revision
+    else:
+        system.account.request_blocked_until = timezone.now() + timedelta(hours=1)
+    system.account.save()
+    monkeypatch.setattr("pyracast.admin.adapter_for", lambda binding: FakeAdapter())
+    response = client.post(setup_url(system), action_input(system, "validate"))
+    assert response.status_code == 400
+    assert (
+        b"Update the private API key"
+        if authentication_failure
+        else b"provider is limiting requests"
+    ) in response.content
+    assert not RequestAttempt.objects.exists()
+    assert system.account.encrypted_api_key.encode() not in response.content
 
 
 def test_initial_setup_duplicate_post_does_not_replace_the_first_binding() -> None:
