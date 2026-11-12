@@ -32,11 +32,9 @@ test("plant archive requests and displays the original forecast", async ({
         });
     });
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
     await page
-        .getByRole("button", { name: "Solar plants", exact: true })
+        .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: /East array/ }).click();
     await expect(
         page.getByRole("option", { name: "Forecast outlook" }),
     ).toHaveAttribute("value", "forecast");

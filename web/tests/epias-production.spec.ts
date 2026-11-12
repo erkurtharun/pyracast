@@ -52,7 +52,7 @@ test("connects, displays partial reported production and disconnects", async ({
             };
         else if (path === "/api/tenants/")
             data = paged([{ id: 1, name: "Tenant" }]);
-        else if (path.endsWith("/regions/")) data = paged([region]);
+        else if (path.endsWith("/sites/")) data = paged([region]);
         else if (path.endsWith("/plants/")) data = paged([plant]);
         else if (path.endsWith("/forecast/"))
             data = {
@@ -69,6 +69,17 @@ test("connects, displays partial reported production and disconnects", async ({
                 metrics: null,
                 baseline_metrics: null,
                 days: [],
+            };
+        else if (path.endsWith("/production/"))
+            data = {
+                timezone: region.timezone,
+                available_start_date: null,
+                available_end_date: null,
+                start_date: "2026-01-01",
+                end_date: "2026-01-01",
+                days: [],
+                intervals: [],
+                observations: [],
             };
         else if (path.endsWith("/production-source/")) {
             if (route.request().method() === "PUT") {
@@ -202,10 +213,7 @@ test("connects, displays partial reported production and disconnects", async ({
     });
     await page.goto("/");
     await page.getByRole("button", { name: /EPİAŞ region/ }).click();
-    await page
-        .getByRole("button", { name: "Solar plants", exact: true })
-        .click();
-    await page.getByRole("button", { name: /EPİAŞ plant/ }).click();
+    await page.getByRole("button", { name: "Production", exact: true }).click();
     await page.getByRole("button", { name: "Automatic production" }).click();
     await expect(
         page.getByRole("button", { name: "Latest settlement day" }),

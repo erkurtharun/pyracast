@@ -21,6 +21,7 @@ from pyracast.plants.models import (
     Plant,
     PlantConfiguration,
     PlantEvent,
+    PlantSubmission,
     ProductionObservation,
 )
 from pyracast.plants.numerics import POLICY_VERSION, PowerInterval
@@ -191,12 +192,13 @@ def create_plant(
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
-        binding = _binding(region)
+        if Plant.objects.filter(region=region, deleted_at__isnull=True).exists():
+            raise ValidationError("location_already_has_plant")
         plant = Plant.objects.create(region=region, name=name.strip())
-        _save_configuration(
+        _save_plant_parameters(
             actor,
             plant,
-            binding,
+            region,
             name=name,
             dc_capacity_mw=dc_capacity_mw,
             inverter_capacity_mw=inverter_capacity_mw,
@@ -242,10 +244,10 @@ def revise_plant(
         plant = Plant.objects.select_for_update().get(
             pk=plant_id, region=region, deleted_at__isnull=True
         )
-        _save_configuration(
+        _save_plant_parameters(
             actor,
             plant,
-            _binding(region),
+            region,
             name=name,
             dc_capacity_mw=dc_capacity_mw,
             inverter_capacity_mw=inverter_capacity_mw,
@@ -256,6 +258,81 @@ def revise_plant(
             surface_azimuth=surface_azimuth,
         )
         return plant
+
+
+def _save_plant_parameters(
+    actor: User,
+    plant: Plant,
+    region: Region,
+    *,
+    name: str,
+    dc_capacity_mw: float,
+    inverter_capacity_mw: float | None,
+    export_limit_mw: float | None,
+    measurement_basis: str,
+    mounting_type: str,
+    surface_tilt: float | None,
+    surface_azimuth: float | None,
+) -> None:
+    if region.status == "pending" and plant.current_configuration_id is None:
+        PlantSubmission.objects.update_or_create(
+            plant=plant,
+            defaults={
+                "dc_capacity_mw": dc_capacity_mw,
+                "inverter_capacity_mw": inverter_capacity_mw,
+                "export_limit_mw": export_limit_mw,
+                "measurement_basis": measurement_basis,
+                "mounting_type": mounting_type,
+                "surface_tilt": surface_tilt,
+                "surface_azimuth": surface_azimuth,
+                "submitted_by": actor,
+            },
+        )
+        plant.name = name.strip()
+        plant.save(update_fields=("name",))
+        PlantEvent.objects.create(plant=plant, actor=actor, action="submission_saved")
+        return
+    _save_configuration(
+        actor,
+        plant,
+        _binding(region),
+        name=name,
+        dc_capacity_mw=dc_capacity_mw,
+        inverter_capacity_mw=inverter_capacity_mw,
+        export_limit_mw=export_limit_mw,
+        measurement_basis=measurement_basis,
+        mounting_type=mounting_type,
+        surface_tilt=surface_tilt,
+        surface_azimuth=surface_azimuth,
+    )
+
+
+def activate_submitted_plants(actor: User, region: Region, binding: SiteBinding) -> None:
+    plants = Plant.objects.select_for_update().filter(region=region, deleted_at__isnull=True)
+    for plant in plants:
+        parameters: PlantConfiguration | PlantSubmission
+        if plant.current_configuration_id is not None:
+            parameters = PlantConfiguration.objects.get(pk=plant.current_configuration_id)
+            if parameters.binding_id == binding.pk:
+                continue
+        else:
+            submission = PlantSubmission.objects.filter(plant=plant).first()
+            if submission is None:
+                raise ValidationError("plant_submission_required")
+            parameters = submission
+        _save_configuration(
+            actor,
+            plant,
+            binding,
+            name=plant.name,
+            dc_capacity_mw=parameters.dc_capacity_mw,
+            inverter_capacity_mw=parameters.inverter_capacity_mw,
+            export_limit_mw=parameters.export_limit_mw,
+            measurement_basis=parameters.measurement_basis,
+            mounting_type=parameters.mounting_type,
+            surface_tilt=parameters.surface_tilt,
+            surface_azimuth=parameters.surface_azimuth,
+        )
 
 
 def _observation(

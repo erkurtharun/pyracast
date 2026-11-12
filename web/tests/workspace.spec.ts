@@ -12,14 +12,21 @@ test("mock contract: signs in with CSRF, selects region, and signs out", async (
     await page.goto("/");
     await page.getByLabel("Username", { exact: true }).fill(user.username);
     await page.getByLabel("Password", { exact: true }).fill("fixture-password");
-    await page.getByRole("button", { name: "Sign in" }).click();
-    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await page.locator("form").getByRole("button", { name: "Sign in" }).click();
+    await expect(
+        page.getByRole("heading", { name: "Your solar portfolio" }),
+    ).toBeVisible();
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
     await expect(
         page.getByRole("heading", { name: "No forecast for this day yet" }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Sign out" }).click();
-    await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+    await expect(
+        page.locator("form").getByRole("button", { name: "Sign in" }),
+    ).toBeVisible();
 });
 
 test("initial session has one CSRF handshake during Strict Mode and focus events", async ({
@@ -47,84 +54,81 @@ test("initial session has one CSRF handshake during Strict Mode and focus events
         document.dispatchEvent(new Event("visibilitychange"));
     });
     release();
-    await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+    await expect(
+        page.locator("form").getByRole("button", { name: "Sign in" }),
+    ).toBeVisible();
     expect(requests).toBe(1);
 });
-test("mock contract: requests a region and surfaces pending approval", async ({
+test("one plant request saves location and technical details before approval", async ({
     page,
 }) => {
     await mockApi(page, { empty: true });
+    let writes = 0;
+    await page.route("**/api/tenants/1/sites/", async (route) => {
+        if (route.request().method() !== "POST") return route.fallback();
+        writes++;
+        expect(route.request().headers()["x-csrftoken"]).toBe("signed-token");
+        expect(route.request().postDataJSON()).toMatchObject({
+            name: "New solar park",
+            latitude: 36.5,
+            longitude: 30.2,
+            timezone: "Europe/Berlin",
+            dc_capacity_mw: 130,
+            inverter_capacity_mw: 100,
+            export_limit_mw: null,
+            mounting_type: "fixed",
+            surface_tilt: 0,
+            surface_azimuth: 180,
+        });
+        return route.fallback();
+    });
+    await page.clock.setFixedTime(new Date("2026-03-28T22:30:00Z"));
     await page.goto("/");
-    await page.getByRole("button", { name: "Request a region" }).click();
-    await page
-        .getByLabel("Region name", { exact: true })
-        .fill("New solar park");
+    await page.getByRole("button", { name: "Add a plant" }).click();
+    await page.getByLabel("Plant name", { exact: true }).fill("New solar park");
     await page.getByLabel("Latitude").fill("36.5");
     await page.getByLabel("Longitude").fill("30.2");
+    await page.getByLabel("IANA timezone").fill("Europe/Berlin");
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.getByLabel("DC nameplate capacity (MW)").fill("130");
+    await page.getByLabel("Inverter AC capacity (MW, optional)").fill("100");
+    await page.getByLabel("Mounting type").selectOption("fixed");
+    await page.getByLabel("Surface tilt (degrees, optional)").fill("0");
+    await page.getByLabel("Surface azimuth (degrees, optional)").fill("180");
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    expect(writes).toBe(0);
+    await expect(
+        page.getByRole("heading", { name: "Check your plant details" }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Back", exact: true }).click();
+    await expect(page.getByLabel("DC nameplate capacity (MW)")).toHaveValue(
+        "130",
+    );
+    await expect(
+        page.getByLabel("Surface tilt (degrees, optional)"),
+    ).toHaveValue("0");
+    await page.getByRole("button", { name: "Back", exact: true }).click();
+    await expect(page.getByLabel("Plant name", { exact: true })).toHaveValue(
+        "New solar park",
+    );
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
     await page
-        .getByRole("button", { name: "Request region", exact: true })
+        .getByRole("button", { name: "Submit plant for approval" })
         .click();
     await expect(
         page.getByRole("heading", { name: "New solar park" }),
     ).toBeVisible();
-    await page
-        .getByRole("button", { name: "Solar plants", exact: true })
-        .click();
     await expect(
-        page.getByRole("button", { name: "Add a plant" }),
-    ).toBeDisabled();
-});
-test("plant creation preserves capacities and opens tomorrow across DST", async ({
-    page,
-}) => {
-    await page.clock.setFixedTime(new Date("2026-03-28T22:30:00Z"));
-    await mockApi(page);
-    await page.route("**/api/tenants/1/regions/", async (route) => {
-        await route.fulfill({
-            json: paged([{ ...region, timezone: "Europe/Berlin" }]),
-        });
-    });
-    await page.route("**/api/tenants/1/regions/11/plants/", async (route) => {
-        if (route.request().method() !== "POST") return route.fallback();
-        expect(route.request().postDataJSON()).toEqual({
-            name: "New array",
-            dc_capacity_mw: 130,
-            inverter_capacity_mw: 100,
-            export_limit_mw: null,
-            measurement_basis: "net_export",
-            mounting_type: "unknown",
-            surface_tilt: null,
-            surface_azimuth: null,
-        });
-        await route.fulfill({
-            json: {
-                ...plant,
-                name: "New array",
-                current_configuration: {
-                    ...plant.current_configuration,
-                    dc_capacity_mw: 130,
-                    inverter_capacity_mw: 100,
-                },
-            },
-        });
-    });
-    await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
-    await page
-        .getByRole("button", { name: "Solar plants", exact: true })
-        .click();
-    await page.getByRole("button", { name: "Add a plant" }).click();
-    await page.getByLabel("Plant name").fill("New array");
-    await page.getByLabel("DC nameplate capacity (MW)").fill("130");
-    await page.getByLabel("Inverter AC capacity (MW, optional)").fill("100");
-    await page.getByRole("button", { name: "Create plant" }).click();
-    await expect(
-        page.getByRole("heading", { name: "New array" }),
+        page.getByText(/Awaiting administrator approval/),
     ).toBeVisible();
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-29");
-    await expect(
-        page.getByRole("heading", { name: "No forecast for this day yet" }),
-    ).toBeVisible();
+    await expect(page.getByLabel("Resolution")).toHaveValue("60");
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await expect(page.getByLabel("DC nameplate capacity (MW)")).toHaveValue(
+        "130",
+    );
+    expect(writes).toBe(1);
 });
 
 test("plant configuration saves fixed angles and clears them when tracking", async ({
@@ -157,11 +161,10 @@ test("plant configuration saves fixed angles and clears them when tracking", asy
         await route.fulfill({ json: updated });
     });
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
     await page
-        .getByRole("button", { name: "Solar plants", exact: true })
+        .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByRole("button", { name: "Production", exact: true }).click();
     await page.getByRole("button", { name: "Production import" }).click();
     await page.getByLabel("Production CSV").setInputFiles({
         name: "production.csv",
@@ -171,7 +174,7 @@ test("plant configuration saves fixed angles and clears them when tracking", asy
         ),
     });
     await expect(page.getByText(/1 valid observations ready/)).toBeVisible();
-    await page.getByRole("button", { name: "Edit configuration" }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByLabel("Mounting type").selectOption("fixed");
     await page.getByLabel("Surface tilt (degrees, optional)").fill("0");
     await page.getByLabel("Surface azimuth (degrees, optional)").fill("360");
@@ -180,6 +183,7 @@ test("plant configuration saves fixed angles and clears them when tracking", asy
     await page.getByLabel("Surface azimuth (degrees, optional)").fill("180");
     await page.getByRole("button", { name: "Save configuration" }).click();
     await expect.poll(() => bodies.length).toBe(1);
+    await page.getByRole("button", { name: "Production", exact: true }).click();
     await expect(page.getByText(/1 valid observations ready/)).toHaveCount(0);
     expect(bodies[0]).toMatchObject({
         mounting_type: "fixed",
@@ -189,7 +193,7 @@ test("plant configuration saves fixed angles and clears them when tracking", asy
         inverter_capacity_mw: 4,
         export_limit_mw: null,
     });
-    await page.getByRole("button", { name: "Edit configuration" }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(
         page.getByLabel("Surface tilt (degrees, optional)"),
     ).toHaveValue("0");
@@ -219,11 +223,9 @@ test("missing plant configuration explains the selected day", async ({
         });
     });
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
     await page
-        .getByRole("button", { name: "Solar plants", exact: true })
+        .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: /East array/ }).click();
     await expect(
         page.getByRole("heading", { name: "No configuration for this day" }),
     ).toBeVisible();
@@ -240,11 +242,10 @@ test("mock contract: imports validated production with explicit energy units", a
 }) => {
     await mockApi(page);
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
     await page
-        .getByRole("button", { name: "Solar plants", exact: true })
+        .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByRole("button", { name: "Production", exact: true }).click();
     await page.getByRole("button", { name: "Production import" }).click();
     await page.getByLabel("Production CSV").setInputFiles({
         name: "production.csv",
@@ -267,11 +268,10 @@ test("CSV selection replaces validated rows and recovers after an invalid file",
 }) => {
     await mockApi(page);
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
     await page
-        .getByRole("button", { name: "Solar plants", exact: true })
+        .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByRole("button", { name: "Production", exact: true }).click();
     await page.getByRole("button", { name: "Production import" }).click();
     const input = page.getByLabel("Production CSV");
     const select = (name: string, energy: string) =>
@@ -347,12 +347,11 @@ for (const staleRead of ["resolve", "reject"] as const) {
             await mockApi(page);
             await page.goto("/");
             await page
-                .getByRole("button", { name: /Antalya solar park/ })
+                .getByRole("button", { name: /East array|Antalya solar park/ })
                 .click();
             await page
-                .getByRole("button", { name: "Solar plants", exact: true })
+                .getByRole("button", { name: "Production", exact: true })
                 .click();
-            await page.getByRole("button", { name: /East array/ }).click();
             await page
                 .getByRole("button", { name: "Production import" })
                 .click();
@@ -433,7 +432,10 @@ test("open regional and plant forecasts refresh after new data arrives", async (
         });
     });
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
     await expect(
         page.getByRole("heading", { name: "No forecast for this day yet" }),
     ).toBeVisible();
@@ -445,10 +447,7 @@ test("open regional and plant forecasts refresh after new data arrives", async (
         }),
     ).toBeVisible();
     revised = false;
-    await page
-        .getByRole("button", { name: "Solar plants", exact: true })
-        .click();
-    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByRole("button", { name: "Generation", exact: true }).click();
     await expect(
         page.getByRole("heading", { name: "No forecast for this day yet" }),
     ).toBeVisible();
@@ -524,7 +523,11 @@ test("region collection schedule validates and saves distinct local times", asyn
         await route.fulfill({ json: schedule });
     });
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Data collection" }).click();
     await expect(
         page.getByText(
@@ -605,6 +608,7 @@ test("region collection schedule validates and saves distinct local times", asyn
     await expect(
         page.getByLabel("Collection time 3 (Europe/Istanbul)"),
     ).toHaveCount(0);
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Email reminders" }).click();
     await page.getByText("Reminder details", { exact: true }).click();
     await expect(
@@ -643,7 +647,10 @@ test("regional and plant data sources identify estimated actuals and retain arch
         });
     });
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
     await page.getByLabel("Forecast date").fill("2026-03-27");
     await expect(
         page.getByText("Satellite/model estimates, not meter readings."),
@@ -655,10 +662,12 @@ test("regional and plant data sources identify estimated actuals and retain arch
     await page.getByLabel("Data source").selectOption("estimated_actuals");
     await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-27");
     await expect.poll(() => sources.at(-1)).toBe("estimated_actuals");
-    await page
-        .getByRole("button", { name: "Solar plants", exact: true })
-        .click();
-    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByRole("button", { name: "Generation", exact: true }).click();
+    await expect(page.getByLabel("Data source")).toHaveValue(
+        "estimated_actuals",
+    );
+    await page.getByLabel("Data source").selectOption("auto");
+    await page.getByLabel("Forecast date").fill("2026-03-29");
     await expect(page.getByLabel("Resolution")).toHaveValue("60");
     await expect
         .poll(() =>
@@ -689,7 +698,7 @@ test("regional and plant data sources identify estimated actuals and retain arch
         .toBe("30");
     await page.getByLabel("Data source").selectOption("forecast");
     await expect.poll(() => sources.at(-1)).toBe("forecast");
-    await page.getByRole("button", { name: "Calibration" }).click();
+    await page.getByRole("button", { name: "Production", exact: true }).click();
     await page.getByText("Journal entry rules", { exact: true }).click();
     await expect(
         page.getByText(/Archived estimated actuals unlock entry/i),
@@ -722,7 +731,10 @@ test("forecast crops edge zeros, retains gaps and downloads the full safe CSV", 
         }),
     );
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
     await page.getByText("View interval data (3 intervals)").click();
     const table = page.getByRole("table");
     await expect(table.getByRole("row")).toHaveCount(4);
@@ -793,14 +805,10 @@ test("journal retains unmeasured reference slots and internal missing comparison
         }),
     );
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
     await page
-        .getByRole("button", { name: "Solar plants", exact: true })
+        .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: /East array/ }).click();
-    await page
-        .getByRole("button", { name: "Calibration", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Production", exact: true }).click();
     await expect(page.getByRole("table").getByRole("row")).toHaveCount(4);
     const missing = page.getByRole("spinbutton", {
         name: "Production 2026-01-01T08:00:00+03:00",
@@ -863,7 +871,10 @@ test("all-zero forecasts remain visible as measured zero values", async ({
         }),
     );
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
     await page.getByText("View interval data (3 intervals)").click();
     await expect(
         page.getByRole("table").getByRole("cell", { name: "0", exact: true }),
@@ -876,9 +887,13 @@ test("mock contract: saves cached forecast reminders without provider queries", 
 }) => {
     await mockApi(page);
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Email reminders" }).click();
-    await page.getByLabel("Enable forecast emails for this region").check();
+    await page.getByLabel("Enable forecast emails for this plant").check();
     await page.getByLabel("Delivery times").fill("08:00, 17:30");
     const outgoing = page.waitForRequest(
         (request) =>
@@ -1025,7 +1040,10 @@ test("mock contract: follows tenant pagination and keeps missing intervals visib
         path: testInfo.outputPath("overview-desktop.png"),
         fullPage: true,
     });
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
     await expect(page.getByRole("status")).toContainText("Partial coverage");
     await page.getByText("Source & quality", { exact: true }).click();
     await expect(
@@ -1042,14 +1060,10 @@ test("mock contract: follows tenant pagination and keeps missing intervals visib
 });
 async function openJournal(page: Page) {
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
     await page
-        .getByRole("button", { name: "Solar plants", exact: true })
+        .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: /East array/ }).click();
-    await page
-        .getByRole("button", { name: "Calibration", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Production", exact: true }).click();
     await expect(
         page.getByRole("heading", { name: "Production journal" }),
     ).toBeVisible();
@@ -1086,11 +1100,11 @@ test("performance hides stale CSV while a selected range is loading", async ({
         });
     });
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
     await page
-        .getByRole("button", { name: "Solar plants", exact: true })
+        .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByRole("button", { name: "Production", exact: true }).click();
+    await page.getByRole("button", { name: "Comparison", exact: true }).click();
     const performance = page.locator("section").filter({
         has: page.getByRole("heading", {
             name: "Production comparison",
@@ -1173,11 +1187,11 @@ test("forecast performance shows replay metrics, missing days and selected range
         });
     });
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
     await page
-        .getByRole("button", { name: "Solar plants", exact: true })
+        .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByRole("button", { name: "Production", exact: true }).click();
+    await page.getByRole("button", { name: "Comparison", exact: true }).click();
     await expect(
         page.getByRole("heading", { name: "Production comparison" }),
     ).toBeVisible();
@@ -1270,6 +1284,9 @@ test("calibration detail explains support, rejection and incumbent comparison", 
         route.fulfill({ json: run }),
     );
     await openJournal(page);
+    await page
+        .getByRole("button", { name: "Calibration", exact: true })
+        .click();
     await page.getByRole("button", { name: "View details" }).click();
     await expect(
         page.getByText(
@@ -1428,12 +1445,6 @@ test("production journal saves missing readings, preserves dates and shows archi
         });
     });
     await openJournal(page);
-    await page
-        .getByRole("button", { name: "View details", exact: true })
-        .click();
-    await expect(
-        page.getByRole("heading", { name: "Calibration #40", exact: true }),
-    ).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Request calibration" }),
     ).toHaveCount(0);
@@ -1452,12 +1463,6 @@ test("production journal saves missing readings, preserves dates and shows archi
         page.getByRole("cell", { name: "0.25 MWh", exact: true }),
     ).toBeVisible();
     expect(observations).toHaveLength(1);
-    await expect(
-        page.getByRole("cell", { name: "#41", exact: true }),
-    ).toBeVisible();
-    await expect(
-        page.getByRole("heading", { name: "Calibration #40", exact: true }),
-    ).toBeVisible();
     await page.getByLabel("Day", { exact: true }).fill("2026-01-06");
     await expect(
         page.getByLabel("Production 2026-01-06T09:00:00Z"),
@@ -1484,6 +1489,20 @@ test("production journal saves missing readings, preserves dates and shows archi
     await page.getByLabel("Meter interval").selectOption("60");
     await expect(
         page.getByRole("cell", { name: "0.25 MWh", exact: true }),
+    ).toBeVisible();
+    await page
+        .getByRole("button", { name: "Calibration", exact: true })
+        .click();
+    await expect(
+        page.getByRole("cell", { name: "#41", exact: true }),
+    ).toBeVisible();
+    await page
+        .getByRole("row")
+        .filter({ has: page.getByRole("cell", { name: "#40", exact: true }) })
+        .getByRole("button", { name: "View details" })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "Calibration #40", exact: true }),
     ).toBeVisible();
 });
 
@@ -1641,14 +1660,18 @@ for (const source of ["forecast", "estimated_actuals"] as const) {
             });
         });
         await page.goto("/");
-        await page.getByRole("button", { name: /Antalya solar park/ }).click();
+        await page
+            .getByRole("button", { name: /East array|Antalya solar park/ })
+            .click();
+        await page
+            .getByRole("button", { name: "Irradiance", exact: true })
+            .click();
         await expect(
-            page.getByRole("heading", { name: "Regional irradiance" }),
+            page.getByRole("heading", { name: "Irradiance" }),
         ).toBeVisible();
         await page
-            .getByRole("button", { name: "Solar plants", exact: true })
+            .getByRole("button", { name: "Generation", exact: true })
             .click();
-        await page.getByRole("button", { name: /East array/ }).click();
         await page.getByLabel("Data source").selectOption(source);
         await page
             .getByLabel("Forecast date")
@@ -1679,152 +1702,132 @@ for (const source of ["forecast", "estimated_actuals"] as const) {
     });
 }
 
-for (const kind of ["region", "plant"] as const) {
-    test(`recycle bin confirms deletion and restores a ${kind} with associated data`, async ({
-        page,
-    }) => {
-        await mockApi(page);
-        let deleted = false;
-        const entity = kind === "region" ? region : plant;
-        const entityPath = `/api/tenants/1/regions/11/${kind === "plant" ? "plants/21/" : ""}`;
-        await page.route("**/api/tenants/1/**", async (route) => {
-            const path = new URL(route.request().url()).pathname;
-            if (path === entityPath && route.request().method() === "DELETE") {
-                expect(route.request().headers()["x-csrftoken"]).toBe(
-                    "signed-token",
-                );
-                deleted = true;
-                await route.fulfill({ status: 204 });
-            } else if (path === `${entityPath}restore/`) {
-                expect(route.request().method()).toBe("POST");
-                expect(route.request().headers()["x-csrftoken"]).toBe(
-                    "signed-token",
-                );
-                expect(route.request().postDataJSON()).toEqual({});
-                deleted = false;
-                await route.fulfill({ json: entity });
-            } else if (
-                path === "/api/tenants/1/regions/" &&
-                route.request().method() === "GET"
-            ) {
-                await route.fulfill({
-                    json: paged(deleted && kind === "region" ? [] : [region]),
-                });
-            } else if (
-                path === "/api/tenants/1/regions/11/plants/" &&
-                route.request().method() === "GET"
-            ) {
-                await route.fulfill({
-                    json: paged(deleted && kind === "plant" ? [] : [plant]),
-                });
-            } else if (path.includes("/trash/")) {
-                const ownList = path.endsWith(`/trash/${kind}s/`);
-                await route.fulfill({
-                    json: paged(
-                        deleted && ownList
-                            ? [
-                                  {
-                                      id: entity.id,
-                                      name: entity.name,
-                                      deleted_at: "2026-11-10T12:00:00Z",
-                                      purge_after: "2026-12-10T12:00:00Z",
-                                      can_restore: true,
-                                      ...(kind === "plant"
-                                          ? {
-                                                region_id: 11,
-                                                region_name: region.name,
-                                                parent_deleted: false,
-                                            }
-                                          : {}),
-                                  },
-                              ]
-                            : [],
-                    ),
-                });
-            } else await route.fallback();
-        });
-        await page.goto("/");
-        await page.getByRole("button", { name: /Antalya solar park/ }).click();
-        if (kind === "plant") {
-            await page
-                .getByRole("button", { name: "Solar plants", exact: true })
-                .click();
-            await page.getByRole("button", { name: /East array/ }).click();
-            await page.getByText("Plant actions", { exact: true }).click();
-        }
-        await page
-            .getByRole("button", { name: `Delete ${kind}`, exact: true })
-            .click();
-        const confirmation = page.getByRole("region", {
-            name: `Delete ${kind} confirmation`,
-        });
-        await expect(confirmation).toContainText("30 days");
-        await expect(confirmation).toContainText("permanently deleted");
-        await confirmation
-            .getByRole("button", { name: "Cancel", exact: true })
-            .click();
-        expect(deleted).toBe(false);
-        await page
-            .getByRole("button", { name: `Delete ${kind}`, exact: true })
-            .click();
-        await page
-            .getByRole("button", {
-                name: `Move ${kind} to recycle bin`,
-                exact: true,
-            })
-            .click();
-        await expect(
-            page.getByRole("button", { name: new RegExp(entity.name) }),
-        ).toHaveCount(0);
-        await page
-            .getByRole("button", { name: "Recycle bin", exact: true })
-            .click();
-        await expect(
-            page.getByRole("heading", { name: "Recycle bin", exact: true }),
-        ).toBeVisible();
-        const row = page.getByRole("listitem").filter({
-            has: page.getByRole("button", {
-                name: `Restore ${entity.name}`,
-                exact: true,
-            }),
-        });
-        await expect(
-            row.locator('time[datetime="2026-12-10T12:00:00Z"]'),
-        ).toBeVisible();
-        await row
-            .getByRole("button", {
-                name: `Restore ${entity.name}`,
-                exact: true,
-            })
-            .click();
-        await expect(
-            page.getByText(`${entity.name} restored. Find it in Overview.`, {
-                exact: true,
-            }),
-        ).toBeVisible();
-        await expect(
-            page.getByRole("button", {
-                name: `Restore ${entity.name}`,
-                exact: true,
-            }),
-        ).toHaveCount(0);
-        await page
-            .getByRole("button", { name: "Overview", exact: true })
-            .click();
-        await page.getByRole("button", { name: /Antalya solar park/ }).click();
-        if (kind === "plant") {
-            await page
-                .getByRole("button", { name: "Solar plants", exact: true })
-                .click();
-            await expect(
-                page.getByRole("button", { name: /East array/ }),
-            ).toBeVisible();
-        } else
-            await expect(
-                page.getByRole("heading", { name: region.name, exact: true }),
-            ).toBeVisible();
+test("recycle bin confirms deletion and restores a plant site with associated data", async ({
+    page,
+}) => {
+    await mockApi(page);
+    let deleted = false;
+    const entity = region;
+    const entityPath = "/api/tenants/1/regions/11/";
+    await page.route("**/api/tenants/1/**", async (route) => {
+        const path = new URL(route.request().url()).pathname;
+        if (path === entityPath && route.request().method() === "DELETE") {
+            expect(route.request().headers()["x-csrftoken"]).toBe(
+                "signed-token",
+            );
+            deleted = true;
+            await route.fulfill({ status: 204 });
+        } else if (path === `${entityPath}restore/`) {
+            expect(route.request().method()).toBe("POST");
+            expect(route.request().headers()["x-csrftoken"]).toBe(
+                "signed-token",
+            );
+            expect(route.request().postDataJSON()).toEqual({});
+            deleted = false;
+            await route.fulfill({ json: entity });
+        } else if (
+            path === "/api/tenants/1/sites/" &&
+            route.request().method() === "GET"
+        ) {
+            await route.fulfill({
+                json: paged(deleted ? [] : [{ ...region, plant }]),
+            });
+        } else if (
+            path === "/api/tenants/1/regions/11/plants/" &&
+            route.request().method() === "GET"
+        ) {
+            await route.fulfill({
+                json: paged([plant]),
+            });
+        } else if (path.includes("/trash/")) {
+            const ownList = path.endsWith("/trash/regions/");
+            await route.fulfill({
+                json: paged(
+                    deleted && ownList
+                        ? [
+                              {
+                                  id: entity.id,
+                                  name: entity.name,
+                                  deleted_at: "2026-11-10T12:00:00Z",
+                                  purge_after: "2026-12-10T12:00:00Z",
+                                  can_restore: true,
+                              },
+                          ]
+                        : [],
+                ),
+            });
+        } else await route.fallback();
     });
-}
+    await page.goto("/");
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Delete plant", exact: true })
+        .click();
+    const confirmation = page.getByRole("region", {
+        name: "Delete plant confirmation",
+    });
+    await expect(confirmation).toContainText("30 days");
+    await expect(confirmation).toContainText("permanently deleted");
+    await confirmation
+        .getByRole("button", { name: "Cancel", exact: true })
+        .click();
+    expect(deleted).toBe(false);
+    await page
+        .getByRole("button", { name: "Delete plant", exact: true })
+        .click();
+    await page
+        .getByRole("button", {
+            name: "Move plant to recycle bin",
+            exact: true,
+        })
+        .click();
+    await expect(
+        page.getByRole("button", { name: new RegExp(entity.name) }),
+    ).toHaveCount(0);
+    await page
+        .getByRole("button", { name: "Recycle bin", exact: true })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "Recycle bin", exact: true }),
+    ).toBeVisible();
+    const row = page.getByRole("listitem").filter({
+        has: page.getByRole("button", {
+            name: `Restore ${entity.name}`,
+            exact: true,
+        }),
+    });
+    await expect(
+        row.locator('time[datetime="2026-12-10T12:00:00Z"]'),
+    ).toBeVisible();
+    await row
+        .getByRole("button", {
+            name: `Restore ${entity.name}`,
+            exact: true,
+        })
+        .click();
+    await expect(
+        page.getByText(`${entity.name} restored. Find it in Plants.`, {
+            exact: true,
+        }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", {
+            name: `Restore ${entity.name}`,
+            exact: true,
+        }),
+    ).toHaveCount(0);
+    await page.getByRole("button", { name: "Overview", exact: true }).click();
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await expect(
+        page.getByRole("heading", { name: plant.name, exact: true }),
+    ).toBeVisible();
+});
 
 test("recycle bin disables expired records and asks to restore a parent region first", async ({
     page,
@@ -1880,7 +1883,7 @@ test("recycle bin disables expired records and asks to restore a parent region f
         }),
     ).toBeDisabled();
     await expect(
-        page.getByText("Restore its region first.", { exact: true }),
+        page.getByText("Restore its location first.", { exact: true }),
     ).toBeVisible();
     await expect(
         page.getByRole("button", { name: /permanently delete|purge/i }),
@@ -1975,7 +1978,7 @@ test("recycle bin ignores a prior workspace response and restores only in the se
         .click();
     await expect(
         page.getByText(
-            "Second workspace deleted region restored. Find it in Overview.",
+            "Second workspace deleted region restored. Find it in Plants.",
             { exact: true },
         ),
     ).toBeVisible();

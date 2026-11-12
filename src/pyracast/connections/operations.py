@@ -9,6 +9,7 @@ from django.utils import timezone
 from pyracast.accounts.operations import require_admin
 from pyracast.connections.contracts import ProviderAdapter, ProviderFailure
 from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.connections.secrets import validate_secret_reference
 from pyracast.forecasts.budget import remaining_forecast_requests
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.regions.models import AuditEvent, Region
@@ -40,8 +41,7 @@ def create_account(
     identity = external_account_id.strip().casefold()
     if provider not in {"fixture", "solcast"} or not identity:
         raise ValidationError("Invalid provider account identity.")
-    if not secret_reference.startswith("env:") or not secret_reference[4:].isidentifier():
-        raise ValidationError("An environment secret reference is required.")
+    validate_secret_reference(secret_reference)
     if daily_quota < 1 or daily_quota > 10:
         raise ValidationError("Account quota must be between 1 and 10.")
     authorization_reference = authorization_reference.strip()
@@ -73,8 +73,7 @@ def create_account(
 
 def rotate_secret(actor: User, account_id: int, secret_reference: str) -> None:
     require_admin(actor)
-    if not secret_reference.startswith("env:") or not secret_reference[4:].isidentifier():
-        raise ValidationError("An environment secret reference is required.")
+    validate_secret_reference(secret_reference)
     with transaction.atomic():
         account = ProviderAccount.objects.select_for_update().get(pk=account_id)
         account.secret_reference = secret_reference

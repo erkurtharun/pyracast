@@ -37,14 +37,10 @@ test("journal distinguishes repeated daylight-saving hours and compacts ordinary
     });
 
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
     await page
-        .getByRole("button", { name: "Solar plants", exact: true })
+        .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: /East array/ }).click();
-    await page
-        .getByRole("button", { name: "Calibration", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Production", exact: true }).click();
 
     const table = page.getByRole("table", {
         name: "Meter entries \u00b7 60 minutes",

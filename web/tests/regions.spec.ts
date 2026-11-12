@@ -1,30 +1,40 @@
 import { test, expect } from "./support/test";
-import { mockApi, paged, region } from "./support/workspace";
+import { mockApi, paged, plant, region } from "./support/workspace";
 import AxeBuilder from "@axe-core/playwright";
 
-test("renames a region without changing its location", async ({ page }) => {
+test("renames a plant without changing its location", async ({ page }) => {
     await mockApi(page);
-    let current = region;
-    await page.route("**/api/tenants/1/regions/", async (route) => {
-        await route.fulfill({ json: paged([current]) });
-    });
-    await page.route("**/api/tenants/1/regions/11/", async (route) => {
-        expect(route.request().method()).toBe("PATCH");
-        expect(route.request().headers()["x-csrftoken"]).toBe("signed-token");
-        expect(route.request().postDataJSON()).toEqual({ name: "New name" });
-        current = { ...region, name: "New name" };
-        await route.fulfill({ json: current });
-    });
-    await page.route("**/location-change-requests/", async (route) => {
-        await route.fulfill({ json: paged([]) });
-    });
+    let current = plant;
+    await page.route("**/api/tenants/1/sites/", (route) =>
+        route.fulfill({ json: paged([{ ...region, plant: current }]) }),
+    );
+    await page.route(
+        "**/api/tenants/1/regions/11/plants/21/",
+        async (route) => {
+            expect(route.request().method()).toBe("PUT");
+            expect(route.request().headers()["x-csrftoken"]).toBe(
+                "signed-token",
+            );
+            expect(route.request().postDataJSON()).toMatchObject({
+                name: "New name",
+                dc_capacity_mw: 5,
+            });
+            current = { ...plant, name: "New name" };
+            await route.fulfill({ json: current });
+        },
+    );
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
-    await page.getByRole("button", { name: "Edit region" }).click();
-    await page.getByLabel("Region name").fill("New name");
-    await page.getByRole("button", { name: "Save name" }).click();
+    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByLabel("Plant name").fill("New name");
+    await page.getByRole("button", { name: "Save configuration" }).click();
     await expect(page.getByRole("heading", { name: "New name" })).toBeVisible();
-    await page.getByRole("button", { name: "All regions" }).click();
+    await expect(
+        page.getByText("36.9\u00b0, 30.7\u00b0 \u00b7 Europe/Istanbul", {
+            exact: true,
+        }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "All plants" }).click();
     await expect(page.getByRole("button", { name: /New name/ })).toBeVisible();
 });
 
@@ -76,8 +86,12 @@ test("requests a location change and preserves the current location", async ({
         });
     });
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
-    await page.getByRole("button", { name: "Edit region" }).click();
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Location", exact: true }).click();
     await page.getByText("Request location change", { exact: true }).click();
     await page.getByLabel("Latitude (°)").fill("37");
     await page.getByLabel("Longitude (°)").fill("31");

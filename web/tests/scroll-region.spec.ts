@@ -28,7 +28,10 @@ async function openForecast(page: Page, width: number) {
         }),
     );
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
     return page.locator("details.interval-details");
 }
 

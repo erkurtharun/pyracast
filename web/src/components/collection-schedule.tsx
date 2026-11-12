@@ -164,7 +164,7 @@ function ScheduleEditor({
                     </label>
                     {region.status !== "approved" && (
                         <Notice>
-                            Data collection can be enabled once this region is
+                            Data collection can be enabled once this plant is
                             approved and connected.
                         </Notice>
                     )}
@@ -253,10 +253,10 @@ function ScheduleEditor({
                         UTC day: {data.quota_utc_day}; resets at 00:00 UTC (
                         {nextReset} in {data.timezone}). Up to{" "}
                         {data.max_forecast_times} forecast times can be set per
-                        region. This account is shared across its regions.
-                        Tracked usage includes validation and retries, but
-                        excludes requests made outside Pyracast, so remaining
-                        requests are not guaranteed.
+                        plant. The daily request budget is shared across
+                        connected plants. Tracked usage includes validation and
+                        retries, but excludes requests made outside Pyracast, so
+                        remaining requests are not guaranteed.
                     </p>
                     {data.requests_by_outcome && (
                         <p className="fine">

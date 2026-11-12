@@ -53,7 +53,7 @@ class ScopedView[ModelT: Model](GenericAPIView[ModelT]):
         )
         return (
             Plant.objects.filter(region=region, deleted_at__isnull=True)
-            .select_related("current_configuration")
+            .select_related("current_configuration", "submission")
             .order_by("id")
         )
 

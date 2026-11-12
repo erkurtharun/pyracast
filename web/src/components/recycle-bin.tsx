@@ -8,7 +8,6 @@ type DeletedRegion = components["schemas"]["TrashedRegionOutput"];
 type DeletedPlant = components["schemas"]["TrashedPlantOutput"];
 
 export function MoveToRecycleBin({
-    kind,
     name,
     url,
     token,
@@ -29,19 +28,15 @@ export function MoveToRecycleBin({
                 className="button secondary"
                 onClick={() => setConfirming(true)}
             >
-                Delete {kind}
+                Delete plant
             </button>
         );
     return (
-        <section className="notice" aria-label={`Delete ${kind} confirmation`}>
+        <section className="notice" aria-label="Delete plant confirmation">
             <h2>Move {name} to the recycle bin?</h2>
             <p>
-                {kind === "region"
-                    ? "This region and its plants will leave your active workspace."
-                    : "This plant will leave your active workspace."}{" "}
-                Restore it and its saved estimates, production readings and
-                calibration history within 30 days. After that, it and its data
-                are permanently deleted.
+                Collection will stop. You can restore this plant and its saved
+                data for 30 days. After that, they are permanently deleted.
             </p>
             {error && <Notice error>{error}</Notice>}
             <div className="button-group">
@@ -70,7 +65,7 @@ export function MoveToRecycleBin({
                         }
                     }}
                 >
-                    {working ? "Moving…" : `Move ${kind} to recycle bin`}
+                    {working ? "Moving…" : "Move plant to recycle bin"}
                 </button>
             </div>
         </section>
@@ -120,7 +115,7 @@ export function RecycleBin({
             await request(url, "POST", {}, token);
             setRestored((current) => [...current, key]);
             setVersion((current) => current + 1);
-            setMessage(`${row.name} restored. Find it in Overview.`);
+            setMessage(`${row.name} restored. Find it in Plants.`);
         } catch (failure) {
             setError((failure as Error).message);
         } finally {
@@ -132,17 +127,9 @@ export function RecycleBin({
             <div className="page-heading">
                 <div>
                     <h1>Recycle bin</h1>
-                    <p>
-                        Restore deleted regions and plants within 30 days. After
-                        that, they are permanently deleted.
-                    </p>
+                    <p>Deleted plants and their data are kept for 30 days.</p>
                 </div>
             </div>
-            <p>
-                Restore a region before restoring any plant inside it. Plants
-                deleted separately stay in the recycle bin when their region is
-                restored.
-            </p>
             {error && <Notice error>{error}</Notice>}
             {message && <Notice>{message}</Notice>}
             {(
@@ -150,120 +137,143 @@ export function RecycleBin({
                     ["region", regions],
                     ["plant", plants],
                 ] as const
-            ).map(([kind, resource]) => (
-                <section className="panel" key={kind}>
-                    <h2>
-                        {kind === "region"
-                            ? "Deleted regions"
-                            : "Deleted plants"}
-                    </h2>
-                    {resource.loading ? (
-                        <p role="status">Loading deleted {kind}s…</p>
-                    ) : resource.error ? (
-                        <Notice error>{resource.error}</Notice>
-                    ) : resource.data?.results.filter(
-                          (row) => !restored.includes(`${kind}-${row.id}`),
-                      ).length ? (
-                        <ul
-                            className="trash-list"
-                            aria-label={`Deleted ${kind}s`}
-                        >
-                            {resource.data.results
-                                .filter(
-                                    (row) =>
-                                        !restored.includes(`${kind}-${row.id}`),
-                                )
-                                .map((row) => {
-                                    const parentDeleted =
-                                        "parent_deleted" in row &&
-                                        row.parent_deleted;
-                                    return (
-                                        <li className="trash-item" key={row.id}>
-                                            <div>
-                                                <strong>{row.name}</strong>
-                                                {kind === "plant" && (
-                                                    <p className="fine">
-                                                        Region:{" "}
-                                                        {
-                                                            (
-                                                                row as DeletedPlant
-                                                            ).region_name
+            )
+                .filter(
+                    ([kind, resource]) =>
+                        kind === "region" ||
+                        resource.loading ||
+                        resource.error ||
+                        resource.data?.results.some(
+                            (row) => !restored.includes(`${kind}-${row.id}`),
+                        ),
+                )
+                .map(([kind, resource]) => (
+                    <section className="panel" key={kind}>
+                        <h2>
+                            {kind === "region"
+                                ? "Deleted plants"
+                                : "Earlier plant records"}
+                        </h2>
+                        {resource.loading ? (
+                            <p role="status">Loading deleted plants…</p>
+                        ) : resource.error ? (
+                            <Notice error>{resource.error}</Notice>
+                        ) : resource.data?.results.filter(
+                              (row) => !restored.includes(`${kind}-${row.id}`),
+                          ).length ? (
+                            <ul
+                                className="trash-list"
+                                aria-label={
+                                    kind === "region"
+                                        ? "Deleted plants"
+                                        : "Earlier plant records"
+                                }
+                            >
+                                {resource.data.results
+                                    .filter(
+                                        (row) =>
+                                            !restored.includes(
+                                                `${kind}-${row.id}`,
+                                            ),
+                                    )
+                                    .map((row) => {
+                                        const parentDeleted =
+                                            "parent_deleted" in row &&
+                                            row.parent_deleted;
+                                        return (
+                                            <li
+                                                className="trash-item"
+                                                key={row.id}
+                                            >
+                                                <div>
+                                                    <strong>{row.name}</strong>
+                                                    {kind === "plant" && (
+                                                        <p className="fine">
+                                                            Location:{" "}
+                                                            {
+                                                                (
+                                                                    row as DeletedPlant
+                                                                ).region_name
+                                                            }
+                                                        </p>
+                                                    )}
+                                                    <dl className="trash-meta">
+                                                        <div>
+                                                            <dt>Deleted</dt>
+                                                            <dd>
+                                                                <time
+                                                                    dateTime={
+                                                                        row.deleted_at
+                                                                    }
+                                                                >
+                                                                    {date(
+                                                                        row.deleted_at,
+                                                                    )}
+                                                                </time>
+                                                            </dd>
+                                                        </div>
+                                                        <div>
+                                                            <dt>
+                                                                Permanent
+                                                                deletion
+                                                            </dt>
+                                                            <dd>
+                                                                <time
+                                                                    dateTime={
+                                                                        row.purge_after
+                                                                    }
+                                                                >
+                                                                    {date(
+                                                                        row.purge_after,
+                                                                    )}
+                                                                </time>
+                                                            </dd>
+                                                        </div>
+                                                    </dl>
+                                                </div>
+                                                <div>
+                                                    <button
+                                                        className="button secondary"
+                                                        disabled={
+                                                            !!working ||
+                                                            !row.can_restore ||
+                                                            !!parentDeleted
                                                         }
-                                                    </p>
-                                                )}
-                                                <dl className="trash-meta">
-                                                    <div>
-                                                        <dt>Deleted</dt>
-                                                        <dd>
-                                                            <time
-                                                                dateTime={
-                                                                    row.deleted_at
-                                                                }
-                                                            >
-                                                                {date(
-                                                                    row.deleted_at,
-                                                                )}
-                                                            </time>
-                                                        </dd>
-                                                    </div>
-                                                    <div>
-                                                        <dt>
-                                                            Permanent deletion
-                                                        </dt>
-                                                        <dd>
-                                                            <time
-                                                                dateTime={
-                                                                    row.purge_after
-                                                                }
-                                                            >
-                                                                {date(
-                                                                    row.purge_after,
-                                                                )}
-                                                            </time>
-                                                        </dd>
-                                                    </div>
-                                                </dl>
-                                            </div>
-                                            <div>
-                                                <button
-                                                    className="button secondary"
-                                                    disabled={
-                                                        !!working ||
-                                                        !row.can_restore ||
-                                                        !!parentDeleted
-                                                    }
-                                                    onClick={() =>
-                                                        void restore(kind, row)
-                                                    }
-                                                >
-                                                    {working ===
-                                                    `${kind}-${row.id}`
-                                                        ? "Restoring?"
-                                                        : `Restore ${row.name}`}
-                                                </button>
-                                                {parentDeleted ? (
-                                                    <p className="fine">
-                                                        Restore its region
-                                                        first.
-                                                    </p>
-                                                ) : !row.can_restore ? (
-                                                    <p className="fine">
-                                                        The 30-day restore
-                                                        period has ended.
-                                                    </p>
-                                                ) : null}
-                                            </div>
-                                        </li>
-                                    );
-                                })}
-                        </ul>
-                    ) : (
-                        <Empty title={`No deleted ${kind}s`}>
-                            Nothing to restore.
-                        </Empty>
-                    )}
-                </section>
-            ))}
+                                                        onClick={() =>
+                                                            void restore(
+                                                                kind,
+                                                                row,
+                                                            )
+                                                        }
+                                                    >
+                                                        {working ===
+                                                        `${kind}-${row.id}`
+                                                            ? "Restoring…"
+                                                            : `Restore ${row.name}`}
+                                                    </button>
+                                                    {parentDeleted ? (
+                                                        <p className="fine">
+                                                            Restore its location
+                                                            first.
+                                                        </p>
+                                                    ) : !row.can_restore ? (
+                                                        <p className="fine">
+                                                            The 30-day restore
+                                                            period has ended.
+                                                        </p>
+                                                    ) : null}
+                                                </div>
+                                            </li>
+                                        );
+                                    })}
+                            </ul>
+                        ) : (
+                            <Empty title="No deleted plants">
+                                Nothing to restore.
+                            </Empty>
+                        )}
+                    </section>
+                ))}
         </>
     );
 }

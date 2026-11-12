@@ -1,0 +1,87 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+{% block extrastyle %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'pyracast/admin-setup.css' %}">
+{% endblock %}
+{% block breadcrumbs %}
+  <div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Home</a> ›
+    <a href="{% url 'admin:regions_region_changelist' %}">Plant reviews</a> › {{ region.name }}
+  </div>
+{% endblock %}
+{% block content %}
+  <div class="provider-setup">
+    <p class="setup-lead">Review the customer's plant, save its private reference connection, then validate and approve it. Provider details remain internal.</p>
+    <section class="setup-section" aria-labelledby="customer-title">
+      <h2 id="customer-title">1. Customer and plant</h2>
+      <dl class="setup-facts">
+        <div><dt>Company</dt><dd>{{ region.tenant.name }}</dd></div>
+        <div><dt>Plant location</dt><dd>{{ region.name }} · {{ region.latitude }}°, {{ region.longitude }}°</dd></div>
+        <div><dt>Local timezone</dt><dd>{{ region.timezone }}</dd></div>
+        <div><dt>Review status</dt><dd>{{ region.status|capfirst }} · location revision {{ region.revision }}</dd></div>
+      </dl>
+      {% for submission in submissions %}
+        <h3>{{ submission.plant.name }}</h3>
+        <dl class="setup-facts">
+          <div><dt>DC nameplate</dt><dd>{{ submission.dc_capacity_mw }} MW</dd></div>
+          <div><dt>Inverter AC capacity</dt><dd>{{ submission.inverter_capacity_mw|default_if_none:"Unknown" }}{% if submission.inverter_capacity_mw != None %} MW{% endif %}</dd></div>
+          <div><dt>Grid export limit</dt><dd>{{ submission.export_limit_mw|default_if_none:"Unknown" }}{% if submission.export_limit_mw != None %} MW{% endif %}</dd></div>
+          <div><dt>Measurement point</dt><dd>{{ submission.measurement_basis }}</dd></div>
+          <div><dt>Mounting</dt><dd>{{ submission.mounting_type|capfirst }}</dd></div>
+          <div><dt>Fixed-array tilt / azimuth</dt><dd>{{ submission.surface_tilt|default_if_none:"Unknown" }}° / {{ submission.surface_azimuth|default_if_none:"Unknown" }}°</dd></div>
+          <div><dt>Submitted by</dt><dd>{{ submission.submitted_by.username }} · {{ submission.created_at }}</dd></div>
+        </dl>
+      {% empty %}
+        {% for plant in plants %}
+          <p>{{ plant.name }} — no pending technical submission. Review the saved plant configuration before approval.</p>
+        {% empty %}
+          <p>No plant has been submitted for this location.</p>
+        {% endfor %}
+      {% endfor %}
+    </section>
+    <section class="setup-section" aria-labelledby="provider-title">
+      <h2 id="provider-title">2. Private provider setup</h2>
+      {% if binding %}
+        <dl class="setup-facts setup-current">
+          <div><dt>Account</dt><dd>{{ binding.provider_account.provider }} · {{ binding.provider_account.external_account_id }}</dd></div>
+          <div><dt>Resource ID</dt><dd>{{ binding.site_id }}</dd></div>
+          <div><dt>Connection</dt><dd>{{ binding.health|capfirst }} · key revision {{ binding.provider_account.credential_revision }}</dd></div>
+          <div><dt>Last validation</dt><dd>{{ binding.validated_at|default_if_none:"Not validated" }}</dd></div>
+        </dl>
+        <p>Saving a replacement creates a new pending location revision and requires validation and approval again. Replacing an existing account's key affects every location using that account.</p>
+      {% endif %}
+      <form method="post" class="setup-form">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="configure">
+        {% for field in setup_form.hidden_fields %}{{ field }}{{ field.errors }}{% endfor %}
+        {{ setup_form.non_field_errors }}
+        {% for field in setup_form.visible_fields %}
+          <div class="setup-field{% if field.errors %} setup-field-error{% endif %}">
+            {{ field.label_tag }}
+            {% if field.help_text %}<p class="help" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</p>{% endif %}
+            {{ field }}
+            {{ field.errors }}
+          </div>
+        {% endfor %}
+        <button type="submit" class="default setup-button">Save private setup</button>
+      </form>
+    </section>
+    <section class="setup-section" aria-labelledby="approval-title">
+      <h2 id="approval-title">3. Validate and approve</h2>
+      <p>Validation makes an authorized provider request and uses the account's shared daily quota. Approval queues the first forecast; customers see data after it has been saved.</p>
+      {{ action_form.errors }}
+      {% if binding %}
+        <form method="post" class="setup-actions">
+          {% csrf_token %}
+          {% for field in action_form.hidden_fields %}{{ field }}{% endfor %}
+          <button type="submit" name="action" value="validate" class="setup-button">Validate connection</button>
+          <button type="submit" name="action" value="approve" class="default setup-button"{% if not can_approve %} disabled{% endif %}>Approve plant</button>
+        </form>
+        {% if not can_approve %}<p class="help">Validate the current setup and key revision to enable approval.</p>{% endif %}
+      {% else %}
+        <p>Save the private provider setup to continue.</p>
+      {% endif %}
+    </section>
+  </div>
+{% endblock %}

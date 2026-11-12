@@ -1,18 +1,21 @@
 from typing import Any, cast
 
 from django.contrib.auth import authenticate, login, logout
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.middleware.csrf import get_token, rotate_token
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
+from django.views.decorators.debug import sensitive_post_parameters
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers
 from rest_framework.authentication import SessionAuthentication
-from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated
+from rest_framework.exceptions import AuthenticationFailed, NotAuthenticated, PermissionDenied
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from pyracast.accounts.registration import register_company
 from pyracast.api.serializers import InputSerializer
 
 
@@ -42,6 +45,11 @@ class EmailInput(InputSerializer):
     email = serializers.EmailField(max_length=254)
 
 
+class RegistrationInput(LoginInput):
+    company_name = serializers.CharField(max_length=200)
+    email = serializers.EmailField(max_length=254)
+
+
 def session_response(request: Request) -> Response:
     user = request._request.user
     return Response(
@@ -53,6 +61,7 @@ def session_response(request: Request) -> Response:
 
 
 @method_decorator(never_cache, name="dispatch")
+@method_decorator(sensitive_post_parameters("password"), name="dispatch")
 class BrowserSessionView(APIView):
     authentication_classes = (BrowserSessionAuthentication,)
     permission_classes = (AllowAny,)
@@ -89,6 +98,24 @@ class SessionLoginView(BrowserSessionView):
             raise AuthenticationFailed("Invalid credentials.")
         login(request._request, user)
         return session_response(request)
+
+
+@extend_schema(auth=[])
+class SessionRegisterView(BrowserSessionView):
+    @extend_schema(request=RegistrationInput, responses={201: SessionOutput})
+    def post(self, request: Request) -> Response:
+        if request.user.is_authenticated:
+            raise PermissionDenied("Sign out before creating a new company account.")
+        data = RegistrationInput(data=request.data)
+        data.is_valid(raise_exception=True)
+        try:
+            user = register_company(**data.validated_data)
+        except DjangoValidationError as error:
+            raise serializers.ValidationError(error.message_dict) from None
+        login(request._request, user, backend="django.contrib.auth.backends.ModelBackend")
+        response = session_response(request)
+        response.status_code = 201
+        return response
 
 
 @extend_schema(auth=[])

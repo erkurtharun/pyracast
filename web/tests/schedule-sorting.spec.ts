@@ -6,9 +6,13 @@ test("reminder times are deduplicated and sent in clock order", async ({
 }) => {
     await mockApi(page);
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Email reminders" }).click();
-    await page.getByLabel("Enable forecast emails for this region").check();
+    await page.getByLabel("Enable forecast emails for this plant").check();
     await page.getByLabel("Delivery times").fill("10:00, 09:30, 09:00, 09:30");
     const outgoing = page.waitForRequest(
         (request) =>

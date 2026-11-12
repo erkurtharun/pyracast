@@ -8,7 +8,7 @@ from pyracast.regions.models import Region
 class ProviderAccount(models.Model):
     provider = models.CharField(max_length=30)
     external_account_id = models.CharField(max_length=200)
-    secret_reference = models.CharField(max_length=250)
+    secret_reference = models.CharField(max_length=2048)
     daily_quota = models.PositiveIntegerField(default=10)
     enabled = models.BooleanField(default=True)
     credential_revision = models.PositiveIntegerField(default=1)

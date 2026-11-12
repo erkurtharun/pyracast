@@ -1,6 +1,5 @@
 import json
 import math
-import os
 import re
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal, cast
@@ -10,6 +9,7 @@ import httpx
 
 from pyracast.connections.contracts import ProviderAdapter, ProviderData, ProviderFailure
 from pyracast.connections.models import SiteBinding
+from pyracast.connections.secrets import resolve_solcast_secret
 
 
 def normalize_payload(
@@ -135,12 +135,7 @@ class SolcastProvider:
     def _request(
         self, binding: SiteBinding, endpoint: Literal["forecasts", "estimated_actuals"]
     ) -> ProviderData:
-        reference = binding.provider_account.secret_reference
-        if not re.fullmatch(r"env:(?:SOLCAST_API_KEY|PYRACAST_SOLCAST_[A-Z0-9_]+)", reference):
-            raise ProviderFailure("invalid_secret_reference")
-        secret = os.environ.get(reference[4:])
-        if not secret:
-            raise ProviderFailure("missing_provider_secret")
+        secret = resolve_solcast_secret(binding.provider_account.secret_reference)
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", binding.site_id):
             raise ProviderFailure("invalid_site_id")
         try:

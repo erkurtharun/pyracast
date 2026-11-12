@@ -283,7 +283,10 @@ def test_unavailable_configuration_or_reference_does_not_schedule(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    empty = Plant.objects.create(region=system.region, name="Unconfigured")
+    region = Region.objects.create(
+        tenant=system.tenant, name="Unconfigured", latitude=41, longitude=29, timezone="UTC"
+    )
+    empty = Plant.objects.create(region=region, name="Unconfigured")
     assert prepare_calibration(empty.pk) is None
     Region.objects.filter(pk=system.region.pk).update(status="suspended")
     assert prepare_calibration(plant.pk) is None

@@ -8,6 +8,9 @@ from django.db.models import F, Q
 
 from pyracast.plants.measurement_policy import MEASUREMENT_POLICY
 
+MEASUREMENT_BASES = (("net_export", "Net export"), ("ac_generation", "AC generation"))
+MOUNTING_TYPES = (("unknown", "Unknown"), ("fixed", "Fixed"), ("tracking", "Tracking"))
+
 
 class TsTzRange(models.Func):
     function = "TSTZRANGE"
@@ -28,6 +31,36 @@ class Plant(models.Model):
     )
     next_calibration_check_at = models.DateTimeField(null=True, db_index=True)
 
+    class Meta:
+        constraints = (
+            models.UniqueConstraint(
+                fields=("region",),
+                condition=Q(deleted_at__isnull=True),
+                name="one_active_plant_per_region",
+            ),
+        )
+
+
+class PlantSubmission(models.Model):
+    plant = models.OneToOneField(Plant, on_delete=models.CASCADE, related_name="submission")
+    dc_capacity_mw = models.FloatField()
+    inverter_capacity_mw = models.FloatField(null=True)
+    export_limit_mw = models.FloatField(null=True)
+    measurement_basis = models.CharField(
+        max_length=20,
+        choices=MEASUREMENT_BASES,
+        default="net_export",
+    )
+    mounting_type = models.CharField(
+        max_length=10,
+        choices=MOUNTING_TYPES,
+        default="unknown",
+    )
+    surface_tilt = models.FloatField(null=True)
+    surface_azimuth = models.FloatField(null=True)
+    submitted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+
 
 class PlantConfiguration(models.Model):
     plant = models.ForeignKey(Plant, on_delete=models.PROTECT, related_name="configurations")
@@ -38,14 +71,14 @@ class PlantConfiguration(models.Model):
     export_limit_mw = models.FloatField(null=True)
     mounting_type = models.CharField(
         max_length=10,
-        choices=(("unknown", "Unknown"), ("fixed", "Fixed"), ("tracking", "Tracking")),
+        choices=MOUNTING_TYPES,
         default="unknown",
     )
     surface_tilt = models.FloatField(null=True)
     surface_azimuth = models.FloatField(null=True)
     measurement_basis = models.CharField(
         max_length=20,
-        choices=(("net_export", "Net export"), ("ac_generation", "AC generation")),
+        choices=MEASUREMENT_BASES,
         default="net_export",
     )
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)

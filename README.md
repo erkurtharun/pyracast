@@ -97,6 +97,7 @@ API, dispatcher and worker process.
 | `PGDATABASE`, `PGUSER` | `pyracast` |
 | `PGPASSWORD` | Your PostgreSQL password |
 | `PYRACAST_SECRET_KEY` | A long random application secret, shared between processes |
+| `PYRACAST_SECRET_KEY_FALLBACKS` | Optional space-separated previous keys during rotation; retain until stored provider credentials have been re-saved under the new primary key |
 | `PYRACAST_DEBUG` | `1` for local HTTP only |
 | `PYRACAST_HOSTS` | `localhost,127.0.0.1` |
 | `PYRACAST_CUTOFF_LOCAL` | `16:00` (local `HH:MM`) |
@@ -281,17 +282,22 @@ they are not frontend assets or routine test fixtures.
 ## Backend operations and API
 
 All tenant routes require membership in the path's tenant; request bodies cannot
-choose ownership or approval status. Create tenant memberships through trusted
-operator provisioning, for example the Django shell (`Tenant`, `Membership`, built-in
-`User`). The development fixture command provisions its own tenant membership.
+choose ownership or approval status. Company registration creates a new workspace
+and its first membership. Additional memberships use trusted operator provisioning,
+for example the Django shell (`Tenant`, `Membership`, built-in `User`). The development
+fixture command provisions its own tenant membership.
 
 | Route | Operation |
 | --- | --- |
+| `/api/session/register/` | POST company name, username, email and password; CSRF required |
 | `/api/tenants/` | GET the authenticated user's memberships; default login destination |
+| `/api/tenants/{tenant}/sites/` | GET the paginated plant portfolio; POST location and technical details atomically |
+| `/api/tenants/{tenant}/sites/{region}/` | GET the combined location, approval and plant record |
 | `/api/tenants/{tenant}/regions/` | GET paginated regions; POST region request |
-| `/api/tenants/{tenant}/regions/{region}/` | GET; PUT replacement settings, requiring reapproval |
+| `/api/tenants/{tenant}/regions/{region}/` | GET; PATCH name; DELETE the plant site to the recycle bin |
+| `/api/tenants/{tenant}/regions/{region}/location-change-requests/` | GET requests; POST a location change for administrator review |
 | `/api/tenants/{tenant}/regions/{region}/forecast/?date=YYYY-MM-DD` | Saved vintage, intervals, coverage and daily/partial energy |
-| `/api/tenants/{tenant}/regions/{region}/plants/` | GET plants; POST configuration |
+| `/api/tenants/{tenant}/regions/{region}/plants/` | GET the active plant; POST its declaration or approved configuration |
 | `/api/tenants/{tenant}/regions/{region}/plants/{plant}/` | GET; PUT a new configuration revision |
 | `.../plants/{plant}/observations/` | GET records; POST an atomic MWh/kWh batch |
 | `.../plants/{plant}/calibrations/` | GET fit summaries; POST a durable calibration request |
@@ -307,7 +313,7 @@ operator provisioning, for example the Django shell (`Tenant`, `Membership`, bui
 | `/api/platform/regions/{region}/approve/` | POST `{ "binding_id": 1 }` |
 | `/api/platform/regions/{region}/transition/` | POST rejected or suspended status |
 | `/api/schema/?format=json` | Authenticated OpenAPI document |
-| `/admin/` | MFA-protected read-only records and shared approval actions |
+| `/admin/` | MFA-protected plant review, private provider setup, validation and approval |
 
 Platform operations require an active superuser and a verified OTP session. Enroll
 the initial superuser's TOTP device through the trusted local Django shell before
@@ -316,9 +322,25 @@ that user and transfer its `config_url` to their authenticator through a private
 channel. Treat the enrollment URI as a secret. Password-only sessions cannot call
 platform operations. Sessions enforce CSRF on writes; use the CSRF cookie/header.
 
+Companies can create an account from the sign-in page, then add a plant through
+Location → Technical details → Review. Each location supports one active plant.
+The request remains visible while an administrator sets up and approves its data
+connection. The customer's workspace never requests provider credentials.
+
+In `/admin/`, open **Regions → Review and set up** for the submitted plant. Check
+the location and technical details, select an existing authorized account or add
+a new Solcast account, save the reference settings, then **Validate connection**
+and **Approve plant**. Validation makes a provider request within the existing quota;
+saving a form does not. Approval queues collection for the worker.
+
 Solcast accounts require an `authorization_reference` documenting permission to use
-that account for this service. Set `secret_reference` to an environment secret name
-such as `env:PYRACAST_SOLCAST_REFERENCE`; supply its value outside the database.
+that account for this service. The admin form accepts a write-only API key, encrypted
+in the database with a key derived from `PYRACAST_SECRET_KEY`. Keep this external
+secret with your backups. During rotation, retain the old key in
+`PYRACAST_SECRET_KEY_FALLBACKS`, re-save each stored provider key under the new primary
+key, and then remove the fallback. Alternatively, set `secret_reference` to an
+environment name such as `env:PYRACAST_SOLCAST_REFERENCE` and supply its value outside
+the database.
 Credential rotation uses the protected API or `connections.operations.rotate_secret`
 and invalidates previous validation without resetting quota. Account creation and
 rotation write atomic audit events without secret values or references. Canonical account identity remains

@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Build a multi-tenant application where customers request regions, a platform administrator links authorized Solcast accounts and approves them, and scheduled jobs publish tomorrow's irradiance and daily energy estimates. Plants belong to regions and expose electrical generation at 30-minute or hourly resolution, including capacity limits and optional calibration against metered production. The Next.js/TypeScript customer frontend lives in `web/` in this repository and runs separately from the Django API and internal admin interface.
+Build a multi-tenant application where companies submit solar plants with their locations and technical declarations, a platform administrator links authorized Solcast accounts and approves them, and scheduled jobs publish tomorrow's irradiance and daily energy estimates. Each active location belongs to one active plant and exposes electrical generation at 30-minute or hourly resolution, including capacity limits and optional calibration against metered production. The internal Region record retains location, provider approval and collection history. The Next.js/TypeScript customer frontend lives in `web/` in this repository and runs separately from the Django API and internal admin interface.
 
 Use only provider accounts authorized for this service. Solcast account creation remains an operator task outside this backend. Implement fixtures so development does not depend on credentials or live API calls.
 
@@ -32,6 +32,7 @@ Use conventional Django apps for accounts, regions, provider connections, foreca
 | CollectionJob, RequestAttempt | Scheduling, leases, quota reservations and execution history |
 | ForecastSnapshot, ForecastResult | Raw input, normalized intervals, derived output and model version |
 | Plant, PlantConfiguration | Region ownership and immutable DC/inverter/export capacity and meter-basis revisions |
+| PlantSubmission | Typed customer technical declaration before provider configuration is approved |
 | PlantIncident, IncidentRevision | Non-overlapping operating periods, remaining capacities and immutable corrections |
 | ProductionObservation | Interval energy, quality, source, configuration and recording time |
 | EpiasConnection, EpiasCollectionJob, EpiasSnapshot | Plant identity, independent collection and immutable reported-production acquisitions |
@@ -46,13 +47,29 @@ Initially each region uses a separately configured provider account. Keep the re
 
 ## Approval flow
 
-1. A tenant member submits a region; its state is `pending`.
+Company registration creates a non-staff user, a new tenant and its initial membership
+in one transaction. It never joins an existing company by name or email. Browser
+registration uses the same CSRF-protected session boundary as login, configured
+Django password validation and session rotation. Protect registration and login
+with ingress rate limits in deployment.
+
+Customers navigate a single plant portfolio. Location and technical details are
+collected in three short steps with a review before submission. A plant has one
+workspace for forecasts (generation and irradiance), production, calibration,
+outages and settings. Approval status remains separate from saved-data availability.
+Administrative provider identity and credentials never enter customer forms.
+The open portfolio and plant workspace refresh saved records every 30 seconds,
+so approval becomes visible without reloading or consuming provider quota.
+
+1. A tenant member submits a plant, coordinates, IANA timezone and technical declaration together through `sites/`; the location and plant commit atomically with state `pending`. Customer submissions never contain provider credentials. Existing locations without a plant can complete setup through the scoped plant endpoint.
 2. A platform admin records the authorized provider account and site binding. The backend validates credentials and site settings within that account's quota.
-3. One shared approval operation checks permissions and the validated configuration revision, then atomically records `approved`, an audit event and the first pending collection job.
+3. One shared approval operation checks permissions and the validated configuration revision, then atomically records `approved`, materializes the plant's immutable binding-backed configuration, records an audit event and creates the first pending collection job. A pending plant's technical declaration remains editable until approval; the approved declaration remains available afterwards while subsequent technical changes create configuration revisions.
 4. A dispatcher delivers that durable job to the worker. The worker retrieves data, calculates and publishes a result.
 5. The frontend reads saved results and their freshness. It does not call Solcast.
 
 Keep approval (`pending`, `approved`, `rejected`, `suspended`), connection health and data freshness separate. Approval does not mean a forecast is ready. Coordinate or model-setting changes create a new revision requiring validation and approval; stale jobs must not publish into the new revision.
+
+PostgreSQL permits one active plant per region and one active location per tenant, comparing latitude and longitude rounded to six decimal places. The application uses the same rounding for new coordinates. The same location in another tenant is independent. Deleted definitions and their immutable archives remain intact; restoring a definition rejects an active replacement conflict. Migrations add constraints without deleting or merging existing records and require conflicting legacy active definitions to be resolved explicitly before migration. Provider reapproval creates a new configuration revision from the current technical parameters when the binding changes, preserving prior configuration and source identities.
 
 Members can rename a region without changing its revision or approval. Location changes are reviewed requests pinned to the current revision; one pending request per region is allowed. Administrator acceptance applies a new pending revision and removes the old approval. A replacement binding must be configured, validated and approved before collection resumes. Rejection preserves the current location.
 
@@ -61,6 +78,13 @@ Members can rename a region without changing its revision or approval. Location 
 - Authenticate with maintained Django mechanisms; use secure sessions and CSRF protection for browser access unless an existing identity provider requires another supported integration. Restrict platform-admin actions and protect admin access with MFA.
 - Derive tenant access from authenticated membership. Scope list/detail/create/update operations, worker jobs and cache keys. Tenant ownership is not a trusted request field. Django admin does not provide tenant isolation automatically.
 - Store provider keys in a secret manager or authenticated encryption with keys outside the database. Accept credential changes through write-only admin inputs; redact secrets from responses, logs and audit payloads.
+  The OTP-protected administration setup page supports existing authorized accounts
+  or a new private account, followed by explicit connection validation and approval.
+  Pasted keys use Fernet authenticated encryption, with an HKDF-SHA256 key derived
+  from the externally configured Django secret and a versioned application context.
+  Environment references remain supported. Key rotation can decrypt with configured
+  secret-key fallbacks; re-save provider keys under the new primary key before
+  removing the old fallback. Back up the external keys separately from the database.
 - Reserve quota atomically by provider account and UTC day before each request, including validation and retries. Use a shared database ledger, bounded timeouts and retry backoff. Uncertain request outcomes consume budget conservatively; do not rotate accounts to evade limits.
 - Claim jobs with expiring leases and unique scheduling keys. Assume queue redelivery: persist results idempotently and recover interrupted work. Publish through a durable job/outbox record so a database commit cannot lose the collection request.
 - Members configure region-local daily forecast times, initially 16:00. Historical collection runs separately at 03:00, refreshing yesterday and recovering missed days from the available seven-day window. Request `hours=168` explicitly and archive completed intervals; each acquisition remains immutable. Historical transport failures, empty responses and incomplete previous days retry no sooner than 30 minutes later, before 09:00. Restart catch-up is allowed inside that night window; disabling collection stops new night work. Account-wide UTC quota reservations preserve the remaining scheduled forecast needs before admitting a night request. Quota exhaustion or reserved forecast budget never creates a rapid retry loop. Configuration changes apply to future forecast slots; they do not invent missed forecast acquisitions. Use unique slots, advance a nonexistent night start to the first valid half-hour before 09:00, choose the first repeated time and flag late acquisitions.

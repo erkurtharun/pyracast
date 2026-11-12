@@ -2,6 +2,63 @@ import { expect, test } from "./support/test";
 import { readFile } from "node:fs/promises";
 import { mockApi, region } from "./support/workspace";
 
+test("switching forecast views waits for data with the matching units", async ({
+    page,
+}) => {
+    await mockApi(page);
+    let release!: () => void;
+    let started!: () => void;
+    const gate = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    const observed = new Promise<void>((resolve) => {
+        started = resolve;
+    });
+    await page.route("**/plants/21/forecast/**", (route) =>
+        route.fulfill({
+            json: {
+                timezone: region.timezone,
+                freshness: "fresh",
+                source_kind: "forecast",
+                result: { complete: true, energy_mwh: 10, intervals: [] },
+            },
+        }),
+    );
+    await page.route("**/regions/11/forecast/**", async (route) => {
+        started();
+        await gate;
+        await route.fulfill({
+            json: {
+                timezone: region.timezone,
+                freshness: "fresh",
+                source_kind: "forecast",
+                result: { complete: true, energy_kwh_m2: 4, intervals: [] },
+            },
+        });
+    });
+    await page.goto("/");
+    await page.getByRole("button", { name: /East array/ }).click();
+    await expect(
+        page.getByRole("heading", { name: "Electrical generation" }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await observed;
+    try {
+        await expect(
+            page.getByRole("heading", { name: "Irradiance", exact: true }),
+        ).toHaveCount(0);
+        await expect(
+            page.getByText("Loading irradiance forecast…", { exact: true }),
+        ).toBeVisible();
+    } finally {
+        release();
+    }
+    await expect(
+        page.getByRole("heading", { name: "Irradiance", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByText("kWh/m²", { exact: true })).toBeVisible();
+});
+
 for (const width of [320, 390]) {
     test(`mixed forecast coverage remains visible at ${width}px`, async ({
         page,
@@ -53,7 +110,12 @@ for (const width of [320, 390]) {
             }),
         );
         await page.goto("/");
-        await page.getByRole("button", { name: /Antalya solar park/ }).click();
+        await page
+            .getByRole("button", { name: /East array|Antalya solar park/ })
+            .click();
+        await page
+            .getByRole("button", { name: "Irradiance", exact: true })
+            .click();
         await expect(
             page.getByText("Includes intervals from earlier forecast updates."),
         ).toBeVisible();
@@ -111,11 +173,9 @@ test("outage comparison CSV retains normal forecast source IDs", async ({
         }),
     );
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
     await page
-        .getByRole("button", { name: "Solar plants", exact: true })
+        .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: /East array/ }).click();
     const downloadPromise = page.waitForEvent("download");
     await page
         .getByRole("button", { name: "Download both scenarios CSV" })

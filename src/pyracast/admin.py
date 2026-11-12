@@ -4,12 +4,23 @@ from django.contrib import admin
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db.models import QuerySet
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse
+from django.shortcuts import get_object_or_404, redirect
+from django.template.response import TemplateResponse
+from django.urls import URLPattern, path, reverse
 from django.utils import timezone
+from django.utils.decorators import method_decorator
+from django.utils.html import format_html
+from django.utils.safestring import SafeString
+from django.views.decorators.debug import sensitive_post_parameters, sensitive_variables
 from django_otp.admin import OTPAdminSite
+from rest_framework.exceptions import ValidationError as APIValidationError
 
 from pyracast.accounts.models import Tenant
+from pyracast.admin_forms import BindingActionForm, ProviderSetupForm
+from pyracast.connections.contracts import ProviderFailure
 from pyracast.connections.models import SiteBinding
+from pyracast.connections.operations import QuotaExhausted, validate_binding
 from pyracast.forecasts.models import CollectionJob, ForecastResult, RequestAttempt
 from pyracast.plants.models import (
     CalibrationActivation,
@@ -18,8 +29,10 @@ from pyracast.plants.models import (
     PlantConfiguration,
     PlantEvent,
     PlantForecast,
+    PlantSubmission,
     ProductionObservation,
 )
+from pyracast.providers import adapter_for
 from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest
 from pyracast.regions.operations import approve_region, review_location_change, transition_region
 
@@ -59,9 +72,150 @@ class ReadOnlyAdmin(AdminBase):
 
 @admin.register(Region, site=site)
 class RegionAdmin(ReadOnlyAdmin):
-    list_display = ("id", "name", "tenant", "status", "revision")
+    list_display = ("id", "name", "tenant", "status", "revision", "review_link")
     list_filter = ("status",)
+    search_fields = ("name", "tenant__name")
+    change_form_template = "admin/regions/region/change_form.html"
     actions = ("approve", "reject", "suspend")
+
+    def get_urls(self) -> list[URLPattern]:
+        return [
+            path(
+                "<int:object_id>/setup/",
+                self.admin_site.admin_view(self.setup),
+                name="regions_region_setup",
+            ),
+            *super().get_urls(),
+        ]
+
+    @admin.display(description="Onboarding")
+    def review_link(self, obj: Region) -> SafeString:
+        return format_html(
+            '<a href="{}">Review and set up</a>',
+            reverse("admin:regions_region_setup", args=(obj.pk,)),
+        )
+
+    @method_decorator(sensitive_post_parameters("api_key", "secret_reference"))
+    @sensitive_variables()
+    def setup(self, request: HttpRequest, object_id: int) -> HttpResponse:
+        region = get_object_or_404(
+            Region.objects.select_related("tenant"), pk=object_id, deleted_at__isnull=True
+        )
+        binding = (
+            SiteBinding.objects.select_related("provider_account")
+            .filter(region=region, region_revision=region.revision)
+            .order_by("-created_at", "-pk")
+            .first()
+        )
+        setup_form = ProviderSetupForm(
+            request.POST
+            if request.method == "POST" and request.POST.get("action") == "configure"
+            else None,
+            initial={
+                "expected_revision": region.revision,
+                "expected_binding_id": binding.pk if binding else None,
+                "account_mode": "existing" if binding else "new",
+                "existing_account": (
+                    f"{binding.provider_account_id}:{binding.provider_account.credential_revision}"
+                    if binding
+                    else ""
+                ),
+                "site_id": binding.site_id if binding else "",
+                "capacity_kw": binding.capacity_kw if binding else None,
+                "dc_capacity_kw": binding.dc_capacity_kw if binding else None,
+                "power_basis": binding.power_basis if binding else "ac",
+                "installation_date": binding.installation_date if binding else None,
+                "azimuth_degrees": binding.azimuth_degrees if binding else 0,
+                "losses_percent": binding.losses_percent if binding else 0,
+                "settings_verification_reference": (
+                    binding.settings_verification_reference if binding else ""
+                ),
+            },
+        )
+        action_form = BindingActionForm(
+            request.POST
+            if request.method == "POST" and request.POST.get("action") != "configure"
+            else None,
+            initial={
+                "expected_revision": region.revision,
+                "binding_id": binding.pk if binding else None,
+                "credential_revision": binding.provider_account.credential_revision
+                if binding
+                else None,
+            },
+        )
+        if request.method == "POST":
+            action = request.POST.get("action")
+            form = setup_form if action == "configure" else action_form
+            if form.is_valid():
+                try:
+                    actor = cast(User, request.user)
+                    if action == "configure":
+                        setup_form.configure(actor, region)
+                        message = (
+                            "Private provider setup saved. Validate the connection before approval."
+                        )
+                    elif action in {"validate", "approve"}:
+                        current = action_form.current_binding(region)
+                        if action == "validate":
+                            validate_binding(
+                                actor, current.pk, adapter_for(current), timezone.now()
+                            )
+                            message = (
+                                "The current provider connection is validated. "
+                                "The plant can now be approved."
+                            )
+                        else:
+                            approve_region(actor, region.pk, current.pk, timezone.now())
+                            message = "Plant approved. The first saved forecast is being prepared."
+                    else:
+                        raise ValidationError("Choose a setup action.")
+                except QuotaExhausted:
+                    form.add_error(
+                        None, "The provider's request budget is unavailable. Try validation later."
+                    )
+                except ProviderFailure:
+                    form.add_error(
+                        None,
+                        "Connection validation failed. Check the private credentials "
+                        "and site settings.",
+                    )
+                except ObjectDoesNotExist, ValidationError, APIValidationError:
+                    form.add_error(
+                        None,
+                        "The setup could not be applied. Check the values or reload "
+                        "if the plant or account changed.",
+                    )
+                else:
+                    self.message_user(request, message)
+                    return redirect("admin:regions_region_setup", object_id=region.pk)
+        plants = Plant.objects.filter(region=region, deleted_at__isnull=True)
+        submissions = PlantSubmission.objects.filter(plant__in=plants).select_related(
+            "plant", "submitted_by"
+        )
+        return TemplateResponse(
+            request,
+            "admin/regions/region/setup.html",
+            {
+                **self.admin_site.each_context(request),
+                "title": f"Review and set up {region.name}",
+                "opts": self.model._meta,
+                "region": region,
+                "plants": plants,
+                "submissions": submissions,
+                "binding": binding,
+                "setup_form": setup_form,
+                "action_form": action_form,
+                "can_approve": bool(
+                    binding
+                    and binding.validated_at
+                    and binding.validated_credential_revision
+                    == binding.provider_account.credential_revision
+                    and binding.provider_account.enabled
+                ),
+            },
+            status=400 if request.method == "POST" else 200,
+        )
 
     @admin.action(description="Approve validated reference binding", permissions=["view"])
     def approve(self, request: HttpRequest, queryset: QuerySet[Region]) -> None:

@@ -51,7 +51,7 @@ test("journal date controls wait for the initial range before selecting a day", 
             };
         else if (path === "/api/tenants/")
             data = paged([{ id: 1, name: "Date test tenant" }]);
-        else if (path.endsWith("/regions/")) data = paged([region]);
+        else if (path.endsWith("/sites/")) data = paged([region]);
         else if (path.endsWith("/plants/")) data = paged([plant]);
         else if (path.endsWith("/calibration/automation/"))
             data = {
@@ -145,13 +145,7 @@ test("journal date controls wait for the initial range before selecting a day", 
     });
     await page.goto("/");
     await page.getByRole("button", { name: /Date test region/ }).click();
-    await page
-        .getByRole("button", { name: "Solar plants", exact: true })
-        .click();
-    await page.getByRole("button", { name: /Date test plant/ }).click();
-    await page
-        .getByRole("button", { name: "Calibration", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Production", exact: true }).click();
     await expect(page.getByLabel("Day", { exact: true })).toBeDisabled();
     release();
     await page.getByLabel("Day", { exact: true }).fill("2026-01-07");

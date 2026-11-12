@@ -141,9 +141,7 @@ export function ForecastPanel({
             <div className="section-heading">
                 <div>
                     <h2>
-                        {electrical
-                            ? "Electrical generation"
-                            : "Regional irradiance"}
+                        {electrical ? "Electrical generation" : "Irradiance"}
                     </h2>
                     <p className="fine">
                         {forecast.date} · {forecast.timezone}

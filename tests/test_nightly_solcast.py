@@ -302,7 +302,7 @@ def test_shared_account_protects_slots_on_both_local_dates_within_utc_day() -> N
     other = Region.objects.create(
         tenant=system.tenant,
         name="Other",
-        latitude=40,
+        latitude=41,
         longitude=29,
         timezone="Europe/Istanbul",
         status="approved",
@@ -449,7 +449,7 @@ def test_inactive_collection_does_not_block_shared_account_history_budget(inacti
         else Region.objects.create(
             tenant=system.tenant,
             name="Inactive collection",
-            latitude=40,
+            latitude=41,
             longitude=29,
             timezone="Europe/Istanbul",
             status="approved",

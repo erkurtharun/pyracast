@@ -8,9 +8,7 @@
         "/api/session/": {
             "get": {
                 "operationId": "session_retrieve",
-                "tags": [
-                    "session"
-                ],
+                "tags": ["session"],
                 "responses": {
                     "200": {
                         "content": {
@@ -26,9 +24,7 @@
             },
             "patch": {
                 "operationId": "session_partial_update",
-                "tags": [
-                    "session"
-                ],
+                "tags": ["session"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -70,9 +66,7 @@
         "/api/session/login/": {
             "post": {
                 "operationId": "session_login_create",
-                "tags": [
-                    "session"
-                ],
+                "tags": ["session"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -110,11 +104,47 @@
         "/api/session/logout/": {
             "post": {
                 "operationId": "session_logout_create",
-                "tags": [
-                    "session"
-                ],
+                "tags": ["session"],
                 "responses": {
                     "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SessionOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/session/register/": {
+            "post": {
+                "operationId": "session_register_create",
+                "tags": ["session"],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RegistrationInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RegistrationInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RegistrationInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "201": {
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -141,9 +171,7 @@
                         }
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -185,9 +213,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -218,9 +244,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -281,9 +305,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -322,9 +344,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -383,9 +403,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -443,9 +461,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -479,9 +495,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -520,9 +534,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -570,11 +582,7 @@
                         "in": "query",
                         "name": "data_source",
                         "schema": {
-                            "enum": [
-                                "auto",
-                                "forecast",
-                                "estimated_actuals"
-                            ],
+                            "enum": ["auto", "forecast", "estimated_actuals"],
                             "type": "string",
                             "default": "forecast",
                             "minLength": 1
@@ -607,9 +615,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -659,9 +665,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -700,9 +704,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -772,9 +774,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -813,9 +813,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -884,9 +882,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -933,9 +929,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -1002,9 +996,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1046,9 +1038,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1095,9 +1085,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -1165,9 +1153,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1225,9 +1211,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1274,9 +1258,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -1353,9 +1335,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1412,9 +1392,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1491,10 +1469,7 @@
                         "in": "query",
                         "name": "resolution_minutes",
                         "schema": {
-                            "enum": [
-                                30,
-                                60
-                            ],
+                            "enum": [30, 60],
                             "type": "integer",
                             "default": 30
                         },
@@ -1509,9 +1484,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1569,9 +1542,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1618,9 +1589,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -1698,9 +1667,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -1747,9 +1714,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -1826,9 +1791,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -1905,9 +1868,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -1984,9 +1945,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -2034,10 +1993,7 @@
                         "in": "query",
                         "name": "comparison",
                         "schema": {
-                            "enum": [
-                                "archived_forecast",
-                                "historical_model"
-                            ],
+                            "enum": ["archived_forecast", "historical_model"],
                             "type": "string",
                             "default": "archived_forecast",
                             "minLength": 1
@@ -2093,9 +2049,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -2155,10 +2109,7 @@
                         "in": "query",
                         "name": "resolution_minutes",
                         "schema": {
-                            "enum": [
-                                30,
-                                60
-                            ],
+                            "enum": [30, 60],
                             "type": "integer",
                             "default": 60
                         },
@@ -2181,9 +2132,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -2232,9 +2181,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -2281,9 +2228,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -2350,9 +2295,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -2417,9 +2360,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -2468,9 +2409,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -2511,9 +2450,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -2552,9 +2489,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "requestBody": {
                     "content": {
                         "application/json": {
@@ -2615,9 +2550,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -2629,6 +2562,140 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/RegionOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/sites/": {
+            "get": {
+                "operationId": "tenants_sites_list",
+                "parameters": [
+                    {
+                        "name": "page",
+                        "required": false,
+                        "in": "query",
+                        "description": "A page number within the paginated result set.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": ["tenants"],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PaginatedSiteOutputList"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            },
+            "post": {
+                "operationId": "tenants_sites_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": ["tenants"],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/SiteInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/SiteInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/SiteInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SiteOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/sites/{region_id}/": {
+            "get": {
+                "operationId": "tenants_sites_retrieve",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": ["tenants"],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SiteOutput"
                                 }
                             }
                         },
@@ -2659,9 +2726,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -2703,9 +2768,7 @@
                         "required": true
                     }
                 ],
-                "tags": [
-                    "tenants"
-                ],
+                "tags": ["tenants"],
                 "security": [
                     {
                         "cookieAuth": []
@@ -2778,18 +2841,10 @@
                         "format": "date-time"
                     }
                 },
-                "required": [
-                    "calibration_id",
-                    "created_at",
-                    "reason",
-                    "status"
-                ]
+                "required": ["calibration_id", "created_at", "reason", "status"]
             },
             "AutomaticCalibrationAttemptOutputStatusEnum": {
-                "enum": [
-                    "activated",
-                    "skipped"
-                ],
+                "enum": ["activated", "skipped"],
                 "type": "string",
                 "description": "* `activated` - activated\n* `skipped` - skipped"
             },
@@ -2844,11 +2899,7 @@
                         "format": "date"
                     }
                 },
-                "required": [
-                    "configuration_id",
-                    "end_date",
-                    "start_date"
-                ]
+                "required": ["configuration_id", "end_date", "start_date"]
             },
             "CalibrationOutput": {
                 "type": "object",
@@ -3095,10 +3146,7 @@
                         "maxItems": 1440
                     }
                 },
-                "required": [
-                    "enabled",
-                    "times"
-                ]
+                "required": ["enabled", "times"]
             },
             "CollectionScheduleOutput": {
                 "type": "object",
@@ -3181,10 +3229,7 @@
                 ]
             },
             "ComparisonEnum": {
-                "enum": [
-                    "archived_forecast",
-                    "historical_model"
-                ],
+                "enum": ["archived_forecast", "historical_model"],
                 "type": "string",
                 "description": "* `archived_forecast` - archived_forecast\n* `historical_model` - historical_model"
             },
@@ -3222,7 +3267,7 @@
                     "measurement_basis": {
                         "allOf": [
                             {
-                                "$ref": "#/components/schemas/ConfigurationOutputMeasurementBasisEnum"
+                                "$ref": "#/components/schemas/MeasurementBasisEnum"
                             }
                         ],
                         "readOnly": true
@@ -3230,7 +3275,7 @@
                     "mounting_type": {
                         "allOf": [
                             {
-                                "$ref": "#/components/schemas/ConfigurationOutputMountingTypeEnum"
+                                "$ref": "#/components/schemas/MountingTypeEnum"
                             }
                         ],
                         "readOnly": true
@@ -3267,29 +3312,8 @@
                     "surface_tilt"
                 ]
             },
-            "ConfigurationOutputMeasurementBasisEnum": {
-                "enum": [
-                    "net_export",
-                    "ac_generation"
-                ],
-                "type": "string",
-                "description": "* `net_export` - Net export\n* `ac_generation` - AC generation"
-            },
-            "ConfigurationOutputMountingTypeEnum": {
-                "enum": [
-                    "unknown",
-                    "fixed",
-                    "tracking"
-                ],
-                "type": "string",
-                "description": "* `unknown` - Unknown\n* `fixed` - Fixed\n* `tracking` - Tracking"
-            },
             "DaylightStatusEnum": {
-                "enum": [
-                    "normal",
-                    "polar_day",
-                    "polar_night"
-                ],
+                "enum": ["normal", "polar_day", "polar_night"],
                 "type": "string",
                 "description": "* `normal` - normal\n* `polar_day` - polar_day\n* `polar_night` - polar_night"
             },
@@ -3305,10 +3329,7 @@
                         "format": "date-time"
                     }
                 },
-                "required": [
-                    "ends_at",
-                    "starts_at"
-                ]
+                "required": ["ends_at", "starts_at"]
             },
             "EpiasConnectionInput": {
                 "type": "object",
@@ -3330,10 +3351,7 @@
                         "default": "unknown"
                     }
                 },
-                "required": [
-                    "expected_eic",
-                    "provider_plant_id"
-                ]
+                "required": ["expected_eic", "provider_plant_id"]
             },
             "EpiasConnectionOutput": {
                 "type": "object",
@@ -3580,10 +3598,7 @@
                 ]
             },
             "EpiasSourceKindEnum": {
-                "enum": [
-                    "realtime_generation",
-                    "settlement_injection"
-                ],
+                "enum": ["realtime_generation", "settlement_injection"],
                 "type": "string",
                 "description": "* `realtime_generation` - realtime_generation\n* `settlement_injection` - settlement_injection"
             },
@@ -3657,10 +3672,7 @@
                 ]
             },
             "ForecastSourceKindEnum": {
-                "enum": [
-                    "forecast",
-                    "estimated_actuals"
-                ],
+                "enum": ["forecast", "estimated_actuals"],
                 "type": "string",
                 "description": "* `forecast` - forecast\n* `estimated_actuals` - estimated_actuals"
             },
@@ -3707,11 +3719,7 @@
                         "nullable": true
                     }
                 },
-                "required": [
-                    "kind",
-                    "starts_at",
-                    "title"
-                ]
+                "required": ["kind", "starts_at", "title"]
             },
             "IncidentOutput": {
                 "type": "object",
@@ -3847,21 +3855,10 @@
                         "minimum": 1
                     }
                 },
-                "required": [
-                    "expected_revision",
-                    "kind",
-                    "starts_at",
-                    "title"
-                ]
+                "required": ["expected_revision", "kind", "starts_at", "title"]
             },
             "KindEnum": {
-                "enum": [
-                    "inverter",
-                    "panels",
-                    "grid",
-                    "other",
-                    "multiple"
-                ],
+                "enum": ["inverter", "panels", "grid", "other", "multiple"],
                 "type": "string",
                 "description": "* `inverter` - inverter\n* `panels` - panels\n* `grid` - grid\n* `other` - other\n* `multiple` - multiple"
             },
@@ -3971,32 +3968,30 @@
                         "maxLength": 1024
                     }
                 },
-                "required": [
-                    "password",
-                    "username"
-                ]
+                "required": ["password", "username"]
+            },
+            "MeasurementBasisEnum": {
+                "enum": ["net_export", "ac_generation"],
+                "type": "string",
+                "description": "* `net_export` - Net export\n* `ac_generation` - AC generation"
             },
             "MeterBasisEnum": {
-                "enum": [
-                    "unknown",
-                    "net_export",
-                    "ac_generation"
-                ],
+                "enum": ["unknown", "net_export", "ac_generation"],
                 "type": "string",
                 "description": "* `unknown` - unknown\n* `net_export` - net_export\n* `ac_generation` - ac_generation"
             },
             "MetricScopeEnum": {
-                "enum": [
-                    "daylight_intervals",
-                    "full_day"
-                ],
+                "enum": ["daylight_intervals", "full_day"],
                 "type": "string",
                 "description": "* `daylight_intervals` - daylight_intervals\n* `full_day` - full_day"
             },
+            "MountingTypeEnum": {
+                "enum": ["unknown", "fixed", "tracking"],
+                "type": "string",
+                "description": "* `unknown` - Unknown\n* `fixed` - Fixed\n* `tracking` - Tracking"
+            },
             "NullEnum": {
-                "enum": [
-                    null
-                ]
+                "enum": [null]
             },
             "ObservationImport": {
                 "type": "object",
@@ -4015,11 +4010,7 @@
                         }
                     }
                 },
-                "required": [
-                    "configuration_id",
-                    "observations",
-                    "unit"
-                ]
+                "required": ["configuration_id", "observations", "unit"]
             },
             "ObservationImportOutput": {
                 "type": "object",
@@ -4040,12 +4031,7 @@
                         }
                     }
                 },
-                "required": [
-                    "count",
-                    "created",
-                    "existing",
-                    "ids"
-                ]
+                "required": ["count", "created", "existing", "ids"]
             },
             "ObservationOutput": {
                 "type": "object",
@@ -4106,12 +4092,7 @@
                 ]
             },
             "ObservationOutputQualityEnum": {
-                "enum": [
-                    "valid",
-                    "outage",
-                    "curtailed",
-                    "invalid"
-                ],
+                "enum": ["valid", "outage", "curtailed", "invalid"],
                 "type": "string",
                 "description": "* `valid` - Valid\n* `outage` - Outage\n* `curtailed` - Curtailed\n* `invalid` - Invalid"
             },
@@ -4144,29 +4125,16 @@
                         "maxLength": 200
                     }
                 },
-                "required": [
-                    "ends_at",
-                    "energy",
-                    "source",
-                    "starts_at"
-                ]
+                "required": ["ends_at", "energy", "source", "starts_at"]
             },
             "ObservationRowQualityEnum": {
-                "enum": [
-                    "valid",
-                    "outage",
-                    "curtailed",
-                    "invalid"
-                ],
+                "enum": ["valid", "outage", "curtailed", "invalid"],
                 "type": "string",
                 "description": "* `valid` - valid\n* `outage` - outage\n* `curtailed` - curtailed\n* `invalid` - invalid"
             },
             "PaginatedCalibrationSummaryOutputList": {
                 "type": "object",
-                "required": [
-                    "count",
-                    "results"
-                ],
+                "required": ["count", "results"],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -4194,10 +4162,7 @@
             },
             "PaginatedIncidentOutputList": {
                 "type": "object",
-                "required": [
-                    "count",
-                    "results"
-                ],
+                "required": ["count", "results"],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -4225,10 +4190,7 @@
             },
             "PaginatedLocationChangeOutputList": {
                 "type": "object",
-                "required": [
-                    "count",
-                    "results"
-                ],
+                "required": ["count", "results"],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -4256,10 +4218,7 @@
             },
             "PaginatedObservationOutputList": {
                 "type": "object",
-                "required": [
-                    "count",
-                    "results"
-                ],
+                "required": ["count", "results"],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -4287,10 +4246,7 @@
             },
             "PaginatedPlantOutputList": {
                 "type": "object",
-                "required": [
-                    "count",
-                    "results"
-                ],
+                "required": ["count", "results"],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -4318,10 +4274,7 @@
             },
             "PaginatedRegionOutputList": {
                 "type": "object",
-                "required": [
-                    "count",
-                    "results"
-                ],
+                "required": ["count", "results"],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -4347,12 +4300,37 @@
                     }
                 }
             },
+            "PaginatedSiteOutputList": {
+                "type": "object",
+                "required": ["count", "results"],
+                "properties": {
+                    "count": {
+                        "type": "integer",
+                        "example": 123
+                    },
+                    "next": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=4"
+                    },
+                    "previous": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=2"
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/SiteOutput"
+                        }
+                    }
+                }
+            },
             "PaginatedTenantOutputList": {
                 "type": "object",
-                "required": [
-                    "count",
-                    "results"
-                ],
+                "required": ["count", "results"],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -4380,10 +4358,7 @@
             },
             "PaginatedTrashedPlantOutputList": {
                 "type": "object",
-                "required": [
-                    "count",
-                    "results"
-                ],
+                "required": ["count", "results"],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -4411,10 +4386,7 @@
             },
             "PaginatedTrashedRegionOutputList": {
                 "type": "object",
-                "required": [
-                    "count",
-                    "results"
-                ],
+                "required": ["count", "results"],
                 "properties": {
                     "count": {
                         "type": "integer",
@@ -4575,10 +4547,7 @@
                 ]
             },
             "PerformanceDayStatusEnum": {
-                "enum": [
-                    "matched",
-                    "missing"
-                ],
+                "enum": ["matched", "missing"],
                 "type": "string",
                 "description": "* `matched` - matched\n* `missing` - missing"
             },
@@ -4816,7 +4785,7 @@
                     "measurement_basis": {
                         "allOf": [
                             {
-                                "$ref": "#/components/schemas/PlantInputMeasurementBasisEnum"
+                                "$ref": "#/components/schemas/MeasurementBasisEnum"
                             }
                         ],
                         "default": "net_export"
@@ -4824,7 +4793,7 @@
                     "mounting_type": {
                         "allOf": [
                             {
-                                "$ref": "#/components/schemas/PlantInputMountingTypeEnum"
+                                "$ref": "#/components/schemas/MountingTypeEnum"
                             }
                         ],
                         "default": "unknown"
@@ -4843,27 +4812,7 @@
                         "nullable": true
                     }
                 },
-                "required": [
-                    "dc_capacity_mw",
-                    "name"
-                ]
-            },
-            "PlantInputMeasurementBasisEnum": {
-                "enum": [
-                    "net_export",
-                    "ac_generation"
-                ],
-                "type": "string",
-                "description": "* `net_export` - net_export\n* `ac_generation` - ac_generation"
-            },
-            "PlantInputMountingTypeEnum": {
-                "enum": [
-                    "unknown",
-                    "fixed",
-                    "tracking"
-                ],
-                "type": "string",
-                "description": "* `unknown` - unknown\n* `fixed` - fixed\n* `tracking` - tracking"
+                "required": ["dc_capacity_mw", "name"]
             },
             "PlantOutput": {
                 "type": "object",
@@ -4887,6 +4836,14 @@
                         ],
                         "nullable": true
                     },
+                    "submission": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/PlantSubmissionOutput"
+                            }
+                        ],
+                        "nullable": true
+                    },
                     "created_at": {
                         "type": "string",
                         "format": "date-time",
@@ -4898,7 +4855,78 @@
                     "current_configuration",
                     "id",
                     "name",
-                    "region_id"
+                    "region_id",
+                    "submission"
+                ]
+            },
+            "PlantSubmissionOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "dc_capacity_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true
+                    },
+                    "inverter_capacity_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "export_limit_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "measurement_basis": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/MeasurementBasisEnum"
+                            }
+                        ],
+                        "readOnly": true
+                    },
+                    "mounting_type": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/MountingTypeEnum"
+                            }
+                        ],
+                        "readOnly": true
+                    },
+                    "surface_tilt": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "surface_azimuth": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "readOnly": true
+                    }
+                },
+                "required": [
+                    "created_at",
+                    "dc_capacity_mw",
+                    "export_limit_mw",
+                    "id",
+                    "inverter_capacity_mw",
+                    "measurement_basis",
+                    "mounting_type",
+                    "surface_azimuth",
+                    "surface_tilt"
                 ]
             },
             "ProductionDayOutput": {
@@ -5086,12 +5114,7 @@
                         "maxLength": 100
                     }
                 },
-                "required": [
-                    "latitude",
-                    "longitude",
-                    "name",
-                    "timezone"
-                ]
+                "required": ["latitude", "longitude", "name", "timezone"]
             },
             "RegionOutput": {
                 "type": "object",
@@ -5150,9 +5173,31 @@
                         "maxLength": 200
                     }
                 },
-                "required": [
-                    "name"
-                ]
+                "required": ["name"]
+            },
+            "RegistrationInput": {
+                "type": "object",
+                "properties": {
+                    "username": {
+                        "type": "string",
+                        "maxLength": 150
+                    },
+                    "password": {
+                        "type": "string",
+                        "writeOnly": true,
+                        "maxLength": 1024
+                    },
+                    "company_name": {
+                        "type": "string",
+                        "maxLength": 200
+                    },
+                    "email": {
+                        "type": "string",
+                        "format": "email",
+                        "maxLength": 254
+                    }
+                },
+                "required": ["company_name", "email", "password", "username"]
             },
             "ReminderDeliveryOutput": {
                 "type": "object",
@@ -5234,10 +5279,7 @@
                         "maxItems": 1440
                     }
                 },
-                "required": [
-                    "enabled",
-                    "times"
-                ]
+                "required": ["enabled", "times"]
             },
             "ReminderOutput": {
                 "type": "object",
@@ -5304,16 +5346,10 @@
                         "type": "integer"
                     }
                 },
-                "required": [
-                    "daily_reminder_limit",
-                    "queries_per_email"
-                ]
+                "required": ["daily_reminder_limit", "queries_per_email"]
             },
             "ResolutionMinutesEnum": {
-                "enum": [
-                    30,
-                    60
-                ],
+                "enum": [30, 60],
                 "type": "integer",
                 "description": "* `30` - 30\n* `60` - 60"
             },
@@ -5329,10 +5365,7 @@
                         "format": "date-time"
                     }
                 },
-                "required": [
-                    "ends_at",
-                    "expected_revision"
-                ]
+                "required": ["ends_at", "expected_revision"]
             },
             "RevisionInput": {
                 "type": "object",
@@ -5342,9 +5375,7 @@
                         "minimum": 1
                     }
                 },
-                "required": [
-                    "expected_revision"
-                ]
+                "required": ["expected_revision"]
             },
             "SessionOutput": {
                 "type": "object",
@@ -5361,10 +5392,7 @@
                         "type": "string"
                     }
                 },
-                "required": [
-                    "csrf_token",
-                    "user"
-                ]
+                "required": ["csrf_token", "user"]
             },
             "SessionUserOutput": {
                 "type": "object",
@@ -5388,17 +5416,147 @@
                         ]
                     }
                 },
+                "required": ["email", "id", "username"]
+            },
+            "SiteInput": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "maxLength": 200
+                    },
+                    "latitude": {
+                        "type": "number",
+                        "format": "double",
+                        "maximum": 90,
+                        "minimum": -90
+                    },
+                    "longitude": {
+                        "type": "number",
+                        "format": "double",
+                        "maximum": 180,
+                        "minimum": -180
+                    },
+                    "timezone": {
+                        "type": "string",
+                        "maxLength": 100
+                    },
+                    "dc_capacity_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0
+                    },
+                    "inverter_capacity_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0,
+                        "nullable": true
+                    },
+                    "export_limit_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0,
+                        "nullable": true
+                    },
+                    "measurement_basis": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/MeasurementBasisEnum"
+                            }
+                        ],
+                        "default": "net_export"
+                    },
+                    "mounting_type": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/MountingTypeEnum"
+                            }
+                        ],
+                        "default": "unknown"
+                    },
+                    "surface_tilt": {
+                        "type": "number",
+                        "format": "double",
+                        "maximum": 90,
+                        "minimum": 0,
+                        "nullable": true
+                    },
+                    "surface_azimuth": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0,
+                        "nullable": true
+                    }
+                },
                 "required": [
-                    "email",
+                    "dc_capacity_mw",
+                    "latitude",
+                    "longitude",
+                    "name",
+                    "timezone"
+                ]
+            },
+            "SiteOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "name": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "latitude": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true
+                    },
+                    "longitude": {
+                        "type": "number",
+                        "format": "double",
+                        "readOnly": true
+                    },
+                    "timezone": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "surface": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "revision": {
+                        "type": "integer",
+                        "readOnly": true
+                    },
+                    "status": {
+                        "type": "string",
+                        "readOnly": true
+                    },
+                    "plant": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/PlantOutput"
+                            }
+                        ],
+                        "nullable": true,
+                        "readOnly": true
+                    }
+                },
+                "required": [
                     "id",
-                    "username"
+                    "latitude",
+                    "longitude",
+                    "name",
+                    "plant",
+                    "revision",
+                    "status",
+                    "surface",
+                    "timezone"
                 ]
             },
             "SlotScopeEnum": {
-                "enum": [
-                    "daylight",
-                    "full_day"
-                ],
+                "enum": ["daylight", "full_day"],
                 "type": "string",
                 "description": "* `daylight` - daylight\n* `full_day` - full_day"
             },
@@ -5414,10 +5572,7 @@
                         "readOnly": true
                     }
                 },
-                "required": [
-                    "id",
-                    "name"
-                ]
+                "required": ["id", "name"]
             },
             "TrashedPlantOutput": {
                 "type": "object",
@@ -5508,10 +5663,7 @@
                 "description": "* `configuration_unavailable` - configuration_unavailable\n* `forecast_unavailable` - forecast_unavailable\n* `estimated_actuals_unavailable` - estimated_actuals_unavailable"
             },
             "UnitEnum": {
-                "enum": [
-                    "MWh",
-                    "kWh"
-                ],
+                "enum": ["MWh", "kWh"],
                 "type": "string",
                 "description": "* `MWh` - MWh\n* `kWh` - kWh"
             }

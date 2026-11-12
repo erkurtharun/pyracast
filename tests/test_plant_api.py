@@ -14,7 +14,13 @@ from rest_framework.exceptions import ValidationError
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.models import CollectionJob, ForecastSnapshot
-from pyracast.plants.models import CalibrationRun, Plant, PlantForecast, ProductionObservation
+from pyracast.plants.models import (
+    CalibrationRun,
+    Plant,
+    PlantConfiguration,
+    PlantForecast,
+    ProductionObservation,
+)
 from pyracast.plants.numerics import POLICY_VERSION
 from pyracast.plants.serializers import AwareDateTime, FiniteFloat
 from tests.test_domain import make_system
@@ -172,10 +178,17 @@ def test_tenant_scope_observation_import_and_validation() -> None:
         ).status_code
         == 400
     )
-    other_plant = client.post(
-        base, {"name": "Other PV", "dc_capacity_mw": 2}, content_type="application/json"
-    ).json()
-    foreign_config = other_plant["current_configuration"]["id"]
+    current = PlantConfiguration.objects.get(pk=config)
+    other_plant = Plant.objects.create(
+        region_id=plant["region_id"], name="Other PV", deleted_at=timezone.now()
+    )
+    foreign_config = PlantConfiguration.objects.create(
+        plant=other_plant,
+        binding=current.binding,
+        revision=1,
+        dc_capacity_mw=2,
+        created_by=current.created_by,
+    ).pk
     assert (
         client.post(
             detail + "observations/",

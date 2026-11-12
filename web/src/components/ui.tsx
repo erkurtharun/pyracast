@@ -1,12 +1,22 @@
 "use client";
-import { useEffect, useState, type ReactNode } from "react";
-import { request, type Page } from "@/lib/api";
+import {
+    createContext,
+    useContext,
+    useEffect,
+    useId,
+    useRef,
+    useState,
+    type ReactNode,
+} from "react";
+import { ApiError, request, type Page } from "@/lib/api";
+const FormErrors = createContext<Record<string, string>>({});
 export function useCollection<T>(url: string, refresh = 0, pollMs = 0) {
     const [state, setState] = useState<{
+        url: string;
         data?: Page<T>;
         error?: string;
         loading: boolean;
-    }>({ loading: true });
+    }>({ url, loading: true });
     useEffect(() => {
         let current = true;
         let sequence = 0;
@@ -29,6 +39,7 @@ export function useCollection<T>(url: string, refresh = 0, pollMs = 0) {
             }
             if (current && requestSequence === sequence)
                 setState({
+                    url,
                     data: { ...first, results: rows, next: null },
                     loading: false,
                 });
@@ -37,7 +48,12 @@ export function useCollection<T>(url: string, refresh = 0, pollMs = 0) {
             const requestSequence = ++sequence;
             load(requestSequence).catch((error: Error) => {
                 if (current && requestSequence === sequence)
-                    setState({ error: error.message, loading: false });
+                    setState((previous) => ({
+                        url,
+                        data: previous.url === url ? previous.data : undefined,
+                        error: error.message,
+                        loading: false,
+                    }));
             });
         };
         start();
@@ -47,7 +63,9 @@ export function useCollection<T>(url: string, refresh = 0, pollMs = 0) {
             if (timer) clearInterval(timer);
         };
     }, [url, refresh, pollMs]);
-    return state;
+    return state.url === url
+        ? state
+        : { url, data: undefined, error: undefined, loading: true };
 }
 export function useResource<T>(url: string, refresh = 0, pollMs = 0) {
     const [state, setState] = useState<{
@@ -105,6 +123,10 @@ export function Field({
     max,
     step,
     placeholder,
+    autoComplete,
+    hint,
+    maxLength,
+    minLength,
 }: {
     label: string;
     name: string;
@@ -115,11 +137,18 @@ export function Field({
     max?: number;
     step?: string;
     placeholder?: string;
+    autoComplete?: string;
+    hint?: string;
+    maxLength?: number;
+    minLength?: number;
 }) {
+    const id = useId();
+    const error = useContext(FormErrors)[name];
     return (
-        <label className="field">
-            {label}
+        <div className="field">
+            <label htmlFor={id}>{label}</label>
             <input
+                id={id}
                 name={name}
                 type={type}
                 defaultValue={defaultValue}
@@ -128,8 +157,24 @@ export function Field({
                 max={max}
                 step={step}
                 placeholder={placeholder}
+                autoComplete={autoComplete}
+                maxLength={maxLength}
+                minLength={minLength}
+                aria-invalid={error ? true : undefined}
+                aria-describedby={
+                    error ? `${id}-error` : hint ? `${id}-hint` : undefined
+                }
             />
-        </label>
+            {error ? (
+                <span className="field-error" id={`${id}-error`}>
+                    {error}
+                </span>
+            ) : hint ? (
+                <span className="field-hint" id={`${id}-hint`}>
+                    {hint}
+                </span>
+            ) : null}
+        </div>
     );
 }
 export function Select({
@@ -161,41 +206,89 @@ export function ActionForm({
     submit: string;
     onSubmit: (data: FormData) => Promise<void>;
 }) {
-    const [pending, setPending] = useState(false),
-        [error, setError] = useState(""),
-        [success, setSuccess] = useState(false);
+    const [state, setState] = useState<
+        | { status: "idle" | "pending" | "success" }
+        | { status: "error"; message: string; fields: Record<string, string> }
+    >({ status: "idle" });
+    const errorRef = useRef<HTMLDivElement>(null);
+    const formRef = useRef<HTMLFormElement>(null);
+    useEffect(() => {
+        if (state.status === "error") errorRef.current?.focus();
+    }, [state]);
     return (
         <form
+            ref={formRef}
             onSubmit={async (event) => {
                 event.preventDefault();
+                if (state.status === "pending") return;
                 const data = new FormData(event.currentTarget);
-                setPending(true);
-                setError("");
-                setSuccess(false);
+                setState({ status: "pending" });
                 try {
                     await onSubmit(data);
-                    setSuccess(true);
+                    setState({ status: "success" });
                 } catch (error) {
-                    setError(
-                        error instanceof Error
-                            ? error.message
-                            : "Something went wrong.",
-                    );
-                } finally {
-                    setPending(false);
+                    setState({
+                        status: "error",
+                        message:
+                            error instanceof Error
+                                ? error.message
+                                : "Something went wrong.",
+                        fields: error instanceof ApiError ? error.fields : {},
+                    });
                 }
             }}
         >
-            <fieldset disabled={pending}>
-                {children}
-                <div className="form-footer">
-                    <button className="button" type="submit">
-                        {pending ? "Saving…" : submit}
-                    </button>
-                    {success && <span role="status">Saved successfully.</span>}
+            {state.status === "error" && (
+                <div
+                    className="notice error form-errors"
+                    role="alert"
+                    tabIndex={-1}
+                    ref={errorRef}
+                >
+                    <strong>We couldn’t save your changes</strong>
+                    {Object.keys(state.fields).length ? (
+                        <ul>
+                            {Object.entries(state.fields).map(
+                                ([name, message]) => (
+                                    <li key={name}>
+                                        <button
+                                            type="button"
+                                            className="text-button"
+                                            onClick={() => {
+                                                const field =
+                                                    formRef.current?.elements.namedItem(
+                                                        name,
+                                                    );
+                                                if (
+                                                    field instanceof HTMLElement
+                                                )
+                                                    field.focus();
+                                            }}
+                                        >
+                                            {message}
+                                        </button>
+                                    </li>
+                                ),
+                            )}
+                        </ul>
+                    ) : (
+                        <p>{state.message}</p>
+                    )}
                 </div>
-            </fieldset>
-            {error && <Notice error>{error}</Notice>}
+            )}
+            <FormErrors value={state.status === "error" ? state.fields : {}}>
+                <fieldset disabled={state.status === "pending"}>
+                    {children}
+                    <div className="form-footer">
+                        <button className="button" type="submit">
+                            {state.status === "pending" ? "Saving…" : submit}
+                        </button>
+                        {state.status === "success" && (
+                            <span role="status">Saved successfully.</span>
+                        )}
+                    </div>
+                </fieldset>
+            </FormErrors>
         </form>
     );
 }

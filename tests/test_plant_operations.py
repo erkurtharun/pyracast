@@ -355,10 +355,11 @@ def test_geometry_revisions_preserve_explicit_unknowns_and_prior_settings(
     fixed.refresh_from_db()
     assert initial.mounting_type == "unknown"
     assert (fixed.surface_tilt, fixed.surface_azimuth) == (90, 359.9)
-    partial = create_plant(
+    partial = revise_plant(
         system.member,
         system.tenant.pk,
         system.region.pk,
+        plant.pk,
         name="Unknown fixed angles",
         dc_capacity_mw=1,
         mounting_type="fixed",
@@ -593,9 +594,12 @@ def test_configless_plant_cannot_activate_and_historical_imports_keep_revision(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    unfinished = Plant.objects.create(region=system.region, name="Unfinished")
+    other_region = Region.objects.create(
+        tenant=system.tenant, name="Unfinished", latitude=41, longitude=29, timezone="UTC"
+    )
+    unfinished = Plant.objects.create(region=other_region, name="Unfinished")
     with pytest.raises(ValidationError, match="configuration_unavailable"):
-        reset_calibration(system.member, system.tenant.pk, system.region.pk, unfinished.pk)
+        reset_calibration(system.member, system.tenant.pk, other_region.pk, unfinished.pk)
     old_id = plant.current_configuration_id
     assert old_id is not None
     observation = ObservationInput(NOW - timedelta(days=1), NOW - timedelta(hours=23), 0)

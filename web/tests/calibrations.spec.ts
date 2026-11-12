@@ -14,11 +14,9 @@ const run = (id: number) => ({
 
 async function openCalibration(page: Page) {
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
     await page
-        .getByRole("button", { name: "Solar plants", exact: true })
+        .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: /East array/ }).click();
     await page
         .getByRole("button", { name: "Calibration", exact: true })
         .click();

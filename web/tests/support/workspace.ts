@@ -43,6 +43,8 @@ export async function mockApi(
 ) {
     let signedIn = !anonymous;
     let automationEnabled = false;
+    let submittedSite: unknown;
+    let submittedPlant: unknown;
     await page.route("**/api/**", async (route) => {
         const path = new URL(route.request().url()).pathname,
             method = route.request().method();
@@ -66,7 +68,10 @@ export async function mockApi(
             };
         } else if (path === "/api/tenants/")
             data = paged([{ id: 1, name: "Sunfield Energy" }]);
-        else if (path === "/api/tenants/1/regions/") {
+        else if (
+            path === "/api/tenants/1/regions/" ||
+            path === "/api/tenants/1/sites/"
+        ) {
             if (failed) {
                 await route.fulfill({
                     status: 503,
@@ -76,16 +81,34 @@ export async function mockApi(
                 });
                 return;
             }
-            data =
-                method === "POST"
-                    ? {
-                          ...region,
-                          ...route.request().postDataJSON(),
-                          status: "pending",
-                      }
-                    : paged(empty ? [] : [region]);
+            if (method === "POST") {
+                const created = {
+                    ...region,
+                    ...route.request().postDataJSON(),
+                    status: "pending",
+                    plant: {
+                        ...plant,
+                        ...route.request().postDataJSON(),
+                        current_configuration: null,
+                        submission: {
+                            ...plant.current_configuration,
+                            ...route.request().postDataJSON(),
+                        },
+                    },
+                };
+                submittedSite = created;
+                submittedPlant = created.plant;
+                data = created;
+            } else
+                data = paged(
+                    submittedSite
+                        ? [submittedSite]
+                        : empty
+                          ? []
+                          : [{ ...region, plant }],
+                );
         } else if (path.endsWith("/plants/"))
-            data = method === "POST" ? plant : paged([plant]);
+            data = method === "POST" ? plant : paged([submittedPlant ?? plant]);
         else if (path.endsWith("/observations/")) {
             expect(route.request().postDataJSON()).toMatchObject({
                 configuration_id: 31,
@@ -119,6 +142,15 @@ export async function mockApi(
                     ? {
                           id: 41,
                           status: "pending",
+                          plant: {
+                              ...plant,
+                              ...route.request().postDataJSON(),
+                              current_configuration: null,
+                              submission: {
+                                  ...plant.current_configuration,
+                                  ...route.request().postDataJSON(),
+                              },
+                          },
                           assessment: "pending",
                           factor: null,
                           result: {},
@@ -135,6 +167,7 @@ export async function mockApi(
                 quota: { daily_reminder_limit: 10, queries_per_email: 0 },
                 deliveries: [],
             };
+        else if (path.endsWith("/location-change-requests/")) data = paged([]);
         else if (path.endsWith("/performance/"))
             data = {
                 start_date: "2026-01-01",

@@ -219,7 +219,7 @@ async function fits(page: Page, name: string, audit: boolean) {
         )
         .evaluateAll((rows) =>
             rows
-                .filter((row) => !row.closest(".table-scroll"))
+                .filter((row) => !row.closest(".table-scroll, .tabs"))
                 .filter((row) => {
                     const rect = row.getBoundingClientRect();
                     return rect.left < -1 || rect.right > innerWidth + 1;
@@ -245,16 +245,24 @@ for (const width of [320, 390, 768, 1440]) {
         const audit = width === 390;
         await page.goto("/");
         await page
-            .getByRole("button", { name: /Antalya solar park/ })
+            .getByRole("button", { name: /East array|Antalya solar park/ })
             .waitFor();
         await fits(page, "Overview", audit);
-        await page.getByRole("button", { name: "+ Request a region" }).click();
+        await page.getByRole("button", { name: "+ Add a plant" }).click();
         await fits(page, "New region", audit);
-        await page.getByRole("button", { name: /Antalya solar park/ }).click();
+        await page
+            .getByRole("button", { name: /East array|Antalya solar park/ })
+            .click();
+        await page
+            .getByRole("button", { name: "Irradiance", exact: true })
+            .click();
         await page
             .getByRole("img", { name: /Irradiance by interval/ })
             .waitFor();
         await fits(page, "Regional forecast", audit);
+        await page
+            .getByRole("button", { name: "Settings", exact: true })
+            .click();
         for (const tab of ["Data collection", "Email reminders"]) {
             await page.getByRole("button", { name: tab, exact: true }).click();
             await page
@@ -263,11 +271,11 @@ for (const width of [320, 390, 768, 1440]) {
             await fits(page, tab, audit);
         }
         await page
-            .getByRole("button", { name: "Solar plants", exact: true })
+            .getByRole("button", { name: "Forecast", exact: true })
             .click();
-        await page.getByRole("button", { name: /East array/ }).waitFor();
-        await fits(page, "Plants", audit);
-        await page.getByRole("button", { name: /East array/ }).click();
+        await page
+            .getByRole("button", { name: "Generation", exact: true })
+            .click();
         await page.getByRole("img", { name: /Power by interval/ }).waitFor();
         await expect(
             page.getByText("Provisional production calibration", {
@@ -275,18 +283,36 @@ for (const width of [320, 390, 768, 1440]) {
             }),
         ).toBeVisible();
         await fits(page, "Plant forecast", audit);
-        await page.getByRole("button", { name: "Edit configuration" }).click();
+        const settingsTab = page.getByRole("button", {
+            name: "Settings",
+            exact: true,
+        });
+        await settingsTab.focus();
+        await expect(settingsTab).toBeFocused();
+        const settingsBounds = await settingsTab.boundingBox();
+        expect(settingsBounds!.x).toBeGreaterThanOrEqual(0);
+        expect(settingsBounds!.x + settingsBounds!.width).toBeLessThanOrEqual(
+            width,
+        );
+        await page
+            .getByRole("button", { name: "Settings", exact: true })
+            .click();
         await fits(page, "Plant configuration", audit);
-        await page.getByRole("button", { name: "Close configuration" }).click();
+        await page
+            .getByRole("button", { name: "Forecast", exact: true })
+            .click();
         for (const tab of [
             "Calibration",
             "Automatic production",
             "Outages",
             "Production import",
         ]) {
+            if (tab === "Automatic production" || tab === "Production import")
+                await page
+                    .getByRole("button", { name: "Production", exact: true })
+                    .click();
             await page.getByRole("button", { name: tab, exact: true }).click();
             if (tab === "Calibration") {
-                await page.getByLabel("Day", { exact: true }).waitFor();
                 await expect(
                     page.getByText("Provisional production", { exact: true }),
                 ).toHaveCount(1);
@@ -326,12 +352,9 @@ for (const width of [320, 390, 768, 1440]) {
                     .click();
             await fits(page, tab, audit);
         }
-        await page.getByRole("button", { name: /^Back to region:/ }).click();
+        await page.getByRole("button", { name: "All plants" }).click();
         await expect(
-            page.getByRole("button", {
-                name: "Regional forecast",
-                exact: true,
-            }),
+            page.getByRole("heading", { name: "Your solar portfolio" }),
         ).toBeVisible();
         for (const tab of ["Account settings", "Recycle bin"]) {
             await page.getByRole("button", { name: tab, exact: true }).click();
@@ -364,6 +387,10 @@ test("mobile sign in keeps visible controls and keyboard focus", async ({
     await mockApi(page, { anonymous: true });
     await page.goto("/");
     await page.getByLabel("Username", { exact: true }).waitFor();
+    await page
+        .getByRole("navigation", { name: "Account access" })
+        .getByRole("button", { name: "Create account" })
+        .focus();
     await page.keyboard.press("Tab");
     await expect(page.getByLabel("Username", { exact: true })).toBeFocused();
     await page.keyboard.press("Tab");

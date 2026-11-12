@@ -52,6 +52,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/session/register/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["session_register_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tenants/": {
         parameters: {
             query?: never;
@@ -468,6 +484,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tenants/{tenant_id}/sites/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["tenants_sites_list"];
+        put?: never;
+        post: operations["tenants_sites_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tenants/{tenant_id}/sites/{region_id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["tenants_sites_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tenants/{tenant_id}/trash/plants/": {
         parameters: {
             query?: never;
@@ -531,7 +579,9 @@ export interface components {
             configuration_id: number | null;
             /** Format: date-time */
             next_check_at: string | null;
-            last_attempt: components["schemas"]["AutomaticCalibrationAttemptOutput"] | null;
+            last_attempt:
+                | components["schemas"]["AutomaticCalibrationAttemptOutput"]
+                | null;
         };
         CalibrationInput: {
             configuration_id: number;
@@ -573,7 +623,14 @@ export interface components {
          *     * `superseded` - superseded
          * @enum {string}
          */
-        CalibrationStatusEnum: "pending" | "running" | "ready" | "insufficient" | "rejected" | "failed" | "superseded";
+        CalibrationStatusEnum:
+            | "pending"
+            | "running"
+            | "ready"
+            | "insufficient"
+            | "rejected"
+            | "failed"
+            | "superseded";
         CalibrationSummaryOutput: {
             readonly id: number;
             configuration_id: number;
@@ -650,8 +707,8 @@ export interface components {
             readonly inverter_capacity_mw: number | null;
             /** Format: double */
             readonly export_limit_mw: number | null;
-            readonly measurement_basis: components["schemas"]["ConfigurationOutputMeasurementBasisEnum"];
-            readonly mounting_type: components["schemas"]["ConfigurationOutputMountingTypeEnum"];
+            readonly measurement_basis: components["schemas"]["MeasurementBasisEnum"];
+            readonly mounting_type: components["schemas"]["MountingTypeEnum"];
             /** Format: double */
             readonly surface_tilt: number | null;
             /** Format: double */
@@ -659,19 +716,6 @@ export interface components {
             /** Format: date-time */
             readonly created_at: string;
         };
-        /**
-         * @description * `net_export` - Net export
-         *     * `ac_generation` - AC generation
-         * @enum {string}
-         */
-        ConfigurationOutputMeasurementBasisEnum: "net_export" | "ac_generation";
-        /**
-         * @description * `unknown` - Unknown
-         *     * `fixed` - Fixed
-         *     * `tracking` - Tracking
-         * @enum {string}
-         */
-        ConfigurationOutputMountingTypeEnum: "unknown" | "fixed" | "tracking";
         /**
          * @description * `normal` - normal
          *     * `polar_day` - polar_day
@@ -713,7 +757,12 @@ export interface components {
             date: string;
             timezone: string;
             unit: string;
-            source_kind: (components["schemas"]["EpiasHistoryOutputSourceKindEnum"] | components["schemas"]["NullEnum"]) | null;
+            source_kind:
+                | (
+                      | components["schemas"]["EpiasHistoryOutputSourceKindEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
             complete: boolean;
             available_sources: components["schemas"]["EpiasSourceKindEnum"][];
             calibration_eligible: boolean;
@@ -728,9 +777,15 @@ export interface components {
          *     * `mixed` - mixed
          * @enum {string}
          */
-        EpiasHistoryOutputSourceKindEnum: "realtime_generation" | "settlement_injection" | "mixed";
+        EpiasHistoryOutputSourceKindEnum:
+            "realtime_generation" | "settlement_injection" | "mixed";
         EpiasReadingOutput: {
-            source_kind: (components["schemas"]["EpiasSourceKindEnum"] | components["schemas"]["NullEnum"]) | null;
+            source_kind:
+                | (
+                      | components["schemas"]["EpiasSourceKindEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
             snapshot_id: number | null;
             /** Format: date-time */
             provider_timestamp: string | null;
@@ -882,6 +937,12 @@ export interface components {
             password: string;
         };
         /**
+         * @description * `net_export` - Net export
+         *     * `ac_generation` - AC generation
+         * @enum {string}
+         */
+        MeasurementBasisEnum: "net_export" | "ac_generation";
+        /**
          * @description * `unknown` - unknown
          *     * `net_export` - net_export
          *     * `ac_generation` - ac_generation
@@ -894,6 +955,13 @@ export interface components {
          * @enum {string}
          */
         MetricScopeEnum: "daylight_intervals" | "full_day";
+        /**
+         * @description * `unknown` - Unknown
+         *     * `fixed` - Fixed
+         *     * `tracking` - Tracking
+         * @enum {string}
+         */
+        MountingTypeEnum: "unknown" | "fixed" | "tracking";
         /** @enum {unknown} */
         NullEnum: null;
         ObservationImport: {
@@ -929,7 +997,8 @@ export interface components {
          *     * `invalid` - Invalid
          * @enum {string}
          */
-        ObservationOutputQualityEnum: "valid" | "outage" | "curtailed" | "invalid";
+        ObservationOutputQualityEnum:
+            "valid" | "outage" | "curtailed" | "invalid";
         ObservationRow: {
             /** Format: date-time */
             starts_at: string;
@@ -1038,6 +1107,21 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["RegionOutput"][];
+        };
+        PaginatedSiteOutputList: {
+            /** @example 123 */
+            count: number;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?page=4
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?page=2
+             */
+            previous?: string | null;
+            results: components["schemas"]["SiteOutput"][];
         };
         PaginatedTenantOutputList: {
             /** @example 123 */
@@ -1162,7 +1246,8 @@ export interface components {
             matched_days: number;
             requested_days: number;
             metrics: components["schemas"]["PerformanceMetrics"] | null;
-            baseline_metrics: components["schemas"]["PerformanceMetrics"] | null;
+            baseline_metrics:
+                components["schemas"]["PerformanceMetrics"] | null;
             days: components["schemas"]["PerformanceDay"][];
             uncertainty: string;
         };
@@ -1177,7 +1262,12 @@ export interface components {
             calibration_id: number | null;
             freshness: string;
             source_kind: components["schemas"]["ForecastSourceKindEnum"];
-            unavailable_reason: (components["schemas"]["UnavailableReasonEnum"] | components["schemas"]["NullEnum"]) | null;
+            unavailable_reason:
+                | (
+                      | components["schemas"]["UnavailableReasonEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
             result: unknown;
             regional_irradiance: unknown;
             outage_scenario?: unknown;
@@ -1191,32 +1281,38 @@ export interface components {
             /** Format: double */
             export_limit_mw?: number | null;
             /** @default net_export */
-            measurement_basis: components["schemas"]["PlantInputMeasurementBasisEnum"];
+            measurement_basis: components["schemas"]["MeasurementBasisEnum"];
             /** @default unknown */
-            mounting_type: components["schemas"]["PlantInputMountingTypeEnum"];
+            mounting_type: components["schemas"]["MountingTypeEnum"];
             /** Format: double */
             surface_tilt?: number | null;
             /** Format: double */
             surface_azimuth?: number | null;
         };
-        /**
-         * @description * `net_export` - net_export
-         *     * `ac_generation` - ac_generation
-         * @enum {string}
-         */
-        PlantInputMeasurementBasisEnum: "net_export" | "ac_generation";
-        /**
-         * @description * `unknown` - unknown
-         *     * `fixed` - fixed
-         *     * `tracking` - tracking
-         * @enum {string}
-         */
-        PlantInputMountingTypeEnum: "unknown" | "fixed" | "tracking";
         PlantOutput: {
             readonly id: number;
             readonly name: string;
             region_id: number;
-            current_configuration: components["schemas"]["ConfigurationOutput"] | null;
+            current_configuration:
+                components["schemas"]["ConfigurationOutput"] | null;
+            submission: components["schemas"]["PlantSubmissionOutput"] | null;
+            /** Format: date-time */
+            readonly created_at: string;
+        };
+        PlantSubmissionOutput: {
+            readonly id: number;
+            /** Format: double */
+            readonly dc_capacity_mw: number;
+            /** Format: double */
+            readonly inverter_capacity_mw: number | null;
+            /** Format: double */
+            readonly export_limit_mw: number | null;
+            readonly measurement_basis: components["schemas"]["MeasurementBasisEnum"];
+            readonly mounting_type: components["schemas"]["MountingTypeEnum"];
+            /** Format: double */
+            readonly surface_tilt: number | null;
+            /** Format: double */
+            readonly surface_azimuth: number | null;
             /** Format: date-time */
             readonly created_at: string;
         };
@@ -1285,6 +1381,13 @@ export interface components {
         RegionRenameInput: {
             name: string;
         };
+        RegistrationInput: {
+            username: string;
+            password: string;
+            company_name: string;
+            /** Format: email */
+            email: string;
+        };
         ReminderDeliveryOutput: {
             id: number;
             /** Format: date-time */
@@ -1341,6 +1444,41 @@ export interface components {
             username: string;
             email: string;
         };
+        SiteInput: {
+            name: string;
+            /** Format: double */
+            latitude: number;
+            /** Format: double */
+            longitude: number;
+            timezone: string;
+            /** Format: double */
+            dc_capacity_mw: number;
+            /** Format: double */
+            inverter_capacity_mw?: number | null;
+            /** Format: double */
+            export_limit_mw?: number | null;
+            /** @default net_export */
+            measurement_basis: components["schemas"]["MeasurementBasisEnum"];
+            /** @default unknown */
+            mounting_type: components["schemas"]["MountingTypeEnum"];
+            /** Format: double */
+            surface_tilt?: number | null;
+            /** Format: double */
+            surface_azimuth?: number | null;
+        };
+        SiteOutput: {
+            readonly id: number;
+            readonly name: string;
+            /** Format: double */
+            readonly latitude: number;
+            /** Format: double */
+            readonly longitude: number;
+            readonly timezone: string;
+            readonly surface: string;
+            readonly revision: number;
+            readonly status: string;
+            readonly plant: components["schemas"]["PlantOutput"] | null;
+        };
         /**
          * @description * `daylight` - daylight
          *     * `full_day` - full_day
@@ -1378,7 +1516,10 @@ export interface components {
          *     * `estimated_actuals_unavailable` - estimated_actuals_unavailable
          * @enum {string}
          */
-        UnavailableReasonEnum: "configuration_unavailable" | "forecast_unavailable" | "estimated_actuals_unavailable";
+        UnavailableReasonEnum:
+            | "configuration_unavailable"
+            | "forecast_unavailable"
+            | "estimated_actuals_unavailable";
         /**
          * @description * `MWh` - MWh
          *     * `kWh` - kWh
@@ -1473,6 +1614,31 @@ export interface operations {
         requestBody?: never;
         responses: {
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionOutput"];
+                };
+            };
+        };
+    };
+    session_register_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegistrationInput"];
+                "application/x-www-form-urlencoded": components["schemas"]["RegistrationInput"];
+                "multipart/form-data": components["schemas"]["RegistrationInput"];
+            };
+        };
+        responses: {
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2102,7 +2268,11 @@ export interface operations {
                  *     * `estimated_actuals` - estimated_actuals
                  *     * `archived_forecast` - archived_forecast
                  */
-                data_source?: "auto" | "forecast" | "estimated_actuals" | "archived_forecast";
+                data_source?:
+                    | "auto"
+                    | "forecast"
+                    | "estimated_actuals"
+                    | "archived_forecast";
                 date: string;
                 /**
                  * @description * `30` - 30
@@ -2476,7 +2646,8 @@ export interface operations {
                  *     * `realtime_generation` - realtime_generation
                  *     * `settlement_injection` - settlement_injection
                  */
-                data_source?: "auto" | "realtime_generation" | "settlement_injection";
+                data_source?:
+                    "auto" | "realtime_generation" | "settlement_injection";
                 date?: string;
             };
             header?: never;
@@ -2590,6 +2761,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RegionOutput"];
+                };
+            };
+        };
+    };
+    tenants_sites_list: {
+        parameters: {
+            query?: {
+                /** @description A page number within the paginated result set. */
+                page?: number;
+            };
+            header?: never;
+            path: {
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedSiteOutputList"];
+                };
+            };
+        };
+    };
+    tenants_sites_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SiteInput"];
+                "application/x-www-form-urlencoded": components["schemas"]["SiteInput"];
+                "multipart/form-data": components["schemas"]["SiteInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteOutput"];
+                };
+            };
+        };
+    };
+    tenants_sites_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SiteOutput"];
                 };
             };
         };

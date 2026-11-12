@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from pyracast.accounts.operations import require_member
 from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import (
     CollectionJob,
     CollectionSchedule,
@@ -27,9 +28,11 @@ from pyracast.plants.models import (
     PlantConfiguration,
     PlantEvent,
     PlantForecast,
+    PlantSubmission,
     ProductionObservation,
 )
 from pyracast.regions.models import AuditEvent, Region
+from pyracast.regions.operations import require_available_location
 
 RETENTION = timedelta(days=30)
 PURGE_BATCH_SIZE = 100
@@ -82,6 +85,10 @@ def trash_region(actor: User, tenant_id: int, region_id: int) -> Region:
 def restore_region(actor: User, tenant_id: int, region_id: int) -> Region:
     require_member(actor, tenant_id)
     with transaction.atomic():
+        location = Region.objects.get(pk=region_id, tenant_id=tenant_id)
+        require_available_location(
+            tenant_id, location.latitude, location.longitude, exclude_region_id=region_id
+        )
         region = Region.objects.select_for_update().get(pk=region_id, tenant_id=tenant_id)
         now = timezone.now()
         _restore_deadline(region.deleted_at, now)
@@ -126,14 +133,42 @@ def restore_plant(actor: User, tenant_id: int, region_id: int, plant_id: int) ->
     require_member(actor, tenant_id)
     with transaction.atomic():
         region = Region.objects.select_for_update().get(pk=region_id, tenant_id=tenant_id)
+        binding = None
+        if region.status == "approved" and region.approved_binding_id is not None:
+            binding = SiteBinding.objects.filter(
+                pk=region.approved_binding_id, region=region
+            ).first()
+            if binding is not None:
+                binding.provider_account = ProviderAccount.objects.select_for_update().get(
+                    pk=binding.provider_account_id
+                )
         plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
         if region.deleted_at is not None:
             raise ValidationError("parent_region_trashed")
         _restore_deadline(plant.deleted_at, timezone.now())
         if plant.deleted_at is None:
             return plant
+        if (
+            Plant.objects.filter(region=region, deleted_at__isnull=True)
+            .exclude(pk=plant.pk)
+            .exists()
+        ):
+            raise ValidationError("location_already_has_plant")
         plant.deleted_at = None
         plant.save(update_fields=("deleted_at",))
+        if (
+            binding is not None
+            and binding.validated_at is not None
+            and binding_is_current(binding)
+            and (
+                plant.current_configuration_id is not None
+                or PlantSubmission.objects.filter(plant=plant).exists()
+            )
+        ):
+            from pyracast.plants.operations import activate_submitted_plants
+
+            activate_submitted_plants(actor, region, binding)
+            plant.refresh_from_db()
         PlantEvent.objects.create(plant=plant, actor=actor, action="plant_restored")
         return plant
 

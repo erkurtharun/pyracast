@@ -21,7 +21,7 @@ def test_collection_status_counts_account_attempts_by_utc_day_without_leaking_ot
         RequestAttempt.objects.filter(pk=attempt.pk).update(outcome=outcome)
     reserve_request(system.binding, moment - timedelta(days=1), purpose="validation")
     other_region = submit_region(
-        system.member, system.tenant.pk, name="Other", latitude=40, longitude=29, timezone="UTC"
+        system.member, system.tenant.pk, name="Other", latitude=41, longitude=29, timezone="UTC"
     )
     other_binding = configure_binding(
         system.admin,

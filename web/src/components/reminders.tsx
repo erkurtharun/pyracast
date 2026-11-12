@@ -73,11 +73,11 @@ export function Reminders({
                             defaultChecked={data.enabled}
                             disabled={region.status !== "approved"}
                         />{" "}
-                        Enable forecast emails for this region
+                        Enable forecast emails for this plant
                     </label>
                     {region.status !== "approved" && (
                         <Notice>
-                            Reminders can be enabled once this region is
+                            Reminders can be enabled once this plant is
                             approved.
                         </Notice>
                     )}

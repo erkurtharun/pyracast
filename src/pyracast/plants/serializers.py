@@ -5,10 +5,13 @@ from rest_framework import serializers
 
 from pyracast.api.serializers import InputSerializer
 from pyracast.plants.models import (
+    MEASUREMENT_BASES,
+    MOUNTING_TYPES,
     CalibrationActivation,
     CalibrationRun,
     Plant,
     PlantConfiguration,
+    PlantSubmission,
     ProductionObservation,
 )
 
@@ -38,12 +41,8 @@ class PlantInput(InputSerializer):
     dc_capacity_mw = FiniteFloat(min_value=0)
     inverter_capacity_mw = FiniteFloat(min_value=0, allow_null=True, required=False, default=None)
     export_limit_mw = FiniteFloat(min_value=0, allow_null=True, required=False, default=None)
-    measurement_basis = serializers.ChoiceField(
-        choices=("net_export", "ac_generation"), default="net_export"
-    )
-    mounting_type = serializers.ChoiceField(
-        choices=("unknown", "fixed", "tracking"), default="unknown"
-    )
+    measurement_basis = serializers.ChoiceField(choices=MEASUREMENT_BASES, default="net_export")
+    mounting_type = serializers.ChoiceField(choices=MOUNTING_TYPES, default="unknown")
     surface_tilt = FiniteFloat(
         min_value=0, max_value=90, allow_null=True, required=False, default=None
     )
@@ -71,13 +70,31 @@ class ConfigurationOutput(serializers.ModelSerializer[PlantConfiguration]):
         read_only_fields = fields
 
 
+class PlantSubmissionOutput(serializers.ModelSerializer[PlantSubmission]):
+    class Meta:
+        model = PlantSubmission
+        fields = (
+            "id",
+            "dc_capacity_mw",
+            "inverter_capacity_mw",
+            "export_limit_mw",
+            "measurement_basis",
+            "mounting_type",
+            "surface_tilt",
+            "surface_azimuth",
+            "created_at",
+        )
+        read_only_fields = fields
+
+
 class PlantOutput(serializers.ModelSerializer[Plant]):
     region_id = serializers.IntegerField()
     current_configuration = ConfigurationOutput(allow_null=True)
+    submission = PlantSubmissionOutput(allow_null=True)
 
     class Meta:
         model = Plant
-        fields = ("id", "name", "region_id", "current_configuration", "created_at")
+        fields = ("id", "name", "region_id", "current_configuration", "submission", "created_at")
         read_only_fields = fields
 
 

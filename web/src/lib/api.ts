@@ -21,6 +21,14 @@ export type Page<T> = {
     previous: string | null;
     count: number;
 };
+export class ApiError extends Error {
+    constructor(
+        message: string,
+        readonly fields: Record<string, string> = {},
+    ) {
+        super(message);
+    }
+}
 let sessionQueue: Promise<unknown> = Promise.resolve();
 let sessionFlight: Promise<Session> | undefined;
 export function request<T>(
@@ -69,21 +77,43 @@ async function send<T>(
             ? null
             : await response.json().catch(() => null);
     if (!response.ok)
-        throw new Error(
+        throw new ApiError(
             errorMessage(data) ||
                 `Request failed (${response.status}). Please try again.`,
+            validationFields(data),
         );
     return data as T;
 }
 function errorMessage(data: unknown): string {
-    if (typeof data === "string") return data;
+    if (typeof data === "string") {
+        const messages: Record<string, string> = {
+            location_already_exists:
+                "This location is already in your company’s portfolio. Open the existing plant.",
+            location_already_has_plant:
+                "This location already has an active plant.",
+        };
+        return messages[data] ?? data;
+    }
     if (Array.isArray(data)) return data.map(errorMessage).join(" ");
     if (data && typeof data === "object")
         return Object.entries(data)
+            .filter(([key]) => key !== "code")
             .map(
                 ([key, value]) =>
                     `${key === "detail" ? "" : `${key}: `}${errorMessage(value)}`,
             )
             .join(" ");
     return "";
+}
+
+function validationFields(data: unknown): Record<string, string> {
+    if (!data || typeof data !== "object" || !("detail" in data)) return {};
+    const detail = data.detail;
+    if (!detail || typeof detail !== "object" || Array.isArray(detail))
+        return {};
+    return Object.fromEntries(
+        Object.entries(detail)
+            .filter(([key]) => !["detail", "non_field_errors"].includes(key))
+            .map(([key, value]) => [key, errorMessage(value)]),
+    );
 }

@@ -1,12 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import {
-    request,
-    type Session,
-    type Tenant,
-    type Region,
-    type Page,
-} from "@/lib/api";
+import { request, type Session, type Tenant } from "@/lib/api";
 import {
     ActionForm,
     Empty,
@@ -18,6 +12,9 @@ import {
     useCollection,
 } from "./ui";
 import { RegionWorkspace } from "./region-workspace";
+import { PlantOnboarding, type PlantSite } from "./plant-onboarding";
+import { Auth } from "./auth";
+import { PlantIcon } from "./plant-icon";
 import { RecycleBin } from "./recycle-bin";
 
 export function Dashboard() {
@@ -62,39 +59,7 @@ export function Dashboard() {
                 </div>
             </main>
         );
-    if (!current.user)
-        return (
-            <main className="auth-page">
-                <div className="auth-card">
-                    <Brand />
-                    <h1>Sign in</h1>
-                    <p>Access your solar workspace.</p>
-                    <ActionForm
-                        submit="Sign in"
-                        onSubmit={async (data) =>
-                            setSession(
-                                await request<Session>(
-                                    "/api/session/login/",
-                                    "POST",
-                                    Object.fromEntries(data),
-                                    current.csrf_token,
-                                ),
-                            )
-                        }
-                    >
-                        <Field label="Username" name="username" />
-                        <Field
-                            label="Password"
-                            name="password"
-                            type="password"
-                        />
-                    </ActionForm>
-                    <p className="fine">
-                        Contact your administrator for access.
-                    </p>
-                </div>
-            </main>
-        );
+    if (!current.user) return <Auth session={current} onSession={setSession} />;
     return (
         <Workspace
             key={current.user.id}
@@ -144,7 +109,14 @@ function Workspace({
         tenants.data?.results[0];
     return (
         <div className="shell">
-            <a className="skip-link" href="#main">
+            <a
+                className="skip-link"
+                href="#main"
+                onClick={(event) => {
+                    event.preventDefault();
+                    document.getElementById("main")?.focus();
+                }}
+            >
                 Skip to content
             </a>
             <aside className="sidebar">
@@ -232,7 +204,7 @@ function Workspace({
                     </span>
                     <span className="topbar-label">{tenant?.name}</span>
                 </header>
-                <main id="main">
+                <main id="main" tabIndex={-1}>
                     {logoutError && <Notice error>{logoutError}</Notice>}
                     {tenants.error && <Notice error>{tenants.error}</Notice>}
                     {view === "profile" ? (
@@ -292,224 +264,247 @@ function Workspace({
     );
 }
 function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
-    const [version, setVersion] = useState(0),
-        [selected, setSelected] = useState<Region>(),
-        [deleted, setDeleted] = useState<number[]>([]),
-        [creating, setCreating] = useState(false),
-        [more, setMore] = useState<Region[]>([]),
-        [pageError, setPageError] = useState(""),
-        [next, setNext] = useState<string | null>();
-    const regions = useResource<Page<Region>>(
-        `/api/tenants/${tenant.id}/regions/`,
+    const [version, setVersion] = useState(0);
+    const [selectedId, setSelectedId] = useState<number>();
+    const [created, setCreated] = useState<PlantSite>();
+    const [deleted, setDeleted] = useState<number[]>([]);
+    const [creating, setCreating] = useState(false);
+    const [search, setSearch] = useState("");
+    const [status, setStatus] = useState("all");
+    const sites = useCollection<PlantSite>(
+        `/api/tenants/${tenant.id}/sites/`,
         version,
+        30_000,
     );
+    useEffect(() => {
+        const sync = () => {
+            const match = window.location.hash.match(/^#plant-(\d+)/);
+            setSelectedId(match ? Number(match[1]) : undefined);
+        };
+        sync();
+        window.addEventListener("hashchange", sync);
+        return () => window.removeEventListener("hashchange", sync);
+    }, []);
+    const rows = (sites.data?.results ?? []).filter(
+        (row) => !deleted.includes(row.id),
+    );
+    const selected =
+        rows.find((row) => row.id === selectedId) ??
+        (created?.id === selectedId ? created : undefined);
+    const open = (site: PlantSite) => {
+        setSelectedId(site.id);
+        window.history.pushState(null, "", `#plant-${site.id}/forecast`);
+    };
+    const back = () => {
+        setVersion((value) => value + 1);
+        setSelectedId(undefined);
+        setCreated(undefined);
+        window.history.pushState(null, "", "#plants");
+    };
     if (selected)
         return (
-            <RegionWorkspace
-                key={selected.id}
-                region={selected}
-                tenant={tenant.id}
-                token={token}
-                onBack={() => {
-                    setVersion((current) => current + 1);
-                    setMore([]);
-                    setNext(undefined);
-                    setPageError("");
-                    setSelected(undefined);
-                }}
-                onUpdated={(region) => {
-                    setSelected(region);
-                    setVersion((current) => current + 1);
-                    setMore([]);
-                    setNext(undefined);
-                    setPageError("");
-                }}
-                onDeleted={() => {
-                    setDeleted((current) => [...current, selected.id]);
-                    setVersion((current) => current + 1);
-                    setMore([]);
-                    setNext(undefined);
-                    setSelected(undefined);
-                }}
-            />
+            <>
+                {sites.error && (
+                    <Notice error>
+                        Unable to refresh plants. Showing saved details.{" "}
+                        {sites.error}
+                    </Notice>
+                )}
+                <RegionWorkspace
+                    key={selected.id}
+                    region={selected}
+                    initialPlant={
+                        created?.id === selected.id
+                            ? (created.plant ?? undefined)
+                            : undefined
+                    }
+                    tenant={tenant.id}
+                    token={token}
+                    onBack={back}
+                    onDeleted={() => {
+                        setDeleted((current) => [...current, selected.id]);
+                        back();
+                    }}
+                />
+            </>
         );
-    const rows = [...(regions.data?.results ?? []), ...more].filter(
-        (row) => !deleted.includes(row.id),
+    const filtered = rows.filter(
+        (site) =>
+            (status === "all" || site.status === status) &&
+            `${site.name} ${site.plant?.name ?? ""} ${site.timezone}`
+                .toLowerCase()
+                .includes(search.toLowerCase()),
     );
     return (
         <>
             <div className="page-heading">
                 <div>
-                    <h1>Overview</h1>
-                    <p>{tenant.name}</p>
+                    <p className="eyebrow">{tenant.name}</p>
+                    <h1>Your solar portfolio</h1>
+                    <p>
+                        Forecasts, production and operating history for every
+                        plant.
+                    </p>
                 </div>
                 <button
                     className="button"
                     onClick={() => setCreating(!creating)}
                 >
-                    {creating ? "Close form" : "+ Request a region"}
+                    {creating ? "Close form" : "+ Add a plant"}
                 </button>
             </div>
             <div className="stats">
-                <Stat label="Regions on this page" value={rows.length} />
                 <Stat
-                    label="Approved regions"
+                    label="Plants"
                     value={
-                        rows.filter((row) => row.status === "approved").length
+                        sites.data
+                            ? rows.filter((site) => site.plant).length
+                            : undefined
+                    }
+                />
+                <Stat
+                    label="Approved"
+                    value={
+                        sites.data
+                            ? rows.filter(
+                                  (site) =>
+                                      site.plant && site.status === "approved",
+                              ).length
+                            : undefined
                     }
                 />
                 <Stat
                     label="Awaiting approval"
                     value={
-                        rows.filter((row) => row.status === "pending").length
+                        sites.data
+                            ? rows.filter(
+                                  (site) =>
+                                      site.plant && site.status === "pending",
+                              ).length
+                            : undefined
                     }
                 />
             </div>
             {creating && (
-                <section className="panel">
-                    <div className="section-heading">
-                        <div>
-                            <h2>Request a region</h2>
-                            <p>New regions require approval.</p>
-                        </div>
-                    </div>
-                    <ActionForm
-                        submit="Request region"
-                        onSubmit={async (data) => {
-                            const region = await request<Region>(
-                                `/api/tenants/${tenant.id}/regions/`,
-                                "POST",
-                                {
-                                    name: data.get("name"),
-                                    latitude: Number(data.get("latitude")),
-                                    longitude: Number(data.get("longitude")),
-                                    timezone: data.get("timezone"),
-                                },
-                                token,
-                            );
-                            setVersion(version + 1);
-                            setMore([]);
-                            setNext(undefined);
-                            setSelected(region);
-                        }}
-                    >
-                        <div className="form-grid">
-                            <Field
-                                label="Region name"
-                                name="name"
-                                placeholder="e.g. Antalya solar park"
-                            />
-                            <Field
-                                label="IANA timezone"
-                                name="timezone"
-                                defaultValue={
-                                    Intl.DateTimeFormat().resolvedOptions()
-                                        .timeZone
-                                }
-                                placeholder="Europe/Istanbul"
-                            />
-                            <Field
-                                label="Latitude (°)"
-                                name="latitude"
-                                type="number"
-                                min={-90}
-                                max={90}
-                                step="any"
-                            />
-                            <Field
-                                label="Longitude (°)"
-                                name="longitude"
-                                type="number"
-                                min={-180}
-                                max={180}
-                                step="any"
-                            />
-                        </div>
-                    </ActionForm>
-                </section>
+                <PlantOnboarding
+                    tenant={tenant.id}
+                    token={token}
+                    onCancel={() => setCreating(false)}
+                    onCreated={(site) => {
+                        setCreated(site);
+                        setCreating(false);
+                        setVersion((value) => value + 1);
+                        open(site);
+                    }}
+                />
             )}
             <section className="panel">
                 <div className="section-heading">
-                    <div>
-                        <h2>
-                            Your regions{" "}
-                            <span className="count">
-                                {regions.data?.count ?? "—"}
-                            </span>
-                        </h2>
-                    </div>
+                    <h2>
+                        Plants{" "}
+                        <span className="count" aria-hidden="true">
+                            {rows.length}
+                        </span>
+                    </h2>
                 </div>
-                {regions.loading ? (
-                    <p role="status">Loading regions…</p>
-                ) : regions.error ? (
+                {rows.length > 0 && (
+                    <div className="portfolio-toolbar">
+                        <label className="field">
+                            Search plants
+                            <input
+                                type="search"
+                                value={search}
+                                onChange={(event) =>
+                                    setSearch(event.target.value)
+                                }
+                                placeholder="Plant name or timezone"
+                            />
+                        </label>
+                        <label className="field">
+                            Approval status
+                            <select
+                                value={status}
+                                onChange={(event) =>
+                                    setStatus(event.target.value)
+                                }
+                            >
+                                <option value="all">All statuses</option>
+                                <option value="pending">
+                                    Awaiting approval
+                                </option>
+                                <option value="approved">Approved</option>
+                                <option value="rejected">Rejected</option>
+                                <option value="suspended">Suspended</option>
+                            </select>
+                        </label>
+                    </div>
+                )}
+                {sites.loading ? (
+                    <p role="status">Loading plants...</p>
+                ) : sites.error ? (
                     <>
-                        <Notice error>{regions.error}</Notice>
+                        <Notice error>{sites.error}</Notice>
                         <button
                             className="button secondary"
-                            onClick={() => setVersion(version + 1)}
+                            onClick={() => setVersion((value) => value + 1)}
                         >
                             Try again
                         </button>
                     </>
-                ) : rows.length ? (
+                ) : filtered.length ? (
                     <div className="region-grid">
-                        {rows.map((region) => (
-                            <button
-                                key={region.id}
-                                className="region-card"
-                                onClick={() => setSelected(region)}
-                            >
-                                <div className="region-card-top">
-                                    <span
-                                        className="location-icon"
-                                        aria-hidden="true"
-                                    >
-                                        ⌖
-                                    </span>
-                                    <Tag>{region.status}</Tag>
-                                </div>
-                                <h3>{region.name}</h3>
-                                <p>
-                                    {region.latitude.toFixed(3)}°,{" "}
-                                    {region.longitude.toFixed(3)}°
-                                </p>
-                                <div className="region-card-bottom">
-                                    <span>{region.timezone}</span>
-                                    <span aria-hidden="true">↗</span>
-                                </div>
-                            </button>
-                        ))}
+                        {filtered.map((site) => {
+                            const metadata =
+                                site.plant?.current_configuration ??
+                                site.plant?.submission;
+                            return (
+                                <button
+                                    className="region-card"
+                                    key={site.id}
+                                    onClick={() => open(site)}
+                                >
+                                    <div className="region-card-top">
+                                        <span
+                                            className="location-icon"
+                                            aria-hidden="true"
+                                        >
+                                            <PlantIcon />
+                                        </span>
+                                        <Tag>{site.status}</Tag>
+                                    </div>
+                                    <h3>{site.plant?.name ?? site.name}</h3>
+                                    <p>
+                                        {metadata
+                                            ? `${metadata.dc_capacity_mw} MW DC`
+                                            : "Complete setup"}{" "}
+                                        {" · "}
+                                        {site.timezone}
+                                    </p>
+                                    <div className="region-card-bottom">
+                                        <span>
+                                            {site.plant
+                                                ? "Open plant"
+                                                : "Complete setup"}
+                                        </span>
+                                        <PlantIcon arrow />
+                                    </div>
+                                </button>
+                            );
+                        })}
                     </div>
                 ) : (
-                    <Empty title="No regions yet">
-                        Request a region to get started.
+                    <Empty
+                        title={
+                            rows.length
+                                ? "No matching plants"
+                                : "Start with your first plant"
+                        }
+                    >
+                        {rows.length
+                            ? "Try a different name or approval status."
+                            : "Add its location and technical details in one request."}
                     </Empty>
                 )}
-                {(next === undefined ? regions.data?.next : next) && (
-                    <button
-                        className="button secondary"
-                        onClick={async () => {
-                            try {
-                                const url = new URL(
-                                    (next === undefined
-                                        ? regions.data?.next
-                                        : next)!,
-                                    window.location.origin,
-                                );
-                                const page = await request<Page<Region>>(
-                                    url.pathname + url.search,
-                                );
-                                setMore([...more, ...page.results]);
-                                setNext(page.next);
-                            } catch (error) {
-                                setPageError((error as Error).message);
-                            }
-                        }}
-                    >
-                        Load more regions
-                    </button>
-                )}
-                {pageError && <Notice error>{pageError}</Notice>}
             </section>
         </>
     );

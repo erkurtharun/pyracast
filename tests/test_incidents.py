@@ -16,6 +16,7 @@ from pyracast.plants.models import Plant
 from pyracast.plants.operations import create_plant, revise_plant
 from pyracast.trash import RETENTION, purge_expired, restore_plant, trash_plant
 from tests.test_domain import make_system
+from tests.test_trash_operations import sibling
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -286,8 +287,9 @@ def test_incident_history_survives_restore_and_is_purged_with_plant() -> None:
     plant = create_plant(
         system.member, system.tenant.pk, system.region.pk, name="PV", dc_capacity_mw=10
     )
+    other_region, _ = sibling(system)
     other = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="Other", dc_capacity_mw=10
+        system.member, system.tenant.pk, other_region.pk, name="Other", dc_capacity_mw=10
     )
     parent = (system.member, system.tenant.pk, system.region.pk)
     start = timezone.now() - timedelta(hours=2)
@@ -303,7 +305,9 @@ def test_incident_history_survives_restore_and_is_purged_with_plant() -> None:
     )
     incident = save_incident(*parent, plant.pk, **values)
     save_incident(*parent, plant.pk, incident_id=incident.pk, expected_revision=1, **values)
-    other_incident = save_incident(*parent, other.pk, **values)
+    other_incident = save_incident(
+        system.member, system.tenant.pk, other_region.pk, other.pk, **values
+    )
     revision_ids = list(
         IncidentRevision.objects.filter(incident=incident).values_list("pk", flat=True)
     )

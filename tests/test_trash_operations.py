@@ -56,7 +56,7 @@ def sibling(system: System) -> tuple[Region, SiteBinding]:
     region = Region.objects.create(
         tenant=system.tenant,
         name="Other region",
-        latitude=40,
+        latitude=41 + Region.objects.filter(tenant=system.tenant).count(),
         longitude=29,
         timezone=system.region.timezone,
         status="approved",
@@ -240,14 +240,14 @@ def test_restore_parent_preserves_individual_plant_trash_and_restarts_future_sch
 ) -> None:
     system, plant = make_plant(monkeypatch)
     _, preference = linked_records(system, plant)
-    active = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="Active", dc_capacity_mw=1
-    )
     args = (system.member, system.tenant.pk, system.region.pk)
     assert restore_region(*args).deleted_at is None
     assert restore_plant(*args, plant.pk).deleted_at is None
     trashed = trash_plant(*args, plant.pk)
     assert trashed.deleted_at == NOW
+    active = create_plant(
+        system.member, system.tenant.pk, system.region.pk, name="Active", dc_capacity_mw=1
+    )
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=1))
     assert trash_plant(*args, plant.pk).deleted_at == NOW
     trash_region(*args)
@@ -263,6 +263,9 @@ def test_restore_parent_preserves_individual_plant_trash_and_restarts_future_sch
     preference.refresh_from_db()
     assert preference.effective_from == restored_at
     assert preference.times == ["16:00"]
+    with pytest.raises(ValidationError, match="location_already_has_plant"):
+        restore_plant(*args, plant.pk)
+    trash_plant(*args, active.pk)
     assert restore_plant(*args, plant.pk).deleted_at is None
     assert PlantEvent.objects.filter(plant=plant, action="plant_trashed").count() == 1
     assert PlantEvent.objects.filter(plant=plant, action="plant_restored").count() == 1

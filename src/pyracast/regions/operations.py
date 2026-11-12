@@ -1,5 +1,6 @@
 import math
 from datetime import date, datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.contrib.auth.models import User
@@ -7,10 +8,37 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone as django_timezone
 
+from pyracast.accounts.models import Tenant
 from pyracast.accounts.operations import require_admin, require_member
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.models import CollectionJob
-from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest
+from pyracast.regions.models import (
+    AuditEvent,
+    Region,
+    RegionLocationChangeRequest,
+    location_coordinate,
+)
+
+
+def canonical_coordinate(value: float) -> float:
+    return float(Decimal(str(value)).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP))
+
+
+def require_available_location(
+    tenant_id: int, latitude: float, longitude: float, *, exclude_region_id: int | None = None
+) -> None:
+    Tenant.objects.select_for_update().get(pk=tenant_id)
+    regions = Region.objects.filter(tenant_id=tenant_id, deleted_at__isnull=True).annotate(
+        location_latitude=location_coordinate("latitude"),
+        location_longitude=location_coordinate("longitude"),
+    )
+    if exclude_region_id is not None:
+        regions = regions.exclude(pk=exclude_region_id)
+    if regions.filter(
+        location_latitude=Decimal(str(canonical_coordinate(latitude))),
+        location_longitude=Decimal(str(canonical_coordinate(longitude))),
+    ).exists():
+        raise ValidationError("location_already_exists")
 
 
 def validate_location(latitude: float, longitude: float, timezone: str) -> None:
@@ -37,13 +65,15 @@ def submit_region(
     validate_location(latitude, longitude, timezone)
     if not name.strip() or len(name) > 200:
         raise ValidationError("A region name of at most 200 characters is required.")
-    return Region.objects.create(
-        tenant_id=tenant_id,
-        name=name.strip(),
-        latitude=latitude,
-        longitude=longitude,
-        timezone=timezone,
-    )
+    with transaction.atomic():
+        require_available_location(tenant_id, latitude, longitude)
+        return Region.objects.create(
+            tenant_id=tenant_id,
+            name=name.strip(),
+            latitude=canonical_coordinate(latitude),
+            longitude=canonical_coordinate(longitude),
+            timezone=timezone,
+        )
 
 
 def update_region(
@@ -83,6 +113,7 @@ def request_location_change(
 ) -> RegionLocationChangeRequest:
     require_member(actor, tenant_id)
     validate_location(latitude, longitude, timezone)
+    latitude, longitude = canonical_coordinate(latitude), canonical_coordinate(longitude)
     if len(reason) > 1000:
         raise ValidationError("A reason of at most 1000 characters is required.")
     with transaction.atomic():
@@ -126,6 +157,11 @@ def review_location_change(
     require_admin(actor)
     with transaction.atomic():
         change = RegionLocationChangeRequest.objects.get(pk=request_id)
+        if approve:
+            tenant_id = Region.objects.values_list("tenant_id", flat=True).get(pk=change.region_id)
+            require_available_location(
+                tenant_id, change.latitude, change.longitude, exclude_region_id=change.region_id
+            )
         region = Region.objects.select_for_update().get(
             pk=change.region_id, deleted_at__isnull=True
         )
@@ -267,6 +303,9 @@ def approve_region(actor: User, region_id: int, binding_id: int, now: datetime) 
         region.status = "approved"
         region.approved_binding = binding
         region.save(update_fields=("status", "approved_binding"))
+        from pyracast.plants.operations import activate_submitted_plants
+
+        activate_submitted_plants(actor, region, binding)
         AuditEvent.objects.create(
             actor=actor, region=region, action="approved", revision=region.revision
         )

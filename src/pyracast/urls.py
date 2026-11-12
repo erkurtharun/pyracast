@@ -3,7 +3,12 @@ from drf_spectacular.views import SpectacularAPIView
 from rest_framework.permissions import IsAuthenticated
 
 from pyracast.admin import site
-from pyracast.api.session import SessionLoginView, SessionLogoutView, SessionView
+from pyracast.api.session import (
+    SessionLoginView,
+    SessionLogoutView,
+    SessionRegisterView,
+    SessionView,
+)
 from pyracast.api.trash import RestoreRegionView, TrashedPlantsView, TrashedRegionsView
 from pyracast.api.views import (
     AccountView,
@@ -19,6 +24,7 @@ from pyracast.api.views import (
     ValidateView,
 )
 from pyracast.forecasts.views import CollectionScheduleView
+from pyracast.plants.site_api import SitesView, SiteView
 
 urlpatterns = [
     path("admin/", site.urls),
@@ -26,9 +32,12 @@ urlpatterns = [
     path("api/schema/", SpectacularAPIView.as_view(permission_classes=[IsAuthenticated])),
     path("api/session/", SessionView.as_view()),
     path("api/session/login/", SessionLoginView.as_view()),
+    path("api/session/register/", SessionRegisterView.as_view()),
     path("api/session/logout/", SessionLogoutView.as_view()),
     path("api/", include("pyracast.notifications.urls")),
     path("api/tenants/", TenantsView.as_view()),
+    path("api/tenants/<int:tenant_id>/sites/", SitesView.as_view()),
+    path("api/tenants/<int:tenant_id>/sites/<int:region_id>/", SiteView.as_view()),
     path("api/tenants/<int:tenant_id>/trash/regions/", TrashedRegionsView.as_view()),
     path("api/tenants/<int:tenant_id>/trash/plants/", TrashedPlantsView.as_view()),
     path("api/tenants/<int:tenant_id>/regions/", RegionsView.as_view()),

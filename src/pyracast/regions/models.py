@@ -4,6 +4,14 @@ from django.db import models
 from pyracast.accounts.models import Tenant
 
 
+def location_coordinate(field: str) -> models.Func:
+    return models.Func(
+        models.F(field),
+        template="ROUND((%(expressions)s)::numeric, 6)",
+        output_field=models.DecimalField(max_digits=10, decimal_places=6),
+    )
+
+
 class Region(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT)
     name = models.CharField(max_length=200)
@@ -21,6 +29,13 @@ class Region(models.Model):
 
     class Meta:
         constraints = (
+            models.UniqueConstraint(
+                models.F("tenant"),
+                location_coordinate("latitude"),
+                location_coordinate("longitude"),
+                condition=models.Q(deleted_at__isnull=True),
+                name="one_active_region_per_tenant_location",
+            ),
             models.CheckConstraint(
                 condition=models.Q(latitude__gte=-90, latitude__lte=90), name="region_latitude"
             ),

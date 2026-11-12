@@ -1,0 +1,326 @@
+import pytest
+from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
+from django.db import connection
+from django.test import Client
+from django.urls import reverse
+from django.utils import timezone
+
+from pyracast.admin_forms import BindingActionForm, ProviderSetupForm
+from pyracast.connections.contracts import ProviderFailure
+from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.connections.operations import rotate_secret
+from pyracast.forecasts.models import CollectionJob, RequestAttempt
+from pyracast.plants.models import Plant, PlantSubmission
+from pyracast.regions.models import AuditEvent, Region
+from tests.test_api import verified_admin
+from tests.test_domain import FakeAdapter, System, make_system, secret_ref
+
+pytestmark = pytest.mark.django_db(transaction=True)
+
+
+def setup_url(system: System) -> str:
+    return reverse("admin:regions_region_setup", args=(system.region.pk,))
+
+
+def setup_input(system: System, **changes: object) -> dict[str, object]:
+    return {
+        "action": "configure",
+        "expected_revision": system.region.revision,
+        "expected_binding_id": system.binding.pk,
+        "account_mode": "existing",
+        "existing_account": f"{system.account.pk}:{system.account.credential_revision}",
+        "api_key": "",
+        "secret_reference": "",
+        "daily_quota": 10,
+        "site_id": "solar-resource",
+        "capacity_kw": 1000,
+        "dc_capacity_kw": "",
+        "power_basis": "ac",
+        "installation_date": "2020-01-01",
+        "azimuth_degrees": 0,
+        "losses_percent": 0,
+        "settings_verification_reference": "Checked site settings with authorized account owner",
+        "capacity_semantics_verified": True,
+        **changes,
+    }
+
+
+def action_input(system: System, action: str, **changes: object) -> dict[str, object]:
+    return {
+        "action": action,
+        "expected_revision": system.region.revision,
+        "binding_id": system.binding.pk,
+        "credential_revision": system.account.credential_revision,
+        **changes,
+    }
+
+
+def submitted_plant(system: System) -> Plant:
+    plant = Plant.objects.create(region=system.region, name="Customer solar park")
+    PlantSubmission.objects.create(
+        plant=plant,
+        dc_capacity_mw=4.2,
+        submitted_by=system.member,
+        inverter_capacity_mw=4,
+        export_limit_mw=3.8,
+    )
+    return plant
+
+
+def test_admin_can_review_configure_validate_and_approve_without_exposing_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = make_system()
+    plant = submitted_plant(system)
+    client, _ = verified_admin()
+    response = client.get(setup_url(system))
+    assert response.status_code == 200
+    assert b"Customer solar park" in response.content
+    assert b"4.2" in response.content
+    assert system.account.secret_reference.encode() not in response.content
+    listing = client.get("/admin/regions/region/")
+    assert setup_url(system).encode() in listing.content
+    detail = client.get(f"/admin/regions/region/{system.region.pk}/change/")
+    assert b"Review and set up provider" in detail.content
+    key = "test-only-provider-key"
+    response = client.post(
+        setup_url(system),
+        setup_input(
+            system,
+            account_mode="new",
+            existing_account="",
+            external_account_id="New-owner",
+            api_key=key,
+            authorization_reference="Authorized service use",
+        ),
+    )
+    assert response.status_code == 302
+    assert not RequestAttempt.objects.exists()
+    system.region.refresh_from_db()
+    system.binding = SiteBinding.objects.get(
+        region=system.region, region_revision=system.region.revision
+    )
+    system.account = system.binding.provider_account
+    assert system.account.provider == "solcast"
+    assert system.account.external_account_id == "new-owner"
+    assert system.account.secret_reference.startswith("encrypted:v1:")
+    assert key not in system.account.secret_reference
+    page = client.get(setup_url(system))
+    assert key.encode() not in page.content
+    assert system.account.secret_reference.encode() not in page.content
+    assert page.context["can_approve"] is False
+    assert client.post(setup_url(system), action_input(system, "approve")).status_code == 400
+    monkeypatch.setattr("pyracast.admin.adapter_for", lambda binding: FakeAdapter())
+    assert client.post(setup_url(system), action_input(system, "validate")).status_code == 302
+    assert RequestAttempt.objects.get().outcome == "succeeded"
+    assert client.get(setup_url(system)).context["can_approve"] is True
+    assert client.post(setup_url(system), action_input(system, "approve")).status_code == 302
+    system.region.refresh_from_db()
+    plant.refresh_from_db()
+    assert system.region.status == "approved"
+    assert plant.current_configuration is not None
+    assert plant.current_configuration.dc_capacity_mw == 4.2
+    assert CollectionJob.objects.filter(binding=system.binding, endpoint="forecasts").count() == 1
+    assert AuditEvent.objects.filter(region=system.region, action="approved").count() == 1
+
+
+@pytest.mark.parametrize("identity", ["anonymous", "member", "staff", "unverified_admin"])
+def test_setup_requires_superuser_and_mfa(identity: str) -> None:
+    system = make_system()
+    client = Client()
+    if identity != "anonymous":
+        user = User.objects.create_user(
+            username=f"setup-{identity}",
+            is_staff=identity in {"staff", "unverified_admin"},
+            is_superuser=identity == "unverified_admin",
+        )
+        client.force_login(user)
+    for method in (client.get, client.post):
+        assert method(setup_url(system)).status_code == 302
+    assert SiteBinding.objects.count() == 1
+
+
+def test_setup_csrf_deleted_regions_and_missing_binding_states() -> None:
+    system = make_system()
+    client, _ = verified_admin()
+    csrf_client = Client(enforce_csrf_checks=True)
+    csrf_client.cookies = client.cookies
+    assert csrf_client.post(setup_url(system), setup_input(system)).status_code == 403
+    region = Region.objects.create(
+        tenant=system.tenant, name="Empty", latitude=41, longitude=30, timezone="Europe/Istanbul"
+    )
+    response = client.get(reverse("admin:regions_region_setup", args=(region.pk,)))
+    assert response.status_code == 200
+    assert b"No plant has been submitted" in response.content
+    assert b"Save the private provider setup to continue" in response.content
+    Plant.objects.create(region=region, name="Legacy plant")
+    response = client.get(reverse("admin:regions_region_setup", args=(region.pk,)))
+    assert b"no pending technical submission" in response.content
+    system.region.deleted_at = timezone.now()
+    system.region.save(update_fields=("deleted_at",))
+    assert client.get(setup_url(system)).status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("changes", "field"),
+    [
+        (
+            {"account_mode": "new", "external_account_id": "", "authorization_reference": ""},
+            "api_key",
+        ),
+        ({"existing_account": ""}, "existing_account"),
+        ({"api_key": "never-render-this", "secret_reference": "env:ALTERNATIVE"}, "api_key"),
+        ({"secret_reference": "raw-key-must-not-appear"}, "secret_reference"),
+        ({"secret_reference": "env:bad-reference"}, "secret_reference"),
+        ({"capacity_kw": "nan"}, "capacity_kw"),
+        ({"capacity_semantics_verified": ""}, "capacity_semantics_verified"),
+        ({"account_mode": "invalid"}, "account_mode"),
+    ],
+)
+def test_invalid_setup_preserves_safe_fields_and_never_renders_secrets(
+    changes: dict[str, object],
+    field: str,
+) -> None:
+    system = make_system()
+    client, _ = verified_admin()
+    response = client.post(setup_url(system), setup_input(system, **changes))
+    assert response.status_code == 400
+    assert field in response.context["setup_form"].errors
+    assert b"never-render-this" not in response.content
+    assert b"raw-key-must-not-appear" not in response.content
+    assert b"bad-reference" not in response.content
+    assert ProviderAccount.objects.count() == SiteBinding.objects.count() == 1
+
+
+def test_existing_key_can_be_rotated_and_invalid_site_rolls_back_rotation() -> None:
+    system = make_system()
+    client, _ = verified_admin()
+    response = client.post(
+        setup_url(system), setup_input(system, secret_reference=secret_ref("REPLACED"))
+    )
+    assert response.status_code == 302
+    system.account.refresh_from_db()
+    system.region.refresh_from_db()
+    system.binding = SiteBinding.objects.get(
+        region=system.region, region_revision=system.region.revision
+    )
+    assert system.account.credential_revision == 2
+    assert system.account.secret_reference == secret_ref("REPLACED")
+    assert client.post(setup_url(system), setup_input(system)).status_code == 302
+    system.region.refresh_from_db()
+    system.account.refresh_from_db()
+    system.binding = SiteBinding.objects.get(
+        region=system.region, region_revision=system.region.revision
+    )
+    assert system.account.credential_revision == 2
+    assert (
+        client.post(
+            setup_url(system),
+            setup_input(system, secret_reference=secret_ref("ROLLBACK"), capacity_kw=0),
+        ).status_code
+        == 400
+    )
+    system.account.refresh_from_db()
+    assert system.account.secret_reference == secret_ref("REPLACED")
+    assert SiteBinding.objects.count() == 3
+
+
+def test_stale_setup_and_action_revisions_are_rejected() -> None:
+    system = make_system()
+    client, _ = verified_admin()
+    assert (
+        client.post(setup_url(system), setup_input(system, expected_revision=999)).status_code
+        == 400
+    )
+    assert (
+        client.post(
+            setup_url(system), action_input(system, "validate", expected_revision=999)
+        ).status_code
+        == 400
+    )
+    assert (
+        client.post(
+            setup_url(system), action_input(system, "validate", credential_revision=999)
+        ).status_code
+        == 400
+    )
+    assert client.post(setup_url(system), action_input(system, "bogus")).status_code == 400
+    assert client.post(setup_url(system), {"action": "validate"}).status_code == 400
+    assert not RequestAttempt.objects.exists()
+    form = ProviderSetupForm(setup_input(system))
+    assert form.is_valid(), form.errors
+    rotate_secret(system.admin, system.account.pk, "env:ROTATED")
+    with pytest.raises(ValidationError, match="account changed"):
+        form.configure(system.admin, system.region)
+    action = BindingActionForm(action_input(system, "validate"))
+    assert action.is_valid()
+    stale = Region.objects.get(pk=system.region.pk)
+    stale.revision += 1
+    with pytest.raises(ValidationError, match="setup changed"):
+        action.current_binding(stale)
+
+
+def test_new_account_duplicate_identity_is_not_silently_reused() -> None:
+    system = make_system()
+    client, _ = verified_admin()
+    system.account.provider = "solcast"
+    system.account.save(update_fields=("provider",))
+    response = client.post(
+        setup_url(system),
+        setup_input(
+            system,
+            account_mode="new",
+            external_account_id=system.account.external_account_id,
+            api_key="new-key",
+            authorization_reference="Authorized",
+        ),
+    )
+    assert response.status_code == 400
+    assert ProviderAccount.objects.count() == 1
+    system.account.refresh_from_db()
+    assert system.account.secret_reference == secret_ref()
+
+
+def test_validation_failures_and_quota_exhaustion_are_safe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = make_system()
+    client, _ = verified_admin()
+
+    def fail() -> None:
+        assert not connection.in_atomic_block
+        raise ProviderFailure("secret-must-not-be-rendered")
+
+    monkeypatch.setattr("pyracast.admin.adapter_for", lambda binding: FakeAdapter(fail))
+    response = client.post(setup_url(system), action_input(system, "validate"))
+    assert response.status_code == 400
+    assert b"Connection validation failed" in response.content
+    assert b"secret-must-not-be-rendered" not in response.content
+    assert RequestAttempt.objects.get().outcome == "failed"
+    system.account.daily_quota = 1
+    system.account.save(update_fields=("daily_quota",))
+    response = client.post(setup_url(system), action_input(system, "validate"))
+    assert response.status_code == 400
+    assert b"request budget is unavailable" in response.content
+    assert RequestAttempt.objects.count() == 1
+
+
+def test_initial_setup_duplicate_post_does_not_replace_the_first_binding() -> None:
+    system = make_system()
+    client, _ = verified_admin()
+    region = Region.objects.create(
+        tenant=system.tenant,
+        name="New site",
+        latitude=41,
+        longitude=30,
+        timezone="Europe/Istanbul",
+    )
+    path = reverse("admin:regions_region_setup", args=(region.pk,))
+    data = setup_input(system, expected_binding_id="")
+    assert client.post(path, data).status_code == 302
+    binding = SiteBinding.objects.get(region=region)
+    assert client.post(path, data).status_code == 400
+    region.refresh_from_db()
+    assert region.revision == 1
+    assert list(SiteBinding.objects.filter(region=region)) == [binding]

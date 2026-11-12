@@ -20,7 +20,7 @@ pytestmark = pytest.mark.django_db(transaction=True)
 def test_observation_overlap_is_scoped_to_plant_and_not_configuration() -> None:
     system = make_system()
     plant = Plant.objects.create(region=system.region, name="One")
-    other = Plant.objects.create(region=system.region, name="Two")
+    other = Plant.objects.create(region=system.region, name="Two", deleted_at=NOW)
     config = PlantConfiguration.objects.create(
         plant=plant, binding=system.binding, revision=1, dc_capacity_mw=1, created_by=system.member
     )

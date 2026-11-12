@@ -4,7 +4,16 @@ import { useState } from "react";
 import type { components } from "@/lib/schema";
 import { Field, Select } from "./ui";
 
-type Configuration = components["schemas"]["ConfigurationOutput"];
+type Configuration = Pick<
+    components["schemas"]["ConfigurationOutput"],
+    | "dc_capacity_mw"
+    | "inverter_capacity_mw"
+    | "export_limit_mw"
+    | "measurement_basis"
+    | "mounting_type"
+    | "surface_tilt"
+    | "surface_azimuth"
+>;
 
 export function configurationInput(data: FormData) {
     const optional = (name: string) => {
@@ -28,9 +37,11 @@ export function configurationInput(data: FormData) {
 export function PlantConfigurationFields({
     name,
     configuration,
+    includeName = true,
 }: {
     name?: string;
     configuration?: Configuration;
+    includeName?: boolean;
 }) {
     const [mounting, setMounting] = useState<string>(
         configuration?.mounting_type ?? "unknown",
@@ -38,7 +49,9 @@ export function PlantConfigurationFields({
     return (
         <>
             <div className="form-grid">
-                <Field label="Plant name" name="name" defaultValue={name} />
+                {includeName && (
+                    <Field label="Plant name" name="name" defaultValue={name} />
+                )}
                 <Field
                     label="DC nameplate capacity (MW)"
                     name="dc_capacity_mw"

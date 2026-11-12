@@ -51,7 +51,7 @@ async function workspace(
             };
         else if (path === "/api/tenants/")
             data = paged([{ id: 1, name: "Tenant" }]);
-        else if (path.endsWith("/regions/")) data = paged([region]);
+        else if (path.endsWith("/sites/")) data = paged([region]);
         else if (path.endsWith("/plants/"))
             data = paged([
                 {
@@ -160,10 +160,6 @@ async function workspace(
     });
     await page.goto("/");
     await page.getByRole("button", { name: /Outage region/ }).click();
-    await page
-        .getByRole("button", { name: "Solar plants", exact: true })
-        .click();
-    await page.getByRole("button", { name: /Outage plant/ }).click();
     return {
         reads: () => outageReads,
         incident: () => incident,
@@ -219,9 +215,7 @@ test("outage lifecycle preserves metadata, compares both scenarios and restores 
             .filter({ hasText: "Available panels" })
             .getByText("2 MW", { exact: true }),
     ).toBeVisible();
-    await page
-        .getByRole("button", { name: "Generation forecast", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Forecast", exact: true }).click();
     await expect(
         page.getByText("Normal capacity · daily energy", { exact: true }),
     ).toBeVisible();
@@ -265,9 +259,7 @@ test("outage lifecycle preserves metadata, compares both scenarios and restores 
         ends_at: "2026-11-11T11:00:00.000Z",
         revision: 3,
     });
-    await page
-        .getByRole("button", { name: "Generation forecast", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Forecast", exact: true }).click();
     await expect(page.getByText("Daily energy", { exact: true })).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Download both scenarios CSV" }),
@@ -287,9 +279,7 @@ test("unknown impact remains missing and stale edits show a conflict", async ({
     await expect(
         page.getByText(/Configuration changed. Edit this report/),
     ).toBeVisible();
-    await page
-        .getByRole("button", { name: "Generation forecast", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Forecast", exact: true }).click();
     await expect(page.getByText(/Capacity impact is unknown/)).toBeVisible();
     await expect(
         page.getByText(

@@ -3,7 +3,7 @@ import AxeBuilder from "@axe-core/playwright";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
 
-test("a customer manages an approved region through the real API", async ({
+test("a customer manages one plant site through the real API", async ({
     page,
 }, testInfo) => {
     test.setTimeout(60_000);
@@ -15,8 +15,13 @@ test("a customer manages an approved region through the real API", async ({
     });
     await page.getByLabel("Username").fill(process.env.BROWSER_USERNAME!);
     await page.getByLabel("Password").fill(process.env.BROWSER_PASSWORD!);
-    await page.getByRole("button", { name: /sign in/i }).click();
-    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
+    await page
+        .locator("form")
+        .getByRole("button", { name: /sign in/i })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "Your solar portfolio" }),
+    ).toBeVisible();
 
     const forbidden = await page.evaluate(
         async ({ tenant, region }) => {
@@ -37,9 +42,44 @@ test("a customer manages an approved region through the real API", async ({
     expect([403, 404]).toContain(forbidden);
 
     await page.getByRole("button", { name: /Site/ }).click();
+    await expect(
+        page.getByRole("heading", { name: "Complete plant setup" }),
+    ).toBeVisible();
+    await page.getByLabel("Plant name").fill("Browser plant");
+    await page.getByLabel("DC nameplate capacity (MW)").fill("130");
+    await page.getByLabel("Inverter AC capacity (MW, optional)").fill("100");
+    await page.getByRole("button", { name: "Continue", exact: true }).click();
+    const created = page.waitForResponse(
+        (response) =>
+            response.request().method() === "POST" &&
+            /\/plants\/$/.test(new URL(response.url()).pathname),
+    );
+    await page
+        .getByRole("button", { name: "Submit plant for approval" })
+        .click();
+    const createdPlant = (await (await created).json()) as {
+        id: number;
+        region_id: number;
+        current_configuration: { id: number; revision: number };
+    };
+    expect(createdPlant.current_configuration.revision).toBe(1);
+    const tenantId = await page.evaluate(async () => {
+        const response = await fetch("/api/tenants/");
+        const tenants = await response.json();
+        return tenants.results[0].id as number;
+    });
+    const plantUrl = `/api/tenants/${tenantId}/regions/${createdPlant.region_id}/plants/${createdPlant.id}/`;
+    await expect(
+        page.getByRole("heading", { name: "Browser plant" }),
+    ).toBeVisible();
+    await expect(page.getByLabel("Forecast date")).toHaveValue(
+        process.env.BROWSER_DATE!,
+    );
+    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+
     await page.getByLabel("Forecast date").fill(process.env.BROWSER_DATE!);
     await expect(
-        page.getByRole("heading", { name: "Regional irradiance" }),
+        page.getByRole("heading", { name: "Irradiance" }),
     ).toBeVisible();
     await expect(
         page.getByRole("img", { name: /Irradiance by interval/ }),
@@ -64,18 +104,8 @@ test("a customer manages an approved region through the real API", async ({
     await expect(
         page.getByText("Satellite/model estimates, not meter readings."),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Solar plants" }).click();
-    await page.getByRole("button", { name: "+ Add a plant" }).click();
-    await page.getByLabel("Plant name").fill("Browser plant");
-    await page.getByLabel("DC nameplate capacity (MW)").fill("130");
-    await page.getByLabel("Inverter AC capacity (MW, optional)").fill("100");
-    await page.getByRole("button", { name: "Create plant" }).click();
-    await expect(
-        page.getByRole("heading", { name: "Browser plant" }),
-    ).toBeVisible();
-    await expect(page.getByLabel("Forecast date")).toHaveValue(
-        process.env.BROWSER_DATE!,
-    );
+    await page.getByRole("button", { name: "Generation", exact: true }).click();
+    await page.getByLabel("Forecast date").fill(process.env.BROWSER_DATE!);
     await page.getByLabel("Resolution").selectOption("60");
     await expect(
         page.getByText("View interval data (12 intervals)"),
@@ -142,9 +172,7 @@ test("a customer manages an approved region through the real API", async ({
     await expect(
         page.getByRole("heading", { name: "Browser inverter outage" }),
     ).toBeVisible();
-    await page
-        .getByRole("button", { name: "Generation forecast", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Forecast", exact: true }).click();
     await expect(
         page.getByText("Normal capacity · daily energy", { exact: true }),
     ).toBeVisible();
@@ -187,9 +215,7 @@ test("a customer manages an approved region through the real API", async ({
         .fill(outageTimes.ends);
     await page.getByRole("button", { name: "Save resolution" }).click();
     await expect(page.getByText("resolved", { exact: true })).toBeVisible();
-    await page
-        .getByRole("button", { name: "Generation forecast", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Forecast", exact: true }).click();
     await expect(page.getByText("Daily energy", { exact: true })).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Download both scenarios CSV" }),
@@ -199,7 +225,8 @@ test("a customer manages an approved region through the real API", async ({
     await page.getByText("Source & quality", { exact: true }).click();
     await expect(
         page.getByText(
-            /Model: reference-power-transfer-v1\. Configuration 1\./,
+            `Model: reference-power-transfer-v1. Configuration ${createdPlant.current_configuration.id}.`,
+            { exact: false },
         ),
     ).toBeVisible();
     await expect(
@@ -227,6 +254,7 @@ test("a customer manages an approved region through the real API", async ({
         page.getByText("View interval data (24 intervals)"),
     ).toBeVisible();
 
+    await page.getByRole("button", { name: "Production", exact: true }).click();
     await page.getByRole("button", { name: "Automatic production" }).click();
     await expect(page.getByLabel("EPİAŞ plant ID")).toBeVisible();
     await expect(page.getByLabel(/Measurement point/)).toHaveValue("unknown");
@@ -248,8 +276,9 @@ test("a customer manages an approved region through the real API", async ({
         ),
     ).toBeVisible();
 
+    await page.getByRole("button", { name: "Production", exact: true }).click();
     await page
-        .getByRole("button", { name: "Calibration", exact: true })
+        .getByRole("button", { name: "Manual journal", exact: true })
         .click();
     await expect(
         page.getByRole("heading", { name: "Production journal" }),
@@ -312,11 +341,9 @@ test("a customer manages an approved region through the real API", async ({
         ),
     ).toEqual([]);
     await page.reload();
-    await page.getByRole("button", { name: /Site/ }).click();
-    await page.getByRole("button", { name: "Solar plants" }).click();
-    await page.getByRole("button", { name: /Browser plant/ }).click();
+    await page.getByRole("button", { name: "Production", exact: true }).click();
     await page
-        .getByRole("button", { name: "Calibration", exact: true })
+        .getByRole("button", { name: "Manual journal", exact: true })
         .click();
     await expect(
         page
@@ -324,7 +351,7 @@ test("a customer manages an approved region through the real API", async ({
             .getByText("1.25 MWh", { exact: true }),
     ).toBeVisible();
 
-    await page.getByRole("button", { name: /all plants/i }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page
         .getByRole("button", { name: "Data collection", exact: true })
         .click();
@@ -341,7 +368,7 @@ test("a customer manages an approved region through the real API", async ({
         page.getByLabel("Collection time 2 (Europe/Istanbul)"),
     ).toHaveValue("16:00");
     await page.getByRole("button", { name: "Email reminders" }).click();
-    await page.getByLabel("Enable forecast emails for this region").check();
+    await page.getByLabel("Enable forecast emails for this plant").check();
     await page.getByLabel(/Delivery times/).fill("10:00");
     await page.getByLabel("Email address (optional override)").fill("");
     await page.getByRole("button", { name: "Save reminders" }).click();
@@ -367,22 +394,21 @@ test("a customer manages an approved region through the real API", async ({
         ),
     ).toEqual([]);
     await page.setViewportSize({ width: 1280, height: 900 });
-    await page
-        .getByRole("button", { name: "Solar plants", exact: true })
-        .click();
-    await page.getByRole("button", { name: /Browser plant/ }).click();
-    await page.getByText("Plant actions", { exact: true }).click();
-    await page
-        .getByRole("button", { name: "Delete plant", exact: true })
-        .click();
     const plantDeleted = page.waitForResponse(
         (response) =>
             response.request().method() === "DELETE" &&
             /\/plants\/\d+\/$/.test(new URL(response.url()).pathname),
     );
-    await page
-        .getByRole("button", { name: "Move plant to recycle bin" })
-        .click();
+    const childDeleteStatus = await page.evaluate(async (url) => {
+        const session = await (await fetch("/api/session/")).json();
+        const response = await fetch(url, {
+            method: "DELETE",
+            headers: { "X-CSRFToken": session.csrf_token },
+        });
+        return response.status;
+    }, plantUrl);
+    expect(childDeleteStatus).toBe(204);
+    await page.getByRole("button", { name: "All plants" }).click();
     expect((await plantDeleted).ok()).toBeTruthy();
     await expect(
         page.getByRole("button", { name: /Browser plant/ }),
@@ -392,17 +418,30 @@ test("a customer manages an approved region through the real API", async ({
         .click();
     await page.getByRole("button", { name: "Restore Browser plant" }).click();
     await expect(
-        page.getByText("Browser plant restored. Find it in Overview."),
+        page.getByText("Browser plant restored. Find it in Plants."),
     ).toBeVisible();
     await page.getByRole("button", { name: "Overview", exact: true }).click();
-    await page.getByRole("button", { name: /Site/ }).click();
+    await page.getByRole("button", { name: /Browser plant/ }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page
-        .getByRole("button", { name: "Delete region", exact: true })
+        .getByRole("button", { name: "Delete plant", exact: true })
         .click();
+    const siteDeleted = page.waitForResponse(
+        (response) =>
+            response.request().method() === "DELETE" &&
+            new URL(response.url()).pathname ===
+                `/api/tenants/${tenantId}/regions/${createdPlant.region_id}/`,
+    );
     await page
-        .getByRole("button", { name: "Move region to recycle bin" })
+        .getByRole("button", { name: "Move plant to recycle bin" })
         .click();
-    await expect(page.getByRole("button", { name: /Site/ })).toHaveCount(0);
+    expect((await siteDeleted).status()).toBe(204);
+    await expect(
+        page.getByRole("heading", { name: "Your solar portfolio" }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: /Browser plant/ }),
+    ).toHaveCount(0);
     await page
         .getByRole("button", { name: "Recycle bin", exact: true })
         .click();
@@ -415,31 +454,34 @@ test("a customer manages an approved region through the real API", async ({
     });
     await page.getByRole("button", { name: "Restore Site" }).click();
     await expect(
-        page.getByText("Site restored. Find it in Overview."),
+        page.getByText("Site restored. Find it in Plants."),
     ).toBeVisible();
     await page.getByRole("button", { name: "Overview", exact: true }).click();
-    await page.getByRole("button", { name: /Site/ }).click();
-    await page
-        .getByRole("button", { name: "Solar plants", exact: true })
-        .click();
     await page.getByRole("button", { name: /Browser plant/ }).click();
+    await page.getByRole("button", { name: "Production", exact: true }).click();
     await page
-        .getByRole("button", { name: "Calibration", exact: true })
+        .getByRole("button", { name: "Manual journal", exact: true })
         .click();
     await expect(
         page
             .getByRole("table", { name: "Meter entries" })
             .getByText("1.25 MWh", { exact: true }),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Edit configuration" }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByLabel("Mounting type").selectOption("fixed");
     await page.getByLabel("Surface tilt (degrees, optional)").fill("33");
     await page.getByLabel("Surface azimuth (degrees, optional)").fill("180");
+    const configurationSaved = page.waitForResponse(
+        (response) =>
+            response.request().method() === "PUT" &&
+            new URL(response.url()).pathname === plantUrl,
+    );
     await page.getByRole("button", { name: "Save configuration" }).click();
+    expect((await configurationSaved).ok()).toBeTruthy();
     await expect(
-        page.getByRole("heading", { name: "Edit plant configuration" }),
-    ).toHaveCount(0);
-    await page.getByRole("button", { name: "Edit configuration" }).click();
+        page.getByText("Saved successfully.", { exact: true }),
+    ).toBeVisible();
+    await page.reload();
     await expect(page.getByLabel("Mounting type")).toHaveValue("fixed");
     await expect(
         page.getByLabel("Surface tilt (degrees, optional)"),
@@ -447,10 +489,8 @@ test("a customer manages an approved region through the real API", async ({
     await expect(
         page.getByLabel("Surface azimuth (degrees, optional)"),
     ).toHaveValue("180");
-    await page.getByRole("button", { name: "Close configuration" }).click();
-    await page
-        .getByRole("button", { name: "Generation forecast", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Production", exact: true }).click();
+    await page.getByRole("button", { name: "Comparison", exact: true }).click();
     await expect(
         page.getByRole("heading", { name: "Production comparison" }),
     ).toBeVisible();

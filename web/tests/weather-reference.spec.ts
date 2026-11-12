@@ -53,7 +53,12 @@ for (const [status, reference] of Object.entries({
             }),
         );
         await page.goto("/");
-        await page.getByRole("button", { name: /Antalya solar park/ }).click();
+        await page
+            .getByRole("button", { name: /East array|Antalya solar park/ })
+            .click();
+        await page
+            .getByRole("button", { name: "Irradiance", exact: true })
+            .click();
         const card = page.getByRole("region", {
             name: "Independent weather model",
         });

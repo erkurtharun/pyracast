@@ -16,7 +16,7 @@ from pyracast.plants.models import (
     PlantForecast,
 )
 from pyracast.plants.numerics import forecast
-from pyracast.plants.operations import activate_calibration, create_plant, revise_plant
+from pyracast.plants.operations import activate_calibration, revise_plant
 from tests.test_domain import NOW
 from tests.test_plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
 
@@ -388,11 +388,12 @@ def test_finite_capacity_overflow_returns_validation_without_saving_forecast(
     power_kw: float,
     explicit_as_of: bool,
 ) -> None:
-    system, _ = make_plant(monkeypatch)
-    plant = create_plant(
+    system, plant = make_plant(monkeypatch)
+    plant = revise_plant(
         system.member,
         system.tenant.pk,
         system.region.pk,
+        plant.pk,
         name="Large finite capacity",
         dc_capacity_mw=1e308,
     )

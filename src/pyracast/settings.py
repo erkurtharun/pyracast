@@ -15,6 +15,7 @@ PYRACAST_CUTOFF_LOCAL = time(int(_cutoff[:2]), int(_cutoff[3:]))
 PYRACAST_WEATHER_ENABLED = os.environ.get("PYRACAST_WEATHER_ENABLED", "1") == "1"
 
 SECRET_KEY = os.environ.get("PYRACAST_SECRET_KEY", "")
+SECRET_KEY_FALLBACKS = os.environ.get("PYRACAST_SECRET_KEY_FALLBACKS", "").split()
 DEBUG = os.environ.get("PYRACAST_DEBUG") == "1"
 ALLOWED_HOSTS = os.environ.get("PYRACAST_HOSTS", "localhost,127.0.0.1").split(",")
 CSRF_TRUSTED_ORIGINS = os.environ.get("PYRACAST_CSRF_ORIGINS", "").split()

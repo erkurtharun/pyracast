@@ -7,36 +7,15 @@ export function RegionSettings({
     region,
     base,
     token,
-    onUpdated,
 }: {
     region: Region;
     base: string;
     token: string;
-    onUpdated: (region: Region) => void;
 }) {
     const [version, setVersion] = useState(0);
     return (
         <section className="panel">
-            <h2>Edit region</h2>
-            <ActionForm
-                submit="Save name"
-                onSubmit={async (data) => {
-                    onUpdated(
-                        await request<Region>(
-                            base,
-                            "PATCH",
-                            { name: data.get("name") },
-                            token,
-                        ),
-                    );
-                }}
-            >
-                <Field
-                    label="Region name"
-                    name="name"
-                    defaultValue={region.name}
-                />
-            </ActionForm>
+            <h2>Plant location</h2>
             <details>
                 <summary>Request location change</summary>
                 <LocationRequests
@@ -115,7 +94,7 @@ function LocationRequests({
                                     : "Unable to submit the request.";
                             if (message.includes("region_revision_changed"))
                                 throw new Error(
-                                    "The region has changed. Return to the region list and reopen it.",
+                                    "The plant location has changed. Return to the plant list and reopen it.",
                                     { cause: error },
                                 );
                             if (

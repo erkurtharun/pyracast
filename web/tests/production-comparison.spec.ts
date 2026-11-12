@@ -36,11 +36,11 @@ test("available historical model days appear without empty grid rows", async ({
         });
     });
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
     await page
-        .getByRole("button", { name: "Solar plants", exact: true })
+        .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByRole("button", { name: "Production", exact: true }).click();
+    await page.getByRole("button", { name: "Comparison", exact: true }).click();
     const comparison = page.locator("section").filter({
         has: page.getByRole("heading", {
             name: "Production comparison",
@@ -100,11 +100,11 @@ test("a completely unavailable comparison stays compact", async ({ page }) => {
         });
     });
     await page.goto("/");
-    await page.getByRole("button", { name: /Antalya solar park/ }).click();
     await page
-        .getByRole("button", { name: "Solar plants", exact: true })
+        .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
-    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByRole("button", { name: "Production", exact: true }).click();
+    await page.getByRole("button", { name: "Comparison", exact: true }).click();
     const comparison = page.locator("section").filter({
         has: page.getByRole("heading", {
             name: "Production comparison",
