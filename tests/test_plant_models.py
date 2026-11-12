@@ -22,13 +22,28 @@ def test_observation_overlap_is_scoped_to_plant_and_not_configuration() -> None:
     plant = Plant.objects.create(region=system.region, name="One")
     other = Plant.objects.create(region=system.region, name="Two", deleted_at=NOW)
     config = PlantConfiguration.objects.create(
-        plant=plant, binding=system.binding, revision=1, dc_capacity_mw=1, created_by=system.member
+        region_id=plant.region_id,
+        plant=plant,
+        binding=system.binding,
+        revision=1,
+        dc_capacity_mw=1,
+        created_by=system.member,
     )
     revised = PlantConfiguration.objects.create(
-        plant=plant, binding=system.binding, revision=2, dc_capacity_mw=1, created_by=system.member
+        region_id=plant.region_id,
+        plant=plant,
+        binding=system.binding,
+        revision=2,
+        dc_capacity_mw=1,
+        created_by=system.member,
     )
     other_config = PlantConfiguration.objects.create(
-        plant=other, binding=system.binding, revision=1, dc_capacity_mw=1, created_by=system.member
+        region_id=other.region_id,
+        plant=other,
+        binding=system.binding,
+        revision=1,
+        dc_capacity_mw=1,
+        created_by=system.member,
     )
     ProductionObservation.objects.create(
         plant=plant,
@@ -75,6 +90,7 @@ def test_database_rejects_invalid_values_and_duplicate_baseline_forecast() -> No
     for capacity in (0.0, float("inf"), float("nan")):
         with pytest.raises(IntegrityError), transaction.atomic():
             PlantConfiguration.objects.create(
+                region_id=plant.region_id,
                 plant=plant,
                 binding=system.binding,
                 revision=1,
@@ -82,7 +98,12 @@ def test_database_rejects_invalid_values_and_duplicate_baseline_forecast() -> No
                 created_by=system.member,
             )
     config = PlantConfiguration.objects.create(
-        plant=plant, binding=system.binding, revision=1, dc_capacity_mw=1, created_by=system.member
+        region_id=plant.region_id,
+        plant=plant,
+        binding=system.binding,
+        revision=1,
+        dc_capacity_mw=1,
+        created_by=system.member,
     )
     for energy in (-1.0, float("inf"), float("nan")):
         with pytest.raises(IntegrityError), transaction.atomic():
@@ -107,7 +128,7 @@ def test_database_rejects_invalid_values_and_duplicate_baseline_forecast() -> No
         )
     job = CollectionJob.objects.get()
     snapshot = ForecastSnapshot.objects.create(
-        job=job, raw_payload={}, normalized_intervals=[], collected_at=NOW
+        job=job, binding=job.binding, raw_payload={}, normalized_intervals=[], collected_at=NOW
     )
     forecast: dict[str, Any] = dict(
         configuration=config,
@@ -153,6 +174,7 @@ def test_database_enforces_mounting_and_angle_contract() -> None:
     for values in invalid:
         with pytest.raises(IntegrityError), transaction.atomic():
             PlantConfiguration.objects.create(
+                region_id=plant.region_id,
                 plant=plant,
                 binding=system.binding,
                 revision=1,
@@ -161,6 +183,7 @@ def test_database_enforces_mounting_and_angle_contract() -> None:
                 **values,
             )
     configuration = PlantConfiguration.objects.create(
+        region_id=plant.region_id,
         plant=plant,
         binding=system.binding,
         revision=1,

@@ -55,12 +55,10 @@ def _validate_bindings(source: SiteBinding, target: SiteBinding) -> float:
         "losses_percent",
         "installation_date",
         "power_basis",
-        "capacity_basis",
     )
     if (
         any(getattr(source, field) != getattr(target, field) for field in fields)
         or target.power_basis != "ac"
-        or target.capacity_basis != "ac"
         or not all(
             isfinite(value) and value > 0 for value in (source.capacity_kw, target.capacity_kw)
         )
@@ -141,6 +139,7 @@ def _copy_snapshot(
     )
     snapshot = ForecastSnapshot.objects.create(
         job=job,
+        binding=target,
         raw_payload=source.raw_payload,
         normalized_intervals=_scaled_intervals(source.normalized_intervals, factor),
         collected_at=source.collected_at,

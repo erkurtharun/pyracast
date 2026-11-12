@@ -100,9 +100,7 @@ export function EpiasProduction({
                                         ID {data.provider_plant_id} - {data.eic}
                                     </p>
                                     <p className="fine">
-                                        Measurement point:{" "}
-                                        {data.meter_basis.replaceAll("_", " ")}{" "}
-                                        · Archived days: {data.archived_days} ·
+                                        Archived days: {data.archived_days} ·
                                         Pending jobs: {data.pending_jobs}
                                     </p>
                                     <p className="fine">
@@ -149,8 +147,6 @@ export function EpiasProduction({
                                             expected_eic: String(
                                                 form.get("expected_eic") ?? "",
                                             ).trim(),
-                                            meter_basis:
-                                                form.get("meter_basis"),
                                         },
                                         token,
                                     );
@@ -180,25 +176,6 @@ export function EpiasProduction({
                                             maxLength={16}
                                             defaultValue={data.eic}
                                         />
-                                    </label>
-                                    <label className="field">
-                                        Measurement point
-                                        <select
-                                            name="meter_basis"
-                                            defaultValue={
-                                                data.meter_basis || "unknown"
-                                            }
-                                        >
-                                            <option value="unknown">
-                                                Unknown
-                                            </option>
-                                            <option value="net_export">
-                                                Net export
-                                            </option>
-                                            <option value="ac_generation">
-                                                AC generation
-                                            </option>
-                                        </select>
                                     </label>
                                 </div>
                                 {data.connected && (
@@ -313,7 +290,7 @@ const blockers: Record<string, string> = {
     source_disconnected:
         "Connect the production source before using settlement injection for calibration.",
     measurement_basis_mismatch:
-        "Settlement injection requires the plant and connection measurement points to be net export.",
+        "Provider production requires the plant measurement point to be net export.",
     production_unavailable:
         "No reported production is available for calibration.",
 };

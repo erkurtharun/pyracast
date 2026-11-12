@@ -220,6 +220,13 @@ def test_changed_pinned_identity_cannot_publish(
     linked = link_settlement(monkeypatch)
     job = EpiasCollectionJob.objects.filter(source_kind="settlement_injection").first()
     assert job is not None
+    if changed == "source_kind":
+        EpiasCollectionJob.objects.filter(
+            connection=linked,
+            source_kind="realtime_generation",
+            target_day=job.target_day,
+            scheduled_for=job.scheduled_for,
+        ).delete()
 
     def fetch(plant: EpiasPlant, day: date) -> EpiasDay:
         if changed == "eic":
@@ -227,7 +234,7 @@ def test_changed_pinned_identity_cannot_publish(
         elif changed == "source_id":
             EpiasConnection.objects.filter(pk=linked.pk).update(settlement_plant_id=2)
         else:
-            EpiasCollectionJob.objects.filter(pk=job.pk).update(source_kind="unknown")
+            EpiasCollectionJob.objects.filter(pk=job.pk).update(source_kind="realtime_generation")
         assert job.period_end_day is not None
         return month_data(plant, day, job.period_end_day)
 

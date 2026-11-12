@@ -33,6 +33,7 @@ class Plant(models.Model):
 
     class Meta:
         constraints = (
+            models.UniqueConstraint(fields=("id", "region"), name="plant_region_identity"),
             models.UniqueConstraint(
                 fields=("region",),
                 condition=Q(deleted_at__isnull=True),
@@ -61,9 +62,51 @@ class PlantSubmission(models.Model):
     submitted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        constraints = (
+            models.CheckConstraint(
+                condition=Q(dc_capacity_mw__gt=0, dc_capacity_mw__lt=float("inf")),
+                name="submission_dc_capacity_finite",
+            ),
+            models.CheckConstraint(
+                condition=Q(inverter_capacity_mw__isnull=True)
+                | Q(inverter_capacity_mw__gt=0, inverter_capacity_mw__lt=float("inf")),
+                name="submission_inverter_finite",
+            ),
+            models.CheckConstraint(
+                condition=Q(export_limit_mw__isnull=True)
+                | Q(export_limit_mw__gt=0, export_limit_mw__lt=float("inf")),
+                name="submission_export_finite",
+            ),
+            models.CheckConstraint(
+                condition=Q(measurement_basis__in=("net_export", "ac_generation")),
+                name="submission_measurement_basis",
+            ),
+            models.CheckConstraint(
+                condition=Q(mounting_type__in=("unknown", "fixed", "tracking")),
+                name="submission_mounting_supported",
+            ),
+            models.CheckConstraint(
+                condition=Q(surface_tilt__isnull=True)
+                | Q(surface_tilt__gte=0, surface_tilt__lte=90),
+                name="submission_tilt_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(surface_azimuth__isnull=True)
+                | Q(surface_azimuth__gte=0, surface_azimuth__lt=360),
+                name="submission_azimuth_valid",
+            ),
+            models.CheckConstraint(
+                condition=Q(mounting_type="fixed")
+                | Q(surface_tilt__isnull=True, surface_azimuth__isnull=True),
+                name="submission_angles_require_fixed",
+            ),
+        )
+
 
 class PlantConfiguration(models.Model):
     plant = models.ForeignKey(Plant, on_delete=models.PROTECT, related_name="configurations")
+    region = models.ForeignKey("regions.Region", on_delete=models.PROTECT)
     binding = models.ForeignKey("connections.SiteBinding", on_delete=models.PROTECT)
     revision = models.PositiveIntegerField()
     dc_capacity_mw = models.FloatField()
@@ -88,6 +131,17 @@ class PlantConfiguration(models.Model):
         constraints = (
             models.UniqueConstraint(
                 fields=("plant", "revision"), name="plant_config_revision_unique"
+            ),
+            models.UniqueConstraint(fields=("id", "plant"), name="plant_config_id_plant_unique"),
+            models.UniqueConstraint(
+                fields=("id", "binding"), name="plant_config_id_binding_unique"
+            ),
+            models.CheckConstraint(
+                condition=Q(revision__gte=1), name="plant_config_revision_positive"
+            ),
+            models.CheckConstraint(
+                condition=Q(measurement_basis__in=("net_export", "ac_generation")),
+                name="plant_measurement_basis_valid",
             ),
             models.CheckConstraint(
                 condition=Q(dc_capacity_mw__gt=0, dc_capacity_mw__lt=float("inf")),
@@ -159,6 +213,10 @@ class ProductionObservation(models.Model):
                 condition=Q(energy_mwh__gte=0, energy_mwh__lt=float("inf")),
                 name="plant_observation_energy_finite",
             ),
+            models.CheckConstraint(
+                condition=Q(quality__in=("valid", "outage", "curtailed", "invalid")),
+                name="plant_observation_quality_valid",
+            ),
             ExclusionConstraint(
                 name="plant_observation_no_overlap",
                 expressions=(
@@ -221,6 +279,30 @@ class CalibrationRun(models.Model):
                 condition=Q(status__in=("pending", "running")),
                 name="plant_one_pending_calibration",
             ),
+            models.UniqueConstraint(
+                fields=("id", "configuration"), name="calibration_id_config_unique"
+            ),
+            models.CheckConstraint(
+                condition=Q(window_end__gte=F("window_start")), name="calibration_window_valid"
+            ),
+            models.CheckConstraint(
+                condition=Q(factor__isnull=True) | Q(factor__gt=0, factor__lt=float("inf")),
+                name="calibration_factor_finite",
+            ),
+            models.CheckConstraint(
+                condition=Q(
+                    status__in=(
+                        "pending",
+                        "running",
+                        "ready",
+                        "insufficient",
+                        "rejected",
+                        "failed",
+                        "superseded",
+                    )
+                ),
+                name="calibration_status_valid",
+            ),
         )
 
 
@@ -230,6 +312,13 @@ class CalibrationActivation(models.Model):
     calibration = models.ForeignKey(CalibrationRun, null=True, on_delete=models.PROTECT)
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = (
+            models.UniqueConstraint(
+                fields=("id", "configuration"), name="activation_id_config_unique"
+            ),
+        )
 
 
 class PlantForecast(models.Model):

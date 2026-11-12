@@ -17,7 +17,6 @@ test("connects, displays partial reported production and disconnects", async ({
         latitude: 36.9,
         longitude: 30.7,
         timezone: "Europe/Istanbul",
-        surface: "horizontal",
         revision: 1,
         status: "approved",
     };
@@ -86,7 +85,6 @@ test("connects, displays partial reported production and disconnects", async ({
                 expect(route.request().postDataJSON()).toEqual({
                     provider_plant_id: 3154,
                     expected_eic: "40W000005011621Y",
-                    meter_basis: "unknown",
                 });
                 connected = true;
             }
@@ -101,7 +99,6 @@ test("connects, displays partial reported production and disconnects", async ({
                 settlement_plant_id: connected ? 55 : null,
                 eic: connected ? "40W000005011621Y" : "",
                 name: connected ? "G4-BOR-1 GES" : "",
-                meter_basis: "unknown",
                 last_success_at: null,
                 last_error: "",
                 pending_jobs: 0,
@@ -237,7 +234,7 @@ test("connects, displays partial reported production and disconnects", async ({
         .toEqual(["2026-01-01", "settlement_injection"]);
     await expect(
         page.getByText(
-            "Settlement injection requires the plant and connection measurement points to be net export.",
+            "Provider production requires the plant measurement point to be net export.",
         ),
     ).toBeVisible();
     await page

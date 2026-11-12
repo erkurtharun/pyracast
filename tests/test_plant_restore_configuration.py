@@ -1,4 +1,5 @@
 import pytest
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from pyracast.connections.operations import validate_binding
@@ -102,8 +103,17 @@ def test_restore_does_not_use_another_regions_binding() -> None:
     validate_binding(system.admin, binding.pk, FakeAdapter(), NOW)
     system.region.status = "approved"
     system.region.approved_binding = binding
-    system.region.save(update_fields=("status", "approved_binding"))
-    assert restore_plant(*args).current_configuration_id is None
+
+    def restore_with_invalid_approval() -> None:
+        with transaction.atomic():
+            system.region.save(update_fields=("status", "approved_binding"))
+            assert restore_plant(*args).current_configuration_id is None
+            assert not PlantConfiguration.objects.filter(plant=plant).exists()
+
+    with pytest.raises(IntegrityError, match="approved_binding_region_fk"):
+        restore_with_invalid_approval()
+    plant.refresh_from_db()
+    assert plant.deleted_at is not None
     assert not PlantConfiguration.objects.filter(plant=plant).exists()
 
 

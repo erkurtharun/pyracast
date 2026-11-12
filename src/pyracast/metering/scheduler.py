@@ -61,6 +61,7 @@ def enqueue_connection(
     for offset in range(1, 91 if initial else 8):
         job, _ = EpiasCollectionJob.objects.get_or_create(
             connection=connection,
+            plant=plant,
             connection_revision=connection.revision,
             configuration=configuration,
             target_day=today - timedelta(days=offset),
@@ -101,6 +102,7 @@ def enqueue_connection(
             month_start = month_end.replace(day=1)
             job, _ = EpiasCollectionJob.objects.get_or_create(
                 connection=connection,
+                plant=plant,
                 connection_revision=connection.revision,
                 configuration=configuration,
                 source_kind="settlement_injection",

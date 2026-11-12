@@ -19,9 +19,6 @@ from pyracast.plants.api import ScopedView
 class EpiasConnectionInput(serializers.Serializer[Any]):
     provider_plant_id = serializers.IntegerField(min_value=1)
     expected_eic = serializers.RegexField(r"^[A-Za-z0-9-]{16}$")
-    meter_basis = serializers.ChoiceField(
-        choices=("unknown", "net_export", "ac_generation"), default="unknown"
-    )
 
 
 class EpiasConnectionOutput(serializers.Serializer[Any]):
@@ -32,7 +29,6 @@ class EpiasConnectionOutput(serializers.Serializer[Any]):
     last_settlement_date = serializers.DateField(allow_null=True)
     eic = serializers.CharField(allow_blank=True)
     name = serializers.CharField(allow_blank=True)
-    meter_basis = serializers.ChoiceField(choices=("unknown", "net_export", "ac_generation"))
     last_success_at = serializers.DateTimeField(allow_null=True)
     last_error = serializers.CharField(allow_blank=True)
     pending_jobs = serializers.IntegerField()

@@ -172,6 +172,7 @@ def persist_snapshot(lease: Lease, data: ProviderData, now: datetime) -> Forecas
         snapshot, _ = ForecastSnapshot.objects.get_or_create(
             job=job,
             defaults={
+                "binding": job.binding,
                 "raw_payload": data.raw_payload,
                 "normalized_intervals": data.intervals,
                 "collected_at": data.collected_at or now,

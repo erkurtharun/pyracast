@@ -20,6 +20,7 @@ from pyracast.forecasts.models import (
     RequestAttempt,
 )
 from pyracast.incidents.models import IncidentRevision, PlantIncident
+from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
 from pyracast.notifications.models import NotificationDelivery, ReminderPreference
 from pyracast.plants.models import (
     CalibrationActivation,
@@ -181,6 +182,9 @@ def _purge_plant(plant: Plant) -> None:
     CalibrationActivation.objects.filter(plant=plant).delete()
     CalibrationRun.objects.filter(plant=plant).delete()
     ProductionObservation.objects.filter(plant=plant).delete()
+    EpiasSnapshot.objects.filter(connection__plant=plant).delete()
+    EpiasCollectionJob.objects.filter(connection__plant=plant).delete()
+    EpiasConnection.objects.filter(plant=plant).delete()
     PlantEvent.objects.filter(plant=plant).delete()
     plant.current_configuration = None
     plant.save(update_fields=("current_configuration",))

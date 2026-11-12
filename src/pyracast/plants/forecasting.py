@@ -78,7 +78,7 @@ def select_snapshot(
     cutoff = min(as_of, day_start)
     return (
         ForecastSnapshot.objects.filter(
-            job__binding_id=configuration.binding_id,
+            binding_id=configuration.binding_id,
             job__target_date=target_date,
             job__status="succeeded",
             source_kind="forecast",

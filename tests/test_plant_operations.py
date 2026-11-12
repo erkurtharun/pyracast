@@ -86,6 +86,7 @@ def snapshot_for(
         cursor += timedelta(minutes=30)
     return ForecastSnapshot.objects.create(
         job=job,
+        binding=system.binding,
         raw_payload={},
         normalized_intervals=rows,
         collected_at=collected_at,

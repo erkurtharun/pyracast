@@ -63,6 +63,7 @@ def settlement(
     stamp = end + timedelta(hours=2, minutes=minute)
     identity = {"id": 77, "eic": "EIC", "name": "Plant"}
     job = EpiasCollectionJob.objects.create(
+        plant_id=connection.plant_id,
         connection=connection,
         configuration=configuration,
         connection_revision=connection.revision,

@@ -274,6 +274,7 @@ def test_meter_basis_and_revisions_are_not_mixed(monkeypatch: pytest.MonkeyPatch
     old = PlantConfiguration.objects.get(pk=plant.current_configuration_id)
     measurements(system, old, 52)
     new = PlantConfiguration.objects.create(
+        region_id=plant.region_id,
         plant=plant,
         binding=system.binding,
         revision=2,

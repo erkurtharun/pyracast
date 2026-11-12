@@ -15,7 +15,6 @@ test("journal date controls wait for the initial range before selecting a day", 
         latitude: 36.9,
         longitude: 30.7,
         timezone: "Europe/Istanbul",
-        surface: "horizontal",
         revision: 1,
         status: "approved",
     };

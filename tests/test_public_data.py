@@ -201,6 +201,7 @@ def test_archived_forecast_hides_provider_identity_without_rewriting_archive() -
     raw = {"provider": "solcast", "resource_id": "private-resource"}
     snapshot = ForecastSnapshot.objects.create(
         job=job,
+        binding=system.binding,
         raw_payload=raw,
         normalized_intervals=[],
         collected_at=NOW,

@@ -20,6 +20,7 @@ from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.coverage import history_day_complete
 from pyracast.forecasts.historical_import import (
     HistoricalSourceSettings,
+    _validate_binding,
     import_historical_reference,
     parse_source_settings,
 )
@@ -324,8 +325,6 @@ def test_import_never_rescales_mismatched_source(
         ("account", {"credential_revision": 2}),
         ("binding", {"validated_at": None}),
         ("binding", {"capacity_semantics_verified": False}),
-        ("binding", {"capacity_basis": "dc"}),
-        ("binding", {"power_basis": "dc"}),
         ("binding", {"settings_verification_reference": ""}),
         ("region", {"status": "suspended"}),
         ("region", {"revision": 2}),
@@ -342,6 +341,16 @@ def test_import_requires_current_authorized_validated_binding(
     type(instance).objects.filter(pk=instance.pk).update(**changes)
     with pytest.raises(ValidationError, match="current authorized"):
         archive(system, power_file(tmp_path))
+    assert not HistoricalReferenceImport.objects.exists()
+
+
+def test_dc_power_basis_cannot_authorize_historical_import(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = system_for_import(monkeypatch)
+    system.binding.power_basis = "dc"
+    with pytest.raises(ValidationError, match="current authorized"):
+        _validate_binding(system.binding, source_settings())
     assert not HistoricalReferenceImport.objects.exists()
 
 

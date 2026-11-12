@@ -56,10 +56,8 @@ def preference_payload(preference: ReminderPreference, now: datetime) -> dict[st
     ]
     return {
         "enabled": preference.enabled,
-        "email": preference.email,
         "times": preference.times,
-        "effective_email": preference.email or preference.user.email,
-        "recipients": preference.recipients or ([preference.email] if preference.email else []),
+        "recipients": preference.recipients,
         "effective_recipients": recipients,
         "recipient_limit": limit,
         "recipient_count": count,

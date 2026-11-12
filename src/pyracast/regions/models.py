@@ -18,7 +18,6 @@ class Region(models.Model):
     latitude = models.FloatField()
     longitude = models.FloatField()
     timezone = models.CharField(max_length=100)
-    surface = models.CharField(max_length=30, default="horizontal")
     revision = models.PositiveIntegerField(default=1)
     status = models.CharField(max_length=20, default="pending")
     approved_binding = models.ForeignKey(

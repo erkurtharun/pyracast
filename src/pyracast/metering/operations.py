@@ -29,12 +29,9 @@ def connect_epias(
     actor: User,
     provider_plant_id: int,
     expected_eic: str,
-    meter_basis: str = "unknown",
     client: EpiasClient | None = None,
 ) -> EpiasConnection:
     plant = member_plant(plant_id, actor)
-    if meter_basis not in {"unknown", "net_export", "ac_generation"}:
-        raise ValidationError("unsupported_meter_basis")
     if isinstance(provider_plant_id, bool) or provider_plant_id <= 0 or not expected_eic.strip():
         raise ValidationError("invalid_epias_plant")
     if plant.current_configuration is None or not configuration_is_current(
@@ -71,7 +68,6 @@ def connect_epias(
         connection.settlement_checked_at = timezone.now()
         connection.eic = selected.eic
         connection.name = selected.name
-        connection.meter_basis = meter_basis
         connection.connected_by = actor
         connection.enabled = True
         connection.save()
@@ -129,7 +125,6 @@ def get_epias_status(plant_id: int, *, actor: User) -> dict[str, object]:
             "last_settlement_date": None,
             "eic": "",
             "name": "",
-            "meter_basis": "unknown",
             "last_success_at": None,
             "last_error": "",
             "pending_jobs": 0,
@@ -151,7 +146,6 @@ def get_epias_status(plant_id: int, *, actor: User) -> dict[str, object]:
         "last_settlement_date": settlement_dates["last"],
         "eic": connection.eic,
         "name": connection.name,
-        "meter_basis": connection.meter_basis,
         "last_success_at": latest.available_at if latest else None,
         "last_error": last_job.last_error if last_job else "",
         "pending_jobs": jobs.filter(status__in=("pending", "running")).count(),

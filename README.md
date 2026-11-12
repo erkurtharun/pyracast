@@ -110,6 +110,39 @@ Ubuntu. It binds to loopback and uses passwordless trust authentication; never u
 this helper for production. It leaves the temporary database running for the session.
 An existing database can be used instead. Tests require permission to create test databases.
 
+### Database changes
+
+Django owns the schema and migration history (`django_migrations`); do not run a
+second migration engine against these tables. Commit model changes and new
+migrations together. Never edit an applied migration to repair an existing database.
+
+```text
+uv run --locked pyracast makemigrations
+uv run --locked pyracast makemigrations --check --dry-run
+uv run --locked pyracast showmigrations
+uv run --locked pyracast migrate --plan
+uv run --locked pyracast migrate --noinput
+uv run --locked pyracast migrate --check
+```
+
+The standard `migrate` command takes a PostgreSQL session advisory lock: another
+migration runner fails before applying changes. It limits each lock wait to five
+seconds and each statement to fifteen minutes. Reviewed maintenance operations can
+override these with `--lock-timeout-seconds` and `--statement-timeout-seconds`.
+Use a direct database connection, not transaction-pooled PgBouncer. The command
+does not wrap all migrations in one transaction, so Django's atomic and concurrent
+operations retain their intended behavior. `start.cmd` uses this same command.
+
+Before deployment, inspect the plan and SQL (`sqlmigrate APP MIGRATION`), create a
+backup with `pg_dump --format=custom --file=backup.dump`, restore it into a separate
+database with `pg_restore --exit-on-error --no-owner --no-privileges
+--dbname=RESTORE_DATABASE backup.dump`, and rehearse the pending migrations there.
+Pass connection settings through the PostgreSQL environment or a password file,
+not command-line passwords. A failed validation names the violated constraint;
+investigate the source records rather than deleting history or using `--fake`.
+See [database invariants and rollout](docs/ARCHITECTURE.md#database-invariants-and-rollout)
+for production roles, large-table changes and recovery requirements.
+
 ```text
 uv run --locked pyracast migrate
 uv run --locked pyracast createsuperuser

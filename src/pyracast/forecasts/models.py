@@ -26,6 +26,9 @@ class HistoricalReferenceImport(models.Model):
     class Meta:
         constraints = (
             models.UniqueConstraint(
+                fields=("id", "binding"), name="reference_import_binding_identity"
+            ),
+            models.UniqueConstraint(
                 fields=("binding", "sha256"), name="unique_historical_reference_import"
             ),
         )
@@ -49,7 +52,23 @@ class CollectionJob(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        indexes = (
+            models.Index(
+                fields=("available_at", "id"),
+                condition=models.Q(status__in=("pending", "retry", "running")),
+                name="collection_dispatch_due",
+            ),
+        )
         constraints = (
+            models.UniqueConstraint(
+                fields=("id", "binding"), name="collection_job_binding_identity"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    status__in=("pending", "running", "retry", "succeeded", "failed", "stale")
+                ),
+                name="collection_job_status",
+            ),
             models.UniqueConstraint(
                 fields=("binding", "endpoint", "scheduled_slot"),
                 condition=models.Q(reference_import__isnull=True),
@@ -71,9 +90,25 @@ class RequestAttempt(models.Model):
     outcome = models.CharField(max_length=20, default="uncertain")
     correlation_id = models.UUIDField(default=uuid.uuid4, unique=True)
 
+    class Meta:
+        constraints = (
+            models.CheckConstraint(
+                condition=models.Q(job__isnull=True) | models.Q(binding__isnull=False),
+                name="request_job_requires_binding",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(outcome__in=("uncertain", "succeeded", "failed")),
+                name="request_attempt_outcome",
+            ),
+        )
+        indexes = (
+            models.Index(fields=("provider_account", "utc_day"), name="request_account_day"),
+        )
+
 
 class ForecastSnapshot(models.Model):
     job = models.OneToOneField(CollectionJob, on_delete=models.PROTECT)
+    binding = models.ForeignKey(SiteBinding, on_delete=models.PROTECT, related_name="snapshots")
     raw_payload = models.JSONField()
     normalized_intervals = models.JSONField()
     collected_at = models.DateTimeField()
@@ -84,6 +119,32 @@ class ForecastSnapshot(models.Model):
     available_at = models.DateTimeField(null=True)
     weather_payload = models.JSONField(null=True)
     weather_error = models.CharField(max_length=64, default="")
+
+    class Meta:
+        indexes = (
+            models.Index(
+                fields=("binding", "source_kind", "-collected_at", "-available_at", "-id"),
+                name="snapshot_binding_source_age",
+            ),
+        )
+        constraints = (
+            models.UniqueConstraint(fields=("id", "binding"), name="snapshot_binding_identity"),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(coverage_start__isnull=True, coverage_end__isnull=True)
+                    | models.Q(
+                        coverage_start__isnull=False,
+                        coverage_end__isnull=False,
+                        coverage_end__gt=models.F("coverage_start"),
+                    )
+                ),
+                name="snapshot_coverage_bounds",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(source_kind__in=("unknown", "forecast", "estimated_actuals")),
+                name="snapshot_source_kind",
+            ),
+        )
 
 
 class ForecastResult(models.Model):
@@ -109,6 +170,18 @@ class ReferenceCapacityNormalization(models.Model):
 
     class Meta:
         constraints = (
+            models.CheckConstraint(
+                condition=~models.Q(snapshot=models.F("source_snapshot")),
+                name="normalization_distinct_source",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(source_capacity_kw__gt=0, source_capacity_kw__lt=float("inf")),
+                name="normalization_source_capacity",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(target_capacity_kw__gt=0, target_capacity_kw__lt=float("inf")),
+                name="normalization_target_capacity",
+            ),
             models.UniqueConstraint(
                 fields=("source_snapshot", "target_binding"),
                 name="unique_reference_capacity_normalization",

@@ -38,7 +38,6 @@ class RegionOutput(serializers.ModelSerializer[Region]):
             "latitude",
             "longitude",
             "timezone",
-            "surface",
             "revision",
             "status",
         )
@@ -92,7 +91,6 @@ class BindingInput(InputSerializer):
     capacity_kw = serializers.FloatField(min_value=0)
     dc_capacity_kw = serializers.FloatField(min_value=0, allow_null=True, default=None)
     power_basis = serializers.ChoiceField(choices=("ac", "dc"), default="ac")
-    capacity_basis = serializers.ChoiceField(choices=("ac", "dc"), default="ac")
     capacity_semantics_verified = serializers.BooleanField()
     tilt_degrees = serializers.FloatField(default=0)
     azimuth_degrees = serializers.FloatField(default=0)

@@ -154,7 +154,6 @@ class ProviderSetupForm(forms.Form):
                     "capacity_kw": data["capacity_kw"],
                     "dc_capacity_kw": data["dc_capacity_kw"],
                     "power_basis": data["power_basis"],
-                    "capacity_basis": data["power_basis"],
                     "capacity_semantics_verified": data["capacity_semantics_verified"],
                     "installation_date": data["installation_date"],
                     "azimuth_degrees": data["azimuth_degrees"],

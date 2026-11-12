@@ -74,6 +74,12 @@ def test_onboarding_migration_refuses_legacy_conflicts_without_removing_records(
     duplicate_id: int | None = None
     try:
         executor.migrate(old_target)
+        legacy_loader = MigrationExecutor(connection).loader
+        legacy_apps = legacy_loader.project_state(list(legacy_loader.applied_migrations)).apps
+        legacy_configuration = legacy_apps.get_model("plants", "PlantConfiguration")
+        previous_legacy_configuration = legacy_configuration.objects.values().get(
+            pk=configuration_id
+        )
         if kind == "plants":
             duplicate = old_model.objects.create(
                 region_id=system.region.pk, name="Legacy second plant"
@@ -98,8 +104,8 @@ def test_onboarding_migration_refuses_legacy_conflicts_without_removing_records(
 
         assert list(old_model.objects.order_by("pk").values()) == before
         assert old_model.objects.filter(pk__in=(original_id, duplicate_id)).count() == 2
-        assert PlantConfiguration.objects.values().get(pk=configuration_id) == (
-            previous_configuration
+        assert legacy_configuration.objects.values().get(pk=configuration_id) == (
+            previous_legacy_configuration
         )
     finally:
         if duplicate_id is not None:

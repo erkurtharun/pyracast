@@ -62,7 +62,6 @@ def automatic_forecast(
         "azimuth_degrees",
         "losses_percent",
         "power_basis",
-        "capacity_basis",
     )
     if (
         previous.binding.capacity_kw == current.binding.capacity_kw

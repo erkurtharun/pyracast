@@ -35,7 +35,6 @@ class ReminderPreference(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     region = models.ForeignKey(Region, on_delete=models.CASCADE)
     enabled = models.BooleanField(default=False)
-    email = models.EmailField(blank=True, default="")
     recipients = models.JSONField(default=list)
     times = models.JSONField(default=list)
     effective_from = models.DateTimeField()
@@ -64,5 +63,28 @@ class NotificationDelivery(models.Model):
             models.UniqueConstraint(
                 fields=("preference", "scheduled_for", "recipient"),
                 name="unique_reminder_recipient_slot",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(
+                    status__in=(
+                        "pending",
+                        "retry",
+                        "sending",
+                        "sent",
+                        "failed",
+                        "uncertain",
+                        "skipped",
+                        "unavailable",
+                        "cancelled",
+                    )
+                ),
+                name="notification_delivery_status_valid",
+            ),
+        )
+        indexes = (
+            models.Index(
+                fields=("available_at", "id"),
+                condition=models.Q(status__in=("pending", "retry", "sending")),
+                name="notification_dispatch_ready",
             ),
         )

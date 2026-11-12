@@ -111,7 +111,6 @@ def _validate_binding(binding: SiteBinding, source: HistoricalSourceSettings) ->
         or binding.validated_at is None
         or not binding.capacity_semantics_verified
         or binding.power_basis != "ac"
-        or binding.capacity_basis != "ac"
         or not binding.settings_verification_reference
     ):
         raise ValidationError("A current authorized and validated Solcast binding is required.")
@@ -212,6 +211,7 @@ def import_historical_reference(
             ]
             ForecastSnapshot.objects.create(
                 job=job,
+                binding=binding,
                 raw_payload={
                     "estimated_actuals": [power.raw_rows[index] for index in indexes],
                     "historical_import": {

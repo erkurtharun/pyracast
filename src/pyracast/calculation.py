@@ -37,7 +37,7 @@ def calculate(binding: SiteBinding, target_date: date, data: ProviderData) -> di
     configuration = BaselineConfiguration(
         binding.capacity_kw,
         cast(PowerBasis, binding.power_basis),
-        cast(PowerBasis, binding.capacity_basis),
+        cast(PowerBasis, binding.power_basis),
         binding.capacity_semantics_verified,
         binding.tilt_degrees,
     )

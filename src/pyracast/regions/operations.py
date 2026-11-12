@@ -212,7 +212,6 @@ def configure_binding(
     capacity_kw: float,
     dc_capacity_kw: float | None = None,
     power_basis: str = "ac",
-    capacity_basis: str = "ac",
     capacity_semantics_verified: bool = False,
     tilt_degrees: float = 0,
     azimuth_degrees: float = 0,
@@ -229,8 +228,8 @@ def configure_binding(
         isinstance(dc_capacity_kw, bool) or not math.isfinite(dc_capacity_kw) or dc_capacity_kw <= 0
     ):
         raise ValidationError("DC capacity must be finite and positive when specified.")
-    if power_basis not in {"ac", "dc"} or capacity_basis != power_basis:
-        raise ValidationError("Matching AC/DC power and capacity bases are required.")
+    if power_basis not in {"ac", "dc"}:
+        raise ValidationError("An AC or DC power basis is required.")
     if tilt_degrees != 0 or not capacity_semantics_verified:
         raise ValidationError("A verified horizontal reference configuration is required.")
     if not math.isfinite(azimuth_degrees) or not 0 <= azimuth_degrees < 360:
@@ -258,7 +257,6 @@ def configure_binding(
             capacity_kw=capacity_kw,
             dc_capacity_kw=dc_capacity_kw,
             power_basis=power_basis,
-            capacity_basis=capacity_basis,
             capacity_semantics_verified=capacity_semantics_verified,
             tilt_degrees=tilt_degrees,
             azimuth_degrees=azimuth_degrees,

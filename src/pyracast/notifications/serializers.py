@@ -3,8 +3,7 @@ from rest_framework import serializers
 
 class ReminderInput(serializers.Serializer[dict[str, object]]):
     enabled = serializers.BooleanField()
-    email = serializers.EmailField(allow_blank=True, required=False)
-    recipients = serializers.ListField(child=serializers.EmailField(), required=False)
+    recipients = serializers.ListField(child=serializers.EmailField())
     times = serializers.ListField(
         child=serializers.RegexField(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"), max_length=1440
     )
@@ -30,9 +29,7 @@ class ReminderDeliveryOutput(serializers.Serializer[dict[str, object]]):
 
 class ReminderOutput(serializers.Serializer[dict[str, object]]):
     enabled = serializers.BooleanField()
-    email = serializers.EmailField(allow_blank=True)
     times = serializers.ListField(child=serializers.CharField())
-    effective_email = serializers.CharField()
     recipients = serializers.ListField(child=serializers.EmailField())
     effective_recipients = serializers.ListField(child=serializers.CharField())
     recipient_limit = serializers.IntegerField()

@@ -1,0 +1,153 @@
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+
+import pytest
+from django.contrib.auth.models import User
+from django.db import IntegrityError, connection, connections, transaction
+from django.db.migrations.executor import MigrationExecutor
+
+from pyracast.connections.models import ProviderAccount
+from pyracast.connections.operations import QuotaExhausted, create_account, reserve_account_request
+from pyracast.regions.models import AuditEvent
+from tests.test_domain import NOW, secret_ref
+
+pytestmark = pytest.mark.django_db(transaction=True)
+
+IDENTITIES = [
+    ("I", "i", "i"),
+    ("\u0130", "i\u0307", "i\u0307"),
+    ("\u0131", "\u0131", "\u0131"),
+    ("Stra\u00dfe", "STRASSE", "strasse"),
+    ("\u1e9e", "ss", "ss"),
+    ("\u03a3", "\u03c2", "\u03c3"),
+    ("\t\xa0Identity\u2003\u3000\x1c", "identity", "identity"),
+]
+
+
+@pytest.mark.parametrize(("original", "equivalent", "expected"), IDENTITIES)
+def test_raw_provider_variants_share_one_account_and_quota(
+    original: str, equivalent: str, expected: str
+) -> None:
+    admin = User.objects.create(username="admin", is_superuser=True)
+    existing = ProviderAccount.objects.create(
+        provider="\xa0FIXTURE\t",
+        external_account_id=original,
+        secret_reference=secret_ref(),
+        daily_quota=1,
+        authorized_by=admin,
+        authorized_at=NOW,
+    )
+    duplicate = create_account(
+        admin,
+        provider="fixture",
+        external_account_id=equivalent,
+        secret_reference=secret_ref("OTHER"),
+        daily_quota=10,
+    )
+    assert duplicate.pk == existing.pk
+    assert duplicate.secret_reference == secret_ref()
+    assert duplicate.daily_quota == 1
+    assert not AuditEvent.objects.filter(action="provider_account_created").exists()
+    reserve_account_request(existing, NOW, purpose="validation")
+    with pytest.raises(QuotaExhausted):
+        reserve_account_request(duplicate, NOW, purpose="validation")
+    with pytest.raises(IntegrityError, match="canonical_provider_account"), transaction.atomic():
+        ProviderAccount.objects.create(
+            provider="fixture", external_account_id=equivalent, secret_reference=secret_ref("OTHER")
+        )
+    assert ProviderAccount.objects.count() == 1
+    assert original.strip().casefold() == expected
+
+
+@pytest.mark.parametrize(("original", "equivalent", "expected"), IDENTITIES)
+def test_new_account_identity_uses_database_unicode_casefold(
+    original: str, equivalent: str, expected: str
+) -> None:
+    admin = User.objects.create(username="admin", is_superuser=True)
+    created = create_account(
+        admin, provider="fixture", external_account_id=original, secret_reference=secret_ref()
+    )
+    assert created.external_account_id == expected
+    assert created.provider == "fixture"
+    assert original.strip().casefold() == expected
+    assert (
+        create_account(
+            admin, provider="fixture", external_account_id=equivalent, secret_reference=secret_ref()
+        ).pk
+        == created.pk
+    )
+
+
+def test_dotted_and_dotless_turkish_identities_keep_distinct_accounts() -> None:
+    admin = User.objects.create(username="admin", is_superuser=True)
+    accounts = [
+        create_account(
+            admin, provider="fixture", external_account_id=identity, secret_reference=secret_ref()
+        )
+        for identity in ("I", "\u0130", "\u0131")
+    ]
+    assert len({account.pk for account in accounts}) == 3
+    assert [account.external_account_id for account in accounts] == ["i", "i\u0307", "\u0131"]
+
+
+def test_concurrent_unicode_account_creation_keeps_one_quota_identity() -> None:
+    admin = User.objects.create(username="admin", is_superuser=True)
+    barrier = Barrier(2)
+
+    def create(identity: str) -> int:
+        try:
+            barrier.wait(timeout=10)
+            return create_account(
+                admin,
+                provider="fixture",
+                external_account_id=identity,
+                secret_reference=secret_ref(),
+                daily_quota=1,
+            ).pk
+        finally:
+            connections.close_all()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        identifiers = list(pool.map(create, ["Stra\u00dfe", "STRASSE"]))
+    assert identifiers[0] == identifiers[1]
+    assert ProviderAccount.objects.count() == 1
+    assert AuditEvent.objects.filter(action="provider_account_created").count() == 1
+
+
+def test_account_index_uses_builtin_unicode_collation() -> None:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT c.collname, c.collprovider, i.indisvalid, i.indisunique "
+            "FROM pg_index i JOIN pg_class x ON x.oid = i.indexrelid "
+            "CROSS JOIN LATERAL unnest(i.indcollation) AS k(collation_oid) "
+            "JOIN pg_collation c ON c.oid = k.collation_oid "
+            "WHERE x.relname = 'canonical_provider_account'"
+        )
+        assert cursor.fetchall() == [
+            ("pg_unicode_fast", "b", True, True),
+            ("pg_unicode_fast", "b", True, True),
+        ]
+
+
+def test_canonical_index_migration_refuses_legacy_duplicate_accounts() -> None:
+    previous = [("connections", "0010_remove_sitebinding_binding_matching_power_basis_and_more")]
+    executor = MigrationExecutor(connection)
+    current = executor.loader.graph.leaf_nodes()
+    try:
+        executor.migrate(previous)
+        accounts = executor.loader.project_state(previous).apps.get_model(
+            "connections", "ProviderAccount"
+        )
+        first = accounts.objects.create(
+            provider="fixture", external_account_id="Stra\u00dfe", secret_reference=secret_ref()
+        )
+        second = accounts.objects.create(
+            provider="fixture", external_account_id="STRASSE", secret_reference=secret_ref("OTHER")
+        )
+        with pytest.raises(IntegrityError, match="canonical_provider_account"):
+            MigrationExecutor(connection).migrate(current)
+        assert accounts.objects.filter(pk__in=[first.pk, second.pk]).count() == 2
+        second.external_account_id = "separate-account"
+        second.save(update_fields=["external_account_id"])
+    finally:
+        MigrationExecutor(connection).migrate(current)

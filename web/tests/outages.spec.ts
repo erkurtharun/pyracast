@@ -35,7 +35,6 @@ async function workspace(
         latitude: 36.9,
         longitude: 30.7,
         timezone: "Europe/Istanbul",
-        surface: "horizontal",
         revision: 1,
         status: "approved",
     };

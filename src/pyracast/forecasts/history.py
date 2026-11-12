@@ -22,7 +22,7 @@ def select_actual_snapshot(
     candidates = (
         ForecastSnapshot.objects.select_related("job__binding__provider_account")
         .filter(
-            job__binding=binding,
+            binding=binding,
             job__status="succeeded",
             source_kind="estimated_actuals",
             coverage_start__lt=end,

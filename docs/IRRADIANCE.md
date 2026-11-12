@@ -439,8 +439,11 @@ performance metrics continue to use manual measurements and UEVM only.
 
 Policy `manual-over-settlement-over-provisional-hour-v2` supplements manual
 observations with valid UEVM hours, then provisional reported-production hours,
-only for a `net_export` target. Select the latest available acquisition per day
-and source kind for the current configuration and provider identity. Never fill
+only for a `net_export` target. The plant configuration owns the measurement point;
+EPİAŞ connection settings do not override it. Legacy connection declarations are
+retained as migration-origin plant events, without changing archived acquisitions
+or calibration eligibility. Select the latest available acquisition per day and
+source kind for the current configuration and provider identity. Never fill
 missing values from an older acquisition of the same source. A valid UEVM zero
 overrides positive provisional production. This target includes settlement
 adjustments; it does not assert raw connection-meter equivalence. Any overlapping

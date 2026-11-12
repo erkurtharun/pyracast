@@ -13,6 +13,15 @@ def main() -> int:
         [sys.executable, "-m", "ruff", "format", "--check", "."],
         [sys.executable, "-m", "ruff", "check", "--output-format", "concise", "."],
         [sys.executable, "-m", "mypy"],
+        [
+            sys.executable,
+            "-m",
+            "django",
+            "makemigrations",
+            "--settings=pyracast.settings",
+            "--check",
+            "--dry-run",
+        ],
         [sys.executable, "-m", "pytest", "-n", "auto", "-x", f"--cov-fail-under={coverage_floor}"],
     ]
     for command in commands:

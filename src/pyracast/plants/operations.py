@@ -121,6 +121,7 @@ def _save_configuration(
         revision = PlantConfiguration.objects.get(pk=plant.current_configuration_id).revision + 1
     configuration = PlantConfiguration.objects.create(
         plant=plant,
+        region_id=plant.region_id,
         binding=binding,
         revision=revision,
         dc_capacity_mw=dc_capacity_mw,

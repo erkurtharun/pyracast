@@ -732,8 +732,6 @@ export interface components {
         EpiasConnectionInput: {
             provider_plant_id: number;
             expected_eic: string;
-            /** @default unknown */
-            meter_basis: components["schemas"]["MeterBasisEnum"];
         };
         EpiasConnectionOutput: {
             connected: boolean;
@@ -745,7 +743,6 @@ export interface components {
             last_settlement_date: string | null;
             eic: string;
             name: string;
-            meter_basis: components["schemas"]["MeterBasisEnum"];
             /** Format: date-time */
             last_success_at: string | null;
             last_error: string;
@@ -942,13 +939,6 @@ export interface components {
          * @enum {string}
          */
         MeasurementBasisEnum: "net_export" | "ac_generation";
-        /**
-         * @description * `unknown` - unknown
-         *     * `net_export` - net_export
-         *     * `ac_generation` - ac_generation
-         * @enum {string}
-         */
-        MeterBasisEnum: "unknown" | "net_export" | "ac_generation";
         /**
          * @description * `daylight_intervals` - daylight_intervals
          *     * `full_day` - full_day
@@ -1374,7 +1364,6 @@ export interface components {
             /** Format: double */
             readonly longitude: number;
             readonly timezone: string;
-            readonly surface: string;
             readonly revision: number;
             readonly status: string;
         };
@@ -1406,15 +1395,12 @@ export interface components {
         };
         ReminderInput: {
             enabled: boolean;
-            email?: string;
-            recipients?: string[];
+            recipients: string[];
             times: string[];
         };
         ReminderOutput: {
             enabled: boolean;
-            email: string;
             times: string[];
-            effective_email: string;
             recipients: string[];
             effective_recipients: string[];
             recipient_limit: number;
@@ -1482,7 +1468,6 @@ export interface components {
             /** Format: double */
             readonly longitude: number;
             readonly timezone: string;
-            readonly surface: string;
             readonly revision: number;
             readonly status: string;
             readonly plant: components["schemas"]["PlantOutput"] | null;

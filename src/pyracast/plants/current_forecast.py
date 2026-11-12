@@ -51,7 +51,7 @@ def current_forecast(
         snapshots = list(
             ForecastSnapshot.objects.select_related("job")
             .filter(
-                job__binding_id=configuration.binding_id,
+                binding_id=configuration.binding_id,
                 job__status="succeeded",
                 source_kind="forecast",
                 coverage_start__lt=end,

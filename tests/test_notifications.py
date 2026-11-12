@@ -61,7 +61,7 @@ def configured() -> tuple[System, ReminderPreference]:
         system.tenant.pk,
         system.region.pk,
         enabled=True,
-        email="",
+        recipients=[],
         times=["10:00"],
         now=NOW,
     )
@@ -78,6 +78,7 @@ def saved(system: System, when: datetime = NOW) -> ForecastSnapshot:
     )
     snapshot = ForecastSnapshot.objects.create(
         job=job,
+        binding=system.binding,
         raw_payload={},
         normalized_intervals=[
             {
@@ -152,7 +153,7 @@ def test_default_email_change_preserves_explicit_region_recipient() -> None:
         system.tenant.pk,
         system.region.pk,
         enabled=True,
-        email="region@example.com",
+        recipients=["region@example.com"],
         times=["10:00"],
         now=NOW,
     )
@@ -188,7 +189,7 @@ def test_configuration_validates_times(times: list[str]) -> None:
             system.tenant.pk,
             system.region.pk,
             enabled=True,
-            email="",
+            recipients=[],
             times=times,
             now=NOW,
         )
@@ -211,7 +212,7 @@ def test_configuration_authority_defaults_and_missing_email() -> None:
             system.tenant.pk,
             system.region.pk,
             enabled=True,
-            email="",
+            recipients=[],
             times=["10:00"],
             now=NOW,
         )
@@ -221,7 +222,7 @@ def test_configuration_authority_defaults_and_missing_email() -> None:
             system.tenant.pk,
             system.region.pk,
             enabled=True,
-            email="override@example.com",
+            recipients=["override@example.com"],
             times=["10:00"],
             now=NOW,
         )
@@ -231,7 +232,7 @@ def test_configuration_authority_defaults_and_missing_email() -> None:
             system.tenant.pk,
             system.region.pk,
             enabled=False,
-            email="bad",
+            recipients=["bad"],
             times=[],
             now=NOW,
         )
@@ -241,7 +242,7 @@ def test_configuration_authority_defaults_and_missing_email() -> None:
             system.tenant.pk,
             system.region.pk,
             enabled=False,
-            email="",
+            recipients=[],
             times=[],
             now=NOW.replace(tzinfo=None),
         )
@@ -249,12 +250,12 @@ def test_configuration_authority_defaults_and_missing_email() -> None:
 
 def test_override_and_no_saved_forecast_are_explicit() -> None:
     system, _ = configured()
-    preference = configure_reminders(
+    configure_reminders(
         system.member,
         system.tenant.pk,
         system.region.pk,
         enabled=True,
-        email="override@example.com",
+        recipients=["override@example.com"],
         times=["10:00"],
         now=NOW,
     )
@@ -262,7 +263,7 @@ def test_override_and_no_saved_forecast_are_explicit() -> None:
     delivery = NotificationDelivery.objects.get(pk=ids[0])
     assert delivery.status == "unavailable"
     assert delivery.last_error == "no_saved_forecast"
-    assert delivery.recipient == preference.email
+    assert delivery.recipient == "override@example.com"
     saved(system)
     assert enqueue_due(SLOT) == ids
     assert not process_notification(delivery.pk, SLOT)
@@ -498,7 +499,7 @@ def test_disabling_preferences_and_lowering_plan_cap() -> None:
         system.tenant.pk,
         system.region.pk,
         enabled=False,
-        email="",
+        recipients=[],
         times=[],
         now=SLOT,
     )
@@ -509,7 +510,7 @@ def test_disabling_preferences_and_lowering_plan_cap() -> None:
         system.tenant.pk,
         system.region.pk,
         enabled=True,
-        email="",
+        recipients=[],
         times=["10:00"],
         now=SLOT,
     )
@@ -560,11 +561,18 @@ def test_api_is_per_user_and_tenant_scoped() -> None:
     assert not client.get(url).json()["enabled"]
     client.force_authenticate(system.member)
     response = client.put(
-        url, {"enabled": True, "email": "override@example.com", "times": ["11:00"]}, format="json"
+        url,
+        {"enabled": True, "recipients": ["override@example.com"], "times": ["11:00"]},
+        format="json",
     )
     assert response.status_code == 200
-    assert response.json()["email"] == "override@example.com"
-    assert client.put(url, {"enabled": True, "times": ["1:00"]}, format="json").status_code == 400
+    assert response.json()["recipients"] == ["override@example.com"]
+    assert (
+        client.put(
+            url, {"enabled": True, "recipients": [], "times": ["1:00"]}, format="json"
+        ).status_code
+        == 400
+    )
     other_tenant = Tenant.objects.create(name="Unrelated")
     assert (
         client.get(
@@ -615,7 +623,7 @@ def test_recipient_configuration_rejects_invalid_and_duplicate_addresses(
         )
 
 
-def test_recipients_trim_legacy_conflict_and_empty_fallback() -> None:
+def test_recipients_trim_and_empty_list_uses_account_email() -> None:
     system, _ = configured()
     preference = configure_reminders(
         system.member,
@@ -627,18 +635,7 @@ def test_recipients_trim_legacy_conflict_and_empty_fallback() -> None:
         now=NOW,
     )
     assert preference.recipients == ["person@example.com"]
-    assert preference.email == "person@example.com"
-    with pytest.raises(ValidationError, match="not both"):
-        configure_reminders(
-            system.member,
-            system.tenant.pk,
-            system.region.pk,
-            enabled=True,
-            email="",
-            recipients=[],
-            times=["10:00"],
-            now=NOW,
-        )
+    assert preference_payload(preference, NOW)["effective_recipients"] == ["person@example.com"]
     preference = configure_reminders(
         system.member,
         system.tenant.pk,
@@ -648,7 +645,6 @@ def test_recipients_trim_legacy_conflict_and_empty_fallback() -> None:
         times=["10:00"],
         now=NOW,
     )
-    assert preference.email == ""
     assert preference_payload(preference, NOW)["effective_recipients"] == ["default@example.com"]
 
 
@@ -1057,3 +1053,109 @@ def test_concurrent_members_cannot_overbook_plant_recipient_capacity() -> None:
     with ThreadPoolExecutor(max_workers=2) as pool:
         outcomes = list(pool.map(configure, [system.member, other]))
     assert sorted(outcomes) == [False, True]
+
+
+@pytest.mark.parametrize(
+    "addresses", [[], ["one@example.com"], ["one@example.com", "two@example.com"]]
+)
+def test_reminder_api_exposes_only_canonical_recipient_fields(addresses: list[str]) -> None:
+    system, preference = configured()
+    ReminderPreference.objects.filter(pk=preference.pk).update(recipients=addresses)
+    client = APIClient()
+    client.force_authenticate(system.member)
+    response = client.get(f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/reminders/")
+    assert response.status_code == 200
+    payload = response.json()
+    assert {"email", "effective_email"}.isdisjoint(payload)
+    assert payload["recipients"] == addresses
+    assert payload["effective_recipients"] == (addresses or ["default@example.com"])
+
+
+def test_reminder_api_requires_an_explicit_recipient_list() -> None:
+    system, _ = configured()
+    client = APIClient()
+    client.force_authenticate(system.member)
+    response = client.put(
+        f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/reminders/",
+        {"enabled": True, "email": "obsolete@example.com", "times": ["10:00"]},
+        format="json",
+    )
+    assert response.status_code == 400
+    assert response.json() == {
+        "code": "http_400",
+        "detail": {"recipients": ["This field is required."]},
+    }
+
+
+def test_email_column_removal_preserves_recipients_and_pinned_deliveries() -> None:
+    system, original = configured()
+    saved(system)
+    old_target = [("notifications", "0004_validate_delivery_status")]
+    executor = MigrationExecutor(connection)
+    current_targets = executor.loader.graph.leaf_nodes()
+    expected = [
+        ("legacy@example.com", [], ["legacy@example.com"]),
+        ("single@example.com", ["single@example.com"], ["single@example.com"]),
+        (
+            "obsolete@example.com",
+            ["one@example.com", "two@example.com"],
+            ["one@example.com", "two@example.com"],
+        ),
+        ("", [], []),
+    ]
+    ids: list[int] = []
+    try:
+        executor.migrate(old_target)
+        old_apps = executor.loader.project_state(old_target).apps
+        preference_model = old_apps.get_model("notifications", "ReminderPreference")
+        delivery_model = old_apps.get_model("notifications", "NotificationDelivery")
+        preference_model.objects.filter(pk=original.pk).delete()
+        for index, (email, recipients, _) in enumerate(expected):
+            user = User.objects.create(username=f"legacy-{index}")
+            preference = preference_model.objects.create(
+                user_id=user.pk,
+                region_id=system.region.pk,
+                email=email,
+                recipients=recipients,
+                effective_from=NOW,
+                times=["10:00"],
+                enabled=False,
+            )
+            ids.append(preference.pk)
+        delivery = delivery_model.objects.create(
+            preference_id=ids[0],
+            scheduled_for=SLOT,
+            available_at=SLOT,
+            recipient="pinned@example.com",
+            status="uncertain",
+            attempts=1,
+        )
+        MigrationExecutor(connection).migrate(current_targets)
+        assert list(
+            ReminderPreference.objects.filter(pk__in=ids)
+            .order_by("pk")
+            .values_list("recipients", flat=True)
+        ) == [recipients for _, _, recipients in expected]
+        history = NotificationDelivery.objects.get(pk=delivery.pk)
+        assert (history.preference_id, history.recipient, history.status, history.attempts) == (
+            ids[0],
+            "pinned@example.com",
+            "uncertain",
+            1,
+        )
+        executor = MigrationExecutor(connection)
+        executor.migrate(old_target)
+        old_apps = executor.loader.project_state(old_target).apps
+        preference_model = old_apps.get_model("notifications", "ReminderPreference")
+        assert list(
+            preference_model.objects.filter(pk__in=ids)
+            .order_by("pk")
+            .values_list("email", "recipients")
+        ) == [
+            ("legacy@example.com", ["legacy@example.com"]),
+            ("single@example.com", ["single@example.com"]),
+            ("", ["one@example.com", "two@example.com"]),
+            ("", []),
+        ]
+    finally:
+        MigrationExecutor(connection).migrate(current_targets)

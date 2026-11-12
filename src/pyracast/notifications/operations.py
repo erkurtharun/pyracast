@@ -21,7 +21,7 @@ def recipient_limit(*, lock: bool = False) -> int:
 
 
 def effective_recipients(preference: ReminderPreference) -> list[str]:
-    return list(preference.recipients) or [preference.email or preference.user.email]
+    return list(preference.recipients) or [preference.user.email]
 
 
 def normalize_recipients(recipients: list[str]) -> list[str]:
@@ -42,12 +42,7 @@ def region_recipient_count(
     ).select_related("user")
     addresses: set[str] = set()
     for preference in preferences:
-        if (
-            not preference.enabled
-            and not preference.times
-            and not preference.recipients
-            and not preference.email
-        ):
+        if not preference.enabled and not preference.times and not preference.recipients:
             continue
         if replacement is None or preference.user_id != replacement[0]:
             addresses.update(
@@ -74,19 +69,14 @@ def configure_reminders(
     region_id: int,
     *,
     enabled: bool,
-    email: str | None = None,
-    recipients: list[str] | None = None,
+    recipients: list[str],
     times: list[str],
     now: datetime,
 ) -> ReminderPreference:
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
     require_member(actor, tenant_id)
-    if email is not None and recipients is not None:
-        raise ValidationError("Provide recipients or the legacy email field, not both.")
-    addresses = normalize_recipients(
-        recipients if recipients is not None else [email] if email else []
-    )
+    addresses = normalize_recipients(recipients)
     with transaction.atomic():
         address_limit = recipient_limit(lock=True)
         actor.refresh_from_db(fields=["email"])
@@ -100,10 +90,7 @@ def configure_reminders(
         current_count = region_recipient_count(region)
         proposed_count = region_recipient_count(region, replacement=(actor.pk, reserved))
         disabling_unchanged = (
-            not enabled
-            and addresses
-            == (preference.recipients or ([preference.email] if preference.email else []))
-            and sorted(times) == preference.times
+            not enabled and addresses == preference.recipients and sorted(times) == preference.times
         )
         if proposed_count > address_limit and not (
             proposed_count < current_count or disabling_unchanged
@@ -127,7 +114,6 @@ def configure_reminders(
                 )
         preference.enabled = enabled
         preference.recipients = addresses
-        preference.email = addresses[0] if len(addresses) == 1 else ""
         preference.times = sorted(times)
         preference.effective_from = now
         preference.save()

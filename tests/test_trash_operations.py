@@ -109,6 +109,7 @@ def test_region_purge_removes_imported_reference_archive_and_preserves_other_own
         )
         snapshot = ForecastSnapshot.objects.create(
             job=job,
+            binding=binding,
             raw_payload={},
             normalized_intervals=[],
             collected_at=NOW,

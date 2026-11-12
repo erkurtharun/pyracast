@@ -173,7 +173,6 @@ def test_revision_invalidates_approval_and_preserves_previous_configuration() ->
         {"capacity_kw": 0},
         {"capacity_kw": float("nan")},
         {"power_basis": "xx"},
-        {"capacity_basis": "dc"},
         {"tilt_degrees": 1},
         {"capacity_semantics_verified": False},
         {"azimuth_degrees": 360},

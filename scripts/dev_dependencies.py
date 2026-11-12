@@ -13,6 +13,10 @@ LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 RABBIT_ENV = ("RABBITMQ_BASE", "RABBITMQ_CONFIG_FILE", "RABBITMQ_NODENAME", "ERLANG_HOME")
 
 
+def _is_windows() -> bool:
+    return sys.platform == "win32"
+
+
 def _postgres_probe() -> str | None:
     with psycopg.connect(
         host=os.environ.get("PGHOST", "127.0.0.1"),
@@ -32,7 +36,7 @@ def _postgres_probe() -> str | None:
 
 
 def _postgres_recipe(data_dir: str | None, host: str, port: int) -> dict[str, Any]:
-    if sys.platform != "win32" or host not in LOCAL_HOSTS or data_dir is None:
+    if not _is_windows() or host not in LOCAL_HOSTS or data_dir is None:
         return {}
     try:
         data = Path(data_dir)
@@ -48,7 +52,7 @@ def _postgres_recipe(data_dir: str | None, host: str, port: int) -> dict[str, An
 
 def _restart_postgres(recipe: Any, host: str, port: int) -> None:
     if (
-        sys.platform != "win32"
+        not _is_windows()
         or host not in LOCAL_HOSTS
         or not isinstance(recipe, dict)
         or recipe.get("host") != host
@@ -126,7 +130,7 @@ def _rabbit_ready(parameters: Any) -> bool:
 
 
 def _rabbit_recipe(host: str, port: int) -> dict[str, Any]:
-    if sys.platform != "win32" or host not in LOCAL_HOSTS:
+    if not _is_windows() or host not in LOCAL_HOSTS:
         return {}
     try:
         for listener in psutil.net_connections(kind="tcp"):
@@ -154,7 +158,7 @@ def _rabbit_recipe(host: str, port: int) -> dict[str, Any]:
 
 def _restart_rabbit(recipe: Any, host: str, port: int, parameters: Any) -> None:
     if (
-        sys.platform != "win32"
+        not _is_windows()
         or host not in LOCAL_HOSTS
         or not isinstance(recipe, dict)
         or recipe.get("host") != host

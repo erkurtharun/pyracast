@@ -6,7 +6,6 @@ export const region = {
     latitude: 36.9,
     longitude: 30.7,
     timezone: "Europe/Istanbul",
-    surface: "horizontal",
     revision: 1,
     status: "approved",
 };
@@ -160,14 +159,12 @@ export async function mockApi(
         else if (path.endsWith("/reminders/"))
             data = {
                 enabled: false,
-                email: "",
                 recipients: [],
                 recipient_limit: 5,
                 recipient_count: 1,
                 recipient_slots_remaining: 4,
                 recipient_limit_exceeded: false,
                 times: ["08:00"],
-                effective_email: user.email,
                 effective_recipients: [user.email],
                 timezone: region.timezone,
                 quota: { daily_reminder_limit: 10, queries_per_email: 0 },

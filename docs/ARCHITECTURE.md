@@ -26,7 +26,7 @@ Use conventional Django apps for accounts, regions, provider connections, foreca
 | Record | Owns |
 | --- | --- |
 | Tenant, User, Membership | Customer ownership and permitted actions |
-| Region | Tenant, coordinates, IANA timezone, surface and approval state |
+| Region | Tenant, coordinates, IANA timezone and approval state |
 | ProviderAccount | Provider identity, secret reference, entitlement and account-wide quota |
 | SiteBinding | Region-to-provider-account/site mapping and immutable configuration revisions |
 | CollectionJob, RequestAttempt | Scheduling, leases, quota reservations and execution history |
@@ -44,6 +44,13 @@ Use conventional Django apps for accounts, regions, provider connections, foreca
 | AuditEvent | Actor, action, target and timestamp for privileged changes |
 
 Initially each region uses a separately configured provider account. Keep the relationship explicit rather than embedding a credential in the region. Enforce one canonical record per provider account across tenants and credential rotations; duplicate records must not create independent quota budgets.
+
+Regions do not store or expose a surface setting: the irradiance result identifies
+its horizontal plane. Provider bindings store one `power_basis` for their matched
+power and normalization capacity. The numerical boundary still validates
+independently declared bases, and archived source manifests retain their fields.
+
+Forecast snapshots pin their job's binding under a composite foreign key, supporting source lookup and a database-enforced normalization target. Normalization retains its unique source/target binding key for idempotency.
 
 ## Approval flow
 
@@ -90,6 +97,99 @@ Members can rename a region without changing its revision or approval. Location 
 - Members configure region-local daily forecast times, initially 16:00. Historical collection runs separately at 03:00, refreshing yesterday and recovering missed days from the available seven-day window. Request `hours=168` explicitly and archive completed intervals; each acquisition remains immutable. Historical transport failures, empty responses and incomplete previous days retry no sooner than 30 minutes later, before 09:00. Restart catch-up is allowed inside that night window; disabling collection stops new night work. Account-wide UTC quota reservations preserve the remaining scheduled forecast needs before admitting a night request. Quota exhaustion or reserved forecast budget never creates a rapid retry loop. Configuration changes apply to future forecast slots; they do not invent missed forecast acquisitions. Use unique slots, advance a nonexistent night start to the first valid half-hour before 09:00, choose the first repeated time and flag late acquisitions.
 - Do not hold database transactions open during external HTTP calls. Recheck binding revision and approval before publication. Multiple scheduler instances must not duplicate work.
 - Preserve forecast vintages and configuration/model versions. Expose stale or incomplete results explicitly. Monitor last successful collection, queue lag, provider errors, quota, solver failures and coverage; logs carry correlation IDs without credentials.
+
+## Database invariants and rollout
+
+Use Django migrations as the sole schema owner. The migration dependency graph,
+historical models and `django_migrations` ledger travel with the application.
+Applied operations and data transformations are immutable; fixes use new forward
+migrations. Historical model type annotations can be corrected without changing
+replay behavior. Do not add Flyway
+or Liquibase over the same tables. `makemigrations --check --dry-run` checks model
+state against committed migrations, while `migrate --check` checks unapplied
+migrations; neither is a physical-schema drift detector or a migration checksum.
+Do not make unrecorded manual DDL changes.
+
+PostgreSQL 18.6 is the verified, pinned development/CI version. Keep time in
+`timestamptz`, quantities in explicitly named units, unknown measurements nullable,
+and immutable acquisition payloads separate from typed relational identities.
+Retain bigint identity keys: replacing them with UUIDv7 has no demonstrated need.
+JSONB holds provider payloads and versioned numerical artifacts; foreign keys,
+scheduling selectors and quantities needing database rules remain typed columns.
+
+Partial unique constraints enforce one active plant/location. GiST exclusion
+constraints enforce half-open, non-overlapping observation and operating periods,
+including the cancelled-incident predicate. PostgreSQL 18 temporal syntax does
+not replace that predicate. Deferred composite foreign keys additionally enforce
+same-region approval, request/account/binding provenance, configuration ownership,
+calibration ownership and acquisition/job identity. Explicit region, plant and
+binding ownership keys on configurations, production jobs and forecast snapshots
+let PostgreSQL enforce both paths of each relationship. Normalized copies must
+point to a different source snapshot and to an acquisition for their target binding;
+the source/target uniqueness key still prevents duplicate normalization.
+CHECK constraints reject invalid ranges, non-finite physical values and unsupported
+persisted states.
+New CHECK and composite FK constraints are added without scanning old rows, then
+validated in separate migrations; deployment is incomplete until validation passes.
+EPİAŞ archives use protected relations; only the explicit expired-definition purge
+removes their snapshots, jobs and connections in order.
+
+These rules supplement tenant-scoped, locked application operations. They are not
+row-level security. Publication eligibility, access and source-selection policies
+still belong to shared operations and workers. Direct SQL must not bypass those
+operations to create business records.
+
+Provider account identity uses PostgreSQL 18 `casefold()` with the built-in
+`pg_unicode_fast` collation and an explicit Unicode whitespace trim set. The same
+expression governs the unique index, lookup and insertion, independent of the
+cluster's operating-system locale. PostgreSQL's Unicode version is authoritative;
+Python's Unicode version must not introduce a second identity definition. No
+Unicode normalization or accent folding is applied.
+
+The overridden `migrate` command retains Django behavior and uses a database-scoped
+session advisory lock on the same direct connection. Concurrent migration runners
+fail fast; session-level DDL lock and statement timeouts are restored afterwards.
+The command rejects Django connection pooling and refuses further queries if its
+locked physical connection is replaced, rather than continuing without the lock.
+Use one deployment migration job with a dedicated schema-owner role. Production
+API/worker roles should have only required DML/sequence access, no superuser,
+CREATEDB, CREATEROLE or schema CREATE rights. Provision `btree_gist` administratively
+when the migrator cannot create extensions. Local loopback trust/superuser helpers
+are test conveniences, not production provisioning. Production connections require
+authenticated transport and secrets outside the repository; use a direct endpoint
+for migrations even when application connections use pooling.
+
+Review `migrate --plan` and `sqlmigrate` before deployment. Test both an empty
+database and a restored copy of existing data. For a small database with stopped
+writers, ordinary constraint/index creation is appropriate. At larger scale,
+create each concurrent index in its own non-atomic migration; add nullable
+columns, backfill in bounded batches, switch readers/writers, validate, and only
+then remove obsolete fields. Never wrap the entire migration sequence in one
+transaction. Keep FK alterations and their constraint replacement atomic. A failed
+concurrent index build can leave an invalid index: inspect `pg_index`, remove only
+the failed migration's index with `DROP INDEX CONCURRENTLY`, then retry the same
+migration. Do not mark the operation applied with `--fake`. A failed validation is
+a data investigation, not permission to delete
+history. PostgreSQL 18 skip scan and AIO are planner/runtime capabilities; use
+measured query plans and platform-supported defaults rather than speculative
+partitioning, duplicate indexes or Linux-only `io_uring` settings on Windows.
+
+Take a custom-format logical backup and prove it restores before a local schema
+change. Production recovery additionally needs retention, off-host backups,
+monitored WAL archiving/PITR and a tested recovery objective. Back up external
+encryption keys separately. After restoring to an earlier point in time, suspend
+provider requests for the rest of the UTC quota day unless its complete request
+ledger can be recovered; otherwise the restored ledger understates consumption.
+Prefer a forward repair; a reverse migration may discard data and is not an
+automatic rollback strategy. Run `ANALYZE` after a
+restore, and verify all constraints are validated and all indexes valid after
+deployment. Major PostgreSQL upgrades require their own tested `pg_upgrade` or
+dump/restore procedure; minor upgrades follow the release-specific instructions.
+
+References: [Django migrations](https://docs.djangoproject.com/en/6.1/topics/migrations/),
+[staged constraints and concurrent indexes](https://docs.djangoproject.com/en/6.1/ref/contrib/postgres/operations/),
+[PostgreSQL 18 features](https://www.postgresql.org/docs/18/release-18.html),
+[backup and recovery](https://www.postgresql.org/docs/18/backup.html).
 
 ## API and delivery
 
@@ -212,7 +312,7 @@ Acceptance: a second tenant cannot access the first tenant's records; concurrent
 
 ## Saved-forecast email reminders
 
-Each member can configure daily local `HH:MM` times and a recipient list for an approved plant. An empty list uses the member's account email. Active members' saved lists share one plant-wide limit of five distinct, case-insensitively compared addresses by default, editable through the MFA-protected admin's **Email reminder settings**. Paused lists retain their places; clearing the addresses and times while paused releases them. Inactive users and departed members do not reserve places. The API returns aggregate counts without exposing another member's addresses. A lower limit preserves saved lists but pauses the plant's deliveries until the aggregate fits; edits that reduce an existing excess remain possible. The legacy single `email` input remains supported, but cannot be combined with `recipients`.
+Each member can configure daily local `HH:MM` times and a recipient list for an approved plant. An empty list uses the member's account email. Active members' saved lists share one plant-wide limit of five distinct, case-insensitively compared addresses by default, editable through the MFA-protected admin's **Email reminder settings**. Paused lists retain their places; clearing the addresses and times while paused releases them. Inactive users and departed members do not reserve places. The API returns aggregate counts without exposing another member's addresses. A lower limit preserves saved lists but pauses the plant's deliveries until the aggregate fits; edits that reduce an existing excess remain possible. Requests require a `recipients` list, and `effective_recipients` resolves an empty list to the account email. Store only the recipient list. Migration `notifications.0005` preserves legacy-only addresses before removing the redundant email column; its reverse recreates the single-recipient mirror, not obsolete shadow values that disagreed with a nonempty canonical list.
 
 The current provider plan's daily request limit also caps daily reminder times; this is a product limit, not a quota reservation. Emails make **zero provider requests** and do not consume the request ledger. A reduced plan limit retains only the earliest configured times within the current limit.
 

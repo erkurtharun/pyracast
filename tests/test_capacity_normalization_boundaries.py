@@ -12,6 +12,7 @@ from pyracast.accounts.models import Tenant
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.capacity_normalization import (
     _scaled_intervals,
+    _validate_bindings,
     normalize_reference_capacity,
 )
 from pyracast.forecasts.history import select_actual_snapshot
@@ -90,7 +91,6 @@ def test_scaled_copies_cannot_be_normalized_again(monkeypatch: pytest.MonkeyPatc
     [
         ("source", {"capacity_semantics_verified": False}),
         ("target", {"settings_verification_reference": ""}),
-        ("source", {"capacity_kw": float("inf")}),
         ("target", {"capacity_kw": 1}),
         ("source", {"dc_capacity_kw": 2}),
         ("source", {"capacity_kw": 1e-308}),
@@ -104,6 +104,16 @@ def test_non_equivalent_or_unverified_capacity_declarations_cannot_relabel_histo
     SiteBinding.objects.filter(pk=binding.pk).update(**patch)
     with pytest.raises(ValidationError):
         normalize(system, target)
+    assert not ReferenceCapacityNormalization.objects.exists()
+
+
+def test_legacy_nonfinite_binding_cannot_authorize_capacity_normalization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, target = scaled_system(monkeypatch)
+    system.binding.capacity_kw = float("inf")
+    with pytest.raises(ValidationError):
+        _validate_bindings(system.binding, target)
     assert not ReferenceCapacityNormalization.objects.exists()
 
 

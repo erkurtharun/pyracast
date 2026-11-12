@@ -28,6 +28,7 @@ def test_archive_replays_previous_binding_without_writing_cache(
     binding.capacity_kw = 1000
     binding.save()
     current = PlantConfiguration.objects.create(
+        region_id=plant.region_id,
         plant=plant,
         binding=binding,
         revision=old.revision + 1,

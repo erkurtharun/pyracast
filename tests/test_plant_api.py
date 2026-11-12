@@ -183,6 +183,7 @@ def test_tenant_scope_observation_import_and_validation() -> None:
         region_id=plant["region_id"], name="Other PV", deleted_at=timezone.now()
     )
     foreign_config = PlantConfiguration.objects.create(
+        region_id=other_plant.region_id,
         plant=other_plant,
         binding=current.binding,
         revision=1,
@@ -338,6 +339,7 @@ def test_forecast_resolution_caps_native_intervals() -> None:
     )
     snapshot = ForecastSnapshot.objects.create(
         job=job,
+        binding=configuration.binding,
         source_kind="forecast",
         collected_at=now,
         raw_payload={},

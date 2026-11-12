@@ -123,11 +123,13 @@ def test_live_selection_excludes_unavailable_and_unmatched_snapshots(
     elif change == "actuals":
         latest.source_kind = "estimated_actuals"
     elif change == "missing_coverage":
-        latest.coverage_start = None
+        latest.coverage_start = latest.coverage_end = None
     elif change == "before_coverage":
         latest.coverage_start = local_day_bounds(DAY, system.binding.timezone)[1]
+        latest.coverage_end = latest.coverage_start + timedelta(minutes=30)
     else:
         latest.coverage_end = local_day_bounds(DAY, system.binding.timezone)[0]
+        latest.coverage_start = latest.coverage_end - timedelta(minutes=30)
     latest.save()
     result = plant_outlook(
         system.member,

@@ -60,7 +60,7 @@ def test_epias_api_connects_archives_native_values_and_preserves_history_after_d
     assert connected.json()["pending_jobs"] == 102
     assert EpiasCollectionJob.objects.filter(source_kind="realtime_generation").count() == 90
     assert EpiasCollectionJob.objects.filter(source_kind="settlement_injection").count() == 12
-    assert connected.json()["meter_basis"] == "unknown"
+    assert "meter_basis" not in connected.json()
     job = EpiasCollectionJob.objects.order_by("-target_day").first()
     assert job is not None
     stamp = datetime.combine(job.target_day, time(), ZoneInfo("Europe/Istanbul"))
@@ -198,6 +198,7 @@ def archive_source(
         "eic": connection.eic,
     }
     job = EpiasCollectionJob.objects.create(
+        plant_id=connection.plant_id,
         connection=connection,
         configuration=configuration,
         connection_revision=connection.revision,
@@ -318,7 +319,6 @@ def test_unpublished_settlement_falls_back_only_in_automatic_view() -> None:
     [
         ("disconnected", "source_disconnected"),
         ("ac", "measurement_basis_mismatch"),
-        ("unknown", "measurement_basis_mismatch"),
         ("unconfigured", "configuration_mismatch"),
         ("suspended", "configuration_unavailable"),
     ],
@@ -340,10 +340,10 @@ def test_settlement_suitability_respects_configuration_and_connection(
     if state == "disconnected":
         connection.enabled = False
         connection.save()
-    elif state in {"ac", "unknown"}:
+    elif state == "ac":
         configuration = connection.plant.current_configuration
         assert configuration is not None
-        configuration.measurement_basis = "ac_generation" if state == "ac" else "unknown"
+        configuration.measurement_basis = "ac_generation"
         configuration.save()
     elif state == "unconfigured":
         connection.plant.current_configuration = None

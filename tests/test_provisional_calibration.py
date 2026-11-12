@@ -204,6 +204,7 @@ def test_last_publication_prepares_once_when_seven_daylight_days_become_matched(
         actual_snapshot_for(system, last_day)
         assert prepare_calibration(plant.pk) is None
         production_job = EpiasCollectionJob.objects.create(
+            plant_id=connection.plant_id,
             connection=connection,
             configuration=configuration,
             connection_revision=connection.revision,
@@ -351,6 +352,7 @@ def test_empty_settlement_correction_automatically_prepares_provisional_fallback
     )
     dispatch = NOW - timedelta(seconds=1)
     job = EpiasCollectionJob.objects.create(
+        plant_id=connection.plant_id,
         connection=connection,
         configuration=configuration,
         connection_revision=connection.revision,

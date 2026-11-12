@@ -107,7 +107,6 @@ def test_connection_scope_identity_and_missing_configuration(
     assert get_epias_status(plant.pk, actor=system.member)["connected"] is False
     disconnect_epias(plant.pk, actor=system.member)
     for kwargs, error in (
-        ({"meter_basis": "other"}, "unsupported_meter_basis"),
         ({"provider_plant_id": 0}, "invalid_epias_plant"),
         ({"provider_plant_id": True}, "invalid_epias_plant"),
         ({"expected_eic": ""}, "invalid_epias_plant"),
@@ -123,7 +122,6 @@ def test_connection_scope_identity_and_missing_configuration(
                 client=cast(EpiasClient, client),
                 provider_plant_id=cast(int, values["provider_plant_id"]),
                 expected_eic=cast(str, values["expected_eic"]),
-                meter_basis=cast(str, values.get("meter_basis", "unknown")),
             )
     Plant.objects.filter(pk=plant.pk).update(current_configuration=None)
     with pytest.raises(ValidationError, match="configuration_unavailable"):
@@ -158,7 +156,6 @@ def test_daily_reconciliation_preserves_acquisitions_and_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant, linked = connected(monkeypatch)
-    assert linked.meter_basis == "unknown"
     assert EpiasCollectionJob.objects.count() == 90
     assert {j.target_day for j in EpiasCollectionJob.objects.all()} == {
         NOW.date() - timedelta(days=i) for i in range(1, 91)
@@ -557,7 +554,6 @@ def test_missing_connection_history_and_status_are_complete(
         "last_settlement_date": None,
         "eic": "",
         "name": "",
-        "meter_basis": "unknown",
         "last_success_at": None,
         "last_error": "",
         "pending_jobs": 0,
@@ -622,6 +618,7 @@ def test_collection_tolerates_purge_after_reading_work_identifiers(
                 Plant.objects.filter(pk=plant.pk).update(deleted_at=NOW - timedelta(days=31))
                 assert purge_expired(NOW)["plants"] == 1
             else:
+                EpiasCollectionJob.objects.filter(connection=linked).delete()
                 linked.delete()
         return execute(sql, params, many, context)
 

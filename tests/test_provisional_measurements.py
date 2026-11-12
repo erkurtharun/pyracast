@@ -2,6 +2,7 @@ from datetime import date, timedelta
 from typing import Any
 
 import pytest
+from django.db import IntegrityError, transaction
 
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
@@ -53,6 +54,7 @@ def acquisition(
         "name": "Plant",
     }
     job = EpiasCollectionJob.objects.create(
+        plant_id=connection.plant_id,
         connection=connection,
         configuration=configuration,
         connection_revision=connection.revision,
@@ -360,6 +362,7 @@ def test_acquisitions_cannot_cross_configuration_boundaries(
     configuration, _ = source
     snapshot = acquisition(source)
     other = PlantConfiguration.objects.create(
+        region_id=configuration.plant.region_id,
         plant=configuration.plant,
         binding=configuration.binding,
         revision=2,
@@ -367,14 +370,15 @@ def test_acquisitions_cannot_cross_configuration_boundaries(
         measurement_basis="net_export",
         created_by=configuration.created_by,
     )
-    if boundary == "snapshot":
-        snapshot.configuration = other
-        snapshot.save(update_fields=("configuration",))
-    else:
-        snapshot.job.configuration = other
-        snapshot.job.save(update_fields=("configuration",))
-    start, end = local_day_bounds(DAY, configuration.binding.timezone)
-    assert select_measurements(configuration, start, end, NOW) == ([], [])
-    assert select_measurements(
-        configuration, start, end, NOW, production_snapshot_ids=[snapshot.pk]
-    ) == ([], [])
+    with pytest.raises(IntegrityError), transaction.atomic():  # noqa: PT012 -- validate before commit.
+        if boundary == "snapshot":
+            snapshot.configuration = other
+            snapshot.save(update_fields=("configuration",))
+        else:
+            snapshot.job.configuration = other
+            snapshot.job.save(update_fields=("configuration",))
+        start, end = local_day_bounds(DAY, configuration.binding.timezone)
+        assert select_measurements(configuration, start, end, NOW) == ([], [])
+        assert select_measurements(
+            configuration, start, end, NOW, production_snapshot_ids=[snapshot.pk]
+        ) == ([], [])

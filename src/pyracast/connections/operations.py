@@ -4,10 +4,12 @@ from datetime import UTC, datetime, timedelta
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Value
 from django.utils import timezone
 
 from pyracast.accounts.operations import require_admin
 from pyracast.connections.contracts import ProviderAdapter, ProviderFailure
+from pyracast.connections.identity import canonical_account_identity
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.secrets import validate_secret_reference
 from pyracast.forecasts.budget import remaining_forecast_requests
@@ -38,7 +40,7 @@ def create_account(
 ) -> ProviderAccount:
     require_admin(actor)
     provider = provider.strip().casefold()
-    identity = external_account_id.strip().casefold()
+    identity = external_account_id.strip()
     if provider not in {"fixture", "solcast"} or not identity:
         raise ValidationError("Invalid provider account identity.")
     validate_secret_reference(secret_reference)
@@ -50,10 +52,15 @@ def create_account(
     ):
         raise ValidationError("A service authorization reference is required.")
     with transaction.atomic():
-        account, created = ProviderAccount.objects.get_or_create(
-            provider=provider,
-            external_account_id=identity,
+        account, created = ProviderAccount.objects.alias(
+            canonical_provider=canonical_account_identity("provider"),
+            canonical_identity=canonical_account_identity("external_account_id"),
+        ).get_or_create(
+            canonical_provider__exact=canonical_account_identity(Value(provider)),
+            canonical_identity__exact=canonical_account_identity(Value(identity)),
             defaults={
+                "provider": provider,
+                "external_account_id": canonical_account_identity(Value(identity)),
                 "secret_reference": secret_reference,
                 "daily_quota": daily_quota,
                 "authorization_reference": authorization_reference or "fixture-development-only",
@@ -62,6 +69,7 @@ def create_account(
             },
         )
         if created:
+            account.refresh_from_db(fields=("provider", "external_account_id"))
             AuditEvent.objects.create(
                 actor=actor,
                 provider_account=account,

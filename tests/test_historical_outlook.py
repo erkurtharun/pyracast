@@ -378,8 +378,11 @@ def test_past_actuals_follow_configuration_at_day_start_after_binding_change(
         {"available_at": NOW + timedelta(seconds=1)},
         {"issued_at": NOW + timedelta(seconds=1)},
         {"collected_at": datetime(2026, 11, 7, tzinfo=NOW.tzinfo)},
-        {"coverage_start": NOW},
-        {"coverage_end": datetime(2026, 11, 7, tzinfo=NOW.tzinfo)},
+        {"coverage_start": NOW, "coverage_end": NOW + timedelta(minutes=30)},
+        {
+            "coverage_start": datetime(2026, 11, 6, tzinfo=NOW.tzinfo),
+            "coverage_end": datetime(2026, 11, 7, tzinfo=NOW.tzinfo),
+        },
         {"source_kind": "forecast"},
         {"available_at": None},
     ],

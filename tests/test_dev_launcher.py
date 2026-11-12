@@ -78,7 +78,11 @@ def test_discovers_records_and_stops_the_exact_workspace_process(
 
     process = launcher.discover(root, "worker")
     assert process is not None
-    assert process.pid == int((root / "ready-worker").read_text())
+    actual = psutil.Process(int((root / "ready-worker").read_text()))
+    outer = psutil.Process(child.pid)
+    expected = outer if launcher.process_role(outer, root) == "worker" else actual
+    assert process.pid == expected.pid
+    assert actual.pid in {process.pid, *(p.pid for p in process.children(recursive=True))}
     record = launcher.identity(process)
     state = {"root": str(root), "processes": {"worker": record}}
     launcher.save_state(root, state)
@@ -89,6 +93,8 @@ def test_discovers_records_and_stops_the_exact_workspace_process(
 
     child.wait(timeout=5)
     assert child.poll() is not None
+    _, alive = psutil.wait_procs([actual], timeout=5)
+    assert alive == []
     assert launcher.read_state(root)["processes"] == {}
 
 

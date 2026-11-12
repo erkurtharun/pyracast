@@ -57,6 +57,7 @@ jobs:
           docker logs pyracast-rabbitmq
           exit 1
       - run: uv run --locked --no-sync --no-build pyracast migrate --noinput
+      - run: uv run --locked --no-sync --no-build pyracast migrate --check
       - run: uv run --locked --no-sync --no-build pyracast check
       - run: uv run --locked --no-sync --no-build python scripts/check.py
       - run: uv build --no-sources
