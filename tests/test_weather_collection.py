@@ -21,7 +21,7 @@ from pyracast.forecasts.models import (
 )
 from pyracast.forecasts.sources import snapshot_data
 from pyracast.providers import FixtureProvider
-from pyracast.weather import OpenMeteoProvider, WeatherData, WeatherFailure, normalize_weather
+from pyracast.weather import OpenMeteoProvider, WeatherData, WeatherError, normalize_weather
 from tests.test_domain import NOW, FakeAdapter, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -39,7 +39,7 @@ class WeatherFixture(OpenMeteoProvider):
         assert not connection.in_atomic_block
         self.calls += 1
         if self.fail:
-            raise WeatherFailure("weather_request_failed")
+            raise WeatherError("weather_request_failed")
         stamps = [start - timedelta(hours=1) + timedelta(hours=i) for i in range(26)]
         return normalize_weather(
             {

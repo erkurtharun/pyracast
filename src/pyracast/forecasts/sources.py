@@ -3,7 +3,7 @@ from typing import cast
 from pyracast.connections.contracts import ProviderData
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import SourceKind
-from pyracast.weather import WeatherFailure, restore_weather
+from pyracast.weather import WeatherError, restore_weather
 
 
 def snapshot_data(
@@ -14,7 +14,7 @@ def snapshot_data(
     if snapshot.weather_payload is not None:
         try:
             weather = restore_weather(snapshot.weather_payload)
-        except WeatherFailure as exc:
+        except WeatherError as exc:
             weather_error = exc.code
     return ProviderData(
         raw_payload=snapshot.raw_payload,

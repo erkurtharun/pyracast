@@ -124,7 +124,7 @@ def calibration_at(configuration: PlantConfiguration, as_of: datetime) -> Calibr
     return run
 
 
-def _payload(
+def forecast_payload(
     configuration: PlantConfiguration,
     snapshot: ForecastSnapshot,
     calibration: CalibrationRun | None,
@@ -255,7 +255,9 @@ def archived_forecast(
             result = (
                 deepcopy(saved.payload)
                 if saved is not None and not assumed
-                else _payload(configuration, snapshot, calibration, target_date, resolution_minutes)
+                else forecast_payload(
+                    configuration, snapshot, calibration, target_date, resolution_minutes
+                )
             )
         except (ValueError, ArithmeticError) as exc:
             raise ValidationError("calculation_out_of_range") from exc
@@ -314,7 +316,9 @@ def declared_forecast(
     irradiance = None
     if snapshot is not None:
         try:
-            result = _payload(configuration, snapshot, None, target_date, resolution_minutes)
+            result = forecast_payload(
+                configuration, snapshot, None, target_date, resolution_minutes
+            )
         except (ValueError, ArithmeticError) as exc:
             raise ValidationError("calculation_out_of_range") from exc
         cast(list[str], result["quality_flags"]).append("historical_configuration_assumed")
@@ -410,7 +414,7 @@ def plant_forecast(
             if not configuration_is_current(configuration):
                 raise ValidationError("configuration_changed")
             try:
-                payload = _payload(
+                payload = forecast_payload(
                     configuration, snapshot, calibration, target_date, resolution_minutes
                 )
             except (ValueError, ArithmeticError) as exc:

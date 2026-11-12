@@ -10,10 +10,10 @@ from django.db import IntegrityError, connection, transaction
 
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.accounts.operations import require_admin, require_member
-from pyracast.connections.contracts import ProviderData, ProviderFailure
+from pyracast.connections.contracts import ProviderData, ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import (
-    QuotaExhausted,
+    QuotaExceededError,
     create_account,
     reserve_request,
     rotate_secret,
@@ -242,9 +242,9 @@ def test_validation_failure_consumes_quota_without_secret_in_audit() -> None:
     system = make_system()
 
     def fail() -> None:
-        raise ProviderFailure("do not persist this secret")
+        raise ProviderError("do not persist this secret")
 
-    with pytest.raises(ProviderFailure):
+    with pytest.raises(ProviderError):
         validate_binding(system.admin, system.binding.pk, FakeAdapter(fail), NOW)
     system.binding.refresh_from_db()
     assert (system.binding.health, system.binding.validated_at) == ("error", None)
@@ -294,13 +294,13 @@ def test_utc_quota_is_conservative_and_resets_on_utc_midnight() -> None:
     first = reserve_request(system.binding, NOW, purpose="validation")
     assert first.utc_day == NOW.date()
     assert first.outcome == "uncertain"
-    with pytest.raises(QuotaExhausted):
+    with pytest.raises(QuotaExceededError):
         reserve_request(system.binding, NOW, purpose="forecast")
     assert (
         reserve_request(system.binding, NOW + timedelta(days=1), purpose="forecast").pk != first.pk
     )
     ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=False)
-    with pytest.raises(QuotaExhausted):
+    with pytest.raises(QuotaExceededError):
         reserve_request(system.binding, NOW + timedelta(days=2), purpose="forecast")
     with pytest.raises(ValidationError):
         reserve_request(system.binding, NOW.replace(tzinfo=None), purpose="forecast")
@@ -406,7 +406,7 @@ def test_live_account_requires_recorded_service_authorization() -> None:
     assert live.authorized_by_id == system.admin.pk
     assert live.authorized_at is not None
     ProviderAccount.objects.filter(pk=system.account.pk).update(authorized_at=None)
-    with pytest.raises(QuotaExhausted):
+    with pytest.raises(QuotaExceededError):
         reserve_request(system.binding, NOW, purpose="validation")
 
 

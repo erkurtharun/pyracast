@@ -18,7 +18,7 @@ class ProviderData:
     weather_error: str = ""
 
 
-class ProviderFailure(Exception):
+class ProviderError(Exception):
     pass
 
 

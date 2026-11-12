@@ -7,7 +7,11 @@ from django.db import IntegrityError, connection, connections, transaction
 from django.db.migrations.executor import MigrationExecutor
 
 from pyracast.connections.models import ProviderAccount
-from pyracast.connections.operations import QuotaExhausted, create_account, reserve_account_request
+from pyracast.connections.operations import (
+    QuotaExceededError,
+    create_account,
+    reserve_account_request,
+)
 from pyracast.regions.models import AuditEvent
 from tests.test_domain import NOW, secret_ref
 
@@ -49,7 +53,7 @@ def test_raw_provider_variants_share_one_account_and_quota(
     assert duplicate.daily_quota == 1
     assert not AuditEvent.objects.filter(action="provider_account_created").exists()
     reserve_account_request(existing, NOW, purpose="validation")
-    with pytest.raises(QuotaExhausted):
+    with pytest.raises(QuotaExceededError):
         reserve_account_request(duplicate, NOW, purpose="validation")
     with pytest.raises(IntegrityError, match="canonical_provider_account"), transaction.atomic():
         ProviderAccount.objects.create(

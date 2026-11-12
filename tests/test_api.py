@@ -18,9 +18,9 @@ from pyracast.admin import ReadOnlyAdmin, RegionAdmin, site
 from pyracast.api.errors import exception_handler
 from pyracast.api.serializers import RegionInput
 from pyracast.calculation import calculate
-from pyracast.connections.contracts import ProviderFailure
+from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import SiteBinding
-from pyracast.connections.operations import QuotaExhausted
+from pyracast.connections.operations import QuotaExceededError
 from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import CollectionJob, ForecastResult
 from pyracast.providers import FixtureProvider
@@ -225,8 +225,8 @@ def test_mfa_and_admin_mutation_boundaries(customer: tuple[Client, User, Tenant]
     [
         (ObjectDoesNotExist(), 404),
         (ValidationError("invalid"), 400),
-        (QuotaExhausted(), 429),
-        (ProviderFailure("secret"), 502),
+        (QuotaExceededError(), 429),
+        (ProviderError("secret"), 502),
         (APIValidationError("invalid"), 400),
     ],
 )

@@ -11,7 +11,7 @@ from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.forecasts.sources import snapshot_data
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_sources import SELECTION_POLICY, apply_composition, compose_snapshots
-from pyracast.plants.forecasting import _payload, calibration_at
+from pyracast.plants.forecasting import calibration_at, forecast_payload
 from pyracast.plants.measurements import production_identity_current
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.plants.operations import configuration_is_current
@@ -73,7 +73,7 @@ def current_forecast(
                 used_snapshots = [
                     source for source in snapshots if source.pk in composition.snapshot_ids
                 ]
-                result = _payload(
+                result = forecast_payload(
                     configuration,
                     snapshot,
                     calibration,

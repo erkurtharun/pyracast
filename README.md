@@ -60,10 +60,11 @@ on ports 3000/8000 is an error, never terminated or assigned a different port.
 The first frontend installation takes longer; later starts reuse the lockfile cache.
 
 Double-click **`stop.cmd`** to stop the four application processes, or
-**`status.cmd`** to inspect them. Stop waits up to five minutes for active worker
-jobs. PostgreSQL and RabbitMQ are shared dependencies and remain running; database
-files are never deleted or reinitialized. Windows termination after the drain is
-bounded process termination, not a guarantee of graceful signal handling.
+**`status.cmd`** to inspect them. Stop requests graceful worker/dispatcher shutdown
+through local control files and waits up to five minutes per process. Active work
+finishes before exit; a timeout preserves the process and its recorded identity for
+a later stop attempt. PostgreSQL and RabbitMQ are shared dependencies and remain
+running; database files are never deleted or reinitialized.
 For terminal use, from either Windows or Ubuntu:
 
 ```text
@@ -178,6 +179,16 @@ and retries share one account/UTC-day budget. Unknown request outcomes consume q
 Provider calls happen outside transactions. Changed or suspended regions cannot
 publish through old bindings. Failed calculations can reuse an archived acquisition.
 
+On POSIX, `SIGINT` and `SIGTERM` request graceful shutdown: the dispatcher completes
+its current cycle, and the worker finishes active tasks before closing its broker.
+Configure the process manager's termination grace period for this work and broker
+cleanup; Dramatiq retains its default ten-minute shutdown timeout. The launcher uses
+`--stop-file` for the same clean shutdown on Windows and Ubuntu. Legacy managed
+processes without that option retain a best-effort database drain and bounded
+termination; queued work can start between the last check and termination. Forced
+termination still uses durable recovery, and an ambiguous email send remains
+`uncertain` without automatic retry.
+
 In **Data collection**, choose daily local forecast times for each approved region.
 Previous-day history is collected independently at 03:00 local time with
 `hours=168`, retaining the available completed seven-day history. Missing or failed
@@ -204,12 +215,14 @@ npm --prefix web run dev
 ```
 
 Open `http://127.0.0.1:3000` and sign in with an existing Django user. The user's
-tenant memberships determine which regions are visible. For another API address,
-copy `web/.env.example` to ignored `web/.env.local` and set `DJANGO_API_ORIGIN`.
-The API origin is a server setting, never a browser credential. Frontend text is English.
+tenant memberships determine which regions are visible. For another development API
+address, copy `web/.env.example` to ignored `web/.env.local` and set
+`DJANGO_API_ORIGIN`. The development server proxies `/api/` to that address.
+Frontend text is English.
 
 For production, run `npm --prefix web run build` and `npm --prefix web start` behind
-an HTTPS gateway. Route `/api/` to Django on the same public origin, disable gateway
+an HTTPS gateway. Route `/api/` to Django on the same public origin; production routing
+does not embed the API origin, so the same build can be promoted. Disable gateway
 caching for authenticated responses and rate-limit login attempts. If the gateway
 terminates TLS, set `PYRACAST_TRUST_PROXY=1` only when it strips and sets
 `X-Forwarded-Proto` and the Django service is reachable only through trusted infrastructure.

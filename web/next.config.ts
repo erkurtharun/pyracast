@@ -1,5 +1,7 @@
 import type { NextConfig } from "next";
-const config: NextConfig = {
+import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
+
+const config = (phase: string): NextConfig => ({
     distDir: process.env.NEXT_DIST_DIR ?? ".next",
     productionBrowserSourceMaps: process.env.PLAYWRIGHT_COVERAGE === "1",
     poweredByHeader: false,
@@ -24,6 +26,7 @@ const config: NextConfig = {
         ];
     },
     async rewrites() {
+        if (phase !== PHASE_DEVELOPMENT_SERVER) return [];
         return [
             {
                 source: "/api/:path*/",
@@ -31,5 +34,5 @@ const config: NextConfig = {
             },
         ];
     },
-};
+});
 export default config;

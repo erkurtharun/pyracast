@@ -8,9 +8,9 @@ import pytest
 from django.core.exceptions import ValidationError
 from django.db import OperationalError, close_old_connections, connection, transaction
 
-from pyracast.connections.contracts import ProviderData, ProviderFailure
+from pyracast.connections.contracts import ProviderData, ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.connections.operations import QuotaExhausted, reserve_request, rotate_secret
+from pyracast.connections.operations import QuotaExceededError, reserve_request, rotate_secret
 from pyracast.forecasts import jobs
 from pyracast.forecasts.jobs import (
     LEASE_DURATION,
@@ -161,7 +161,7 @@ def test_provider_retries_consume_quota_and_fail_after_bounded_attempts() -> Non
     job = CollectionJob.objects.get()
 
     def fail() -> None:
-        raise ProviderFailure("sensitive exception must not be stored")
+        raise ProviderError("sensitive exception must not be stored")
 
     for _ in range(3):
         assert not collect(job.pk, FakeAdapter(fail), calculate, job.available_at)
@@ -228,7 +228,7 @@ def test_failure_backoff_starts_after_the_failed_operation_finishes(
     def fail_provider() -> None:
         if failure == "provider":
             clock[0] = 90.0
-            raise ProviderFailure("Provider failed after a delayed response")
+            raise ProviderError("Provider failed after a delayed response")
 
     def fail_calculation(
         binding: SiteBinding, target_date: object, data: ProviderData
@@ -343,7 +343,7 @@ def test_concurrent_quota_reservations_share_one_account_budget() -> None:
             barrier.wait(timeout=10)
             reserve_request(system.binding, NOW, purpose="forecast")
             return True
-        except QuotaExhausted:
+        except QuotaExceededError:
             return False
         finally:
             connection.close()

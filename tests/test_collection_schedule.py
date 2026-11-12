@@ -13,7 +13,7 @@ from django.db import close_old_connections, connection
 from rest_framework.test import APIClient
 
 from pyracast.accounts.models import Membership, Tenant
-from pyracast.connections.contracts import ProviderData, ProviderFailure
+from pyracast.connections.contracts import ProviderData, ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.jobs import claim, collect, persist_snapshot, retry
 from pyracast.forecasts.models import (
@@ -94,7 +94,7 @@ def test_failed_initial_history_is_backfilled_again_next_day() -> None:
     first = CollectionJob.objects.get(endpoint="estimated_actuals")
 
     def unavailable() -> None:
-        raise ProviderFailure("private provider message")
+        raise ProviderError("private provider message")
 
     assert not collect(first.pk, HistoricalFixture(action=unavailable), no_calculation, NIGHT)
     enqueue_due(NIGHT + timedelta(days=1))
@@ -116,7 +116,7 @@ def test_successful_retry_clears_current_error_and_preserves_request_history(end
     job = CollectionJob.objects.get(endpoint=endpoint)
 
     def unavailable() -> None:
-        raise ProviderFailure("private provider message")
+        raise ProviderError("private provider message")
 
     failing = (
         HistoricalFixture(action=unavailable)

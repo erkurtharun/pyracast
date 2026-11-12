@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from pyracast.connections.contracts import ProviderAdapter, ProviderData, ProviderFailure
+from pyracast.connections.contracts import ProviderAdapter, ProviderData, ProviderError
 from pyracast.connections.models import SiteBinding
 from pyracast.connections.secrets import resolve_solcast_secret
 
@@ -19,13 +19,13 @@ def normalize_payload(
     collected_at: datetime | None = None,
 ) -> ProviderData:
     if endpoint not in ("forecasts", "estimated_actuals"):
-        raise ProviderFailure("invalid_provider_endpoint")
+        raise ProviderError("invalid_provider_endpoint")
     if not isinstance(payload, dict) or not isinstance(payload.get(endpoint), list):
-        raise ProviderFailure("invalid_provider_schema")
+        raise ProviderError("invalid_provider_schema")
     intervals: list[dict[str, object]] = []
     for row in payload[endpoint]:
         if not isinstance(row, dict) or row.get("period") != "PT30M":
-            raise ProviderFailure("invalid_provider_interval")
+            raise ProviderError("invalid_provider_interval")
         try:
             end = datetime.fromisoformat(row["period_end"])
             if end.utcoffset() is None:
@@ -39,7 +39,7 @@ def normalize_payload(
                 raise ValueError("Nonfinite power")
             end = end.astimezone(UTC)
         except KeyError, TypeError, ValueError, OverflowError:
-            raise ProviderFailure("invalid_provider_interval") from None
+            raise ProviderError("invalid_provider_interval") from None
         intervals.append(
             {
                 "start": (end - timedelta(minutes=30)).isoformat(),
@@ -51,7 +51,7 @@ def normalize_payload(
     try:
         json.dumps(payload, allow_nan=False)
     except TypeError, ValueError:
-        raise ProviderFailure("invalid_provider_schema") from None
+        raise ProviderError("invalid_provider_schema") from None
     # The Hobby response does not promise an issue timestamp or P50 semantics.
     return ProviderData(
         raw_payload=cast(dict[str, object], payload.copy()),
@@ -77,7 +77,7 @@ def _contains_secret(value: object, secret: str) -> bool:
 class FixtureProvider:
     def validate(self, binding: SiteBinding) -> None:
         if binding.provider_account.provider != "fixture":
-            raise ProviderFailure("fixture_account_required")
+            raise ProviderError("fixture_account_required")
 
     def fetch(self, binding: SiteBinding, target_date: date) -> ProviderData:
         self.validate(binding)
@@ -137,7 +137,7 @@ class SolcastProvider:
     ) -> ProviderData:
         secret = resolve_solcast_secret(binding.provider_account.secret_reference)
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", binding.site_id):
-            raise ProviderFailure("invalid_site_id")
+            raise ProviderError("invalid_site_id")
         try:
             with httpx.Client(
                 timeout=httpx.Timeout(20, connect=5),
@@ -151,12 +151,12 @@ class SolcastProvider:
                 )
                 response.raise_for_status()
                 if secret in response.text:
-                    raise ProviderFailure("unsafe_provider_response")
+                    raise ProviderError("unsafe_provider_response")
                 payload = response.json()
         except httpx.HTTPError, json.JSONDecodeError, UnicodeDecodeError:
-            raise ProviderFailure("provider_request_failed") from None
+            raise ProviderError("provider_request_failed") from None
         if _contains_secret(payload, secret):
-            raise ProviderFailure("unsafe_provider_response")
+            raise ProviderError("unsafe_provider_response")
         return normalize_payload(payload, endpoint)
 
 
@@ -165,4 +165,4 @@ def adapter_for(binding: SiteBinding) -> ProviderAdapter:
         return FixtureProvider()
     if binding.provider_account.provider == "solcast":
         return SolcastProvider()
-    raise ProviderFailure("unsupported_provider")
+    raise ProviderError("unsupported_provider")

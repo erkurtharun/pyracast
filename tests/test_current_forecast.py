@@ -222,7 +222,7 @@ def test_live_rechecks_configuration_after_calculation(
     system, plant = make_plant(monkeypatch)
     publish_snapshot(snapshot_for(system, DAY, collected_at=NOW))
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
-    original = forecasting._payload
+    original = forecasting.forecast_payload
 
     def changed(*args: Any, **kwargs: Any) -> dict[str, object]:
         payload = original(*args, **kwargs)
@@ -234,7 +234,7 @@ def test_live_rechecks_configuration_after_calculation(
             ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=False)
         return payload
 
-    monkeypatch.setattr(current_forecast, "_payload", changed)
+    monkeypatch.setattr(current_forecast, "forecast_payload", changed)
     result = plant_outlook(*scope, target_date=DAY, resolution_minutes=60)
     assert result["unavailable_reason"] == "configuration_unavailable"
     assert result["result"] is None

@@ -10,9 +10,9 @@ import pytest
 from django.db import connections
 from django.utils import timezone
 
-from pyracast.connections.contracts import ProviderFailure
+from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount
-from pyracast.connections.operations import QuotaExhausted, reserve_account_request
+from pyracast.connections.operations import QuotaExceededError, reserve_account_request
 from pyracast.forecasts.models import RequestAttempt
 from pyracast.providers import normalize_payload
 from scripts import check_solcast
@@ -217,7 +217,7 @@ def test_settings_sanitization_selects_exact_site_and_allowlisted_fields() -> No
     ],
 )
 def test_settings_sanitization_rejects_invalid_or_ambiguous_sites(payload: object) -> None:
-    with pytest.raises(ProviderFailure):
+    with pytest.raises(ProviderError):
         check_solcast.sanitize(payload, "settings", "synthetic-site")
 
 
@@ -324,7 +324,7 @@ def test_capture_shares_account_budget_and_prevents_duplicate_daily_kind(
         "inspect_settings",
         "validation",
     ]
-    with pytest.raises(QuotaExhausted):
+    with pytest.raises(QuotaExceededError):
         reserve_account_request(capture_account, timezone.now(), purpose="collection")
 
 
@@ -356,7 +356,7 @@ def test_failed_capture_is_private_consumes_quota_and_is_not_retried(
         )
 
     transport = httpx.MockTransport(handle)
-    with pytest.raises(ProviderFailure, match="no retry was made") as caught:
+    with pytest.raises(ProviderError, match="no retry was made") as caught:
         check_solcast.capture(capture_account, "forecast", tmp_path, transport=transport)
     assert "synthetic-capture-credential" not in str(caught.value)
     assert caught.value.__suppress_context__

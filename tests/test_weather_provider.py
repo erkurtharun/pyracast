@@ -10,7 +10,7 @@ import pytest
 from pyracast.weather import (
     OpenMeteoProvider,
     WeatherData,
-    WeatherFailure,
+    WeatherError,
     normalize_weather,
     restore_weather,
     serialize_weather,
@@ -208,7 +208,7 @@ def test_http_failures_do_not_follow_redirects_retry_or_expose_bodies(status: in
             status, text="private-key", headers={"location": "https://other.test"}
         )
 
-    with pytest.raises(WeatherFailure, match=r"^weather_request_failed$") as failure:
+    with pytest.raises(WeatherError, match=r"^weather_request_failed$") as failure:
         OpenMeteoProvider(httpx.MockTransport(respond), "private-key").fetch(39, 32, START, END)
     assert failure.value.code == "weather_request_failed"
     assert "private-key" not in str(failure.value)
@@ -220,7 +220,7 @@ def test_http_failures_do_not_follow_redirects_retry_or_expose_bodies(status: in
 )
 def test_invalid_response_decoding_is_sanitized(response: bytes) -> None:
     transport = httpx.MockTransport(lambda request: httpx.Response(200, content=response))
-    with pytest.raises(WeatherFailure, match="weather_request_failed"):
+    with pytest.raises(WeatherError, match="weather_request_failed"):
         OpenMeteoProvider(transport).fetch(39, 32, START, END)
 
 
@@ -228,7 +228,7 @@ def test_transport_failures_are_sanitized() -> None:
     def fail(request: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("private-key", request=request)
 
-    with pytest.raises(WeatherFailure, match=r"^weather_request_failed$"):
+    with pytest.raises(WeatherError, match=r"^weather_request_failed$"):
         OpenMeteoProvider(httpx.MockTransport(fail)).fetch(39, 32, START, END)
 
 
@@ -237,7 +237,7 @@ def test_percent_encoded_echoed_keys_are_never_saved(echo: str) -> None:
     raw = weather_payload()
     raw["metadata"] = f"https://example.test/?apikey={echo}"
     transport = httpx.MockTransport(lambda request: httpx.Response(200, json=raw))
-    with pytest.raises(WeatherFailure, match="unsafe_weather_response"):
+    with pytest.raises(WeatherError, match="unsafe_weather_response"):
         OpenMeteoProvider(transport, "a/b+c").fetch(39, 32, START, END)
 
 
@@ -248,7 +248,7 @@ def test_echoed_secrets_are_rejected_recursively(metadata: object) -> None:
     raw = weather_payload()
     raw["metadata"] = metadata
     transport = httpx.MockTransport(lambda request: httpx.Response(200, json=raw))
-    with pytest.raises(WeatherFailure, match=r"^unsafe_weather_response$"):
+    with pytest.raises(WeatherError, match=r"^unsafe_weather_response$"):
         OpenMeteoProvider(transport, "private-key").fetch(39, 32, START, END)
 
 
@@ -256,13 +256,13 @@ def test_echoed_secrets_are_rejected_recursively(metadata: object) -> None:
 def test_authentication_fields_are_never_saved(key: str) -> None:
     raw = weather_payload()
     raw["metadata"] = {key: "another-secret"}
-    with pytest.raises(WeatherFailure, match="unsafe_weather_response"):
+    with pytest.raises(WeatherError, match="unsafe_weather_response"):
         normalize(raw)
 
 
 @pytest.mark.parametrize("payload", [None, [], {}, {"latitude": 1, "longitude": 2}])
 def test_invalid_response_schemas_are_rejected(payload: object) -> None:
-    with pytest.raises(WeatherFailure):
+    with pytest.raises(WeatherError):
         normalize(payload)
 
 
@@ -270,7 +270,7 @@ def test_invalid_response_schemas_are_rejected(payload: object) -> None:
 def test_non_json_or_nonfinite_metadata_is_rejected(metadata: object) -> None:
     raw = weather_payload()
     raw["metadata"] = metadata
-    with pytest.raises(WeatherFailure, match="schema"):
+    with pytest.raises(WeatherError, match="schema"):
         normalize(raw)
 
 
@@ -278,7 +278,7 @@ def test_non_json_or_nonfinite_metadata_is_rejected(metadata: object) -> None:
 def test_non_utc_timezone_is_rejected(offset: object) -> None:
     raw = weather_payload()
     raw["utc_offset_seconds"] = offset
-    with pytest.raises(WeatherFailure, match="timezone"):
+    with pytest.raises(WeatherError, match="timezone"):
         normalize(raw)
 
 
@@ -286,7 +286,7 @@ def test_non_utc_timezone_is_rejected(offset: object) -> None:
 def test_unit_schema_is_required(units: object) -> None:
     raw = weather_payload()
     raw["hourly_units"] = units
-    with pytest.raises(WeatherFailure, match="units"):
+    with pytest.raises(WeatherError, match="units"):
         normalize(raw)
 
 
@@ -296,7 +296,7 @@ def test_unit_schema_is_required(units: object) -> None:
 def test_each_unit_must_match_exactly(name: str) -> None:
     raw = weather_payload()
     cast(dict[str, object], raw["hourly_units"])[name] = "wrong"
-    with pytest.raises(WeatherFailure, match="units"):
+    with pytest.raises(WeatherError, match="units"):
         normalize(raw)
 
 
@@ -304,7 +304,7 @@ def test_each_unit_must_match_exactly(name: str) -> None:
 def test_hourly_schema_is_required(hourly: object) -> None:
     raw = weather_payload()
     raw["hourly"] = hourly
-    with pytest.raises(WeatherFailure, match="schema"):
+    with pytest.raises(WeatherError, match="schema"):
         normalize(raw)
 
 
@@ -312,7 +312,7 @@ def test_hourly_schema_is_required(hourly: object) -> None:
 def test_inconsistent_or_missing_hourly_arrays_are_rejected(value: object) -> None:
     raw = weather_payload()
     cast(dict[str, object], raw["hourly"])["temperature_2m"] = value
-    with pytest.raises(WeatherFailure, match="schema"):
+    with pytest.raises(WeatherError, match="schema"):
         normalize(raw)
 
 
@@ -320,7 +320,7 @@ def test_inconsistent_or_missing_hourly_arrays_are_rejected(value: object) -> No
 def test_invalid_numbers_are_rejected(value: object) -> None:
     raw = weather_payload()
     cast(dict[str, list[object]], raw["hourly"])["temperature_2m"][0] = value
-    with pytest.raises(WeatherFailure):
+    with pytest.raises(WeatherError):
         normalize(raw)
 
 
@@ -328,7 +328,7 @@ def test_invalid_numbers_are_rejected(value: object) -> None:
 def test_negative_nonnegative_weather_variables_are_rejected(name: str) -> None:
     raw = weather_payload()
     cast(dict[str, list[object]], raw["hourly"])[name][0] = -0.1
-    with pytest.raises(WeatherFailure, match="number"):
+    with pytest.raises(WeatherError, match="number"):
         normalize(raw)
 
 
@@ -338,16 +338,16 @@ def test_negative_nonnegative_weather_variables_are_rejected(name: str) -> None:
 def test_invalid_duplicate_gapped_or_out_of_range_timestamps_are_rejected(time: object) -> None:
     raw = weather_payload()
     cast(dict[str, list[object]], raw["hourly"])["time"][1] = time
-    with pytest.raises(WeatherFailure):
+    with pytest.raises(WeatherError):
         normalize(raw)
 
 
 def test_empty_rows_and_nonoverlapping_forecasts_are_not_zero_weather() -> None:
     raw = weather_payload()
     raw["hourly"] = {name: [] for name in cast(dict[str, object], raw["hourly"])}
-    with pytest.raises(WeatherFailure, match="empty_weather_response"):
+    with pytest.raises(WeatherError, match="empty_weather_response"):
         normalize(raw)
-    with pytest.raises(WeatherFailure, match="empty_weather_response"):
+    with pytest.raises(WeatherError, match="empty_weather_response"):
         normalize(weather_payload(), END + timedelta(days=1), END + timedelta(days=2))
 
 
@@ -358,7 +358,7 @@ def test_invalid_coordinates_fail_before_http(latitude: float, longitude: float)
     def fail(request: httpx.Request) -> httpx.Response:
         pytest.fail("Invalid coordinates must not request weather")
 
-    with pytest.raises(WeatherFailure):
+    with pytest.raises(WeatherError):
         OpenMeteoProvider(httpx.MockTransport(fail)).fetch(latitude, longitude, START, END)
 
 
@@ -377,12 +377,12 @@ def test_invalid_windows_fail_before_http(start: datetime, end: datetime) -> Non
     def fail(request: httpx.Request) -> httpx.Response:
         pytest.fail("Invalid windows must not request weather")
 
-    with pytest.raises(WeatherFailure, match="window"):
+    with pytest.raises(WeatherError, match="window"):
         OpenMeteoProvider(httpx.MockTransport(fail)).fetch(39, 32, start, end)
 
 
 def test_collected_time_requires_an_offset() -> None:
-    with pytest.raises(WeatherFailure, match="collection_time"):
+    with pytest.raises(WeatherError, match="collection_time"):
         normalize_weather(
             weather_payload(),
             latitude=39,
@@ -417,7 +417,7 @@ def test_saved_weather_roundtrip_revalidates_raw_without_invented_issue_time() -
     assert restore_weather(json.loads(json.dumps(saved))) == result
     raw = cast(dict[str, object], saved["raw_payload"])
     raw["hourly_units"] = {}
-    with pytest.raises(WeatherFailure, match="units"):
+    with pytest.raises(WeatherError, match="units"):
         restore_weather(saved)
 
 
@@ -427,7 +427,7 @@ def test_saved_weather_rejects_excessive_json_nesting() -> None:
     for _ in range(2000):
         nested = [nested]
     saved["metadata"] = nested
-    with pytest.raises(WeatherFailure, match="invalid_weather_schema"):
+    with pytest.raises(WeatherError, match="invalid_weather_schema"):
         restore_weather(saved)
 
 
@@ -445,5 +445,5 @@ def test_saved_weather_rejects_excessive_json_nesting() -> None:
 def test_saved_weather_rejects_invalid_provenance_and_timestamps(key: str, value: object) -> None:
     saved = serialize_weather(normalize(weather_payload()))
     saved[key] = value
-    with pytest.raises(WeatherFailure, match="schema"):
+    with pytest.raises(WeatherError, match="schema"):
         restore_weather(saved)

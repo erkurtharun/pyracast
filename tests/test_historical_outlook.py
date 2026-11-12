@@ -206,7 +206,7 @@ def test_projection_rechecks_current_configuration_after_calculation(
     system, plant = make_plant(monkeypatch)
     PlantConfiguration.objects.filter(plant=plant).update(created_at=NOW)
     publish_snapshot(snapshot_for(system, DAY))
-    original = forecasting._payload
+    original = forecasting.forecast_payload
 
     def changed(*args: Any, **kwargs: Any) -> dict[str, object]:
         result = original(*args, **kwargs)
@@ -225,7 +225,7 @@ def test_projection_rechecks_current_configuration_after_calculation(
             ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=False)
         return result
 
-    monkeypatch.setattr(forecasting, "_payload", changed)
+    monkeypatch.setattr(forecasting, "forecast_payload", changed)
     result = plant_outlook(
         system.member,
         system.tenant.pk,

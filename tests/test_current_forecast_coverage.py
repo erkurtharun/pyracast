@@ -201,7 +201,7 @@ def test_outage_scenario_and_invalidated_calibration_keep_composite_morning(
         available_export_mw=None,
     )
     if calibrated:
-        original_payload = forecasting._payload
+        original_payload = forecasting.forecast_payload
 
         def record_training_outage(*args: Any, **kwargs: Any) -> dict[str, object]:
             payload = original_payload(*args, **kwargs)
@@ -219,7 +219,7 @@ def test_outage_scenario_and_invalidated_calibration_keep_composite_morning(
             )
             return payload
 
-        monkeypatch.setattr(current_forecast, "_payload", record_training_outage)
+        monkeypatch.setattr(current_forecast, "forecast_payload", record_training_outage)
     outlook = plant_outlook(*scope, target_date=DAY, resolution_minutes=60)
     normal = cast(dict[str, Any], outlook["result"])
     affected = cast(dict[str, Any], outlook["outage_scenario"])["result"]

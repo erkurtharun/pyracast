@@ -141,6 +141,18 @@ LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {"standard": {"format": "%(asctime)s %(levelname)s %(name)s %(message)s"}},
-    "handlers": {"console": {"class": "logging.StreamHandler", "formatter": "standard"}},
-    "loggers": {"pyracast": {"handlers": ["console"], "level": "INFO", "propagate": False}},
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "standard",
+            "stream": "ext://sys.stdout",
+        }
+    },
+    "loggers": {
+        "pyracast": {
+            "handlers": ["console"],
+            "level": os.environ.get("PYRACAST_LOG_LEVEL", "INFO"),
+            "propagate": False,
+        }
+    },
 }

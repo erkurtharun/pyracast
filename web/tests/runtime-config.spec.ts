@@ -1,0 +1,21 @@
+import { expect, test } from "@playwright/test";
+import {
+    PHASE_DEVELOPMENT_SERVER,
+    PHASE_PRODUCTION_BUILD,
+    PHASE_PRODUCTION_SERVER,
+} from "next/constants";
+import config from "../next.config";
+
+test("only the development server proxies API requests", async () => {
+    const development = config(PHASE_DEVELOPMENT_SERVER);
+
+    expect(await development.rewrites?.()).toEqual([
+        {
+            source: "/api/:path*/",
+            destination: `${process.env.DJANGO_API_ORIGIN ?? "http://127.0.0.1:8000"}/api/:path*/`,
+        },
+    ]);
+    for (const phase of [PHASE_PRODUCTION_BUILD, PHASE_PRODUCTION_SERVER]) {
+        expect(await config(phase).rewrites?.()).toEqual([]);
+    }
+});

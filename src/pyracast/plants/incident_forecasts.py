@@ -6,7 +6,7 @@ from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.incidents.operations import select_incidents
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_sources import apply_composition, replay_composition
-from pyracast.plants.forecasting import _payload, power_intervals, power_limit
+from pyracast.plants.forecasting import forecast_payload, power_intervals, power_limit
 from pyracast.plants.incident_policy import incidents_unchanged
 from pyracast.plants.models import CalibrationRun, PlantConfiguration
 from pyracast.plants.numerics import forecast
@@ -35,7 +35,7 @@ def incident_scenario(
         if not incidents_unchanged(calibration, known_at):
             normal = cast(
                 dict[str, Any],
-                _payload(
+                forecast_payload(
                     configuration,
                     snapshot,
                     None,

@@ -6,7 +6,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.test import override_settings
 
-from pyracast.connections.contracts import ProviderFailure
+from pyracast.connections.contracts import ProviderError
 from pyracast.connections.operations import create_account, rotate_secret
 from pyracast.connections.secrets import (
     encrypt_secret,
@@ -56,7 +56,7 @@ def test_rotation_retains_old_keys_only_while_fallback_is_configured() -> None:
         replacement = encrypt_secret(resolve_solcast_secret(original))
     with override_settings(SECRET_KEY=new, SECRET_KEY_FALLBACKS=[]):
         assert resolve_solcast_secret(replacement) == KEY
-        with pytest.raises(ProviderFailure, match="invalid_provider_secret"):
+        with pytest.raises(ProviderError, match="invalid_provider_secret"):
             resolve_solcast_secret(original)
 
 

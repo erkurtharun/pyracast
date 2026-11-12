@@ -31,7 +31,7 @@ FORECAST_FIELDS = ("period_end", "period", "pv_estimate", "pv_estimate10", "pv_e
 
 
 def sanitize(payload: object, kind: str, site_id: str) -> dict[str, object]:
-    from pyracast.connections.contracts import ProviderFailure
+    from pyracast.connections.contracts import ProviderError
     from pyracast.providers import normalize_payload
 
     if kind == "forecast":
@@ -41,14 +41,14 @@ def sanitize(payload: object, kind: str, site_id: str) -> dict[str, object]:
             "forecasts": [{key: row[key] for key in FORECAST_FIELDS if key in row} for row in rows]
         }
     if not isinstance(payload, dict) or not isinstance(payload.get("sites"), list):
-        raise ProviderFailure("invalid_site_schema")
+        raise ProviderError("invalid_site_schema")
     sites = [
         row
         for row in payload["sites"]
         if isinstance(row, dict) and row.get("resource_id") == site_id
     ]
     if len(sites) != 1:
-        raise ProviderFailure("reference_site_not_found")
+        raise ProviderError("reference_site_not_found")
     return {key: sites[0][key] for key in SITE_FIELDS if key in sites[0]}
 
 
@@ -62,7 +62,7 @@ def capture(
     from django.db import transaction
     from django.utils import timezone
 
-    from pyracast.connections.contracts import ProviderFailure
+    from pyracast.connections.contracts import ProviderError
     from pyracast.connections.models import ProviderAccount
     from pyracast.connections.operations import reserve_account_request
     from pyracast.forecasts.models import RequestAttempt
@@ -101,14 +101,14 @@ def capture(
                 params={"format": "json"},
             )
             if response.status_code != 200:
-                raise ProviderFailure(f"provider_http_{response.status_code}")
+                raise ProviderError(f"provider_http_{response.status_code}")
             payload = response.json()
         if _contains_secret(payload, secret) or _contains_secret(dict(response.headers), secret):
-            raise ProviderFailure("unsafe_provider_response")
+            raise ProviderError("unsafe_provider_response")
         safe = sanitize(payload, kind, site_id)
-    except httpx.HTTPError, ValueError, ProviderFailure:
+    except httpx.HTTPError, ValueError, ProviderError:
         RequestAttempt.objects.filter(pk=attempt.pk).update(outcome="failed")
-        raise ProviderFailure(
+        raise ProviderError(
             "Live check failed; no retry was made. Inspect the account in Toolkit."
         ) from None
     collected_at = timezone.now()

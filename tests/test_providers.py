@@ -6,7 +6,7 @@ from typing import Literal, cast
 import httpx
 import pytest
 
-from pyracast.connections.contracts import ProviderFailure
+from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.providers import FixtureProvider, SolcastProvider, adapter_for, normalize_payload
 
@@ -67,7 +67,7 @@ def test_actuals_are_distinct_from_archived_forecasts() -> None:
     assert result.source_kind == "estimated_actuals"
     assert result.collected_at is not None
     assert result.collected_at.utcoffset() is not None
-    with pytest.raises(ProviderFailure, match="endpoint"):
+    with pytest.raises(ProviderError, match="endpoint"):
         normalize_payload(raw, cast(Literal["forecasts", "estimated_actuals"], "wrong"))
 
 
@@ -89,7 +89,7 @@ def test_captured_seven_day_actuals_preserves_source_and_interval_bounds() -> No
 
 @pytest.mark.parametrize("payload", [None, [], {}, {"forecasts": {}}, {"forecasts": None}])
 def test_invalid_top_level_schemas_are_rejected(payload: object) -> None:
-    with pytest.raises(ProviderFailure, match="schema"):
+    with pytest.raises(ProviderError, match="schema"):
         normalize_payload(payload)
 
 
@@ -111,13 +111,13 @@ def test_invalid_top_level_schemas_are_rejected(payload: object) -> None:
     ],
 )
 def test_invalid_rows_are_rejected(row: object) -> None:
-    with pytest.raises(ProviderFailure, match="interval"):
+    with pytest.raises(ProviderError, match="interval"):
         normalize_payload({"forecasts": [row]})
 
 
 @pytest.mark.parametrize("metadata", [object(), float("nan")])
 def test_non_json_metadata_is_rejected(metadata: object) -> None:
-    with pytest.raises(ProviderFailure, match="schema"):
+    with pytest.raises(ProviderError, match="schema"):
         normalize_payload({"forecasts": [], "metadata": metadata})
 
 
@@ -130,14 +130,14 @@ def test_fixture_is_explicitly_synthetic_and_supports_dst_days() -> None:
     assert result.raw_payload["synthetic"] is True
     assert {row["sunlight"] for row in result.intervals} == {"day", "night"}
     assert {row["power_kw"] for row in result.intervals} == {0, 1.2}
-    with pytest.raises(ProviderFailure, match="fixture_account_required"):
+    with pytest.raises(ProviderError, match="fixture_account_required"):
         provider.validate(binding_for())
 
 
 def test_adapter_selection() -> None:
     assert isinstance(adapter_for(binding_for("fixture")), FixtureProvider)
     assert isinstance(adapter_for(binding_for()), SolcastProvider)
-    with pytest.raises(ProviderFailure, match="unsupported_provider"):
+    with pytest.raises(ProviderError, match="unsupported_provider"):
         adapter_for(binding_for("unknown"))
 
 
@@ -192,7 +192,7 @@ def test_credentials_and_site_ids_are_validated_before_transport(
     binding = binding_for()
     binding.provider_account.secret_reference = reference
     binding.site_id = site
-    with pytest.raises(ProviderFailure, match=code):
+    with pytest.raises(ProviderError, match=code):
         SolcastProvider().fetch(binding, TARGET)
 
 
@@ -208,7 +208,7 @@ def test_http_errors_never_expose_provider_body_or_follow_redirects(
             status, text="test-credential", headers={"Location": "https://evil.test"}
         )
 
-    with pytest.raises(ProviderFailure, match=r"^provider_request_failed$") as caught:
+    with pytest.raises(ProviderError, match=r"^provider_request_failed$") as caught:
         SolcastProvider(httpx.MockTransport(handle)).fetch(binding_for(), TARGET)
     assert "test-credential" not in str(caught.value)
     assert caught.value.__suppress_context__
@@ -220,7 +220,7 @@ def test_timeouts_are_redacted(monkeypatch: pytest.MonkeyPatch) -> None:
     def handle(request: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("test-credential", request=request)
 
-    with pytest.raises(ProviderFailure, match=r"^provider_request_failed$"):
+    with pytest.raises(ProviderError, match=r"^provider_request_failed$"):
         SolcastProvider(httpx.MockTransport(handle)).fetch(binding_for(), TARGET)
 
 
@@ -241,5 +241,5 @@ def test_malformed_or_secret_echoing_success_bodies_are_rejected(
     def handle(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, content=body)
 
-    with pytest.raises(ProviderFailure, match=r"provider_request_failed|unsafe_provider_response"):
+    with pytest.raises(ProviderError, match=r"provider_request_failed|unsafe_provider_response"):
         SolcastProvider(httpx.MockTransport(handle)).fetch(binding_for(), TARGET)

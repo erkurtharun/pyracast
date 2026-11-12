@@ -158,6 +158,45 @@ def terminate_tree(process: psutil.Process) -> None:
         pass
 
 
+def stop_file_path(root: Path, role: str) -> Path:
+    stop_file = (root / ".dev" / f"{role}.stop").resolve()
+    if not stop_file.is_relative_to(root.resolve()):
+        raise RuntimeError("Shutdown marker must remain inside the workspace.")
+    return stop_file
+
+
+def process_stop_file(root: Path, role: str, process: psutil.Process) -> Path | None:
+    if role not in ("worker", "dispatcher"):
+        return None
+    stop_file = stop_file_path(root, role)
+    args = process.cmdline()
+    return (
+        stop_file
+        if any(
+            args[index : index + 2] == ["--stop-file", str(stop_file)] for index in range(len(args))
+        )
+        else None
+    )
+
+
+def stop_cooperatively(
+    root: Path, role: str, process: psutil.Process, timeout: float = 300
+) -> bool:
+    try:
+        stop_file = process_stop_file(root, role, process)
+        if stop_file is None:
+            return False
+        stop_file.touch()
+        process.wait(timeout=timeout)
+    except psutil.NoSuchProcess:
+        pass
+    except psutil.TimeoutExpired:
+        raise RuntimeError(
+            f"{role} is still shutting down and was left running. Retry stop later."
+        ) from None
+    return True
+
+
 def run_setup(root: Path, args: list[str]) -> None:
     try:
         with (root / ".dev/setup.log").open("ab") as output:
@@ -236,6 +275,12 @@ def wait_ready(process: psutil.Process, role: str, timeout: float = 90) -> None:
 
 def start(root: Path, state: dict[str, Any]) -> None:
     existing = {role: discover(root, role) for role in ROLES}
+    for role in ("worker", "dispatcher"):
+        process = existing[role]
+        if process is not None:
+            stop_file = process_stop_file(root, role, process)
+            if stop_file is not None and stop_file.exists():
+                raise RuntimeError(f"{role} is still shutting down. Retry start after it exits.")
     for role, port in PORTS.items():
         process = existing[role]
         if listener_pid(port) is not None and (process is None or not owns_port(process, port)):
@@ -262,6 +307,10 @@ def start(root: Path, state: dict[str, Any]) -> None:
                     raise RuntimeError(
                         f"Port {PORTS[role]} belongs to another process; {role} was not started."
                     )
+                if role in ("worker", "dispatcher"):
+                    stop_file = stop_file_path(root, role)
+                    stop_file.unlink(missing_ok=True)
+                    args = [*args, "--stop-file", str(stop_file)]
                 with (root / f".dev/{role}.log").open("ab") as output:
                     child = subprocess.Popen(  # noqa: S603 -- fixed local service commands.
                         args,
@@ -283,13 +332,24 @@ def start(root: Path, state: dict[str, Any]) -> None:
             state["processes"][role] = identity(actual)
             save_state(root, state)
             print(f"{role}: ready", flush=True)
-    except BaseException:
+    except BaseException as startup_error:
         for role, process, child in reversed(launched):
-            terminate_tree(process)
-            child.wait(timeout=15)
+            try:
+                if not stop_cooperatively(root, role, process):
+                    terminate_tree(process)
+                child.wait(timeout=15)
+            except (RuntimeError, OSError, psutil.Error, subprocess.TimeoutExpired) as error:
+                startup_error.add_note(
+                    f"{role} cleanup failed ({type(error).__name__}); its process identity was "
+                    "retained. Retry stop to finish cleanup."
+                )
+                continue
             CHILDREN.remove(child)
             state["processes"].pop(role, None)
-        save_state(root, state)
+        try:
+            save_state(root, state)
+        except OSError:
+            startup_error.add_note("Cleanup state could not be saved; inspect running processes.")
         raise
     print("Open http://127.0.0.1:3000. Services stay running; use stop.cmd to stop them.")
 
@@ -300,12 +360,16 @@ def wait_for_jobs(timeout: float = 300) -> None:
     django.setup()
     from pyracast.forecasts.models import CollectionJob
     from pyracast.metering.models import EpiasCollectionJob
+    from pyracast.notifications.models import NotificationDelivery
     from pyracast.plants.models import CalibrationRun
 
     deadline = time.monotonic() + timeout
-    while any(
-        model.objects.filter(status="running").exists()
-        for model in (CollectionJob, EpiasCollectionJob, CalibrationRun)
+    while (
+        any(
+            model.objects.filter(status="running").exists()
+            for model in (CollectionJob, EpiasCollectionJob, CalibrationRun)
+        )
+        or NotificationDelivery.objects.filter(status="sending").exists()
     ):
         if time.monotonic() >= deadline:
             raise RuntimeError("Jobs are still running; worker was left running. Retry stop later.")
@@ -317,12 +381,11 @@ def stop(root: Path, state: dict[str, Any], frontend_only: bool = False) -> None
         record = state["processes"].get(role, {})
         process = recorded_process(root, role, record)
         if process is not None:
-            if role == "worker":
-                print(
-                    "Waiting for active worker jobs to finish (up to five minutes)...", flush=True
-                )
-                wait_for_jobs()
-            terminate_tree(process)
+            print(f"Stopping {role} (up to five minutes for background work)...", flush=True)
+            if not stop_cooperatively(root, role, process):
+                if role == "worker":
+                    wait_for_jobs()
+                terminate_tree(process)
         state["processes"].pop(role, None)
         save_state(root, state)
         print(f"{role}: stopped" if process else f"{role}: not managed/running")
@@ -357,6 +420,8 @@ def main() -> int:
         return 0
     except RuntimeError as error:
         print(str(error), file=sys.stderr)
+        for note in getattr(error, "__notes__", ()):
+            print(note, file=sys.stderr)
         return 1
     except OSError, ValueError, psutil.Error:
         print(

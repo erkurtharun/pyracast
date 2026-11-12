@@ -13,9 +13,9 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.plants.automatic_forecast import automatic_forecast
 from pyracast.plants.current_forecast import current_forecast
 from pyracast.plants.forecasting import (
-    _payload,
     archived_forecast,
     declared_forecast,
+    forecast_payload,
     plant_forecast,
 )
 from pyracast.plants.models import Plant, PlantConfiguration
@@ -41,12 +41,14 @@ def plant_outlook(
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
-        Plant.objects.select_for_update().get(pk=plant_id, region=region, deleted_at__isnull=True)
+        plant = Plant.objects.select_for_update().get(
+            pk=plant_id, region=region, deleted_at__isnull=True
+        )
+        plant.region = region
         result = _plant_outlook(
             actor,
             tenant_id,
-            region_id,
-            plant_id,
+            plant,
             target_date=target_date,
             resolution_minutes=resolution_minutes,
             as_of=as_of,
@@ -66,8 +68,7 @@ def plant_outlook(
 def _plant_outlook(
     actor: User,
     tenant_id: int,
-    region_id: int,
-    plant_id: int,
+    plant: Plant,
     *,
     target_date: date,
     resolution_minutes: int,
@@ -75,8 +76,7 @@ def _plant_outlook(
     source: str = "forecast",
 ) -> dict[str, object]:
     require_member(actor, tenant_id)
-    region = Region.objects.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
-    plant = Plant.objects.get(pk=plant_id, region=region, deleted_at__isnull=True)
+    region = plant.region
     now = timezone.now()
     today = now.astimezone(ZoneInfo(region.timezone)).date()
     if source not in {"auto", "forecast", "estimated_actuals", "archived_forecast"}:
@@ -90,7 +90,7 @@ def _plant_outlook(
         return _forecast_outlook(
             actor,
             tenant_id,
-            region_id,
+            region.pk,
             plant,
             target_date=target_date,
             resolution_minutes=resolution_minutes,
@@ -131,7 +131,7 @@ def _plant_outlook(
         return _forecast_outlook(
             actor,
             tenant_id,
-            region_id,
+            region.pk,
             plant,
             target_date=target_date,
             resolution_minutes=resolution_minutes,
@@ -142,7 +142,9 @@ def _plant_outlook(
     irradiance = None
     if snapshot is not None and configuration is not None:
         try:
-            result = _payload(configuration, snapshot, None, target_date, resolution_minutes)
+            result = forecast_payload(
+                configuration, snapshot, None, target_date, resolution_minutes
+            )
             irradiance = historical_irradiance(snapshot, target_date)
         except (ValueError, ArithmeticError) as exc:
             raise ValidationError("calculation_out_of_range") from exc

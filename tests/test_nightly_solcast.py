@@ -7,7 +7,7 @@ import pytest
 from django.db import close_old_connections, connection
 
 from pyracast.connections import operations
-from pyracast.connections.contracts import ProviderData, ProviderFailure
+from pyracast.connections.contracts import ProviderData, ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts import jobs
 from pyracast.forecasts.history import select_actual_snapshot
@@ -99,7 +99,7 @@ def test_history_transport_retries_half_hour_without_forecast_three_attempt_cap(
     job = history_job()
 
     def unavailable() -> None:
-        raise ProviderFailure("unavailable")
+        raise ProviderError("unavailable")
 
     moment = NIGHT
     for _ in range(4):

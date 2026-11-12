@@ -16,13 +16,13 @@ from pyracast.connections.contracts import (
     HistoryAdapter,
     ProviderAdapter,
     ProviderData,
-    ProviderFailure,
+    ProviderError,
 )
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import (
-    ForecastBudgetReserved,
-    HistoryWindowClosed,
-    QuotaExhausted,
+    ForecastBudgetReservedError,
+    HistoryWindowClosedError,
+    QuotaExceededError,
     reserve_request,
 )
 from pyracast.forecasts.coverage import history_day_complete
@@ -36,7 +36,7 @@ from pyracast.forecasts.models import (
 from pyracast.forecasts.sources import snapshot_data
 from pyracast.irradiance import local_day_bounds
 from pyracast.regions.models import Region
-from pyracast.weather import OpenMeteoProvider, WeatherFailure, serialize_weather
+from pyracast.weather import OpenMeteoProvider, WeatherError, serialize_weather
 
 logger = logging.getLogger(__name__)
 
@@ -267,7 +267,7 @@ def publish(
 
 def fetch_history(lease: Lease, adapter: ProviderAdapter) -> ProviderData:
     if not isinstance(adapter, HistoryAdapter):
-        raise ProviderFailure("history_not_supported")
+        raise ProviderError("history_not_supported")
     data = adapter.fetch_history(lease.binding, lease.target_date, 7)
     zone = ZoneInfo(lease.binding.timezone)
     start = datetime.combine(
@@ -301,7 +301,7 @@ def _attach_weather(lease: Lease, data: ProviderData, provider: OpenMeteoProvide
     )
     try:
         weather = provider.fetch(lease.binding.latitude, lease.binding.longitude, start, end)
-    except WeatherFailure as exc:
+    except WeatherError as exc:
         return replace(data, weather=None, weather_error=exc.code)
     return replace(data, weather=weather, weather_error="")
 
@@ -350,14 +350,14 @@ def collect(
                 else "forecast",
                 job=job,
             )
-        except QuotaExhausted as exc:
+        except QuotaExceededError as exc:
             retry(
                 lease,
                 now + timedelta(seconds=time.monotonic() - started),
                 "history_window_closed"
-                if isinstance(exc, HistoryWindowClosed)
+                if isinstance(exc, HistoryWindowClosedError)
                 else "history_budget_reserved"
-                if isinstance(exc, ForecastBudgetReserved)
+                if isinstance(exc, ForecastBudgetReservedError)
                 else "quota_exhausted",
                 quota=True,
             )
@@ -373,7 +373,7 @@ def collect(
                 if lease.endpoint == "estimated_actuals"
                 else adapter.fetch(lease.binding, lease.target_date)
             )
-        except ProviderFailure:
+        except ProviderError:
             RequestAttempt.objects.filter(pk=attempt.pk).update(outcome="failed")
             logger.warning("Provider request failed correlation_id=%s", attempt.correlation_id)
             retry(lease, now + timedelta(seconds=time.monotonic() - started), "provider_failure")

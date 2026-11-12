@@ -1,4 +1,6 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
+from typing import Literal
+from zoneinfo import ZoneInfo
 
 from django.db.models import Case, IntegerField, Q, Value, When
 
@@ -8,11 +10,17 @@ from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.capacity_normalization import normalization_provenance
 from pyracast.forecasts.coverage import history_day_complete
 from pyracast.forecasts.jobs import binding_is_current
-from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.forecasts.models import ForecastResult, ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.regions.models import Region
 
 HISTORY_SELECTION_POLICY = "native-then-authorized-scale-complete-actuals-v4"
+
+
+class OutlookRequestError(Exception):
+    def __init__(self, code: Literal["date_out_of_range", "completed_day_required"]) -> None:
+        self.code = code
+        super().__init__(code)
 
 
 def select_actual_snapshot(
@@ -97,4 +105,54 @@ def regional_history(region: Region, target_date: date, as_of: datetime) -> dict
         "binding_revision": snapshot.job.binding_id if snapshot else None,
         "scheduled_slot": snapshot.job.scheduled_slot if snapshot else None,
         "late": snapshot.collected_at > snapshot.job.scheduled_slot if snapshot else None,
+    }
+
+
+def regional_outlook(
+    region: Region,
+    target_date: date,
+    source: Literal["auto", "forecast", "estimated_actuals"],
+    now: datetime,
+) -> dict[str, object]:
+    today = now.astimezone(ZoneInfo(region.timezone)).date()
+    if not today - timedelta(days=366) <= target_date <= today + timedelta(days=14):
+        raise OutlookRequestError("date_out_of_range")
+    if source == "estimated_actuals" and target_date >= today:
+        raise OutlookRequestError("completed_day_required")
+    if source == "estimated_actuals" or (source == "auto" and target_date < today):
+        history = regional_history(region, target_date, now)
+        if history["result"] is not None or source == "estimated_actuals":
+            return history
+    saved = (
+        ForecastResult.objects.select_related("snapshot__job__binding__provider_account")
+        .filter(
+            snapshot__job__binding__region=region,
+            snapshot__job__target_date=target_date,
+            snapshot__source_kind="forecast",
+            snapshot__collected_at__lte=now,
+            published_at__lte=now,
+        )
+        .filter(Q(snapshot__issued_at__isnull=True) | Q(snapshot__issued_at__lte=now))
+        .order_by("-snapshot__collected_at", "-published_at", "-pk")
+        .first()
+    )
+    fresh = (
+        saved is not None
+        and binding_is_current(saved.snapshot.job.binding)
+        and saved.snapshot.collected_at >= now - timedelta(hours=24)
+    )
+    return {
+        "region_id": region.pk,
+        "date": target_date,
+        "timezone": saved.snapshot.job.binding.timezone if saved else region.timezone,
+        "status": region.status,
+        "source_kind": "forecast",
+        "unavailable_reason": "forecast_unavailable" if saved is None else None,
+        "freshness": "missing" if saved is None else "fresh" if fresh else "stale",
+        "result": saved.payload if saved else None,
+        "collected_at": saved.snapshot.collected_at if saved else None,
+        "issued_at": saved.snapshot.issued_at if saved else None,
+        "binding_revision": saved.snapshot.job.binding_id if saved else None,
+        "scheduled_slot": saved.snapshot.job.scheduled_slot if saved else None,
+        "late": saved.snapshot.collected_at > saved.snapshot.job.scheduled_slot if saved else None,
     }

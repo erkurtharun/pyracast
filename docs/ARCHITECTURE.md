@@ -19,6 +19,31 @@ At bootstrap, verify and lock the latest stable compatible dependencies and cont
 
 Celery has no supported native Windows runtime. Selecting Celery would require an explicit Linux-container/WSL worker contract; it must not be presented as native Windows support.
 
+Build versioned artifacts from the committed dependency locks and promote those
+artifacts between environments. Deployment-specific configuration and credentials
+come from environment variables; the ignored working-directory `.env` is a local
+convenience that never overrides an existing variable. Run migrations as a separate
+release command using the same application version and its dedicated database role.
+API, worker and dispatcher processes retain no authoritative workflow state locally:
+PostgreSQL owns jobs, leases, results and sessions, and RabbitMQ transports deliveries.
+Application logs are an event stream on standard output for the process manager to
+collect; `PYRACAST_LOG_LEVEL` controls verbosity and defaults to `INFO`. Local launcher
+logs and process identities are development tooling.
+
+Worker and dispatcher entry points handle `SIGINT` and `SIGTERM` without raising
+asynchronous exceptions into database operations. The dispatcher finishes its current cycle; the worker stops
+taking new work, lets active tasks finish and returns buffered work through Dramatiq.
+Its default ten-minute shutdown timeout remains in effect. Deployment must provide
+a termination grace period that accommodates active work and broker cleanup.
+Abrupt termination still relies on durable leases and idempotent publication;
+ambiguous email acceptance is never retried automatically. The local launcher passes
+an optional `--stop-file` to its worker and dispatcher; these process-local control
+files request the same graceful path on Windows and Ubuntu. Stop and failed-start
+cleanup wait for those processes to exit and preserve their identity on timeout.
+Legacy managed processes without this option use a best-effort database drain and
+bounded termination; queued work can start between the final check and termination.
+The production HTTPS gateway and process supervision remain deployment responsibilities.
+
 ## Boundaries and records
 
 Use conventional Django apps for accounts, regions, provider connections, forecasts and plants; keep calculations independent of Django. API views, admin actions and tasks call shared application operations. Avoid business logic in serializers or implicit model signals.
@@ -322,5 +347,6 @@ Use region IANA timezones, skip nonexistent DST times and use the first occurren
 
 ## Primary references
 
+- [The Twelve-Factor App](https://12factor.net/), [Django design philosophies](https://docs.djangoproject.com/en/6.1/misc/design-philosophies/), [PEP 8](https://peps.python.org/pep-0008/).
 - [Python 3.15.2](https://www.python.org/downloads/release/python-3152/), [Django 6.1.3](https://docs.djangoproject.com/en/6.1/releases/6.1.3/), [DRF releases](https://www.django-rest-framework.org/community/release-notes/).
 - [pvlib](https://pvlib-python.readthedocs.io/en/stable/), [Dramatiq releases](https://pypi.org/project/dramatiq/), [Dramatiq platform history](https://dramatiq.io/changelog.html), [Celery Windows limitation](https://docs.celeryq.dev/en/stable/faq.html#does-celery-support-windows).

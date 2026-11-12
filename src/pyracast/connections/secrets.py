@@ -10,7 +10,7 @@ from django.core.exceptions import ValidationError
 from django.utils.encoding import force_bytes
 from django.views.decorators.debug import sensitive_variables
 
-from pyracast.connections.contracts import ProviderFailure
+from pyracast.connections.contracts import ProviderError
 
 PREFIX = "encrypted:v1:"
 
@@ -48,7 +48,7 @@ def validate_secret_reference(reference: str) -> None:
         try:
             resolve_solcast_secret(reference)
             return
-        except ProviderFailure:
+        except ProviderError:
             pass
     raise ValidationError("A valid encrypted key or environment secret reference is required.")
 
@@ -59,10 +59,10 @@ def resolve_solcast_secret(reference: str) -> str:
         try:
             return _cipher().decrypt(reference[len(PREFIX) :]).decode("utf-8")
         except InvalidToken, UnicodeDecodeError:
-            raise ProviderFailure("invalid_provider_secret") from None
+            raise ProviderError("invalid_provider_secret") from None
     if not re.fullmatch(r"env:(?:SOLCAST_API_KEY|PYRACAST_SOLCAST_[A-Z0-9_]+)", reference):
-        raise ProviderFailure("invalid_secret_reference")
+        raise ProviderError("invalid_secret_reference")
     secret = os.environ.get(reference[4:])
     if not secret:
-        raise ProviderFailure("missing_provider_secret")
+        raise ProviderError("missing_provider_secret")
     return secret

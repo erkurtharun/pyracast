@@ -1,4 +1,5 @@
-from types import SimpleNamespace
+import signal
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -8,6 +9,7 @@ from dramatiq.brokers.stub import StubBroker
 
 from pyracast import runtime
 from pyracast.forecasts.models import CollectionJob, ForecastResult, RequestAttempt
+from pyracast.shutdown import ShutdownRequest
 from tests.test_domain import make_system
 
 
@@ -86,9 +88,7 @@ def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     broker.close.assert_called_once()
     with pytest.raises(CommandError, match="positive"):
         call_command("dispatch", poll_seconds=0)
-    monkeypatch.setattr(
-        command, "time", SimpleNamespace(sleep=MagicMock(side_effect=KeyboardInterrupt))
-    )
+    monkeypatch.setattr(ShutdownRequest, "wait", MagicMock(side_effect=KeyboardInterrupt))
     call_command("dispatch", loop=True, poll_seconds=1)
     assert send.call_count == 2
     assert purge.call_count == 2
@@ -112,9 +112,7 @@ def test_worker_command_stops_on_interrupt(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(command, "make_epias_actor", epias_registration)
     create_worker = MagicMock(return_value=worker)
     monkeypatch.setattr(command, "Worker", create_worker)
-    event = MagicMock()
-    event.wait.side_effect = KeyboardInterrupt
-    monkeypatch.setattr(command, "threading", SimpleNamespace(Event=lambda: event))
+    monkeypatch.setattr(ShutdownRequest, "wait", MagicMock(side_effect=KeyboardInterrupt))
     call_command("worker", threads=2)
     create_worker.assert_called_once_with(broker, worker_threads=2)
     calibration_registration.assert_called_once_with(broker)
@@ -125,3 +123,154 @@ def test_worker_command_stops_on_interrupt(monkeypatch: pytest.MonkeyPatch) -> N
     broker.close.assert_called_once()
     with pytest.raises(CommandError, match="positive"):
         call_command("worker", threads=0)
+
+
+@pytest.mark.parametrize("command_name", ["worker", "dispatch"])
+def test_commands_handle_termination_and_restore_previous_handlers(
+    command_name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pyracast.forecasts.management.commands import dispatch, worker
+
+    command = worker if command_name == "worker" else dispatch
+    broker = MagicMock()
+    previous = signal.getsignal(signal.SIGTERM)
+    monkeypatch.setattr(command, "make_broker", lambda: broker)
+    for factory in (
+        "make_actor",
+        "make_calibration_actor",
+        "make_notification_actor",
+        "make_epias_actor",
+    ):
+        monkeypatch.setattr(command, factory, MagicMock())
+
+    def terminate() -> None:
+        handler = signal.getsignal(signal.SIGTERM)
+        assert callable(handler)
+        handler(signal.SIGTERM, None)
+
+    if command_name == "worker":
+        instance = MagicMock()
+        instance.start.side_effect = terminate
+        instance.stop.side_effect = terminate
+        monkeypatch.setattr(command, "Worker", lambda *args, **kwargs: instance)
+        call_command(command_name)
+        instance.stop.assert_called_once()
+    else:
+        monkeypatch.setattr(command, "purge_expired", terminate)
+        for operation in (
+            "dispatch",
+            "dispatch_calibrations",
+            "dispatch_notifications",
+            "dispatch_epias",
+        ):
+            monkeypatch.setattr(command, operation, MagicMock())
+        call_command(command_name, loop=True, poll_seconds=60)
+
+    broker.close.assert_called_once()
+    assert signal.getsignal(signal.SIGTERM) == previous
+
+
+def test_worker_command_closes_broker_when_stopping_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    from pyracast.forecasts.management.commands import worker as command
+
+    broker, worker = MagicMock(), MagicMock()
+    worker.start.side_effect = KeyboardInterrupt
+    worker.stop.side_effect = RuntimeError("shutdown failed")
+    monkeypatch.setattr(command, "make_broker", lambda: broker)
+    monkeypatch.setattr(command, "Worker", lambda *args, **kwargs: worker)
+    for factory in (
+        "make_actor",
+        "make_calibration_actor",
+        "make_notification_actor",
+        "make_epias_actor",
+    ):
+        monkeypatch.setattr(command, factory, MagicMock())
+
+    with pytest.raises(RuntimeError, match="shutdown failed"):
+        call_command("worker")
+
+    broker.close.assert_called_once()
+
+
+@pytest.mark.parametrize("interval", [float("nan"), float("inf"), -float("inf")])
+def test_dispatch_rejects_nonfinite_poll_interval(interval: float) -> None:
+    with pytest.raises(CommandError, match="positive and finite"):
+        call_command("dispatch", poll_seconds=interval)
+
+
+def test_dispatch_does_not_start_cycle_after_shutdown_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pyracast.forecasts.management.commands import dispatch as command
+
+    broker, purge = MagicMock(), MagicMock()
+    monkeypatch.setattr(command, "make_broker", lambda: broker)
+    monkeypatch.setattr(command, "purge_expired", purge)
+    for factory in ("make_actor", "make_calibration_actor", "make_notification_actor"):
+        monkeypatch.setattr(command, factory, MagicMock())
+
+    def finish_registration(_: object) -> None:
+        handler = signal.getsignal(signal.SIGTERM)
+        assert callable(handler)
+        handler(signal.SIGTERM, None)
+
+    monkeypatch.setattr(command, "make_epias_actor", finish_registration)
+
+    call_command("dispatch", loop=True)
+
+    purge.assert_not_called()
+    broker.close.assert_called_once()
+
+
+@pytest.mark.parametrize("command_name", ["worker", "dispatch"])
+def test_existing_stop_file_prevents_command_startup(
+    command_name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pyracast.forecasts.management.commands import dispatch, worker
+
+    command = worker if command_name == "worker" else dispatch
+    stop_file = tmp_path / "stop"
+    stop_file.touch()
+    broker = MagicMock()
+    monkeypatch.setattr(command, "make_broker", broker)
+
+    call_command(command_name, stop_file=stop_file)
+
+    broker.assert_not_called()
+
+
+def test_dispatch_repeats_after_poll_timeout_until_stop_requested(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pyracast.forecasts.management.commands import dispatch as command
+
+    broker = MagicMock()
+    monkeypatch.setattr(command, "make_broker", lambda: broker)
+    for factory in (
+        "make_actor",
+        "make_calibration_actor",
+        "make_notification_actor",
+        "make_epias_actor",
+    ):
+        monkeypatch.setattr(command, factory, MagicMock())
+    for operation in (
+        "purge_expired",
+        "dispatch",
+        "dispatch_calibrations",
+        "dispatch_notifications",
+    ):
+        monkeypatch.setattr(command, operation, MagicMock())
+    stop_file = tmp_path / "stop"
+    cycles: list[str] = []
+
+    def finish_cycle(_: object) -> None:
+        cycles.append("completed")
+        if len(cycles) == 2:
+            stop_file.touch()
+
+    monkeypatch.setattr(command, "dispatch_epias", finish_cycle)
+
+    call_command("dispatch", loop=True, poll_seconds=0.001, stop_file=stop_file)
+
+    assert cycles == ["completed", "completed"]
+    broker.close.assert_called_once()

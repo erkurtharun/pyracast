@@ -9,7 +9,11 @@ from django.db import close_old_connections, connection
 
 from pyracast.connections import operations
 from pyracast.connections.models import ProviderAccount
-from pyracast.connections.operations import QuotaExhausted, reserve_account_request, reserve_request
+from pyracast.connections.operations import (
+    QuotaExceededError,
+    reserve_account_request,
+    reserve_request,
+)
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.regions.operations import configure_binding
 from tests.test_domain import NOW, make_system, secret_ref
@@ -31,7 +35,7 @@ def test_quota_uses_utc_day_after_account_lock_wait(
     monkeypatch.setattr(operations, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
 
     if next_day_full:
-        with pytest.raises(QuotaExhausted):
+        with pytest.raises(QuotaExceededError):
             reserve_request(system.binding, started, purpose="forecast")
     else:
         attempt = reserve_request(system.binding, started, purpose="forecast")
@@ -48,7 +52,7 @@ def test_prebinding_requests_share_the_account_ledger() -> None:
     assert attempt.job_id is None
     assert attempt.outcome == "uncertain"
     assert attempt.provider_account_id == system.account.pk
-    with pytest.raises(QuotaExhausted):
+    with pytest.raises(QuotaExceededError):
         reserve_request(system.binding, NOW, purpose="validation")
     assert RequestAttempt.objects.count() == 1
 
@@ -67,7 +71,7 @@ def test_prebinding_and_forecast_reservations_serialize_one_budget() -> None:
             else:
                 reserve_request(system.binding, NOW, purpose="forecast")
             return True
-        except QuotaExhausted:
+        except QuotaExceededError:
             return False
         finally:
             connection.close()
@@ -85,7 +89,7 @@ def test_prebinding_reservations_recheck_account_authorization(state: str) -> No
         ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=False)
     else:
         ProviderAccount.objects.filter(pk=system.account.pk).update(authorized_at=None)
-    with pytest.raises(QuotaExhausted):
+    with pytest.raises(QuotaExceededError):
         reserve_account_request(system.account, NOW, purpose="site_settings")
     assert not RequestAttempt.objects.exists()
 

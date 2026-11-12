@@ -8,7 +8,7 @@ from django.db.models import Value
 from django.utils import timezone
 
 from pyracast.accounts.operations import require_admin
-from pyracast.connections.contracts import ProviderAdapter, ProviderFailure
+from pyracast.connections.contracts import ProviderAdapter, ProviderError
 from pyracast.connections.identity import canonical_account_identity
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.secrets import validate_secret_reference
@@ -17,15 +17,15 @@ from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.regions.models import AuditEvent, Region
 
 
-class QuotaExhausted(Exception):
+class QuotaExceededError(Exception):
     pass
 
 
-class ForecastBudgetReserved(QuotaExhausted):
+class ForecastBudgetReservedError(QuotaExceededError):
     pass
 
 
-class HistoryWindowClosed(QuotaExhausted):
+class HistoryWindowClosedError(QuotaExceededError):
     pass
 
 
@@ -114,18 +114,18 @@ def reserve_account_request(
         account = ProviderAccount.objects.select_for_update().get(pk=account.pk)
         now += timedelta(seconds=time.monotonic() - started)
         if job is not None and job.retry_until is not None and now >= job.retry_until:
-            raise HistoryWindowClosed
+            raise HistoryWindowClosedError
         utc_day = now.astimezone(UTC).date()
         used = RequestAttempt.objects.filter(provider_account=account, utc_day=utc_day).count()
         if not account.enabled or account.authorized_at is None or used >= account.daily_quota:
-            raise QuotaExhausted
+            raise QuotaExceededError
         if (
             job is not None
             and job.retry_until is not None
             and purpose == "estimated_actuals"
             and used + 1 + remaining_forecast_requests(account, now) > account.daily_quota
         ):
-            raise ForecastBudgetReserved
+            raise ForecastBudgetReservedError
         return RequestAttempt.objects.create(
             provider_account=account,
             binding=binding,
@@ -158,7 +158,7 @@ def validate_binding(
     attempt = reserve_request(binding, now, purpose="validation")
     try:
         adapter.validate(binding)
-    except ProviderFailure:
+    except ProviderError:
         RequestAttempt.objects.filter(pk=attempt.pk).update(outcome="failed")
         SiteBinding.objects.filter(pk=binding.pk).update(health="error")
         raise

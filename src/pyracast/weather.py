@@ -42,7 +42,7 @@ class WeatherData:
     issued_at: datetime | None = None
 
 
-class WeatherFailure(Exception):
+class WeatherError(Exception):
     def __init__(self, code: str) -> None:
         self.code = code
         super().__init__(code)
@@ -50,20 +50,20 @@ class WeatherFailure(Exception):
 
 def _weather_number(value: object, *, nonnegative: bool = False) -> float:
     if isinstance(value, bool) or not isinstance(value, int | float):
-        raise WeatherFailure("invalid_weather_number")
+        raise WeatherError("invalid_weather_number")
     try:
         number = float(value)
     except OverflowError:
-        raise WeatherFailure("invalid_weather_number") from None
+        raise WeatherError("invalid_weather_number") from None
     if not math.isfinite(number) or (nonnegative and number < 0):
-        raise WeatherFailure("invalid_weather_number")
+        raise WeatherError("invalid_weather_number")
     return number
 
 
 def _weather_coordinate(value: object, limit: int) -> float:
     number = _weather_number(value)
     if abs(number) > limit:
-        raise WeatherFailure("invalid_weather_coordinates")
+        raise WeatherError("invalid_weather_coordinates")
     return number
 
 
@@ -87,35 +87,35 @@ def _unsafe_weather_payload(value: object, secret: str | None) -> bool:
 
 def _weather_columns(payload: object) -> tuple[dict[str, object], dict[str, list[object]]]:
     if not isinstance(payload, dict):
-        raise WeatherFailure("invalid_weather_schema")
+        raise WeatherError("invalid_weather_schema")
     try:
         json.dumps(payload, allow_nan=False)
     except TypeError, ValueError:
-        raise WeatherFailure("invalid_weather_schema") from None
+        raise WeatherError("invalid_weather_schema") from None
     _weather_coordinate(payload.get("latitude"), 90)
     _weather_coordinate(payload.get("longitude"), 180)
     offset = payload.get("utc_offset_seconds")
     if isinstance(offset, bool) or offset != 0:
-        raise WeatherFailure("invalid_weather_timezone")
+        raise WeatherError("invalid_weather_timezone")
     units = payload.get("hourly_units")
     if not isinstance(units, dict) or any(
         units.get(name) != unit for name, unit in _HOURLY_UNITS.items()
     ):
-        raise WeatherFailure("invalid_weather_units")
+        raise WeatherError("invalid_weather_units")
     hourly = payload.get("hourly")
     if not isinstance(hourly, dict):
-        raise WeatherFailure("invalid_weather_schema")
+        raise WeatherError("invalid_weather_schema")
     columns: dict[str, list[object]] = {}
     for name in _HOURLY_UNITS:
         values = hourly.get(name)
         if not isinstance(values, list):
-            raise WeatherFailure("invalid_weather_schema")
+            raise WeatherError("invalid_weather_schema")
         columns[name] = values
     count = len(columns["time"])
     if count == 0:
-        raise WeatherFailure("empty_weather_response")
+        raise WeatherError("empty_weather_response")
     if any(len(values) != count for values in columns.values()):
-        raise WeatherFailure("invalid_weather_schema")
+        raise WeatherError("invalid_weather_schema")
     return cast(dict[str, object], payload.copy()), columns
 
 
@@ -127,14 +127,14 @@ def _weather_intervals(columns: dict[str, list[object]]) -> tuple[WeatherInterva
     for index, timestamp in enumerate(columns["time"]):
         seconds = _weather_number(timestamp)
         if not seconds.is_integer() or seconds % 3600:
-            raise WeatherFailure("invalid_weather_interval")
+            raise WeatherError("invalid_weather_interval")
         try:
             end = datetime.fromtimestamp(seconds, UTC)
             start = end - timedelta(hours=1)
         except OverflowError, OSError, ValueError:
-            raise WeatherFailure("invalid_weather_interval") from None
+            raise WeatherError("invalid_weather_interval") from None
         if previous_end is not None and previous_end != start:
-            raise WeatherFailure("invalid_weather_interval")
+            raise WeatherError("invalid_weather_interval")
         values = {
             name: None
             if (value := column[index]) is None
@@ -163,14 +163,14 @@ def _weather_intervals(columns: dict[str, list[object]]) -> tuple[WeatherInterva
 
 def _weather_window(start: datetime, end: datetime) -> tuple[datetime, datetime]:
     if start.utcoffset() is None or end.utcoffset() is None:
-        raise WeatherFailure("invalid_weather_window")
+        raise WeatherError("invalid_weather_window")
     try:
         start, end = start.astimezone(UTC), end.astimezone(UTC)
         start - timedelta(hours=1)
     except OverflowError:
-        raise WeatherFailure("invalid_weather_window") from None
+        raise WeatherError("invalid_weather_window") from None
     if end <= start or end - start > timedelta(days=16):
-        raise WeatherFailure("invalid_weather_window")
+        raise WeatherError("invalid_weather_window")
     return start, end
 
 
@@ -187,7 +187,7 @@ def normalize_weather(
     longitude = _weather_coordinate(longitude, 180)
     start, end = _weather_window(start, end)
     if _unsafe_weather_payload(payload, None):
-        raise WeatherFailure("unsafe_weather_response")
+        raise WeatherError("unsafe_weather_response")
     raw, columns = _weather_columns(payload)
     intervals = tuple(
         interval
@@ -195,10 +195,10 @@ def normalize_weather(
         if interval.start < end and interval.end > start
     )
     if not intervals:
-        raise WeatherFailure("empty_weather_response")
+        raise WeatherError("empty_weather_response")
     collected = collected_at if collected_at is not None else datetime.now(UTC)
     if collected.utcoffset() is None:
-        raise WeatherFailure("invalid_weather_collection_time")
+        raise WeatherError("invalid_weather_collection_time")
     return WeatherData(
         raw_payload=raw,
         intervals=intervals,
@@ -226,11 +226,11 @@ def serialize_weather(data: WeatherData) -> dict[str, object]:
 
 def _saved_weather_datetime(value: object) -> datetime:
     if not isinstance(value, str):
-        raise WeatherFailure("invalid_weather_schema")
+        raise WeatherError("invalid_weather_schema")
     try:
         return datetime.fromisoformat(value)
     except ValueError:
-        raise WeatherFailure("invalid_weather_schema") from None
+        raise WeatherError("invalid_weather_schema") from None
 
 
 def restore_weather(payload: object) -> WeatherData:
@@ -242,7 +242,7 @@ def restore_weather(payload: object) -> WeatherData:
             or payload.get("issued_at") is not None
             or _unsafe_weather_payload(payload, None)
         ):
-            raise WeatherFailure("invalid_weather_schema")
+            raise WeatherError("invalid_weather_schema")
         return normalize_weather(
             payload.get("raw_payload"),
             latitude=_weather_coordinate(payload.get("requested_latitude"), 90),
@@ -252,7 +252,7 @@ def restore_weather(payload: object) -> WeatherData:
             collected_at=_saved_weather_datetime(payload.get("collected_at")),
         )
     except RecursionError:
-        raise WeatherFailure("invalid_weather_schema") from None
+        raise WeatherError("invalid_weather_schema") from None
 
 
 class _WeatherKeyTransport(httpx.BaseTransport):
@@ -320,9 +320,9 @@ class OpenMeteoProvider:
                 response.raise_for_status()
                 payload = response.json()
             if _unsafe_weather_payload(payload, self.api_key):
-                raise WeatherFailure("unsafe_weather_response")
+                raise WeatherError("unsafe_weather_response")
             return normalize_weather(
                 payload, latitude=latitude, longitude=longitude, start=start, end=end
             )
         except httpx.HTTPError, ValueError, RecursionError:
-            raise WeatherFailure("weather_request_failed") from None
+            raise WeatherError("weather_request_failed") from None

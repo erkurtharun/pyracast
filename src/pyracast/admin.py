@@ -18,9 +18,9 @@ from rest_framework.exceptions import ValidationError as APIValidationError
 
 from pyracast.accounts.models import Tenant
 from pyracast.admin_forms import BindingActionForm, ProviderSetupForm
-from pyracast.connections.contracts import ProviderFailure
+from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import SiteBinding
-from pyracast.connections.operations import QuotaExhausted, validate_binding
+from pyracast.connections.operations import QuotaExceededError, validate_binding
 from pyracast.forecasts.models import CollectionJob, ForecastResult, RequestAttempt
 from pyracast.notifications.models import NotificationSettings
 from pyracast.plants.models import (
@@ -183,11 +183,11 @@ class RegionAdmin(ReadOnlyAdmin):
                             message = "Plant approved. The first saved forecast is being prepared."
                     else:
                         raise ValidationError("Choose a setup action.")
-                except QuotaExhausted:
+                except QuotaExceededError:
                     form.add_error(
                         None, "The provider's request budget is unavailable. Try validation later."
                     )
-                except ProviderFailure:
+                except ProviderError:
                     form.add_error(
                         None,
                         "Connection validation failed. Check the private credentials "

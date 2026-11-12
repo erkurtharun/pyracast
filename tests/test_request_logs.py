@@ -2,7 +2,7 @@ import logging
 
 import pytest
 
-from pyracast.connections.contracts import ProviderFailure
+from pyracast.connections.contracts import ProviderError
 from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from tests.test_domain import NOW, FakeAdapter, make_system
@@ -20,7 +20,7 @@ def test_provider_outcome_logs_correlation_without_exception_details(
 
     def outcome() -> None:
         if failed:
-            raise ProviderFailure("private-provider-detail")
+            raise ProviderError("private-provider-detail")
 
     assert (
         collect(CollectionJob.objects.get().pk, FakeAdapter(outcome), calculate, NOW) is not failed

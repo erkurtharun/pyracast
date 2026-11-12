@@ -7,7 +7,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from pyracast.admin_forms import BindingActionForm, ProviderSetupForm
-from pyracast.connections.contracts import ProviderFailure
+from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import rotate_secret
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
@@ -290,7 +290,7 @@ def test_validation_failures_and_quota_exhaustion_are_safe(
 
     def fail() -> None:
         assert not connection.in_atomic_block
-        raise ProviderFailure("secret-must-not-be-rendered")
+        raise ProviderError("secret-must-not-be-rendered")
 
     monkeypatch.setattr("pyracast.admin.adapter_for", lambda binding: FakeAdapter(fail))
     response = client.post(setup_url(system), action_input(system, "validate"))

@@ -1,5 +1,7 @@
 import os
 import runpy
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -63,3 +65,27 @@ def test_settings_load_local_environment_before_reading_configuration(
     configuration = runpy.run_path(str(Path(__file__).parents[1] / "src/pyracast/settings.py"))
 
     assert configuration["SECRET_KEY"] == expected
+
+
+@pytest.mark.parametrize("level", ["INFO", "WARNING"])
+def test_application_logs_use_stdout_and_configured_level(tmp_path: Path, level: str) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import logging.config; "
+            "from pyracast.settings import LOGGING; "
+            "logging.config.dictConfig(LOGGING); "
+            "logger = logging.getLogger('pyracast.probe'); "
+            "logger.info('info-event'); logger.warning('warning-event')",
+        ],
+        cwd=tmp_path,
+        env={**os.environ, "PYRACAST_LOG_LEVEL": level},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert "warning-event" in result.stdout
+    assert ("info-event" in result.stdout) == (level == "INFO")
+    assert result.stderr == ""
