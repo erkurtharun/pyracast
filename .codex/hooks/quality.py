@@ -5,7 +5,6 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import cast
 
 type JsonValue = bool | int | float | str | list[JsonValue] | dict[str, JsonValue] | None
 type JsonObject = dict[str, JsonValue]
@@ -174,10 +173,9 @@ def main(argv: list[str] | None = None, *, root: Path | None = None) -> int:
         value: object = json.load(sys.stdin)
         if not isinstance(value, dict):
             raise ValueError("Hook input must be a JSON object.")
-        payload = cast(JsonObject, value)
         if event == "post-tool":
-            post_tool(payload, root)
-        elif denied_read(payload, root):
+            post_tool(value, root)
+        elif denied_read(value, root):
             print(
                 json.dumps(
                     {

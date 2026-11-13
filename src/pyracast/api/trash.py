@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import cast
+from typing import Any, cast
 
 from django.contrib.auth.models import User
 from django.db.models import QuerySet
@@ -83,7 +83,7 @@ class TrashedRegionsView(GenericAPIView[Region]):
         )
 
     @extend_schema(responses=TrashedRegionOutput(many=True))
-    def get(self, request: Request, tenant_id: int) -> Response:
+    def get(self, _request: Request, **_kwargs: Any) -> Response:
         page = self.paginate_queryset(self.get_queryset())
         return self.get_paginated_response(TrashedRegionOutput(page, many=True).data)
 
@@ -101,7 +101,7 @@ class TrashedPlantsView(GenericAPIView[Plant]):
         )
 
     @extend_schema(responses=TrashedPlantOutput(many=True))
-    def get(self, request: Request, tenant_id: int) -> Response:
+    def get(self, _request: Request, **_kwargs: Any) -> Response:
         page = self.paginate_queryset(self.get_queryset())
         return self.get_paginated_response(TrashedPlantOutput(page, many=True).data)
 

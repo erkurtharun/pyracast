@@ -177,7 +177,7 @@ def select_measurements(
         .distinct("target_day", "source_kind")
     )
     selected = sorted(
-        snapshots.select_related("job"), key=lambda snapshot: kinds.index(snapshot.source_kind)
+        snapshots.select_related("job"), key=lambda item: kinds.index(item.source_kind)
     )
     provider_rows: dict[datetime, Measurement] = {}
     for snapshot in selected:

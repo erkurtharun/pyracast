@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from math import isfinite
+from typing import TypedDict
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
@@ -36,6 +37,13 @@ class ObservationInput:
     energy: float
     quality: str = "valid"
     source: str = "operator"
+
+
+class ObservationImportResult(TypedDict):
+    created: int
+    existing: int
+    count: int
+    ids: list[int]
 
 
 def configuration_is_current(configuration: PlantConfiguration) -> bool:
@@ -372,7 +380,7 @@ def import_observations(
     configuration_id: int,
     unit: str,
     observations: list[ObservationInput],
-) -> dict[str, object]:
+) -> ObservationImportResult:
     require_member(actor, tenant_id)
     if unit not in {"MWh", "kWh"} or not 1 <= len(observations) <= 2000:
         raise ValidationError("Use MWh or kWh and a batch of 1 to 2000 observations.")

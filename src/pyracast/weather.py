@@ -2,7 +2,7 @@ import json
 import math
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Literal, cast
+from typing import Literal
 from urllib.parse import unquote, unquote_plus
 
 import httpx
@@ -116,7 +116,7 @@ def _weather_columns(payload: object) -> tuple[dict[str, object], dict[str, list
         raise WeatherError("empty_weather_response")
     if any(len(values) != count for values in columns.values()):
         raise WeatherError("invalid_weather_schema")
-    return cast(dict[str, object], payload.copy()), columns
+    return payload.copy(), columns
 
 
 def _weather_intervals(columns: dict[str, list[object]]) -> tuple[WeatherInterval, ...]:

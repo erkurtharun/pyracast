@@ -23,7 +23,7 @@ def record_security_event(
     request: HttpRequest | None = None,
     user: AbstractBaseUser | None = None,
     email_address: EmailAddress | None = None,
-    **kwargs: Any,
+    **_kwargs: Any,
 ) -> None:
     user_id = user.pk if user is not None else None
     if user_id is None and email_address is not None:

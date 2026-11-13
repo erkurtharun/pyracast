@@ -31,7 +31,7 @@ class ShutdownRequest:
 def shutdown_control(stop_file: Path | None = None) -> Iterator[ShutdownRequest]:
     shutdown = ShutdownRequest(stop_file=stop_file)
 
-    def request_shutdown(signum: int, frame: FrameType | None) -> None:
+    def request_shutdown(_signum: int, _frame: FrameType | None) -> None:
         # Signal handlers cannot safely acquire an Event's internal lock.
         shutdown._requested = True
 

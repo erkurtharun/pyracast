@@ -1,4 +1,4 @@
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from itertools import pairwise
@@ -81,7 +81,7 @@ def _validate(intervals: tuple[PowerInterval, ...]) -> tuple[PowerInterval, ...]
         if power is not None and (not isfinite(power) or power < 0):
             raise ValueError("Power must be finite and nonnegative, or missing")
         normalized.append(PowerInterval(start, end, power))
-    normalized.sort(key=lambda interval: interval.start)
+    normalized.sort(key=lambda item: item.start)
     if any(a.end > b.start for a, b in pairwise(normalized)):
         raise ValueError("Power intervals must not overlap")
     return tuple(normalized)
@@ -192,7 +192,7 @@ def _rows(
     if windows_by_day is not None:
         exclusions["outside_required_windows"] = 0
     previous_end: datetime | None = None
-    for sample in sorted(samples, key=lambda sample: _bounds(sample.start, sample.end)[0]):
+    for sample in sorted(samples, key=lambda item: _bounds(item.start, item.end)[0]):
         start, end = _bounds(sample.start, sample.end)
         if previous_end is not None and start < previous_end:
             raise ValueError("Meter intervals must not overlap")
@@ -324,10 +324,24 @@ def _fit(rows: list[_Row], normalization: float, cap: float | None) -> float:
             "Calibration loss",
         )
 
+    def gradient(factor: float, interval_slopes: Sequence[float]) -> float:
+        result = 2 * IDENTITY_PENALTY * (factor - 1)
+        for row, slope in zip(rows, interval_slopes, strict=True):
+            residual = (
+                (row.sample.energy_mwh - _energy(row.pieces, factor, cap)) / row.hours
+            ) / normalization
+            result -= (
+                row.hours
+                / hours
+                * max(-HUBER_DELTA, min(HUBER_DELTA, residual))
+                * (slope / normalization)
+            )
+        return _finite(result, "Calibration gradient")
+
     candidates = list(boundaries)
     for left, right in pairwise(boundaries):
         midpoint = (left + right) / 2
-        slopes = [
+        segment_slopes = [
             sum(
                 power * duration
                 for power, duration in row.pieces
@@ -336,25 +350,10 @@ def _fit(rows: list[_Row], normalization: float, cap: float | None) -> float:
             / row.hours
             for row in rows
         ]
-
-        def gradient(factor: float, slopes: list[float] = slopes) -> float:
-            result = 2 * IDENTITY_PENALTY * (factor - 1)
-            for row, slope in zip(rows, slopes, strict=True):
-                residual = (
-                    (row.sample.energy_mwh - _energy(row.pieces, factor, cap)) / row.hours
-                ) / normalization
-                result -= (
-                    row.hours
-                    / hours
-                    * max(-HUBER_DELTA, min(HUBER_DELTA, residual))
-                    * (slope / normalization)
-                )
-            return _finite(result, "Calibration gradient")
-
-        if gradient(left) < 0 < gradient(right):
+        if gradient(left, segment_slopes) < 0 < gradient(right, segment_slopes):
             for _ in range(60):
                 midpoint = (left + right) / 2
-                if gradient(midpoint) < 0:
+                if gradient(midpoint, segment_slopes) < 0:
                     left = midpoint
                 else:
                     right = midpoint

@@ -10,7 +10,7 @@ from django.db.migrations.operations.base import Operation
 class Migration(migrations.Migration):
     initial = True
 
-    dependencies: ClassVar[list[tuple[str, str]]] = [
+    dependencies: ClassVar = [
         ("accounts", "0001_initial"),
         ("connections", "0001_initial"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),

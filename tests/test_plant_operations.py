@@ -1,7 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from threading import Barrier
-from typing import Any, cast
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -24,6 +24,7 @@ from pyracast.plants.models import (
 )
 from pyracast.plants.numerics import POLICY_VERSION
 from pyracast.plants.operations import (
+    ObservationImportResult,
     ObservationInput,
     activate_calibration,
     create_plant,
@@ -567,7 +568,7 @@ def test_concurrent_observation_replay_is_one_row(monkeypatch: pytest.MonkeyPatc
     configuration_id = plant.current_configuration_id
     assert configuration_id is not None
 
-    def upload() -> dict[str, object]:
+    def upload() -> ObservationImportResult:
         close_old_connections()
         try:
             barrier.wait(timeout=10)
@@ -587,7 +588,7 @@ def test_concurrent_observation_replay_is_one_row(monkeypatch: pytest.MonkeyPatc
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(lambda _: upload(), range(2)))
-    assert sorted(cast(int, result["created"]) for result in results) == [0, 1]
+    assert sorted(result["created"] for result in results) == [0, 1]
     assert ProductionObservation.objects.count() == 1
 
 

@@ -16,6 +16,7 @@ from allauth.headless.account.inputs import (
     ResetPasswordInput as AllauthResetPasswordInput,
 )
 from django import forms
+from django.contrib.auth.models import User
 from django.core.validators import MaxLengthValidator
 
 from pyracast.accounts.authentication import email_identity
@@ -37,6 +38,8 @@ class LoginInput(PasswordInput, AllauthLoginInput):
 
 
 class RequestPasswordResetInput(AllauthRequestPasswordResetInput):
+    users: list[User]
+
     def clean_email(self) -> str:
         email: str = super().clean_email()
         user = email_identity(email, for_recovery=True)

@@ -1,4 +1,5 @@
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -142,6 +143,13 @@ def _weather(rows: list[dict[str, Any]]) -> list[WeatherInterval]:
     return result
 
 
+def _weighted_mean(rows: Sequence[WeatherInterval], attribute: str, duration: float) -> float:
+    return (
+        fsum(getattr(row, attribute) * (row.end - row.start).total_seconds() for row in rows)
+        / duration
+    )
+
+
 def load_pairs(
     power_path: Path, weather_path: Path, *, trusted_root: Path | None = None
 ) -> PairedDataset:
@@ -165,23 +173,14 @@ def load_pairs(
         ):
             continue
         seconds = (power.end - power.start).total_seconds()
-
-        def mean(
-            attribute: str, rows: list[WeatherInterval] = selected, duration: float = seconds
-        ) -> float:
-            return (
-                fsum(getattr(w, attribute) * (w.end - w.start).total_seconds() for w in rows)
-                / duration
-            )
-
         samples.append(
             PairedInterval(
                 power.start,
                 power.end,
                 power.power_kw,
-                mean("ghi_wm2"),
-                mean("air_temp_c"),
-                mean("snow_loss_fraction"),
+                _weighted_mean(selected, "ghi_wm2", seconds),
+                _weighted_mean(selected, "air_temp_c", seconds),
+                _weighted_mean(selected, "snow_loss_fraction", seconds),
                 tuple(selected),
             )
         )

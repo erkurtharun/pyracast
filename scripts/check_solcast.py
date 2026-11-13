@@ -69,7 +69,7 @@ def capture(
     from pyracast.connections.secrets import decrypt_api_key
     from pyracast.forecasts.models import RequestAttempt
     from pyracast.provider_retry import retry_after_seconds, retryable_status
-    from pyracast.providers import _contains_secret
+    from pyracast.providers import contains_secret
 
     if kind not in {"settings", "forecast"}:
         raise ValueError("Unknown capture kind.")
@@ -118,7 +118,7 @@ def capture(
                     status_code=response.status_code,
                 )
             payload = response.json()
-        if _contains_secret(payload, secret) or _contains_secret(dict(response.headers), secret):
+        if contains_secret(payload, secret) or contains_secret(dict(response.headers), secret):
             raise ProviderError("unsafe_provider_response")
         safe = sanitize(payload, kind, site_id)
     except (httpx.HTTPError, ValueError, ProviderError) as exc:

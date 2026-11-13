@@ -154,7 +154,7 @@ def build_unavailable_message(
 ) -> tuple[EmailMultiAlternatives, dict[str, str]]:
     existing = delivery.prepared_message
     payload = (
-        cast(dict[str, str], existing)
+        existing
         if isinstance(existing, dict) and existing.get("format") == "plain"
         else {
             "format": "plain",

@@ -67,13 +67,13 @@ class IncidentsView(ScopedView[PlantIncident]):
     serializer_class = IncidentOutput
 
     @extend_schema(responses=IncidentOutput(many=True))
-    def get(self, request: Request, **kwargs: Any) -> Response:
+    def get(self, _request: Request, **_kwargs: Any) -> Response:
         rows = PlantIncident.objects.filter(plant=self.plant()).order_by("-starts_at", "-id")
         page = self.paginate_queryset(rows)
         return self.get_paginated_response(IncidentOutput(page, many=True).data)
 
     @extend_schema(request=IncidentInput, responses={201: IncidentOutput})
-    def post(self, request: Request, **kwargs: Any) -> Response:
+    def post(self, request: Request, **_kwargs: Any) -> Response:
         scope = self.scope()
         data = IncidentInput(data=request.data)
         data.is_valid(raise_exception=True)

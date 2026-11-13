@@ -8,10 +8,11 @@ from django.db.backends.utils import CursorWrapper
 
 
 class AuthenticationCache(BaseCache):
-    def __init__(self, location: str, params: dict[str, Any]) -> None:
+    def __init__(self, _location: str, params: dict[str, Any]) -> None:
         super().__init__(params)
 
-    def _cursor(self) -> CursorWrapper:
+    @staticmethod
+    def _cursor() -> CursorWrapper:
         connection = connections["auth_cache"]
         if not connection.get_autocommit():
             raise ImproperlyConfigured(

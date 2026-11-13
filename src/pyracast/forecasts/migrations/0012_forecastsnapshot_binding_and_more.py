@@ -10,7 +10,7 @@ from django.db.migrations.operations.base import Operation
 
 
 class Migration(migrations.Migration):
-    dependencies: ClassVar[list[tuple[str, str]]] = [
+    dependencies: ClassVar = [
         ("connections", "0009_validate_binding_integrity"),
         ("forecasts", "0011_validate_collection_integrity"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),

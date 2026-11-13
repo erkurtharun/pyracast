@@ -82,12 +82,12 @@ class EpiasConnectionView(ScopedView[EpiasConnection]):
     serializer_class = EpiasConnectionOutput
 
     @extend_schema(responses=EpiasConnectionOutput)
-    def get(self, request: Request, **kwargs: Any) -> Response:
+    def get(self, request: Request, **_kwargs: Any) -> Response:
         result = operations.get_epias_status(self.plant().pk, actor=cast(User, request.user))
         return Response(EpiasConnectionOutput(result).data)
 
     @extend_schema(request=EpiasConnectionInput, responses=EpiasConnectionOutput)
-    def put(self, request: Request, **kwargs: Any) -> Response:
+    def put(self, request: Request, **_kwargs: Any) -> Response:
         plant = self.plant()
         data = EpiasConnectionInput(data=request.data)
         data.is_valid(raise_exception=True)
@@ -107,7 +107,7 @@ class EpiasConnectionView(ScopedView[EpiasConnection]):
         )
 
     @extend_schema(responses={204: None})
-    def delete(self, request: Request, **kwargs: Any) -> Response:
+    def delete(self, request: Request, **_kwargs: Any) -> Response:
         operations.disconnect_epias(self.plant().pk, actor=cast(User, request.user))
         return Response(status=204)
 
@@ -116,7 +116,7 @@ class EpiasHistoryView(ScopedView[EpiasSnapshot]):
     serializer_class = EpiasHistoryOutput
 
     @extend_schema(parameters=[EpiasDateQuery], responses=EpiasHistoryOutput)
-    def get(self, request: Request, **kwargs: Any) -> Response:
+    def get(self, request: Request, **_kwargs: Any) -> Response:
         plant = self.plant()
         query = EpiasDateQuery(data=request.query_params)
         query.is_valid(raise_exception=True)

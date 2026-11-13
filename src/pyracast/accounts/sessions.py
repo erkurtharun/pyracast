@@ -7,7 +7,7 @@ from django.contrib.auth.base_user import AbstractBaseUser
 from django.http import HttpRequest
 
 
-def revoke_other_sessions(*, request: HttpRequest, user: AbstractBaseUser, **kwargs: Any) -> None:
+def revoke_other_sessions(*, request: HttpRequest, user: AbstractBaseUser, **_kwargs: Any) -> None:
     for session in UserSession.objects.filter(user=user).exclude(
         session_key=request.session.session_key
     ):

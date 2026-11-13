@@ -17,7 +17,12 @@ from pyracast.plants.availability import (
 )
 from pyracast.plants.models import Plant, ProductionObservation
 from pyracast.plants.numerics import PowerInterval
-from pyracast.plants.operations import ObservationInput, import_observations, revise_plant
+from pyracast.plants.operations import (
+    ObservationImportResult,
+    ObservationInput,
+    import_observations,
+    revise_plant,
+)
 from pyracast.plants.production import production_history
 from pyracast.regions.models import Region
 from tests.test_domain import NOW, System
@@ -27,7 +32,7 @@ pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 8)
 
 
-def upload(system: System, plant: Plant, rows: list[ObservationInput]) -> dict[str, object]:
+def upload(system: System, plant: Plant, rows: list[ObservationInput]) -> ObservationImportResult:
     assert plant.current_configuration_id is not None
     return import_observations(
         system.member,

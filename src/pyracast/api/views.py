@@ -1,4 +1,4 @@
-from typing import cast
+from typing import Any, cast
 
 from django.contrib.auth.models import User
 from django.db.models import QuerySet
@@ -61,7 +61,7 @@ class TenantsView(GenericAPIView[Tenant]):
         return Tenant.objects.filter(membership__user=cast(User, self.request.user)).order_by("id")
 
     @extend_schema(responses=TenantOutput(many=True))
-    def get(self, request: Request) -> Response:
+    def get(self, _request: Request) -> Response:
         page = self.paginate_queryset(self.get_queryset())
         return self.get_paginated_response(TenantOutput(page, many=True).data)
 
@@ -128,7 +128,7 @@ class LocationChangeRequestsView(GenericAPIView[RegionLocationChangeRequest]):
         return RegionLocationChangeRequest.objects.filter(region=self.get_region()).order_by("-id")
 
     @extend_schema(responses=LocationChangeOutput(many=True))
-    def get(self, request: Request, tenant_id: int, region_id: int) -> Response:
+    def get(self, _request: Request, **_kwargs: Any) -> Response:
         page = self.paginate_queryset(self.get_queryset())
         return self.get_paginated_response(LocationChangeOutput(page, many=True).data)
 

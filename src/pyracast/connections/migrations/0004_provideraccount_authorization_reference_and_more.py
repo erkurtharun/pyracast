@@ -8,7 +8,7 @@ from django.db.migrations.operations.base import Operation
 
 
 class Migration(migrations.Migration):
-    dependencies: ClassVar[list[tuple[str, str]]] = [
+    dependencies: ClassVar = [
         ("connections", "0003_remove_provideraccount_canonical_provider_account_and_more"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]

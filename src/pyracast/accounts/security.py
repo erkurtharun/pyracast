@@ -14,7 +14,7 @@ def normalize_client_ip(value: str) -> str:
     return str(address)
 
 
-def start_user_session(*, request: HttpRequest, **kwargs: Any) -> None:
+def start_user_session(*, request: HttpRequest, **_kwargs: Any) -> None:
     now = time.time()
     request.session["authenticated_at"] = now
     request.session["last_activity_at"] = now

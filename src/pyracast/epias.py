@@ -5,12 +5,12 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from threading import Lock
-from typing import Literal, cast
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 import httpx
 
-from pyracast.provider_retry import retry_after_seconds, retryable_status
+from pyracast import provider_retry
 
 AUTH_URL = "https://giris.epias.com.tr/cas/v1/tickets"
 BASE_URL = "https://seffaflik.epias.com.tr/electricity-service/v1/generation/data"
@@ -79,7 +79,7 @@ def _has_secret(value: object, secrets: tuple[str, ...]) -> bool:
 def _object(value: object) -> dict[str, object]:
     if not isinstance(value, dict):
         raise EpiasError("invalid_epias_schema")
-    return cast(dict[str, object], value)
+    return value
 
 
 def _integer(value: object) -> int:
@@ -185,10 +185,10 @@ class EpiasClient:
                 self._ticket = ""
             raise EpiasError(
                 "epias_request_failed",
-                retryable=retryable_status(response.status_code)
+                retryable=provider_retry.retryable_status(response.status_code)
                 or (response.status_code == 401 and url != AUTH_URL),
                 retry_after_seconds=(
-                    retry_after_seconds(response.headers.get("Retry-After"))
+                    provider_retry.retry_after_seconds(response.headers.get("Retry-After"))
                     if response.status_code in (429, 503)
                     else None
                 ),
@@ -337,7 +337,7 @@ class EpiasClient:
             if len(readings) == total:
                 break
             number += 1
-        ordered = tuple(sorted(readings, key=lambda row: row.timestamp))
+        ordered = tuple(sorted(readings, key=lambda reading: reading.timestamp))
         if len({reading.timestamp for reading in ordered}) != len(ordered):
             raise EpiasError("duplicate_epias_timestamps")
         return EpiasDay(

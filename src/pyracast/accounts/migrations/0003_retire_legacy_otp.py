@@ -6,7 +6,7 @@ from django.db.migrations.operations.base import Operation
 from django.db.migrations.state import StateApps
 
 
-def retire_legacy_otp(apps: StateApps, schema_editor: BaseDatabaseSchemaEditor) -> None:
+def retire_legacy_otp(_apps: StateApps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     connection = schema_editor.connection
     if "otp_totp_totpdevice" not in connection.introspection.table_names():
         return

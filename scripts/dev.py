@@ -9,7 +9,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 import httpx
 import psutil
@@ -23,6 +23,25 @@ BACKGROUND_ROLES = ("worker", "mailer", "dispatcher")
 PORTS = {"api": 8000, "frontend": 3000}
 CHILDREN: list[subprocess.Popen[bytes]] = []
 
+if sys.platform == "win32":
+    import msvcrt
+
+    def _lock_file(stream: BinaryIO) -> None:
+        msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+
+    def _unlock_file(stream: BinaryIO) -> None:
+        stream.seek(0)
+        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+
+else:
+    import fcntl
+
+    def _lock_file(stream: BinaryIO) -> None:
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    def _unlock_file(stream: BinaryIO) -> None:
+        fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
 
 @contextmanager
 def command_lock(directory: Path) -> Iterator[None]:
@@ -33,24 +52,13 @@ def command_lock(directory: Path) -> Iterator[None]:
         stream.flush()
         stream.seek(0)
         try:
-            if sys.platform == "win32":
-                import msvcrt
-
-                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-
-                fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            _lock_file(stream)
         except OSError:
             raise RuntimeError("Another launcher command is running.") from None
         try:
             yield
         finally:
-            if sys.platform == "win32":
-                stream.seek(0)
-                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+            _unlock_file(stream)
 
 
 def read_state(root: Path) -> dict[str, Any]:

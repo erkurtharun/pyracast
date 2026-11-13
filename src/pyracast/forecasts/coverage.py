@@ -22,7 +22,7 @@ def history_day_complete(snapshot: ForecastSnapshot, target: date, timezone: str
         if left.utcoffset() is None or right.utcoffset() is None:
             return False
         rows.append((left, right, row.get("power_kw")))
-    for left, right, power in sorted(rows, key=lambda row: row[0]):
+    for left, right, power in sorted(rows, key=lambda item: item[0]):
         if right <= start or left >= end:
             continue
         if (

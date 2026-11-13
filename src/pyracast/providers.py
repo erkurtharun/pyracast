@@ -7,7 +7,12 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from pyracast.connections.contracts import ProviderAdapter, ProviderData, ProviderError
+from pyracast.connections.contracts import (
+    HistoryAdapter,
+    ProviderAdapter,
+    ProviderData,
+    ProviderError,
+)
 from pyracast.connections.models import SiteBinding
 from pyracast.connections.secrets import decrypt_api_key
 from pyracast.provider_retry import retry_after_seconds, retryable_status
@@ -56,27 +61,27 @@ def normalize_payload(
         raise ProviderError("invalid_provider_schema", retryable=False) from None
     # The Hobby response does not promise an issue timestamp or P50 semantics.
     return ProviderData(
-        raw_payload=cast(dict[str, object], payload.copy()),
+        raw_payload=payload.copy(),
         intervals=intervals,
         collected_at=collected_at if collected_at is not None else datetime.now(UTC),
         source_kind="forecast" if endpoint == "forecasts" else "estimated_actuals",
     )
 
 
-def _contains_secret(value: object, secret: str) -> bool:
+def contains_secret(value: object, secret: str) -> bool:
     if isinstance(value, str):
         return secret in value
     if isinstance(value, list):
-        return any(_contains_secret(item, secret) for item in value)
+        return any(contains_secret(item, secret) for item in value)
     if isinstance(value, dict):
         return any(
-            _contains_secret(key, secret) or _contains_secret(item, secret)
+            contains_secret(key, secret) or contains_secret(item, secret)
             for key, item in value.items()
         )
     return False
 
 
-class FixtureProvider:
+class FixtureProvider(ProviderAdapter, HistoryAdapter):
     def validate(self, binding: SiteBinding) -> None:
         if binding.provider_account.provider != "fixture":
             raise ProviderError("fixture_account_required")
@@ -120,7 +125,7 @@ class FixtureProvider:
         )
 
 
-class SolcastProvider:
+class SolcastProvider(ProviderAdapter, HistoryAdapter):
     def __init__(self, transport: httpx.BaseTransport | None = None) -> None:
         self.transport = transport
 
@@ -165,7 +170,7 @@ class SolcastProvider:
                 payload = response.json()
         except httpx.HTTPError, json.JSONDecodeError, UnicodeDecodeError:
             raise ProviderError("provider_request_failed") from None
-        if _contains_secret(payload, secret):
+        if contains_secret(payload, secret):
             raise ProviderError("unsafe_provider_response")
         return normalize_payload(payload, endpoint)
 

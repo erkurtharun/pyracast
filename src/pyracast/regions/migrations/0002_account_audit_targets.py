@@ -7,7 +7,7 @@ from django.db.migrations.operations.base import Operation
 
 
 class Migration(migrations.Migration):
-    dependencies: ClassVar[list[tuple[str, str]]] = [
+    dependencies: ClassVar = [
         ("connections", "0005_sitebinding_settings_verification_reference"),
         ("regions", "0001_initial"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),

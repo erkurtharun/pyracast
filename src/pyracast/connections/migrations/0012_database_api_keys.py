@@ -8,7 +8,7 @@ ENCRYPTED_PREFIX = "encrypted:v1:"
 
 
 def prepare_database_keys(apps: StateApps, schema_editor: BaseDatabaseSchemaEditor) -> None:
-    accounts = apps.get_model("connections", "ProviderAccount")._default_manager.using(
+    accounts = apps.get_model("connections", "ProviderAccount").objects.using(
         schema_editor.connection.alias
     )
     if (

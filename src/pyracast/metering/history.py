@@ -39,11 +39,11 @@ def _intervals(snapshot: EpiasSnapshot | None, day: date) -> list[dict[str, obje
 
 def _valid_energy(row: dict[str, object]) -> bool:
     value = row["total_mwh"]
-    if value is None:
+    if isinstance(value, bool) or not isinstance(value, str | int | float):
         return False
     try:
-        energy = float(str(value))
-    except TypeError, ValueError, OverflowError:
+        energy = float(value)
+    except ValueError, OverflowError:
         return False
     return isfinite(energy) and energy >= 0
 

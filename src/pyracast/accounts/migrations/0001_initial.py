@@ -10,7 +10,7 @@ from django.db.migrations.operations.base import Operation
 class Migration(migrations.Migration):
     initial = True
 
-    dependencies: ClassVar[list[tuple[str, str]]] = [
+    dependencies: ClassVar = [
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 

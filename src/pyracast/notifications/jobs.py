@@ -181,6 +181,7 @@ def process_notification(
         delivery.transmit_started_at = None
         delivery.attempts += 1
         delivery.save()
+    available_at = now
     try:
 
         def before_send() -> bool:
@@ -208,8 +209,16 @@ def process_notification(
             if delivery.attempts < 8 and retry_at < delivery.scheduled_for + MAX_LATENESS
             else "failed"
         )
+        available_at = retry_at if status == "retry" else now
         error_code = error.code
-    except Exception:  # SMTP acceptance may have succeeded before an exception reached the caller.
+    except (
+        Exception
+    ) as error:  # SMTP acceptance may have succeeded before an exception reached the caller.
+        logger.warning(
+            "notification_delivery_uncertain delivery_id=%s error_type=%s",
+            delivery_id,
+            type(error).__name__,
+        )
         status, error_code = "uncertain", "mail_outcome_uncertain"
     else:
         status, error_code = "sent", ""
@@ -219,7 +228,7 @@ def process_notification(
         status=status,
         last_error=error_code,
         sent_at=timezone.now() if status == "sent" else None,
-        available_at=retry_at if status == "retry" else now,
+        available_at=available_at,
         lease_token=None,
         lease_expires_at=None,
     )

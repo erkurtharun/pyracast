@@ -6,7 +6,7 @@ from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 from django.db.migrations.state import StateApps
 
 
-def populate_plants(apps: StateApps, schema_editor: BaseDatabaseSchemaEditor) -> None:
+def populate_plants(_apps: StateApps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     with schema_editor.connection.cursor() as cursor:
         cursor.execute(
             "SELECT j.id FROM metering_epiascollectionjob j "

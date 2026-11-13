@@ -53,7 +53,7 @@ def _cancel_calibrations(plants: list[int], now: datetime) -> None:
 def trash_region(actor: User, tenant_id: int, region_id: int) -> Region:
     require_member(actor, tenant_id)
     with transaction.atomic():
-        region = Region.objects.select_for_update().get(pk=region_id, tenant_id=tenant_id)
+        region: Region = Region.objects.select_for_update().get(pk=region_id, tenant_id=tenant_id)
         if region.deleted_at is not None:
             return region
         plants = list(Plant.objects.select_for_update().filter(region=region).order_by("pk"))
@@ -116,8 +116,8 @@ def restore_region(actor: User, tenant_id: int, region_id: int) -> Region:
 def trash_plant(actor: User, tenant_id: int, region_id: int, plant_id: int) -> Plant:
     require_member(actor, tenant_id)
     with transaction.atomic():
-        region = Region.objects.select_for_update().get(pk=region_id, tenant_id=tenant_id)
-        plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
+        region: Region = Region.objects.select_for_update().get(pk=region_id, tenant_id=tenant_id)
+        plant: Plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
         if plant.deleted_at is not None:
             return plant
         if region.deleted_at is not None:

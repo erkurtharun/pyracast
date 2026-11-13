@@ -14,6 +14,7 @@ from django.utils.decorators import method_decorator
 from django.utils.html import format_html
 from django.utils.safestring import SafeString
 from django.views.decorators.debug import sensitive_post_parameters, sensitive_variables
+from django.views.generic import RedirectView
 from rest_framework.exceptions import ValidationError as APIValidationError
 
 from pyracast.accounts.models import Tenant
@@ -85,7 +86,9 @@ class PlatformAdminSite(admin.AdminSite):
             path("operations/", self.admin_view(self.operations), name="workspace_operations"),
             path("settings/", self.admin_view(self.settings), name="workspace_settings"),
             path(
-                "password_change/", self.admin_view(self.account_security), name="password_change"
+                "password_change/",
+                self.admin_view(RedirectView.as_view(url="/?account=security")),
+                name="password_change",
             ),
             *[
                 url
@@ -179,9 +182,6 @@ class PlatformAdminSite(admin.AdminSite):
                 request, "Choose a review action and reload the current plant before continuing."
             )
         return redirect("admin:workspace_plant", object_id=object_id)
-
-    def account_security(self, request: HttpRequest) -> HttpResponse:
-        return redirect("/?account=security")
 
     def workspace_logout(self, request: HttpRequest) -> HttpResponse:
         if request.method != "POST":
@@ -416,7 +416,7 @@ class RegionAdmin(ReadOnlyAdmin):
                 **review_context(region.pk),
                 "workspace_section": "plants",
                 "title": f"Review and set up {region.name}",
-                "opts": self.model._meta,
+                "opts": self.opts,
                 "region": region,
                 "plants": plants,
                 "submissions": submissions,

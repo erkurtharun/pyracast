@@ -105,7 +105,7 @@ class DailyEnergy:
 def _ordered_intervals[
     T: (PowerInterval, IrradianceInterval),
 ](intervals: Sequence[T]) -> tuple[T, ...]:
-    ordered = tuple(sorted(intervals, key=lambda interval: _utc(interval.start)))
+    ordered = tuple(sorted(intervals, key=lambda item: _utc(item.start)))
     previous_end: datetime | None = None
     for interval in ordered:
         start, end = _utc(interval.start), _utc(interval.end)

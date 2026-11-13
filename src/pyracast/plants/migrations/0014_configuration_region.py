@@ -6,7 +6,7 @@ from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 from django.db.migrations.state import StateApps
 
 
-def populate_regions(apps: StateApps, schema_editor: BaseDatabaseSchemaEditor) -> None:
+def populate_regions(_apps: StateApps, schema_editor: BaseDatabaseSchemaEditor) -> None:
     with schema_editor.connection.cursor() as cursor:
         cursor.execute(
             "SELECT c.id FROM plants_plantconfiguration c "

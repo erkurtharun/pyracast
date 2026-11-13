@@ -28,7 +28,7 @@ def validate_public_origin() -> None:
 
 
 @register(Tags.security, deploy=True)
-def check_authentication_origin(**kwargs: Any) -> list[CheckMessage]:
+def check_authentication_origin(**_kwargs: Any) -> list[CheckMessage]:
     try:
         validate_public_origin()
     except ImproperlyConfigured as error:
@@ -37,7 +37,7 @@ def check_authentication_origin(**kwargs: Any) -> list[CheckMessage]:
 
 
 @register(Tags.security, deploy=True)
-def check_authentication_mail_delivery(**kwargs: Any) -> list[CheckMessage]:
+def check_authentication_mail_delivery(**_kwargs: Any) -> list[CheckMessage]:
     mailer = cast(dict[str, Any], settings.MAILERS["default"])
     address = parseaddr(settings.DEFAULT_FROM_EMAIL)[1]
     if not settings.DEBUG and (
