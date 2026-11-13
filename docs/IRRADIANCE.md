@@ -437,9 +437,10 @@ zero errors. This diagnostic does not train or activate a model and does not pro
 confidence intervals from a short or selectively observed history.
 
 The separate `historical_model` comparison uses saved estimated actuals available
-at evaluation time and the currently declared configuration with factor 1. It may
-project dates before that configuration existed, marking the retrospective
-assumption; it never backdates a configuration or uses an active calibration.
+at evaluation time and the currently declared configuration with its active
+calibration, reporting the factor-1 result as the baseline. It may project dates
+before that configuration existed, marking the retrospective assumption; it never
+backdates a configuration. The calibration may have been fitted on the compared days.
 Manual measurements take priority over settlement injection and provisional
 reported production under the current measurement-selection policy. Preserve
 source snapshot IDs and provisional labels, and retain the same daylight,

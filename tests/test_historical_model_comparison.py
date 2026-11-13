@@ -8,7 +8,7 @@ from django.test import Client
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasConnection
-from pyracast.plants.models import PlantForecast, ProductionObservation
+from pyracast.plants.models import CalibrationRun, PlantForecast, ProductionObservation
 from pyracast.plants.performance import forecast_performance
 from pyracast.solar import Daylight
 from tests.test_domain import NOW
@@ -74,7 +74,7 @@ def test_historical_daylight_comparison_retains_whole_boundary_hours_and_native_
     )
 
 
-def test_historical_model_compares_available_provisional_history_without_backdating(
+def test_historical_model_applies_the_active_calibration_without_backdating(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
@@ -105,8 +105,8 @@ def test_historical_model_compares_available_provisional_history_without_backdat
     assert result["evaluation_kind"] == "retrospective_model_comparison"
     assert result["matched_days"] == 1
     day = result["days"][0]
-    assert day["factor"] == 1
-    assert day["calibration_id"] is None
+    assert day["factor"] == 0.8
+    assert day["calibration_id"] == CalibrationRun.objects.get().pk
     assert day["source_kind"] == "estimated_actuals"
     assert day["historical_configuration_assumed"] is True
     assert day["provisional_production"] is True
@@ -114,7 +114,8 @@ def test_historical_model_compares_available_provisional_history_without_backdat
     assert day["settlement_snapshot_ids"] == []
     assert day["snapshot_id"] == reference.pk
     assert day["measured_energy_mwh"] == 624
-    assert day["predicted_energy_mwh"] == pytest.approx(624)
+    assert day["predicted_energy_mwh"] == pytest.approx(0.8 * 624)
+    assert day["baseline_energy_mwh"] == pytest.approx(624)
     assert not PlantForecast.objects.exists()
     archived = client.get(url, {**query, "comparison": "archived_forecast"}).json()
     assert archived["matched_days"] == 0

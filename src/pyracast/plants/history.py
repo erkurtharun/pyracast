@@ -9,16 +9,19 @@ from django.utils import timezone
 
 from pyracast.accounts.operations import require_member
 from pyracast.forecasts.history import historical_irradiance, select_actual_snapshot
+from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.automatic_forecast import automatic_forecast
 from pyracast.plants.current_forecast import current_forecast
 from pyracast.plants.forecasting import (
     archived_forecast,
+    calibration_at,
     declared_forecast,
     forecast_payload,
     plant_forecast,
 )
-from pyracast.plants.models import Plant, PlantConfiguration
+from pyracast.plants.measurements import production_identity_current
+from pyracast.plants.models import CalibrationRun, Plant, PlantConfiguration
 from pyracast.plants.operations import configuration_is_current
 from pyracast.regions.models import Region
 
@@ -70,6 +73,25 @@ def plant_outlook(
         return result
 
 
+def _current_actuals(
+    plant: Plant, target_date: date, cutoff: datetime
+) -> tuple[PlantConfiguration, ForecastSnapshot, CalibrationRun | None] | None:
+    """Prefer the current declaration and its active calibration for a past day that its
+    binding archived; both are retrospective assumptions, flagged in the result."""
+    if plant.current_configuration_id is None:
+        return None
+    current = PlantConfiguration.objects.select_related("binding__provider_account").get(
+        pk=plant.current_configuration_id, plant=plant
+    )
+    snapshot = select_actual_snapshot(current.binding, target_date, cutoff)
+    if snapshot is None:
+        return None
+    calibration = calibration_at(current, cutoff)
+    if calibration is not None and not production_identity_current(calibration):
+        calibration = None
+    return current, snapshot, calibration
+
+
 def _plant_outlook(
     actor: User,
     tenant_id: int,
@@ -114,24 +136,31 @@ def _plant_outlook(
     configurations = PlantConfiguration.objects.select_related("binding__provider_account").filter(
         plant=plant, created_at__lte=cutoff
     )
-    configuration = None
-    if as_of is None:
-        day_start, day_end = local_day_bounds(target_date, region.timezone)
-        configuration = (
-            configurations.filter(created_at__lte=day_start).order_by("-created_at", "-pk").first()
-        )
-        if configuration is None:
+    configuration: PlantConfiguration | None = None
+    snapshot: ForecastSnapshot | None = None
+    calibration: CalibrationRun | None = None
+    selected = _current_actuals(plant, target_date, cutoff) if as_of is None else None
+    if selected is not None:
+        configuration, snapshot, calibration = selected
+    else:
+        if as_of is None:
+            day_start, day_end = local_day_bounds(target_date, region.timezone)
             configuration = (
-                configurations.filter(created_at__lt=day_end).order_by("-created_at", "-pk").first()
+                configurations.filter(created_at__lte=day_start)
+                .order_by("-created_at", "-pk")
+                .first()
             )
-    if configuration is None:
-        ordering = ("created_at", "pk") if as_of is None else ("-created_at", "-pk")
-        configuration = configurations.order_by(*ordering).first()
-    snapshot = (
-        select_actual_snapshot(configuration.binding, target_date, cutoff)
-        if configuration is not None
-        else None
-    )
+            if configuration is None:
+                configuration = (
+                    configurations.filter(created_at__lt=day_end)
+                    .order_by("-created_at", "-pk")
+                    .first()
+                )
+        if configuration is None:
+            ordering = ("created_at", "pk") if as_of is None else ("-created_at", "-pk")
+            configuration = configurations.order_by(*ordering).first()
+        if configuration is not None:
+            snapshot = select_actual_snapshot(configuration.binding, target_date, cutoff)
     if snapshot is None and source == "auto" and as_of is not None:
         return _forecast_outlook(
             actor,
@@ -148,18 +177,22 @@ def _plant_outlook(
     if snapshot is not None and configuration is not None:
         try:
             result = forecast_payload(
-                configuration, snapshot, None, target_date, resolution_minutes
+                configuration, snapshot, calibration, target_date, resolution_minutes
             )
             irradiance = historical_irradiance(snapshot, target_date)
         except (ValueError, ArithmeticError) as exc:
             raise ValidationError("calculation_out_of_range") from exc
+        if calibration is not None:
+            cast(list[str], result["quality_flags"]).append(
+                "current_calibration_applied_retrospectively"
+            )
     return {
         "plant_id": plant.pk,
         "date": target_date.isoformat(),
         "timezone": configuration.binding.timezone if configuration else region.timezone,
         "as_of": cutoff.isoformat(),
         "configuration_id": configuration.pk if configuration else None,
-        "calibration_id": None,
+        "calibration_id": calibration.pk if calibration else None,
         "source_kind": "estimated_actuals",
         "freshness": "missing"
         if snapshot is None

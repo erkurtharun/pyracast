@@ -60,8 +60,9 @@ export function ForecastPerformance({
                 <summary>How comparison is measured</summary>
                 <p>
                     Historical model comparison uses saved historical weather
-                    estimates with the current plant configuration and factor 1.
-                    It assumes that configuration for past dates and can include
+                    estimates with the current plant configuration and its
+                    active calibration; the baseline uses factor 1. It assumes
+                    that configuration for past dates and can include
                     provisional reported production. It does not measure
                     forecast accuracy or establish the production meter
                     boundary.
@@ -227,8 +228,9 @@ function PerformanceResults({
                         )}
                         {historical && matched.length > 0 && (
                             <p className="fine">
-                                Current configuration · factor 1 · retrospective
-                                model comparison.
+                                Current configuration · active calibration
+                                (factor 1 when none) · retrospective model
+                                comparison.
                                 {matched.some(
                                     (day) => day.provisional_production,
                                 ) &&

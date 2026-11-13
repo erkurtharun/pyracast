@@ -584,8 +584,9 @@ time must have an existing configuration. Sources acquired during or after the t
 day cannot turn into day-ahead predictions. Predictions retain the first preceding-day
 acquisition and its actual lead time. Use `data_source=auto` to prefer estimated
 actuals on completed past days, or explicitly choose `forecast` / `estimated_actuals`.
-Past electrical estimates use the declared configuration and baseline factor, with
-source and configuration-assumption flags; they are not meter readings.
+Past electrical estimates prefer the current configuration and its active calibration,
+flagged as retrospective assumptions; an explicit `as_of` keeps the configuration known
+then and the baseline factor. They are not meter readings.
 
 A plant declared as `tracking` over a horizontal reference site uses the tracking
 geometry transfer; other plants scale reference power directly. Declare the reference

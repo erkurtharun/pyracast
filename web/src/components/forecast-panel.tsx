@@ -273,7 +273,9 @@ export function ForecastPanel({
                 ) && (
                     <Notice>
                         {forecast.source_kind === "estimated_actuals"
-                            ? "Calculated from estimated actuals using the plant configuration entered later. No calibration is applied."
+                            ? forecast.calibration_id
+                                ? "Calculated from estimated actuals using the plant configuration entered later and the current calibration."
+                                : "Calculated from estimated actuals using the plant configuration entered later. No calibration is applied."
                             : "Calculated from the archived forecast using the plant configuration entered later. No calibration is applied."}
                     </Notice>
                 )}
@@ -513,11 +515,15 @@ export function ForecastPanel({
                     {forecast.configuration_id
                         ? `Configuration ${forecast.configuration_id}. `
                         : ""}
-                    {electrical && forecast.source_kind === "estimated_actuals"
+                    {electrical &&
+                    forecast.source_kind === "estimated_actuals" &&
+                    !forecast.calibration_id
                         ? "Baseline estimate using the current configuration; no calibration factor applied."
                         : electrical
                           ? forecast.calibration_id
-                              ? `Calibration ${forecast.calibration_id}.`
+                              ? forecast.source_kind === "estimated_actuals"
+                                  ? `Calibration ${forecast.calibration_id}, applied retrospectively.`
+                                  : `Calibration ${forecast.calibration_id}.`
                               : "Baseline (no active calibration)."
                           : ""}
                 </p>
