@@ -14,7 +14,7 @@ dependencies = [
     "dramatiq[rabbitmq]>=2.2.1",
     "drf-spectacular>=0.30.0",
     "httpx>=0.28.1",
-    "gunicorn==26.2.0; sys_platform != 'win32'",
+    "gunicorn==27.0.0; sys_platform != 'win32'",
     "psycopg[binary]>=3.3.9",
     "python-dotenv>=1.2.4",
     "tzdata>=2026.6",
