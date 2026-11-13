@@ -1,0 +1,85 @@
+x-local-logs: &local-logs
+  driver: local
+  options: !override {max-size: 10m, max-file: "5"}
+
+services:
+  postgres:
+    logging: *local-logs
+    volumes: !override [smoke-postgres:/var/lib/postgresql]
+    healthcheck:
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  gateway:
+    logging: *local-logs
+    networks:
+      application: {ipv4_address: 172.30.80.2}
+      cloudflare-smoke: {ipv4_address: 173.245.48.2}
+    depends_on:
+      header-probe: {condition: service_healthy}
+    environment:
+      TRAEFIK_ENTRYPOINTS_WEB_HTTP_REDIRECTIONS_ENTRYPOINT_TO: :18443
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_HTTP_TLS_CERTRESOLVER: !reset null
+      TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_EMAIL: !reset null
+      TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_STORAGE: !reset null
+      TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_HTTPCHALLENGE_ENTRYPOINT: !reset null
+    volumes: !override
+      - ./routes.yml:/etc/traefik/dynamic/routes.yml:ro
+      - ./tls.smoke.yml:/etc/traefik/dynamic/tls.yml:ro
+      - smoke-certificates:/certificates:ro
+      - smoke-gateway:/data
+  header-probe:
+    image: ${BACKEND_IMAGE}
+    entrypoint: [python, -c]
+    command:
+      - |
+        import json
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(json.dumps(dict(self.headers)).encode())
+        HTTPServer(('0.0.0.0', 8080), Handler).serve_forever()
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks:
+      application: {}
+      cloudflare-smoke: {ipv4_address: 173.245.48.3}
+    mem_limit: 64m
+    pids_limit: 20
+    logging: *local-logs
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/', timeout=3).read()"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+  rabbitmq:
+    logging: *local-logs
+    volumes: !override [smoke-rabbitmq:/var/lib/rabbitmq]
+  api:
+    logging: *local-logs
+  web:
+    logging: *local-logs
+  worker:
+    logging: *local-logs
+  notifications:
+    logging: *local-logs
+  dispatcher:
+    logging: *local-logs
+  migrate:
+    logging: *local-logs
+
+networks:
+  cloudflare-smoke:
+    internal: true
+    ipam:
+      config: [{subnet: 173.245.48.0/24}]
+
+volumes:
+  smoke-postgres:
+  smoke-gateway:
+  smoke-certificates:
+  smoke-rabbitmq:

@@ -1,0 +1,13 @@
+{
+  "provider": "epias",
+  "dataset": "realtime-generation",
+  "fixture_kind": "sanitized_live_capture",
+  "captured_on_utc": "2026-11-10",
+  "target_date": "2026-11-09",
+  "plant_id": 3154,
+  "eic": "40W000005011621Y",
+  "unit": "MWh",
+  "timestamp_semantics": "unverified_provider_hour_label",
+  "measurement_basis": "unverified",
+  "sanitization": "Only date, hour, total and sun retained; no authentication headers, credentials or tickets."
+}

@@ -1,0 +1,240 @@
+name: pyracast
+
+# Reviewed against https://www.cloudflare.com/ips-v4 and /ips-v6; keep ingress rules aligned.
+x-cloudflare-proxies: &cloudflare-proxies >-
+  173.245.48.0/20,103.21.244.0/22,103.22.200.0/22,103.31.4.0/22,141.101.64.0/18,108.162.192.0/18,190.93.240.0/20,188.114.96.0/20,197.234.240.0/22,198.41.128.0/17,162.158.0.0/15,104.16.0.0/13,104.24.0.0/14,172.64.0.0/13,131.0.72.0/22,2400:cb00::/32,2606:4700::/32,2803:f800::/32,2405:b500::/32,2405:8100::/32,2a06:98c0::/29,2c0f:f248::/32
+
+x-process: &process
+  image: ${BACKEND_IMAGE:?Set BACKEND_IMAGE to the verified digest}
+  init: true
+  # Host startup must honor the migration block before starting application processes.
+  restart: on-failure:5
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+  env_file:
+    - path: ${RUNTIME_ENV_FILE:-/run/pyracast/runtime.env}
+      format: raw
+  environment: &application-environment
+    DJANGO_SETTINGS_MODULE: pyracast.production
+    PYRACAST_DEBUG: "0"
+    PYRACAST_HOSTS: ${SITE_ADDRESS},localhost,127.0.0.1
+    PYRACAST_PUBLIC_ORIGIN: https://${SITE_ADDRESS}
+    PYRACAST_CSRF_ORIGINS: https://${SITE_ADDRESS}
+    PYRACAST_TRUST_PROXY: "1"
+    PYRACAST_TRUSTED_PROXY_CIDRS: 172.30.80.2/32
+    PYRACAST_TRUSTED_UPSTREAM_PROXY_CIDRS: *cloudflare-proxies
+    PGHOST: postgres
+    PGPORT: "5432"
+    PGDATABASE: pyracast
+  networks: [application]
+  depends_on:
+    postgres: {condition: service_healthy}
+  logging: &logs
+    driver: gcplogs
+    options:
+      mode: non-blocking
+      max-buffer-size: 4m
+      cache-max-size: 10m
+      cache-max-file: "5"
+
+services:
+  gateway:
+    image: ${GATEWAY_IMAGE:?Set GATEWAY_IMAGE to the verified digest}
+    restart: on-failure:5
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    ports: ["${HTTP_BIND:-0.0.0.0:80}:8080", "${HTTPS_BIND:-0.0.0.0:443}:8443"]
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?Set the public DNS hostname}
+      TRAEFIK_GLOBAL_CHECKNEWVERSION: "false"
+      TRAEFIK_GLOBAL_SENDANONYMOUSUSAGE: "false"
+      TRAEFIK_GLOBAL_ALIASHEADERSSTRATEGY: delete
+      TRAEFIK_LOG_FORMAT: json
+      TRAEFIK_ENTRYPOINTS_WEB_ADDRESS: :8080
+      TRAEFIK_ENTRYPOINTS_WEB_FORWARDEDHEADERS_INSECURE: "false"
+      TRAEFIK_ENTRYPOINTS_WEB_HTTP_REDIRECTIONS_ENTRYPOINT_TO: :443
+      TRAEFIK_ENTRYPOINTS_WEB_HTTP_REDIRECTIONS_ENTRYPOINT_SCHEME: https
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_ADDRESS: :8443
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_FORWARDEDHEADERS_INSECURE: "false"
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_FORWARDEDHEADERS_TRUSTEDIPS: *cloudflare-proxies
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_HTTP_TLS: "true"
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_HTTP_TLS_CERTRESOLVER: letsencrypt
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_TRANSPORT_RESPONDINGTIMEOUTS_READTIMEOUT: 30s
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_TRANSPORT_RESPONDINGTIMEOUTS_WRITETIMEOUT: 120s
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_TRANSPORT_RESPONDINGTIMEOUTS_IDLETIMEOUT: 120s
+      TRAEFIK_ENTRYPOINTS_WEBSECURE_TRANSPORT_LIFECYCLE_GRACETIMEOUT: 30s
+      TRAEFIK_ENTRYPOINTS_HEALTH_ADDRESS: :8082
+      TRAEFIK_PING: "true"
+      TRAEFIK_PING_ENTRYPOINT: health
+      TRAEFIK_PROVIDERS_FILE_DIRECTORY: /etc/traefik/dynamic
+      TRAEFIK_PROVIDERS_FILE_WATCH: "false"
+      TRAEFIK_SERVERSTRANSPORT_FORWARDINGTIMEOUTS_RESPONSEHEADERTIMEOUT: 90s
+      TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_EMAIL: ${ACME_EMAIL:?Set a certificate contact email}
+      TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_STORAGE: /data/acme.json
+      TRAEFIK_CERTIFICATESRESOLVERS_LETSENCRYPT_ACME_HTTPCHALLENGE_ENTRYPOINT: web
+    volumes:
+      - ./routes.yml:/etc/traefik/dynamic/routes.yml:ro
+      - ${DATA_ROOT:-/var/lib/pyracast}/gateway:/data
+    tmpfs: ["/tmp:uid=10001,gid=10001,mode=0700,size=32m"]
+    networks:
+      application: {ipv4_address: 172.30.80.2}
+    mem_limit: 128m
+    pids_limit: 100
+    logging: *logs
+    stop_grace_period: 40s
+    healthcheck:
+      test: [CMD, /traefik, healthcheck]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      api: {condition: service_healthy}
+      web: {condition: service_healthy}
+
+  api:
+    <<: *process
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 100
+    stop_grace_period: 100s
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready/', timeout=8).read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  web:
+    image: ${WEB_IMAGE:?Set WEB_IMAGE to the verified digest}
+    init: true
+    restart: on-failure:5
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: ["/tmp:size=32m", "/app/.next/cache:uid=1000,gid=1000,size=64m"]
+    environment: {NODE_ENV: production, NEXT_TELEMETRY_DISABLED: "1"}
+    networks: [application]
+    mem_limit: 384m
+    cpus: 1.0
+    pids_limit: 100
+    stop_grace_period: 30s
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging: *logs
+
+  worker:
+    <<: *process
+    command: [pyracast, worker, --threads, "1", --queues, default, calibration, epias]
+    stop_grace_period: 660s
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 100
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+
+  notifications:
+    <<: *process
+    command: [pyracast, worker, --threads, "1", --queues, notifications]
+    stop_grace_period: 660s
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 100
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+
+  dispatcher:
+    <<: *process
+    command: [pyracast, dispatch, --loop, --poll-seconds, "30"]
+    stop_grace_period: 660s
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 100
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+
+  migrate:
+    <<: *process
+    profiles: [release]
+    restart: "no"
+    command: [pyracast, migrate, --noinput]
+    env_file:
+      - path: ${RUNTIME_ENV_FILE:-/run/pyracast/runtime.env}
+        format: raw
+      - path: ${MIGRATION_ENV_FILE:-/run/pyracast/migration.env}
+        format: raw
+        required: false
+    mem_limit: 512m
+    pids_limit: 100
+
+  postgres:
+    image: ${POSTGRES_IMAGE:?Set POSTGRES_IMAGE to the verified digest}
+    user: "70:70"
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    env_file:
+      - path: ${DATABASE_ENV_FILE:-/run/pyracast/database.env}
+        format: raw
+    environment:
+      POSTGRES_DB: pyracast
+      POSTGRES_INITDB_ARGS: --data-checksums
+    command: [postgres, -c, shared_buffers=128MB, -c, max_connections=40]
+    volumes:
+      - ${DATA_ROOT:-/var/lib/pyracast}/postgres:/var/lib/postgresql
+    tmpfs: ["/tmp:uid=70,gid=70,mode=0700,size=32m", "/var/run/postgresql:uid=70,gid=70,mode=0770,size=16m"]
+    mem_limit: 768m
+    pids_limit: 100
+    networks: [application]
+    stop_grace_period: 120s
+    healthcheck:
+      test: [CMD, pg_isready, -h, 127.0.0.1, -U, postgres, -d, pyracast]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    logging: *logs
+
+  rabbitmq:
+    image: rabbitmq:4.4.0@sha256:1166559c9e77b0208b9d96bfaf265ddbdd491ce3cebb8cf990aabe9274f16d2c
+    hostname: rabbitmq
+    user: "999:999"
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    env_file:
+      - path: ${BROKER_ENV_FILE:-/run/pyracast/broker.env}
+        format: raw
+    volumes:
+      - ${DATA_ROOT:-/var/lib/pyracast}/rabbitmq:/var/lib/rabbitmq
+    tmpfs: ["/tmp:uid=999,gid=999,mode=0700,size=32m"]
+    networks: [application]
+    mem_limit: 384m
+    pids_limit: 200
+    stop_grace_period: 60s
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, check_running]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s
+    logging: *logs
+
+networks:
+  application:
+    ipam:
+      config: [{subnet: 172.30.80.0/24, ip_range: 172.30.80.128/25}]

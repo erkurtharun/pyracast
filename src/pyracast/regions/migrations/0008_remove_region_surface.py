@@ -1,0 +1,34 @@
+from typing import ClassVar, cast
+
+from django.apps.registry import Apps
+from django.db import migrations, models
+from django.db.backends.base.schema import BaseDatabaseSchemaEditor
+from django.db.migrations.operations.base import Operation
+
+
+def require_horizontal_regions(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
+    region = cast(type[models.Model], apps.get_model("regions", "Region"))
+    conflicts = list(
+        region._default_manager.using(schema_editor.connection.alias)
+        .exclude(surface="horizontal")
+        .values_list("pk", flat=True)[:10]
+    )
+    if conflicts:
+        raise RuntimeError(
+            "Cannot remove Region.surface: non-horizontal regions exist "
+            f"(sample IDs: {conflicts}). Resolve these values explicitly before migration."
+        )
+
+
+class Migration(migrations.Migration):
+    dependencies: ClassVar[list[tuple[str, str]]] = [
+        ("regions", "0007_validate_approved_binding_region"),
+    ]
+
+    operations: ClassVar[list[Operation]] = [
+        migrations.RunPython(require_horizontal_regions, migrations.RunPython.noop),
+        migrations.RemoveField(
+            model_name="region",
+            name="surface",
+        ),
+    ]

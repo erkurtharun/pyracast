@@ -1,0 +1,44 @@
+from typing import ClassVar
+
+from django.contrib.postgres.operations import AddConstraintNotValid
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+    dependencies: ClassVar = [
+        ("forecasts", "0009_requestattempt_request_account_day_and_more"),
+        ("notifications", "0002_notificationsettings_and_more"),
+    ]
+
+    operations: ClassVar = [
+        migrations.AddIndex(
+            model_name="notificationdelivery",
+            index=models.Index(
+                condition=models.Q(("status__in", ("pending", "retry", "sending"))),
+                fields=["available_at", "id"],
+                name="notification_dispatch_ready",
+            ),
+        ),
+        AddConstraintNotValid(
+            model_name="notificationdelivery",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    (
+                        "status__in",
+                        (
+                            "pending",
+                            "retry",
+                            "sending",
+                            "sent",
+                            "failed",
+                            "uncertain",
+                            "skipped",
+                            "unavailable",
+                            "cancelled",
+                        ),
+                    )
+                ),
+                name="notification_delivery_status_valid",
+            ),
+        ),
+    ]

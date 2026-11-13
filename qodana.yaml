@@ -1,0 +1,44 @@
+version: "1.0"
+linter: qodana-python
+withinDocker: false
+
+profile:
+  name: qodana.recommended
+
+include:
+  - name: VulnerableLibrariesLocal
+  - name: PyVulnerableApiCode
+
+exclude:
+  - name: All
+    paths:
+      - web/src/lib/schema.d.ts
+      - web/test-results-frontend
+      - web/test-results-security
+  - name: PyTypeHintsInspection
+    paths:
+      - src/pyracast/admin_workspace.py
+  - name: PyMethodMayBeStaticInspection
+    paths:
+      - src/pyracast/admin.py
+      - src/pyracast/api/trash.py
+      - src/pyracast/incidents/api.py
+  - name: PyUnnecessaryCastInspection
+    paths:
+      - src/pyracast/admin_forms.py
+      - src/pyracast/api/public.py
+      - src/pyracast/plants/incident_forecasts.py
+  - name: PySimplifyBooleanCheckInspection
+    paths:
+      - src/pyracast/calculation.py
+      - src/pyracast/notifications/preparation.py
+  - name: DuplicatedCode
+    paths:
+      - web/tests
+      - web/integration
+  - name: PyMethodOverridingInspection
+    paths:
+      - src/pyracast/admin.py
+  - name: PyPackageRequirementsInspection
+    paths:
+      - scripts/dev_dependencies.py

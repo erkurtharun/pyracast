@@ -1,0 +1,78 @@
+from typing import ClassVar
+
+from django.contrib.postgres.operations import AddConstraintNotValid
+from django.db import migrations, models
+from django.db.migrations.operations.base import Operation
+
+
+class Migration(migrations.Migration):
+    dependencies: ClassVar[list[tuple[str, str]]] = [
+        ("connections", "0007_alter_provideraccount_secret_reference"),
+        ("regions", "0005_region_one_active_region_per_tenant_location"),
+    ]
+
+    operations: ClassVar[list[Operation]] = [
+        migrations.AddConstraint(
+            model_name="sitebinding",
+            constraint=models.UniqueConstraint(
+                fields=("id", "region"), name="binding_region_identity"
+            ),
+        ),
+        migrations.AddConstraint(
+            model_name="sitebinding",
+            constraint=models.UniqueConstraint(
+                fields=("id", "provider_account"), name="binding_account_identity"
+            ),
+        ),
+        AddConstraintNotValid(
+            model_name="sitebinding",
+            constraint=models.CheckConstraint(
+                condition=models.Q(("capacity_kw__lt", float("inf"))),
+                name="binding_capacity_finite",
+            ),
+        ),
+        AddConstraintNotValid(
+            model_name="sitebinding",
+            constraint=models.CheckConstraint(
+                condition=models.Q(("latitude__gte", -90), ("latitude__lte", 90)),
+                name="binding_latitude",
+            ),
+        ),
+        AddConstraintNotValid(
+            model_name="sitebinding",
+            constraint=models.CheckConstraint(
+                condition=models.Q(("longitude__gte", -180), ("longitude__lte", 180)),
+                name="binding_longitude",
+            ),
+        ),
+        AddConstraintNotValid(
+            model_name="sitebinding",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    ("capacity_basis", models.F("power_basis")), ("power_basis__in", ("ac", "dc"))
+                ),
+                name="binding_matching_power_basis",
+            ),
+        ),
+        AddConstraintNotValid(
+            model_name="sitebinding",
+            constraint=models.CheckConstraint(
+                condition=models.Q(("azimuth_degrees__gte", 0), ("azimuth_degrees__lt", 360)),
+                name="binding_azimuth",
+            ),
+        ),
+        AddConstraintNotValid(
+            model_name="sitebinding",
+            constraint=models.CheckConstraint(
+                condition=models.Q(("losses_percent__gte", 0), ("losses_percent__lt", 100)),
+                name="binding_losses",
+            ),
+        ),
+        AddConstraintNotValid(
+            model_name="sitebinding",
+            constraint=models.CheckConstraint(
+                condition=models.Q(("health__in", ("unknown", "healthy", "error"))),
+                name="binding_health",
+            ),
+        ),
+    ]

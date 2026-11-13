@@ -1,0 +1,81 @@
+# Python environments and build output
+.venv/
+.venv-*/
+venv/
+env/
+ENV/
+__pypackages__/
+__pycache__/
+*.py[codz]
+*.so
+*.egg-info/
+*.egg
+build/
+dist/
+.pdm-python
+
+# Test, type checker and formatter caches
+.pytest_cache/
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+junit.xml
+audit-requirements.txt
+
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+.envrc
+.pypirc
+/secrets/
+gha-creds-*.json
+local_settings.py
+
+# Local services and application data
+.dev/
+*.log
+*.pid
+db.sqlite3
+db.sqlite3-*
+/media/
+/staticfiles/
+/docs/json_*.json
+
+# Frontend dependencies and generated output
+node_modules/
+.next/
+.next-*/
+out/
+*.tsbuildinfo
+/web/coverage/
+/web/playwright-report/
+/web/test-results/
+/web/AGENTS.md
+
+# Local agent/IDE state and scanner output
+/.codex/*
+!/.codex/hooks.json
+!/.codex/hooks/
+/.codex/hooks/*
+!/.codex/hooks/*.py
+.code-review-graph/
+.code-review-graph.db*
+.idea/
+*.code-workspace
+.scannerwork/
+.sonar/
+
+# Operating system and editor artifacts
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~

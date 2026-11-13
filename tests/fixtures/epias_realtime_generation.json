@@ -1,0 +1,9 @@
+{
+  "items": [
+    {"date": "2026-11-09T00:00:00+03:00", "hour": "00:00", "total": 0, "sun": 0},
+    {"date": "2026-11-09T01:00:00+03:00", "hour": "01:00", "total": null, "sun": null},
+    {"date": "2026-11-09T12:00:00+03:00", "hour": "12:00", "total": 7.125, "sun": 7.125}
+  ],
+  "page": {"number": 1, "size": 100, "total": 3, "sort": null},
+  "totals": {"total": 7.125}
+}

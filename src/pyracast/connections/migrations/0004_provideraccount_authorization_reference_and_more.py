@@ -1,0 +1,33 @@
+from typing import ClassVar
+
+import django.db.models.deletion
+from django.conf import settings
+from django.db import migrations, models
+from django.db.migrations.operations.base import Operation
+
+
+class Migration(migrations.Migration):
+    dependencies: ClassVar = [
+        ("connections", "0003_remove_provideraccount_canonical_provider_account_and_more"),
+        migrations.swappable_dependency(settings.AUTH_USER_MODEL),
+    ]
+
+    operations: ClassVar[list[Operation]] = [
+        migrations.AddField(
+            model_name="provideraccount",
+            name="authorization_reference",
+            field=models.CharField(default="", max_length=500),
+        ),
+        migrations.AddField(
+            model_name="provideraccount",
+            name="authorized_at",
+            field=models.DateTimeField(null=True),
+        ),
+        migrations.AddField(
+            model_name="provideraccount",
+            name="authorized_by",
+            field=models.ForeignKey(
+                null=True, on_delete=django.db.models.deletion.PROTECT, to=settings.AUTH_USER_MODEL
+            ),
+        ),
+    ]

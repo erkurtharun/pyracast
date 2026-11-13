@@ -1,0 +1,17 @@
+from typing import ClassVar
+
+from django.db import migrations, models
+
+
+class Migration(migrations.Migration):
+    dependencies: ClassVar[list[tuple[str, str]]] = [
+        ("connections", "0006_reference_dc_capacity"),
+    ]
+
+    operations: ClassVar[list[migrations.operations.base.Operation]] = [
+        migrations.AlterField(
+            model_name="provideraccount",
+            name="secret_reference",
+            field=models.CharField(max_length=2048),
+        ),
+    ]

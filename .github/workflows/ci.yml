@@ -1,0 +1,320 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  deployment:
+    name: Deployment configuration and containers
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: 0.13.7
+      - name: Validate GitHub workflows and deployment scripts
+        run: >-
+          docker run --rm -v "$PWD:/repo" -w /repo --entrypoint sh
+          rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+          -c 'actionlint -color && shellcheck deploy/*.sh'
+      - name: Verify release failure recovery without cloud access
+        run: >-
+          docker run --rm --network none --cap-drop ALL --entrypoint bash
+          -v "$PWD/deploy:/source:ro"
+          python:3.15.2-slim-trixie@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
+          /source/test-release.sh
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.17.2
+          terraform_wrapper: false
+      - name: Validate Terraform without cloud credentials or backend access
+        working-directory: infra/terraform
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false -lockfile=readonly
+          terraform validate
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.39.0
+          driver-opts: image=moby/buildkit:v0.35.0@sha256:aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb
+      - name: Build the production backend without cloud credentials
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: pyracast-backend:ci
+          provenance: false
+      - name: Build the production web without cloud credentials
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: web
+          file: web/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: pyracast-web:ci
+          provenance: false
+      - name: Build the production gateway
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: deploy/gateway
+          platforms: linux/amd64
+          load: true
+          tags: pyracast-gateway:ci
+          provenance: false
+      - name: Build the production PostgreSQL image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: deploy/postgres
+          platforms: linux/amd64
+          load: true
+          tags: pyracast-postgres:ci
+          provenance: false
+      - name: Scan gateway, RabbitMQ and PostgreSQL
+        run: |
+          POSTGRES_IMAGE=$(docker image inspect pyracast-postgres:ci --format '{{.Id}}')
+          [[ "$POSTGRES_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "POSTGRES_IMAGE=$POSTGRES_IMAGE" >> "$GITHUB_ENV"
+          bash deploy/scan-support.sh pyracast-gateway:ci "$POSTGRES_IMAGE"
+      - name: Exercise the production images and Compose boundary
+        run: bash deploy/smoke.sh pyracast-backend:ci pyracast-web:ci pyracast-gateway:ci "$POSTGRES_IMAGE"
+
+  verify:
+    name: Verify (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 55432
+      PGUSER: pyracast
+      PGDATABASE: pyracast
+      PYRACAST_SECRET_KEY: ci-only-key-not-for-deployment
+      PYTEST_XDIST_AUTO_NUM_WORKERS: '2'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: 0.13.7
+          enable-cache: true
+      - run: uv sync --locked --no-build
+      - run: uv run --locked --no-sync --no-build python scripts/start_postgres.py
+      - name: Start RabbitMQ (Windows)
+        if: matrix.os == 'windows-latest'
+        run: uv run --locked --no-sync --no-build python scripts/start_rabbitmq.py
+      - name: Start RabbitMQ (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          RABBITMQ_DEFAULT_PASS="$(openssl rand -hex 24)"
+          echo "::add-mask::${RABBITMQ_DEFAULT_PASS}"
+          export RABBITMQ_DEFAULT_PASS
+          docker run -d --name pyracast-rabbitmq -p 127.0.0.1:5672:5672 -e RABBITMQ_DEFAULT_USER=pyracast -e RABBITMQ_DEFAULT_PASS rabbitmq:4.4.0@sha256:485319d42170eab53d8a030e1cc49d95e41f5d325479fa504736db8091981eb7
+          for _ in $(seq 1 90); do
+            if docker exec --user rabbitmq pyracast-rabbitmq rabbitmq-diagnostics -q check_running; then
+              echo 'PYRACAST_LIVE_QUEUE=1' >> "$GITHUB_ENV"
+              echo "PYRACAST_RABBITMQ_URL=amqp://pyracast:${RABBITMQ_DEFAULT_PASS}@127.0.0.1:5672/%2F" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs pyracast-rabbitmq
+          exit 1
+      - run: uv run --locked --no-sync --no-build pyracast migrate --noinput
+      - run: uv run --locked --no-sync --no-build pyracast migrate --check
+      - run: uv run --locked --no-sync --no-build pyracast check
+      - name: Report test worker allocation
+        run: >-
+          uv run --locked --no-sync --no-build python -c
+          "import os, psutil; print({'xdist_workers': os.environ['PYTEST_XDIST_AUTO_NUM_WORKERS'], 'physical_cpus': psutil.cpu_count(logical=False), 'logical_cpus': psutil.cpu_count()})"
+      - run: uv run --locked --no-sync --no-build python scripts/check.py
+      - run: uv build --no-sources
+      - name: Check wheel in an isolated environment
+        shell: python
+        run: |
+          import os
+          import pathlib
+          import subprocess
+          import sys
+          import tempfile
+          wheel, = pathlib.Path('dist').glob('*.whl')
+          with tempfile.TemporaryDirectory() as directory:
+              root = pathlib.Path(directory)
+              env = root / 'venv'
+              python = env / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
+              variables = os.environ.copy()
+              variables['UV_PROJECT_ENVIRONMENT'] = str(env)
+              subprocess.run(['uv', 'sync', '--locked', '--no-build', '--no-dev', '--no-install-project'],
+                             env=variables, check=True)
+              subprocess.run(['uv', 'pip', 'install', '--python', str(python), '--no-deps',
+                              '--no-build', str(wheel.resolve())], cwd=pathlib.Path.home(), check=True)
+              subprocess.run([str(python), '-I', '-c', 'import pyracast; print(pyracast.__version__)'],
+                             cwd=pathlib.Path.home(), check=True)
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          name: coverage
+          path: coverage.xml
+          if-no-files-found: error
+          retention-days: 7
+
+  web:
+    name: Web (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: 55432
+      PGUSER: pyracast
+      PGDATABASE: pyracast
+      PYRACAST_SECRET_KEY: ci-only-key-not-for-deployment
+      PYRACAST_BROWSER_TEST: '1'
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: 0.13.7
+          enable-cache: true
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26.13.0
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: uv sync --locked --no-build
+      - run: uv run --locked --no-sync --no-build python scripts/start_postgres.py
+      - run: npm ci --ignore-scripts
+        working-directory: web
+      - run: npx --no-install playwright install --with-deps chromium
+        working-directory: web
+      - name: Verify API schema and generated types
+        env:
+          PYRACAST_DEBUG: "0"
+        run: |
+          uv run --locked --no-sync --no-build pyracast spectacular --validate --fail-on-warn --format openapi-json --file web/openapi.json
+          npm --prefix web run api:generate
+          git diff --exit-code -- web/openapi.json web/src/lib/schema.d.ts
+      - run: npm run check
+        if: matrix.os == 'windows-latest'
+        working-directory: web
+      - run: npm run check:coverage
+        if: matrix.os == 'ubuntu-latest'
+        working-directory: web
+      - run: npm audit --audit-level=low
+        working-directory: web
+      - name: Exercise browser against Django and PostgreSQL
+        run: uv run --locked --no-sync --no-build python -m pytest tests/test_browser.py -n 1 --no-cov
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          name: web-coverage
+          path: web/coverage/lcov.info
+          if-no-files-found: error
+          retention-days: 7
+
+  scientific:
+    name: Scientific (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: 0.13.7
+      - name: Check scientific dependencies
+        shell: python
+        run: |
+          import subprocess
+          subprocess.run(['uv', 'python', 'install', '3.15.2'], check=True)
+          python = subprocess.check_output(['uv', 'python', 'find', '3.15.2'], text=True).strip()
+          subprocess.run([python, 'scripts/check_scientific.py'], check=True)
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: 0.13.7
+      - run: uv sync --locked --no-build
+      - run: uv export --locked --all-groups --all-extras --no-emit-project --no-hashes --output-file audit-requirements.txt
+      - run: uv run --locked --no-sync --no-build pip-audit --strict --no-deps --disable-pip --requirement audit-requirements.txt
+
+  sonar:
+    name: Sonar quality gate
+    needs: [verify, web]
+    if: >-
+      vars.SONAR_ENABLED == 'true' &&
+      github.event_name != 'merge_group' &&
+      github.actor != 'dependabot[bot]' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: coverage
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: web-coverage
+          path: web/coverage
+      - name: Validate Sonar configuration
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+        shell: python
+        run: |
+          import os
+          missing = [name for name in ('SONAR_TOKEN', 'SONAR_PROJECT_KEY', 'SONAR_ORGANIZATION')
+                     if not os.environ.get(name)]
+          if missing:
+              raise SystemExit('Missing Sonar configuration: ' + ', '.join(missing))
+      - uses: SonarSource/sonarqube-scan-action@e805d875275f728fac1885b413934be6d7c63f65 # v8.4.1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
+          SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+        with:
+          args: >-
+            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+            -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}

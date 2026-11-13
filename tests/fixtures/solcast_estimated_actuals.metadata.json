@@ -1,0 +1,19 @@
+{
+  "source_kind": "estimated_actuals",
+  "collected_at": "2026-11-10T01:14:10.727260+00:00",
+  "available_at": "2026-11-10T01:14:10.724514+00:00",
+  "issued_at": null,
+  "authentication": "bearer",
+  "http_status": 200,
+  "request_parameters": {
+    "format": "json",
+    "hours": 168
+  },
+  "accuracy": "unvalidated",
+  "sanitization": "allowlisted fields; account and site identifiers omitted",
+  "interval_count": 337,
+  "raw_first_period_end": "2026-11-03T01:30:00.0000000Z",
+  "raw_last_period_end": "2026-11-10T01:30:00.0000000Z",
+  "coverage_start": "2026-11-03T01:00:00+00:00",
+  "coverage_end": "2026-11-08T21:00:00+00:00"
+}

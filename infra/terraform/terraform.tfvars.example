@@ -1,0 +1,11 @@
+project_id = "your-existing-billing-project"
+region     = "us-central1"
+zone       = "us-central1-a"
+domain     = "forecast.example.com"
+acme_email = "operator@example.com"
+
+operator_members = ["user:operator@example.com"]
+
+# PostgreSQL shares the single application VM; hourly backups live in a private bucket.
+machine_type = "e2-medium"
+data_disk_gb = 30

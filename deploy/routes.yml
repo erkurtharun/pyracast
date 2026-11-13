@@ -1,0 +1,45 @@
+http:
+  routers:
+    # Inherit TLS and the ACME resolver from websecure; tls: {} would discard its resolver.
+    backend:
+      rule: 'Host(`{{ env "SITE_ADDRESS" }}`) && (Path(`/api`) || PathPrefix(`/api/`) || Path(`/admin`) || PathPrefix(`/admin/`) || PathPrefix(`/static/`) || PathPrefix(`/health/`))'
+      entryPoints: [websecure]
+      priority: 100
+      middlewares: [security, body-limit, compression]
+      service: backend
+    frontend:
+      rule: 'Host(`{{ env "SITE_ADDRESS" }}`)'
+      entryPoints: [websecure]
+      priority: 10
+      middlewares: [security, body-limit, compression]
+      service: frontend
+  services:
+    backend:
+      loadBalancer:
+        servers: [{url: "http://api:8000"}]
+    frontend:
+      loadBalancer:
+        servers: [{url: "http://web:3000"}]
+  middlewares:
+    security:
+      headers:
+        customRequestHeaders:
+          Forwarded: ""
+          X-Forwarded-Proto: https
+        customResponseHeaders:
+          Server: ""
+        stsSeconds: 31536000
+        contentTypeNosniff: true
+        referrerPolicy: same-origin
+    body-limit:
+      buffering:
+        maxRequestBodyBytes: 8388608
+        memRequestBodyBytes: 1048576
+    compression:
+      compress: {}
+
+tls:
+  options:
+    default:
+      minVersion: VersionTLS12
+      sniStrict: true

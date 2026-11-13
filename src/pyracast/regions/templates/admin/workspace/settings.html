@@ -1,0 +1,28 @@
+{% extends "admin/workspace/base.html" %}
+{% block title %}Settings{% endblock %}
+{% block heading %}Settings{% endblock %}
+{% block lead %}<p class="lead">Platform-wide limits.</p>{% endblock %}
+{% block content %}
+  {% if settings_form.errors %}<section class="notice notice--error" role="alert" tabindex="-1" data-error-summary aria-labelledby="errors-title">
+    <h2 id="errors-title">Review the recipient limit</h2>
+    <p><a href="#reminders-title">Check the value and messages below.</a></p>
+  </section>{% endif %}
+  <section class="panel panel--narrow" aria-labelledby="reminders-title">
+    <div class="panel-head"><h2 id="reminders-title">Email reminders</h2></div>
+    <dl class="facts facts--compact">
+      <div><dt>Current limit</dt><dd>{{ recipient_limit }} recipient{{ recipient_limit|pluralize }} per plant</dd></div>
+    </dl>
+    <form method="post" class="form">
+      {% csrf_token %}
+      {% for field in settings_form.hidden_fields %}{{ field }}{{ field.errors }}{% endfor %}
+      {{ settings_form.non_field_errors }}
+      <div class="field{% if settings_form.max_recipients.errors %} field--error{% endif %}">
+        {{ settings_form.max_recipients.as_field_group }}
+      </div>
+      <p class="callout">Lowering the limit pauses reminders for plants whose saved recipient list is over it. Their lists are kept, not deleted, and reminders resume once the list is shortened or the limit is raised.</p>
+      <div class="form-actions">
+        <button type="submit" class="btn btn--primary">Save limit</button>
+      </div>
+    </form>
+  </section>
+{% endblock %}
