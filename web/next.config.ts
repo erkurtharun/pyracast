@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
 
 const config = (phase: string): NextConfig => ({
+    output: "standalone",
     distDir: process.env.NEXT_DIST_DIR ?? ".next",
     productionBrowserSourceMaps: process.env.PLAYWRIGHT_COVERAGE === "1",
     poweredByHeader: false,

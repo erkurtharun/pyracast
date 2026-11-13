@@ -5,6 +5,7 @@ from django.views.decorators.http import require_POST
 from drf_spectacular.views import SpectacularAPIView
 from rest_framework.permissions import IsAuthenticated
 
+from pyracast import health
 from pyracast.accounts import headless
 from pyracast.accounts.mfa_views import ManageRecoveryCodesView
 from pyracast.accounts.signup import CompanySignupView
@@ -28,6 +29,8 @@ from pyracast.forecasts.views import CollectionScheduleView
 from pyracast.plants.site_api import SitesView, SiteView
 
 urlpatterns = [
+    path("health/live/", health.live),
+    path("health/ready/", health.ready),
     path("admin/", site.urls),
     path("api/auth/browser/v1/auth/login", headless.LoginView.as_api_view(client=Client.BROWSER)),
     path(

@@ -1,0 +1,46 @@
+x-local-logs: &local-logs
+  driver: local
+  options: !override {max-size: 10m, max-file: "5"}
+
+services:
+  sqlproxy:
+    logging: *local-logs
+    image: postgres:18.6-bookworm@sha256:f1ea2a1a4fb7b68d4836be1fdcb8a6466a89b072158bf9d97663600538c294c5
+    command: !reset null
+    read_only: false
+    cap_drop: !reset []
+    environment:
+      POSTGRES_DB: pyracast
+      POSTGRES_PASSWORD: smoke-bootstrap-only
+    volumes: [smoke-postgres:/var/lib/postgresql]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U postgres -d pyracast]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  gateway:
+    logging: *local-logs
+    volumes: !override
+      - ${CADDY_CONFIG_FILE}:/etc/caddy/Caddyfile:ro
+      - ./routes.caddy:/etc/caddy/routes.caddy:ro
+      - smoke-caddy:/data
+  rabbitmq:
+    logging: *local-logs
+    volumes: !override [smoke-rabbitmq:/var/lib/rabbitmq]
+  api:
+    logging: *local-logs
+  web:
+    logging: *local-logs
+  worker:
+    logging: *local-logs
+  notifications:
+    logging: *local-logs
+  dispatcher:
+    logging: *local-logs
+  migrate:
+    logging: *local-logs
+
+volumes:
+  smoke-postgres:
+  smoke-caddy:
+  smoke-rabbitmq:

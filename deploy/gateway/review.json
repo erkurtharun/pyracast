@@ -1,0 +1,25 @@
+{
+  "reviewed": "2026-11-13",
+  "expires": "2026-11-27",
+  "binary_sha256": "76a5a62c8048e6b5c221bd359c7baa399cce7d2b0dbc12d751a52fc699342832",
+  "configuration_sha256": {
+    "deploy/Caddyfile": "31d102483ef8cf5ff1545f8a681cc6350f3e3f3a548aa34b3b8c4ddd79d27178",
+    "deploy/routes.caddy": "787ee9ec9ff6e0e06ff37f7b7bb94087059711caa917c15607b12ff35b90381a"
+  },
+  "finding": {
+    "target": "usr/bin/caddy",
+    "vulnerability": "CVE-2026-116587",
+    "package": "github.com/go-jose/go-jose/v3",
+    "version": "v3.0.5"
+  },
+  "status": "not_affected",
+  "justification": "vulnerable_code_not_in_execute_path",
+  "impact_statement": "The vulnerable RSA private-JWK parser remains compiled. The reviewed reverse-proxy configuration disables administration and exposes no ACME server, JWK/JWT handler or PKI API. Public automatic-HTTPS HTTP-01 challenges serve stored key authorizations without parsing client JWS/JWK bodies. This is a configuration-dependent conclusion, not an upstream fix or absence of vulnerable code.",
+  "sources": [
+    "https://github.com/go-jose/go-jose/security/advisories/GHSA-mgcc-cww5-fp2q",
+    "https://github.com/caddyserver/caddy/blob/v2.11.9/modules/caddypki/acmeserver/acmeserver.go",
+    "https://github.com/smallstep/certificates/blob/v0.30.2/acme/api/middleware.go",
+    "https://github.com/smallstep/crypto/blob/v0.91.0/jose/types.go",
+    "https://github.com/caddyserver/certmagic/blob/v0.25.6/httphandlers.go"
+  ]
+}

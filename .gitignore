@@ -35,6 +35,7 @@ audit-requirements.txt
 .envrc
 .pypirc
 /secrets/
+gha-creds-*.json
 local_settings.py
 
 # Local services and application data

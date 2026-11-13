@@ -15,6 +15,70 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  deployment:
+    name: Deployment configuration and containers
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Validate GitHub workflows and deployment scripts
+        run: >-
+          docker run --rm -v "$PWD:/repo" -w /repo --entrypoint sh
+          rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+          -c 'actionlint -color && shellcheck deploy/*.sh'
+      - name: Verify release failure recovery without cloud access
+        run: >-
+          docker run --rm --network none --cap-drop ALL --entrypoint bash
+          -v "$PWD/deploy:/source:ro"
+          python:3.15.2-slim-trixie@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
+          /source/test-release.sh
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.17.2
+          terraform_wrapper: false
+      - name: Validate Terraform without cloud credentials or backend access
+        working-directory: infra/terraform
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false -lockfile=readonly
+          terraform validate
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.39.0
+          driver-opts: image=moby/buildkit:v0.35.0@sha256:aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb
+      - name: Build the production backend without cloud credentials
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: pyracast-backend:ci
+          provenance: false
+      - name: Build the production web without cloud credentials
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: web
+          file: web/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: pyracast-web:ci
+          provenance: false
+      - name: Build the patched production gateway
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: deploy/gateway
+          platforms: linux/amd64
+          load: true
+          tags: pyracast-gateway:ci
+          provenance: false
+      - name: Scan gateway, RabbitMQ and Cloud SQL proxy
+        run: bash deploy/scan-support.sh pyracast-gateway:ci
+      - name: Exercise the production images and Compose boundary
+        run: bash deploy/smoke.sh pyracast-backend:ci pyracast-web:ci pyracast-gateway:ci
+
   verify:
     name: Verify (${{ matrix.os }})
     strategy:
@@ -49,7 +113,7 @@ jobs:
           echo "::add-mask::${RABBITMQ_DEFAULT_PASS}"
           export RABBITMQ_DEFAULT_PASS
           docker run -d --name pyracast-rabbitmq -p 127.0.0.1:5672:5672 -e RABBITMQ_DEFAULT_USER=pyracast -e RABBITMQ_DEFAULT_PASS rabbitmq:4.4.0@sha256:485319d42170eab53d8a030e1cc49d95e41f5d325479fa504736db8091981eb7
-          for attempt in $(seq 1 90); do
+          for _ in $(seq 1 90); do
             if docker exec --user rabbitmq pyracast-rabbitmq rabbitmq-diagnostics -q check_running; then
               echo 'PYRACAST_LIVE_QUEUE=1' >> "$GITHUB_ENV"
               echo "PYRACAST_RABBITMQ_URL=amqp://pyracast:${RABBITMQ_DEFAULT_PASS}@127.0.0.1:5672/%2F" >> "$GITHUB_ENV"

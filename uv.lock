@@ -410,15 +410,15 @@ wheels = [
 
 [[package]]
 name = "django-allauth"
-version = "65.22.0"
+version = "65.22.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "asgiref" },
     { name = "django" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d0/bd/a7d34e50c8f26a7056480ce13f18ba0d0a8c086f5e0e1b8666d41052d2f0/django_allauth-65.22.0.tar.gz", hash = "sha256:cdef61e0e12460d331074072d84702184df4f5a989ad005bec2bd1629efd9b4b", size = 2351848, upload-time = "2026-11-11T19:59:21.768Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/20/d7/fd2e9622eeb6f2dffd005fc478a3de22e4bd9e91518dca33c145ce0f514b/django_allauth-65.22.1.tar.gz", hash = "sha256:b05e20b8f511066c97ed98491520a2ca0319ef16d7f27feed9f688cc6877a8ba", size = 2352989, upload-time = "2026-11-13T09:25:16.184Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1d/71/c14070650e8a43b1c82ad616708a1471aa657841f39aa155e4505a1900c4/django_allauth-65.22.0-py3-none-any.whl", hash = "sha256:5ea1501ff5d3c56bffd4bfbf2e7b88e010960ec1baa7c75b6257d51ca13064b5", size = 2118438, upload-time = "2026-11-11T19:59:17.889Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/15/f7bd5323ed1f83869f902033faa1630eb1d4e24d220ac5372e82f7600474/django_allauth-65.22.1-py3-none-any.whl", hash = "sha256:08f7a3ddbd5ff7f1000d685dee9c0678d0da2057e18bed473a6eb2de18bd04e4", size = 2116758, upload-time = "2026-11-13T09:25:13.281Z" },
 ]
 
 [package.optional-dependencies]
@@ -543,6 +543,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/a3/1d/d730c664fcb4f1d264a722722a3134cf0881854f73c1fd58abf87572f232/filelock-4.2.9.tar.gz", hash = "sha256:96530b7c538d4ea08493ab067247aab7948c54d8cd622cce711c97cccc5d9896", size = 663116, upload-time = "2026-11-04T18:37:10.014Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/00/05/76184fe08339723d643ab47887a8e4de8f2921ca4e008617ab7490af7857/filelock-4.2.9-py3-none-any.whl", hash = "sha256:a379c50a729e5b68c8519a4d26489f755d9769960a236ecd838190e2a78db2e9", size = 164734, upload-time = "2026-11-04T18:37:08.273Z" },
+]
+
+[[package]]
+name = "gunicorn"
+version = "26.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d9/8a/e4ef6ee11701b6cd64702848415ffb69eeff85cb388a3c6c7fe86f22f3f8/gunicorn-26.2.0.tar.gz", hash = "sha256:62b864895d9ebff0b2f9867ba04fe811c93121596540830c9c916d0769668447", size = 787921, upload-time = "2026-08-24T15:05:59.3Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fe/85/7522a52e5e2f42faf1a129113ab63e548c42e103e9af395b7bfe65e403e2/gunicorn-26.2.0-py3-none-any.whl", hash = "sha256:bd249d0b3f7972f7432f0a6b6ff3b3ee2d129f70cd1ff6c09a9dd9e29a2b88e3", size = 228389, upload-time = "2026-08-24T15:05:57.67Z" },
 ]
 
 [[package]]
@@ -1136,10 +1145,12 @@ dependencies = [
     { name = "djangorestframework" },
     { name = "dramatiq", extra = ["rabbitmq"] },
     { name = "drf-spectacular" },
+    { name = "gunicorn", marker = "sys_platform != 'win32'" },
     { name = "httpx" },
     { name = "psycopg", extra = ["binary"] },
     { name = "python-dotenv" },
     { name = "tzdata" },
+    { name = "whitenoise" },
 ]
 
 [package.optional-dependencies]
@@ -1171,15 +1182,17 @@ requires-dist = [
     { name = "astral", specifier = "==3.2" },
     { name = "cryptography", specifier = "==50.0.2" },
     { name = "django", specifier = ">=6.1.3" },
-    { name = "django-allauth", extras = ["headless", "mfa"], specifier = "==65.22.0" },
+    { name = "django-allauth", extras = ["headless", "mfa"], specifier = "==65.22.1" },
     { name = "djangorestframework", specifier = ">=3.18.3" },
     { name = "dramatiq", extras = ["rabbitmq"], specifier = ">=2.2.1" },
     { name = "drf-spectacular", specifier = ">=0.30.0" },
+    { name = "gunicorn", marker = "sys_platform != 'win32'", specifier = "==26.2.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.9" },
     { name = "pvlib", marker = "extra == 'scientific'", specifier = ">=0.16.1" },
     { name = "python-dotenv", specifier = ">=1.2.4" },
     { name = "tzdata", specifier = ">=2026.6" },
+    { name = "whitenoise", specifier = "==6.12.0" },
 ]
 provides-extras = ["scientific"]
 
@@ -1544,4 +1557,13 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/e3/05/b17359e1cefb4f909b5e40b1b90a496d987258916dbbf88e842c729f510e/urllib3-2.8.0.tar.gz", hash = "sha256:63bf2ead4c879426ebf22ef2a781eeb4aa3b4ae798a0435506f8687fd5bb9b63", size = 458972, upload-time = "2026-09-15T19:29:36.253Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/92/9d/c4e665119135114480843e7ab388fa94d8480650450e6f8e26b70d323a4c/urllib3-2.8.0-py3-none-any.whl", hash = "sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3", size = 135717, upload-time = "2026-09-15T19:29:34.577Z" },
+]
+
+[[package]]
+name = "whitenoise"
+version = "6.12.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/cb/2a/55b3f3a4ec326cd077c1c3defeee656b9298372a69229134d930151acd01/whitenoise-6.12.0.tar.gz", hash = "sha256:f723ebb76a112e98816ff80fcea0a6c9b8ecde835f8ddda25df7a30a3c2db6ad", size = 26841, upload-time = "2026-02-27T00:05:42.028Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/db/eb/d5583a11486211f3ebd4b385545ae787f32363d453c19fffd81106c9c138/whitenoise-6.12.0-py3-none-any.whl", hash = "sha256:fc5e8c572e33ebf24795b47b6a7da8da3c00cff2349f5b04c02f28d0cc5a3cc2", size = 20302, upload-time = "2026-02-27T00:05:40.086Z" },
 ]

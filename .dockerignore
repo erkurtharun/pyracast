@@ -1,0 +1,13 @@
+**
+!pyproject.toml
+!uv.lock
+!README.md
+!src/
+!src/**
+!deploy/
+!deploy/gunicorn_conf.py
+!Dockerfile
+**/__pycache__/
+**/*.py[cod]
+**/.env*
+**/gha-creds-*.json

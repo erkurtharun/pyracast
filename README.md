@@ -47,8 +47,17 @@ uv export --locked --all-groups --all-extras --no-emit-project --no-hashes --out
 uv run --locked pip-audit --strict --no-deps --disable-pip --requirement audit-requirements.txt
 ```
 
-Dependabot proposes weekly uv and GitHub Actions updates; workflow actions are
-pinned to immutable commits. No auto-merge or deployment is configured.
+Dependabot proposes weekly dependency, image, Terraform and GitHub Actions updates;
+workflow actions are pinned to immutable commits. No auto-merge is configured.
+
+## Google Cloud
+
+Follow [the deployment guide](docs/DEPLOYMENT.md) for the low-cost single-VM
+Docker Compose deployment with private Cloud SQL, Secret Manager, HTTPS, backups
+and keyless GitHub Actions delivery. Terraform and production containers are in
+`infra/terraform/` and `deploy/`. Deployment remains disabled until the operator
+configures the cloud project and sets `GCP_DEPLOY_ENABLED=true`; repository changes
+alone do not provision paid resources.
 
 ## Run locally
 
@@ -804,8 +813,7 @@ updates. Queries resolve this external database through the registry in `CRG_HOM
 they do not support a `--data-dir` flag. No graph database belongs in git.
 
 The local Sonar MCP connection is configured in ignored `.codex/config.toml`.
-It uses the official Sonar MCP JAR and the installed Java runtime because Docker
-is unavailable on this workstation. Its startup and tool discovery have been
-verified. Restart the Codex session to load newly added MCP tools. Other machines
+It uses the official Sonar MCP JAR and the installed Java runtime. Its startup and
+tool discovery have been verified. Restart the Codex session to load newly added MCP tools. Other machines
 can use either Docker or Java 21+ following the
 [official MCP setup](https://github.com/SonarSource/sonarqube-mcp-server).

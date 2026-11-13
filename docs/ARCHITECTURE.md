@@ -51,7 +51,12 @@ files request the same graceful path on Windows and Ubuntu. Stop and failed-star
 cleanup wait for those processes to exit and preserve their identity on timeout.
 Legacy managed processes without this option use a best-effort database drain and
 bounded termination; queued work can start between the final check and termination.
-The production HTTPS gateway and process supervision remain deployment responsibilities.
+The production HTTPS gateway and process supervision are provided by the
+[Google Cloud deployment](DEPLOYMENT.md): Caddy and systemd-supervised Docker Compose
+on one Compute Engine VM, private Cloud SQL, separate schema/runtime roles and
+Secret Manager. This initial topology deliberately accepts VM downtime to control
+cost; PostgreSQL remains independent of the VM. CI promotes immutable tested image
+digests and runs migrations separately during a controlled maintenance window.
 
 ## Boundaries and records
 

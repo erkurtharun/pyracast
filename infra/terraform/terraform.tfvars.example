@@ -1,0 +1,10 @@
+project_id = "your-existing-billing-project"
+region     = "europe-west1"
+zone       = "europe-west1-b"
+domain     = "forecast.example.com"
+acme_email = "operator@example.com"
+
+operator_members = ["user:operator@example.com"]
+
+# Regional database redundancy does not make the single application VM redundant.
+database_ha = false

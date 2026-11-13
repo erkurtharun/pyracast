@@ -1,0 +1,113 @@
+#!/bin/bash
+set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive
+
+apt-get update
+apt-get install --yes --no-install-recommends ca-certificates curl iptables python3
+install -d -m 0755 /etc/apt/keyrings
+curl --fail --silent --show-error --location https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+chmod 0644 /etc/apt/keyrings/docker.asc
+cat >/etc/apt/sources.list.d/docker.sources <<'EOF'
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: noble
+Components: stable
+Architectures: amd64
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+apt-get update
+apt-get install --yes --no-install-recommends --allow-change-held-packages \
+  docker-ce=5:29.9.3-1~ubuntu.24.04~noble \
+  docker-ce-cli=5:29.9.3-1~ubuntu.24.04~noble \
+  containerd.io=2.4.2-2~ubuntu.24.04~noble \
+  docker-compose-plugin=5.7.1-1~ubuntu.24.04~noble
+apt-mark hold docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+install -d -m 0755 /etc/docker
+cat >/etc/docker/daemon.json <<'EOF'
+{
+  "log-driver": "local",
+  "log-opts": {"max-size": "10m", "max-file": "5"},
+  "firewall-backend": "iptables",
+  "ipv6": false,
+  "live-restore": true
+}
+EOF
+
+data_device=/dev/disk/by-id/google-pyracast-data
+for attempt in $(seq 1 90); do
+  test ! -b "$data_device" || break
+  sleep 1
+done
+test -b "$data_device"
+filesystem=$(blkid -s TYPE -o value "$data_device" || true)
+if test -z "$filesystem"; then
+  # Refuse to format a disk containing any existing partition or filesystem signature.
+  test -z "$(wipefs --no-act --noheadings --output TYPE "$data_device")"
+  mkfs.ext4 -F "$data_device"
+elif test "$filesystem" != ext4; then
+  echo 'The application data disk must use ext4.' >&2
+  exit 1
+fi
+data_uuid=$(blkid -s UUID -o value "$data_device")
+install -d -m 0755 /var/lib/pyracast
+if ! grep --quiet --fixed-strings "UUID=$data_uuid /var/lib/pyracast " /etc/fstab; then
+  if awk '$2 == "/var/lib/pyracast" { found=1 } END { exit !found }' /etc/fstab; then
+    echo 'A different data disk is already configured; inspect fstab before continuing.' >&2
+    exit 1
+  fi
+  echo "UUID=$data_uuid /var/lib/pyracast ext4 defaults,nodev,nosuid 0 2" >>/etc/fstab
+fi
+mountpoint --quiet /var/lib/pyracast || mount /var/lib/pyracast
+install -d -o 999 -g 999 -m 0750 /var/lib/pyracast/rabbitmq
+install -d -o 10001 -g 10001 -m 0750 /var/lib/pyracast/caddy /var/lib/pyracast/caddy/data /var/lib/pyracast/caddy/config
+install -d -m 0755 /opt/pyracast/releases
+install -d -m 0700 /etc/pyracast
+echo '${host_config_base64}' | base64 --decode >/etc/pyracast/host.json
+chmod 0600 /etc/pyracast/host.json
+echo '${network_guard_base64}' | base64 --decode >/usr/local/sbin/pyracast-network-guard
+chmod 0755 /usr/local/sbin/pyracast-network-guard
+
+install -d -m 0755 /etc/systemd/system/docker.service.d
+cat >/etc/systemd/system/docker.service.d/pyracast-data.conf <<'EOF'
+[Unit]
+RequiresMountsFor=/var/lib/pyracast
+
+[Service]
+ExecStartPre=/usr/local/sbin/pyracast-network-guard
+ExecStartPost=/usr/local/sbin/pyracast-network-guard
+EOF
+
+cat >/etc/systemd/system/pyracast.service <<'EOF'
+[Unit]
+Description=Pyracast application containers
+Wants=network-online.target
+Requires=docker.service
+After=network-online.target docker.service
+RequiresMountsFor=/var/lib/pyracast
+ConditionPathExists=/opt/pyracast/current/deploy/compose.yaml
+ConditionPathExists=!/var/lib/pyracast/release-blocked
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/pyracast/current
+RuntimeDirectory=pyracast
+RuntimeDirectoryMode=0700
+ExecStartPre=/usr/local/sbin/pyracast-network-guard
+ExecStartPre=/usr/bin/python3 /opt/pyracast/current/deploy/runtime_secrets.py /etc/pyracast/host.json
+ExecStart=/usr/bin/docker compose --env-file deploy/release.env -f deploy/compose.yaml up --detach --wait --wait-timeout 180
+ExecStop=/usr/bin/docker compose --env-file deploy/release.env -f deploy/compose.yaml stop --timeout 660
+TimeoutStartSec=300
+TimeoutStopSec=720
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable docker.service pyracast.service
+systemctl restart docker.service
+if test -f /opt/pyracast/current/deploy/compose.yaml; then
+  systemctl start pyracast.service
+fi

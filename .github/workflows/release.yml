@@ -1,0 +1,232 @@
+name: Release
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    if: >-
+      vars.GCP_DEPLOY_ENABLED == 'true' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha: ${{ steps.authorize.outputs.sha }}
+    steps:
+      - name: Authorize the current main commit against its exact CI run
+        id: authorize
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const repository = context.repo;
+            const { data: workflow } = await github.rest.actions.getWorkflow({
+              ...repository, workflow_id: 'ci.yml',
+            });
+            const { data: main } = await github.rest.repos.getBranch({ ...repository, branch: 'main' });
+            const sha = main.commit.sha;
+            if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('Invalid main SHA');
+            let run;
+            if (context.eventName === 'workflow_run') {
+              ({ data: run } = await github.rest.actions.getWorkflowRun({
+                ...repository, run_id: context.payload.workflow_run.id,
+              }));
+            } else {
+              const { data } = await github.rest.actions.listWorkflowRuns({
+                ...repository, workflow_id: workflow.id, branch: 'main', head_sha: sha, per_page: 100,
+              });
+              run = data.workflow_runs.find(candidate =>
+                ['push', 'workflow_dispatch'].includes(candidate.event) && candidate.conclusion === 'success');
+            }
+            if (!run || run.workflow_id !== workflow.id || run.path !== '.github/workflows/ci.yml' ||
+                run.repository.full_name !== `${repository.owner}/${repository.repo}` ||
+                run.head_repository?.full_name !== `${repository.owner}/${repository.repo}` ||
+                !['push', 'workflow_dispatch'].includes(run.event) || run.head_branch !== 'main' ||
+                run.head_sha !== sha || run.status !== 'completed' || run.conclusion !== 'success') {
+              throw new Error('Only the current main SHA with successful repository CI may be released');
+            }
+            core.setOutput('sha', sha);
+            await core.summary.addRaw(`Authorized main commit ${sha} using CI run ${run.id}.`).write();
+
+  deploy:
+    needs: authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_SHA: ${{ needs.authorize.outputs.sha }}
+      GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      GCP_ZONE: ${{ vars.GCP_ZONE }}
+      GCP_INSTANCE: ${{ vars.GCP_INSTANCE }}
+      GCP_ARTIFACT_REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY }}
+      GCP_MIGRATION_SECRET: ${{ vars.GCP_MIGRATION_SECRET }}
+      GCP_SQL_INSTANCE: ${{ vars.GCP_SQL_INSTANCE }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.authorize.outputs.sha }}
+          persist-credentials: false
+      - name: Validate deployment configuration
+        env:
+          GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
+          GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+        run: |
+          for name in RELEASE_SHA GCP_PROJECT_ID GCP_ZONE GCP_INSTANCE GCP_ARTIFACT_REPOSITORY GCP_MIGRATION_SECRET GCP_SQL_INSTANCE GCP_WIF_PROVIDER GCP_DEPLOY_SERVICE_ACCOUNT; do
+            test -n "${!name}" || { echo "Missing production variable: $name"; exit 1; }
+          done
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$GCP_ARTIFACT_REPOSITORY" =~ ^[a-z0-9-]+-docker\.pkg\.dev/[a-z0-9-]+/[a-z0-9_-]+$ ]]
+          [[ "$GCP_INSTANCE" =~ ^[a-z][a-z0-9-]*$ ]]
+          [[ "$GCP_ZONE" =~ ^[a-z0-9-]+$ ]]
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          version: v0.39.0
+          driver-opts: image=moby/buildkit:v0.35.0@sha256:aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+        with:
+          version: 593.0.0
+      - name: Configure Artifact Registry credentials
+        run: gcloud auth configure-docker "${GCP_ARTIFACT_REPOSITORY%%/*}" --quiet
+      - name: Reuse immutable images when retrying the same commit
+        id: existing
+        run: |
+          for image in backend web gateway; do
+            if digest="$(docker buildx imagetools inspect "$GCP_ARTIFACT_REPOSITORY/$image:$RELEASE_SHA" --format '{{.Manifest.Digest}}' 2>/dev/null)"; then
+              [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+              echo "$image=$digest" >> "$GITHUB_OUTPUT"
+            fi
+          done
+      - name: Publish backend with provenance and SBOM
+        id: backend
+        if: steps.existing.outputs.backend == ''
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ vars.GCP_ARTIFACT_REPOSITORY }}/backend:${{ needs.authorize.outputs.sha }}
+          provenance: mode=max
+          sbom: generator=docker/buildkit-syft-scanner:stable-1@sha256:873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315
+          labels: org.opencontainers.image.revision=${{ needs.authorize.outputs.sha }}
+      - name: Publish web with provenance and SBOM
+        id: web
+        if: steps.existing.outputs.web == ''
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: web
+          file: web/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ vars.GCP_ARTIFACT_REPOSITORY }}/web:${{ needs.authorize.outputs.sha }}
+          provenance: mode=max
+          sbom: generator=docker/buildkit-syft-scanner:stable-1@sha256:873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315
+          labels: org.opencontainers.image.revision=${{ needs.authorize.outputs.sha }}
+      - name: Publish patched gateway with provenance and SBOM
+        id: gateway
+        if: steps.existing.outputs.gateway == ''
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: deploy/gateway
+          platforms: linux/amd64
+          push: true
+          tags: ${{ vars.GCP_ARTIFACT_REPOSITORY }}/gateway:${{ needs.authorize.outputs.sha }}
+          provenance: mode=max
+          sbom: generator=docker/buildkit-syft-scanner:stable-1@sha256:873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315
+          labels: org.opencontainers.image.revision=${{ needs.authorize.outputs.sha }}
+      - name: Resolve immutable release references
+        env:
+          BACKEND_DIGEST: ${{ steps.existing.outputs.backend || steps.backend.outputs.digest }}
+          WEB_DIGEST: ${{ steps.existing.outputs.web || steps.web.outputs.digest }}
+          GATEWAY_DIGEST: ${{ steps.existing.outputs.gateway || steps.gateway.outputs.digest }}
+        run: |
+          [[ "$BACKEND_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$WEB_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$GATEWAY_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          {
+            echo "BACKEND_IMAGE=$GCP_ARTIFACT_REPOSITORY/backend@$BACKEND_DIGEST"
+            echo "WEB_IMAGE=$GCP_ARTIFACT_REPOSITORY/web@$WEB_DIGEST"
+            echo "GATEWAY_IMAGE=$GCP_ARTIFACT_REPOSITORY/gateway@$GATEWAY_DIGEST"
+          } >> "$GITHUB_ENV"
+      - name: Scan backend; block every high or critical vulnerability
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.2
+          image-ref: ${{ env.BACKEND_IMAGE }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: '1'
+          cache: false
+      - name: Scan web; block every high or critical vulnerability
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.76.2
+          image-ref: ${{ env.WEB_IMAGE }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: '1'
+          cache: false
+      - name: Scan the exact gateway and public support images
+        run: bash deploy/scan-support.sh "$GATEWAY_IMAGE"
+      - name: Smoke test the exact published images
+        run: bash deploy/smoke.sh "$BACKEND_IMAGE" "$WEB_IMAGE" "$GATEWAY_IMAGE"
+      - name: Create and wait for a pre-migration Cloud SQL backup
+        run: |
+          gcloud sql backups create --project="$GCP_PROJECT_ID" --instance="$GCP_SQL_INSTANCE" \
+            --description="pyracast-release-$RELEASE_SHA" --quiet
+      - name: Refuse a superseded release before changing production
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { data } = await github.rest.repos.getBranch({ ...context.repo, branch: 'main' });
+            if (data.commit.sha !== process.env.RELEASE_SHA) throw new Error('Main advanced; release the new passing CI commit');
+      - name: Transfer the verified release and deploy through IAP
+        run: |
+          set -euo pipefail
+          umask 077
+          stage="/dev/shm/pyracast-$RELEASE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          local_stage="$(mktemp -d)"
+          cleanup() {
+            rm -f "$local_stage/migration.json" "$local_stage/release.tar.gz"
+            rmdir "$local_stage"
+            gcloud compute ssh "$GCP_INSTANCE" --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" \
+              --tunnel-through-iap --ssh-key-expire-after=1h --quiet --command="sudo rm -rf -- '$stage'" || true
+          }
+          trap cleanup EXIT
+          git archive --format=tar.gz --output="$local_stage/release.tar.gz" "$RELEASE_SHA" deploy
+          gcloud secrets versions access latest --secret="$GCP_MIGRATION_SECRET" \
+            --project="$GCP_PROJECT_ID" --out-file="$local_stage/migration.json"
+          gcloud compute ssh "$GCP_INSTANCE" --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" \
+            --tunnel-through-iap --ssh-key-expire-after=1h --quiet --command="umask 077; mkdir '$stage'; mkdir '$stage/bundle'"
+          gcloud compute scp "$local_stage/release.tar.gz" "$local_stage/migration.json" "$GCP_INSTANCE:$stage/" \
+            --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" --tunnel-through-iap --ssh-key-expire-after=1h --quiet
+          gcloud compute ssh "$GCP_INSTANCE" --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" \
+            --tunnel-through-iap --ssh-key-expire-after=1h --quiet \
+            --command="tar -xzf '$stage/release.tar.gz' -C '$stage/bundle' && sudo bash '$stage/bundle/deploy/install-release.sh' '$RELEASE_SHA' '$BACKEND_IMAGE' '$WEB_IMAGE' '$GATEWAY_IMAGE' '$stage/bundle' '$stage/migration.json'"
+      - name: Record the deployed digests
+        run: |
+          printf 'Released %s\n\nBackend: %s\n\nWeb: %s\n\nGateway: %s\n' "$RELEASE_SHA" "$BACKEND_IMAGE" "$WEB_IMAGE" "$GATEWAY_IMAGE" >> "$GITHUB_STEP_SUMMARY"
