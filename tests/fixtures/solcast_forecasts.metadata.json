@@ -1,0 +1,12 @@
+{
+  "collected_at": "2026-11-09T15:15:37.195320+00:00",
+  "issued_at": null,
+  "source_kind": "forecast",
+  "authentication": "bearer",
+  "http_status": 200,
+  "sanitization": "allowlisted fields; account and site identifiers omitted",
+  "accuracy": "unvalidated",
+  "provider": "solcast",
+  "interval_count": 97,
+  "matched_ghi_available": false
+}

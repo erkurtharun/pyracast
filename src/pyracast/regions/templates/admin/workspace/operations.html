@@ -1,0 +1,123 @@
+{% extends "admin/workspace/base.html" %}
+{% block title %}Operations{% endblock %}
+{% block heading %}Operations{% endblock %}
+{% block lead %}<p class="lead">Collection and email status.</p>{% endblock %}
+{% block content %}
+  <section class="panel" aria-labelledby="checks-title">
+    <div class="panel-head">
+      <h2 id="checks-title">Health checks</h2>
+      {% if health.healthy %}
+        <span class="badge badge--healthy">All checks clear</span>
+      {% else %}
+        <span class="badge badge--needs-attention">Needs attention</span>
+      {% endif %}
+    </div>
+    {% if not health.healthy %}<ul class="checks">
+      {% for check in health_checks %}
+        {% if check.count %}<li class="check check--raised">
+          <span class="check-count">{{ check.count }}</span>
+          <div>
+            <p class="check-label">{{ check.label }}
+              <span class="badge badge--needs-attention">Check</span></p>
+            <p class="row-meta">{{ check.help }}</p>
+          </div>
+        </li>{% endif %}
+      {% endfor %}
+    </ul>{% endif %}
+    {% if health.unhealthy_dispatch_phases %}<p class="row-meta"><a class="text-link" href="#dispatch-title">Review dispatcher status</a></p>{% endif %}
+  </section>
+
+  <section class="panel" aria-labelledby="dispatch-title">
+    <div class="panel-head"><h2 id="dispatch-title">Dispatch</h2></div>
+      <div class="table-wrap" role="region" aria-labelledby="dispatch-title" tabindex="0">
+        <table class="table table--stack">
+          <thead>
+            <tr><th scope="col">Phase</th><th scope="col">State</th><th scope="col">Last attempt</th><th scope="col">Last success</th><th scope="col">Last error</th></tr>
+          </thead>
+          <tbody>
+            {% for phase in dispatch_phases %}
+              <tr>
+                <th scope="row" data-label="Phase">{{ phase.label }}</th>
+                <td data-label="State">
+                  <span class="badge{% if phase.unhealthy %} badge--needs-attention{% else %} badge--healthy{% endif %}">{{ phase.state_label }}</span>
+                </td>
+                <td data-label="Last attempt">{% if phase.attempted_at %}<time datetime="{{ phase.attempted_at|date:'c' }}">{{ phase.attempted_at|date:"j M Y, H:i T" }}</time>{% else %}<span class="muted">Never</span>{% endif %}</td>
+                <td data-label="Last success">{% if phase.succeeded_at %}<time datetime="{{ phase.succeeded_at|date:'c' }}">{{ phase.succeeded_at|date:"j M Y, H:i T" }}</time>{% else %}<span class="muted">Never</span>{% endif %}</td>
+                <td data-label="Last error">{% if phase.last_error %}<span class="code">{{ phase.last_error }}</span>{% else %}<span class="muted">None</span>{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+  </section>
+
+  <section class="panel" aria-labelledby="collections-title">
+    <div class="panel-head"><h2 id="collections-title">Data collection</h2><p class="row-meta">Latest 20 jobs</p></div>
+    {% if collections %}
+      <div class="table-wrap" role="region" aria-labelledby="collections-title" tabindex="0">
+        <table class="table table--stack">
+          <thead>
+            <tr><th scope="col">Plant</th><th scope="col">Data</th><th scope="col">Status</th><th scope="col">Scheduled for</th><th scope="col">Attempts</th><th scope="col">Last error</th></tr>
+          </thead>
+          <tbody>
+            {% for job in collections %}
+              <tr>
+                <th scope="row" data-label="Plant">
+                  <span class="cell">
+                    <a class="row-title" href="{{ job.review_url }}">{{ job.plant_name }}</a>
+                    <span class="row-meta">{{ job.company }}</span>
+                  </span>
+                </th>
+                <td data-label="Data"><span class="cell"><span>{{ job.kind }}</span><span class="row-meta">{{ job.target_date|date:"j M Y" }}</span></span></td>
+                <td data-label="Status"><span class="badge badge--{{ job.status|slugify }}">{{ job.status_label }}</span></td>
+                <td data-label="Scheduled for"><time datetime="{{ job.scheduled_for|date:'c' }}">{{ job.scheduled_for|date:"j M Y, H:i T" }}</time></td>
+                <td data-label="Attempts">{{ job.attempts }}</td>
+                <td data-label="Last error">{% if job.error_label %}{{ job.error_label }}{% else %}<span class="muted">None</span>{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty">No collection jobs yet.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel" aria-labelledby="deliveries-title">
+    <div class="panel-head"><h2 id="deliveries-title">Email delivery</h2><p class="row-meta">Latest 20 deliveries</p></div>
+    {% if deliveries %}
+      <div class="table-wrap" role="region" aria-labelledby="deliveries-title" tabindex="0">
+        <table class="table table--stack">
+          <thead>
+            <tr><th scope="col">Plant</th><th scope="col">Recipient</th><th scope="col">Status</th><th scope="col">Scheduled for</th><th scope="col">Accepted</th><th scope="col">Attempts</th><th scope="col">Last error</th></tr>
+          </thead>
+          <tbody>
+            {% for delivery in deliveries %}
+              <tr>
+                <th scope="row" data-label="Plant">
+                  <span class="cell">
+                    <a class="row-title" href="{{ delivery.review_url }}">{{ delivery.plant_name }}</a>
+                    <span class="row-meta">{{ delivery.company }}</span>
+                  </span>
+                </th>
+                <td data-label="Recipient">{% if delivery.recipient %}<span class="wrap">{{ delivery.recipient }}</span>{% else %}<span class="muted">Not set</span>{% endif %}</td>
+                <td data-label="Status">
+                  <span class="cell">
+                    <span class="badge badge--{{ delivery.status|slugify }}">{{ delivery.status_label }}</span>
+                    {% if delivery.status == "uncertain" %}<span class="row-meta">The mail server's acceptance is unknown. Confirm with the mail provider before a manual resend.</span>{% endif %}
+                  </span>
+                </td>
+                <td data-label="Scheduled for"><time datetime="{{ delivery.scheduled_for|date:'c' }}">{{ delivery.scheduled_for|date:"j M Y, H:i T" }}</time></td>
+                <td data-label="Accepted">{% if delivery.sent_at %}<time datetime="{{ delivery.sent_at|date:'c' }}">{{ delivery.sent_at|date:"j M Y, H:i T" }}</time>{% elif delivery.status == "uncertain" or delivery.status == "sending" %}<span class="muted">Not confirmed</span>{% else %}<span class="muted">Not sent</span>{% endif %}</td>
+                <td data-label="Attempts">{{ delivery.attempts }}</td>
+                <td data-label="Last error">{% if delivery.error_label %}{{ delivery.error_label }}{% else %}<span class="muted">None</span>{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="empty">No email deliveries yet.</p>
+    {% endif %}
+  </section>
+{% endblock %}

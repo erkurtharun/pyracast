@@ -1,0 +1,49 @@
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      development:
+        dependency-type: development
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      # Runtime minor/major upgrades require a coordinated compatibility review.
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+  - package-ecosystem: docker
+    directory: /web
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker-compose
+    directory: /deploy
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /deploy/gateway
+    schedule:
+      interval: weekly
+  - package-ecosystem: gomod
+    directory: /deploy/gateway
+    schedule:
+      interval: weekly
+  - package-ecosystem: terraform
+    directory: /infra/terraform
+    schedule:
+      interval: weekly
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    ignore:
+      # Upgrade with the OpenAPI generator when its TypeScript peer range permits it.
+      - dependency-name: typescript
+        versions: [">=6"]

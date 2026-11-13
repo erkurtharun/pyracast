@@ -1,0 +1,11 @@
+.next
+.next-*
+node_modules
+package-lock.json
+openapi.json
+src/lib/schema.d.ts
+next-env.d.ts
+playwright-report
+test-results
+coverage
+.dev

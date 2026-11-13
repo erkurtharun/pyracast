@@ -1,0 +1,345 @@
+import hashlib
+import json
+from dataclasses import dataclass, replace
+from datetime import date, datetime, timedelta
+from math import isfinite
+from typing import Any
+from zoneinfo import ZoneInfo
+
+from django.db.models import Q, QuerySet
+
+from pyracast.epias import TIMEZONE
+from pyracast.forecasts.history import HISTORY_SELECTION_POLICY, select_actual_snapshot
+from pyracast.incidents.operations import pinned_incidents, select_incidents
+from pyracast.irradiance import local_day_bounds
+from pyracast.metering.models import EpiasConnection, EpiasSnapshot
+from pyracast.plants.measurement_policy import (
+    LEGACY_MEASUREMENT_POLICY as LEGACY_MEASUREMENT_POLICY,
+)
+from pyracast.plants.measurement_policy import (
+    MEASUREMENT_POLICY as MEASUREMENT_POLICY,
+)
+from pyracast.plants.models import CalibrationRun, PlantConfiguration, ProductionObservation
+
+
+def _source_kinds(policy: str) -> list[str]:
+    if policy == LEGACY_MEASUREMENT_POLICY:
+        return ["settlement_injection"]
+    if policy == MEASUREMENT_POLICY:
+        return ["settlement_injection", "realtime_generation"]
+    raise ValueError("Unknown measurement selection policy")
+
+
+@dataclass(frozen=True)
+class Measurement:
+    starts_at: datetime
+    ends_at: datetime
+    energy_mwh: float
+    quality: str
+    source: str
+    pk: int | None
+    recorded_at: datetime
+    snapshot: EpiasSnapshot | None = None
+
+
+def _current_production(
+    configuration: PlantConfiguration, cutoff: datetime, policy: str
+) -> QuerySet[EpiasSnapshot]:
+    connection = EpiasConnection.objects.filter(
+        plant_id=configuration.plant_id, enabled=True
+    ).first()
+    query = EpiasSnapshot.objects.filter(
+        configuration=configuration,
+        source_kind__in=_source_kinds(policy),
+        available_at__lte=cutoff,
+        collected_at__lte=cutoff,
+    )
+    if configuration.measurement_basis != "net_export" or connection is None:
+        return query.none()
+    identities = Q(
+        source_kind="realtime_generation", provider_plant__id=connection.provider_plant_id
+    )
+    if connection.settlement_plant_id is not None:
+        identities |= Q(
+            source_kind="settlement_injection", provider_plant__id=connection.settlement_plant_id
+        )
+    return query.filter(
+        connection=connection,
+        provider_plant__eic=connection.eic,
+    ).filter(identities)
+
+
+def latest_measurement_day(
+    configuration: PlantConfiguration,
+    completed_before: datetime,
+    cutoff: datetime,
+    observation_id_cutoff: int,
+    *,
+    policy: str = MEASUREMENT_POLICY,
+) -> date | None:
+    zone = ZoneInfo(configuration.binding.timezone)
+    last_manual = (
+        ProductionObservation.objects.filter(
+            configuration=configuration,
+            recorded_at__lte=cutoff,
+            ends_at__lte=completed_before,
+            pk__lte=observation_id_cutoff,
+        )
+        .order_by("-ends_at")
+        .values_list("ends_at", flat=True)
+        .first()
+    )
+    manual_day = (
+        (last_manual - timedelta(microseconds=1)).astimezone(zone).date()
+        if last_manual is not None
+        else None
+    )
+    days = (
+        _current_production(configuration, cutoff, policy)
+        .filter(
+            target_day__lte=(completed_before - timedelta(microseconds=1))
+            .astimezone(TIMEZONE)
+            .date()
+        )
+        .order_by("-target_day", "-collected_at", "-available_at", "-pk")
+        .distinct("target_day")
+        .values_list("target_day", flat=True)
+        .iterator(chunk_size=100)
+    )
+    seen: set[date] = set()
+    for provider_day in days:
+        provider_start, provider_end = local_day_bounds(provider_day, str(TIMEZONE))
+        first_day = provider_start.astimezone(zone).date()
+        day = (provider_end - timedelta(microseconds=1)).astimezone(zone).date()
+        while day >= first_day:
+            if manual_day is not None and day <= manual_day:
+                return manual_day
+            start, end = local_day_bounds(day, configuration.binding.timezone)
+            if day not in seen and end <= completed_before:
+                rows, _ = select_measurements(
+                    configuration,
+                    start,
+                    end,
+                    cutoff,
+                    observation_id_cutoff=observation_id_cutoff,
+                    policy=policy,
+                )
+                if rows:
+                    return day
+                seen.add(day)
+            day -= timedelta(days=1)
+    return manual_day
+
+
+def select_measurements(
+    configuration: PlantConfiguration,
+    start: datetime,
+    end: datetime,
+    cutoff: datetime,
+    *,
+    observation_id_cutoff: int | None = None,
+    production_snapshot_ids: list[int] | None = None,
+    incident_revision_ids: list[int] | None = None,
+    policy: str = MEASUREMENT_POLICY,
+) -> tuple[list[Measurement], list[int]]:
+    kinds = _source_kinds(policy)
+    manual = ProductionObservation.objects.filter(
+        configuration=configuration,
+        starts_at__lt=end,
+        ends_at__gt=start,
+        recorded_at__lte=cutoff,
+    )
+    manual = manual.filter(ends_at__lte=cutoff)
+    if observation_id_cutoff is not None:
+        manual = manual.filter(pk__lte=observation_id_cutoff)
+    overlapping_manual = list(manual)
+    rows = [
+        Measurement(r.starts_at, r.ends_at, r.energy_mwh, r.quality, r.source, r.pk, r.recorded_at)
+        for r in overlapping_manual
+        if r.starts_at >= start and r.ends_at <= end
+    ]
+    if production_snapshot_ids is None:
+        snapshots = _current_production(configuration, cutoff, policy)
+    else:
+        snapshots = EpiasSnapshot.objects.filter(
+            configuration=configuration,
+            source_kind__in=kinds,
+            available_at__lte=cutoff,
+            collected_at__lte=cutoff,
+            pk__in=production_snapshot_ids,
+        )
+    snapshots = (
+        snapshots.filter(
+            target_day__gte=start.astimezone(TIMEZONE).date(),
+            target_day__lte=(end - timedelta(microseconds=1)).astimezone(TIMEZONE).date(),
+        )
+        .order_by("target_day", "source_kind", "-collected_at", "-available_at", "-pk")
+        .distinct("target_day", "source_kind")
+    )
+    selected = sorted(
+        snapshots.select_related("job"), key=lambda item: kinds.index(item.source_kind)
+    )
+    provider_rows: dict[datetime, Measurement] = {}
+    for snapshot in selected:
+        if (
+            snapshot.job.source_kind != snapshot.source_kind
+            or snapshot.job.configuration_id != configuration.pk
+            or snapshot.normalization_policy != "hour-start-istanbul-v1"
+        ):
+            continue
+        for row in _provider_measurements(snapshot, start, end, cutoff):
+            if row.starts_at in provider_rows or any(
+                manual.starts_at < row.ends_at and manual.ends_at > row.starts_at
+                for manual in overlapping_manual
+            ):
+                continue
+            provider_rows[row.starts_at] = row
+    rows.extend(provider_rows.values())
+    incidents = (
+        select_incidents(configuration.plant_id, start, end, cutoff)
+        if incident_revision_ids is None
+        else pinned_incidents(configuration.plant_id, incident_revision_ids)
+    )
+    rows = [
+        replace(row, quality="outage")
+        if row.quality == "valid"
+        and any(
+            incident.starts_at < row.ends_at
+            and (incident.ends_at is None or incident.ends_at > row.starts_at)
+            for incident in incidents
+        )
+        else row
+        for row in rows
+    ]
+    used = {row.snapshot.pk for row in rows if row.snapshot is not None}
+    return sorted(rows, key=lambda r: (r.starts_at, r.pk or 0)), [
+        snapshot.pk
+        for snapshot in sorted(selected, key=lambda s: (s.target_day, s.pk))
+        if snapshot.pk in used
+    ]
+
+
+def _provider_measurements(
+    snapshot: EpiasSnapshot, start: datetime, end: datetime, cutoff: datetime
+) -> list[Measurement]:
+    rows = []
+    for reading in snapshot.readings:
+        if (
+            not isinstance(reading, dict)
+            or reading.get("total_mwh") is None
+            or reading.get("reported") is False
+        ):
+            continue
+        try:
+            begin = datetime.fromisoformat(reading["period_start"])
+            finish = datetime.fromisoformat(reading["period_end"])
+            energy = float(reading["total_mwh"])
+        except ValueError, TypeError, KeyError:
+            continue
+        local_begin = begin.astimezone(TIMEZONE) if begin.utcoffset() is not None else begin
+        if (
+            begin.utcoffset() is None
+            or finish.utcoffset() is None
+            or finish - begin != timedelta(hours=1)
+            or local_begin.date() != snapshot.target_day
+            or any((local_begin.minute, local_begin.second, local_begin.microsecond))
+            or begin < start
+            or finish > end
+            or finish > cutoff
+            or not isfinite(energy)
+            or energy < 0
+        ):
+            continue
+        rows.append(
+            Measurement(
+                begin,
+                finish,
+                energy,
+                "valid",
+                snapshot.source_kind,
+                None,
+                snapshot.available_at,
+                snapshot,
+            )
+        )
+    return rows
+
+
+def selection_fingerprint(
+    configuration: PlantConfiguration,
+    rows: list[Measurement],
+    cutoff: datetime,
+    incident_revision_ids: list[int] | None = None,
+    *,
+    policy: str = MEASUREMENT_POLICY,
+) -> tuple[str, dict[str, int | None]]:
+    zone = ZoneInfo(configuration.binding.timezone)
+    days = sorted({r.starts_at.astimezone(zone).date() for r in rows})
+    references: dict[str, int | None] = {}
+    reference_content: dict[str, Any] = {}
+    for day in days:
+        snapshot = select_actual_snapshot(configuration.binding, day, cutoff)
+        references[day.isoformat()] = snapshot.pk if snapshot else None
+        reference_content[day.isoformat()] = (
+            {
+                "intervals": snapshot.normalized_intervals,
+                "endpoint": snapshot.job.endpoint,
+                "historical_import": snapshot.job.reference_import_id is not None,
+            }
+            if snapshot
+            else None
+        )
+    values = [
+        {
+            "start": r.starts_at.isoformat(),
+            "end": r.ends_at.isoformat(),
+            "energy": r.energy_mwh,
+            "quality": r.quality,
+            "source": r.source,
+            "manual_id": r.pk,
+            "provider": r.snapshot.provider_plant if r.snapshot else None,
+        }
+        for r in rows
+    ]
+    payload = {
+        "policy": policy,
+        "reference_selection_policy": HISTORY_SELECTION_POLICY,
+        "configuration": configuration.pk,
+        "rows": values,
+        "reference": reference_content,
+        "incident_revision_ids": incident_revision_ids or [],
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    ).hexdigest()
+    return digest, references
+
+
+def production_identity_current(run: CalibrationRun) -> bool:
+    if not run.production_snapshot_ids:
+        return True
+    connection = EpiasConnection.objects.filter(plant_id=run.plant_id).first()
+    if connection is None:
+        return False
+    snapshots = list(
+        EpiasSnapshot.objects.filter(
+            pk__in=run.production_snapshot_ids,
+            configuration_id=run.configuration_id,
+            connection=connection,
+            source_kind__in=_source_kinds(run.measurement_selection_policy),
+        ).select_related("job")
+    )
+    return len(snapshots) == len(run.production_snapshot_ids) and all(
+        snapshot.provider_plant.get("id") is not None
+        and snapshot.provider_plant.get("id")
+        == (
+            connection.settlement_plant_id
+            if snapshot.source_kind == "settlement_injection"
+            else connection.provider_plant_id
+        )
+        and snapshot.provider_plant.get("eic") == connection.eic
+        and snapshot.job.source_kind == snapshot.source_kind
+        and snapshot.job.configuration_id == run.configuration_id
+        and snapshot.normalization_policy == "hour-start-istanbul-v1"
+        for snapshot in snapshots
+    )

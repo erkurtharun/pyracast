@@ -1,0 +1,10 @@
+{
+  "provider": "EPIAS Transparency Platform",
+  "product": "injection-quantity",
+  "unit": "MWh",
+  "captured_at": "2026-11-10T20:55:03.991052+00:00",
+  "eic": "40W000005011621Y",
+  "provider_plant_id": 5011621,
+  "period": "2026-09-01",
+  "sanitization": "Only date, hour, total and sun retained; no credentials or tickets."
+}

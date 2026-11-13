@@ -1,0 +1,114 @@
+import { test, expect } from "./support/test";
+import { mockApi, paged, plant, region } from "./support/workspace";
+import AxeBuilder from "@axe-core/playwright";
+
+test("renames a plant without changing its location", async ({ page }) => {
+    await mockApi(page);
+    let current = plant;
+    await page.route("**/api/tenants/1/sites/", (route) =>
+        route.fulfill({ json: paged([{ ...region, plant: current }]) }),
+    );
+    await page.route(
+        "**/api/tenants/1/regions/11/plants/21/",
+        async (route) => {
+            expect(route.request().method()).toBe("PUT");
+            expect(route.request().headers()["x-csrftoken"]).toBe(
+                "signed-token",
+            );
+            expect(route.request().postDataJSON()).toMatchObject({
+                name: "New name",
+                dc_capacity_mw: 5,
+            });
+            current = { ...plant, name: "New name" };
+            await route.fulfill({ json: current });
+        },
+    );
+    await page.goto("/");
+    await page.getByRole("button", { name: /East array/ }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByLabel("Plant name").fill("New name");
+    await page.getByRole("button", { name: "Save configuration" }).click();
+    await expect(page.getByRole("heading", { name: "New name" })).toBeVisible();
+    await expect(
+        page.getByText("36.9\u00b0, 30.7\u00b0 \u00b7 Europe/Istanbul", {
+            exact: true,
+        }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "All plants" }).click();
+    await expect(page.getByRole("button", { name: /New name/ })).toBeVisible();
+});
+
+test("requests a location change and preserves the current location", async ({
+    page,
+}) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await mockApi(page);
+    let pending = false;
+    let fail = true;
+    await page.route("**/location-change-requests/", async (route) => {
+        if (route.request().method() === "POST") {
+            expect(route.request().headers()["x-csrftoken"]).toBe(
+                "signed-token",
+            );
+            expect(route.request().postDataJSON()).toEqual({
+                latitude: 37,
+                longitude: 31,
+                timezone: "Europe/Istanbul",
+                reason: "Move",
+                expected_revision: 1,
+            });
+            if (fail) {
+                fail = false;
+                await route.fulfill({
+                    status: 400,
+                    json: { detail: "Please try again." },
+                });
+                return;
+            }
+            pending = true;
+        }
+        const item = {
+            id: 1,
+            base_revision: 1,
+            latitude: 37,
+            longitude: 31,
+            timezone: "Europe/Istanbul",
+            reason: "Move",
+            status: "pending",
+            created_at: "2026-01-01T00:00:00Z",
+            reviewed_at: null,
+        };
+        await route.fulfill({
+            json:
+                route.request().method() === "POST"
+                    ? item
+                    : paged(pending ? [item] : []),
+        });
+    });
+    await page.goto("/");
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Location", exact: true }).click();
+    await page.getByText("Request location change", { exact: true }).click();
+    await page.getByLabel("Latitude (°)").fill("37");
+    await page.getByLabel("Longitude (°)").fill("31");
+    await page.getByLabel("Reason (optional)").fill("Move");
+    await page.getByRole("button", { name: "Submit location request" }).click();
+    await expect(page.getByText("Please try again.")).toBeVisible();
+    await expect(page.getByLabel("Latitude (°)")).toHaveValue("37");
+    await page.getByRole("button", { name: "Submit location request" }).click();
+    await expect(page.getByText("37°, 31° · Europe/Istanbul")).toBeVisible();
+    await expect(
+        page.getByText("Current location: 36.9°, 30.7° · Europe/Istanbul"),
+    ).toBeVisible();
+    await expect(page.getByText("pending", { exact: true })).toBeVisible();
+    expect(
+        await page.evaluate(
+            () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+    ).toBe(true);
+    expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
+});

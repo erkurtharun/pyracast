@@ -1,0 +1,17 @@
+http:
+  routers:
+    header-probe:
+      rule: Host(`localhost`) && Path(`/__smoke/headers`)
+      entryPoints: [websecure]
+      priority: 200
+      middlewares: [security]
+      service: header-probe
+  services:
+    header-probe:
+      loadBalancer:
+        servers: [{url: "http://header-probe:8080"}]
+
+tls:
+  certificates:
+    - certFile: /certificates/localhost.pem
+      keyFile: /certificates/localhost-key.pem
