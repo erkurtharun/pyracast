@@ -274,7 +274,7 @@ export function ForecastPanel({
                     <Notice>
                         {forecast.source_kind === "estimated_actuals"
                             ? forecast.calibration_id
-                                ? "Calculated from estimated actuals using the plant configuration entered later and the current calibration."
+                                ? "Calculated from estimated actuals using the plant configuration entered later and the calibration fitted for that period."
                                 : "Calculated from estimated actuals using the plant configuration entered later. No calibration is applied."
                             : "Calculated from the archived forecast using the plant configuration entered later. No calibration is applied."}
                     </Notice>

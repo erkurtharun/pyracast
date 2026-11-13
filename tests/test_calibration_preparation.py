@@ -464,12 +464,12 @@ def test_old_complete_history_uses_window_ending_at_latest_observation(
     assert run.window_end == date(2026, 11, 7)
 
 
-def test_automatic_pool_preserves_180_days_for_inner_window_comparisons(
+def test_automatic_pool_keeps_sixty_days_ending_on_the_latest_recorded_day(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
     assert plant.current_configuration_id is not None
-    for day in (date(2026, 5, 11), date(2026, 5, 12)):
+    for day in (date(2026, 9, 8), date(2026, 9, 9)):
         actual_snapshot_for(system, day)
         start, _ = local_day_bounds(day, system.binding.timezone)
         import_observations(
@@ -488,7 +488,7 @@ def test_automatic_pool_preserves_180_days_for_inner_window_comparisons(
         )
     add_days(system, plant, 1, 7)
     run = CalibrationRun.objects.get()
-    assert (run.window_start, run.window_end) == (date(2026, 5, 12), date(2026, 11, 7))
+    assert (run.window_start, run.window_end) == (date(2026, 9, 9), date(2026, 11, 7))
     assert run.reference_snapshot_ids is not None
     assert len(run.reference_snapshot_ids) == 8
-    assert "2026-05-11" not in run.reference_snapshot_ids
+    assert "2026-09-08" not in run.reference_snapshot_ids

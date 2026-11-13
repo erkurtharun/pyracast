@@ -8,6 +8,7 @@ import pytest
 from pyracast.plants.numerics import CalibrationSample, PowerInterval, fit_calibration
 
 START = datetime(2026, 4, 1, tzinfo=UTC)
+WINDOW = {"policy": "recent-calendar-days-v1", "lookback_days": 30}
 
 
 def _history(days: int = 150) -> tuple[CalibrationSample, ...]:
@@ -42,11 +43,9 @@ def _fit(samples: tuple[CalibrationSample, ...]) -> dict[str, object]:
     ).report
 
 
-def test_recent_transfer_drift_selects_short_history_before_final_holdout() -> None:
+def test_fit_uses_the_thirty_calendar_days_before_the_final_holdout() -> None:
     report = _fit(_history())
-    selection = cast(dict[str, object], report["adaptive_window"])
-    assert selection["status"] == "selected"
-    assert selection["selected_lookback_days"] == 30
+    assert report["training_window"] == WINDOW
     assert 0.8 < cast(float, report["candidate_factor"]) < 0.81
     assert report["training_days"] == 30
     training = cast(list[str], report["training_day_dates"])
@@ -57,62 +56,40 @@ def test_recent_transfer_drift_selects_short_history_before_final_holdout() -> N
     assert candidate["interval_mae_mw"] < 0.1
 
 
-def test_final_holdout_cannot_change_window_selection_or_fit() -> None:
+def test_neither_the_holdout_nor_older_days_can_change_the_fit() -> None:
     samples = _history()
     initial = _fit(samples)
+    training_start = START + timedelta(days=113)
     holdout_start = START + timedelta(days=143)
     changed = _fit(
         tuple(
-            replace(sample, energy_mwh=sample.energy_mwh * 2)
-            if sample.start >= holdout_start
-            else sample
+            sample
+            if training_start <= sample.start < holdout_start
+            else replace(sample, energy_mwh=sample.energy_mwh * 2)
             for sample in samples
         )
     )
-    assert initial["adaptive_window"] == changed["adaptive_window"]
     assert initial["candidate_factor"] == changed["candidate_factor"]
+    assert initial["training_day_dates"] == changed["training_day_dates"]
     assert initial["candidate"] != changed["candidate"]
 
 
-def test_candidate_folds_share_dates_and_require_full_calendar_history() -> None:
-    report = _fit(_history(90))
-    selection = cast(dict[str, object], report["adaptive_window"])
-    candidates = cast(list[dict[str, object]], selection["candidates"])
-    assert [candidate["lookback_days"] for candidate in candidates] == [30, 60, 90]
-    assert candidates[2]["status"] == "insufficient_history"
-    comparable = [c for c in candidates if c["status"] == "evaluated"]
-    dates = []
-    for candidate in comparable:
-        folds = cast(list[dict[str, object]], candidate["folds"])
-        assert len(folds) == 3
-        dates.append([fold["evaluation_day_dates"] for fold in folds])
-        for fold in folds:
-            training = cast(list[str], fold["training_day_dates"])
-            evaluation = cast(list[str], fold["evaluation_day_dates"])
-            assert max(training) < min(evaluation)
-            assert len(training) >= 20
-            assert len(evaluation) == 7
-            assert max(evaluation) < cast(list[str], report["holdout_day_dates"])[0]
-    assert dates[0] == dates[1]
-
-
-@pytest.mark.parametrize("days", [7, 29, 30, 59])
-def test_short_histories_keep_existing_training_split(days: int) -> None:
+@pytest.mark.parametrize(("days", "training"), [(7, 5), (29, 23), (30, 23), (59, 30)])
+def test_short_histories_train_on_every_recent_day_before_the_holdout(
+    days: int, training: int
+) -> None:
     report = _fit(_history(days))
-    selection = cast(dict[str, object], report["adaptive_window"])
-    assert selection["status"] == "insufficient"
-    assert selection["selected_lookback_days"] is None
-    assert report["training_days"] == days - cast(int, report["holdout_days"])
+    assert report["training_window"] == WINDOW
+    assert report["training_days"] == training
+    assert report["training_days"] == min(30, days - cast(int, report["holdout_days"]))
 
 
-@pytest.mark.parametrize("sparse", [False, True])
-def test_unsupported_inner_folds_skip_a_window_or_keep_all_development_days(sparse: bool) -> None:
+def test_sparse_history_keeps_only_days_inside_the_calendar_window() -> None:
     samples = []
     for sample in _history(60):
-        offset = (sample.start - START).days
-        if sparse:
-            shift = timedelta(days=offset)
-            sample = replace(
+        shift = timedelta(days=(sample.start - START).days)
+        samples.append(
+            replace(
                 sample,
                 start=sample.start + shift,
                 end=sample.end + shift,
@@ -121,23 +98,16 @@ def test_unsupported_inner_folds_skip_a_window_or_keep_all_development_days(spar
                     for piece in sample.intervals
                 ),
             )
-        elif offset < 40:
-            sample = replace(
-                sample,
-                energy_mwh=0.008,
-                intervals=(PowerInterval(sample.start, sample.end, 0.01),),
-            )
-        samples.append(sample)
+        )
     report = _fit(tuple(samples))
-    selection = cast(dict[str, object], report["adaptive_window"])
-    assert selection["status"] == ("selected" if sparse else "insufficient")
-    assert selection["selected_lookback_days"] == (60 if sparse else None)
-    candidates = cast(list[dict[str, object]], selection["candidates"])
-    assert candidates[0]["status"] == "insufficient_training_support"
-    assert report["training_days"] == (30 if sparse else 53)
+    assert report["valid_days"] == 60
+    assert report["training_days"] == 15
+    training = cast(list[str], report["training_day_dates"])
+    holdout = cast(list[str], report["holdout_day_dates"])
+    assert date.fromisoformat(holdout[0]) - date.fromisoformat(training[0]) == timedelta(days=30)
 
 
-def test_adaptive_fit_clips_native_power_before_hourly_energy() -> None:
+def test_fit_clips_native_power_before_hourly_energy() -> None:
     samples = []
     for sample in _history():
         factor = 1.3 if (sample.start - START).days < 80 else 0.8
@@ -153,8 +123,6 @@ def test_adaptive_fit_clips_native_power_before_hourly_energy() -> None:
             )
         )
     report = _fit(tuple(samples))
-    selection = cast(dict[str, object], report["adaptive_window"])
-    assert selection["selected_lookback_days"] == 30
     assert 0.8 < cast(float, report["candidate_factor"]) < 0.81
     candidate = cast(dict[str, float], report["candidate"])
     assert candidate["interval_mae_mw"] < 0.1
@@ -179,8 +147,6 @@ def test_lookback_uses_local_calendar_days_across_a_clock_change() -> None:
         limit_mw=100,
         required_windows=windows,
     ).report
-    selection = cast(dict[str, object], report["adaptive_window"])
-    assert selection["selected_lookback_days"] == 30
     training = cast(list[str], report["training_day_dates"])
     holdout = cast(list[str], report["holdout_day_dates"])
     assert date.fromisoformat(holdout[0]) - date.fromisoformat(training[0]) == timedelta(days=30)

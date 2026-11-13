@@ -15,7 +15,7 @@ from pyracast.plants.automatic_forecast import automatic_forecast
 from pyracast.plants.current_forecast import current_forecast
 from pyracast.plants.forecasting import (
     archived_forecast,
-    calibration_at,
+    calibration_for_day,
     declared_forecast,
     forecast_payload,
     plant_forecast,
@@ -76,8 +76,8 @@ def plant_outlook(
 def _current_actuals(
     plant: Plant, target_date: date, cutoff: datetime
 ) -> tuple[PlantConfiguration, ForecastSnapshot, CalibrationRun | None] | None:
-    """Prefer the current declaration and its active calibration for a past day that its
-    binding archived; both are retrospective assumptions, flagged in the result."""
+    """Prefer the current declaration for a past day that its binding archived, with the
+    calibration whose training period covers that day; both are flagged in the result."""
     if plant.current_configuration_id is None:
         return None
     current = PlantConfiguration.objects.select_related("binding__provider_account").get(
@@ -86,7 +86,7 @@ def _current_actuals(
     snapshot = select_actual_snapshot(current.binding, target_date, cutoff)
     if snapshot is None:
         return None
-    calibration = calibration_at(current, cutoff)
+    calibration = calibration_for_day(current, target_date, cutoff)
     if calibration is not None and not production_identity_current(calibration):
         calibration = None
     return current, snapshot, calibration
@@ -183,9 +183,7 @@ def _plant_outlook(
         except (ValueError, ArithmeticError) as exc:
             raise ValidationError("calculation_out_of_range") from exc
         if calibration is not None:
-            cast(list[str], result["quality_flags"]).append(
-                "current_calibration_applied_retrospectively"
-            )
+            cast(list[str], result["quality_flags"]).append("retrospective_calibration")
     return {
         "plant_id": plant.pk,
         "date": target_date.isoformat(),

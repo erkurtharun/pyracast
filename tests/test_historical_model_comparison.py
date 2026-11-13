@@ -74,7 +74,7 @@ def test_historical_daylight_comparison_retains_whole_boundary_hours_and_native_
     )
 
 
-def test_historical_model_applies_the_active_calibration_without_backdating(
+def test_historical_model_applies_the_calibration_fitted_for_that_period(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
@@ -93,6 +93,7 @@ def test_historical_model_applies_the_active_calibration_without_backdating(
     )
     production = acquisition((config, connection))
     selected_factor(system, config, NOW - timedelta(days=20))
+    CalibrationRun.objects.update(result={"training_day_dates": [DAY.isoformat()]})
     client = Client()
     client.force_login(system.member)
     url = (

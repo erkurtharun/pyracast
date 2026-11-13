@@ -80,7 +80,7 @@ def prepare_cohorts(
         (0, 0, 7, ["unknown"], 7, "ready"),
         (0, 7, 0, ["historical_rooftop_pv"], 7, "ready"),
         (7, 0, 2, ["rooftop_pv_power"], 7, "ready"),
-        (30, 60, 0, ["rooftop_pv_power"], 30, "ready"),
+        (30, 30, 0, ["rooftop_pv_power"], 30, "ready"),
     ],
 )
 def test_fit_pools_settings_matched_history_until_thirty_native_days(

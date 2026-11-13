@@ -34,7 +34,7 @@ from pyracast.plants.numerics import (
 from pyracast.regions.models import Region
 from pyracast.solar import daylight_window
 
-AUTOMATIC_POOL_DAYS = 180
+AUTOMATIC_POOL_DAYS = 60
 
 
 def _matched_days(

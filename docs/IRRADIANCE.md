@@ -201,7 +201,7 @@ domain [0.25, 2]. The one-dimensional solver considers every clipping breakpoint
 and each convex segment; it does not assume the entire capped objective is convex.
 These are versioned engineering defaults, not universal statistical constants.
 
-Policy `regularized-huber-v5` uses completed local days with complete, matched
+Policy `regularized-huber-v6` uses completed local days with complete, matched
 astronomical daylight coverage and `valid` observations. Select whole meter
 intervals with positive overlap with daylight; keep sunrise/sunset boundary slots
 and their full energy without prorating. Valid measurements must cover every
@@ -233,15 +233,16 @@ neither duration proves seasonal validity. Intervals within a day are correlated
 so hundreds of half-hours are not hundreds of independent weather realizations.
 Archive twelve completed months of settlement injection initially and 90 days of
 provisional reported production. Preserve every acquisition and its source identity.
-The automatic matching pool contains at most 180 calendar days ending on the latest
-recorded completed day; it supplies past origins for comparing shorter training
-windows rather than forcing one factor to explain six months. With sufficient
-development history, compare 30/60/90-calendar-day training windows on the same three
-chronological seven-day development blocks. Require each candidate window's full
-history and adequate support at every origin. Choose by duration-weighted interval
-MAE, then daily MAE, then the shorter window. Fit the selected window before the
-untouched final holdout; never refit on that holdout. Smaller datasets retain the
-single-window provisional policy and disclose insufficient window-selection evidence.
+The automatic matching pool contains at most 60 calendar days ending on the latest
+recorded completed day. Training uses the valid days within the 30 calendar days before
+the final holdout (`recent-calendar-days-v1`); older days never enter the fit, and the
+holdout is never refitted. On the authorized case with the tracking transfer, weekly
+origins scored on the same evaluation days gave interval MAE 5.58, 5.60, 5.58 and 5.62 MW
+for 30-, 45-, 60- and 90-day windows, 5.88 MW for 14 days and 5.75 MW for 180 days; the
+30-day window had the lowest daily MAE (46.2 MWh). The monthly mean of the 30-day factor
+moved between 0.86 and 0.94 through the year, so one recent month follows that drift
+without a window search. A factor describes its training period onward: completed days
+before that period are not shown with it.
 Year boundaries and matching last year's calendar dates have no special weight.
 Retain operating regimes, capacity changes, meter definitions and known incidents;
 older commissioning data is useful context, not evidence for today's full capacity.
@@ -299,6 +300,18 @@ excludes its intervals and prepares a new fit; manual activation remains availab
 outlooks without a reported outage add `derating_scenario`: DC capacity is scaled by the
 ratio, and the inverter limit too unless the window still reached the cap. This is a
 conditional estimate, not a diagnosis, and its thresholds are engineering defaults.
+
+A fault inside the training window pulls the factor toward the reduced level. Three
+mechanisms keep the factor describing the healthy plant: reported outage intervals never
+enter training; automatic promotion pauses while a derating is suspected against an
+active calibration; and after the fault ends, a candidate that still contains those days
+must beat the healthy incumbent on recent holdout days. A first calibration fitted during
+an unreported fault cannot be told apart from the plant's normal level; once later days
+are healthy it follows the plant upward through the ordinary gated updates. Splitting the
+training window automatically at its largest level shift was tested on the case year and
+rejected: it triggered at 19 of 46 weekly origins, mostly on weather and snow-soiled
+reference days, and raised next-week interval MAE from 7.07 to 7.63 MW. Reporting the
+outage remains the reliable way to keep it out of the factor.
 
 The dataset pairs manual metered production or settlement injection with matching Solcast estimated actuals,
 never archived forecasts. Prefer complete current Hobby acquisitions under the
@@ -394,7 +407,7 @@ estimated actuals does not establish improvement in future forecast accuracy.
 Meter entry requires matching archived estimated actuals for the entire interval.
 Saving at least seven days with complete valid matched daylight coverage automatically
 schedules fitting; daylight gaps and outage labels do not satisfy this threshold.
-Use a 180-day matching pool ending on the latest recorded local day and elapsed durations, including DST
+Use a 60-day matching pool ending on the latest recorded local day and elapsed durations, including DST
 days. Capture both an observation timestamp cutoff and an ID watermark so readings
 saved during fitting cannot enter that dataset, even with identical timestamps.
 New readings remain saved and can prepare a subsequent candidate. Preparation never
@@ -437,10 +450,11 @@ zero errors. This diagnostic does not train or activate a model and does not pro
 confidence intervals from a short or selectively observed history.
 
 The separate `historical_model` comparison uses saved estimated actuals available
-at evaluation time and the currently declared configuration with its active
-calibration, reporting the factor-1 result as the baseline. It may project dates
-before that configuration existed, marking the retrospective assumption; it never
-backdates a configuration. The calibration may have been fitted on the compared days.
+at evaluation time and the currently declared configuration. Each day uses the newest
+activated calibration whose training period had begun by that day, and factor 1 before
+any such period; the factor-1 result is always reported as the baseline. It may project
+dates before that configuration existed, marking the retrospective assumption; it never
+backdates a configuration. A calibration may have been fitted on the compared days.
 Manual measurements take priority over settlement injection and provisional
 reported production under the current measurement-selection policy. Preserve
 source snapshot IDs and provisional labels, and retain the same daylight,

@@ -9,7 +9,12 @@ from django.utils import timezone
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY, select_actual_snapshot
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
-from pyracast.plants.forecasting import calibration_at, power_intervals, power_limit
+from pyracast.plants.forecasting import (
+    calibration_at,
+    calibration_for_day,
+    power_intervals,
+    power_limit,
+)
 from pyracast.plants.measurement_policy import LEGACY_MEASUREMENT_POLICY, MEASUREMENT_POLICY
 from pyracast.plants.measurements import Measurement, select_measurements
 from pyracast.plants.models import Plant, PlantConfiguration
@@ -120,10 +125,10 @@ def _day(
             "estimated_actuals_not_available" if historical_model else "forecast_not_available"
         )
         return result, (), ()
-    # The retrospective comparison applies the calibration in use; the replay uses the
-    # one active before the target day.
-    calibration = calibration_at(
-        configuration, cutoff if historical_model else start - timedelta(microseconds=1)
+    calibration = (
+        calibration_for_day(configuration, day, cutoff)
+        if historical_model
+        else calibration_at(configuration, start - timedelta(microseconds=1))
     )
     factor = cast(float, calibration.factor) if calibration is not None else 1.0
     result.update(

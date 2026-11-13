@@ -332,7 +332,7 @@ hours in the current view and prepare a new calibration candidate. Prior fits
 remain unchanged. In **Calibration**, enable automatic calibration once to schedule
 daily checks and guarded activation. Disabling keeps the last good model; resetting
 to baseline disables automation. New configurations need fresh authorization.
-The fitter compares 30/60/90-day training windows before an untouched holdout.
+The fitter trains on the 30 calendar days before an untouched holdout.
 Automatic activation also needs sufficient current Hobby source evidence; imported
 historical data alone does not prove live-source accuracy. See the
 [calibration policy](docs/IRRADIANCE.md#production-calibration).
@@ -584,9 +584,10 @@ time must have an existing configuration. Sources acquired during or after the t
 day cannot turn into day-ahead predictions. Predictions retain the first preceding-day
 acquisition and its actual lead time. Use `data_source=auto` to prefer estimated
 actuals on completed past days, or explicitly choose `forecast` / `estimated_actuals`.
-Past electrical estimates prefer the current configuration and its active calibration,
-flagged as retrospective assumptions; an explicit `as_of` keeps the configuration known
-then and the baseline factor. They are not meter readings.
+Past electrical estimates prefer the current configuration and apply a calibration only
+from the start of its training period; earlier days use the baseline factor. An explicit
+`as_of` keeps the configuration known then and the baseline factor. They are not meter
+readings.
 
 A plant declared as `tracking` over a horizontal reference site uses the tracking
 geometry transfer; other plants scale reference power directly. Declare the reference

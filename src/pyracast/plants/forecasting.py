@@ -34,6 +34,7 @@ from pyracast.plants.transfer import (
 from pyracast.regions.models import Region
 
 SELECTION_POLICY = "first-available-day-ahead-v1"
+RETROSPECTIVE_ACTIVATIONS = 60
 
 
 def power_limit(configuration: PlantConfiguration) -> float | None:
@@ -108,12 +109,30 @@ def select_snapshot(
     )
 
 
+def _usable(
+    run: CalibrationRun, configuration: PlantConfiguration, as_of: datetime, any_transfer: bool
+) -> bool:
+    from pyracast.plants.incident_policy import incidents_unchanged
+
+    return (
+        run.configuration_id == configuration.pk
+        and run.binding_id == configuration.binding_id
+        and run.plant_id == configuration.plant_id
+        and run.status == "ready"
+        and run.factor is not None
+        and run.completed_at is not None
+        and run.completed_at <= as_of
+        and run.cutoff_at <= as_of
+        and run.created_at <= as_of
+        and (any_transfer or calibration_matches_transfer(run, configuration))
+        and incidents_unchanged(run, as_of)
+    )
+
+
 def calibration_at(
     configuration: PlantConfiguration, as_of: datetime, *, any_transfer: bool = False
 ) -> CalibrationRun | None:
     """`any_transfer` only locates saved outputs; new calculations need the current model."""
-    from pyracast.plants.incident_policy import incidents_unchanged
-
     activation = (
         CalibrationActivation.objects.select_related("calibration")
         .filter(configuration=configuration, created_at__lte=as_of)
@@ -123,21 +142,40 @@ def calibration_at(
     if activation is None or activation.calibration is None:
         return None
     run = activation.calibration
-    if (
-        run.configuration_id != configuration.pk
-        or run.binding_id != configuration.binding_id
-        or run.plant_id != configuration.plant_id
-        or run.status != "ready"
-        or run.factor is None
-        or run.completed_at is None
-        or run.completed_at > as_of
-        or run.cutoff_at > as_of
-        or run.created_at > as_of
-        or not (any_transfer or calibration_matches_transfer(run, configuration))
-        or not incidents_unchanged(run, as_of)
-    ):
+    return run if _usable(run, configuration, as_of, any_transfer) else None
+
+
+def _fitted_start(run: CalibrationRun) -> date | None:
+    days = run.result.get("training_day_dates")
+    if not isinstance(days, list) or not days or not isinstance(days[0], str):
         return None
-    return run
+    try:
+        return date.fromisoformat(days[0])
+    except ValueError:
+        return None
+
+
+def calibration_for_day(
+    configuration: PlantConfiguration, day: date, as_of: datetime
+) -> CalibrationRun | None:
+    """Activated calibration whose training period had begun by a completed `day`.
+
+    A factor describes its training period onward, not earlier seasons. The newest
+    qualifying activation wins, and a baseline reset ends the search.
+    """
+    activations = (
+        CalibrationActivation.objects.select_related("calibration")
+        .filter(configuration=configuration, created_at__lte=as_of)
+        .order_by("-created_at", "-pk")[:RETROSPECTIVE_ACTIVATIONS]
+    )
+    for activation in activations:
+        run = activation.calibration
+        if run is None:
+            return None
+        start = _fitted_start(run)
+        if start is not None and start <= day and _usable(run, configuration, as_of, False):
+            return run
+    return None
 
 
 def _historical_selection(
