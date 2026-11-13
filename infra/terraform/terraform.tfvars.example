@@ -1,6 +1,6 @@
 project_id = "your-existing-billing-project"
-region     = "us-central1"
-zone       = "us-central1-a"
+region     = "europe-west1"
+zone       = "europe-west1-b"
 domain     = "forecast.example.com"
 acme_email = "operator@example.com"
 

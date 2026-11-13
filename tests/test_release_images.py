@@ -43,7 +43,7 @@ def test_current_release_reads_only_image_values_without_executing_environment(
         f"Path({str(current)!r})",
     )
     result = subprocess.check_output([sys.executable, "-c", script], text=True)  # noqa: S603
-    assert pin_release_images.validate_images(result, REPOSITORY) == IMAGES
+    assert pin_release_images.parse_current_images(result, REPOSITORY) == IMAGES
 
 
 def test_missing_current_release_is_distinct_from_a_broken_existing_release(tmp_path: Path) -> None:
@@ -53,7 +53,7 @@ def test_missing_current_release_is_distinct_from_a_broken_existing_release(tmp_
         f"Path({str(current)!r})",
     )
     result = subprocess.check_output([sys.executable, "-c", script], text=True)  # noqa: S603
-    assert json.loads(result) == {}
+    assert pin_release_images.parse_current_images(result, REPOSITORY) == {}
     current.mkdir()
     with pytest.raises(subprocess.CalledProcessError):
         subprocess.check_output([sys.executable, "-c", script], stderr=subprocess.DEVNULL)  # noqa: S603
@@ -72,6 +72,43 @@ def test_current_release_access_errors_abort_retention_pinning(
     monkeypatch.setattr(subprocess, "check_output", denied)
     with pytest.raises(subprocess.CalledProcessError):
         pin_release_images.current_images("pyracast", "us-central1-a", "pyracast", REPOSITORY)
+
+
+@pytest.mark.parametrize("images", [IMAGES, {}])
+def test_current_release_ignores_ssh_bootstrap_output_around_its_framed_record(
+    monkeypatch: pytest.MonkeyPatch,
+    images: dict[str, str],
+) -> None:
+    output = (
+        "Generating public/private rsa key pair.\n"
+        "Your identification has been saved in temporary-key.\n"
+        "unrelated {banner} output\n"
+        "PYRACAST_RELEASE_IMAGES=" + json.dumps(images) + "\r\n"
+        "Connection closed.\n"
+    )
+    monkeypatch.setattr(subprocess, "check_output", lambda *_args, **_kwargs: output)
+    assert (
+        pin_release_images.current_images("pyracast", "us-central1-a", "pyracast", REPOSITORY)
+        == images
+    )
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "{}\n",
+        "SSH banner only\n",
+        " PYRACAST_RELEASE_IMAGES={}\n",
+        "PYRACAST_RELEASE_IMAGES={}\nPYRACAST_RELEASE_IMAGES={}\n",
+        "PYRACAST_RELEASE_IMAGES=not-json\n",
+        'PYRACAST_RELEASE_IMAGES={"BACKEND_IMAGE":"mutable:latest"}\n',
+    ],
+)
+def test_current_release_protocol_rejects_missing_ambiguous_or_invalid_records(output: str) -> None:
+    with pytest.raises(
+        ValueError, match=r"current release image record|Expecting value|release image"
+    ):
+        pin_release_images.parse_current_images(output, REPOSITORY)
 
 
 @pytest.mark.parametrize("matching_digest", [True, False])

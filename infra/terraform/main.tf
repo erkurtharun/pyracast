@@ -137,7 +137,7 @@ resource "google_secret_manager_secret" "application" {
   replication {
     user_managed {
       replicas {
-        location = var.region
+        location = coalesce(var.secret_replica_location, var.region)
       }
     }
   }

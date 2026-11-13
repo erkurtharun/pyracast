@@ -4,15 +4,21 @@ variable "project_id" {
 }
 
 variable "region" {
-  description = "Region shared by the VM, backup bucket, registry and secrets."
+  description = "Region shared by the VM, backup bucket and registry."
   type        = string
-  default     = "us-central1"
+  default     = "europe-west1"
 }
 
 variable "zone" {
   description = "VM and persistent disk zone, within region."
   type        = string
-  default     = "us-central1-a"
+  default     = "europe-west1-b"
+}
+
+variable "secret_replica_location" {
+  description = "Immutable Secret Manager replica location; null uses region. Preserve the original location when moving an existing deployment."
+  type        = string
+  default     = null
 }
 
 variable "name" {

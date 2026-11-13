@@ -12,14 +12,17 @@ IMAGE_PACKAGES = {
     "GATEWAY_IMAGE": "gateway",
     "POSTGRES_IMAGE": "postgres",
 }
-CURRENT_IMAGES_SCRIPT = """
+CURRENT_IMAGES_PREFIX = "PYRACAST_RELEASE_IMAGES="
+CURRENT_IMAGES_SCRIPT = (
+    f"record_prefix = {CURRENT_IMAGES_PREFIX!r}\n"
+    + """
 import json
 from pathlib import Path
 current = Path('/opt/pyracast/current')
 try:
     current.lstat()
 except FileNotFoundError:
-    print('{}')
+    print(record_prefix + '{}')
 else:
     wanted = {'BACKEND_IMAGE', 'WEB_IMAGE', 'GATEWAY_IMAGE', 'POSTGRES_IMAGE'}
     values = {}
@@ -31,8 +34,9 @@ else:
             values[key] = value
     if values.keys() != wanted:
         raise ValueError('Current release is missing image identities.')
-    print(json.dumps(values))
+    print(record_prefix + json.dumps(values))
 """
+)
 
 
 def validate_images(payload: str, repository: str) -> dict[str, str]:
@@ -44,6 +48,17 @@ def validate_images(payload: str, repository: str) -> dict[str, str]:
         if not isinstance(value, str) or re.fullmatch(expected, value) is None:
             raise ValueError(f"Invalid immutable release image: {key}.")
     return values
+
+
+def parse_current_images(output: str, repository: str) -> dict[str, str]:
+    records = [
+        line.removeprefix(CURRENT_IMAGES_PREFIX)
+        for line in output.splitlines()
+        if line.startswith(CURRENT_IMAGES_PREFIX)
+    ]
+    if len(records) != 1:
+        raise ValueError("Expected exactly one current release image record.")
+    return validate_images(records[0], repository)
 
 
 def current_images(project: str, zone: str, instance: str, repository: str) -> dict[str, str]:
@@ -63,7 +78,7 @@ def current_images(project: str, zone: str, instance: str, repository: str) -> d
         text=True,
         timeout=120,
     )
-    return validate_images(payload, repository)
+    return parse_current_images(payload, repository)
 
 
 def pin_images(images: dict[str, str], project: str) -> None:

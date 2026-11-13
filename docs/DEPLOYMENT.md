@@ -3,7 +3,9 @@
 This deployment prioritizes low initial cost. One Compute Engine VM runs Traefik,
 Next.js, the Django API, collection/calibration workers, a separate notification
 worker, the dispatcher, RabbitMQ and PostgreSQL. The default is an `e2-medium`
-(4 GiB RAM, one sustained vCPU exposed as two shared vCPUs) in `us-central1-a`.
+(4 GiB RAM, one sustained vCPU exposed as two shared vCPUs) in `europe-west1-b`
+(Belgium), keeping the base price close to the US region while reducing latency
+for users in Türkiye.
 PostgreSQL and RabbitMQ use a persistent data disk. Hourly and pre-release database
 dumps go to private Cloud Storage with seven-day retention. The recovery-point
 target is one hour while scheduled backups succeed; there is no point-in-time
@@ -118,12 +120,14 @@ requires Terraform **1.17.2**; install that
 stable version using [HashiCorp's instructions](https://developer.hashicorp.com/terraform/install)
 and verify its published checksum. Do not use a service-account JSON key.
 
-For 730 hours/month in `us-central1`, budget approximately **USD 33–38/month** for
+For 730 hours/month in `europe-west1`, budget approximately **USD 37–42/month** for
 the default VM, 30 GiB standard boot disk, 30 GiB balanced data disk, one IPv4
 address, small backups, image storage and low traffic. This excludes tax, domain,
 mail/provider subscriptions, trial credits and commitments. The VM alone is about
-USD 24.46/month and IPv4 USD 3.65/month. Free Tier disk/storage allowances depend
-on billing-account usage. Verify current [VM](https://cloud.google.com/products/compute/pricing/general-purpose),
+USD 26.91/month, the disks USD 4.20/month and IPv4 USD 3.65/month: a baseline of
+USD 34.76/month before backups, image storage and traffic. This conservatively
+prices both disks without Free Tier credits; allowances depend on billing-account
+usage. Verify current [VM](https://cloud.google.com/products/compute/pricing/general-purpose),
 [disk](https://cloud.google.com/compute/disks-image-pricing) and
 [network](https://cloud.google.com/vpc/pricing) prices before applying Terraform.
 Set a Billing budget and alerts; alerts do not cap spending. Measure memory during
@@ -143,13 +147,17 @@ application so destroying an environment cannot destroy its state.
 ```bash
 export PROJECT_ID=your-project-id
 gcloud storage buckets create "gs://$PROJECT_ID-pyracast-tfstate" \
-  --project="$PROJECT_ID" --location=us-central1 --uniform-bucket-level-access --public-access-prevention
+  --project="$PROJECT_ID" --location=europe-west1 --uniform-bucket-level-access --public-access-prevention
 gcloud storage buckets update "gs://$PROJECT_ID-pyracast-tfstate" --project="$PROJECT_ID" --versioning
 cp infra/terraform/terraform.tfvars.example infra/terraform/terraform.tfvars
 ```
 
 Edit `terraform.tfvars`: set `project_id`, `domain`, `acme_email` and your Google
-account in `operator_members`. Keep region and zone consistent. The repository
+account in `operator_members`. Keep region and zone consistent. Secret replication
+is immutable: when moving an existing deployment, set `secret_replica_location`
+to its original region to retain its secrets and versions. Keep the existing state
+bucket in its original location; its location does not determine the VM region.
+The repository
 and owner numeric IDs already identify `erkurtharun/pyracast`; forks must change
 these IDs and the repository name.
 
@@ -177,7 +185,7 @@ SSH is accessible only through IAP. Terraform enables OS Login and grants the
 named operators access to this VM. Wait for its startup script to finish:
 
 ```bash
-gcloud compute ssh pyracast --project="$PROJECT_ID" --zone=us-central1-a --tunnel-through-iap
+gcloud compute ssh pyracast --project="$PROJECT_ID" --zone=europe-west1-b --tunnel-through-iap
 sudo journalctl -u google-startup-scripts.service --no-pager -n 80
 sudo docker compose version
 ```
