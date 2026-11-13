@@ -4566,6 +4566,9 @@
                     },
                     "outage_scenario": {
                         "nullable": true
+                    },
+                    "derating_scenario": {
+                        "nullable": true
                     }
                 },
                 "required": [

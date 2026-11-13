@@ -25,6 +25,12 @@ from pyracast.plants.models import (
 )
 from pyracast.plants.numerics import PowerInterval, forecast
 from pyracast.plants.operations import configuration_is_current
+from pyracast.plants.transfer import (
+    calibration_matches_transfer,
+    reference_power_mw,
+    tracking_modeled,
+    transfer_model,
+)
 from pyracast.regions.models import Region
 
 SELECTION_POLICY = "first-available-day-ahead-v1"
@@ -43,6 +49,7 @@ def power_intervals(
     configuration: PlantConfiguration,
     *,
     source_intervals: tuple[dict[str, Any], ...] | None = None,
+    model_version: str | None = None,
 ) -> tuple[PowerInterval, ...]:
     result = []
     capacity = configuration.binding.capacity_kw
@@ -59,11 +66,16 @@ def power_intervals(
             or power < 0
         ):
             raise ValueError("Invalid source power")
+        begin, stop = datetime.fromisoformat(start), datetime.fromisoformat(end)
         result.append(
             PowerInterval(
-                datetime.fromisoformat(start),
-                datetime.fromisoformat(end),
-                None if power is None else power / capacity * configuration.dc_capacity_mw,
+                begin,
+                stop,
+                None
+                if power is None
+                else reference_power_mw(
+                    configuration, begin, stop, power, model_version=model_version
+                ),
             )
         )
     return tuple(result)
@@ -96,7 +108,10 @@ def select_snapshot(
     )
 
 
-def calibration_at(configuration: PlantConfiguration, as_of: datetime) -> CalibrationRun | None:
+def calibration_at(
+    configuration: PlantConfiguration, as_of: datetime, *, any_transfer: bool = False
+) -> CalibrationRun | None:
+    """`any_transfer` only locates saved outputs; new calculations need the current model."""
     from pyracast.plants.incident_policy import incidents_unchanged
 
     activation = (
@@ -118,10 +133,43 @@ def calibration_at(configuration: PlantConfiguration, as_of: datetime) -> Calibr
         or run.completed_at > as_of
         or run.cutoff_at > as_of
         or run.created_at > as_of
+        or not (any_transfer or calibration_matches_transfer(run, configuration))
         or not incidents_unchanged(run, as_of)
     ):
         return None
     return run
+
+
+def _historical_selection(
+    configuration: PlantConfiguration,
+    snapshot: ForecastSnapshot | None,
+    as_of: datetime,
+    target_date: date,
+    resolution_minutes: int,
+) -> tuple[CalibrationRun | None, PlantForecast | None]:
+    """Keep an output saved under the calibration selected then; never recalculate with a
+    factor fitted under another transfer model."""
+
+    def saved(calibration: CalibrationRun | None) -> PlantForecast | None:
+        if snapshot is None:
+            return None
+        return PlantForecast.objects.filter(
+            configuration=configuration,
+            snapshot=snapshot,
+            calibration=calibration,
+            resolution_minutes=resolution_minutes,
+            target_date=target_date,
+        ).first()
+
+    calibration = calibration_at(configuration, as_of, any_transfer=True)
+    record = saved(calibration)
+    if (
+        record is None
+        and calibration is not None
+        and not calibration_matches_transfer(calibration, configuration)
+    ):
+        return None, saved(None)
+    return calibration, record
 
 
 def forecast_payload(
@@ -145,7 +193,15 @@ def forecast_payload(
         else 1,
     )
     flags = list(result["quality_flags"]) if isinstance(result["quality_flags"], list) else []
-    flags.extend(("unvalidated_reference_transfer", "geometry_not_modeled"))
+    result["model_version"] = transfer_model(configuration)
+    flags.extend(
+        (
+            "unvalidated_reference_transfer",
+            "assumed_tracker_geometry"
+            if tracking_modeled(configuration)
+            else "geometry_not_modeled",
+        )
+    )
     if snapshot.source_kind == "estimated_actuals":
         flags.append("estimated_actuals_not_metered")
         if configuration.created_at > start:
@@ -234,27 +290,24 @@ def archived_forecast(
     configured_start, _ = local_day_bounds(target_date, configuration.binding.timezone)
     cutoff = min(cutoff, configured_start)
     snapshot = select_snapshot(configuration, target_date, cutoff)
-    calibration = (
-        None
+    calibration, saved = (
+        (None, None)
         if assumed
-        else calibration_at(
-            configuration, min(cutoff, configured_start - timedelta(microseconds=1))
+        else _historical_selection(
+            configuration,
+            snapshot,
+            min(cutoff, configured_start - timedelta(microseconds=1)),
+            target_date,
+            resolution_minutes,
         )
     )
     result: dict[str, object] | None = None
     irradiance: dict[str, object] | None = None
     if snapshot is not None:
-        saved = PlantForecast.objects.filter(
-            configuration=configuration,
-            snapshot=snapshot,
-            calibration=calibration,
-            resolution_minutes=resolution_minutes,
-            target_date=target_date,
-        ).first()
         try:
             result = (
                 deepcopy(saved.payload)
-                if saved is not None and not assumed
+                if saved is not None
                 else forecast_payload(
                     configuration, snapshot, calibration, target_date, resolution_minutes
                 )
@@ -398,18 +451,13 @@ def plant_forecast(
     configured_start, _ = local_day_bounds(target_date, configuration.binding.timezone)
     if as_of > configured_start:
         raise ValidationError("as_of must not follow the configured local day start.")
-    calibration = calibration_at(configuration, as_of)
     snapshot = select_snapshot(configuration, target_date, as_of)
+    calibration, saved = _historical_selection(
+        configuration, snapshot, as_of, target_date, resolution_minutes
+    )
     result: dict[str, object] | None = None
     irradiance: dict[str, object] | None = None
     if snapshot is not None:
-        saved = PlantForecast.objects.filter(
-            configuration=configuration,
-            snapshot=snapshot,
-            calibration=calibration,
-            resolution_minutes=resolution_minutes,
-            target_date=target_date,
-        ).first()
         if saved is None:
             if not configuration_is_current(configuration):
                 raise ValidationError("configuration_changed")

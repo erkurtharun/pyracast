@@ -24,6 +24,14 @@ type OutageScenario = {
     incidents: Record<string, unknown>[];
     result: Record<string, unknown>;
 };
+type DeratingScenario = {
+    evaluated_at: string;
+    status: "suspected";
+    performance_ratio: number;
+    window_start: string;
+    window_end: string;
+    result: Record<string, unknown>;
+};
 function number(value: unknown): string {
     return typeof value === "number"
         ? new Intl.NumberFormat("en", { maximumFractionDigits: 3 }).format(
@@ -67,10 +75,15 @@ export function ForecastPanel({
                 )}
             </>
         );
-    const scenario = electrical
-        ? (forecast as Forecast & { outage_scenario?: OutageScenario | null })
-              .outage_scenario
-        : null;
+    const scenarios = forecast as Forecast & {
+        outage_scenario?: OutageScenario | null;
+        derating_scenario?: DeratingScenario | null;
+    };
+    const outage = electrical ? scenarios.outage_scenario : null;
+    const derating = electrical && !outage ? scenarios.derating_scenario : null;
+    const scenario = outage ?? derating ?? null;
+    const affected = derating ? "if derating persists" : "with outages";
+    const Affected = derating ? "If derating persists" : "With outages";
     const result = forecast.result as Record<string, unknown>;
     const mixedVintages =
         Array.isArray(result.quality_flags) &&
@@ -175,7 +188,9 @@ export function ForecastPanel({
                             },
                             ...(scenario
                                 ? {
-                                      outage_scenario: {
+                                      [derating
+                                          ? "derating_scenario"
+                                          : "outage_scenario"]: {
                                           ...scenario,
                                           result: {
                                               ...scenario.result,
@@ -220,6 +235,16 @@ export function ForecastPanel({
                         production.
                     </Notice>
                 )}
+            {derating && (
+                <Notice>
+                    Production from {derating.window_start} to{" "}
+                    {derating.window_end} was about{" "}
+                    {number((1 - derating.performance_ratio) * 100)}% below the
+                    calibrated level. The second scenario assumes this
+                    continues; normal capacity assumes it is resolved. Record an
+                    outage to confirm it.
+                </Notice>
+            )}
             {scenario?.status === "unknown_impact" && (
                 <Notice>
                     Capacity impact is unknown for some intervals; missing
@@ -272,14 +297,14 @@ export function ForecastPanel({
                 />
                 {scenario && (
                     <Stat
-                        label="With outages · daily energy"
+                        label={`${Affected} · daily energy`}
                         value={scenario.result.energy_mwh}
                         unit="MWh"
                     />
                 )}
                 {scenario && scenario.result.complete !== true && (
                     <Stat
-                        label="With outages · partial estimate"
+                        label={`${Affected} · partial estimate`}
                         value={scenario.result.partial_energy_mwh}
                         unit="MWh"
                     />
@@ -341,20 +366,20 @@ export function ForecastPanel({
                     </div>
                     {scenario && (
                         <p className="fine">
-                            Green: normal capacity · Blue: with outages · Gaps:
+                            Green: normal capacity · Blue: {affected} · Gaps:
                             unknown impact
                         </p>
                     )}
                     <div
                         className="chart"
                         role="img"
-                        aria-label={`${scenario ? "Normal capacity and with outages power" : electrical ? "Power" : "Irradiance"} by interval. Full values are available in the following table. Missing values are gaps.`}
+                        aria-label={`${scenario ? `Normal capacity and ${affected} power` : electrical ? "Power" : "Irradiance"} by interval. Full values are available in the following table. Missing values are gaps.`}
                     >
                         {rows.map((row, index) => (
                             <div
                                 className={`chart-column ${row[metric] == null ? "missing" : ""}`}
                                 key={index}
-                                title={`${time(row.start)}: ${scenario ? "normal capacity " : ""}${number(row[metric])} ${unit}${scenario ? `; with outages ${number(row.affected_mean_power_mw)} MW` : ""}`}
+                                title={`${time(row.start)}: ${scenario ? "normal capacity " : ""}${number(row[metric])} ${unit}${scenario ? `; ${affected} ${number(row.affected_mean_power_mw)} MW` : ""}`}
                             >
                                 <div
                                     style={{
@@ -414,9 +439,9 @@ export function ForecastPanel({
                                                     : "Energy (MWh)"}
                                             </th>
                                         )}
-                                        {scenario && <th>With outages (MW)</th>}
+                                        {scenario && <th>{Affected} (MW)</th>}
                                         {scenario && (
-                                            <th>With outages energy (MWh)</th>
+                                            <th>{Affected} energy (MWh)</th>
                                         )}
                                         <th>Quality</th>
                                     </tr>
@@ -458,7 +483,7 @@ export function ForecastPanel({
                                                 {scenario &&
                                                 row.affected_quality_flags
                                                     ?.length
-                                                    ? `; with outages: ${row.affected_quality_flags.map((flag) => flag.replaceAll("_", " ")).join(", ")}`
+                                                    ? `; ${affected}: ${row.affected_quality_flags.map((flag) => flag.replaceAll("_", " ")).join(", ")}`
                                                     : ""}
                                             </td>
                                         </tr>
@@ -473,9 +498,11 @@ export function ForecastPanel({
                 <summary>Source & quality</summary>
                 {scenario && (
                     <p className="fine">
-                        Normal capacity assumes a healthy plant. With outages
-                        uses reported remaining capacity. Both are estimates,
-                        not meter readings.
+                        Normal capacity assumes a healthy plant.{" "}
+                        {derating
+                            ? "If derating persists scales capacity by the recent measured shortfall."
+                            : "With outages uses reported remaining capacity."}{" "}
+                        Both are estimates, not meter readings.
                     </p>
                 )}
                 <p>

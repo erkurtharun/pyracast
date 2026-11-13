@@ -93,7 +93,7 @@ def test_scaled_copies_cannot_be_normalized_again(monkeypatch: pytest.MonkeyPatc
         ("target", {"settings_verification_reference": ""}),
         ("target", {"capacity_kw": 1}),
         ("source", {"dc_capacity_kw": 2}),
-        ("source", {"capacity_kw": 1e-308}),
+        ("source", {"capacity_kw": 1e-308, "dc_capacity_kw": 1e-308}),
     ],
 )
 def test_non_equivalent_or_unverified_capacity_declarations_cannot_relabel_history(
@@ -151,8 +151,15 @@ def test_same_binding_and_foreign_tenant_are_rejected(monkeypatch: pytest.Monkey
 
 def test_known_dc_capacity_cannot_be_discarded(monkeypatch: pytest.MonkeyPatch) -> None:
     system, target = scaled_system(monkeypatch)
-    SiteBinding.objects.filter(pk=system.binding.pk).update(dc_capacity_kw=1)
     SiteBinding.objects.filter(pk=target.pk).update(dc_capacity_kw=None)
+    with pytest.raises(ValidationError):
+        normalize(system, target)
+
+
+def test_undeclared_source_dc_capacity_cannot_be_scaled(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The provider applies an implicit DC/AC ratio when DC capacity is undeclared.
+    system, target = scaled_system(monkeypatch)
+    SiteBinding.objects.filter(pk=system.binding.pk).update(dc_capacity_kw=None)
     with pytest.raises(ValidationError):
         normalize(system, target)
 

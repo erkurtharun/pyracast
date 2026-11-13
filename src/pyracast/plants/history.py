@@ -34,7 +34,7 @@ def plant_outlook(
     as_of: datetime | None = None,
     source: str = "forecast",
 ) -> dict[str, object]:
-    from pyracast.plants.incident_forecasts import incident_scenario
+    from pyracast.plants.incident_forecasts import derating_scenario, incident_scenario
 
     require_member(actor, tenant_id)
     with transaction.atomic():
@@ -61,6 +61,11 @@ def plant_outlook(
         )
         result["outage_scenario"] = incident_scenario(
             result, target_date, resolution_minutes, scenario_at
+        )
+        result["derating_scenario"] = (
+            derating_scenario(result, target_date, resolution_minutes, scenario_at)
+            if result["outage_scenario"] is None and as_of is None and source != "archived_forecast"
+            else None
         )
         return result
 

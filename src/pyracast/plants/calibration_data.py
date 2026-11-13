@@ -25,7 +25,10 @@ from pyracast.plants.numerics import (
     RequiredWindows,
     evaluate_samples,
 )
+from pyracast.plants.transfer import calibration_matches_transfer
 from pyracast.solar import DAYLIGHT_POLICY, daylight_window
+
+NATIVE_COHORT_DAYS = 30
 
 
 @dataclass(frozen=True)
@@ -138,6 +141,7 @@ def current_source_validation(
     sources = manifest.get("sources")
     current: list[str] = []
     normalized: list[str] = []
+    historical: list[str] = []
     if (
         isinstance(sources, dict)
         and type(manifest.get("binding_id")) is int
@@ -145,20 +149,27 @@ def current_source_validation(
     ):
         for day in sorted(set(included or []) & set(selected)):
             source = sources.get(day)
-            if (
+            if not (
                 isinstance(source, dict)
                 and type(source.get("snapshot_id")) is int
                 and source["snapshot_id"] > 0
                 and type(source.get("binding_id")) is int
                 and source.get("binding_id") == binding_id
                 and source.get("source_kind") == "estimated_actuals"
-                and source.get("source_product") == "rooftop_pv_power"
                 and "reference_import" in source
+            ):
+                continue
+            if (
+                source.get("source_product") == "rooftop_pv_power"
                 and source["reference_import"] is None
             ):
                 current.append(day)
                 if isinstance(source.get("capacity_normalization"), dict):
                     normalized.append(day)
+            elif source.get("source_product") == "historical_rooftop_pv" and isinstance(
+                source["reference_import"], dict
+            ):
+                historical.append(day)
     current_holdout = sorted(set(holdout or []) & set(current))
     eligible = (
         included is not None
@@ -173,17 +184,18 @@ def current_source_validation(
         and holdout == included[-7:]
         and set(selected) <= set(included)
         and all(day < holdout[0] for day in training)
-        and len(current) >= 30
-        and len(current) == len(selected)
+        and len(current) + len(historical) >= 30
+        and len(current) + len(historical) == len(selected)
         and len(current_holdout) == 7
     )
     return {
-        "policy": "current-or-authorized-scale-rooftop-selected-30-final-7-v2",
+        "policy": "native-final-7-settings-matched-selected-30-v3",
         "source_product": "rooftop_pv_power",
         "valid_day_dates": current,
         "valid_days": len(current),
         "native_valid_days": len(current) - len(normalized),
         "capacity_normalized_valid_days": len(normalized),
+        "historical_valid_days": len(historical),
         "training_day_dates": sorted(set(training or []) & set(current)),
         "training_days": len(set(training or []) & set(current)),
         "holdout_day_dates": current_holdout,
@@ -225,19 +237,32 @@ def _select_reference_cohort(
             "complete_matched_day_dates": evaluation["included_day_dates"],
             "samples": len(indexes),
         }
-    selected = next(
-        (product for product in products if counts[product] >= 7),
-        max(products, key=lambda product: counts[product]),
+    native, historical, legacy = products
+    pooled = 0 < counts[native] < NATIVE_COHORT_DAYS and counts[historical] > 0
+    selected = (
+        native
+        if pooled or counts[native] >= 7
+        else next(
+            (product for product in (historical, legacy) if counts[product] >= 7),
+            max(products, key=lambda product: counts[product]),
+        )
     )
+    members = [native, historical] if pooled else [selected]
+    chosen = {index for product in members for index in groups[product]}
     return (
-        set(groups[selected]),
-        windows_by_product[selected],
+        chosen,
         {
-            "policy": "single-product-native-first-seven-complete-days-v1",
+            day: windows
+            for product in members
+            for day, windows in windows_by_product[product].items()
+        },
+        {
+            "policy": "native-thirty-days-else-settings-matched-pool-v2",
             "selected_product": selected,
+            "pooled_products": members,
             "cohorts": cohorts,
-            "selected_samples": len(groups[selected]),
-            "excluded_samples": len(samples) - len(groups[selected]),
+            "selected_samples": len(chosen),
+            "excluded_samples": len(samples) - len(chosen),
         },
     )
 
@@ -368,9 +393,11 @@ def _comparison_factor(run: CalibrationRun) -> float:
     activation = run.comparison_activation
     if activation is None or activation.calibration is None:
         return 1.0
-    if not incidents_unchanged(
-        activation.calibration, run.cutoff_at
-    ) or not production_identity_current(activation.calibration):
+    if (
+        not incidents_unchanged(activation.calibration, run.cutoff_at)
+        or not production_identity_current(activation.calibration)
+        or not calibration_matches_transfer(activation.calibration, run.configuration)
+    ):
         return 1.0
     factor = activation.calibration.factor
     if factor is None:

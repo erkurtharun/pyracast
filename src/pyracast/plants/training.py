@@ -29,6 +29,7 @@ from pyracast.plants.numerics import (
 )
 from pyracast.plants.operations import configuration_is_current
 from pyracast.plants.preparation import prepare_calibration
+from pyracast.plants.transfer import transfer_model
 from pyracast.regions.models import Region
 
 LEASE_DURATION = timedelta(minutes=5)
@@ -213,6 +214,7 @@ def run_calibration(run_id: int, now: datetime | None = None) -> bool:
             required_windows=dataset.required_windows,
         )
         result.report["comparison_activation_id"] = lease.run.comparison_activation_id
+        result.report["transfer_model"] = transfer_model(lease.configuration)
         result.report["selection"] = dataset.selection
         result.report["provisional_production"] = dataset.selection["provisional_production"]
         result.report["production_sources"] = dataset.selection["production_sources"]

@@ -27,6 +27,7 @@ from pyracast.plants.models import (
 )
 from pyracast.plants.numerics import POLICY_VERSION, PowerInterval
 from pyracast.plants.preparation import prepare_calibration
+from pyracast.plants.transfer import calibration_matches_transfer
 from pyracast.regions.models import Region
 
 
@@ -600,6 +601,7 @@ def _validate_activation(
         or not run.result.get("candidate")
         or not run.result.get("baseline")
         or run.result.get("policy_version") != POLICY_VERSION
+        or not calibration_matches_transfer(run, configuration)
         or run.dataset_manifest.get("selection_policy") != HISTORY_SELECTION_POLICY
         or run.dataset_manifest.get("source_kind") != "estimated_actuals"
     ):

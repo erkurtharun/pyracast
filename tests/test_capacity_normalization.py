@@ -26,7 +26,7 @@ def scaled_system(monkeypatch: pytest.MonkeyPatch) -> tuple[System, SiteBinding]
         provider="solcast", encrypted_api_key=encrypt_secret("test-only-solcast-key")
     )
     SiteBinding.objects.filter(pk=system.binding.pk).update(
-        settings_verification_reference="Verified original Hobby settings"
+        settings_verification_reference="Verified original Hobby settings", dc_capacity_kw=1
     )
     target = SiteBinding.objects.get(pk=system.binding.pk)
     target.pk = None
@@ -77,7 +77,7 @@ def test_old_hobby_history_becomes_available_at_the_new_scale_without_rewriting_
     assert original.normalized_intervals == before
     system.binding.refresh_from_db()
     assert system.binding.capacity_kw == 1
-    assert system.binding.dc_capacity_kw is None
+    assert system.binding.dc_capacity_kw == 1
     record = ReferenceCapacityNormalization.objects.get(snapshot=selected)
     assert record.source_snapshot == original
     assert record.factor == 1000

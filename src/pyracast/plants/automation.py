@@ -191,6 +191,9 @@ def _promotion_reason(run: CalibrationRun, now: datetime) -> str | None:
         return "stale_automatic_evaluation"
     comparison = run.comparison_activation
     if comparison is not None and comparison.calibration is not None:
+        derating = run.result.get("derating")
+        if isinstance(derating, dict) and derating.get("status") == "suspected":
+            return "derating_suspected"
         incumbent = comparison.calibration
         previous = _holdout_dates(incumbent)
         boundary = max(previous) if previous else incumbent.window_end

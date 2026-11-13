@@ -5,7 +5,9 @@ import { Notice, useResource } from "./ui";
 const reasons: Record<string, string> = {
     accepted: "The candidate passed evaluation and was activated.",
     insufficient_current_source_validation:
-        "Waiting for 30 matched days from the current live reference source, including seven held-out days.",
+        "Waiting for 30 matched days from the current live reference source or its matching historical export, with seven live held-out days.",
+    derating_suspected:
+        "Recent production is well below the current calibration. Record the outage or activate a candidate manually.",
     authorization_revoked: "Authorization is no longer available.",
     configuration_changed: "The plant configuration changed.",
     insufficient_automatic_evaluation:

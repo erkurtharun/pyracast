@@ -8,6 +8,7 @@ from pyracast.forecasts.history import select_actual_snapshot
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.plants.models import PlantConfiguration
 from pyracast.plants.numerics import PowerInterval
+from pyracast.plants.transfer import reference_power_mw
 
 
 def reference_intervals(
@@ -37,11 +38,7 @@ def actual_power_intervals(
         if start.utcoffset() is None or end.utcoffset() is None or end <= start:
             continue
         result.append(
-            PowerInterval(
-                start,
-                end,
-                power / configuration.binding.capacity_kw * configuration.dc_capacity_mw,
-            )
+            PowerInterval(start, end, reference_power_mw(configuration, start, end, power))
         )
     return tuple(sorted(result, key=lambda interval: interval.start))
 

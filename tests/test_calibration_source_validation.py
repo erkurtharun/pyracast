@@ -66,60 +66,66 @@ def test_only_explicit_native_snapshot_provenance_counts_toward_current_source_s
     assert result["eligible"] is False
 
 
-def test_unselected_development_days_do_not_establish_current_training_source_support() -> None:
-    days = [(date(2026, 9, 1) + timedelta(days=offset)).isoformat() for offset in range(90)]
-    native = set(days[:30] + days[-7:])
+def _mixed_report(
+    training: list[str], holdout: list[str], products: dict[str, str]
+) -> tuple[dict[str, object], dict[str, object]]:
+    days = sorted(products)
     sources = {
         day: {
             "snapshot_id": index + 1,
             "binding_id": 1,
             "source_kind": "estimated_actuals",
-            "source_product": "rooftop_pv_power" if day in native else "historical_rooftop_pv",
-            "reference_import": None if day in native else {"id": 1},
+            "source_product": products[day],
+            "reference_import": None if products[day] == "rooftop_pv_power" else {"id": 1},
         }
         for index, day in enumerate(days)
     }
     report: dict[str, object] = {
         "included_day_dates": days,
-        "valid_days": 90,
-        "training_day_dates": days[-37:-7],
-        "training_days": 30,
-        "holdout_day_dates": days[-7:],
-        "holdout_days": 7,
+        "valid_days": len(days),
+        "training_day_dates": training,
+        "training_days": len(training),
+        "holdout_day_dates": holdout,
+        "holdout_days": len(holdout),
     }
-    summary = current_source_validation({"binding_id": 1, "sources": sources}, report, 1)
+    return {"binding_id": 1, "sources": sources}, report
+
+
+def test_settings_matched_history_supports_training_behind_a_native_holdout() -> None:
+    days = [(date(2026, 9, 1) + timedelta(days=offset)).isoformat() for offset in range(90)]
+    products = dict.fromkeys(days, "historical_rooftop_pv") | dict.fromkeys(
+        days[:30] + days[-7:], "rooftop_pv_power"
+    )
+    manifest, report = _mixed_report(days[-37:-7], days[-7:], products)
+    summary = current_source_validation(manifest, report, 1)
+    assert summary["policy"] == "native-final-7-settings-matched-selected-30-v3"
     assert summary["valid_day_dates"] == days[-7:]
     assert summary["valid_days"] == 7
+    assert summary["historical_valid_days"] == 30
     assert summary["training_days"] == 0
     assert summary["holdout_days"] == 7
-    assert summary["eligible"] is False
+    assert summary["eligible"] is True
 
 
-def test_current_source_validation_rejects_mixed_training_despite_30_native_days() -> None:
-    days = [(date(2026, 7, 1) + timedelta(days=offset)).isoformat() for offset in range(90)]
-    native = set(days[:23] + days[-7:])
-    sources = {
-        day: {
-            "snapshot_id": index + 1,
-            "binding_id": 1,
-            "source_kind": "estimated_actuals",
-            "source_product": "rooftop_pv_power" if day in native else "historical_rooftop_pv",
-            "reference_import": None if day in native else {"id": 1},
-        }
-        for index, day in enumerate(days)
-    }
-    report: dict[str, object] = {
-        "included_day_dates": days,
-        "valid_days": 90,
-        "training_day_dates": days[:-7],
-        "training_days": 83,
-        "holdout_day_dates": days[-7:],
-        "holdout_days": 7,
-    }
-    summary = current_source_validation({"binding_id": 1, "sources": sources}, report, 1)
-    assert summary["valid_days"] == 30
-    assert summary["holdout_days"] == 7
-    assert summary["eligible"] is False
+@pytest.mark.parametrize(
+    ("training_days", "patch"),
+    [
+        (22, {}),
+        (30, {-1: "historical_rooftop_pv"}),
+        (30, {-10: "unknown"}),
+    ],
+)
+def test_promotion_evidence_needs_thirty_supported_days_and_a_native_holdout(
+    training_days: int, patch: dict[int, str]
+) -> None:
+    days = [(date(2026, 9, 1) + timedelta(days=offset)).isoformat() for offset in range(90)]
+    products = dict.fromkeys(days, "historical_rooftop_pv") | dict.fromkeys(
+        days[-7:], "rooftop_pv_power"
+    )
+    for offset, product in patch.items():
+        products[days[offset]] = product
+    manifest, report = _mixed_report(days[-7 - training_days : -7], days[-7:], products)
+    assert current_source_validation(manifest, report, 1)["eligible"] is False
 
 
 @pytest.mark.parametrize("imported_days", ["all", "one_holdout_day", "none"])

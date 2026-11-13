@@ -3,10 +3,12 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from itertools import pairwise
 from math import ceil, isfinite
+from statistics import median
+from typing import cast
 from zoneinfo import ZoneInfo
 
 MODEL_VERSION = "reference-power-transfer-v1"
-POLICY_VERSION = "regularized-huber-v4"
+POLICY_VERSION = "regularized-huber-v5"
 DAYLIGHT_COVERAGE_POLICY = "whole-meter-intervals-cover-daylight-v1"
 type RequiredWindows = Mapping[date, tuple[tuple[datetime, datetime], ...]]
 FACTOR_MIN = 0.25
@@ -19,6 +21,12 @@ MIN_SUPPORT_DAYS = 5
 MIN_SUPPORT_HOURS = 2.0
 MIN_LEVERAGE_HOURS = 0.02
 COMPARISON_TOLERANCE = 1e-9
+DERATING_POLICY = "strong-unclipped-power-median-v1"
+DERATING_LOOKBACK_DAYS = 10
+DERATING_MIN_DAYS = 3
+DERATING_MIN_HOURS = 3.0
+DERATING_MIN_POWER_FRACTION = 0.25
+DERATING_THRESHOLD = 0.92
 
 
 @dataclass(frozen=True)
@@ -479,6 +487,59 @@ def _support(
     }
 
 
+def _derating(
+    rows: list[_Row], end: date, baseline: float, normalization: float, cap: float | None
+) -> dict[str, object]:
+    """Compare recent strong, unclipped meter intervals with the healthy baseline factor."""
+    first = end - timedelta(days=DERATING_LOOKBACK_DAYS - 1)
+    totals: dict[date, list[float]] = {}
+    limit_reached = False
+    for row in rows:
+        if row.day < first:
+            continue
+        predicted = _energy(row.pieces, baseline, cap)
+        ceiling = None if cap is None else CAP_MARGIN * cap * row.hours
+        if ceiling is not None and row.sample.energy_mwh >= ceiling:
+            limit_reached = True
+        if predicted < DERATING_MIN_POWER_FRACTION * normalization * row.hours or (
+            ceiling is not None and max(predicted, row.sample.energy_mwh) >= ceiling
+        ):
+            continue
+        day = totals.setdefault(row.day, [0.0, 0.0, 0.0])
+        day[0] += row.sample.energy_mwh
+        day[1] += predicted
+        day[2] += row.hours
+    daily = [
+        {
+            "day": day.isoformat(),
+            "performance_index": _finite(measured / predicted, "Performance index"),
+            "hours": hours,
+        }
+        for day, (measured, predicted, hours) in sorted(totals.items())
+        if hours >= DERATING_MIN_HOURS
+    ]
+    ratio = (
+        median(cast(float, day["performance_index"]) for day in daily)
+        if len(daily) >= DERATING_MIN_DAYS
+        else None
+    )
+    return {
+        "policy": DERATING_POLICY,
+        "status": "insufficient"
+        if ratio is None
+        else "suspected"
+        if ratio < DERATING_THRESHOLD
+        else "normal",
+        "baseline_factor": baseline,
+        "performance_ratio": ratio,
+        "threshold": DERATING_THRESHOLD,
+        "window_start": first.isoformat(),
+        "window_end": end.isoformat(),
+        "days": daily,
+        "limit_reached": limit_reached,
+    }
+
+
 def _worse(candidate: float, reference: float) -> bool:
     return candidate > reference + COMPARISON_TOLERANCE * max(1, abs(reference))
 
@@ -632,6 +693,7 @@ def fit_calibration(
         "incumbent_factor": incumbent_factor,
         "reasons": [],
         "rolling_origin": {"status": "insufficient", "folds": []},
+        "derating": {"policy": DERATING_POLICY, "status": "not_evaluated"},
         "adaptive_window": {
             "status": "insufficient",
             "selected_lookback_days": None,
@@ -710,6 +772,14 @@ def fit_calibration(
             reasons.append(f"{name}_bias_regression")
     report["reasons"] = reasons
     accepted = not reasons
+    if incumbent_factor != 1 or accepted:
+        report["derating"] = _derating(
+            rows,
+            days[-1],
+            incumbent_factor if incumbent_factor != 1 else factor,
+            normalization_mw,
+            limit_mw,
+        )
     return FitResult(
         "ready" if accepted else "rejected",
         factor if accepted else None,

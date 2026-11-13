@@ -185,3 +185,74 @@ test("outage comparison CSV retains normal forecast source IDs", async ({
     expect(csv).toContain("source_snapshot_ids");
     expect(csv).toContain("[6]");
 });
+
+test("suspected derating shows a second scenario with its evidence", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const interval = {
+        start: "2026-11-11T04:00:00Z",
+        end: "2026-11-11T04:30:00Z",
+        mean_power_mw: 10,
+        energy_mwh: 5,
+        source_snapshot_ids: [6],
+    };
+    await page.route("**/plants/21/forecast/**", (route) =>
+        route.fulfill({
+            json: {
+                date: "2026-11-11",
+                timezone: region.timezone,
+                source_kind: "forecast",
+                freshness: "fresh",
+                result: {
+                    complete: true,
+                    energy_mwh: 5,
+                    intervals: [interval],
+                },
+                outage_scenario: null,
+                derating_scenario: {
+                    status: "suspected",
+                    performance_ratio: 0.875,
+                    window_start: "2026-11-01",
+                    window_end: "2026-11-10",
+                    result: {
+                        complete: true,
+                        energy_mwh: 4.375,
+                        intervals: [
+                            {
+                                ...interval,
+                                mean_power_mw: 8.75,
+                                energy_mwh: 4.375,
+                            },
+                        ],
+                    },
+                },
+            },
+        }),
+    );
+    await page.goto("/");
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await expect(
+        page.getByText(
+            "Production from 2026-11-01 to 2026-11-10 was about 12.5% below the calibrated level.",
+            { exact: false },
+        ),
+    ).toBeVisible();
+    await expect(
+        page.getByText("If derating persists · daily energy"),
+    ).toBeVisible();
+    await page.getByText("View interval data (1 intervals)").click();
+    await expect(
+        page.getByRole("columnheader", { name: "If derating persists (MW)" }),
+    ).toBeVisible();
+    await expect(page.getByRole("cell", { name: "8.75" })).toBeVisible();
+    const downloadPromise = page.waitForEvent("download");
+    await page
+        .getByRole("button", { name: "Download both scenarios CSV" })
+        .click();
+    const download = await downloadPromise;
+    const csv = await readFile(await download.path(), "utf8");
+    expect(csv).toContain("derating_scenario.performance_ratio");
+});

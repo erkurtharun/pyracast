@@ -1205,6 +1205,7 @@ export interface components {
             result: unknown;
             regional_irradiance: unknown;
             outage_scenario?: unknown;
+            derating_scenario?: unknown;
         };
         PlantInput: {
             name: string;

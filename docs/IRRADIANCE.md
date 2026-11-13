@@ -112,6 +112,47 @@ the reference-transfer model does not use them. Tracking does not imply a known 
 backtracking policy or row geometry. Never infer plant geometry from a downloaded
 weather filename or treat a grid export limit as an inverter rating.
 
+### Tracking geometry transfer
+
+One number cannot scale a horizontal reference to a tracking plant: the plane-of-array gain
+depends on solar position and on the beam share. For a `tracking` configuration whose
+reference binding is horizontal (`tilt=0`) with a declared DC capacity,
+`tracking-geometry-transfer-v1` multiplies each native reference interval by a physical gain
+before calibration and clipping:
+
+`raw_power_mw = reference_power_kw / reference_capacity_kw * plant_dc_capacity_mw * gain`
+
+At each interval midpoint: estimate GHI from loss-free reference power per DC capacity with
+`p = 0.9964*g - 0.1484*g²` (`g = GHI/1000`, fitted on the authorized horizontal case and
+used only for the clearness index); split it with the Erbs diffuse fraction; rotate a
+north–south horizontal axis with ground coverage ratio 0.40, a ±55° limit and slope-free
+backtracking; transpose with Hay–Davies and albedo 0.20; divide plane irradiance by GHI and
+apply −0.35 %/K over 29 W/m²K to the plane excess for warmer tracker cells. Astral supplies
+solar position at sea level. Zero reference power, zenith of 87° or more, or GHI of at most
+1 W/m² give gain 1, and the ratio is capped at 6. These are versioned assumptions flagged
+`assumed_tracker_geometry`: declared axis, row spacing, bifacial gain and terrain are not
+modeled. Other configurations keep `reference-power-transfer-v1` and `geometry_not_modeled`.
+The pure-Python gain agrees with an independent pvlib 0.16.1 chain within 0.012 on the
+tested cases.
+
+Evidence from the authorized case, 2025-11-05 to 2026-11-03, against hourly settlement
+energy: a weekly rolling origin refit the factor on the trailing 30/60/90 days and scored the
+next seven. Direct transfer gave interval MAE 9.39/9.68/9.71 MW, daily MAE 79.4/82.6/86.0 MWh
+and factors from 0.99 to 1.73. With the gain: 6.97/6.78/6.40 MW, 61.3/59.2/55.1 MWh and
+factors from 0.83 to 1.00. Morning, midday and afternoon factors fitted separately were
+1.48/0.95/1.34 on direct transfer and 0.89/0.89/0.88 with the gain, where they no longer
+improved unseen days. Using Solcast DNI/DHI instead of the reference-derived split changed
+in-sample MAE by 0.2 MW. One scalar therefore remains the calibrated quantity; time-of-day
+and seasonal factors are not fitted. This is transfer accuracy against estimated actuals,
+not day-ahead forecast accuracy. A calibration records its `transfer_model` and is neither
+applied, compared nor activated under another one. Outputs saved earlier keep their recorded
+model and factor, and their outage scenarios replay that model.
+
+Known limit: the horizontal rooftop reference includes dynamic snow soiling. In the case
+year 57 days were affected, with reference power near zero on days when the plant produced
+280–530 MWh. The gain cannot restore that energy; such days stay large underestimates until
+a validated snow-free source is added.
+
 For inverter AC production, apply the known inverter limit. For net export, apply
 the smaller known inverter/export limit. Omit unknown limits rather than inventing
 them. Thus 130 MW DC and a 100 MW export limit are separate inputs. Apply clipping
@@ -160,7 +201,7 @@ domain [0.25, 2]. The one-dimensional solver considers every clipping breakpoint
 and each convex segment; it does not assume the entire capped objective is convex.
 These are versioned engineering defaults, not universal statistical constants.
 
-Policy `regularized-huber-v4` uses completed local days with complete, matched
+Policy `regularized-huber-v5` uses completed local days with complete, matched
 astronomical daylight coverage and `valid` observations. Select whole meter
 intervals with positive overlap with daylight; keep sunrise/sunset boundary slots
 and their full energy without prorating. Valid measurements must cover every
@@ -243,6 +284,22 @@ they neither tune hyperparameters nor establish operational forecast accuracy.
 Report source-positive interval MAE separately, using whole meter intervals with
 positive reference power; it is not an astronomical daylight classification.
 
+Every fit with an applied baseline also reports a derating assessment,
+`strong-unclipped-power-median-v1`. The baseline is the pinned incumbent factor, or the
+accepted candidate when no calibration is active. Over the last ten calendar days of the
+dataset, keep whole meter intervals whose baseline prediction is at least 25% of DC capacity
+and where neither prediction nor measurement reaches 98% of the cap. A day qualifies with at
+least three such hours. With three qualifying days, a median daily measured/predicted ratio
+below 0.92 is `suspected`. On the case year, with the baseline refit weekly on the preceding
+60 days, this rule fired on May 29 inside a known outage week and from October 31 onward,
+where the operator later reported about 10% of inverter capacity out of service; the
+estimated ratio was 0.88–0.91. A suspected derating blocks automatic promotion over an
+active calibration, so the healthy baseline is not refitted to a fault. Recording the outage
+excludes its intervals and prepares a new fit; manual activation remains available. Live
+outlooks without a reported outage add `derating_scenario`: DC capacity is scaled by the
+ratio, and the inverter limit too unless the window still reached the cap. This is a
+conditional estimate, not a diagnosis, and its thresholds are engineering defaults.
+
 The dataset pairs manual metered production or settlement injection with matching Solcast estimated actuals,
 never archived forecasts. Prefer complete current Hobby acquisitions under the
 source-selection policy below, applying the request cutoff before ranking, and
@@ -255,23 +312,23 @@ future production intervals are rejected at import. Importing an old measurement
 explicitly associates it with the declared configuration, without backdating that
 configuration. Do not mix periods with different capacities or meter definitions.
 
-An authorized historical rooftop PV export is a different source product from the
-Hobby Rooftop PV API. Never pool these products to fit one multiplier or to reach
-the minimum day count. Prefer the native Hobby cohort once it has seven complete
-valid matched days; otherwise use a sufficiently supported historical cohort for
-offline evidence. Legacy unknown products remain a separate cohort and cannot
-establish current Hobby validation. If no cohort has seven days, keep the fit
-insufficient. Record the chosen product, coverage counts and excluded samples;
-preserve the full pinned source manifest for audit.
+An authorized historical rooftop PV export is another delivery of the same modeled product,
+imported under a settings manifest matching the approved binding. Policy
+`native-thirty-days-else-settings-matched-pool-v2` fits on native Hobby days alone once
+thirty complete matched days exist. Until then it pools native days with that export, so a
+new binding does not restart from one week of data; each day still uses exactly one source.
+Legacy unknown products remain a separate cohort and are never pooled. If no cohort has
+seven days, keep the fit insufficient. Record the pooled products, coverage counts and
+excluded samples; preserve the full pinned source manifest for audit.
 Import historical exports with an explicit settings manifest matching the
 approved binding, preserve native timestamps/means and the original payload digest,
 and record the actual import/publication time. Never infer settings from the filename
-or backdate availability. Automatic activation additionally needs 30 valid matched
-days from the current binding's native Hobby estimated actuals or explicitly
-authorized capacity-normalized copies of that same product, including
-all seven final holdout days; every selected training and holdout day must use that
-same product. Recompute this gate from the immutable per-day source
-manifest; historical exports alone cannot establish this source-transfer evidence.
+or backdate availability. Automatic activation additionally needs all seven final holdout
+days from the current binding's native Hobby estimated actuals or explicitly authorized
+capacity-normalized copies of that product, and at least 30 selected training and holdout
+days that are such days or the settings-matched historical export. Recompute this gate
+from the immutable per-day source manifest; historical exports alone cannot establish this
+source-transfer evidence.
 Declared configurations applied to older readings remain an explicit retrospective
 assumption. Neither source supplies measured irradiance labels.
 
@@ -280,8 +337,9 @@ explicit source/target binding IDs and an operator authorization reference. Arch
 derived copies under the current binding using `P_new = P_old * C_new / C_old`.
 Keep the original snapshots, binding capacities and raw provider payload unchanged;
 the normalization record identifies the raw payload's original capacity, both
-snapshot IDs, the scale, operator and declaration. Unknown original DC capacity
-remains unknown. Other model inputs must match, and known DC/AC ratios must agree.
+snapshot IDs, the scale, operator and declaration. Both bindings must declare DC capacity
+with equal DC/AC ratios: an undeclared value leaves the provider's implicit ratio in
+effect. Other model inputs must match.
 Never convert Historical Rooftop exports into Hobby records or normalize a copy
 again. Preserve acquisition/issue times, set derived availability/publication to
 the actual conversion time, and recalculate saved results at the target capacity.
@@ -293,14 +351,14 @@ Native complete acquisitions precede authorized scaled copies, which precede
 historical exports. Calibration reports count native and normalized support
 separately; normalization creates no additional observed days or API requests.
 
-The authorized November 2026 case demonstrates why this gate matters: a three-phase
-solar-day correction improved held-out Historical Rooftop interval MAE from 8.320 to
-5.905 MW, but worsened the independent November 4–10 Hobby check from 10.989 to
-13.230 MW. Every predeclared scalar/three-phase candidate also failed that independent
-baseline comparison. On overlapping November 3 daylight intervals, normalized Hobby
-reference energy was about 30% higher than the historical product, without either
-source reaching the plant cap. Keep the shape model offline; these experiments do
-not justify an operational forecast improvement claim. The plant owner's
+The authorized November 2026 case first appeared to show a product mismatch: on November 3
+normalized Hobby reference energy was about 30% above the historical export, and every
+scalar or three-phase candidate failed the November 4–10 Hobby check. The cause was the
+source binding. The original 1 kW Hobby site declared no DC capacity and returned 1.25 times
+the power of the 1000/1000 kW site on 116 common daylight intervals, so its scaled copies
+were not equivalent. Capacity normalization now requires declared DC capacity on both
+bindings. The three-phase correction compensated for unmodeled tracker geometry and is
+superseded by the tracking transfer above. The plant owner's
 [announcement](https://smartsolar.com.tr/HaberDetay.aspx?Id=5520) places full-capacity
 operation in March 2026, so January 1 is not a verified full-capacity boundary.
 Longer history and seasonal testing are supported by the

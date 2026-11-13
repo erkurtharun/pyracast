@@ -63,15 +63,13 @@ def _validate_bindings(source: SiteBinding, target: SiteBinding) -> float:
             isfinite(value) and value > 0 for value in (source.capacity_kw, target.capacity_kw)
         )
         or source.capacity_kw == target.capacity_kw
-        or (source.dc_capacity_kw is not None and target.dc_capacity_kw is None)
-        or (
-            source.dc_capacity_kw is not None
-            and target.dc_capacity_kw is not None
-            and not isclose(
-                source.dc_capacity_kw / source.capacity_kw,
-                target.dc_capacity_kw / target.capacity_kw,
-                rel_tol=1e-12,
-            )
+        # An undeclared DC capacity leaves the provider's implicit DC/AC ratio in effect.
+        or source.dc_capacity_kw is None
+        or target.dc_capacity_kw is None
+        or not isclose(
+            source.dc_capacity_kw / source.capacity_kw,
+            target.dc_capacity_kw / target.capacity_kw,
+            rel_tol=1e-12,
         )
     ):
         raise ValidationError(

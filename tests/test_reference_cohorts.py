@@ -71,23 +71,24 @@ def prepare_cohorts(
 
 
 @pytest.mark.parametrize(
-    ("native", "historical", "unknown", "product", "valid_days", "status"),
+    ("native", "historical", "unknown", "products", "valid_days", "status"),
     [
-        (6, 6, 0, "rooftop_pv_power", 6, "insufficient"),
-        (2, 5, 2, "historical_rooftop_pv", 5, "insufficient"),
-        (6, 7, 0, "historical_rooftop_pv", 7, "ready"),
-        (1, 6, 7, "unknown", 7, "ready"),
-        (0, 0, 7, "unknown", 7, "ready"),
-        (0, 7, 0, "historical_rooftop_pv", 7, "ready"),
-        (30, 60, 0, "rooftop_pv_power", 30, "ready"),
+        (6, 6, 0, ["rooftop_pv_power", "historical_rooftop_pv"], 12, "ready"),
+        (2, 5, 2, ["rooftop_pv_power", "historical_rooftop_pv"], 7, "ready"),
+        (1, 6, 7, ["rooftop_pv_power", "historical_rooftop_pv"], 7, "ready"),
+        (0, 4, 4, ["historical_rooftop_pv"], 4, "insufficient"),
+        (0, 0, 7, ["unknown"], 7, "ready"),
+        (0, 7, 0, ["historical_rooftop_pv"], 7, "ready"),
+        (7, 0, 2, ["rooftop_pv_power"], 7, "ready"),
+        (30, 60, 0, ["rooftop_pv_power"], 30, "ready"),
     ],
 )
-def test_fit_never_combines_products_to_reach_minimum_or_enlarge_a_current_cohort(
+def test_fit_pools_settings_matched_history_until_thirty_native_days(
     monkeypatch: pytest.MonkeyPatch,
     native: int,
     historical: int,
     unknown: int,
-    product: str,
+    products: list[str],
     valid_days: int,
     status: str,
 ) -> None:
@@ -97,7 +98,9 @@ def test_fit_never_combines_products_to_reach_minimum_or_enlarge_a_current_cohor
     assert run.status == status
     assert run.result["valid_days"] == valid_days
     cohort = run.dataset_manifest["reference_cohort"]
-    assert cohort["selected_product"] == product
+    assert cohort["policy"] == "native-thirty-days-else-settings-matched-pool-v2"
+    assert cohort["pooled_products"] == products
+    assert cohort["selected_product"] == products[0]
     assert cohort["cohorts"]["rooftop_pv_power"]["complete_matched_days"] == native
     assert cohort["cohorts"]["historical_rooftop_pv"]["complete_matched_days"] == historical
     assert cohort["cohorts"]["unknown"]["complete_matched_days"] == unknown
@@ -112,19 +115,19 @@ def test_fit_never_combines_products_to_reach_minimum_or_enlarge_a_current_cohor
     assert run.result["current_source_validation"]["eligible"] == (native == 30)
 
 
-def test_native_priority_does_not_choose_a_product_using_candidate_holdout_performance(
+def test_pooling_follows_day_counts_not_candidate_holdout_performance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, _, run = prepare_cohorts(monkeypatch, native=7, historical=15, native_power=0.2)
     assert run_calibration(run.pk, NOW)
     run.refresh_from_db()
-    assert run.dataset_manifest["reference_cohort"]["selected_product"] == "rooftop_pv_power"
-    assert run.result["valid_days"] == 7
+    cohort = run.dataset_manifest["reference_cohort"]
+    assert cohort["pooled_products"] == ["rooftop_pv_power", "historical_rooftop_pv"]
+    assert run.result["valid_days"] == 22
     assert run.status == "rejected"
-    assert "baseline_improvement_below_margin" in run.result["reasons"]
 
 
-def test_cohort_minimum_uses_complete_valid_matched_daylight_days(
+def test_pooled_cohort_counts_only_complete_valid_matched_daylight_days(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _, _, run = prepare_cohorts(monkeypatch, native=7, historical=7, invalid_native_day=True)
@@ -132,6 +135,6 @@ def test_cohort_minimum_uses_complete_valid_matched_daylight_days(
     run.refresh_from_db()
     cohort = run.dataset_manifest["reference_cohort"]
     assert cohort["cohorts"]["rooftop_pv_power"]["complete_matched_days"] == 6
-    assert cohort["selected_product"] == "historical_rooftop_pv"
-    assert run.result["valid_days"] == 7
+    assert cohort["pooled_products"] == ["rooftop_pv_power", "historical_rooftop_pv"]
+    assert run.result["valid_days"] == 13
     assert not run.result["current_source_validation"]["eligible"]

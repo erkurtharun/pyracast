@@ -404,7 +404,7 @@ Weather supplier identity and account/site details remain internal. Customer JSO
 Auxiliary Open-Meteo weather is the narrow attribution exception: its license requires visible source and license links next to displayed data. Worker forecast deliveries archive its native hourly GHI, temperature endpoints and ground-snow indicators separately on the Hobby forecast snapshot, without using additional Solcast endpoints or quota. Regional results expose an independent weather reference with its own energy, coverage, collection time and attribution; weather failure does not prevent the Hobby result from publishing. Neither source fills the other's gaps. Existing emails and CSV exports retain their original dataset. The optional customer API key lives only in environment configuration; the free endpoint is for evaluation/non-commercial use.
 
 Plant operations use the same tenant membership boundary. Configuration revisions pin the approved reference binding and distinguish DC nameplate, inverter AC capacity, grid export limit and the measurement point (`net_export` or `ac_generation`). Unknown capacities remain null. Changing the configuration supersedes pending calibration work; it does not rewrite historical forecasts or observations.
-Mounting metadata is also revisioned: unknown, fixed or tracking, with optional fixed-array tilt and clockwise-from-north azimuth. It is not consumed by the current reference-transfer proxy. In particular, a 100 MW grid export limit does not imply a 100 MW inverter rating.
+Mounting metadata is also revisioned: unknown, fixed or tracking, with optional fixed-array tilt and clockwise-from-north azimuth. A tracking declaration over a horizontal reference with declared DC capacity selects the tracking geometry transfer in `IRRADIANCE.md`; fixed-array angles are not consumed. In particular, a 100 MW grid export limit does not imply a 100 MW inverter rating.
 
 The plant's **Outages** tab records actual operating periods, their cause and
 optional remaining DC/inverter/export capacity in MW. Zero means unavailable;
@@ -423,6 +423,12 @@ are excluded from calibration without modifying saved readings. Fits pin inciden
 revisions; relevant later corrections supersede pending work and prevent a stale
 factor from being activated or used in new outlooks. Preparation can create a new
 candidate when enough unaffected matched days remain.
+
+Without a reported outage, a live outlook can add `derating_scenario` when the latest
+completed calibration found recent strong, unclipped production below the active factor.
+It scales remaining capacity by the measured ratio next to the normal outlook, expires
+ten days after its evidence window and yields to any reported outage. Automatic promotion
+over an active calibration pauses while it is suspected. Details are in `IRRADIANCE.md`.
 
 The production journal selects one completed local day at 30/60-minute resolution and shows whole meter intervals overlapping astronomical daylight. Astral calculates a sea-level horizon from immutable binding coordinates and timezone without provider requests. Previous/next controls preserve unsaved entries in memory; saved observations, including night and previous configurations, remain in a separate expandable list. The API retains explicit full-day/range access for integrations. New meter entries and CSV imports require complete matching archived estimated-actual coverage and the current approved plant configuration; forecasts do not unlock entry. The available window grows with the archive. Saved readings remain visible after configuration changes. Import energy in explicit MWh or kWh, with timezone-aware bounds and quality labels. Exact replays are idempotent; conflicting or overlapping records reject the entire batch. PostgreSQL exclusion constraints enforce non-overlap, requiring the `btree_gist` extension. An import contains at most 2,000 rows; larger histories use multiple batches. Observations are immutable in this version; corrections need an explicit replacement-history design before they can be supported safely.
 

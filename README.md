@@ -587,6 +587,14 @@ actuals on completed past days, or explicitly choose `forecast` / `estimated_act
 Past electrical estimates use the declared configuration and baseline factor, with
 source and configuration-assumption flags; they are not meter readings.
 
+A plant declared as `tracking` over a horizontal reference site uses the tracking
+geometry transfer; other plants scale reference power directly. Declare the reference
+site's AC and DC capacity explicitly: an undeclared DC capacity leaves the provider's
+own DC/AC ratio in effect. While recent production sits well below the active
+calibration, live forecasts also return `derating_scenario` next to the normal result.
+The model, its evidence and limits are in
+[plant electrical generation](docs/IRRADIANCE.md#plant-electrical-generation).
+
 Place a CSV inside the working directory (an ignored local directory such as
 `.codex/production.csv` is suitable). Values are **interval energy**, not instantaneous
 MW or cumulative meter readings. Include every interval, including measured night

@@ -357,6 +357,7 @@ class PlantForecastOutput(serializers.Serializer[dict[str, Any]]):
     result = serializers.JSONField(allow_null=True)
     regional_irradiance = serializers.JSONField(allow_null=True)
     outage_scenario = serializers.JSONField(allow_null=True, default=None)
+    derating_scenario = serializers.JSONField(allow_null=True, default=None)
 
 
 def calibration_status_choices() -> Any:
