@@ -225,7 +225,7 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          stage="/dev/shm/pyracast-$RELEASE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          stage="/run/pyracast-release-$RELEASE_SHA-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           local_stage="$(mktemp -d)"
           cleanup() {
             rm -f "$local_stage/migration.json" "$local_stage/release.tar.gz"
@@ -238,7 +238,7 @@ jobs:
           gcloud secrets versions access latest --secret="$GCP_MIGRATION_SECRET" \
             --project="$GCP_PROJECT_ID" --out-file="$local_stage/migration.json"
           gcloud compute ssh "$GCP_INSTANCE" --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" \
-            --tunnel-through-iap --ssh-key-expire-after=1h --quiet --command="umask 077; mkdir '$stage'; mkdir '$stage/bundle'"
+            --tunnel-through-iap --ssh-key-expire-after=1h --quiet --command="umask 077; sudo install -d -m 0700 -o \"\$(id -u)\" -g \"\$(id -g)\" '$stage' && mkdir '$stage/bundle'"
           gcloud compute scp "$local_stage/release.tar.gz" "$local_stage/migration.json" "$GCP_INSTANCE:$stage/" \
             --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" --tunnel-through-iap --ssh-key-expire-after=1h --quiet
           gcloud compute ssh "$GCP_INSTANCE" --project="$GCP_PROJECT_ID" --zone="$GCP_ZONE" \

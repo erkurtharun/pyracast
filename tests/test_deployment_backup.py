@@ -6,6 +6,7 @@ import subprocess
 import time
 import urllib.request
 from email.message import Message
+from http.client import HTTPException
 from pathlib import Path
 from typing import BinaryIO, cast
 from urllib.error import HTTPError
@@ -13,7 +14,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from deploy import backup
+from deploy import backup, operations_log
 
 
 @pytest.mark.parametrize("valid_checksum", [True, False])
@@ -160,3 +161,112 @@ def test_restore_waits_for_the_final_tcp_server_instead_of_the_init_socket(
     monkeypatch.setattr(backup, "report", lambda *_args, **_kwargs: None)
     backup.restore_archive(tmp_path, archive, "postgres/fixture.dump")
     assert restored
+
+
+@pytest.mark.parametrize("failure", [RuntimeError, TypeError])
+def test_backup_does_not_retry_programming_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: type[Exception],
+) -> None:
+    archive = tmp_path / "database.dump"
+    archive.write_bytes(b"PGDMP")
+    attempts = 0
+
+    def upload(_request: urllib.request.Request, **_kwargs: object) -> io.BytesIO:
+        nonlocal attempts
+        attempts += 1
+        raise failure("internal failure")
+
+    monkeypatch.setattr(backup, "access_token", lambda: "private-token")
+    monkeypatch.setattr(urllib.request, "urlopen", upload)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    with pytest.raises(failure, match="internal failure"):
+        backup.upload_backup("private-backups", "postgres/hourly.dump", archive)
+    assert attempts == 1
+
+
+@pytest.mark.parametrize("failure", [RuntimeError, TypeError])
+def test_operations_logging_does_not_hide_programming_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failure: type[Exception],
+) -> None:
+    def metadata(_path: str) -> str:
+        raise failure("private-error-detail")
+
+    monkeypatch.setattr(operations_log, "metadata", metadata)
+    with pytest.raises(failure, match="private-error-detail"):
+        operations_log.report("pyracast_backup_failed", "ERROR")
+    assert capsys.readouterr().err.splitlines() == ['{"event": "pyracast_backup_failed"}']
+
+
+@pytest.mark.parametrize("failure", [OSError, ValueError, HTTPException])
+def test_operations_logging_preserves_redacted_fallback_for_expected_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failure: type[Exception],
+) -> None:
+    def metadata(_path: str) -> str:
+        raise failure("private-error-detail")
+
+    monkeypatch.setattr(operations_log, "metadata", metadata)
+    operations_log.report("pyracast_backup_failed", "ERROR")
+    assert [json.loads(line) for line in capsys.readouterr().err.splitlines()] == [
+        {"event": "pyracast_backup_failed"},
+        {"event": "pyracast_operations_log_failed"},
+    ]
+
+
+@pytest.mark.parametrize(
+    "payload", [[], {}, {"access_token": None}, {"access_token": 123}, {"access_token": ""}]
+)
+def test_invalid_metadata_credentials_have_a_redacted_data_error(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: object,
+) -> None:
+    monkeypatch.setattr(operations_log, "metadata", lambda _path: json.dumps(payload))
+    with pytest.raises(ValueError, match="Invalid instance access token response"):
+        operations_log.access_token()
+
+
+@pytest.mark.parametrize("failure", [OSError, HTTPException])
+def test_backup_retries_expected_transport_failures_with_a_bounded_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: type[Exception],
+) -> None:
+    archive = tmp_path / "database.dump"
+    archive.write_bytes(b"PGDMP")
+    attempts = 0
+
+    def upload(_request: urllib.request.Request, **_kwargs: object) -> io.BytesIO:
+        nonlocal attempts
+        attempts += 1
+        raise failure("private-error-detail")
+
+    monkeypatch.setattr(backup, "access_token", lambda: "private-token")
+    monkeypatch.setattr(urllib.request, "urlopen", upload)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    with pytest.raises(failure):
+        backup.upload_backup("private-backups", "postgres/hourly.dump", archive)
+    assert attempts == 3
+
+
+@pytest.mark.parametrize("payload", [[], {}, {"md5Hash": "invalid", "size": None}])
+def test_malformed_backup_confirmation_has_a_bounded_redacted_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: object,
+) -> None:
+    archive = tmp_path / "database.dump"
+    archive.write_bytes(b"PGDMP")
+    monkeypatch.setattr(backup, "access_token", lambda: "private-token")
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda _request, **_kwargs: io.BytesIO(json.dumps(payload).encode()),
+    )
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    with pytest.raises(ValueError, match="Uploaded backup checksum does not match"):
+        backup.upload_backup("private-backups", "postgres/hourly.dump", archive)

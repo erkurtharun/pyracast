@@ -1,6 +1,7 @@
 import json
 import sys
 import urllib.request
+from http.client import HTTPException
 from typing import Any
 
 
@@ -14,7 +15,11 @@ def metadata(path: str) -> str:
 
 
 def access_token() -> str:
-    return str(json.loads(metadata("instance/service-accounts/default/token"))["access_token"])
+    payload = json.loads(metadata("instance/service-accounts/default/token"))
+    token = payload.get("access_token") if isinstance(payload, dict) else None
+    if not isinstance(token, str) or not token:
+        raise ValueError("Invalid instance access token response.")
+    return token
 
 
 def report(event: str, severity: str, **details: object) -> None:
@@ -44,5 +49,5 @@ def report(event: str, severity: str, **details: object) -> None:
         )
         with urllib.request.urlopen(request, timeout=15):  # noqa: S310
             pass
-    except Exception:
+    except (OSError, ValueError, HTTPException):
         print('{"event":"pyracast_operations_log_failed"}', file=sys.stderr, flush=True)

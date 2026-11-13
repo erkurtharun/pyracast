@@ -152,9 +152,11 @@ def authorize(
             super().setup()
             self.connection.settimeout(min(timeout_seconds, 5))
 
-        def log_message(self, format: str, *args: object) -> None:
+        def log_message(self, *_args: object, **_kwargs: object) -> None:
             pass
 
+        # BaseHTTPRequestHandler dispatches GET requests using this exact method name.
+        # noinspection PyPep8Naming
         def do_GET(self) -> None:
             nonlocal code, denied
             try:

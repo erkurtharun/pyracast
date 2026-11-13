@@ -11,6 +11,7 @@ import tempfile
 import time
 import urllib.request
 import uuid
+from http.client import HTTPException
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.parse import quote, urlencode
@@ -52,7 +53,11 @@ def upload_backup(bucket: str, name: str, archive: Path) -> None:
                 )
                 with urllib.request.urlopen(request, timeout=180) as response:  # noqa: S310
                     result = json.load(response)
-            if result["md5Hash"] != expected or int(result["size"]) != archive.stat().st_size:
+            if (
+                not isinstance(result, dict)
+                or result.get("md5Hash") != expected
+                or result.get("size") != str(archive.stat().st_size)
+            ):
                 raise ValueError("Uploaded backup checksum does not match.")
             return
         except HTTPError as error:
@@ -65,13 +70,17 @@ def upload_backup(bucket: str, name: str, archive: Path) -> None:
                 )
                 with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
                     result = json.load(response)
-                if result["md5Hash"] == expected and int(result["size"]) == archive.stat().st_size:
+                if (
+                    isinstance(result, dict)
+                    and result.get("md5Hash") == expected
+                    and result.get("size") == str(archive.stat().st_size)
+                ):
                     return
                 raise ValueError("Existing backup checksum does not match.") from None
             if attempt == 2:
                 raise
             time.sleep(2**attempt)
-        except Exception:
+        except (OSError, ValueError, HTTPException):
             if attempt == 2:
                 raise
             time.sleep(2**attempt)
