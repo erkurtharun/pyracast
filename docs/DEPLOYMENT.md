@@ -264,6 +264,8 @@ commit; a failed test, stale commit, fork or pull-request run cannot deploy.
 
 Use `terraform -chdir=infra/terraform output -json github_environment_variables`
 to obtain the nonsecret values. Add them as **production environment variables**.
+`GCP_MIGRATION_SECRET` is the short secret ID (for example `pyracast-migration`)
+passed to `gcloud --secret`, without a `projects/.../secrets/` prefix.
 Add **`GCP_DEPLOY_ENABLED=true` as a repository variable**, because the initial
 authorization job runs before entering the production environment.
 

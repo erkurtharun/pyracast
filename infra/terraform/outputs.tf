@@ -68,6 +68,6 @@ output "github_environment_variables" {
     GCP_WIF_PROVIDER           = google_iam_workload_identity_pool_provider.github.name
     GCP_DEPLOY_SERVICE_ACCOUNT = google_service_account.deploy.email
     GCP_ARTIFACT_REPOSITORY    = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.application.repository_id}"
-    GCP_MIGRATION_SECRET       = google_secret_manager_secret.application["migration"].id
+    GCP_MIGRATION_SECRET       = google_secret_manager_secret.application["migration"].secret_id
   }
 }
