@@ -13,7 +13,13 @@ from pyracast.plants.calibration_data import build_calibration_dataset
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.incident_policy import incidents_unchanged
 from pyracast.plants.measurements import select_measurements
-from pyracast.plants.models import CalibrationRun, Plant, PlantForecast, ProductionObservation
+from pyracast.plants.models import (
+    CalibrationActivation,
+    CalibrationRun,
+    Plant,
+    PlantForecast,
+    ProductionObservation,
+)
 from pyracast.plants.numerics import FitResult, fit_calibration
 from pyracast.plants.operations import activate_calibration, revise_plant
 from tests.test_domain import NOW, System
@@ -67,7 +73,18 @@ def test_late_outage_supersedes_fit_preserves_meter_readings_and_cancel_restores
     )
     pending.refresh_from_db()
     assert pending.status == "superseded"
-    assert not CalibrationRun.objects.filter(status="pending").exists()
+    diagnostic = CalibrationRun.objects.get(status="pending")
+    assert diagnostic.pk != pending.pk
+    assert diagnostic.incident_revision_ids == [outage.revisions.get().pk]
+    assert training.run_calibration(diagnostic.pk, timezone.now())
+    diagnostic.refresh_from_db()
+    assert diagnostic.status == "insufficient"
+    assert diagnostic.factor is None
+    assert diagnostic.result["valid_days"] == 6
+    assert diagnostic.result["included_day_dates"] == [
+        f"2026-11-{day:02d}" for day in (2, 3, 5, 6, 7, 8)
+    ]
+    assert not CalibrationActivation.objects.exists()
     rows, _ = select_measurements(config, start, end, timezone.now())
     assert sum(row.quality == "outage" for row in rows) == 1
     assert not ProductionObservation.objects.exclude(quality="valid").exists()
@@ -87,7 +104,15 @@ def test_late_outage_supersedes_fit_preserves_meter_readings_and_cancel_restores
     )
     replacement = CalibrationRun.objects.get(status="pending")
     assert replacement.pk != pending.pk
+    assert replacement.pk != diagnostic.pk
     assert replacement.incident_revision_ids == []
+    assert training.run_calibration(replacement.pk, timezone.now())
+    replacement.refresh_from_db()
+    assert replacement.status == "ready"
+    assert replacement.result["valid_days"] == 7
+    assert replacement.result["included_day_dates"] == [f"2026-11-{day:02d}" for day in range(2, 9)]
+    assert not ProductionObservation.objects.exclude(quality="valid").exists()
+    assert not CalibrationActivation.objects.exists()
 
 
 def test_outage_recorded_while_fitting_prevents_publication(

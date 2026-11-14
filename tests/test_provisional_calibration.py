@@ -167,6 +167,18 @@ def test_last_publication_prepares_once_when_seven_daylight_days_become_matched(
         day = FIRST_DAY + timedelta(days=offset)
         actual_snapshot_for(system, day)
         reported(connection, configuration, day)
+    diagnostic = prepare_calibration(plant.pk)
+    assert diagnostic is not None
+    assert len(diagnostic.production_snapshot_ids) == 6
+    assert run_calibration(diagnostic.pk, NOW)
+    diagnostic.refresh_from_db()
+    assert diagnostic.status == "insufficient"
+    assert diagnostic.factor is None
+    assert diagnostic.result["valid_days"] == 6
+    assert diagnostic.result["included_day_dates"] == [
+        (FIRST_DAY + timedelta(days=offset)).isoformat() for offset in range(6)
+    ]
+    assert not CalibrationActivation.objects.exists()
     last_day = FIRST_DAY + timedelta(days=6)
     start, _ = local_day_bounds(last_day, configuration.binding.timezone)
     dispatch = NOW - timedelta(seconds=1)
@@ -197,7 +209,8 @@ def test_last_publication_prepares_once_when_seven_daylight_days_become_matched(
         )
         snapshot = persist_snapshot(lease, data, dispatch)
         assert snapshot is not None
-        assert not CalibrationRun.objects.exists()
+        assert CalibrationRun.objects.count() == 1
+        assert not CalibrationRun.objects.filter(status="pending").exists()
         assert publish(lease, snapshot, {}, dispatch)
         assert not publish(lease, snapshot, {}, dispatch)
     else:
@@ -239,7 +252,8 @@ def test_last_publication_prepares_once_when_seven_daylight_days_become_matched(
             "pending" if last_source == "realtime_partial" else "succeeded"
         )
         assert not run_epias_job(production_job.pk, fetch=fetch, now=dispatch)
-    run = CalibrationRun.objects.get()
+    run = CalibrationRun.objects.get(status="pending")
+    assert run.pk != diagnostic.pk
     assert run.status == "pending"
     assert run.window_start == FIRST_DAY
     assert run.window_end == last_day
@@ -252,7 +266,11 @@ def test_last_publication_prepares_once_when_seven_daylight_days_become_matched(
     assert run.result["valid_days"] == 7
     assert run.result["provisional_production"] is True
     assert not CalibrationActivation.objects.exists()
-    assert CalibrationRun.objects.count() == 1
+    assert CalibrationRun.objects.count() == 2
+    assert prepare_calibration(plant.pk) is None
+    diagnostic.refresh_from_db()
+    assert diagnostic.status == "insufficient"
+    assert diagnostic.result["valid_days"] == 6
 
 
 def fitted_production(

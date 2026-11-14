@@ -477,6 +477,40 @@ def test_zero_production_holdout_is_scored_without_backdating_the_evaluation() -
     incumbent = cast(dict[str, float], result.report["incumbent"])
     assert incumbent["interval_mae_mw"] == 16
     assert incumbent["daily_mae_mwh"] == 384
+    assert result.report["zero_production_holdout_days"] == 7
+    assert "zero_production_holdout" in cast(list[str], result.report["reasons"])
+    assert "incumbent_mae_regression" in cast(list[str], result.report["reasons"])
+
+
+def test_complete_zero_holdout_cannot_authorize_a_first_factor() -> None:
+    samples = tuple(
+        sample if sample.start < START + timedelta(days=23) else replace(sample, energy_mwh=0)
+        for sample in _samples(30, factor=0.5)
+    )
+    result = fit_calibration(samples, timezone="UTC", normalization_mw=100, limit_mw=100)
+    assert result.status == "rejected"
+    assert result.factor is None
+    assert result.report["candidate_kind"] == "huber"
+    assert 0.5 < cast(float, result.report["candidate_factor"]) < 0.53
+    assert result.report["zero_production_holdout_days"] == 7
+    assert result.report["reasons"] == ["zero_production_holdout"]
+    assert result.report["holdout_day_dates"] == [f"2026-06-{day}" for day in range(24, 31)]
+    assert cast(dict[str, object], result.report["derating"])["status"] == "suspected"
+
+
+def test_source_zero_and_meter_zero_holdout_day_does_not_falsely_block_a_factor() -> None:
+    samples = tuple(
+        sample
+        if sample.start < START + timedelta(days=29)
+        else replace(sample, energy_mwh=0, intervals=(PowerInterval(sample.start, sample.end, 0),))
+        for sample in _samples(30)
+    )
+    result = fit_calibration(samples, timezone="UTC", normalization_mw=100, limit_mw=100)
+    assert result.status == "ready"
+    assert result.report["valid_days"] == 30
+    assert result.report["zero_production_holdout_days"] == 0
+    assert result.report["reasons"] == []
+    assert cast(list[str], result.report["holdout_day_dates"])[-1] == "2026-06-30"
 
 
 def test_zero_production_training_days_do_not_pull_down_the_healthy_factor() -> None:
@@ -656,6 +690,41 @@ def test_identity_recovery_can_replace_a_depressed_incumbent_after_production_re
     assert result.report["candidate"] == result.report["baseline"]
     assert result.report["reasons"] == []
     assert result.report["holdout_day_dates"] == [f"2026-06-{day}" for day in range(24, 31)]
+
+
+def test_zero_holdout_cannot_replace_a_correct_incumbent_when_the_median_is_normal() -> None:
+    samples = tuple(
+        replace(sample, energy_mwh=0)
+        if START + timedelta(days=23) <= sample.start < START + timedelta(days=27)
+        else sample
+        for sample in _samples(30, factor=1.5)
+    )
+    result = fit_calibration(
+        samples, timezone="UTC", normalization_mw=100, limit_mw=100, incumbent_factor=1.5
+    )
+    assert result.status == "rejected"
+    assert result.factor is None
+    assert result.report["candidate_kind"] == "identity_recovery"
+    assert result.report["candidate_factor"] == 1
+    assert result.report["zero_production_holdout_days"] == 4
+    assert result.report["reasons"] == ["zero_production_holdout"]
+    assert result.report["holdout_day_dates"] == [f"2026-06-{day}" for day in range(24, 31)]
+    assert cast(dict[str, object], result.report["derating"])["status"] == "normal"
+
+
+def test_nonzero_identity_recovery_can_challenge_an_incumbent_above_one() -> None:
+    result = fit_calibration(
+        _samples(30, factor=1),
+        timezone="UTC",
+        normalization_mw=100,
+        limit_mw=100,
+        incumbent_factor=1.3,
+    )
+    assert result.status == "ready"
+    assert result.factor == 1
+    assert result.report["candidate_kind"] == "identity_recovery"
+    assert result.report["zero_production_holdout_days"] == 0
+    assert cast(dict[str, object], result.report["derating"])["status"] == "suspected"
 
 
 def test_identity_recovery_still_requires_meaningful_paired_improvement_and_bias_guards() -> None:

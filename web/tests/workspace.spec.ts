@@ -1272,7 +1272,7 @@ test("calibration detail explains support, rejection and incumbent comparison", 
             training_days: 8,
             holdout_days: 2,
             training_support: { informative_days: 4, minimum_days: 5 },
-            reasons: ["incumbent_mae_regression"],
+            reasons: ["incumbent_mae_regression", "zero_production_holdout"],
             rolling_origin: { status: "diagnostic", folds: [{}, {}] },
             baseline: { daily_mae_mwh: 3 },
             candidate: { daily_mae_mwh: 2 },
@@ -1297,6 +1297,11 @@ test("calibration detail explains support, rejection and incumbent comparison", 
         ),
     ).toBeVisible();
     await expect(page.getByText("4 / 5 required")).toBeVisible();
+    await expect(
+        page.getByText(
+            "Zero production in the comparison period prevents a calibration change.",
+        ),
+    ).toBeVisible();
     await expect(
         page.getByText(
             "Metrics use whole meter intervals intersecting daylight, not 24-hour totals.",

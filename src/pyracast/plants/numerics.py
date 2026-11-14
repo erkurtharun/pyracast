@@ -653,6 +653,7 @@ def fit_calibration(
         "included_day_dates": [day.isoformat() for day in days],
         "training_day_dates": [],
         "holdout_day_dates": [],
+        "zero_production_holdout_days": 0,
         "normalization_mw": normalization_mw,
         "limit_mw": limit_mw,
         "factor_bounds": [FACTOR_MIN, FACTOR_MAX],
@@ -687,6 +688,11 @@ def fit_calibration(
     training_days = [day for day in days[:-holdout_count] if day >= first_training_day]
     training = [row for row in rows if first_training_day <= row.day < holdout_days[0]]
     validation = [row for row in rows if row.day in holdout_days]
+    zero_production_holdout_days = sum(
+        not any(row.sample.energy_mwh > 0 for row in validation if row.day == day)
+        and any(power > 0 for row in validation if row.day == day for power, _ in row.pieces)
+        for day in holdout_days
+    )
     informative = _eligible(training, None)
     eligible = _eligible(informative, limit_mw)
     exclusions["uninformative_training"] = len(training) - len(informative)
@@ -700,6 +706,7 @@ def fit_calibration(
         {
             "training_days": len(training_days),
             "holdout_days": holdout_count,
+            "zero_production_holdout_days": zero_production_holdout_days,
             "fit_samples": len(eligible),
             "holdout_start": holdout_days[0].isoformat(),
             "training_day_dates": [day.isoformat() for day in training_days],
@@ -760,6 +767,8 @@ def fit_calibration(
                 "candidate": candidate,
             }
         )
+    if zero_production_holdout_days:
+        reasons.append("zero_production_holdout")
     report["reasons"] = reasons
     accepted = not reasons
     return FitResult(

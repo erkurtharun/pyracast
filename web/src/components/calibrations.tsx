@@ -306,6 +306,8 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
             "Not enough complete paired days are available.",
         insufficient_training_support:
             "The training days do not contain enough informative production.",
+        zero_production_holdout:
+            "Zero production in the comparison period prevents a calibration change.",
         baseline_improvement_below_margin:
             "The candidate did not improve enough over the baseline.",
         factor_at_bound: "The fitted factor reached its allowed boundary.",

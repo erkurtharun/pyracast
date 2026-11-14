@@ -301,6 +301,13 @@ it. Preserve the fitted Huber factor and metrics and identify the selected candi
 kind. This recovery option retains the same training-support, chronological,
 source, authorization and activation guards; it never resets an aging factor merely
 because time has passed or assumes factor 1 is correct.
+For either candidate kind, any complete holdout day with zero measured energy and
+positive matched reference power rejects the candidate with
+`zero_production_holdout`. Record its count as `zero_production_holdout_days`,
+retaining the full holdout dates, errors and independent diagnostics. Such days
+score operational prediction error but cannot authorize a new transfer factor.
+A day with both zero source power and zero measured energy does not trigger this
+guard. Rejection also prevents manual activation.
 The 1% margin is an operational acceptance rule, not a significance test. Confidence
 intervals are not estimated in this version; do not expose invented probability
 bands. Fitting and activation remain separate transactions. An authorized member can
@@ -355,8 +362,12 @@ when its configuration, source identity, incidents and reference factor remain
 applicable. Evidence older than two completed local days is labeled `stale`.
 The diagnostic changes neither forecast power nor DC/inverter/export capacity.
 Only reported operating limits drive the separate outage scenario. A `suspected`
-aggregate assessment still pauses automatic promotion over an active calibration;
-manual activation retains its existing guards. Reported outage intervals remain
+aggregate assessment pauses automatic promotion of fitted Huber candidates over an
+active calibration. Explicit `identity_recovery` may pass that diagnostic veto only
+after all source, freshness, thirty matched-day, seven new holdout-day, paired MAE,
+bias and zero-production holdout guards pass. Its reference comparison cannot
+identify the cause of a persistent production change or establish healthy capacity.
+Manual activation retains its existing guards. Reported outage intervals remain
 excluded from calibration. Unreported partial losses can still affect training,
 and a first fit cannot distinguish their cause from normal model-transfer bias.
 Later candidates, including identity recovery, must pass the unchanged paired

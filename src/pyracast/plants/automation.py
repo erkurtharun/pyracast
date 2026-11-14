@@ -192,7 +192,11 @@ def _promotion_reason(run: CalibrationRun, now: datetime) -> str | None:
     comparison = run.comparison_activation
     if comparison is not None and comparison.calibration is not None:
         derating = run.result.get("derating")
-        if isinstance(derating, dict) and derating.get("status") == "suspected":
+        if (
+            isinstance(derating, dict)
+            and derating.get("status") == "suspected"
+            and not (run.result.get("candidate_kind") == "identity_recovery" and run.factor == 1.0)
+        ):
             return "derating_suspected"
         incumbent = comparison.calibration
         previous = _holdout_dates(incumbent)
