@@ -79,8 +79,8 @@ def calculate(binding: SiteBinding, target_date: date, data: ProviderData) -> di
                 daylight,
                 (
                     (
-                        datetime.fromisoformat(str(row.get("original_start", row["start"]))),
-                        datetime.fromisoformat(str(row.get("original_end", row["end"]))),
+                        datetime.fromisoformat(cast(str, row.get("original_start", row["start"]))),
+                        datetime.fromisoformat(cast(str, row.get("original_end", row["end"]))),
                     )
                     for row in data.intervals
                 ),

@@ -112,6 +112,39 @@ test("a customer manages one plant site through the real API", async ({
     await expect(
         page.getByText("View interval data (12 intervals)"),
     ).toBeVisible();
+    async function daylightForecast(resolution: 30 | 60) {
+        const response = await page.request.get(`${plantUrl}forecast/`, {
+            params: {
+                date: process.env.BROWSER_DATE!,
+                resolution_minutes: resolution,
+                data_source: "auto",
+            },
+        });
+        expect(response.status()).toBe(200);
+        const forecast = (await response.json()) as {
+            result: {
+                daylight: {
+                    complete: boolean;
+                    coverage_fraction: number;
+                    energy_mwh: number;
+                };
+            };
+        };
+        expect(forecast.result.daylight.complete).toBe(true);
+        expect(forecast.result.daylight.coverage_fraction).toBe(1);
+        expect(forecast.result.daylight.energy_mwh).toBeGreaterThan(0);
+        return forecast.result.daylight;
+    }
+    const hourlyDaylight = await daylightForecast(60);
+    const daylightEnergy = new Intl.NumberFormat("en", {
+        maximumFractionDigits: 3,
+    }).format(hourlyDaylight.energy_mwh);
+    await expect(
+        page.locator(".stat").filter({ hasText: /^Daylight energy/ }),
+    ).toContainText(`${daylightEnergy} MWh`);
+    await expect(
+        page.locator(".stat").filter({ hasText: /^Coverage/ }),
+    ).toContainText("100 %");
     async function expectFullForecastCsv(fullCount: 24 | 48) {
         const download = page.waitForEvent("download");
         await page
@@ -149,6 +182,12 @@ test("a customer manages one plant site through the real API", async ({
     await expect(
         page.getByText("View interval data (24 intervals)"),
     ).toBeVisible();
+    expect((await daylightForecast(30)).energy_mwh).toBe(
+        hourlyDaylight.energy_mwh,
+    );
+    await expect(
+        page.locator(".stat").filter({ hasText: /^Daylight energy/ }),
+    ).toContainText(`${daylightEnergy} MWh`);
     await expectFullForecastCsv(48);
     const outageTimes = await page.evaluate(() => {
         const localInput = (minutesAgo: number) => {
@@ -175,11 +214,22 @@ test("a customer manages one plant site through the real API", async ({
     ).toBeVisible();
     await page.getByRole("button", { name: "Forecast", exact: true }).click();
     await expect(
-        page.getByText("Normal capacity · daily energy", { exact: true }),
+        page.getByText("Normal capacity · daylight energy", { exact: true }),
     ).toBeVisible();
     await expect(
-        page.getByText("With outages · daily energy", { exact: true }),
+        page.getByText("With outages · daylight energy", { exact: true }),
     ).toBeVisible();
+    await expect(
+        page
+            .locator(".stat")
+            .filter({ hasText: /^Normal capacity · daylight energy/ }),
+    ).toContainText(`${daylightEnergy} MWh`);
+    await expect(
+        page
+            .locator(".stat")
+            .filter({ hasText: /^With outages · daylight energy/ })
+            .locator("strong"),
+    ).toHaveText("0 MWh");
     const outageDownload = page.waitForEvent("download");
     await page
         .getByRole("button", { name: "Download both scenarios CSV" })
@@ -217,7 +267,9 @@ test("a customer manages one plant site through the real API", async ({
     await page.getByRole("button", { name: "Save resolution" }).click();
     await expect(page.getByText("resolved", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Forecast", exact: true }).click();
-    await expect(page.getByText("Daily energy", { exact: true })).toBeVisible();
+    await expect(
+        page.getByText("Daylight energy", { exact: true }),
+    ).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Download both scenarios CSV" }),
     ).toHaveCount(0);

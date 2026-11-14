@@ -89,9 +89,7 @@ def summarize_daylight(
         ),
         timedelta(),
     )
-    complete = (
-        duration > timedelta() and valid_coverage == duration and energy_coverage == energy_duration
-    )
+    complete = timedelta() < duration == valid_coverage and energy_coverage == energy_duration
     if not isfinite(energy):
         raise ValueError("Daylight energy must be finite")
     return {
