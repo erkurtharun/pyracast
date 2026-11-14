@@ -15,7 +15,7 @@ def test_tenant_list_includes_only_authenticated_users_memberships(is_superuser:
     hidden = Tenant.objects.create(name="Hidden")
     second = Tenant.objects.create(name="Second")
     Membership.objects.create(user=user, tenant=second)
-    Membership.objects.create(user=user, tenant=first)
+    Membership.objects.create(user=user, tenant=first, role=Membership.Role.ADMIN)
     Membership.objects.create(user=other, tenant=hidden)
     client = Client()
     client.force_login(user)
@@ -27,7 +27,10 @@ def test_tenant_list_includes_only_authenticated_users_memberships(is_superuser:
         "count": 2,
         "next": None,
         "previous": None,
-        "results": [{"id": first.pk, "name": "First"}, {"id": second.pk, "name": "Second"}],
+        "results": [
+            {"id": first.pk, "name": "First", "role": "admin"},
+            {"id": second.pk, "name": "Second", "role": "viewer"},
+        ],
     }
 
 

@@ -7,9 +7,10 @@ from unittest.mock import Mock
 
 import pytest
 from django.db import close_old_connections, connection
-from django.db.models import QuerySet
+from django.db.models import Model, QuerySet
 from django.utils import timezone
 
+from pyracast.accounts.models import Tenant
 from pyracast.connections.contracts import ProviderData
 from pyracast.forecasts.jobs import (
     binding_is_current,
@@ -25,7 +26,7 @@ from pyracast.forecasts.scheduler import enqueue_due as enqueue_collections
 from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.scheduler import enqueue_due as enqueue_reminders
 from pyracast.plants.history import plant_outlook
-from pyracast.plants.models import Plant
+from pyracast.plants.models import CalibrationRun, Plant
 from pyracast.plants.operations import configuration_is_current, reset_calibration
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.plants.training import run_calibration
@@ -133,20 +134,22 @@ def _race_before_region_lock(
     query_method: str,
     work: Callable[[], object],
     purge: Callable[[], None],
+    *,
+    lock_model: type[Model] = Region,
 ) -> object:
     entered, release = Event(), Event()
     main_thread = get_ident()
     original = getattr(QuerySet, query_method)
 
-    def paused(queryset: QuerySet[Any]) -> Any:
+    def paused(queryset: QuerySet[Any], *args: Any, **kwargs: Any) -> Any:
         if (
             get_ident() != main_thread
-            and queryset.model is Region
+            and queryset.model is lock_model
             and queryset.query.select_for_update
         ):
             entered.set()
             assert release.wait(timeout=10)
-        return original(queryset)
+        return original(queryset, *args, **kwargs)
 
     monkeypatch.setattr(QuerySet, query_method, paused)
 
@@ -211,6 +214,10 @@ def test_calibration_identity_purged_before_region_lock(
         purge_expired(NOW + timedelta(days=31))
 
     assert (
-        _race_before_region_lock(monkeypatch, "exists", lambda: run_calibration(run.pk, NOW), purge)
+        _race_before_region_lock(
+            monkeypatch, "get", lambda: run_calibration(run.pk, NOW), purge, lock_model=Tenant
+        )
         is False
     )
+    assert not Plant.objects.filter(pk=plant.pk).exists()
+    assert not CalibrationRun.objects.filter(pk=run.pk).exists()

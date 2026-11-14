@@ -23,7 +23,7 @@ from scripts import check_solcast
 
 def make_binding(account: ProviderAccount, site_id: str = "synthetic-site") -> SiteBinding:
     region = Region.objects.create(
-        tenant=Tenant.objects.create(name="Capture tenant"),
+        tenant=Tenant.objects.create(name=f"Capture tenant {account.pk}/{site_id}"),
         name="Capture site",
         latitude=37.8,
         longitude=34.46,

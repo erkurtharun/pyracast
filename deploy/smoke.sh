@@ -207,7 +207,7 @@ else:
     raise SystemExit('Runtime role unexpectedly owns DDL permission')
 actor = User.objects.create_superuser(username='container-smoke', email='smoke@example.com')
 tenant = Tenant.objects.create(name='Container smoke')
-Membership.objects.create(user=actor, tenant=tenant)
+Membership.objects.create(user=actor, tenant=tenant, role=Membership.Role.ADMIN)
 region = submit_region(actor, tenant.pk, name='Synthetic Ankara', latitude=39.9,
                        longitude=32.8, timezone='Europe/Istanbul')
 account = create_account(actor, provider='fixture', external_account_id='container-smoke')

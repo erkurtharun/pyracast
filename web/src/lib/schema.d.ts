@@ -611,7 +611,9 @@ export interface components {
             configuration_id: number | null;
             /** Format: date-time */
             next_check_at: string | null;
-            last_attempt: components["schemas"]["AutomaticCalibrationAttemptOutput"] | null;
+            last_attempt:
+                | components["schemas"]["AutomaticCalibrationAttemptOutput"]
+                | null;
         };
         CalibrationInput: {
             configuration_id: number;
@@ -653,7 +655,14 @@ export interface components {
          *     * `superseded` - superseded
          * @enum {string}
          */
-        CalibrationStatusEnum: "pending" | "running" | "ready" | "insufficient" | "rejected" | "failed" | "superseded";
+        CalibrationStatusEnum:
+            | "pending"
+            | "running"
+            | "ready"
+            | "insufficient"
+            | "rejected"
+            | "failed"
+            | "superseded";
         CalibrationSummaryOutput: {
             readonly id: number;
             configuration_id: number;
@@ -784,7 +793,12 @@ export interface components {
             date: string;
             timezone: string;
             unit: string;
-            source_kind: (components["schemas"]["EpiasHistoryOutputSourceKindEnum"] | components["schemas"]["NullEnum"]) | null;
+            source_kind:
+                | (
+                      | components["schemas"]["EpiasHistoryOutputSourceKindEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
             complete: boolean;
             /** Format: double */
             reported_total_mwh: number | null;
@@ -801,9 +815,15 @@ export interface components {
          *     * `mixed` - mixed
          * @enum {string}
          */
-        EpiasHistoryOutputSourceKindEnum: "realtime_generation" | "settlement_injection" | "mixed";
+        EpiasHistoryOutputSourceKindEnum:
+            "realtime_generation" | "settlement_injection" | "mixed";
         EpiasReadingOutput: {
-            source_kind: (components["schemas"]["EpiasSourceKindEnum"] | components["schemas"]["NullEnum"]) | null;
+            source_kind:
+                | (
+                      | components["schemas"]["EpiasSourceKindEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
             snapshot_id: number | null;
             /** Format: date-time */
             provider_timestamp: string | null;
@@ -1032,7 +1052,8 @@ export interface components {
          *     * `invalid` - Invalid
          * @enum {string}
          */
-        ObservationOutputQualityEnum: "valid" | "outage" | "curtailed" | "invalid";
+        ObservationOutputQualityEnum:
+            "valid" | "outage" | "curtailed" | "invalid";
         ObservationRow: {
             /** Format: date-time */
             starts_at: string;
@@ -1285,7 +1306,8 @@ export interface components {
             /** Format: double */
             scored_hours: number;
             metrics: components["schemas"]["PerformanceMetrics"] | null;
-            baseline_metrics: components["schemas"]["PerformanceMetrics"] | null;
+            baseline_metrics:
+                components["schemas"]["PerformanceMetrics"] | null;
             days: components["schemas"]["PerformanceDay"][];
             uncertainty: string;
         };
@@ -1300,7 +1322,12 @@ export interface components {
             calibration_id: number | null;
             freshness: string;
             source_kind: components["schemas"]["ForecastSourceKindEnum"];
-            unavailable_reason: (components["schemas"]["UnavailableReasonEnum"] | components["schemas"]["NullEnum"]) | null;
+            unavailable_reason:
+                | (
+                      | components["schemas"]["UnavailableReasonEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
             result: unknown;
             regional_irradiance: unknown;
             outage_scenario?: unknown;
@@ -1327,7 +1354,8 @@ export interface components {
             readonly id: number;
             readonly name: string;
             region_id: number;
-            current_configuration: components["schemas"]["ConfigurationOutput"] | null;
+            current_configuration:
+                components["schemas"]["ConfigurationOutput"] | null;
             submission: components["schemas"]["PlantSubmissionOutput"] | null;
             /** Format: date-time */
             readonly created_at: string;
@@ -1557,7 +1585,10 @@ export interface components {
          *     * `estimated_actuals_unavailable` - estimated_actuals_unavailable
          * @enum {string}
          */
-        UnavailableReasonEnum: "configuration_unavailable" | "forecast_unavailable" | "estimated_actuals_unavailable";
+        UnavailableReasonEnum:
+            | "configuration_unavailable"
+            | "forecast_unavailable"
+            | "estimated_actuals_unavailable";
         /**
          * @description * `MWh` - MWh
          *     * `kWh` - kWh
@@ -2364,7 +2395,11 @@ export interface operations {
                  *     * `estimated_actuals` - estimated_actuals
                  *     * `archived_forecast` - archived_forecast
                  */
-                data_source?: "auto" | "forecast" | "estimated_actuals" | "archived_forecast";
+                data_source?:
+                    | "auto"
+                    | "forecast"
+                    | "estimated_actuals"
+                    | "archived_forecast";
                 date: string;
                 /**
                  * @description * `30` - 30
@@ -2739,7 +2774,8 @@ export interface operations {
                  *     * `realtime_generation` - realtime_generation
                  *     * `settlement_injection` - settlement_injection
                  */
-                data_source?: "auto" | "realtime_generation" | "settlement_injection";
+                data_source?:
+                    "auto" | "realtime_generation" | "settlement_injection";
                 date?: string;
             };
             header?: never;
