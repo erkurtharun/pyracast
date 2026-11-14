@@ -20,6 +20,15 @@ def session_settings() -> tuple[str, str]:
         return cast(tuple[str, str], cursor.fetchone())
 
 
+def assert_migration_lock_released_after_close() -> None:
+    with psycopg.connect(**connection.get_connection_params(), autocommit=True) as contender:
+        contender.execute("SET lock_timeout = '5s'")
+        contender.execute("SELECT pg_advisory_lock(%s,%s)", MIGRATION_LOCK)
+        assert contender.execute("SELECT pg_advisory_unlock(%s,%s)", MIGRATION_LOCK).fetchone() == (
+            True,
+        )
+
+
 def test_standard_migrate_command_remains_idempotent() -> None:
     output = StringIO()
     call_command("migrate", interactive=False, verbosity=1, stdout=output)
@@ -41,15 +50,25 @@ def test_migration_lock_survives_transaction_commits_and_restores_timeouts() -> 
         assert contender.execute(
             "SELECT pg_try_advisory_lock(%s,%s)", MIGRATION_LOCK
         ).fetchone() == (True,)
+        assert contender.execute("SELECT pg_advisory_unlock(%s,%s)", MIGRATION_LOCK).fetchone() == (
+            True,
+        )
     assert session_settings() == before
 
 
-def test_another_migration_is_rejected_before_schema_work() -> None:
+@pytest.mark.parametrize("close_owner", [False, True])
+def test_another_migration_is_rejected_before_schema_work(close_owner: bool) -> None:
     with psycopg.connect(**connection.get_connection_params(), autocommit=True) as owner:
         owner.execute("SELECT pg_advisory_lock(%s,%s)", MIGRATION_LOCK)
         with pytest.raises(CommandError, match="Another Pyracast migration"):
             call_command("migrate", interactive=False, verbosity=0)
-    call_command("migrate", check_unapplied=True, verbosity=0)
+        # Client close does not wait for PostgreSQL to end the lock-owning session.
+        assert owner.execute("SELECT pg_advisory_unlock(%s,%s)", MIGRATION_LOCK).fetchone() == (
+            True,
+        )
+        if close_owner:
+            owner.close()
+        call_command("migrate", check_unapplied=True, verbosity=0)
 
 
 def test_failed_migration_releases_lock_and_restores_session() -> None:
@@ -64,6 +83,9 @@ def test_failed_migration_releases_lock_and_restores_session() -> None:
         assert contender.execute(
             "SELECT pg_try_advisory_lock(%s,%s)", MIGRATION_LOCK
         ).fetchone() == (True,)
+        assert contender.execute("SELECT pg_advisory_unlock(%s,%s)", MIGRATION_LOCK).fetchone() == (
+            True,
+        )
 
 
 def test_failed_cleanup_closes_connection_and_releases_lock() -> None:
@@ -79,10 +101,7 @@ def test_failed_cleanup_closes_connection_and_releases_lock() -> None:
     ):
         pass
     assert connection.connection is None
-    with psycopg.connect(**connection.get_connection_params(), autocommit=True) as contender:
-        assert contender.execute(
-            "SELECT pg_try_advisory_lock(%s,%s)", MIGRATION_LOCK
-        ).fetchone() == (True,)
+    assert_migration_lock_released_after_close()
 
 
 def test_sql_failure_rolls_back_before_restoring_migration_session() -> None:
@@ -146,6 +165,7 @@ def test_lost_migration_connection_is_closed(monkeypatch: pytest.MonkeyPatch) ->
     with migration_session(database, lock_timeout=2, statement_timeout=45):
         monkeypatch.setattr(database, "is_usable", lambda: False)
     assert database.connection is None
+    assert_migration_lock_released_after_close()
 
 
 @pytest.mark.parametrize("reconnect", [False, True])
@@ -162,10 +182,7 @@ def test_migration_cannot_continue_after_losing_the_locked_connection(reconnect:
     ):
         replace_connection()
     assert connection.connection is None
-    with psycopg.connect(**connection.get_connection_params(), autocommit=True) as contender:
-        assert contender.execute(
-            "SELECT pg_try_advisory_lock(%s,%s)", MIGRATION_LOCK
-        ).fetchone() == (True,)
+    assert_migration_lock_released_after_close()
 
 
 @pytest.mark.parametrize("pool", [True, {}])

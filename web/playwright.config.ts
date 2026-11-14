@@ -1,6 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
 const coverage = process.env.PLAYWRIGHT_COVERAGE === "1";
 const port = coverage ? 3102 : 3100;
+const startCommand = `npm start -- --port ${port}`;
+const normalCommand = process.env.CI
+    ? startCommand
+    : `npm run dev -- --port ${port}`;
 export default defineConfig({
     testDir: "./tests",
     fullyParallel: true,
@@ -13,9 +17,7 @@ export default defineConfig({
     use: { baseURL: `http://127.0.0.1:${port}`, trace: "retain-on-failure" },
     projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
     webServer: {
-        command: coverage
-            ? `npm run build && npm start -- --port ${port}`
-            : `npm run dev -- --port ${port}`,
+        command: coverage ? `npm run build && ${startCommand}` : normalCommand,
         url: `http://127.0.0.1:${port}`,
         reuseExistingServer: !coverage && !process.env.CI,
         timeout: 120_000,

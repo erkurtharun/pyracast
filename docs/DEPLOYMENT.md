@@ -287,6 +287,8 @@ successful `main` CI runs trigger it automatically. The workflow:
 Image artifacts expire after one day and are deleted after successful deployment.
 Retry a failed Release while its artifact remains available; otherwise run
 **Actions → CI → Run workflow → main** to produce a fresh verified release.
+When retrying CI, choose **Re-run all jobs** so reports and images belong to the
+same attempt; **Re-run failed jobs** cannot supply a complete release record.
 
 Runtime and deployment accounts have separate secret access. The deploy account
 can administer this VM and therefore has a privileged production trust boundary;
@@ -395,6 +397,7 @@ configuration only. Never apply it to a production Compose project.
 CI also retains native Windows and Ubuntu quality, browser, scientific and package
 checks and validates Terraform without provisioning resources. BuildKit caches
 each image separately; PRs can read the main cache but cannot publish or deploy.
+Superseded CI runs are cancelled; production releases remain serialized.
 Windows backend tests run in two groups, with complete test selection and the
 combined 100% coverage floor verified before release. Sonar starts when the Linux
 coverage reports are ready. Merged `main` still runs all checks because its source
