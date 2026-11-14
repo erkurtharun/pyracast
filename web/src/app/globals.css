@@ -1002,6 +1002,51 @@ pre,
 .production-table {
     min-width: 0;
 }
+.forecast-interval-table {
+    min-width: 0;
+    table-layout: fixed;
+}
+.forecast-interval-table th,
+.forecast-interval-table td {
+    padding: 12px 10px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: right;
+}
+.forecast-interval-table th:first-child,
+.forecast-interval-table td:first-child {
+    width: 35%;
+    text-align: left;
+    white-space: nowrap;
+}
+.forecast-interval-table .interval-unit {
+    display: block;
+    font-weight: 400;
+}
+.forecast-interval-table .interval-value {
+    white-space: nowrap;
+}
+.interval-notes {
+    margin-top: 12px;
+    color: var(--muted);
+    font-size: 12px;
+}
+.interval-notes ul {
+    list-style: none;
+    margin: 10px 0 0;
+    padding: 0;
+}
+.interval-notes li {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 12px;
+    padding: 8px 0;
+    border-top: 1px solid var(--line);
+    overflow-wrap: anywhere;
+}
+.interval-notes p {
+    margin: 0;
+}
 .production-table th,
 .production-table td {
     white-space: normal;

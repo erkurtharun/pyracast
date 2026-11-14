@@ -112,6 +112,13 @@ test("a customer manages one plant site through the real API", async ({
     await expect(
         page.getByText("View interval data (12 intervals)"),
     ).toBeVisible();
+    await page.getByText("View interval data (12 intervals)").click();
+    await expect(
+        page
+            .getByRole("table", { name: "Forecast intervals, Europe/Istanbul" })
+            .getByRole("columnheader"),
+    ).toHaveText(["Time interval", "Energy (MWh)"]);
+    await page.getByText("View interval data (12 intervals)").click();
     async function daylightForecast(resolution: 30 | 60) {
         const response = await page.request.get(`${plantUrl}forecast/`, {
             params: {

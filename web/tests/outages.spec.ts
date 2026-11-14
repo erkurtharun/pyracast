@@ -288,10 +288,15 @@ test("unknown impact remains missing and stale edits show a conflict", async ({
     await page.getByText(/View interval data/).click();
     await expect(
         page.getByRole("columnheader", {
-            name: "With outages (MW)",
+            name: "With outages (MWh)",
             exact: true,
         }),
     ).toBeVisible();
+    const intervalValues = page.getByRole("table").locator(".interval-value");
+    await expect(intervalValues).toHaveText(["2", "—"]);
+    await expect(
+        page.getByRole("table").getByRole("cell", { name: /Data unavailable/ }),
+    ).toHaveCount(1);
     await page.getByRole("button", { name: "Outages", exact: true }).click();
     await page
         .getByRole("button", { name: "Edit report", exact: true })

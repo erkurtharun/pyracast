@@ -76,16 +76,15 @@ for (const electrical of [true, false]) {
         await page.getByText("View interval data (4 intervals)").click();
         const missing = page
             .getByRole("row")
-            .filter({ hasText: "missing source interval" });
+            .filter({ hasText: "00:00–03:30" });
         await expect(
-            missing.getByRole("cell", { name: "00:00", exact: true }),
+            missing.getByRole("cell", { name: "00:00–03:30", exact: true }),
         ).toBeVisible();
-        await expect(
-            missing.getByRole("cell", { name: "03:30", exact: true }),
-        ).toBeVisible();
-        await expect(
-            missing.getByRole("cell", { name: "—", exact: true }),
-        ).toHaveCount(electrical ? 2 : 1);
+        await expect(missing.locator(".interval-value")).toHaveText(["—"]);
+        await page.locator(".interval-notes summary").click();
+        await expect(page.locator(".interval-notes")).toContainText(
+            "missing source interval",
+        );
         const downloadPromise = page.waitForEvent("download");
         await page
             .getByRole("button", { name: "Download CSV", exact: true })
@@ -160,13 +159,17 @@ test("irradiance distinguishes available source hours from ambiguous zero power"
         })
         .check();
     await page.getByText("View interval data (4 intervals)").click();
+    await page.locator(".interval-notes summary").click();
     const ambiguous = page
-        .getByRole("row")
+        .locator(".interval-notes li")
         .filter({ hasText: "ambiguous zero power" });
     await expect(ambiguous).toHaveCount(2);
     await expect(
-        ambiguous.getByRole("cell", { name: "—", exact: true }),
-    ).toHaveCount(2);
+        page
+            .getByRole("table")
+            .locator(".interval-value")
+            .filter({ hasText: "—" }),
+    ).toHaveCount(3);
 });
 
 test("switching forecast views waits for data with the matching units", async ({
@@ -287,8 +290,8 @@ for (const width of [320, 390]) {
             page.getByText("Includes intervals from earlier forecast updates."),
         ).toBeVisible();
         await page.getByText("View interval data (2 intervals)").click();
-        await expect(page.getByRole("cell", { name: "07:00" })).toBeVisible();
-        await expect(page.getByRole("cell", { name: "10:30" })).toBeVisible();
+        await expect(page.getByRole("cell", { name: /^07:00–/ })).toBeVisible();
+        await expect(page.getByRole("cell", { name: /^10:30–/ })).toBeVisible();
         await page.getByText("Source & quality", { exact: true }).click();
         await expect(
             page.getByText(
@@ -435,9 +438,14 @@ test("suspected derating shows a second scenario with its evidence", async ({
     ).toBeVisible();
     await page.getByText("View interval data (1 intervals)").click();
     await expect(
-        page.getByRole("columnheader", { name: "If derating persists (MW)" }),
+        page.getByRole("columnheader", { name: "If derating persists (MWh)" }),
     ).toBeVisible();
-    await expect(page.getByRole("cell", { name: "8.75" })).toBeVisible();
+    await expect(
+        page
+            .getByRole("table")
+            .locator(".interval-value")
+            .filter({ hasText: "4.375" }),
+    ).toBeVisible();
     const downloadPromise = page.waitForEvent("download");
     await page
         .getByRole("button", { name: "Download both scenarios CSV" })

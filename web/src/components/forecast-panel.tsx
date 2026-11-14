@@ -1,23 +1,14 @@
 "use client";
 import { useState } from "react";
-import { ScrollRegion } from "./scroll-region";
+import {
+    ForecastIntervals,
+    type ForecastInterval as Interval,
+} from "./forecast-intervals";
 import { WeatherReferenceCard } from "./weather-reference";
 import type { Forecast } from "@/lib/api";
 import { Empty, JsonDetails, Notice, Stat, Tag } from "./ui";
 import { CsvDownload } from "./csv-download";
 import { dataIntervalRange } from "@/lib/intervals";
-type Interval = {
-    start: string;
-    end: string;
-    ghi_wm2?: number | null;
-    mean_power_mw?: number | null;
-    energy_mwh?: number | null;
-    quality_flags?: string[];
-    source_snapshot_ids?: number[];
-    affected_mean_power_mw?: number | null;
-    affected_energy_mwh?: number | null;
-    affected_quality_flags?: string[];
-};
 type DaylightSummary = {
     status: "normal" | "polar_day" | "polar_night";
     complete: boolean;
@@ -515,7 +506,7 @@ export function ForecastPanel({
                     <div
                         className="chart"
                         role="img"
-                        aria-label={`${scenario ? `Normal capacity and ${affected} power` : electrical ? "Power" : "Irradiance"} by interval. Full values are available in the following table. Missing values are gaps.`}
+                        aria-label={`${scenario ? `Normal capacity and ${affected} power` : electrical ? "Power" : "Irradiance"} by interval. ${electrical ? "The following table shows interval energy with average power descriptions." : "Values are available in the following table."} Missing values are gaps.`}
                     >
                         {rows.map((row, index) => (
                             <div
@@ -549,96 +540,18 @@ export function ForecastPanel({
                         <span>Local time · {forecast.timezone}</span>
                         <span>{time(rows[rows.length - 1].end)}</span>
                     </div>
-                    <details className="interval-details">
-                        <summary>
-                            View interval data ({rows.length} intervals)
-                        </summary>
-                        <ScrollRegion
-                            label={
-                                forecast.source_kind === "estimated_actuals"
-                                    ? "Estimated actual intervals"
-                                    : "Forecast intervals"
-                            }
-                        >
-                            <table>
-                                <caption className="sr-only">
-                                    {forecast.source_kind ===
-                                    "estimated_actuals"
-                                        ? "Estimated actual intervals"
-                                        : "Forecast intervals"}
-                                    , {forecast.timezone}
-                                </caption>
-                                <thead>
-                                    <tr>
-                                        <th>Start</th>
-                                        <th>End</th>
-                                        <th>
-                                            {electrical
-                                                ? scenario
-                                                    ? "Normal capacity (MW)"
-                                                    : "Mean power (MW)"
-                                                : "Irradiance (W/m²)"}
-                                        </th>
-                                        {electrical && (
-                                            <th>
-                                                {scenario
-                                                    ? "Normal capacity energy (MWh)"
-                                                    : "Energy (MWh)"}
-                                            </th>
-                                        )}
-                                        {scenario && <th>{Affected} (MW)</th>}
-                                        {scenario && (
-                                            <th>{Affected} energy (MWh)</th>
-                                        )}
-                                        <th>Quality</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {rows.map((row, index) => (
-                                        <tr key={index}>
-                                            <td>{time(row.start)}</td>
-                                            <td>{time(row.end)}</td>
-                                            <td>{number(row[metric])}</td>
-                                            {electrical && (
-                                                <td>
-                                                    {number(row.energy_mwh)}
-                                                </td>
-                                            )}
-                                            {scenario && (
-                                                <td>
-                                                    {number(
-                                                        row.affected_mean_power_mw,
-                                                    )}
-                                                </td>
-                                            )}
-                                            {scenario && (
-                                                <td>
-                                                    {number(
-                                                        row.affected_energy_mwh,
-                                                    )}
-                                                </td>
-                                            )}
-                                            <td>
-                                                {row.quality_flags
-                                                    ?.map((flag) =>
-                                                        flag.replaceAll(
-                                                            "_",
-                                                            " ",
-                                                        ),
-                                                    )
-                                                    .join(", ") || "—"}
-                                                {scenario &&
-                                                row.affected_quality_flags
-                                                    ?.length
-                                                    ? `; ${affected}: ${row.affected_quality_flags.map((flag) => flag.replaceAll("_", " ")).join(", ")}`
-                                                    : ""}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        </ScrollRegion>
-                    </details>
+                    <ForecastIntervals
+                        rows={rows}
+                        electrical={electrical}
+                        scenarioLabel={scenario ? Affected : undefined}
+                        label={
+                            forecast.source_kind === "estimated_actuals"
+                                ? "Estimated actual intervals"
+                                : "Forecast intervals"
+                        }
+                        timezone={forecast.timezone}
+                        formatTime={time}
+                    />
                 </>
             )}
             <details className="provenance">

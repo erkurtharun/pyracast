@@ -738,12 +738,8 @@ test("forecast crops edge zeros, retains gaps and downloads the full safe CSV", 
     await page.getByText("View interval data (3 intervals)").click();
     const table = page.getByRole("table");
     await expect(table.getByRole("row")).toHaveCount(4);
-    await expect(
-        table.getByRole("cell", { name: "07:00", exact: true }),
-    ).toBeVisible();
-    await expect(
-        table.getByRole("cell", { name: "06:00", exact: true }),
-    ).toHaveCount(0);
+    await expect(table.getByRole("cell", { name: /^07:00–/ })).toBeVisible();
+    await expect(table.getByRole("cell", { name: /^06:00–/ })).toHaveCount(0);
     await expect(page.locator(".chart-column.missing")).toHaveCount(1);
     const download = page.waitForEvent("download");
     await page
