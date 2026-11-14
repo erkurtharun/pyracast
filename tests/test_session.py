@@ -42,6 +42,7 @@ def test_session_login_logout_and_csrf_rotation() -> None:
     initial_response = client.get("/api/session/")
     initial = initial_response.json()
     assert initial["user"] is None
+    assert initial["language"] == "en"
     assert "no-store" in initial_response.headers["Cache-Control"]
     assert "private" in initial_response.headers["Cache-Control"]
     credentials = {"email": user.email, "password": PASSWORD}
@@ -52,11 +53,13 @@ def test_session_login_logout_and_csrf_rotation() -> None:
     assert submit(client, "auth/login", credentials).status_code == 200
     assert client.cookies[settings.SESSION_COOKIE_NAME]["httponly"]
     logged_in = client.get("/api/session/").json()
+    assert logged_in["language"] == "en"
     assert logged_in["user"] == {
         "id": user.pk,
         "username": user.username,
         "email": user.email,
         "can_admin": False,
+        "language_preference": None,
     }
     assert (
         client.delete(AUTH + "auth/session", HTTP_X_CSRFTOKEN=initial["csrf_token"]).status_code

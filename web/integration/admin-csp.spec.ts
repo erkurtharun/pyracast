@@ -153,7 +153,7 @@ test("an MFA administrator reviews plants and operations on desktop and mobile u
         .locator("summary")
         .filter({ hasText: "Advanced reference settings" });
     await referenceSettings.click();
-    const azimuth = page.getByLabel("Azimuth degrees");
+    const azimuth = page.getByLabel("Azimuth (degrees):", { exact: true });
     await azimuth.fill("-1");
     await referenceSettings.click();
     await page

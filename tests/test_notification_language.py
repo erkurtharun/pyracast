@@ -77,25 +77,36 @@ def test_schedule_pins_owner_language_for_every_recipient_and_defaults_to_englis
     }
 
 
-def test_mixed_languages_share_one_frozen_source_and_retries_keep_original_content() -> None:
+@pytest.mark.parametrize("first_language", ["en", "tr"])
+def test_mixed_languages_share_one_frozen_source_and_retries_keep_original_content(
+    first_language: str,
+) -> None:
     system, _ = configured()
     snapshot = complete_saved(system)
     other_owner(system, "tr")
     requests = RequestAttempt.objects.count()
-    ids = enqueue_due(SLOT)
+    enqueue_due(SLOT)
+    first = NotificationDelivery.objects.filter(language=first_language).order_by("pk").first()
+    assert first is not None
     messages: list[EmailMultiAlternatives] = []
 
     def temporary_failure(message: EmailMultiAlternatives) -> None:
         messages.append(message)
         raise NotSentError
 
-    assert not process_notification(ids[0], SLOT, sender=temporary_failure)
+    assert not process_notification(first.pk, SLOT, sender=temporary_failure)
+    first.refresh_from_db()
     deliveries = list(NotificationDelivery.objects.order_by("pk"))
     assert len(deliveries) == 3
     assert {delivery.snapshot_id for delivery in deliveries} == {snapshot.pk}
     payloads = [delivery.prepared_message for delivery in deliveries]
     assert all(isinstance(payload, dict) for payload in payloads)
-    english, turkish, repeated_turkish = payloads
+    english = next(
+        delivery.prepared_message for delivery in deliveries if delivery.language == "en"
+    )
+    turkish, repeated_turkish = (
+        delivery.prepared_message for delivery in deliveries if delivery.language == "tr"
+    )
     assert english is not None
     assert turkish is not None
     assert turkish == repeated_turkish
@@ -111,18 +122,18 @@ def test_mixed_languages_share_one_frozen_source_and_retries_keep_original_conte
     UserLanguagePreference.objects.update_or_create(user=system.member, defaults={"language": "tr"})
     Region.objects.filter(pk=system.region.pk).update(name="Renamed after preparation")
     newer = complete_saved(system, SLOT - timedelta(minutes=1))
-    for delivery in deliveries[1:]:
+    for delivery in deliveries:
+        if delivery.pk == first.pk:
+            continue
         assert process_notification(
             delivery.pk, SLOT + timedelta(seconds=1), sender=messages.append
         )
-    assert process_notification(
-        deliveries[0].pk, deliveries[0].available_at, sender=messages.append
-    )
+    assert process_notification(first.pk, first.available_at, sender=messages.append)
     current = list(NotificationDelivery.objects.order_by("pk"))
     assert [delivery.prepared_message for delivery in current] == payloads
     assert {delivery.snapshot_id for delivery in current} == {snapshot.pk}
     assert snapshot.pk != newer.pk
-    assert [delivery.attempts for delivery in current] == [2, 1, 1]
+    assert all(delivery.attempts == (2 if delivery.pk == first.pk else 1) for delivery in current)
     assert all(delivery.status == "sent" for delivery in current)
     assert messages[0].body == messages[-1].body
     assert len({message.extra_headers["Message-ID"] for message in messages}) == 3

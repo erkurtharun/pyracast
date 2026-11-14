@@ -18,12 +18,25 @@ test("account language survives sign-in from another browser without a preferenc
         .getByRole("button", { name: "Sign in", exact: true })
         .click();
     await expect(
-        page.getByRole("heading", { name: "Your solar portfolio" }),
+        page.getByRole("heading", {
+            name: "Your solar portfolio",
+            exact: true,
+        }),
     ).toBeVisible();
     await page.getByLabel("Language", { exact: true }).selectOption("tr");
     await expect(
-        page.getByRole("heading", { name: "Güneş enerjisi portföyünüz" }),
+        page.getByRole("heading", {
+            name: "Güneş enerjisi portföyünüz",
+            exact: true,
+        }),
     ).toBeVisible();
+    const saved = await page.request.get("/api/session/");
+    const preference = await saved.json();
+    expect(preference.user).not.toBeNull();
+    expect(preference).toMatchObject({
+        language: "tr",
+        user: { language_preference: "tr" },
+    });
     const second = await browser.newContext({ baseURL, locale: "en-US" });
     try {
         const fresh = await second.newPage();
@@ -39,7 +52,10 @@ test("account language survives sign-in from another browser without a preferenc
             .getByRole("button", { name: "Sign in", exact: true })
             .click();
         await expect(
-            fresh.getByRole("heading", { name: "Güneş enerjisi portföyünüz" }),
+            fresh.getByRole("heading", {
+                name: "Güneş enerjisi portföyünüz",
+                exact: true,
+            }),
         ).toBeVisible();
         await expect(fresh.locator("html")).toHaveAttribute("lang", "tr");
         const session = await fresh.request.get("/api/session/");
@@ -55,7 +71,10 @@ test("account language survives sign-in from another browser without a preferenc
         await second.close();
         await page.getByLabel("Dil", { exact: true }).selectOption("en");
         await expect(
-            page.getByRole("heading", { name: "Your solar portfolio" }),
+            page.getByRole("heading", {
+                name: "Your solar portfolio",
+                exact: true,
+            }),
         ).toBeVisible();
     }
 });
