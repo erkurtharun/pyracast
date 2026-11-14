@@ -27,10 +27,15 @@ jobs:
       actions: read
     outputs:
       sha: ${{ steps.authorize.outputs.sha }}
+      ci_run_id: ${{ steps.authorize.outputs.ci_run_id }}
+      ci_run_attempt: ${{ steps.authorize.outputs.ci_run_attempt }}
+      artifact_id: ${{ steps.authorize.outputs.artifact_id }}
     steps:
       - name: Authorize the current main commit against its exact CI run
         id: authorize
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          SONAR_ENABLED: ${{ vars.SONAR_ENABLED }}
         with:
           script: |
             const repository = context.repo;
@@ -59,7 +64,28 @@ jobs:
                 run.head_sha !== sha || run.status !== 'completed' || run.conclusion !== 'success') {
               throw new Error('Only the current main SHA with successful repository CI may be released');
             }
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+              ...repository, run_id: run.id, filter: 'latest', per_page: 100,
+            });
+            const required = ['Deployment configuration and containers', 'Dependency audit',
+              'Verify (ubuntu-latest)', 'Verify (windows-latest)',
+              'Web (ubuntu-latest)', 'Web (windows-latest)',
+              'Scientific (ubuntu-latest)', 'Scientific (windows-latest)'];
+            if (process.env.SONAR_ENABLED === 'true') required.push('Sonar quality gate');
+            if (required.some(name => !jobs.some(job => job.name === name && job.conclusion === 'success'))) {
+              throw new Error('Every required CI job must pass for this run');
+            }
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              ...repository, run_id: run.id, per_page: 100,
+            });
+            const candidates = artifacts.filter(artifact =>
+              artifact.name === `release-images-${sha}-${run.run_attempt}` && !artifact.expired &&
+              artifact.workflow_run?.head_sha === sha);
+            if (candidates.length !== 1) throw new Error('Run CI again to produce an unexpired image artifact');
             core.setOutput('sha', sha);
+            core.setOutput('ci_run_id', run.id);
+            core.setOutput('ci_run_attempt', run.run_attempt);
+            core.setOutput('artifact_id', candidates[0].id);
             await core.summary.addRaw(`Authorized main commit ${sha} using CI run ${run.id}.`).write();
 
   deploy:
@@ -69,6 +95,7 @@ jobs:
     environment: production
     permissions:
       contents: read
+      actions: read
       id-token: write
     env:
       RELEASE_SHA: ${{ needs.authorize.outputs.sha }}
@@ -87,6 +114,22 @@ jobs:
           version: 0.13.7
       - name: Confirm the trusted branch still matches the CI-authorized commit
         run: test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+      - name: Download images from the exact authorized CI run
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.authorize.outputs.artifact_id }}
+          path: ${{ runner.temp }}/release-images
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.authorize.outputs.ci_run_id }}
+          digest-mismatch: error
+      - name: Verify source, run and immutable archive contents before cloud authentication
+        env:
+          CI_RUN_ID: ${{ needs.authorize.outputs.ci_run_id }}
+          CI_RUN_ATTEMPT: ${{ needs.authorize.outputs.ci_run_attempt }}
+        run: >-
+          uv run --no-project --python 3.15.2 python deploy/ci_images.py verify
+          "$RUNNER_TEMP/release-images" "$RELEASE_SHA" "$CI_RUN_ID" "$CI_RUN_ATTEMPT"
       - name: Validate deployment configuration
         env:
           GCP_WIF_PROVIDER: ${{ vars.GCP_WIF_PROVIDER }}
@@ -99,15 +142,13 @@ jobs:
           [[ "$GCP_ARTIFACT_REPOSITORY" =~ ^[a-z0-9-]+-docker\.pkg\.dev/[a-z0-9-]+/[a-z0-9_-]+$ ]]
           [[ "$GCP_INSTANCE" =~ ^[a-z][a-z0-9-]*$ ]]
           [[ "$GCP_ZONE" =~ ^[a-z0-9-]+$ ]]
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-        with:
-          version: v0.39.0
-          driver-opts: image=moby/buildkit:v0.35.0@sha256:aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb
       - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        id: google-auth
         with:
           workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
           project_id: ${{ vars.GCP_PROJECT_ID }}
+          token_format: access_token
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
         with:
           version: 593.0.0
@@ -115,82 +156,10 @@ jobs:
         run: gcloud auth configure-docker "${GCP_ARTIFACT_REPOSITORY%%/*}" --quiet
       - name: Protect the live release from registry cleanup
         run: python3 deploy/pin_release_images.py current
-      - name: Reuse release images when retrying the same commit
-        id: existing
-        run: |
-          for image in backend web gateway postgres; do
-            if digest="$(docker buildx imagetools inspect "$GCP_ARTIFACT_REPOSITORY/$image:$RELEASE_SHA" --format '{{.Manifest.Digest}}' 2>/dev/null)"; then
-              [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
-              echo "$image=$digest" >> "$GITHUB_OUTPUT"
-            fi
-          done
-      - name: Publish backend with provenance and SBOM
-        id: backend
-        if: steps.existing.outputs.backend == ''
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: .
-          file: Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ vars.GCP_ARTIFACT_REPOSITORY }}/backend:${{ needs.authorize.outputs.sha }}
-          provenance: mode=max
-          sbom: generator=docker/buildkit-syft-scanner:stable-1@sha256:873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315
-          labels: org.opencontainers.image.revision=${{ needs.authorize.outputs.sha }}
-      - name: Publish web with provenance and SBOM
-        id: web
-        if: steps.existing.outputs.web == ''
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: web
-          file: web/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ vars.GCP_ARTIFACT_REPOSITORY }}/web:${{ needs.authorize.outputs.sha }}
-          provenance: mode=max
-          sbom: generator=docker/buildkit-syft-scanner:stable-1@sha256:873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315
-          labels: org.opencontainers.image.revision=${{ needs.authorize.outputs.sha }}
-      - name: Publish gateway with provenance and SBOM
-        id: gateway
-        if: steps.existing.outputs.gateway == ''
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: deploy/gateway
-          platforms: linux/amd64
-          push: true
-          tags: ${{ vars.GCP_ARTIFACT_REPOSITORY }}/gateway:${{ needs.authorize.outputs.sha }}
-          provenance: mode=max
-          sbom: generator=docker/buildkit-syft-scanner:stable-1@sha256:873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315
-          labels: org.opencontainers.image.revision=${{ needs.authorize.outputs.sha }}
-      - name: Publish PostgreSQL with provenance and SBOM
-        id: postgres
-        if: steps.existing.outputs.postgres == ''
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: deploy/postgres
-          platforms: linux/amd64
-          push: true
-          tags: ${{ vars.GCP_ARTIFACT_REPOSITORY }}/postgres:${{ needs.authorize.outputs.sha }}
-          provenance: mode=max
-          sbom: generator=docker/buildkit-syft-scanner:stable-1@sha256:873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315
-          labels: org.opencontainers.image.revision=${{ needs.authorize.outputs.sha }}
-      - name: Resolve immutable release references
+      - name: Publish the exact CI images with their provenance and SBOM
         env:
-          BACKEND_DIGEST: ${{ steps.existing.outputs.backend || steps.backend.outputs.digest }}
-          WEB_DIGEST: ${{ steps.existing.outputs.web || steps.web.outputs.digest }}
-          GATEWAY_DIGEST: ${{ steps.existing.outputs.gateway || steps.gateway.outputs.digest }}
-          POSTGRES_DIGEST: ${{ steps.existing.outputs.postgres || steps.postgres.outputs.digest }}
-        run: |
-          [[ "$BACKEND_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
-          [[ "$WEB_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
-          [[ "$GATEWAY_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
-          [[ "$POSTGRES_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
-          {
-            echo "BACKEND_IMAGE=$GCP_ARTIFACT_REPOSITORY/backend@$BACKEND_DIGEST"
-            echo "WEB_IMAGE=$GCP_ARTIFACT_REPOSITORY/web@$WEB_DIGEST"
-            echo "GATEWAY_IMAGE=$GCP_ARTIFACT_REPOSITORY/gateway@$GATEWAY_DIGEST"
-            echo "POSTGRES_IMAGE=$GCP_ARTIFACT_REPOSITORY/postgres@$POSTGRES_DIGEST"
-          } >> "$GITHUB_ENV"
+          REGISTRY_ACCESS_TOKEN: ${{ steps.google-auth.outputs.access_token }}
+        run: bash deploy/oci-images.sh publish "$RUNNER_TEMP/release-images" "$RELEASE_SHA" "$GCP_ARTIFACT_REPOSITORY"
       - name: Scan backend; block every high or critical vulnerability
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -249,3 +218,20 @@ jobs:
       - name: Record the deployed digests
         run: |
           printf 'Released %s\n\nBackend: %s\n\nWeb: %s\n\nGateway: %s\n\nPostgreSQL: %s\n' "$RELEASE_SHA" "$BACKEND_IMAGE" "$WEB_IMAGE" "$GATEWAY_IMAGE" "$POSTGRES_IMAGE" >> "$GITHUB_STEP_SUMMARY"
+
+  cleanup:
+    needs: [authorize, deploy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Remove the transferred image artifact after successful deployment
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          ARTIFACT_ID: ${{ needs.authorize.outputs.artifact_id }}
+        with:
+          script: |
+            await github.rest.actions.deleteArtifact({
+              ...context.repo, artifact_id: Number(process.env.ARTIFACT_ID),
+            });

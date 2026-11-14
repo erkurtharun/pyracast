@@ -174,6 +174,12 @@ def restore_plant(actor: User, tenant_id: int, region_id: int, plant_id: int) ->
         return plant
 
 
+def _purge_epias_history(plant: Plant) -> None:
+    EpiasSnapshot.objects.filter(connection__plant=plant).delete()
+    EpiasCollectionJob.objects.filter(connection__plant=plant).delete()
+    EpiasConnection.objects.filter(plant=plant).delete()
+
+
 def _purge_plant(plant: Plant) -> None:
     IncidentRevision.objects.filter(incident__plant=plant).delete()
     PlantIncident.objects.filter(plant=plant).delete()
@@ -182,9 +188,7 @@ def _purge_plant(plant: Plant) -> None:
     CalibrationActivation.objects.filter(plant=plant).delete()
     CalibrationRun.objects.filter(plant=plant).delete()
     ProductionObservation.objects.filter(plant=plant).delete()
-    EpiasSnapshot.objects.filter(connection__plant=plant).delete()
-    EpiasCollectionJob.objects.filter(connection__plant=plant).delete()
-    EpiasConnection.objects.filter(plant=plant).delete()
+    _purge_epias_history(plant)
     PlantEvent.objects.filter(plant=plant).delete()
     plant.current_configuration = None
     plant.save(update_fields=("current_configuration",))

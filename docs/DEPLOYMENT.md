@@ -272,9 +272,9 @@ authorization job runs before entering the production environment.
 Run **Actions → Release → Run workflow → main** after CI is green. Subsequent
 successful `main` CI runs trigger it automatically. The workflow:
 
-1. Builds or reuses immutable backend, web, gateway and PostgreSQL images with
-   SBOM and provenance. All four release references, including `POSTGRES_IMAGE`,
-   are pinned to the tested digests.
+1. Verifies the image artifact from that exact successful CI run, then publishes
+   its backend, web, gateway and PostgreSQL images without rebuilding. OCI digests,
+   SBOM and provenance are preserved; all four release references are immutable.
 2. Rejects HIGH/CRITICAL image vulnerabilities and tests the exact image digests.
 3. Transfers the release through IAP using a short-lived OIDC identity.
 4. Checks configuration and database access, stops producers and drains workers,
@@ -283,6 +283,10 @@ successful `main` CI runs trigger it automatically. The workflow:
    revision. A failed backup leaves the application stopped and blocks migration.
 5. Promotes `current` only after container readiness checks and a local HTTPS request
    verify the public certificate, routing and database health.
+
+Image artifacts expire after one day and are deleted after successful deployment.
+Retry a failed Release while its artifact remains available; otherwise run
+**Actions → CI → Run workflow → main** to produce a fresh verified release.
 
 Runtime and deployment accounts have separate secret access. The deploy account
 can administer this VM and therefore has a privileged production trust boundary;
@@ -389,6 +393,12 @@ DNS, ACME, Cloud Logging or live Gmail/SMTP/provider behavior. `compose.smoke.ya
 configuration only. Never apply it to a production Compose project.
 
 CI also retains native Windows and Ubuntu quality, browser, scientific and package
-checks and validates Terraform without provisioning resources. The actual cloud
+checks and validates Terraform without provisioning resources. BuildKit caches
+each image separately; PRs can read the main cache but cannot publish or deploy.
+Windows backend tests run in two groups, with complete test selection and the
+combined 100% coverage floor verified before release. Sonar starts when the Linux
+coverage reports are ready. Merged `main` still runs all checks because its source
+can differ from the PR's tested merge. Test timings are retained for seven days.
+The actual cloud
 deployment and restore exercise remain operator acceptance steps after project,
 DNS and mail configuration.
