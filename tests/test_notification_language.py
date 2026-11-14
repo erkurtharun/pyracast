@@ -71,7 +71,7 @@ def test_schedule_pins_owner_language_for_every_recipient_and_defaults_to_englis
     UserLanguagePreference.objects.update_or_create(
         user=system.member, defaults={"language": "tr" if language != "tr" else "en"}
     )
-    assert enqueue_due(SLOT) == ids
+    assert sorted(enqueue_due(SLOT)) == sorted(ids)
     assert set(NotificationDelivery.objects.values_list("language", flat=True)) == {
         language or "en"
     }
@@ -81,13 +81,15 @@ def test_schedule_pins_owner_language_for_every_recipient_and_defaults_to_englis
 def test_mixed_languages_share_one_frozen_source_and_retries_keep_original_content(
     first_language: str,
 ) -> None:
-    system, _ = configured()
+    system, english_owner = configured()
     snapshot = complete_saved(system)
-    other_owner(system, "tr")
+    turkish_owner = other_owner(system, "tr")
     requests = RequestAttempt.objects.count()
     enqueue_due(SLOT)
-    first = NotificationDelivery.objects.filter(language=first_language).order_by("pk").first()
-    assert first is not None
+    first_owner = english_owner if first_language == "en" else turkish_owner
+    first = NotificationDelivery.objects.get(
+        preference=first_owner, recipient=first_owner.user.email
+    )
     messages: list[EmailMultiAlternatives] = []
 
     def temporary_failure(message: EmailMultiAlternatives) -> None:
@@ -96,11 +98,11 @@ def test_mixed_languages_share_one_frozen_source_and_retries_keep_original_conte
 
     assert not process_notification(first.pk, SLOT, sender=temporary_failure)
     first.refresh_from_db()
-    deliveries = list(NotificationDelivery.objects.order_by("pk"))
+    deliveries = list(NotificationDelivery.objects.all())
     assert len(deliveries) == 3
     assert {delivery.snapshot_id for delivery in deliveries} == {snapshot.pk}
-    payloads = [delivery.prepared_message for delivery in deliveries]
-    assert all(isinstance(payload, dict) for payload in payloads)
+    payloads = {delivery.pk: delivery.prepared_message for delivery in deliveries}
+    assert all(isinstance(payload, dict) for payload in payloads.values())
     english = next(
         delivery.prepared_message for delivery in deliveries if delivery.language == "en"
     )
@@ -129,8 +131,8 @@ def test_mixed_languages_share_one_frozen_source_and_retries_keep_original_conte
             delivery.pk, SLOT + timedelta(seconds=1), sender=messages.append
         )
     assert process_notification(first.pk, first.available_at, sender=messages.append)
-    current = list(NotificationDelivery.objects.order_by("pk"))
-    assert [delivery.prepared_message for delivery in current] == payloads
+    current = list(NotificationDelivery.objects.all())
+    assert {delivery.pk: delivery.prepared_message for delivery in current} == payloads
     assert {delivery.snapshot_id for delivery in current} == {snapshot.pk}
     assert snapshot.pk != newer.pk
     assert all(delivery.attempts == (2 if delivery.pk == first.pk else 1) for delivery in current)
@@ -138,9 +140,7 @@ def test_mixed_languages_share_one_frozen_source_and_retries_keep_original_conte
     assert messages[0].body == messages[-1].body
     assert len({message.extra_headers["Message-ID"] for message in messages}) == 3
     assert all(len(message.to) == 1 for message in messages)
-    assert not process_notification(
-        current[0].pk, SLOT + timedelta(minutes=5), sender=messages.append
-    )
+    assert not process_notification(first.pk, SLOT + timedelta(minutes=5), sender=messages.append)
     assert len(messages) == 4
     assert RequestAttempt.objects.count() == requests
 
@@ -158,7 +158,7 @@ def test_missing_saved_data_is_reported_in_the_pinned_language_without_inventing
     system, _ = configured()
     UserLanguagePreference.objects.create(user=system.member, language=language)
     requests = RequestAttempt.objects.count()
-    delivery_id = enqueue_due(SLOT)[0]
+    (delivery_id,) = enqueue_due(SLOT)
     messages: list[EmailMultiAlternatives] = []
     assert process_notification(delivery_id, SLOT, sender=messages.append)
     assert missing in messages[0].body
@@ -172,11 +172,12 @@ def test_missing_saved_data_is_reported_in_the_pinned_language_without_inventing
 def test_render_failure_freezes_distinct_plain_fallbacks_and_preserves_them_on_retry(
     first_language: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    system, _ = configured()
+    system, owner = configured()
     UserLanguagePreference.objects.create(user=system.member, language=first_language)
     other_owner(system, "tr" if first_language == "en" else "en")
     complete_saved(system)
-    ids = enqueue_due(SLOT)
+    enqueue_due(SLOT)
+    first = NotificationDelivery.objects.get(preference=owner, recipient=system.member.email)
 
     def broken(*args: object, **kwargs: object) -> EmailMultiAlternatives:
         raise RuntimeError("The normal renderer is unavailable.")
@@ -188,9 +189,10 @@ def test_render_failure_freezes_distinct_plain_fallbacks_and_preserves_them_on_r
         messages.append(message)
         raise NotSentError
 
-    assert not process_notification(ids[0], SLOT, sender=temporary_failure)
-    deliveries = list(NotificationDelivery.objects.order_by("pk"))
-    payloads = [delivery.prepared_message for delivery in deliveries]
+    assert not process_notification(first.pk, SLOT, sender=temporary_failure)
+    first.refresh_from_db()
+    deliveries = list(NotificationDelivery.objects.all())
+    payloads = {delivery.pk: delivery.prepared_message for delivery in deliveries}
     for delivery in deliveries:
         assert delivery.prepared_message is not None
         assert delivery.prepared_message["format"] == "plain"
@@ -203,12 +205,15 @@ def test_render_failure_freezes_distinct_plain_fallbacks_and_preserves_them_on_r
         ) in body
     UserLanguagePreference.objects.update(language="en" if first_language == "tr" else "tr")
     for delivery in deliveries:
+        if delivery.pk == first.pk:
+            continue
         assert process_notification(delivery.pk, delivery.available_at, sender=messages.append)
-    assert [record.prepared_message for record in NotificationDelivery.objects.order_by("pk")] == (
-        payloads
-    )
+    assert process_notification(first.pk, first.available_at, sender=messages.append)
+    assert {
+        record.pk: record.prepared_message for record in NotificationDelivery.objects.all()
+    } == payloads
     assert all(not message.attachments and not message.alternatives for message in messages)
-    assert messages[0].body == messages[1].body
+    assert messages[0].body == messages[-1].body
 
 
 @pytest.mark.parametrize("plain", [False, True])
@@ -217,7 +222,7 @@ def test_later_language_uses_the_already_frozen_slot_source_and_preparation_time
 ) -> None:
     system, _ = configured()
     snapshot = complete_saved(system)
-    delivery_id = enqueue_due(SLOT)[0]
+    (delivery_id,) = enqueue_due(SLOT)
     messages: list[EmailMultiAlternatives] = []
     if plain:
 
@@ -227,26 +232,30 @@ def test_later_language_uses_the_already_frozen_slot_source_and_preparation_time
         monkeypatch.setattr("pyracast.notifications.preparation.build_message", broken)
     assert process_notification(delivery_id, SLOT, sender=messages.append)
     original = NotificationDelivery.objects.get(pk=delivery_id)
-    other_owner(system, "tr")
+    later_owner = other_owner(system, "tr")
     complete_saved(system, SLOT - timedelta(minutes=1))
-    ids = enqueue_due(SLOT)
-    for pk in ids[1:]:
-        assert process_notification(pk, SLOT + timedelta(minutes=1), sender=messages.append)
-    latest = list(NotificationDelivery.objects.order_by("pk"))
+    enqueue_due(SLOT)
+    later = list(NotificationDelivery.objects.filter(preference=later_owner))
+    assert {record.recipient for record in later} == {"other@example.com", "external@example.com"}
+    for record in later:
+        assert process_notification(record.pk, SLOT + timedelta(minutes=1), sender=messages.append)
+    latest = list(NotificationDelivery.objects.all())
     assert {record.snapshot_id for record in latest} == {None if plain else snapshot.pk}
     assert original.prepared_message is not None
     for record in latest:
         assert record.prepared_message is not None
         assert record.prepared_message["prepared_at"] == original.prepared_message["prepared_at"]
     assert messages[0].body != messages[1].body == messages[2].body
-    original.refresh_from_db()
-    assert original.prepared_message == latest[0].prepared_message
+    assert (
+        NotificationDelivery.objects.get(pk=delivery_id).prepared_message
+        == original.prepared_message
+    )
 
 
 def test_later_languages_reuse_frozen_english_payload_when_turkish_is_processed_first() -> None:
     system, _ = configured()
     snapshot = complete_saved(system)
-    english_id = enqueue_due(SLOT)[0]
+    (english_id,) = enqueue_due(SLOT)
     messages: list[EmailMultiAlternatives] = []
     assert process_notification(english_id, SLOT, sender=messages.append)
     original = NotificationDelivery.objects.get(pk=english_id).prepared_message
@@ -255,8 +264,9 @@ def test_later_languages_reuse_frozen_english_payload_when_turkish_is_processed_
     english_owner = late_english_owner(system)
     turkish_owner = other_owner(system, "tr")
     enqueue_due(SLOT)
-    turkish = NotificationDelivery.objects.filter(preference=turkish_owner).order_by("pk").first()
-    assert turkish is not None
+    turkish = NotificationDelivery.objects.get(
+        preference=turkish_owner, recipient="other@example.com"
+    )
     assert process_notification(turkish.pk, SLOT + timedelta(minutes=1), sender=messages.append)
     english = NotificationDelivery.objects.get(preference=english_owner)
     assert english.prepared_message == original
@@ -273,7 +283,7 @@ def test_later_language_render_failure_preserves_frozen_slot_provenance_and_retr
 ) -> None:
     system, _ = configured()
     snapshot = complete_saved(system)
-    english_id = enqueue_due(SLOT)[0]
+    (english_id,) = enqueue_due(SLOT)
     messages: list[EmailMultiAlternatives] = []
     assert process_notification(english_id, SLOT, sender=messages.append)
     english = NotificationDelivery.objects.get(pk=english_id)
@@ -284,8 +294,9 @@ def test_later_language_render_failure_preserves_frozen_slot_provenance_and_retr
     preference = other_owner(system, "tr")
     newer = complete_saved(system, SLOT - timedelta(minutes=1))
     enqueue_due(SLOT)
-    turkish, sibling = list(
-        NotificationDelivery.objects.filter(preference=preference).order_by("pk")
+    turkish = NotificationDelivery.objects.get(preference=preference, recipient="other@example.com")
+    sibling = NotificationDelivery.objects.get(
+        preference=preference, recipient="external@example.com"
     )
     assert turkish.snapshot_id == newer.pk != snapshot.pk
     render = build_message
@@ -347,7 +358,8 @@ def test_later_language_render_failure_preserves_frozen_slot_provenance_and_retr
 def test_mail_rendering_restores_the_caller_language_and_preserves_technical_csv() -> None:
     system, _ = configured()
     complete_saved(system)
-    delivery = NotificationDelivery.objects.get(pk=enqueue_due(SLOT)[0])
+    (delivery_id,) = enqueue_due(SLOT)
+    delivery = NotificationDelivery.objects.get(pk=delivery_id)
     delivery.language = "tr"
     with translation.override("en"):
         message = build_message(delivery)
@@ -375,7 +387,8 @@ def test_delivery_language_is_database_constrained() -> None:
 def test_saved_forecast_age_uses_translated_day_units(days: int) -> None:
     system, _ = configured()
     complete_saved(system, NOW - timedelta(days=days))
-    delivery = NotificationDelivery.objects.get(pk=enqueue_due(SLOT)[0])
+    (delivery_id,) = enqueue_due(SLOT)
+    delivery = NotificationDelivery.objects.get(pk=delivery_id)
     delivery.language = "tr"
     assert f"{days} gün, 18:00:00" in build_message(delivery).body
 
@@ -383,7 +396,7 @@ def test_saved_forecast_age_uses_translated_day_units(days: int) -> None:
 def test_language_migration_preserves_prepared_content_and_does_not_resend() -> None:
     system, _ = configured()
     complete_saved(system)
-    delivery_id = enqueue_due(SLOT)[0]
+    (delivery_id,) = enqueue_due(SLOT)
     messages: list[EmailMultiAlternatives] = []
     assert process_notification(delivery_id, SLOT, sender=messages.append)
     original = NotificationDelivery.objects.get(pk=delivery_id)

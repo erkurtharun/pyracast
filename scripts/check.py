@@ -54,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
             "--check",
             "--dry-run",
         ],
-        [sys.executable, "-m", "pytest", "-n", "auto", "-x", f"--cov-fail-under={coverage_floor}"],
+        [sys.executable, "-m", "pytest", "-n", "auto", f"--cov-fail-under={coverage_floor}"],
     ]
     if args.shard:
         output = args.shard_output.resolve()
@@ -76,7 +76,6 @@ def main(argv: list[str] | None = None) -> int:
             "scripts.pytest_shard",
             "-n",
             "auto",
-            "-x",
             "-o",
             f"addopts={shlex.join(options)}",
             "--cov-report=",
