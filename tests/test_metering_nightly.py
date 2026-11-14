@@ -124,6 +124,56 @@ def test_midnight_slot_and_nine_am_deadline_are_independent_of_forecasts(
     assert EpiasCollectionJob.objects.count() == 90
 
 
+@pytest.mark.parametrize("completed", [False, True])
+def test_forecast_time_edit_during_night_preserves_production_collection(
+    monkeypatch: pytest.MonkeyPatch, completed: bool
+) -> None:
+    system, _, _ = connected(monkeypatch)
+    midnight = NEXT_NIGHT - timedelta(hours=3)
+    schedule = CollectionSchedule.objects.create(
+        region=system.region, times=["16:00"], effective_from=midnight - timedelta(hours=1)
+    )
+    original_ids = enqueue_due_epias_jobs(now=midnight) if completed else []
+    if completed:
+        previous = EpiasCollectionJob.objects.get(
+            pk__in=original_ids, target_day=NEXT_NIGHT.date() - timedelta(days=1)
+        )
+        assert run_epias_job(previous.pk, fetch=day_data, now=midnight)
+    schedule.times = ["00:28", "08:45", "10:00"]
+    schedule.effective_from = midnight + timedelta(minutes=27)
+    schedule.save()
+    now = midnight + timedelta(minutes=75)
+
+    identifiers = enqueue_due_epias_jobs(now=now)
+
+    assert len(identifiers) == 7
+    if completed:
+        assert identifiers == original_ids
+    job = EpiasCollectionJob.objects.get(
+        pk__in=identifiers, target_day=NEXT_NIGHT.date() - timedelta(days=1)
+    )
+    assert job.scheduled_for == midnight
+    assert job.retry_until == NEXT_NIGHT + timedelta(hours=6)
+    assert EpiasCollectionJob.objects.count() == 97
+    assert run_epias_job(job.pk, fetch=day_data, now=now) is not completed
+    assert EpiasSnapshot.objects.filter(job=job, complete=True).count() == 1
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_nightly_production_waits_for_enabled_effective_schedule(
+    monkeypatch: pytest.MonkeyPatch, enabled: bool
+) -> None:
+    system, _, _ = connected(monkeypatch)
+    effective = NEXT_NIGHT + timedelta(minutes=1) if enabled else NEXT_NIGHT
+    CollectionSchedule.objects.create(
+        region=system.region, enabled=enabled, times=["16:00"], effective_from=effective
+    )
+    assert enqueue_due_epias_jobs(now=NEXT_NIGHT) == []
+    assert EpiasCollectionJob.objects.count() == 90
+    if enabled:
+        assert len(enqueue_due_epias_jobs(now=effective)) == 7
+
+
 @pytest.mark.parametrize("complete", [False, True])
 def test_midnight_rollout_reuses_existing_three_am_production_slots(
     monkeypatch: pytest.MonkeyPatch, complete: bool

@@ -29,7 +29,7 @@ def _daily_window(connection: EpiasConnection, now: datetime) -> tuple[datetime,
         window is None
         or not window[0] <= now < window[1]
         or window[0] < connection.updated_at
-        or (schedule and window[0] < schedule.effective_from)
+        or (schedule and now < schedule.effective_from)
     ):
         return None
     return window
