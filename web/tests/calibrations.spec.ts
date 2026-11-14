@@ -176,21 +176,21 @@ test("automatic calibration can be enabled before a fit and disabled without res
     });
     await openCalibration(page);
     await page
-        .getByRole("button", { name: "Enable automatic calibration" })
+        .getByRole("checkbox", { name: "Automatic calibration enabled" })
         .click();
     await expect(
-        page.getByRole("button", { name: "Disable automatic calibration" }),
-    ).toBeVisible();
+        page.getByRole("checkbox", { name: "Automatic calibration enabled" }),
+    ).toBeChecked();
     await expect(page.getByRole("row", { name: /#40/ })).toBeVisible();
     await expect(
         page.getByText("Waiting for seven new held-out days."),
     ).toBeVisible();
     await page
-        .getByRole("button", { name: "Disable automatic calibration" })
+        .getByRole("checkbox", { name: "Automatic calibration enabled" })
         .click();
     await expect(
-        page.getByRole("button", { name: "Enable automatic calibration" }),
-    ).toBeVisible();
+        page.getByRole("checkbox", { name: "Automatic calibration enabled" }),
+    ).not.toBeChecked();
     expect(changes).toEqual([true, false]);
 });
 
@@ -224,12 +224,12 @@ test("automatic status reloads after manual activation and reset", async ({
     await openCalibration(page);
     await page.getByRole("button", { name: "Activate", exact: true }).click();
     await expect(
-        page.getByRole("button", { name: "Disable automatic calibration" }),
-    ).toBeVisible();
+        page.getByRole("checkbox", { name: "Automatic calibration enabled" }),
+    ).toBeChecked();
     await page.getByRole("button", { name: "Reset to baseline" }).click();
     await expect(
-        page.getByRole("button", { name: "Enable automatic calibration" }),
-    ).toBeVisible();
+        page.getByRole("checkbox", { name: "Automatic calibration enabled" }),
+    ).not.toBeChecked();
 });
 
 test("an older automation response cannot undo an enabled setting", async ({
@@ -282,21 +282,19 @@ test("an older automation response cannot undo an enabled setting", async ({
     });
     await openCalibration(page);
     await expect(
-        page.getByRole("button", { name: "Enable automatic calibration" }),
-    ).toBeVisible();
+        page.getByRole("checkbox", { name: "Automatic calibration enabled" }),
+    ).not.toBeChecked();
     delayNext = true;
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await observed;
     await page
-        .getByRole("button", { name: "Enable automatic calibration" })
+        .getByRole("checkbox", { name: "Automatic calibration enabled" })
         .click();
     await expect(
-        page.getByRole("button", { name: "Disable automatic calibration" }),
-    ).toBeVisible();
+        page.getByRole("checkbox", { name: "Automatic calibration enabled" }),
+    ).toBeChecked();
     await expect(
-        page.getByText(
-            /Waiting for 30 matched days from the current live reference source/,
-        ),
+        page.getByText(/Needs 30 days from this reference source/),
     ).toBeVisible();
     const oldResponse = page.waitForResponse(
         "**/plants/21/calibration/automation/",
@@ -304,12 +302,10 @@ test("an older automation response cannot undo an enabled setting", async ({
     release();
     await (await oldResponse).finished();
     await expect(
-        page.getByRole("button", { name: "Disable automatic calibration" }),
-    ).toBeVisible();
+        page.getByRole("checkbox", { name: "Automatic calibration enabled" }),
+    ).toBeChecked();
     await expect(
-        page.getByText(
-            /Waiting for 30 matched days from the current live reference source/,
-        ),
+        page.getByText(/Needs 30 days from this reference source/),
     ).toBeVisible();
 });
 

@@ -95,13 +95,10 @@ test("an older pending submission cannot replace a saved technical update", asyn
     await page.clock.fastForward(30_000);
     await observed;
     await page.getByRole("button", { name: "Save configuration" }).click();
-    const capacity = page
-        .locator(".capacity-stats .stat")
-        .first()
-        .locator("strong");
+    const capacity = page.getByLabel("DC nameplate capacity (MW)");
     const refreshed = page.waitForResponse("**/regions/11/plants/");
     try {
-        await expect(capacity).toContainText("6.25");
+        await expect(capacity).toHaveValue("6.25");
     } finally {
         release();
     }
@@ -114,7 +111,11 @@ test("an older pending submission cannot replace a saved technical update", asyn
                 ),
             ),
     );
-    await expect(capacity).toContainText("6.25");
+    await page.getByRole("button", { name: "Location", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Technical details", exact: true })
+        .click();
+    await expect(capacity).toHaveValue("6.25");
     hold = false;
     serverCapacity = 6.25;
     const confirmed = page.waitForResponse("**/regions/11/plants/");
@@ -129,8 +130,14 @@ test("an older pending submission cannot replace a saved technical update", asyn
             ),
     );
     serverCapacity = 7;
+    const updated = page.waitForResponse("**/regions/11/plants/");
     await page.clock.fastForward(30_000);
-    await expect(capacity).toContainText("7 MW");
+    await (await updated).finished();
+    await page.getByRole("button", { name: "Location", exact: true }).click();
+    await page
+        .getByRole("button", { name: "Technical details", exact: true })
+        .click();
+    await expect(capacity).toHaveValue("7");
 });
 
 for (const section of ["Forecast", "Settings"] as const) {

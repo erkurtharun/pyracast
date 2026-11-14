@@ -1,4 +1,4 @@
-﻿import { expect, test, type Page } from "./support/test";
+import { expect, test, type Page } from "./support/test";
 import AxeBuilder from "@axe-core/playwright";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
@@ -110,6 +110,10 @@ test("generation intervals show energy without redundant visible power columns",
 }) => {
     await openForecast(page);
     await expect(page.getByLabel("Resolution")).toHaveValue("60");
+    await expect(page.getByText(/CSV includes all/)).toHaveCount(0);
+    await expect(
+        page.getByRole("checkbox", { name: "Show full day", exact: true }),
+    ).toBeVisible();
     await page.getByText("View interval data (2 intervals)").click();
     const table = page.getByRole("table");
     await expect(table.getByRole("columnheader")).toHaveText([
@@ -167,6 +171,14 @@ for (const scenario of ["derating", "outage"] as const) {
     }, testInfo) => {
         await page.setViewportSize({ width: 390, height: 844 });
         await openForecast(page, { scenario, flagged: true });
+        await expect(page.getByText(/Green: normal capacity/)).toHaveCount(0);
+        await expect(
+            page.getByRole("img", {
+                name: new RegExp(
+                    `Normal capacity and ${scenario === "derating" ? "if derating persists" : "with outages"} power by interval`,
+                ),
+            }),
+        ).toBeVisible();
         await page.getByText("View interval data (2 intervals)").click();
         const affected =
             scenario === "derating" ? "If derating persists" : "With outages";
@@ -279,7 +291,7 @@ for (const electrical of [true, false]) {
         ).toBeVisible();
         await page
             .getByRole("checkbox", {
-                name: "Show full day, including missing intervals",
+                name: "Show full day",
             })
             .check();
         await expect(table.getByRole("row")).toHaveCount(6);

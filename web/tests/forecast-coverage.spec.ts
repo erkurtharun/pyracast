@@ -63,14 +63,11 @@ for (const electrical of [true, false]) {
                 .getByRole("button", { name: "Irradiance", exact: true })
                 .click();
         await expect(page.getByRole("status")).toContainText(
-            "20.5 of 24 hours have valid values",
-        );
-        await expect(page.getByRole("status")).toContainText(
-            "including nighttime",
+            "Some forecast data is missing.",
         );
         await page
             .getByRole("checkbox", {
-                name: "Show full day, including missing intervals",
+                name: "Show full day",
             })
             .check();
         await page.getByText("View interval data (4 intervals)").click();
@@ -145,17 +142,11 @@ test("irradiance distinguishes available source hours from ambiguous zero power"
         .click();
     await page.getByRole("button", { name: "Irradiance", exact: true }).click();
     await expect(page.getByRole("status")).toContainText(
-        "10 of 24 hours have valid values",
-    );
-    await expect(page.getByRole("status")).toContainText(
-        "Source intervals cover 20.5 of 24 hours",
-    );
-    await expect(page.getByRole("status")).toContainText(
-        "Zero reference power cannot identify irradiance",
+        "Some forecast data is missing.",
     );
     await page
         .getByRole("checkbox", {
-            name: "Show full day, including missing intervals",
+            name: "Show full day",
         })
         .check();
     await page.getByText("View interval data (4 intervals)").click();
@@ -287,7 +278,7 @@ for (const width of [320, 390]) {
             .getByRole("button", { name: "Irradiance", exact: true })
             .click();
         await expect(
-            page.getByText("Includes intervals from earlier forecast updates."),
+            page.getByText("Mixed forecast updates", { exact: true }),
         ).toBeVisible();
         await page.getByText("View interval data (2 intervals)").click();
         await expect(page.getByRole("cell", { name: /^07:00–/ })).toBeVisible();
@@ -425,16 +416,20 @@ test("suspected derating shows a second scenario with its evidence", async ({
         .click();
     await expect(
         page.getByText(
-            "Across 5 qualifying days from 2026-11-08 to 2026-11-13, the median daily production/reference ratio was 12.5% below the calibration estimate.",
+            "Median shortfall: 12.5% over 5 comparable days. Outage unconfirmed.",
             { exact: false },
         ),
     ).toBeVisible();
     await expect(page.getByRole("status")).not.toContainText("2026-11-04");
-    await expect(page.getByRole("status")).toContainText(
-        "does not confirm an outage",
+    await expect(page.getByRole("status")).toContainText("Outage unconfirmed.");
+    await page.getByText("Source & quality", { exact: true }).click();
+    await expect(page.locator(".provenance")).toContainText(
+        "5 qualifying days: 2026-11-08 to 2026-11-13. Median daily production/reference ratio over matched hours.",
     );
     await expect(
-        page.getByText("If derating persists · daily energy"),
+        page
+            .locator(".stat")
+            .getByText("If derating persists", { exact: true }),
     ).toBeVisible();
     await page.getByText("View interval data (1 intervals)").click();
     await expect(

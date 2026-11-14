@@ -58,7 +58,6 @@ export function Outages({
             <div className="section-heading">
                 <div>
                     <h2>Plant outages</h2>
-                    <p>Track unavailable capacity and recovery.</p>
                 </div>
                 <button className="button" onClick={() => setEditor("new")}>
                     Report outage

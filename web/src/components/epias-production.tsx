@@ -56,12 +56,13 @@ export function EpiasProduction({ base }: { base: string }) {
                             </strong>{" "}
                             · {data.connected ? "Connected" : "Not connected"}
                         </p>
-                        <p className="fine">
-                            Your administrator manages the EPİAŞ connection.
-                            {!data.connected &&
-                                data.archived_days > 0 &&
-                                " Previously archived production remains available below."}
-                        </p>
+                        {!data.connected && (
+                            <p className="fine">
+                                Contact your administrator to connect EPİAŞ.
+                                {data.archived_days > 0 &&
+                                    " Saved production is still available."}
+                            </p>
+                        )}
                         <p className="fine">
                             Archived days: {data.archived_days}
                             {data.connected && (
@@ -290,13 +291,6 @@ function EpiasArchive({
                         {" - "}
                         {selectedHistory.timezone}
                     </p>
-                    {positiveRows.length > 0 &&
-                        visibleRows.length < rows.length && (
-                            <p className="fine">
-                                Positive interval range, including gaps. CSV
-                                includes all hours.
-                            </p>
-                        )}
                     {!positiveRows.length &&
                         visibleRows.length > 0 &&
                         visibleRows.every(

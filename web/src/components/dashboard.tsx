@@ -420,10 +420,6 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
                 <div>
                     <p className="eyebrow">{tenant.name}</p>
                     <h1>Your solar portfolio</h1>
-                    <p>
-                        Forecasts, production and operating history for every
-                        plant.
-                    </p>
                 </div>
                 <button
                     className="button"

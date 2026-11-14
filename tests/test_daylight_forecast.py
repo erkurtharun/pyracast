@@ -7,14 +7,15 @@ from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.irradiance import local_day_bounds
+from pyracast.plants.forecast_composition import ForecastVintage, compose_forecasts
 from pyracast.plants.numerics import PowerInterval, forecast
 from pyracast.plants.operating_limits import OperatingLimit, affected_power
 from pyracast.solar import Daylight, daylight_energy_windows, daylight_window, summarize_daylight
 
 
-@pytest.mark.parametrize("all_zero", [False, True])
-def test_nigde_separates_daylight_validity_from_source_and_night_gaps(all_zero: bool) -> None:
-    site = SiteBinding(
+@pytest.fixture
+def nigde_binding() -> SiteBinding:
+    return SiteBinding(
         id=7,
         region_id=8,
         region_revision=1,
@@ -25,6 +26,12 @@ def test_nigde_separates_daylight_validity_from_source_and_night_gaps(all_zero: 
         longitude=34.460913,
         timezone="Europe/Istanbul",
     )
+
+
+@pytest.mark.parametrize("all_zero", [False, True])
+def test_nigde_separates_daylight_validity_from_source_and_night_gaps(
+    all_zero: bool, nigde_binding: SiteBinding
+) -> None:
     start = datetime(2026, 11, 14, 0, 30, tzinfo=UTC)
     rows: list[dict[str, object]] = [
         {
@@ -37,7 +44,7 @@ def test_nigde_separates_daylight_validity_from_source_and_night_gaps(all_zero: 
         for offset in range(41)
     ]
     result = calculate(
-        site,
+        nigde_binding,
         date(2026, 11, 14),
         ProviderData({}, rows, collected_at=start + timedelta(minutes=8)),
     )
@@ -47,6 +54,8 @@ def test_nigde_separates_daylight_validity_from_source_and_night_gaps(all_zero: 
     assert daylight["complete"] is not all_zero
     assert daylight["coverage_fraction"] == (0 if all_zero else 1)
     assert daylight["coverage_seconds"] == daylight["duration_seconds"]
+    assert daylight["input_coverage_seconds"] == daylight["duration_seconds"]
+    assert daylight["input_coverage_fraction"] == 1
     assert daylight["energy_kwh_m2"] == (None if all_zero else pytest.approx(1.1))
     assert daylight["sunrise"].startswith("2026-11-14T04:")
     assert daylight["sunset"].startswith("2026-11-14T14:")
@@ -61,6 +70,126 @@ def test_nigde_separates_daylight_validity_from_source_and_night_gaps(all_zero: 
         }
         for row in rows
     ]
+
+
+@pytest.mark.parametrize("missing", [None, -1, float("nan"), float("inf"), "absent"])
+def test_irradiance_input_coverage_excludes_missing_or_invalid_power(
+    missing: float | str | None, nigde_binding: SiteBinding
+) -> None:
+    start = datetime(2026, 11, 14, tzinfo=UTC)
+    rows: list[dict[str, object]] = [
+        {
+            "start": (start + timedelta(minutes=30 * index)).isoformat(),
+            "end": (start + timedelta(minutes=30 * (index + 1))).isoformat(),
+            "power_kw": missing if index == 24 else 100,
+        }
+        for index in range(48)
+        if not (index == 24 and missing == "absent")
+    ]
+    result = calculate(nigde_binding, start.date(), ProviderData({}, rows, collected_at=start))
+    summary = cast(dict[str, Any], result["daylight"])
+    assert summary["input_coverage_seconds"] == pytest.approx(36601.476925 - 1800)
+    assert summary["input_coverage_fraction"] == pytest.approx(1 - 1800 / 36601.476925)
+    assert summary["complete"] is False
+    assert summary["energy_kwh_m2"] is None
+    assert summary["partial_energy_kwh_m2"] == pytest.approx(1.05)
+
+
+def test_irradiance_zero_boundary_power_keeps_complete_input_and_partial_ghi(
+    nigde_binding: SiteBinding,
+) -> None:
+    start = datetime(2026, 11, 14, 4, tzinfo=UTC)
+    rows: list[dict[str, object]] = [
+        {
+            "start": (start + timedelta(minutes=30 * index)).isoformat(),
+            "end": (start + timedelta(minutes=30 * (index + 1))).isoformat(),
+            "power_kw": 0 if index in (0, 21) else 100,
+        }
+        for index in range(22)
+    ]
+    result = calculate(nigde_binding, start.date(), ProviderData({}, rows, collected_at=start))
+    summary = cast(dict[str, Any], result["daylight"])
+    assert summary["input_coverage_seconds"] == pytest.approx(36601.476925)
+    assert summary["input_coverage_fraction"] == 1
+    assert summary["valid_coverage_seconds"] == 36000
+    assert summary["coverage_fraction"] == pytest.approx(0.9835668673635087)
+    assert summary["complete"] is False
+    assert summary["energy_kwh_m2"] is None
+    assert summary["partial_energy_kwh_m2"] == pytest.approx(1)
+
+
+def test_irradiance_input_coverage_uses_owned_pieces_and_preserves_authoritative_gaps(
+    nigde_binding: SiteBinding,
+) -> None:
+    start = datetime(2026, 11, 14, tzinfo=UTC)
+    end = start + timedelta(days=1)
+    recent_start, recent_end = start + timedelta(hours=10), start + timedelta(hours=11)
+    composition = compose_forecasts(
+        (
+            ForecastVintage(
+                2,
+                recent_start,
+                recent_end,
+                (
+                    {
+                        "start": recent_start.isoformat(),
+                        "end": (recent_start + timedelta(minutes=30)).isoformat(),
+                        "power_kw": None,
+                    },
+                    {
+                        "start": (recent_start + timedelta(minutes=45)).isoformat(),
+                        "end": recent_end.isoformat(),
+                        "power_kw": 0,
+                    },
+                ),
+            ),
+            ForecastVintage(
+                1,
+                start,
+                end,
+                ({"start": start.isoformat(), "end": end.isoformat(), "power_kw": 100},),
+            ),
+        ),
+        start,
+        end,
+    )
+    result = calculate(
+        nigde_binding,
+        start.date(),
+        ProviderData({}, list(composition.intervals), collected_at=start),
+    )
+    summary = cast(dict[str, Any], result["daylight"])
+    assert summary["input_coverage_seconds"] == pytest.approx(36601.476925 - 2700)
+    assert summary["input_coverage_fraction"] == pytest.approx(1 - 2700 / 36601.476925)
+    assert summary["valid_coverage_seconds"] == pytest.approx(36601.476925 - 3600)
+    assert summary["energy_kwh_m2"] is None
+    assert summary["partial_energy_kwh_m2"] == pytest.approx(2)
+
+
+def test_irradiance_polar_night_has_no_input_coverage_fraction(nigde_binding: SiteBinding) -> None:
+    nigde_binding.latitude = 90
+    start = datetime(2026, 12, 21, tzinfo=UTC)
+    result = calculate(
+        nigde_binding,
+        start.date(),
+        ProviderData(
+            {},
+            [
+                {
+                    "start": (start - timedelta(days=1)).isoformat(),
+                    "end": (start + timedelta(days=1)).isoformat(),
+                    "power_kw": 0,
+                }
+            ],
+            collected_at=start,
+        ),
+    )
+    summary = cast(dict[str, Any], result["daylight"])
+    assert summary["input_coverage_seconds"] == 0
+    assert summary["input_coverage_fraction"] is None
+    assert summary["coverage_fraction"] is None
+    assert summary["energy_kwh_m2"] is None
+    assert summary["complete"] is False
 
 
 @pytest.mark.parametrize("resolution", [30, 60])
@@ -93,6 +222,8 @@ def test_nigde_intraday_source_has_complete_generation_despite_missing_night(
     assert summary["complete"] is True
     assert summary["coverage_fraction"] == 1
     assert summary["energy_mwh"] == 990
+    assert "input_coverage_fraction" not in summary
+    assert "input_coverage_seconds" not in summary
 
 
 @pytest.mark.parametrize("resolution", [30, 60])
@@ -239,6 +370,8 @@ def test_unknown_outage_before_sunrise_within_native_boundary_keeps_total_missin
     assert summary["complete"] is False
     assert summary["energy_mwh"] is None
     assert summary["partial_energy_mwh"] == pytest.approx(100 * 5 / 6)
+    assert "input_coverage_fraction" not in summary
+    assert "input_coverage_seconds" not in summary
 
 
 def test_missing_original_native_boundary_piece_does_not_become_complete() -> None:
@@ -337,8 +470,11 @@ def test_native_window_union_and_day_clipping_prevent_duplicate_energy() -> None
         end=end,
         energy_windows=windows,
         unit="mwh",
+        input_windows=((start - timedelta(hours=1), end), (start, end + timedelta(hours=1))),
     )
     assert summary["energy_mwh"] == 48
+    assert summary["input_coverage_seconds"] == 86400
+    assert summary["input_coverage_fraction"] == 1
     with pytest.raises(ValueError, match="finite"):
         summarize_daylight(
             daylight,
@@ -348,3 +484,23 @@ def test_native_window_union_and_day_clipping_prevent_duplicate_energy() -> None
             energy_windows=windows,
             unit="mwh",
         )
+
+
+@pytest.mark.parametrize("input_hour", [7, 8, 10, 11])
+def test_daylight_input_outside_summary_bounds_has_zero_coverage(input_hour: int) -> None:
+    midnight = datetime(2026, 11, 14, tzinfo=UTC)
+    rise, setting = midnight + timedelta(hours=6), midnight + timedelta(hours=18)
+    start, end = midnight + timedelta(hours=9), midnight + timedelta(hours=10)
+    input_start = midnight + timedelta(hours=input_hour)
+    summary = summarize_daylight(
+        Daylight(((rise, setting),), rise, setting, "normal"),
+        ((start, end, 1),),
+        start=start,
+        end=end,
+        energy_windows=((start, end),),
+        unit="mwh",
+        input_windows=((input_start, input_start + timedelta(hours=1)),),
+    )
+    assert summary["input_coverage_seconds"] == 0
+    assert summary["input_coverage_fraction"] == 0
+    assert summary["partial_energy_mwh"] == 1

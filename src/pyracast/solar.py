@@ -45,6 +45,19 @@ def daylight_energy_windows(
     return tuple(selected)
 
 
+def _daylight_overlap(daylight: Daylight, begin: datetime, stop: datetime) -> timedelta:
+    if begin >= stop:
+        return timedelta()
+    return sum(
+        (
+            min(stop, right) - max(begin, left)
+            for left, right in daylight.windows
+            if begin < right and stop > left
+        ),
+        timedelta(),
+    )
+
+
 def summarize_daylight(
     daylight: Daylight,
     intervals: Iterable[tuple[datetime, datetime, float | None]],
@@ -53,6 +66,7 @@ def summarize_daylight(
     end: datetime,
     energy_windows: TimeWindows,
     unit: Literal["mwh", "kwh_m2"],
+    input_windows: Iterable[tuple[datetime, datetime]] | None = None,
 ) -> dict[str, object]:
     """Integrate validated native means, retaining complete daylight boundary intervals."""
     coverage = valid_coverage = energy_coverage = timedelta()
@@ -63,14 +77,7 @@ def summarize_daylight(
         begin, stop = max(start, begin.astimezone(UTC)), min(end, stop.astimezone(UTC))
         if begin >= stop:
             continue
-        overlap = sum(
-            (
-                min(stop, right) - max(begin, left)
-                for left, right in daylight.windows
-                if begin < right and stop > left
-            ),
-            timedelta(),
-        )
+        overlap = _daylight_overlap(daylight, begin, stop)
         coverage += overlap
         if value is None:
             continue
@@ -92,7 +99,7 @@ def summarize_daylight(
     complete = timedelta() < duration == valid_coverage and energy_coverage == energy_duration
     if not isfinite(energy):
         raise ValueError("Daylight energy must be finite")
-    return {
+    result: dict[str, object] = {
         "policy": DAYLIGHT_POLICY,
         "energy_scope": "whole_native_intervals",
         "status": daylight.status,
@@ -110,6 +117,17 @@ def summarize_daylight(
         f"energy_{unit}": energy if complete else None,
         f"partial_energy_{unit}": energy,
     }
+    if input_windows is not None:
+        input_coverage = sum(
+            (
+                _daylight_overlap(daylight, max(start, begin), min(end, stop))
+                for begin, stop in daylight_energy_windows(daylight, input_windows)
+            ),
+            timedelta(),
+        )
+        result["input_coverage_seconds"] = input_coverage.total_seconds()
+        result["input_coverage_fraction"] = input_coverage / duration if duration else None
+    return result
 
 
 def daylight_window(day: date, timezone: str, latitude: float, longitude: float) -> Daylight:

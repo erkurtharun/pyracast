@@ -13,6 +13,7 @@ type DaylightSummary = {
     status: "normal" | "polar_day" | "polar_night";
     complete: boolean;
     coverage_fraction: number | null;
+    input_coverage_fraction?: number | null;
     energy_mwh?: number | null;
     energy_kwh_m2?: number | null;
     partial_energy_mwh?: number;
@@ -128,6 +129,14 @@ export function ForecastPanel({
     const partialEnergyField = electrical
         ? "partial_energy_mwh"
         : "partial_energy_kwh_m2";
+    const partial = primary.complete !== true && !noDaylight;
+    const affectedPartial =
+        affectedSummary?.complete !== true &&
+        affectedDaylight?.status !== "polar_night";
+    const coverage =
+        !electrical && daylight?.input_coverage_fraction !== undefined
+            ? daylight.input_coverage_fraction
+            : primary.coverage_fraction;
     const dayHours =
         typeof result.start === "string" && typeof result.end === "string"
             ? (Date.parse(result.end) - Date.parse(result.start)) / 3_600_000
@@ -219,11 +228,6 @@ export function ForecastPanel({
                             Satellite/model estimates, not meter readings.
                         </p>
                     )}
-                    {mixedVintages && (
-                        <p className="fine">
-                            Includes intervals from earlier forecast updates.
-                        </p>
-                    )}
                 </div>
                 <div className="button-group">
                     <CsvDownload
@@ -257,6 +261,11 @@ export function ForecastPanel({
                         }}
                     />
                     <Tag>{forecast.freshness}</Tag>
+                    {mixedVintages && <Tag>Mixed forecast updates</Tag>}
+                    {Array.isArray(result.quality_flags) &&
+                        result.quality_flags.includes("archived_forecast") && (
+                            <Tag>Archived forecast</Tag>
+                        )}
                     {Array.isArray(result.quality_flags) &&
                         result.quality_flags.includes(
                             "provisional_production_calibration",
@@ -280,37 +289,22 @@ export function ForecastPanel({
                     }
                 />
             )}
-            {electrical &&
-                Array.isArray(result.quality_flags) &&
-                result.quality_flags.includes("archived_forecast") && (
-                    <Notice>
-                        Saved day-ahead forecast using configuration{" "}
-                        {forecast.configuration_id ?? "—"}. This archive is
-                        separate from the current outlook and metered
-                        production.
-                    </Notice>
-                )}
             {derating && (
                 <Notice>
-                    {deratingDays.length > 0
-                        ? `Across ${deratingDays.length} qualifying days from ${deratingDays[0]} to ${deratingDays[deratingDays.length - 1]}, `
-                        : `In the assessment window from ${derating.window_start} to ${derating.window_end}, `}
-                    the median daily production/reference ratio was{" "}
+                    Median shortfall:{" "}
                     {number(
                         Math.round((1 - derating.performance_ratio) * 1000) /
                             10,
                     )}
-                    % below the calibration estimate. This comparison does not
-                    confirm an outage. The second scenario assumes this ratio
-                    persists; normal capacity uses the calibration estimate.
-                    Record an outage only if independently confirmed.
+                    %
+                    {deratingDays.length > 0
+                        ? ` over ${deratingDays.length} comparable days`
+                        : ""}
+                    . Outage unconfirmed.
                 </Notice>
             )}
             {scenario?.status === "unknown_impact" && (
-                <Notice>
-                    Capacity impact is unknown for some intervals; missing
-                    affected values are not zero.
-                </Notice>
+                <Notice>Outage impact is unknown for some intervals.</Notice>
             )}
             {scenario &&
                 ((Array.isArray(scenario.result.quality_flags) &&
@@ -323,8 +317,8 @@ export function ForecastPanel({
                         ),
                     )) && (
                     <Notice>
-                        Configuration changed. Confirm remaining capacities in
-                        Outages to restore the affected estimate.
+                        Update remaining capacity in Outages after this
+                        configuration change.
                     </Notice>
                 )}
             {electrical &&
@@ -333,120 +327,63 @@ export function ForecastPanel({
                     "historical_configuration_assumed",
                 ) && (
                     <Notice>
-                        {forecast.source_kind === "estimated_actuals"
-                            ? forecast.calibration_id
-                                ? "Calculated from estimated actuals using the plant configuration entered later and the calibration fitted for that period."
-                                : "Calculated from estimated actuals using the plant configuration entered later. No calibration is applied."
-                            : "Calculated from the archived forecast using the plant configuration entered later. No calibration is applied."}
+                        Estimated using settings recorded after this date.
                     </Notice>
                 )}
             {daylight &&
                 (noDaylight ? (
-                    <p className="fine">
-                        No daylight on this local date. Daylight energy is
-                        unavailable.
-                    </p>
+                    <p className="fine">No daylight on this date.</p>
                 ) : !daylight.complete ? (
                     <Notice>
-                        {daylight.coverage_fraction === 1
-                            ? "Partial estimate."
-                            : "Partial coverage."}{" "}
-                        Some required {electrical ? "production" : "irradiance"}{" "}
-                        intervals have missing values. The total is unavailable;
-                        the partial estimate includes valid intervals only.
-                        Missing values are not zero.
-                        {!electrical &&
-                            Array.isArray(result.quality_flags) &&
-                            result.quality_flags.includes(
-                                "ambiguous_zero_power",
-                            ) && (
-                                <>
-                                    {" "}
-                                    Zero reference power remains unknown
-                                    irradiance unless nighttime is confirmed.
-                                </>
-                            )}
+                        {coverage === 1
+                            ? electrical
+                                ? "Some interval values are unavailable."
+                                : "Some irradiance values could not be calculated."
+                            : "Some forecast data is missing."}
                     </Notice>
                 ) : null)}
             {!daylight && result.complete !== true && (
-                <Notice>
-                    Partial coverage.
-                    {Number.isFinite(coveredHours) && Number.isFinite(dayHours)
-                        ? ` ${number(coveredHours)} of ${number(dayHours)} hours have valid values.`
-                        : ""}{" "}
-                    Daily total unavailable: it requires the entire local day,
-                    including nighttime. The partial estimate includes valid
-                    intervals only; missing values are not zero.
-                    {!electrical &&
-                        typeof result.coverage_seconds === "number" &&
-                        Number.isFinite(dayHours) && (
-                            <>
-                                {" "}
-                                Source intervals cover{" "}
-                                {number(result.coverage_seconds / 3600)} of{" "}
-                                {number(dayHours)} hours; irradiance validity is
-                                separate from source availability.
-                            </>
-                        )}
-                    {!electrical &&
-                        Array.isArray(result.quality_flags) &&
-                        result.quality_flags.includes(
-                            "ambiguous_zero_power",
-                        ) && (
-                            <>
-                                {" "}
-                                Zero reference power cannot identify irradiance
-                                without a confirmed nighttime classification.
-                            </>
-                        )}
-                </Notice>
+                <Notice>Some forecast data is missing.</Notice>
             )}
             <div className="stats forecast-stats">
                 <Stat
                     label={
                         scenario
-                            ? `Normal capacity · ${daylight ? "daylight" : "daily"} energy`
-                            : daylight
-                              ? "Daylight energy"
-                              : electrical
-                                ? "Daily energy"
-                                : "Daily solar energy"
+                            ? `Normal capacity${partial ? " · partial" : ""}`
+                            : partial
+                              ? "Partial estimate"
+                              : "Estimated energy"
                     }
-                    value={primary[energyField]}
+                    value={
+                        partial && primary.coverage_fraction === 0
+                            ? undefined
+                            : primary[
+                                  partial ? partialEnergyField : energyField
+                              ]
+                    }
                     unit={electrical ? "MWh" : "kWh/m²"}
                 />
                 {scenario && (
                     <Stat
-                        label={`${Affected} · ${affectedDaylight ? "daylight" : "daily"} energy`}
-                        value={affectedSummary?.energy_mwh}
-                        unit="MWh"
-                    />
-                )}
-                {scenario &&
-                    affectedSummary?.complete !== true &&
-                    affectedDaylight?.status !== "polar_night" && (
-                        <Stat
-                            label={`${Affected} · ${affectedDaylight ? "daylight partial" : "partial"} estimate`}
-                            value={affectedSummary?.partial_energy_mwh}
-                            unit="MWh"
-                        />
-                    )}
-                {primary.complete !== true && !noDaylight && (
-                    <Stat
-                        label={
-                            daylight
-                                ? "Daylight partial estimate"
-                                : "Partial estimate"
+                        label={`${Affected}${affectedPartial ? " · partial" : ""}`}
+                        value={
+                            affectedPartial &&
+                            affectedSummary?.coverage_fraction === 0
+                                ? undefined
+                                : affectedSummary?.[
+                                      affectedPartial
+                                          ? "partial_energy_mwh"
+                                          : "energy_mwh"
+                                  ]
                         }
-                        value={primary[partialEnergyField]}
-                        unit={electrical ? "MWh" : "kWh/m²"}
+                        unit="MWh"
                     />
                 )}
                 <Stat
                     label="Coverage"
                     value={
-                        typeof primary.coverage_fraction === "number"
-                            ? primary.coverage_fraction * 100
+                        typeof coverage === "number"
+                            ? coverage * 100
                             : undefined
                     }
                     unit="%"
@@ -461,34 +398,12 @@ export function ForecastPanel({
                             setShowFullDay(event.target.checked)
                         }
                     />{" "}
-                    Show full day, including missing intervals
+                    Show full day
                 </span>
             </label>
-            {rows.length === 0 && (
-                <p>
-                    No interval values are available for this day. Missing
-                    values are not zero.
-                </p>
-            )}
+            {rows.length === 0 && <p>No interval data available.</p>}
             {rows.length > 0 && (
                 <>
-                    {!showFullDay &&
-                        positiveRows.length > 0 &&
-                        rows.length < allRows.length && (
-                            <p className="fine">
-                                Showing the first through last generating
-                                interval, including gaps. CSV includes all
-                                intervals.
-                            </p>
-                        )}
-                    {!positiveRows.length &&
-                        rows.every(
-                            (row) => row[metric] == null || row[metric] === 0,
-                        ) && (
-                            <p className="fine">
-                                All available intervals have zero generation.
-                            </p>
-                        )}
                     <div className="chart-title">
                         <strong>
                             {electrical
@@ -498,10 +413,16 @@ export function ForecastPanel({
                         <span>{unit}</span>
                     </div>
                     {scenario && (
-                        <p className="fine">
-                            Green: normal capacity · Blue: {affected} · Gaps:
-                            unknown impact
-                        </p>
+                        <div className="chart-legend">
+                            <span>
+                                <i className="normal" aria-hidden="true" />
+                                Normal capacity
+                            </span>
+                            <span>
+                                <i className="affected" aria-hidden="true" />
+                                {Affected}
+                            </span>
+                        </div>
                     )}
                     <div
                         className="chart"
@@ -556,44 +477,86 @@ export function ForecastPanel({
             )}
             <details className="provenance">
                 <summary>Source & quality</summary>
-                {daylight && (
-                    <>
-                        <p>
-                            Daylight energy includes whole source intervals that
-                            overlap daylight. Sunrise and sunset boundary
-                            intervals are kept intact.
-                        </p>
-                        <p>
-                            Full-day coverage:
-                            {` ${number(typeof result.coverage_fraction === "number" ? result.coverage_fraction * 100 : undefined)}%.`}
-                            {Number.isFinite(coveredHours) &&
-                            Number.isFinite(dayHours)
-                                ? ` ${number(coveredHours)} of ${number(dayHours)} hours have valid values.`
-                                : ""}{" "}
-                            {result.complete === true
-                                ? `Full-day energy: ${number(result[energyField])} ${electrical ? "MWh" : "kWh/m²"}.`
-                                : `Full-day total unavailable. Available partial energy: ${number(result[partialEnergyField])} ${electrical ? "MWh" : "kWh/m²"}.`}
-                        </p>
-                        {!electrical &&
-                            typeof result.coverage_seconds === "number" && (
-                                <p>
-                                    Source intervals cover{" "}
-                                    {number(result.coverage_seconds / 3600)}{" "}
-                                    hours. Zero reference power cannot identify
-                                    irradiance without a confirmed nighttime
-                                    classification.
-                                </p>
-                            )}
-                    </>
+                {derating && (
+                    <p>
+                        {deratingDays.length > 0
+                            ? `${deratingDays.length} qualifying days: ${deratingDays[0]} to ${deratingDays[deratingDays.length - 1]}. `
+                            : `Assessment window: ${derating.window_start} to ${derating.window_end}. `}
+                        Median daily production/reference ratio over matched
+                        hours.
+                    </p>
                 )}
+                {daylight && (
+                    <p>
+                        Energy includes whole source intervals overlapping
+                        daylight.
+                    </p>
+                )}
+                {!electrical &&
+                    daylight?.input_coverage_fraction !== undefined && (
+                        <p>
+                            Source data coverage:{" "}
+                            {number(
+                                daylight.input_coverage_fraction === null
+                                    ? null
+                                    : daylight.input_coverage_fraction * 100,
+                            )}
+                            %.
+                        </p>
+                    )}
+                {!electrical && daylight && (
+                    <p>
+                        Usable irradiance coverage:{" "}
+                        {number(
+                            daylight.coverage_fraction === null
+                                ? null
+                                : daylight.coverage_fraction * 100,
+                        )}
+                        %.
+                    </p>
+                )}
+                <p>
+                    Full-day coverage:
+                    {` ${number(typeof result.coverage_fraction === "number" ? result.coverage_fraction * 100 : undefined)}%.`}
+                    {Number.isFinite(coveredHours) && Number.isFinite(dayHours)
+                        ? ` ${number(coveredHours)} of ${number(dayHours)} hours.`
+                        : ""}
+                </p>
+                <p>
+                    {result.complete === true
+                        ? "Full-day energy"
+                        : "Full-day partial estimate"}
+                    :{" "}
+                    {number(
+                        result.complete !== true &&
+                            result.coverage_fraction === 0
+                            ? undefined
+                            : result[
+                                  result.complete === true
+                                      ? energyField
+                                      : partialEnergyField
+                              ],
+                    )}{" "}
+                    {electrical ? "MWh" : "kWh/m²"}.
+                </p>
+                {!electrical && typeof result.coverage_seconds === "number" && (
+                    <p>
+                        Received source intervals:{" "}
+                        {number(result.coverage_seconds / 3600)} hours.
+                    </p>
+                )}
+                {!electrical &&
+                    Array.isArray(result.quality_flags) &&
+                    result.quality_flags.includes("ambiguous_zero_power") && (
+                        <p>
+                            Zero PV output cannot uniquely determine irradiance.
+                        </p>
+                    )}
                 {scenario && (
                     <p className="fine">
-                        Normal capacity uses configured capacity and the
-                        selected calibration.{" "}
                         {derating
-                            ? "If derating persists scales capacity by the recent measured shortfall."
-                            : "With outages uses reported remaining capacity."}{" "}
-                        Both are estimates, not meter readings.
+                            ? "The alternative scenario assumes the measured shortfall persists."
+                            : "The outage scenario uses reported remaining capacity."}
                     </p>
                 )}
                 <p>

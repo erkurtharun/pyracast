@@ -139,7 +139,6 @@ export function PlantConfigurationFields({
                     </>
                 )}
             </div>
-            <p className="fine">Leave unknown optional capacities blank.</p>
             <details>
                 <summary>Capacity and mounting guide</summary>
                 <p className="fine">

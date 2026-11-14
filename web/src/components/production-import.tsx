@@ -63,11 +63,6 @@ export function ProductionImport({
             <div className="section-heading">
                 <div>
                     <h2>Import production CSV</h2>
-                    <p>
-                        Import 30 or 60 minute readings covered by archived
-                        estimated actuals. Available dates are in the
-                        Calibration journal.
-                    </p>
                 </div>
             </div>
             <details>

@@ -21,6 +21,7 @@ async function reminderApi(
     otherRecipientCount = 0,
     enabled = false,
     delivery: Record<string, unknown> = {},
+    dailyLimit = 10,
 ) {
     await mockApi(page);
     let saved = { enabled, recipients, times: ["08:00"] };
@@ -46,7 +47,10 @@ async function reminderApi(
                     Math.max(1, saved.recipients.length) + otherRecipientCount >
                     limit,
                 timezone: region.timezone,
-                quota: { daily_reminder_limit: 10, queries_per_email: 0 },
+                quota: {
+                    daily_reminder_limit: dailyLimit,
+                    queries_per_email: 0,
+                },
                 deliveries: [
                     {
                         id: 1,
@@ -66,6 +70,49 @@ async function reminderApi(
                 ],
             },
         });
+    });
+}
+
+for (const [field, add, remove] of [
+    ["Email address", "Add address", "Remove email address"],
+    ["Delivery time", "Add time", "Remove delivery time"],
+]) {
+    test(`${field} add and remove keep keyboard focus in the edited fields`, async ({
+        page,
+    }) => {
+        await reminderApi(page);
+        await openReminders(page);
+        await expect(
+            page.getByRole("button", { name: "Email reminders", exact: true }),
+        ).toBeFocused();
+        const addButton = page.getByRole("button", { name: add, exact: true });
+        await addButton.focus();
+        await page.keyboard.press("Enter");
+        await expect(
+            page.getByLabel(`${field} 2`, { exact: true }),
+        ).toBeFocused();
+        await addButton.focus();
+        await page.keyboard.press("Enter");
+        await expect(
+            page.getByLabel(`${field} 3`, { exact: true }),
+        ).toBeFocused();
+        await page
+            .getByRole("button", { name: `${remove} 2`, exact: true })
+            .focus();
+        await page.keyboard.press("Enter");
+        await expect(
+            page.getByLabel(`${field} 2`, { exact: true }),
+        ).toBeFocused();
+        await page
+            .getByRole("button", { name: `${remove} 2`, exact: true })
+            .focus();
+        await page.keyboard.press("Enter");
+        await expect(
+            page.getByLabel(`${field} 1`, { exact: true }),
+        ).toBeFocused();
+        await expect(
+            page.getByRole("button", { name: `${remove} 1`, exact: true }),
+        ).toHaveCount(0);
     });
 }
 
@@ -124,9 +171,7 @@ test("five recipients can be added, removed, saved and reloaded at 320px", async
             .getByLabel(`Email address ${index}`, { exact: true })
             .fill(`person${index}@example.test`);
     }
-    await expect(
-        page.getByText("5 of 5 addresses.", { exact: false }),
-    ).toBeVisible();
+    await expect(page.getByText("5 / 5", { exact: true })).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Add address" }),
     ).toBeDisabled();
@@ -182,9 +227,7 @@ test("dynamic recipient limit and server error retain entered values", async ({
     await expect(
         page.getByRole("button", { name: "Add address" }),
     ).toBeDisabled();
-    await expect(
-        page.getByText("2 of 2 addresses.", { exact: false }),
-    ).toBeVisible();
+    await expect(page.getByText("2 / 2", { exact: true })).toBeVisible();
     await page.route("**/reminders/", (route) =>
         route.fulfill({
             status: 400,
@@ -207,20 +250,31 @@ test("dynamic recipient limit and server error retain entered values", async ({
     ).toHaveValue("second@example.test");
 });
 
-test("empty recipients use account email and duplicate addresses are rejected", async ({
+test("automatic account email is editable and unchanged saves preserve the fallback", async ({
     page,
 }) => {
     await reminderApi(page);
     await openReminders(page);
     await expect(
-        page.getByText(`(${user.email})`, { exact: false }),
-    ).toBeVisible();
+        page.getByLabel("Email address 1", { exact: true }),
+    ).toHaveValue(user.email);
+    await expect(
+        page.getByRole("button", {
+            name: "Remove email address 1",
+            exact: true,
+        }),
+    ).toHaveCount(0);
     const outgoing = page.waitForRequest(
         (request) =>
             request.method() === "PUT" && request.url().endsWith("/reminders/"),
     );
     await page.getByRole("button", { name: "Save reminders" }).click();
     expect((await outgoing).postDataJSON().recipients).toEqual([]);
+});
+
+test("duplicate recipient addresses are rejected", async ({ page }) => {
+    await reminderApi(page);
+    await openReminders(page);
     await page
         .getByLabel("Email address 1", { exact: true })
         .fill("First@example.test");
@@ -232,6 +286,151 @@ test("empty recipients use account email and duplicate addresses are rejected", 
     await expect(page.locator(".notice[role=alert]")).toContainText(
         "Enter each email address only once.",
     );
+});
+
+for (const width of [320, 390]) {
+    test(`automatic and custom recipients match the visible fields at ${width}px`, async ({
+        page,
+    }) => {
+        await page.setViewportSize({ width, height: 900 });
+        await reminderApi(page);
+        await openReminders(page);
+        const first = page.getByLabel("Email address 1", { exact: true });
+        await expect(first).toHaveValue(user.email);
+        await page.getByRole("button", { name: "Add address" }).focus();
+        await page.keyboard.press("Enter");
+        await page
+            .getByLabel("Email address 2", { exact: true })
+            .fill("custom@example.test");
+        const both = page.waitForRequest(
+            (request) =>
+                request.method() === "PUT" &&
+                request.url().endsWith("/reminders/"),
+        );
+        await page.getByRole("button", { name: "Save reminders" }).click();
+        expect((await both).postDataJSON().recipients).toEqual([
+            user.email,
+            "custom@example.test",
+        ]);
+        await expect(first).toHaveValue(user.email);
+        await first.fill("");
+        const custom = page.waitForRequest(
+            (request) =>
+                request.method() === "PUT" &&
+                request.url().endsWith("/reminders/"),
+        );
+        await page.getByRole("button", { name: "Save reminders" }).click();
+        expect((await custom).postDataJSON().recipients).toEqual([
+            "custom@example.test",
+        ]);
+        await expect(first).toHaveValue("custom@example.test");
+        await expect(page.locator('input[name="recipients"]')).toHaveCount(1);
+        await expect(
+            page.getByRole("button", {
+                name: "Remove email address 1",
+                exact: true,
+            }),
+        ).toHaveCount(0);
+        await page
+            .getByRole("button", { name: "Add time", exact: true })
+            .focus();
+        await page.keyboard.press("Enter");
+        await page.getByLabel("Delivery time 2", { exact: true }).fill("17:30");
+        await expect(
+            page.getByLabel("Delivery time 2", { exact: true }),
+        ).toHaveAttribute("type", "time");
+        expect(
+            await page.evaluate(
+                () => document.documentElement.scrollWidth <= window.innerWidth,
+            ),
+        ).toBe(true);
+        await page
+            .getByRole("button", {
+                name: "Remove delivery time 1",
+                exact: true,
+            })
+            .click();
+        await expect(
+            page.getByLabel("Delivery time 1", { exact: true }),
+        ).toHaveValue("17:30");
+        await expect(
+            page.getByRole("button", {
+                name: "Remove delivery time 1",
+                exact: true,
+            }),
+        ).toHaveCount(0);
+    });
+}
+
+test("an explicit account email stays explicit and a paused empty schedule can release recipients", async ({
+    page,
+}) => {
+    await reminderApi(page, [user.email]);
+    await openReminders(page);
+    const explicit = page.waitForRequest(
+        (request) =>
+            request.method() === "PUT" && request.url().endsWith("/reminders/"),
+    );
+    await page.getByRole("button", { name: "Save reminders" }).click();
+    expect((await explicit).postDataJSON().recipients).toEqual([user.email]);
+    await expect(
+        page.getByLabel("Email address 1", { exact: true }),
+    ).toHaveValue(user.email);
+    await page.getByLabel("Email address 1", { exact: true }).fill("");
+    await page.getByLabel("Delivery time 1", { exact: true }).fill("");
+    const cleared = page.waitForRequest(
+        (request) =>
+            request.method() === "PUT" && request.url().endsWith("/reminders/"),
+    );
+    await page.getByRole("button", { name: "Save reminders" }).click();
+    expect((await cleared).postDataJSON()).toEqual({
+        enabled: false,
+        recipients: [],
+        times: [],
+    });
+    await expect(
+        page.getByLabel("Email address 1", { exact: true }),
+    ).toHaveValue(user.email);
+});
+
+test("native delivery time controls require a schedule only when enabled", async ({
+    page,
+}) => {
+    await reminderApi(page);
+    await openReminders(page);
+    const first = page.getByLabel("Delivery time 1", { exact: true });
+    await expect(first).toHaveAttribute("type", "time");
+    await first.fill("");
+    await page.getByLabel("Enable forecast emails for this plant").check();
+    await page.getByRole("button", { name: "Save reminders" }).click();
+    await expect(page.locator(".notice[role=alert]")).toContainText(
+        "Add at least one delivery time.",
+    );
+    await page.getByLabel("Enable forecast emails for this plant").uncheck();
+    const outgoing = page.waitForRequest(
+        (request) =>
+            request.method() === "PUT" && request.url().endsWith("/reminders/"),
+    );
+    await page.getByRole("button", { name: "Save reminders" }).click();
+    expect((await outgoing).postDataJSON().times).toEqual([]);
+    await expect(first).toHaveValue("");
+});
+
+test("delivery time controls stop at the current daily limit", async ({
+    page,
+}) => {
+    await reminderApi(page, [], 5, 0, false, {}, 2);
+    await openReminders(page);
+    await page.getByRole("button", { name: "Add time", exact: true }).click();
+    await expect(
+        page.getByRole("button", { name: "Add time", exact: true }),
+    ).toBeDisabled();
+    await page
+        .getByRole("button", { name: "Remove delivery time 2", exact: true })
+        .click();
+    await expect(
+        page.getByRole("button", { name: "Add time", exact: true }),
+    ).toBeEnabled();
 });
 
 test("a reduced limit preserves all saved addresses until repaired", async ({
@@ -288,23 +487,36 @@ test("reminder access errors do not reveal recipient controls", async ({
     ).toHaveCount(0);
 });
 
-test("shared plant capacity is shown without other members' email addresses", async ({
+test("shared plant capacity rejection retains entered addresses", async ({
     page,
 }) => {
     await reminderApi(page, ["mine@example.test"], 5, 3);
     await openReminders(page);
-    await expect(
-        page.getByText("Saved plant recipients: 4 of 5.", { exact: false }),
-    ).toContainText("1 new address slots remaining.");
-    await expect(
-        page.getByText("This limit is shared by all plant members", {
-            exact: false,
-        }),
-    ).toBeVisible();
     await expect(page.locator('input[name="recipients"]')).toHaveCount(1);
     await expect(
         page.getByLabel("Email address 1", { exact: true }),
     ).toHaveValue("mine@example.test");
+    await page.getByRole("button", { name: "Add address" }).click();
+    await page
+        .getByLabel("Email address 2", { exact: true })
+        .fill("second@example.test");
+    await page.route("**/reminders/", (route) =>
+        route.fulfill({
+            status: 400,
+            json: {
+                recipients: [
+                    "This plant has no room for another address. Remove an address or ask an administrator to raise the limit.",
+                ],
+            },
+        }),
+    );
+    await page.getByRole("button", { name: "Save reminders" }).click();
+    await expect(page.locator(".notice[role=alert]")).toContainText(
+        "Remove an address",
+    );
+    await expect(
+        page.getByLabel("Email address 2", { exact: true }),
+    ).toHaveValue("second@example.test");
 });
 
 test("an oversized list can be reduced in stages while sending remains paused", async ({

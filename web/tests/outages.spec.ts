@@ -216,10 +216,10 @@ test("outage lifecycle preserves metadata, compares both scenarios and restores 
     ).toBeVisible();
     await page.getByRole("button", { name: "Forecast", exact: true }).click();
     await expect(
-        page.getByText("Normal capacity · daily energy", { exact: true }),
+        page.locator(".stat").getByText("Normal capacity", { exact: true }),
     ).toBeVisible();
     await expect(
-        page.getByText("With outages · daily energy", { exact: true }),
+        page.locator(".stat").getByText("With outages", { exact: true }),
     ).toBeVisible();
     const download = page.waitForEvent("download");
     await page
@@ -259,7 +259,9 @@ test("outage lifecycle preserves metadata, compares both scenarios and restores 
         revision: 3,
     });
     await page.getByRole("button", { name: "Forecast", exact: true }).click();
-    await expect(page.getByText("Daily energy", { exact: true })).toBeVisible();
+    await expect(
+        page.getByText("Estimated energy", { exact: true }),
+    ).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Download both scenarios CSV" }),
     ).toHaveCount(0);
@@ -279,10 +281,14 @@ test("unknown impact remains missing and stale edits show a conflict", async ({
         page.getByText(/Configuration changed. Edit this report/),
     ).toBeVisible();
     await page.getByRole("button", { name: "Forecast", exact: true }).click();
-    await expect(page.getByText(/Capacity impact is unknown/)).toBeVisible();
+    await expect(
+        page.getByText("Outage impact is unknown for some intervals.", {
+            exact: true,
+        }),
+    ).toBeVisible();
     await expect(
         page.getByText(
-            /Configuration changed. Confirm remaining capacities in Outages/,
+            "Update remaining capacity in Outages after this configuration change.",
         ),
     ).toBeVisible();
     await page.getByText(/View interval data/).click();

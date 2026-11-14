@@ -3,22 +3,21 @@ import { request, type CalibrationAutomation } from "@/lib/api";
 import { Notice, useResource } from "./ui";
 
 const reasons: Record<string, string> = {
-    accepted: "The candidate passed evaluation and was activated.",
+    accepted: "Calibration activated.",
     insufficient_current_source_validation:
-        "Waiting for 30 matched days from the current live reference source or its matching historical export, with seven live held-out days.",
+        "Needs 30 days from this reference source, including seven live validation days.",
     derating_suspected:
-        "Recent production is well below the current calibration. Record the outage or activate a candidate manually.",
+        "Production is below the current calibration. Check for an outage.",
     authorization_revoked: "Authorization is no longer available.",
     configuration_changed: "The plant configuration changed.",
     insufficient_automatic_evaluation:
-        "At least 30 matched days and seven held-out days are required.",
+        "Needs 30 matched days, including seven validation days.",
     awaiting_new_holdout_days: "Waiting for seven new held-out days.",
-    stale_automatic_evaluation:
-        "The held-out evidence is too old or too spread out for automatic activation.",
+    stale_automatic_evaluation: "Validation data is too old or too spread out.",
     invalid_incumbent_comparison:
-        "The comparison with the current calibration was incomplete.",
+        "Current calibration comparison is incomplete.",
     incumbent_improvement_below_margin:
-        "The candidate did not improve enough over the current calibration.",
+        "No sufficient improvement; current calibration kept.",
     candidate_rejected: "The candidate did not pass evaluation.",
     candidate_insufficient: "The candidate did not have enough eligible data.",
     candidate_failed: "The candidate could not be evaluated.",
@@ -102,27 +101,18 @@ function AutomationStatus({
                     <h2 id="automatic-calibration-heading">
                         Automatic calibration
                     </h2>
-                    <p className="fine">
-                        Daily checks prepare and evaluate transfer-power
-                        calibration as matched production and reference data
-                        become available. Automatic activation requires at least
-                        30 matched days from the same current live reference
-                        source, including seven held-out days. Imported history
-                        alone cannot establish the accuracy of that live source.
-                        A rejected candidate leaves the last good calibration in
-                        use.
-                    </p>
                 </div>
                 {data && !resource.error && (
-                    <button
-                        className="button secondary"
-                        disabled={disabled || pending}
-                        onClick={() => toggle(!data.enabled)}
-                    >
-                        {data.enabled
-                            ? "Disable automatic calibration"
-                            : "Enable automatic calibration"}
-                    </button>
+                    <label className="check-field">
+                        <input
+                            type="checkbox"
+                            aria-label="Automatic calibration enabled"
+                            checked={data.enabled}
+                            disabled={disabled || pending}
+                            onChange={(event) => toggle(event.target.checked)}
+                        />{" "}
+                        Enabled
+                    </label>
                 )}
             </div>
             {resource.loading && (
@@ -132,22 +122,19 @@ function AutomationStatus({
             {error && <Notice error>{error}</Notice>}
             {data && !resource.error && (
                 <>
-                    <p>
-                        <strong>Status:</strong>{" "}
-                        {data.enabled
-                            ? data.authorized
-                                ? "Enabled"
-                                : "Enabled, authorization unavailable"
-                            : "Disabled"}
-                    </p>
-                    <p>
-                        <strong>Next daily check:</strong>{" "}
+                    {data.enabled && !data.authorized && (
+                        <Notice>
+                            Authorization unavailable. Calibration is paused.
+                        </Notice>
+                    )}
+                    <p className="fine">
+                        <strong>Next check:</strong>{" "}
                         {data.next_check_at
                             ? new Date(data.next_check_at).toLocaleString()
                             : "Not scheduled"}
                     </p>
-                    <p>
-                        <strong>Last attempt:</strong>{" "}
+                    <p className="fine">
+                        <strong>Last result:</strong>{" "}
                         {data.last_attempt ? (
                             <>
                                 {data.last_attempt.status === "activated"
@@ -172,9 +159,7 @@ function AutomationStatus({
                         )}
                     </p>
                     <p className="fine">
-                        Disabling automatic calibration keeps the last good
-                        calibration. Resetting to baseline also disables
-                        automation.
+                        Turning this off keeps the current calibration.
                     </p>
                 </>
             )}

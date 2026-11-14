@@ -35,13 +35,16 @@ async function openForecast(page: Page, width: number) {
     return page.locator("details.interval-details");
 }
 
-test("overflowing interval tables support keyboard scrolling and adapt to viewport width", async ({
+test("wide content supports keyboard scrolling and adapts to viewport width", async ({
     page,
 }) => {
     const details = await openForecast(page, 390);
     const summary = details.locator("summary");
     const scroll = details.locator(".table-scroll");
     await summary.click();
+    await scroll.locator("table").evaluate((table) => {
+        table.style.minWidth = "700px";
+    });
     await expect(scroll).toHaveAttribute("role", "region");
     await expect(scroll).toHaveAccessibleName("Forecast intervals");
     await expect(scroll).toHaveAttribute("tabindex", "0");
@@ -79,14 +82,9 @@ test("scroll regions follow table content width and closed details reopening", a
     await summary.click();
     await expect(scroll).not.toHaveAttribute("tabindex");
     const width = await scroll.evaluate((element) => element.clientWidth);
-    await scroll
-        .locator("td")
-        .last()
-        .evaluate((cell) => {
-            cell.textContent = "Extended provider quality explanation ".repeat(
-                40,
-            );
-        });
+    await scroll.locator("table").evaluate((table, minimumWidth) => {
+        table.style.minWidth = `${minimumWidth}px`;
+    }, width + 200);
     await expect(scroll).toHaveAttribute("tabindex", "0");
     await expect(scroll).toHaveAccessibleName("Forecast intervals");
     expect(await scroll.evaluate((element) => element.clientWidth)).toBe(width);
@@ -99,13 +97,34 @@ test("scroll regions follow table content width and closed details reopening", a
     await summary.click();
     await expect(scroll).toHaveAttribute("tabindex", "0");
     await expect(scroll).toHaveAccessibleName("Forecast intervals");
-    await scroll
-        .locator("td")
-        .last()
-        .evaluate((cell) => {
-            cell.textContent = "—";
-        });
+    await scroll.locator("table").evaluate((table) => {
+        table.style.removeProperty("min-width");
+    });
     await expect(scroll).not.toHaveAttribute("tabindex");
     await expect(scroll).not.toHaveAttribute("role");
     await expect(scroll).not.toHaveAttribute("aria-label");
+});
+
+test("simplified forecast intervals fit mobile without an extra scroll tab stop", async ({
+    page,
+}) => {
+    const details = await openForecast(page, 390);
+    const summary = details.locator("summary");
+    const scroll = details.locator(".table-scroll");
+    await summary.click();
+    await expect(details.getByRole("columnheader")).toHaveText([
+        "Time interval",
+        "Irradiance (W/m²)",
+    ]);
+    expect(
+        await scroll.evaluate(
+            (element) => element.scrollWidth <= element.clientWidth,
+        ),
+    ).toBe(true);
+    await expect(scroll).not.toHaveAttribute("tabindex");
+    await expect(scroll).not.toHaveAttribute("role");
+    await expect(scroll).not.toHaveAttribute("aria-label");
+    await summary.focus();
+    await page.keyboard.press("Tab");
+    await expect(scroll).not.toBeFocused();
 });

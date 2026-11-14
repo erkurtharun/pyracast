@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from math import isfinite
 from typing import cast
 
 from pyracast.connections.contracts import ProviderData
@@ -49,7 +50,8 @@ def calculate(binding: SiteBinding, target_date: date, data: ProviderData) -> di
         data.issued_at,
         f"{binding.pk}:{binding.region_revision}",
     )
-    series = estimate_intervals([_interval(row) for row in data.intervals], configuration, vintage)
+    source_intervals = tuple(_interval(row) for row in data.intervals)
+    series = estimate_intervals(source_intervals, configuration, vintage)
     result = integrate_day(series, target_date, binding.timezone)
     daylight = daylight_window(target_date, binding.timezone, binding.latitude, binding.longitude)
     flags = set(result.quality_flags)
@@ -86,6 +88,13 @@ def calculate(binding: SiteBinding, target_date: date, data: ProviderData) -> di
                 ),
             ),
             unit="kwh_m2",
+            input_windows=(
+                (interval.start, interval.end)
+                for interval in source_intervals
+                if interval.power_kw is not None
+                and isfinite(interval.power_kw)
+                and interval.power_kw >= 0
+            ),
         ),
         "intervals": [
             {

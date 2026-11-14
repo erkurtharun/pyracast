@@ -1,6 +1,43 @@
-import { expect, test } from "./support/test";
+﻿import { expect, test } from "./support/test";
 import type { Page } from "@playwright/test";
 import { mockApi, region } from "./support/workspace";
+
+test("irradiance input coverage stays complete when a derived value is unavailable", async ({
+    page,
+}) => {
+    const result = forecastResult(false, false);
+    Object.assign(result.daylight, {
+        input_coverage_seconds: 34200,
+        input_coverage_fraction: 1,
+        valid_coverage_seconds: 33640,
+        coverage_fraction: 0.9836,
+        complete: false,
+        energy_kwh_m2: null,
+        partial_energy_kwh_m2: 0.95,
+    });
+    await openForecast(page, false, result);
+    await expect(
+        page.locator(".stat").filter({ hasText: /^Coverage/ }),
+    ).toContainText("100 %");
+    await expect(
+        page.locator(".stat").filter({ hasText: /^Partial estimate/ }),
+    ).toContainText("0.95 kWh/m²");
+    await expect(
+        page.getByText("Some irradiance values could not be calculated.", {
+            exact: true,
+        }),
+    ).toBeVisible();
+    await expect(
+        page.locator(".stat").filter({ hasText: /^Estimated energy/ }),
+    ).toHaveCount(0);
+    await page.getByText("Source & quality", { exact: true }).click();
+    await expect(
+        page.getByText("Source data coverage: 100%.", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByText("Usable irradiance coverage: 98.36%.", { exact: true }),
+    ).toBeVisible();
+});
 
 function forecastResult(electrical: boolean, complete = true) {
     const energy = electrical ? "energy_mwh" : "energy_kwh_m2";
@@ -29,6 +66,7 @@ function forecastResult(electrical: boolean, complete = true) {
             coverage_seconds: 34200,
             valid_coverage_seconds: complete ? 34200 : 32400,
             coverage_fraction: complete ? 1 : 18 / 19,
+            input_coverage_fraction: complete ? 1 : 18 / 19,
             complete,
             [energy]: complete ? (electrical ? 30 : 1) : null,
             [partial]: complete
@@ -53,6 +91,107 @@ function forecastResult(electrical: boolean, complete = true) {
             };
         }).filter((_, index) => electrical || index >= 7),
     };
+}
+
+test("legacy irradiance payloads keep their reported coverage when input coverage is absent", async ({
+    page,
+}) => {
+    const result = forecastResult(false, false);
+    Object.assign(result.daylight, { input_coverage_fraction: undefined });
+    await openForecast(page, false, result);
+    await expect(
+        page.locator(".stat").filter({ hasText: /^Coverage/ }),
+    ).toContainText("94.737 %");
+    await expect(
+        page.locator(".stat").filter({ hasText: /^Partial estimate/ }),
+    ).toContainText("0.95 kWh/m²");
+});
+
+test("complete irradiance input without any usable irradiance does not present unknown energy as zero", async ({
+    page,
+}) => {
+    const result = forecastResult(false, false);
+    Object.assign(result, { coverage_fraction: 0, partial_energy_kwh_m2: 0 });
+    Object.assign(result.daylight, {
+        input_coverage_fraction: 1,
+        coverage_fraction: 0,
+        valid_coverage_seconds: 0,
+        partial_energy_kwh_m2: 0,
+    });
+    result.intervals = result.intervals.map((row) => ({
+        ...row,
+        ghi_wm2: null,
+    }));
+    await openForecast(page, false, result);
+    await expect(
+        page.locator(".stat").filter({ hasText: /^Coverage/ }),
+    ).toContainText("100 %");
+    await expect(
+        page.locator(".stat").filter({ hasText: /^Partial estimate/ }),
+    ).toContainText("— kWh/m²");
+    await expect(
+        page.getByText("Some irradiance values could not be calculated.", {
+            exact: true,
+        }),
+    ).toBeVisible();
+    await page.getByText("Source & quality", { exact: true }).click();
+    await expect(
+        page.getByText("Full-day partial estimate: — kWh/m².", { exact: true }),
+    ).toBeVisible();
+});
+
+test("an outage with no usable intervals does not present unknown partial energy as zero", async ({
+    page,
+}) => {
+    const affected = forecastResult(true, false);
+    Object.assign(affected.daylight, {
+        coverage_fraction: 0,
+        valid_coverage_seconds: 0,
+        partial_energy_mwh: 0,
+    });
+    affected.intervals = affected.intervals.map((row) => ({
+        ...row,
+        mean_power_mw: null,
+        energy_mwh: null,
+    }));
+    await openForecast(page, true, forecastResult(true), {
+        outage_scenario: { status: "unknown_impact", result: affected },
+    });
+    await expect(
+        page.locator(".stat").filter({ hasText: /^Normal capacity/ }),
+    ).toContainText("30 MWh");
+    await expect(
+        page.locator(".stat").filter({ hasText: /^With outages · partial/ }),
+    ).toContainText("— MWh");
+});
+
+for (const electrical of [true, false]) {
+    test(`${electrical ? "generation" : "irradiance"} preserves a complete zero energy estimate`, async ({
+        page,
+    }) => {
+        const result = forecastResult(electrical);
+        Object.assign(result, {
+            complete: true,
+            coverage_fraction: 1,
+            energy_mwh: 0,
+            energy_kwh_m2: 0,
+        });
+        Object.assign(result.daylight, { energy_mwh: 0, energy_kwh_m2: 0 });
+        await openForecast(page, electrical, result);
+        await expect(
+            page.locator(".stat").filter({ hasText: /^Estimated energy/ }),
+        ).toContainText(electrical ? "0 MWh" : "0 kWh/m²");
+        await expect(
+            page.locator(".stat").filter({ hasText: /^Partial estimate/ }),
+        ).toHaveCount(0);
+        await page.getByText("Source & quality", { exact: true }).click();
+        await expect(
+            page.getByText(
+                `Full-day energy: 0 ${electrical ? "MWh" : "kWh/m²"}.`,
+                { exact: true },
+            ),
+        ).toBeVisible();
+    });
 }
 
 async function openForecast(
@@ -93,7 +232,7 @@ for (const electrical of [true, false]) {
         if (electrical) await page.setViewportSize({ width: 390, height: 844 });
         await openForecast(page, electrical, forecastResult(electrical));
         await expect(
-            page.locator(".stat").filter({ hasText: /^Daylight energy/ }),
+            page.locator(".stat").filter({ hasText: /^Estimated energy/ }),
         ).toContainText(electrical ? "30 MWh" : "1 kWh/m²");
         await expect(
             page.locator(".stat").filter({ hasText: /^Coverage/ }),
@@ -104,7 +243,10 @@ for (const electrical of [true, false]) {
         await expect(page.getByRole("status")).toHaveCount(0);
         await page.getByText("Source & quality", { exact: true }).click();
         await expect(
-            page.getByText("Full-day total unavailable.", { exact: false }),
+            page.getByText(
+                `Full-day partial estimate: ${electrical ? "30 MWh" : "1 kWh/m²"}.`,
+                { exact: true },
+            ),
         ).toBeVisible();
         await expect(
             page.getByText(
@@ -114,7 +256,7 @@ for (const electrical of [true, false]) {
         ).toBeVisible();
         await expect(
             page.getByText(
-                "Sunrise and sunset boundary intervals are kept intact.",
+                "Energy includes whole source intervals overlapping daylight.",
                 { exact: false },
             ),
         ).toBeVisible();
@@ -129,19 +271,14 @@ for (const electrical of [true, false]) {
     }) => {
         await openForecast(page, electrical, forecastResult(electrical, false));
         await expect(page.getByRole("status")).toContainText(
-            "Partial coverage",
+            "Some forecast data is missing.",
         );
         await expect(
-            page.locator(".stat").filter({ hasText: /^Daylight energy/ }),
-        ).toContainText("—");
+            page.locator(".stat").filter({ hasText: /^Estimated energy/ }),
+        ).toHaveCount(0);
         await expect(
-            page
-                .locator(".stat")
-                .filter({ hasText: /^Daylight partial estimate/ }),
+            page.locator(".stat").filter({ hasText: /^Partial estimate/ }),
         ).toContainText(electrical ? "28.5 MWh" : "0.95 kWh/m²");
-        await expect(page.getByRole("status")).toContainText(
-            "Missing values are not zero",
-        );
     });
 }
 
@@ -158,14 +295,13 @@ test("a missing boundary interval preserves a partial energy estimate despite fu
         page.locator(".stat").filter({ hasText: /^Coverage/ }),
     ).toContainText("100 %");
     await expect(
-        page.locator(".stat").filter({ hasText: /^Daylight energy/ }),
-    ).toContainText("—");
+        page.locator(".stat").filter({ hasText: /^Estimated energy/ }),
+    ).toHaveCount(0);
     await expect(
-        page.locator(".stat").filter({ hasText: /^Daylight partial estimate/ }),
+        page.locator(".stat").filter({ hasText: /^Partial estimate/ }),
     ).toContainText("28.5 MWh");
-    await expect(page.getByRole("status")).toContainText("Partial estimate");
     await expect(page.getByRole("status")).toContainText(
-        "required production intervals have missing values",
+        "Some interval values are unavailable.",
     );
 });
 
@@ -185,10 +321,10 @@ test("polar night shows no daylight without a complete zero total", async ({
     });
     await openForecast(page, true, result);
     await expect(
-        page.getByText("No daylight on this local date.", { exact: false }),
+        page.getByText("No daylight on this date.", { exact: true }),
     ).toBeVisible();
     await expect(
-        page.locator(".stat").filter({ hasText: /^Daylight energy/ }),
+        page.locator(".stat").filter({ hasText: /^Estimated energy/ }),
     ).toContainText("—");
     await expect(
         page.locator(".stat").filter({ hasText: /^Coverage/ }),
@@ -216,16 +352,14 @@ for (const name of ["outage_scenario", "derating_scenario"]) {
         };
         await openForecast(page, true, forecastResult(true), scenario);
         await expect(
-            page
-                .locator(".stat")
-                .filter({ hasText: /^Normal capacity · daylight energy/ }),
+            page.locator(".stat").filter({ hasText: /^Normal capacity/ }),
         ).toContainText("30 MWh");
         await expect(
             page.locator(".stat").filter({
                 hasText:
                     name === "outage_scenario"
-                        ? /^With outages · daylight energy/
-                        : /^If derating persists · daylight energy/,
+                        ? /^With outages/
+                        : /^If derating persists/,
             }),
         ).toContainText("15 MWh");
         await expect(
@@ -233,3 +367,30 @@ for (const name of ["outage_scenario", "derating_scenario"]) {
         ).toHaveCount(0);
     });
 }
+
+test("an incomplete outage scenario keeps its partial energy beside the complete normal estimate", async ({
+    page,
+}) => {
+    const affected = forecastResult(true, false);
+    Object.assign(affected.daylight, { partial_energy_mwh: 12 });
+    await openForecast(page, true, forecastResult(true), {
+        outage_scenario: { status: "unknown_impact", result: affected },
+    });
+    await expect(
+        page.locator(".stat").filter({ hasText: /^Normal capacity/ }),
+    ).toHaveCount(1);
+    await expect(
+        page.locator(".stat").filter({ hasText: /^Normal capacity/ }),
+    ).toContainText("30 MWh");
+    await expect(
+        page.locator(".stat").filter({ hasText: /^With outages · partial/ }),
+    ).toHaveCount(1);
+    await expect(
+        page.locator(".stat").filter({ hasText: /^With outages · partial/ }),
+    ).toContainText("12 MWh");
+    await expect(
+        page.getByText("Outage impact is unknown for some intervals.", {
+            exact: true,
+        }),
+    ).toBeVisible();
+});

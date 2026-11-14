@@ -57,8 +57,15 @@ The energy total additionally requires valid values throughout those selected na
 boundary intervals; a missing boundary fragment can leave the total null even at
 100% astronomical daylight coverage. The summary is independent of the requested
 30/60-minute display resolution.
-Daylight source coverage and valid-value coverage remain separate; zero reference
-power with unknown sunlight still cannot establish GHI. Missing daylight values
+Daylight source coverage and valid-value coverage remain separate. Irradiance
+`input_coverage_seconds` and `input_coverage_fraction` report astronomical daylight
+covered by finite, nonnegative source PV power, including valid zeroes. They use
+the actual selected interval pieces, excluding null values and gaps; original
+native bounds do not fill coverage. These fields are absent from electrical and
+outage summaries and the fraction is null during polar night. Existing
+`coverage_fraction` still reports usable derived GHI, so complete input coverage
+does not establish a complete irradiance total. Zero reference power with unknown
+sunlight still cannot establish GHI. Missing daylight values
 give a null daylight total and an available partial estimate. Polar night has no
 daylight total or coverage fraction. The frontend opens this scope, while existing
 full-day fields, saved outputs and raw intervals keep their original meaning; no

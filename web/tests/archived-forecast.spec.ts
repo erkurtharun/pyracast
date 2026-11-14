@@ -42,14 +42,12 @@ test("plant archive requests and displays the original forecast", async ({
         page.getByRole("option", { name: "Archived day-ahead forecast" }),
     ).toHaveAttribute("value", "archived_forecast");
     await expect(
-        page.getByText(/Saved day-ahead forecast using configuration/),
+        page.getByText("Archived forecast", { exact: true }),
     ).toHaveCount(0);
     await page.getByLabel("Data source").selectOption("archived_forecast");
     await expect.poll(() => sources.at(-1)).toBe("archived_forecast");
     await expect(
-        page.getByText(
-            "Saved day-ahead forecast using configuration 3. This archive is separate from the current outlook and metered production.",
-        ),
+        page.getByText("Archived forecast", { exact: true }),
     ).toBeVisible();
     await expect(
         page.getByText(

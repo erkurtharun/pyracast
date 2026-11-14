@@ -7,7 +7,7 @@ import { CsvDownload } from "./csv-download";
 import { request, type Plant, type Forecast, type Region } from "@/lib/api";
 import { ProductionImport } from "./production-import";
 import { Calibrations } from "./calibrations";
-import { ActionForm, Notice, Stat, Tag, useResource } from "./ui";
+import { ActionForm, Notice, Tag, useResource } from "./ui";
 import { ProductionHistory } from "./production-history";
 import { MoveToRecycleBin } from "./recycle-bin";
 import { ForecastPanel } from "./forecast-panel";
@@ -255,28 +255,6 @@ export function PlantWorkspace({
                     {settingsView === "configuration" ? (
                         <section className="panel">
                             <h2>Technical details</h2>
-                            <p>
-                                Saving updates your plant declaration. Approved
-                                plants receive a new configuration revision;
-                                pending calibration may be superseded.
-                            </p>
-                            <div className="stats capacity-stats">
-                                <Stat
-                                    label="DC nameplate"
-                                    value={metadata?.dc_capacity_mw}
-                                    unit="MW"
-                                />
-                                <Stat
-                                    label="Inverter AC capacity"
-                                    value={metadata?.inverter_capacity_mw}
-                                    unit="MW"
-                                />
-                                <Stat
-                                    label="Grid export limit"
-                                    value={metadata?.export_limit_mw}
-                                    unit="MW"
-                                />
-                            </div>
                             {metadata ? (
                                 <ActionForm
                                     submit="Save configuration"
@@ -295,6 +273,12 @@ export function PlantWorkspace({
                                         name={currentPlant.name}
                                         configuration={metadata}
                                     />
+                                    {configuration && (
+                                        <p className="fine">
+                                            Changes may replace pending
+                                            calibration.
+                                        </p>
+                                    )}
                                 </ActionForm>
                             ) : (
                                 <Notice>

@@ -531,11 +531,14 @@ test("region collection schedule validates and saves distinct local times", asyn
     await page.getByRole("button", { name: "Data collection" }).click();
     await expect(
         page.getByText(
-            /at 03:00 \(Europe\/Istanbul\); this time cannot be changed/,
+            "Daily history: 03:00 (Europe/Istanbul). Pausing also stops history collection.",
         ),
     ).toBeVisible();
+    await page.getByText("Collection details", { exact: true }).click();
     await expect(
-        page.getByText(/no more often than every 30 minutes, until 09:00/),
+        page.getByText(
+            /Historical estimate retries preserve requests for scheduled forecasts/,
+        ),
     ).toBeVisible();
     await expect(page.getByText("Requests used")).toBeVisible();
     await page.getByText("Usage details", { exact: true }).click();
@@ -890,7 +893,9 @@ test("mock contract: saves cached forecast reminders without provider queries", 
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Email reminders" }).click();
     await page.getByLabel("Enable forecast emails for this plant").check();
-    await page.getByLabel("Delivery times").fill("08:00, 17:30");
+    await page.getByLabel("Delivery time 1", { exact: true }).fill("08:00");
+    await page.getByRole("button", { name: "Add time", exact: true }).click();
+    await page.getByLabel("Delivery time 2", { exact: true }).fill("17:30");
     const outgoing = page.waitForRequest(
         (request) =>
             request.method() === "PUT" && request.url().includes("/reminders/"),
@@ -1040,7 +1045,9 @@ test("mock contract: follows tenant pagination and keeps missing intervals visib
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
     await page.getByRole("button", { name: "Irradiance", exact: true }).click();
-    await expect(page.getByRole("status")).toContainText("Partial coverage");
+    await expect(page.getByRole("status")).toContainText(
+        "Some forecast data is missing.",
+    );
     await page.getByText("Source & quality", { exact: true }).click();
     await expect(
         page.getByText("synthetic fixture", { exact: true }),
@@ -1297,9 +1304,6 @@ test("calibration detail explains support, rejection and incumbent comparison", 
     ).toBeVisible();
     await expect(page.getByText("Daylight energy MAE (MWh)")).toBeVisible();
     await expect(page.getByText("Daylight energy bias (MWh)")).toBeVisible();
-    await expect(
-        page.getByText("Rolling-origin diagnostic: diagnostic; 2 folds."),
-    ).toBeVisible();
     await expect(
         page.getByRole("columnheader", {
             name: "Selection at training (factor 1.2)",
@@ -1677,9 +1681,7 @@ for (const source of ["forecast", "estimated_actuals"] as const) {
         ).toBeVisible();
         await expect(
             page.getByText(
-                source === "forecast"
-                    ? "Calculated from the archived forecast using the plant configuration entered later. No calibration is applied."
-                    : "Calculated from estimated actuals using the plant configuration entered later. No calibration is applied.",
+                "Estimated using settings recorded after this date.",
                 { exact: true },
             ),
         ).toBeVisible();

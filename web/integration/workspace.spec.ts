@@ -147,7 +147,7 @@ test("a customer manages one plant site through the real API", async ({
         maximumFractionDigits: 3,
     }).format(hourlyDaylight.energy_mwh);
     await expect(
-        page.locator(".stat").filter({ hasText: /^Daylight energy/ }),
+        page.locator(".stat").filter({ hasText: /^Estimated energy/ }),
     ).toContainText(`${daylightEnergy} MWh`);
     await expect(
         page.locator(".stat").filter({ hasText: /^Coverage/ }),
@@ -193,7 +193,7 @@ test("a customer manages one plant site through the real API", async ({
         hourlyDaylight.energy_mwh,
     );
     await expect(
-        page.locator(".stat").filter({ hasText: /^Daylight energy/ }),
+        page.locator(".stat").filter({ hasText: /^Estimated energy/ }),
     ).toContainText(`${daylightEnergy} MWh`);
     await expectFullForecastCsv(48);
     const outageTimes = await page.evaluate(() => {
@@ -221,20 +221,18 @@ test("a customer manages one plant site through the real API", async ({
     ).toBeVisible();
     await page.getByRole("button", { name: "Forecast", exact: true }).click();
     await expect(
-        page.getByText("Normal capacity · daylight energy", { exact: true }),
+        page.locator(".stat").getByText("Normal capacity", { exact: true }),
     ).toBeVisible();
     await expect(
-        page.getByText("With outages · daylight energy", { exact: true }),
+        page.locator(".stat").getByText("With outages", { exact: true }),
     ).toBeVisible();
     await expect(
-        page
-            .locator(".stat")
-            .filter({ hasText: /^Normal capacity · daylight energy/ }),
+        page.locator(".stat").filter({ hasText: /^Normal capacity/ }),
     ).toContainText(`${daylightEnergy} MWh`);
     await expect(
         page
             .locator(".stat")
-            .filter({ hasText: /^With outages · daylight energy/ })
+            .filter({ hasText: /^With outages/ })
             .locator("strong"),
     ).toHaveText("0 MWh");
     const outageDownload = page.waitForEvent("download");
@@ -275,7 +273,7 @@ test("a customer manages one plant site through the real API", async ({
     await expect(page.getByText("resolved", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Forecast", exact: true }).click();
     await expect(
-        page.getByText("Daylight energy", { exact: true }),
+        page.getByText("Estimated energy", { exact: true }),
     ).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Download both scenarios CSV" }),
@@ -318,7 +316,7 @@ test("a customer manages one plant site through the real API", async ({
     await page.getByRole("button", { name: "Automatic production" }).click();
     await expect(page.getByLabel("EPİAŞ plant ID")).toHaveCount(0);
     await expect(
-        page.getByText("Your administrator manages the EPİAŞ connection."),
+        page.getByText("Contact your administrator to connect EPİAŞ."),
     ).toBeVisible();
     await expect(
         page.getByRole("button", {
@@ -437,11 +435,15 @@ test("a customer manages one plant site through the real API", async ({
     ).toHaveValue("16:00");
     await page.getByRole("button", { name: "Email reminders" }).click();
     await page.getByLabel("Enable forecast emails for this plant").check();
-    await page.getByLabel(/Delivery times/).fill("10:00");
+    await page.getByLabel("Delivery time 1", { exact: true }).fill("10:00");
     await page.getByLabel("Email address 1", { exact: true }).fill("");
     await page.getByRole("button", { name: "Save reminders" }).click();
-    await expect(page.getByText(/member@example.com/)).toBeVisible();
-    await expect(page.getByLabel(/Delivery times/)).toHaveValue("10:00");
+    await expect(
+        page.getByLabel("Email address 1", { exact: true }),
+    ).toHaveValue("member@example.com");
+    await expect(
+        page.getByLabel("Delivery time 1", { exact: true }),
+    ).toHaveValue("10:00");
     await expect(page.getByText("Enabled", { exact: true })).toBeVisible();
     await page
         .getByLabel("Email address 1", { exact: true })
@@ -468,7 +470,9 @@ test("a customer manages one plant site through the real API", async ({
     await expect(
         page.getByLabel("Email address 2", { exact: true }),
     ).toHaveValue("forecast-two@example.test");
-    await expect(page.getByLabel(/Delivery times/)).toHaveValue("10:00");
+    await expect(
+        page.getByLabel("Delivery time 1", { exact: true }),
+    ).toHaveValue("10:00");
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({
         path: testInfo.outputPath("reminders-mobile.png"),

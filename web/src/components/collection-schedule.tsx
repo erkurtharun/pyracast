@@ -219,13 +219,8 @@ function ScheduleEditor({
                         + Add time
                     </button>
                     <p className="fine">
-                        Previous-day production and historical estimates are
-                        collected at {data.history_local_time} ({data.timezone}
-                        ); this time cannot be changed. Missing or failed data
-                        is retried no more often than every{" "}
-                        {data.history_retry_minutes} minutes, until{" "}
-                        {data.history_retry_until_local}. Pausing collection
-                        stops these jobs.
+                        Daily history: {data.history_local_time} (
+                        {data.timezone}). Pausing also stops history collection.
                     </p>
                     <details>
                         <summary>Collection details</summary>

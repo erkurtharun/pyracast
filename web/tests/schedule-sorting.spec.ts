@@ -13,7 +13,20 @@ test("reminder times are deduplicated and sent in clock order", async ({
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Email reminders" }).click();
     await page.getByLabel("Enable forecast emails for this plant").check();
-    await page.getByLabel("Delivery times").fill("10:00, 09:30, 09:00, 09:30");
+    for (const [index, time] of [
+        "10:00",
+        "09:30",
+        "09:00",
+        "09:30",
+    ].entries()) {
+        if (index)
+            await page
+                .getByRole("button", { name: "Add time", exact: true })
+                .click();
+        await page
+            .getByLabel(`Delivery time ${index + 1}`, { exact: true })
+            .fill(time);
+    }
     const outgoing = page.waitForRequest(
         (request) =>
             request.method() === "PUT" && request.url().includes("/reminders/"),

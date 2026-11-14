@@ -86,10 +86,8 @@ export function Calibrations({
                     <div>
                         <h2>Calibration history</h2>
                         <p className="fine">
-                            Activate a ready fit or return future estimates to
-                            baseline. Activation applies to newly calculated
-                            outlooks; saved forecasts and recorded production
-                            stay unchanged.
+                            Future forecasts only. Reset also turns off
+                            automatic calibration.
                         </p>
                     </div>
                     <div className="button-group">
@@ -286,7 +284,6 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
         candidate = asRecord(result.candidate),
         incumbent = asRecord(result.incumbent),
         support = asRecord(result.training_support),
-        rolling = asRecord(result.rolling_origin),
         exclusions = asRecord(result.exclusions),
         daylightMetrics = result.metric_scope === "daylight_intervals";
     const format = (value: unknown) =>
@@ -353,13 +350,6 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
                     />
                 )}
             </div>
-            {typeof rolling.status === "string" && (
-                <p className="fine">
-                    Rolling-origin diagnostic: {rolling.status};{" "}
-                    {Array.isArray(rolling.folds) ? rolling.folds.length : 0}{" "}
-                    folds.
-                </p>
-            )}
             {daylightMetrics && (
                 <p className="fine">
                     Metrics use whole meter intervals intersecting daylight, not

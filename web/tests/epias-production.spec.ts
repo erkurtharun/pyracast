@@ -215,12 +215,10 @@ test("shows administrator-managed connection status and preserves the production
         page.getByText("EPİAŞ · Not connected", { exact: true }),
     ).toBeVisible();
     await expect(
-        page.getByText(/Your administrator manages the EPİAŞ connection/),
+        page.getByText(/Contact your administrator to connect EPİAŞ/),
     ).toBeVisible();
     await expect(
-        page.getByText(
-            /Previously archived production remains available below/,
-        ),
+        page.getByText(/Saved production is still available/),
     ).toHaveCount(0);
     connected = true;
     archivedDays = 1;
@@ -356,9 +354,7 @@ test("shows administrator-managed connection status and preserves the production
         page.getByText("Collection error: Temporary collection failure"),
     ).toHaveCount(0);
     await expect(
-        page.getByText(
-            /Previously archived production remains available below/,
-        ),
+        page.getByText(/Saved production is still available/),
     ).toBeVisible();
     await expect(
         table.getByRole("cell", { name: "1", exact: true }),

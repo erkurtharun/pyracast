@@ -1,9 +1,9 @@
 "use client";
 import { ScrollRegion } from "./scroll-region";
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { components } from "@/lib/schema";
 import { request, type Region } from "@/lib/api";
-import { ActionForm, Empty, Field, Notice, Tag, useResource } from "./ui";
+import { ActionForm, Empty, Notice, Tag, useResource } from "./ui";
 type Preference = components["schemas"]["ReminderOutput"];
 const deliveryLabels: Record<string, string> = {
     pending: "Preparing",
@@ -44,38 +44,128 @@ const deliveryDetails: Record<string, string> = {
     missing_recipient: "No valid email address is available.",
     no_saved_forecast: "No saved forecast covers the requested day.",
 };
-function RecipientFields({ data }: { data: Preference }) {
+function useRowFocus(rows: { id: number }[]) {
     const prefix = useId();
+    const pending = useRef<number | null>(null);
+    useEffect(() => {
+        if (pending.current !== null) {
+            document.getElementById(`${prefix}-${pending.current}`)?.focus();
+            pending.current = null;
+        }
+    }, [prefix, rows]);
+    return {
+        prefix,
+        focusRow: (id: number) => {
+            pending.current = id;
+        },
+    };
+}
+function DeliveryTimes({
+    data,
+    timezone,
+}: {
+    data: Preference;
+    timezone: string;
+}) {
     const [rows, setRows] = useState(() =>
-        (data.recipients.length ? data.recipients : [""]).map((value, id) => ({
+        (data.times.length ? data.times : [""]).map((value, id) => ({
             id,
             value,
         })),
     );
+    const { prefix, focusRow } = useRowFocus(rows);
+    const limit = data.quota?.daily_reminder_limit;
+    return (
+        <fieldset className="reminder-recipients">
+            <legend>Delivery times ({timezone})</legend>
+            {rows.map((row, index) => (
+                <div className="recipient-row" key={row.id}>
+                    <label className="field" htmlFor={`${prefix}-${row.id}`}>
+                        Delivery time {index + 1}
+                        <input
+                            id={`${prefix}-${row.id}`}
+                            type="time"
+                            name="times"
+                            value={row.value}
+                            onChange={(event) =>
+                                setRows(
+                                    rows.map((item) =>
+                                        item.id === row.id
+                                            ? {
+                                                  ...item,
+                                                  value: event.target.value,
+                                              }
+                                            : item,
+                                    ),
+                                )
+                            }
+                        />
+                    </label>
+                    {rows.length > 1 && (
+                        <button
+                            type="button"
+                            className="button secondary"
+                            aria-label={`Remove delivery time ${index + 1}`}
+                            onClick={() => {
+                                focusRow(
+                                    (rows[index + 1] ?? rows[index - 1]).id,
+                                );
+                                setRows(
+                                    rows.filter((item) => item.id !== row.id),
+                                );
+                            }}
+                        >
+                            Remove
+                        </button>
+                    )}
+                </div>
+            ))}
+            <button
+                type="button"
+                className="button secondary"
+                disabled={limit != null && rows.length >= limit}
+                onClick={() => {
+                    const id = Math.max(-1, ...rows.map((row) => row.id)) + 1;
+                    focusRow(id);
+                    setRows([
+                        ...rows,
+                        {
+                            id,
+                            value: "",
+                        },
+                    ]);
+                }}
+            >
+                Add time
+            </button>
+            {limit != null && (
+                <span className="fine">
+                    {" "}
+                    {rows.filter((row) => row.value).length} / {limit}
+                </span>
+            )}
+        </fieldset>
+    );
+}
+function RecipientFields({ data }: { data: Preference }) {
+    const [rows, setRows] = useState(() =>
+        (data.effective_recipients.length
+            ? data.effective_recipients
+            : [""]
+        ).map((value, id) => ({
+            id,
+            value,
+        })),
+    );
+    const { prefix, focusRow } = useRowFocus(rows);
     const count = rows.filter((row) => row.value.trim()).length;
     return (
         <fieldset className="reminder-recipients">
             <legend>Email recipients</legend>
-            <p className="fine">
-                {count} of {data.recipient_limit} addresses. Leave all addresses
-                empty to use your account email
-                {!data.recipients.length && data.effective_recipients.length
-                    ? ` (${data.effective_recipients.join(", ")})`
-                    : ""}
-                .
-            </p>
-            <p className="fine">
-                Saved plant recipients: {data.recipient_count} of{" "}
-                {data.recipient_limit}. {data.recipient_slots_remaining} new
-                address slots remaining. This limit is shared by all plant
-                members; an address already on the plant does not use another
-                slot.
-            </p>
             {data.recipient_limit_exceeded && (
                 <Notice>
-                    Sending is paused because the plant exceeds the current
-                    limit of {data.recipient_limit} recipients. Reduce saved
-                    recipient lists to resume.
+                    Sending is paused. Reduce the plant's saved recipients to{" "}
+                    {data.recipient_limit} to resume.
                 </Notice>
             )}
             {rows.map((row, index) => (
@@ -101,34 +191,47 @@ function RecipientFields({ data }: { data: Preference }) {
                             }
                         />
                     </label>
-                    <button
-                        className="button secondary"
-                        type="button"
-                        aria-label={`Remove email address ${index + 1}`}
-                        onClick={() =>
-                            setRows(rows.filter((item) => item.id !== row.id))
-                        }
-                    >
-                        Remove
-                    </button>
+                    {rows.length > 1 && (
+                        <button
+                            className="button secondary"
+                            type="button"
+                            aria-label={`Remove email address ${index + 1}`}
+                            onClick={() => {
+                                focusRow(
+                                    (rows[index + 1] ?? rows[index - 1]).id,
+                                );
+                                setRows(
+                                    rows.filter((item) => item.id !== row.id),
+                                );
+                            }}
+                        >
+                            Remove
+                        </button>
+                    )}
                 </div>
             ))}
             <button
                 className="button secondary"
                 type="button"
                 disabled={rows.length >= data.recipient_limit}
-                onClick={() =>
+                onClick={() => {
+                    const id = Math.max(-1, ...rows.map((row) => row.id)) + 1;
+                    focusRow(id);
                     setRows([
                         ...rows,
                         {
-                            id: Math.max(-1, ...rows.map((row) => row.id)) + 1,
+                            id,
                             value: "",
                         },
-                    ])
-                }
+                    ]);
+                }}
             >
                 Add address
             </button>
+            <span className="fine">
+                {" "}
+                {count} / {data.recipient_limit}
+            </span>
         </fieldset>
     );
 }
@@ -152,10 +255,6 @@ export function Reminders({
                 <div className="section-heading">
                     <div>
                         <h2>Email reminders</h2>
-                        <p>
-                            Choose when the latest saved forecast is emailed to
-                            you.
-                        </p>
                     </div>
                     <Tag>
                         {data.enabled && !data.recipient_limit_exceeded
@@ -167,9 +266,9 @@ export function Reminders({
                     key={JSON.stringify(data)}
                     submit="Save reminders"
                     onSubmit={async (form) => {
-                        const times = String(form.get("times"))
-                            .split(",")
-                            .map((time) => time.trim())
+                        const times = form
+                            .getAll("times")
+                            .map((time) => String(time).trim())
                             .filter(Boolean);
                         if (
                             times.some(
@@ -177,14 +276,21 @@ export function Reminders({
                                     !/^([01]\d|2[0-3]):[0-5]\d$/.test(time),
                             )
                         )
-                            throw new Error(
-                                "Enter times as HH:MM, separated by commas.",
-                            );
-                        const recipients = form
+                            throw new Error("Enter a valid delivery time.");
+                        const enteredRecipients = form
                             .getAll("recipients")
                             .map((value) => String(value).trim())
                             .filter(Boolean);
+                        const recipients =
+                            !data.recipients.length &&
+                            enteredRecipients.length === 1 &&
+                            enteredRecipients[0] ===
+                                data.effective_recipients[0]
+                                ? []
+                                : enteredRecipients;
                         const enabled = form.get("enabled") === "on";
+                        if (enabled && !times.length)
+                            throw new Error("Add at least one delivery time.");
                         if (
                             enabled &&
                             recipients.length > data.recipient_limit &&
@@ -236,17 +342,7 @@ export function Reminders({
                             approved.
                         </Notice>
                     )}
-                    <Field
-                        label={`Delivery times (${region.timezone})`}
-                        name="times"
-                        defaultValue={data.times.join(", ")}
-                        placeholder="08:00, 14:30"
-                        required={false}
-                    />
-                    <p className="fine">
-                        Separate times with commas. Remove all times and pause
-                        to clear your schedule.
-                    </p>
+                    <DeliveryTimes data={data} timezone={region.timezone} />
                     <RecipientFields data={data} />
                     <details>
                         <summary>Reminder details</summary>
