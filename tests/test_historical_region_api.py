@@ -108,7 +108,7 @@ def test_region_history_preserves_application_validation_response(
     assert response.status_code == 400
     assert response.json() == {
         "code": "invalid_request",
-        "detail": ["Invalid saved irradiance."],
+        "detail": errors,
     }
 
 

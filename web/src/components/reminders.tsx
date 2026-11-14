@@ -209,15 +209,29 @@ function RecipientFields({ data }: { data: Preference }) {
         </fieldset>
     );
 }
-export function Reminders({
-    base,
-    region,
-    token,
-}: {
+type ReminderProps = {
     base: string;
     region: Region;
     token: string;
-}) {
+};
+
+export function Reminders(props: ReminderProps) {
+    const [version, setVersion] = useState(0);
+    return (
+        <ReminderSettings
+            key={`${props.base}-${version}`}
+            {...props}
+            onSaved={() => setVersion((current) => current + 1)}
+        />
+    );
+}
+
+function ReminderSettings({
+    base,
+    region,
+    token,
+    onSaved,
+}: ReminderProps & { onSaved: () => void }) {
     const t = useTranslations("Reminders");
     const locale = useLocale();
     const format = useFormatter();
@@ -253,8 +267,7 @@ export function Reminders({
         no_saved_forecast: t("noSavedForecast"),
     };
 
-    const [version, setVersion] = useState(0);
-    const resource = useResource<Preference>(`${base}reminders/`, version);
+    const resource = useResource<Preference>(`${base}reminders/`);
     if (resource.loading)
         return <p role="status">{t("loadingEmailReminders")}</p>;
     if (resource.error) return <Notice error>{resource.error}</Notice>;
@@ -334,7 +347,7 @@ export function Reminders({
                             },
                             token,
                         );
-                        setVersion(version + 1);
+                        onSaved();
                     }}
                 >
                     <label className="check-field">

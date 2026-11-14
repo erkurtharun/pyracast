@@ -454,7 +454,7 @@ for (const state of [
         await expect(
             page.getByRole("img", { name: /^Power by interval/ }),
         ).toBeVisible();
-        await page.getByText("View interval data (1 intervals)").click();
+        await page.getByText("View interval data (1 interval)").click();
         await expect(page.getByRole("columnheader")).toHaveCount(2);
         await expect(
             page.getByRole("table").locator(".interval-value"),

@@ -288,6 +288,32 @@ test("duplicate recipient addresses are rejected", async ({ page }) => {
     );
 });
 
+test("saved reminder fields stay unavailable until the refreshed settings arrive", async ({
+    page,
+}) => {
+    await reminderApi(page);
+    const refresh = Promise.withResolvers<void>();
+    let saving = false;
+    await page.route("**/reminders/", async (route) => {
+        if (route.request().method() === "PUT") saving = true;
+        else if (saving) await refresh.promise;
+        await route.fallback();
+    });
+    await openReminders(page);
+    const address = page.getByLabel("Email address 1", { exact: true });
+    await address.fill("custom@example.test");
+    await page.getByRole("button", { name: "Save reminders" }).click();
+    try {
+        await expect(
+            page.getByText("Loading email reminders…", { exact: true }),
+        ).toBeVisible();
+        await expect(address).toHaveCount(0);
+    } finally {
+        refresh.resolve();
+    }
+    await expect(address).toHaveValue("custom@example.test");
+});
+
 for (const width of [320, 390]) {
     test(`automatic and custom recipients match the visible fields at ${width}px`, async ({
         page,

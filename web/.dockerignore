@@ -6,6 +6,8 @@
 !tsconfig.json
 !src/
 !src/**
+!messages/
+!messages/**
 !public/
 !public/**
 !Dockerfile

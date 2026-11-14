@@ -206,4 +206,10 @@ def test_region_current_forecast_maps_invalid_saved_inputs_to_validation_error(
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/"
     response = client.get(path, {"date": NOW.date().isoformat()})
     assert response.status_code == 400
-    assert response.json() == {"code": "invalid_request", "detail": ["calculation_out_of_range"]}
+    assert response.json() == {
+        "code": "invalid_request",
+        "detail": [
+            "This forecast could not be calculated. "
+            "Choose another day or contact your administrator."
+        ],
+    }

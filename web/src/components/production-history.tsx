@@ -95,6 +95,7 @@ export function ProductionHistory({
             day: "numeric",
             hour: "2-digit",
             minute: "2-digit",
+            hourCycle: "h23",
             timeZoneName: "short",
         }).format(new Date(value));
     const day = ready ? history.days[0] : undefined;
@@ -125,6 +126,7 @@ export function ProductionHistory({
         timeZone: history?.timezone,
         hour: "2-digit",
         minute: "2-digit",
+        hourCycle: "h23",
         ...(offsets.size > 1 ? { timeZoneName: "shortOffset" as const } : {}),
     });
     const time = (value: string) => timeFormatter.format(new Date(value));
