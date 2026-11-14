@@ -152,13 +152,12 @@ def test_region_forecast_excludes_vintages_not_yet_available(
         payload={"marker": "future"},
         published_at=NOW + timedelta(seconds=1) if future_field == "published_at" else NOW,
     )
-    for source in ("forecast", "auto"):
-        response = client.get(path, {"date": DAY.isoformat(), "data_source": source})
-        assert response.status_code == 200
-        assert response.json()["result"] == {"marker": "available"}
+    response = client.get(path, {"date": DAY.isoformat(), "data_source": "forecast"})
+    assert response.status_code == 200
+    assert response.json()["result"] == {"marker": "available"}
 
 
-def test_region_history_prefers_actuals_but_preserves_forecast_and_missing_fallback(
+def test_region_history_preserves_missing_actuals_and_explicit_forecast_archive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(timezone, "now", lambda: NOW)
@@ -170,12 +169,11 @@ def test_region_history_prefers_actuals_but_preserves_forecast_and_missing_fallb
     ForecastResult.objects.create(
         snapshot=forecast, payload={"marker": "archive"}, published_at=NOW
     )
-    assert client.get(path, {"date": DAY.isoformat(), "data_source": "auto"}).json()["result"] == {
-        "marker": "archive"
-    }
-    missing = client.get(path, {"date": DAY.isoformat(), "data_source": "estimated_actuals"}).json()
-    assert missing["result"] is None
-    assert missing["unavailable_reason"] == "estimated_actuals_unavailable"
+    for source in ("auto", "estimated_actuals"):
+        missing = client.get(path, {"date": DAY.isoformat(), "data_source": source}).json()
+        assert missing["source_kind"] == "estimated_actuals"
+        assert missing["result"] is None
+        assert missing["unavailable_reason"] == "estimated_actuals_unavailable"
     actual = actual_for(system)
     response = client.get(path, {"date": DAY.isoformat(), "data_source": "auto"})
     assert response.status_code == 200

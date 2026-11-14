@@ -2,6 +2,173 @@ import { expect, test } from "./support/test";
 import { readFile } from "node:fs/promises";
 import { mockApi, region } from "./support/workspace";
 
+for (const electrical of [true, false]) {
+    test(`partial ${electrical ? "generation" : "irradiance"} explains hidden missing hours`, async ({
+        page,
+    }) => {
+        await mockApi(page);
+        await page.route(
+            electrical
+                ? "**/plants/21/forecast/**"
+                : "**/regions/11/forecast/**",
+            (route) =>
+                route.fulfill({
+                    json: {
+                        date: "2026-11-14",
+                        timezone: region.timezone,
+                        source_kind: "forecast",
+                        freshness: "fresh",
+                        result: {
+                            start: "2026-11-13T21:00:00Z",
+                            end: "2026-11-14T21:00:00Z",
+                            complete: false,
+                            coverage_fraction: 20.5 / 24,
+                            energy_mwh: null,
+                            partial_energy_mwh: 5,
+                            energy_kwh_m2: null,
+                            partial_energy_kwh_m2: 1,
+                            intervals: [
+                                {
+                                    start: "2026-11-14T00:30:00Z",
+                                    end: "2026-11-14T04:00:00Z",
+                                    mean_power_mw: 0,
+                                    energy_mwh: 0,
+                                    ghi_wm2: 0,
+                                },
+                                {
+                                    start: "2026-11-14T04:00:00Z",
+                                    end: "2026-11-14T15:00:00Z",
+                                    mean_power_mw: 1,
+                                    energy_mwh: 11,
+                                    ghi_wm2: 100,
+                                },
+                                {
+                                    start: "2026-11-14T15:00:00Z",
+                                    end: "2026-11-14T21:00:00Z",
+                                    mean_power_mw: 0,
+                                    energy_mwh: 0,
+                                    ghi_wm2: 0,
+                                },
+                            ],
+                        },
+                    },
+                }),
+        );
+        await page.goto("/");
+        await page
+            .getByRole("button", { name: /East array|Antalya solar park/ })
+            .click();
+        if (!electrical)
+            await page
+                .getByRole("button", { name: "Irradiance", exact: true })
+                .click();
+        await expect(page.getByRole("status")).toContainText(
+            "20.5 of 24 hours have valid values",
+        );
+        await expect(page.getByRole("status")).toContainText(
+            "including nighttime",
+        );
+        await page
+            .getByRole("checkbox", {
+                name: "Show full day, including missing intervals",
+            })
+            .check();
+        await page.getByText("View interval data (4 intervals)").click();
+        const missing = page
+            .getByRole("row")
+            .filter({ hasText: "missing source interval" });
+        await expect(
+            missing.getByRole("cell", { name: "00:00", exact: true }),
+        ).toBeVisible();
+        await expect(
+            missing.getByRole("cell", { name: "03:30", exact: true }),
+        ).toBeVisible();
+        await expect(
+            missing.getByRole("cell", { name: "—", exact: true }),
+        ).toHaveCount(electrical ? 2 : 1);
+        const downloadPromise = page.waitForEvent("download");
+        await page
+            .getByRole("button", { name: "Download CSV", exact: true })
+            .click();
+        const csv = await readFile(
+            await (await downloadPromise).path(),
+            "utf8",
+        );
+        expect(csv).not.toContain("missing_source_interval");
+        expect(csv).toContain("2026-11-14T00:30:00Z");
+    });
+}
+
+test("irradiance distinguishes available source hours from ambiguous zero power", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/regions/11/forecast/**", (route) =>
+        route.fulfill({
+            json: {
+                date: "2026-11-14",
+                timezone: region.timezone,
+                source_kind: "forecast",
+                freshness: "fresh",
+                result: {
+                    start: "2026-11-13T21:00:00Z",
+                    end: "2026-11-14T21:00:00Z",
+                    complete: false,
+                    coverage_seconds: 73800,
+                    coverage_fraction: 10 / 24,
+                    quality_flags: ["ambiguous_zero_power"],
+                    intervals: [
+                        {
+                            start: "2026-11-14T00:30:00Z",
+                            end: "2026-11-14T04:00:00Z",
+                            ghi_wm2: null,
+                            quality_flags: ["ambiguous_zero_power"],
+                        },
+                        {
+                            start: "2026-11-14T04:00:00Z",
+                            end: "2026-11-14T14:00:00Z",
+                            ghi_wm2: 100,
+                        },
+                        {
+                            start: "2026-11-14T14:00:00Z",
+                            end: "2026-11-14T21:00:00Z",
+                            ghi_wm2: null,
+                            quality_flags: ["ambiguous_zero_power"],
+                        },
+                    ],
+                },
+            },
+        }),
+    );
+    await page.goto("/");
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Irradiance", exact: true }).click();
+    await expect(page.getByRole("status")).toContainText(
+        "10 of 24 hours have valid values",
+    );
+    await expect(page.getByRole("status")).toContainText(
+        "Source intervals cover 20.5 of 24 hours",
+    );
+    await expect(page.getByRole("status")).toContainText(
+        "Zero reference power cannot identify irradiance",
+    );
+    await page
+        .getByRole("checkbox", {
+            name: "Show full day, including missing intervals",
+        })
+        .check();
+    await page.getByText("View interval data (4 intervals)").click();
+    const ambiguous = page
+        .getByRole("row")
+        .filter({ hasText: "ambiguous zero power" });
+    await expect(ambiguous).toHaveCount(2);
+    await expect(
+        ambiguous.getByRole("cell", { name: "—", exact: true }),
+    ).toHaveCount(2);
+});
+
 test("switching forecast views waits for data with the matching units", async ({
     page,
 }) => {
@@ -213,8 +380,27 @@ test("suspected derating shows a second scenario with its evidence", async ({
                 derating_scenario: {
                     status: "suspected",
                     performance_ratio: 0.875,
-                    window_start: "2026-11-01",
-                    window_end: "2026-11-10",
+                    window_start: "2026-11-04",
+                    window_end: "2026-11-13",
+                    days: [
+                        { day: "2026-11-08", performance_index: 0.9, hours: 9 },
+                        { day: "2026-11-09", performance_index: 0.8, hours: 9 },
+                        {
+                            day: "2026-11-11",
+                            performance_index: 1.03,
+                            hours: 8,
+                        },
+                        {
+                            day: "2026-11-12",
+                            performance_index: 0.875,
+                            hours: 5,
+                        },
+                        {
+                            day: "2026-11-13",
+                            performance_index: 0.86,
+                            hours: 3,
+                        },
+                    ],
                     result: {
                         complete: true,
                         energy_mwh: 4.375,
@@ -236,10 +422,14 @@ test("suspected derating shows a second scenario with its evidence", async ({
         .click();
     await expect(
         page.getByText(
-            "Production from 2026-11-01 to 2026-11-10 was about 12.5% below the calibrated level.",
+            "Across 5 qualifying days from 2026-11-08 to 2026-11-13, the median daily production/reference ratio was 12.5% below the calibration estimate.",
             { exact: false },
         ),
     ).toBeVisible();
+    await expect(page.getByRole("status")).not.toContainText("2026-11-04");
+    await expect(page.getByRole("status")).toContainText(
+        "does not confirm an outage",
+    );
     await expect(
         page.getByText("If derating persists · daily energy"),
     ).toBeVisible();

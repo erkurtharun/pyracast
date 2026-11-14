@@ -50,7 +50,18 @@ def enqueue_connection(
     retry_until = None
     if scheduled_for > now:
         return []
-    if not initial:
+    if initial:
+        region = plant.region
+        window = nightly_window(
+            scheduled_for.astimezone(ZoneInfo(region.timezone)).date(), region.timezone
+        )
+        if (
+            window is not None
+            and window[0] <= scheduled_for <= now < window[1]
+            and not CollectionSchedule.objects.filter(region=region, enabled=False).exists()
+        ):
+            retry_until = window[1]
+    else:
         window = _daily_window(connection, now)
         if window is None:
             return []
@@ -75,7 +86,7 @@ def enqueue_connection(
                     "short_name": "",
                 },
                 "next_attempt_at": now,
-                "retry_until": retry_until,
+                "retry_until": retry_until if not initial or offset == 1 else None,
             },
         )
         jobs.append(job.pk)
@@ -117,7 +128,7 @@ def enqueue_connection(
                         "short_name": "",
                     },
                     "next_attempt_at": now,
-                    "retry_until": retry_until,
+                    "retry_until": None if initial else retry_until,
                 },
             )
             jobs.append(job.pk)

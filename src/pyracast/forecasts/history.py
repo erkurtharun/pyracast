@@ -1,7 +1,8 @@
 from datetime import date, datetime, timedelta
-from typing import Literal
+from typing import Literal, cast
 from zoneinfo import ZoneInfo
 
+from django.core.exceptions import ValidationError
 from django.db.models import Case, IntegerField, Q, Value, When
 
 from pyracast.calculation import calculate
@@ -11,7 +12,9 @@ from pyracast.forecasts.capacity_normalization import normalization_provenance
 from pyracast.forecasts.coverage import history_day_complete
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import ForecastResult, ForecastSnapshot
+from pyracast.forecasts.sources import current_forecast_snapshots, snapshot_data
 from pyracast.irradiance import local_day_bounds
+from pyracast.plants.forecast_sources import apply_composition, compose_snapshots
 from pyracast.regions.models import Region
 
 HISTORY_SELECTION_POLICY = "native-then-authorized-scale-complete-actuals-v4"
@@ -120,9 +123,9 @@ def regional_outlook(
     if source == "estimated_actuals" and target_date >= today:
         raise OutlookRequestError("completed_day_required")
     if source == "estimated_actuals" or (source == "auto" and target_date < today):
-        history = regional_history(region, target_date, now)
-        if history["result"] is not None or source == "estimated_actuals":
-            return history
+        return regional_history(region, target_date, now)
+    if target_date >= today:
+        return _regional_current_forecast(region, target_date, now)
     saved = (
         ForecastResult.objects.select_related("snapshot__job__binding__provider_account")
         .filter(
@@ -155,4 +158,59 @@ def regional_outlook(
         "binding_revision": saved.snapshot.job.binding_id if saved else None,
         "scheduled_slot": saved.snapshot.job.scheduled_slot if saved else None,
         "late": saved.snapshot.collected_at > saved.snapshot.job.scheduled_slot if saved else None,
+    }
+
+
+def _regional_current_forecast(
+    region: Region, target_date: date, now: datetime
+) -> dict[str, object]:
+    binding = region.approved_binding
+    snapshots: list[ForecastSnapshot] = []
+    if binding is not None:
+        start, end = local_day_bounds(target_date, binding.timezone)
+        snapshots = current_forecast_snapshots(
+            binding_id=binding.pk, start=start, end=end, as_of=now
+        )
+    snapshot = snapshots[0] if snapshots else None
+    result = None
+    used_snapshots: list[ForecastSnapshot] = []
+    if snapshot is not None and binding is not None:
+        try:
+            composition = compose_snapshots(snapshots, start, end)
+            result = calculate(
+                binding,
+                target_date,
+                snapshot_data(snapshot, intervals=list(composition.intervals)),
+            )
+            result["provenance"] = {
+                "snapshot_id": snapshot.pk,
+                "binding_id": binding.pk,
+                "source_kind": "forecast",
+            }
+            cast(dict[str, object], result["vintage"])["scope"] = "primary_forecast_source"
+            apply_composition(result, snapshots, composition)
+            used_snapshots = [
+                source for source in snapshots if source.pk in composition.snapshot_ids
+            ]
+        except (ValueError, ArithmeticError) as exc:
+            raise ValidationError("calculation_out_of_range") from exc
+    fresh = (
+        binding is not None
+        and binding_is_current(binding)
+        and all(source.collected_at >= now - timedelta(hours=24) for source in used_snapshots)
+    )
+    return {
+        "region_id": region.pk,
+        "date": target_date,
+        "timezone": binding.timezone if binding else region.timezone,
+        "status": region.status,
+        "source_kind": "forecast",
+        "unavailable_reason": "forecast_unavailable" if snapshot is None else None,
+        "freshness": "missing" if snapshot is None else "fresh" if fresh else "stale",
+        "result": result,
+        "collected_at": snapshot.collected_at if snapshot else None,
+        "issued_at": snapshot.issued_at if snapshot else None,
+        "binding_revision": snapshot.job.binding_id if snapshot else None,
+        "scheduled_slot": snapshot.job.scheduled_slot if snapshot else None,
+        "late": snapshot.collected_at > snapshot.job.scheduled_slot if snapshot else None,
     }

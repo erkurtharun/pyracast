@@ -1,9 +1,32 @@
+from datetime import datetime
 from typing import cast
+
+from django.db.models import Q
 
 from pyracast.connections.contracts import ProviderData
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import SourceKind
 from pyracast.weather import WeatherError, restore_weather
+
+
+def current_forecast_snapshots(
+    *, binding_id: int, start: datetime, end: datetime, as_of: datetime
+) -> list[ForecastSnapshot]:
+    return list(
+        ForecastSnapshot.objects.select_related("job")
+        .filter(
+            binding_id=binding_id,
+            job__status="succeeded",
+            source_kind="forecast",
+            coverage_start__lt=end,
+            coverage_end__gt=start,
+            collected_at__lte=as_of,
+            available_at__lte=as_of,
+            forecastresult__published_at__lte=as_of,
+        )
+        .filter(Q(issued_at__isnull=True) | Q(issued_at__lte=as_of))
+        .order_by("-collected_at", "-available_at", "-pk")
+    )
 
 
 def snapshot_data(

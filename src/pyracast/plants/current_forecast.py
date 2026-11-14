@@ -3,12 +3,11 @@ from typing import cast
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
-from django.db.models import Q
 
 from pyracast.calculation import calculate
 from pyracast.connections.models import ProviderAccount
 from pyracast.forecasts.models import ForecastSnapshot
-from pyracast.forecasts.sources import snapshot_data
+from pyracast.forecasts.sources import current_forecast_snapshots, snapshot_data
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_sources import SELECTION_POLICY, apply_composition, compose_snapshots
 from pyracast.plants.forecasting import calibration_at, forecast_payload
@@ -48,20 +47,8 @@ def current_forecast(
     used_snapshots: list[ForecastSnapshot] = []
     if configuration is not None:
         start, end = local_day_bounds(target_date, configuration.binding.timezone)
-        snapshots = list(
-            ForecastSnapshot.objects.select_related("job")
-            .filter(
-                binding_id=configuration.binding_id,
-                job__status="succeeded",
-                source_kind="forecast",
-                coverage_start__lt=end,
-                coverage_end__gt=start,
-                collected_at__lte=now,
-                available_at__lte=now,
-                forecastresult__published_at__lte=now,
-            )
-            .filter(Q(issued_at__isnull=True) | Q(issued_at__lte=now))
-            .order_by("-collected_at", "-available_at", "-pk")
+        snapshots = current_forecast_snapshots(
+            binding_id=configuration.binding_id, start=start, end=end, as_of=now
         )
         snapshot = snapshots[0] if snapshots else None
         calibration = calibration_at(configuration, now)

@@ -10,7 +10,8 @@ from pyracast.metering.jobs import EpiasLease, claim_epias_job, pending_epias_id
 from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
 from pyracast.metering.scheduler import enqueue_due_epias_jobs
 from pyracast.plants.models import CalibrationRun
-from tests.test_metering import NEXT_NIGHT, connected, day_data
+from tests.test_metering import NEXT_NIGHT, connect, connected, day_data
+from tests.test_metering_settlement import SettlementClient
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -21,6 +22,76 @@ def nightly_job(monkeypatch: pytest.MonkeyPatch) -> EpiasCollectionJob:
     return EpiasCollectionJob.objects.get(
         pk__in=identifiers, target_day=NEXT_NIGHT.date() - timedelta(days=1)
     )
+
+
+@pytest.mark.parametrize("minutes", [0, 93, 359])
+def test_initial_yesterday_collection_uses_the_remaining_night_window(
+    monkeypatch: pytest.MonkeyPatch, minutes: int
+) -> None:
+    system, plant, _ = connected(monkeypatch)
+    now = NEXT_NIGHT + timedelta(minutes=minutes)
+    monkeypatch.setattr("django.utils.timezone.now", lambda: now)
+    linked = connect(plant, system.admin, SettlementClient())
+    jobs = EpiasCollectionJob.objects.filter(connection=linked, connection_revision=linked.revision)
+    latest = jobs.get(source_kind="realtime_generation", target_day=now.date() - timedelta(days=1))
+    assert latest.scheduled_for == now
+    assert latest.retry_until == NEXT_NIGHT + timedelta(hours=6)
+    assert jobs.exclude(pk=latest.pk).count() == 101
+    assert not jobs.exclude(pk=latest.pk).filter(retry_until__isnull=False).exists()
+    identifiers = set(EpiasCollectionJob.objects.values_list("pk", flat=True))
+    enqueue_due_epias_jobs(now=now + timedelta(seconds=1))
+    assert set(EpiasCollectionJob.objects.values_list("pk", flat=True)) == identifiers
+
+
+@pytest.mark.parametrize(
+    ("minutes", "enabled"), [(-1, True), (360, True), (400, True), (93, False)]
+)
+def test_initial_backfill_outside_an_enabled_night_keeps_its_independent_budget(
+    monkeypatch: pytest.MonkeyPatch, minutes: int, enabled: bool
+) -> None:
+    system, plant, _ = connected(monkeypatch)
+    now = NEXT_NIGHT + timedelta(minutes=minutes)
+    monkeypatch.setattr("django.utils.timezone.now", lambda: now)
+    CollectionSchedule.objects.create(region=system.region, enabled=enabled, effective_from=now)
+    linked = connect(plant, system.admin)
+    jobs = EpiasCollectionJob.objects.filter(connection=linked, connection_revision=linked.revision)
+    assert jobs.count() == 90
+    assert not jobs.filter(retry_until__isnull=False).exists()
+    latest = jobs.latest("target_day")
+    assert run_epias_job(latest.pk, fetch=day_data, now=now)
+
+
+def test_initial_yesterday_partial_data_can_recover_after_three_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant, _ = connected(monkeypatch)
+    now = NEXT_NIGHT + timedelta(minutes=93)
+    monkeypatch.setattr("django.utils.timezone.now", lambda: now)
+    monkeypatch.setattr("pyracast.metering.jobs.time.monotonic", lambda: 0.0)
+    linked = connect(plant, system.admin)
+    job = EpiasCollectionJob.objects.get(
+        connection=linked,
+        connection_revision=linked.revision,
+        target_day=now.date() - timedelta(days=1),
+    )
+
+    def partial(plant: EpiasPlant, day: date) -> EpiasDay:
+        data = day_data(plant, day)
+        return replace(data, readings=data.readings[:19])
+
+    for attempt in range(1, 5):
+        assert not run_epias_job(job.pk, fetch=partial, now=now)
+        job.refresh_from_db()
+        assert job.status == "pending"
+        assert job.attempts == attempt
+        assert job.next_attempt_at == now + timedelta(minutes=30)
+        now = job.next_attempt_at
+    assert run_epias_job(job.pk, fetch=day_data, now=now)
+    job.refresh_from_db()
+    assert job.status == "succeeded"
+    assert job.attempts == 5
+    assert EpiasSnapshot.objects.filter(job=job, complete=False).count() == 4
+    assert EpiasSnapshot.objects.filter(job=job, complete=True).count() == 1
 
 
 def test_three_am_slot_and_nine_am_deadline_are_independent_of_forecasts(

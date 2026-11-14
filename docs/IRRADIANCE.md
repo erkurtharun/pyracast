@@ -300,6 +300,10 @@ excludes its intervals and prepares a new fit; manual activation remains availab
 outlooks without a reported outage add `derating_scenario`: DC capacity is scaled by the
 ratio, and the inverter limit too unless the window still reached the cap. This is a
 conditional estimate, not a diagnosis, and its thresholds are engineering defaults.
+Show the actual qualifying dates and day count, not the ten-day search window as
+observed history. The percentage describes the median of these selected daily ratios,
+not the total production loss over that period. A first provisional calibration is
+not an independently established healthy baseline; record an outage only when known.
 
 A fault inside the training window pulls the factor toward the reduced level. Three
 mechanisms keep the factor describing the healthy plant: reported outage intervals never

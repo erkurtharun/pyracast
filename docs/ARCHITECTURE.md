@@ -308,9 +308,11 @@ Collect 90 completed Istanbul dates of reported production on connection or a ne
 then reconcile the trailing seven dates at the region's independent 03:00 nightly
 slot. The previous day's reported-production job retries incomplete or failed
 responses every 30 minutes before 09:00, respecting longer provider retry hints.
-Older correction dates and settlement jobs retain three attempts. All new daily
-jobs stop at the morning deadline or when collection is disabled; initial backfill
-remains independent. Resolve the separate settlement plant ID by EIC and initially collect
+Older correction dates and settlement jobs retain three attempts. When initial collection
+starts inside an enabled nightly window, its previous-day job uses the remaining window
+and the same morning deadline. Other initial backfill remains independent of the nightly
+schedule. All jobs with a morning deadline stop when collection is disabled.
+Resolve the separate settlement plant ID by EIC and initially collect
 the previous twelve completed calendar months, including when the settlement identity
 becomes available after connection. Use one paginated request period per month;
 reported-production backfill stays at 90 days. Reconcile the previous two months daily
@@ -354,6 +356,9 @@ daylight coverage or statistical acceptance requirements.
 
 Read-only interval tables show the first through last positive value, retaining
 interior zeros and gaps. All-zero days remain distinguishable from missing data.
+Forecast tables also offer the full local day, exposing missing edge intervals.
+Coverage notices distinguish missing source hours from values whose irradiance
+cannot be inferred; neither becomes zero or a complete daily total.
 The entry journal instead preserves available reference slots and saved/draft
 measurements. Numerical views offer UTF-8 CSV downloads containing the entire
 selected dataset, including hidden edge intervals, units and provenance. CSV cells

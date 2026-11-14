@@ -1,4 +1,5 @@
 "use client";
+import { useState } from "react";
 import { ScrollRegion } from "./scroll-region";
 import { WeatherReferenceCard } from "./weather-reference";
 import type { Forecast } from "@/lib/api";
@@ -30,8 +31,39 @@ type DeratingScenario = {
     performance_ratio: number;
     window_start: string;
     window_end: string;
+    days?: { day: string; performance_index: number; hours: number }[];
     result: Record<string, unknown>;
 };
+function fullDayIntervals(
+    rows: Interval[],
+    start: unknown,
+    end: unknown,
+): Interval[] {
+    if (typeof start !== "string" || typeof end !== "string") return rows;
+    let cursor = Date.parse(start);
+    const stop = Date.parse(end);
+    if (!Number.isFinite(cursor) || !Number.isFinite(stop) || stop <= cursor)
+        return rows;
+    const result: Interval[] = [];
+    for (const row of rows) {
+        const begin = Date.parse(row.start);
+        if (begin > cursor)
+            result.push({
+                start: new Date(cursor).toISOString(),
+                end: row.start,
+                quality_flags: ["missing_source_interval"],
+            });
+        result.push(row);
+        cursor = Math.max(cursor, Date.parse(row.end));
+    }
+    if (cursor < stop)
+        result.push({
+            start: new Date(cursor).toISOString(),
+            end,
+            quality_flags: ["missing_source_interval"],
+        });
+    return result;
+}
 function number(value: unknown): string {
     return typeof value === "number"
         ? new Intl.NumberFormat("en", { maximumFractionDigits: 3 }).format(
@@ -46,6 +78,7 @@ export function ForecastPanel({
     forecast: Forecast;
     electrical?: boolean;
 }) {
+    const [showFullDay, setShowFullDay] = useState(false);
     if (
         !forecast.result ||
         typeof forecast.result !== "object" ||
@@ -85,6 +118,15 @@ export function ForecastPanel({
     const affected = derating ? "if derating persists" : "with outages";
     const Affected = derating ? "If derating persists" : "With outages";
     const result = forecast.result as Record<string, unknown>;
+    const dayHours =
+        typeof result.start === "string" && typeof result.end === "string"
+            ? (Date.parse(result.end) - Date.parse(result.start)) / 3_600_000
+            : NaN;
+    const coveredHours =
+        typeof result.coverage_fraction === "number"
+            ? result.coverage_fraction * dayHours
+            : NaN;
+    const deratingDays = derating?.days?.map((day) => day.day).sort() ?? [];
     const mixedVintages =
         Array.isArray(result.quality_flags) &&
         result.quality_flags.includes("mixed_forecast_vintages");
@@ -133,9 +175,12 @@ export function ForecastPanel({
         allRows,
         (row) => typeof row[metric] === "number" && row[metric]! > 0,
     );
-    const rows = positiveRows.length
+    const generationRows = positiveRows.length
         ? positiveRows
         : dataIntervalRange(allRows, (row) => row[metric] != null);
+    const rows = showFullDay
+        ? fullDayIntervals(allRows, result.start, result.end)
+        : generationRows;
     const max = Math.max(
         1,
         ...rows.map((row) =>
@@ -237,12 +282,18 @@ export function ForecastPanel({
                 )}
             {derating && (
                 <Notice>
-                    Production from {derating.window_start} to{" "}
-                    {derating.window_end} was about{" "}
-                    {number((1 - derating.performance_ratio) * 100)}% below the
-                    calibrated level. The second scenario assumes this
-                    continues; normal capacity assumes it is resolved. Record an
-                    outage to confirm it.
+                    {deratingDays.length > 0
+                        ? `Across ${deratingDays.length} qualifying days from ${deratingDays[0]} to ${deratingDays[deratingDays.length - 1]}, `
+                        : `In the assessment window from ${derating.window_start} to ${derating.window_end}, `}
+                    the median daily production/reference ratio was{" "}
+                    {number(
+                        Math.round((1 - derating.performance_ratio) * 1000) /
+                            10,
+                    )}
+                    % below the calibration estimate. This comparison does not
+                    confirm an outage. The second scenario assumes this ratio
+                    persists; normal capacity uses the calibration estimate.
+                    Record an outage only if independently confirmed.
                 </Notice>
             )}
             {scenario?.status === "unknown_impact" && (
@@ -281,8 +332,35 @@ export function ForecastPanel({
                 )}
             {result.complete !== true && (
                 <Notice>
-                    Partial coverage. Daily total unavailable; the partial
-                    estimate includes covered intervals only.
+                    Partial coverage.
+                    {Number.isFinite(coveredHours) && Number.isFinite(dayHours)
+                        ? ` ${number(coveredHours)} of ${number(dayHours)} hours have valid values.`
+                        : ""}{" "}
+                    Daily total unavailable: it requires the entire local day,
+                    including nighttime. The partial estimate includes valid
+                    intervals only; missing values are not zero.
+                    {!electrical &&
+                        typeof result.coverage_seconds === "number" &&
+                        Number.isFinite(dayHours) && (
+                            <>
+                                {" "}
+                                Source intervals cover{" "}
+                                {number(result.coverage_seconds / 3600)} of{" "}
+                                {number(dayHours)} hours; irradiance validity is
+                                separate from source availability.
+                            </>
+                        )}
+                    {!electrical &&
+                        Array.isArray(result.quality_flags) &&
+                        result.quality_flags.includes(
+                            "ambiguous_zero_power",
+                        ) && (
+                            <>
+                                {" "}
+                                Zero reference power cannot identify irradiance
+                                without a confirmed nighttime classification.
+                            </>
+                        )}
                 </Notice>
             )}
             <div className="stats forecast-stats">
@@ -334,6 +412,18 @@ export function ForecastPanel({
                     unit="%"
                 />
             </div>
+            <label className="field">
+                <span>
+                    <input
+                        type="checkbox"
+                        checked={showFullDay}
+                        onChange={(event) =>
+                            setShowFullDay(event.target.checked)
+                        }
+                    />{" "}
+                    Show full day, including missing intervals
+                </span>
+            </label>
             {rows.length === 0 && (
                 <p>
                     No interval values are available for this day. Missing
@@ -342,7 +432,8 @@ export function ForecastPanel({
             )}
             {rows.length > 0 && (
                 <>
-                    {positiveRows.length > 0 &&
+                    {!showFullDay &&
+                        positiveRows.length > 0 &&
                         rows.length < allRows.length && (
                             <p className="fine">
                                 Showing the first through last generating
@@ -381,6 +472,11 @@ export function ForecastPanel({
                             <div
                                 className={`chart-column ${row[metric] == null ? "missing" : ""}`}
                                 key={index}
+                                style={{
+                                    flexGrow:
+                                        Date.parse(row.end) -
+                                        Date.parse(row.start),
+                                }}
                                 title={`${time(row.start)}: ${scenario ? "normal capacity " : ""}${number(row[metric])} ${unit}${scenario ? `; ${affected} ${number(row.affected_mean_power_mw)} MW` : ""}`}
                             >
                                 <div
