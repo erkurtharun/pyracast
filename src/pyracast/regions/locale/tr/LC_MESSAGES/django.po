@@ -241,6 +241,9 @@ msgstr "Veri toplama"
 msgid "Collection and email status."
 msgstr "Veri toplama ve e-posta durumu."
 
+msgid "Collection schedule updated"
+msgstr "Veri toplama programı güncellendi"
+
 msgid "Collection times must use HH:MM."
 msgstr "Veri toplama saatleri SS:DD biçiminde olmalıdır."
 
@@ -467,6 +470,9 @@ msgstr "Sağlık denetimleri"
 msgid "Healthy"
 msgstr "Sağlıklı"
 
+msgid "Historical reference imported"
+msgstr "Geçmiş referans verileri içe aktarıldı"
+
 msgid "History budget reserved"
 msgstr "Geçmiş veriler için bütçe ayrıldı"
 
@@ -562,6 +568,9 @@ msgstr "Konum değişikliği onaylandı"
 
 msgid "Location change rejected"
 msgstr "Konum değişikliği reddedildi"
+
+msgid "Location change requested"
+msgstr "Konum değişikliği talep edildi"
 
 msgid "Location change requests"
 msgstr "Konum değişikliği talepleri"
@@ -782,6 +791,15 @@ msgstr ""
 msgid "Plant location"
 msgstr "Santral konumu"
 
+msgid "Plant location moved to trash"
+msgstr "Santral konumu çöp kutusuna taşındı"
+
+msgid "Plant location renamed"
+msgstr "Santral konumu yeniden adlandırıldı"
+
+msgid "Plant location restored"
+msgstr "Santral konumu geri yüklendi"
+
 msgid "Plant pages"
 msgstr "Santral sayfaları"
 
@@ -934,6 +952,9 @@ msgstr "Referans DC kapasitesi (kW, isteğe bağlı)"
 
 msgid "Reference capacity (kW)"
 msgstr "Referans kapasitesi (kW)"
+
+msgid "Reference capacity normalized"
+msgstr "Referans kapasitesi normalize edildi"
 
 msgid "Reference power and capacity basis"
 msgstr "Referans güç ve kapasite esası"

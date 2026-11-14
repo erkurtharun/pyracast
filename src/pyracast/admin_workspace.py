@@ -223,8 +223,16 @@ def recent_activity_context(
         "suspended": _("Plant suspended"),
         "binding_configured": _("Provider connection configured"),
         "binding_validated": _("Provider connection validated"),
+        "connection_validated": _("Provider connection validated"),
+        "location_change_requested": _("Location change requested"),
         "location_change_approved": _("Location change approved"),
         "location_change_rejected": _("Location change rejected"),
+        "region_renamed": _("Plant location renamed"),
+        "collection_schedule_updated": _("Collection schedule updated"),
+        "historical_reference_imported": _("Historical reference imported"),
+        "reference_capacity_normalized": _("Reference capacity normalized"),
+        "region_trashed": _("Plant location moved to trash"),
+        "region_restored": _("Plant location restored"),
     }
     return [
         {
