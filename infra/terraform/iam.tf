@@ -31,6 +31,21 @@ resource "google_artifact_registry_repository_iam_member" "deploy_write" {
   member     = google_service_account.deploy.member
 }
 
+resource "google_project_iam_custom_role" "deploy_retention_tags" {
+  role_id     = "${replace(var.name, "-", "_")}_deploy_retention_tags"
+  title       = "Pyracast deployment retention tags"
+  description = "Replace existing production retention tags during verified releases."
+  permissions = ["artifactregistry.tags.delete"]
+  depends_on  = [google_project_service.required]
+}
+
+resource "google_artifact_registry_repository_iam_member" "deploy_retention_tags" {
+  location   = google_artifact_registry_repository.application.location
+  repository = google_artifact_registry_repository.application.name
+  role       = google_project_iam_custom_role.deploy_retention_tags.name
+  member     = google_service_account.deploy.member
+}
+
 resource "google_secret_manager_secret_iam_member" "runtime_read" {
   for_each  = toset(["runtime", "database"])
   secret_id = google_secret_manager_secret.application[each.key].id
