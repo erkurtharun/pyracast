@@ -108,7 +108,7 @@ def test_browser_against_live_django(
 
     outsider = User.objects.create_user(username="other")
     other_tenant = Tenant.objects.create(name="Other")
-    Membership.objects.create(user=outsider, tenant=other_tenant)
+    Membership.objects.create(user=outsider, tenant=other_tenant, role=Membership.Role.ADMIN)
     other_region = submit_region(
         outsider,
         other_tenant.pk,

@@ -1909,7 +1909,7 @@ test("recycle bin ignores a prior workspace response and restores only in the se
     await page.route("**/api/tenants/", async (route) =>
         route.fulfill({
             json: paged([
-                { id: 1, name: "Sunfield Energy" },
+                { id: 1, name: "Sunfield Energy", role: "admin" },
                 { id: 2, name: "Second workspace" },
             ]),
         }),

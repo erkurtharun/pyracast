@@ -7,7 +7,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from pyracast.accounts.operations import require_member
+from pyracast.accounts.operations import require_workspace_admin
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import (
@@ -51,8 +51,8 @@ def _cancel_calibrations(plants: list[int], now: datetime) -> None:
 
 
 def trash_region(actor: User, tenant_id: int, region_id: int) -> Region:
-    require_member(actor, tenant_id)
     with transaction.atomic():
+        require_workspace_admin(actor, tenant_id)
         region: Region = Region.objects.select_for_update().get(pk=region_id, tenant_id=tenant_id)
         if region.deleted_at is not None:
             return region
@@ -84,8 +84,8 @@ def trash_region(actor: User, tenant_id: int, region_id: int) -> Region:
 
 
 def restore_region(actor: User, tenant_id: int, region_id: int) -> Region:
-    require_member(actor, tenant_id)
     with transaction.atomic():
+        require_workspace_admin(actor, tenant_id)
         location = Region.objects.get(pk=region_id, tenant_id=tenant_id)
         require_available_location(
             tenant_id, location.latitude, location.longitude, exclude_region_id=region_id
@@ -114,8 +114,8 @@ def restore_region(actor: User, tenant_id: int, region_id: int) -> Region:
 
 
 def trash_plant(actor: User, tenant_id: int, region_id: int, plant_id: int) -> Plant:
-    require_member(actor, tenant_id)
     with transaction.atomic():
+        require_workspace_admin(actor, tenant_id)
         region: Region = Region.objects.select_for_update().get(pk=region_id, tenant_id=tenant_id)
         plant: Plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
         if plant.deleted_at is not None:
@@ -131,8 +131,8 @@ def trash_plant(actor: User, tenant_id: int, region_id: int, plant_id: int) -> P
 
 
 def restore_plant(actor: User, tenant_id: int, region_id: int, plant_id: int) -> Plant:
-    require_member(actor, tenant_id)
     with transaction.atomic():
+        require_workspace_admin(actor, tenant_id)
         region = Region.objects.select_for_update().get(pk=region_id, tenant_id=tenant_id)
         binding = None
         if region.status == "approved" and region.approved_binding_id is not None:

@@ -9,7 +9,7 @@ from django.db import models, transaction
 from django.utils.translation import gettext
 
 from pyracast.accounts.models import Membership
-from pyracast.accounts.operations import require_member
+from pyracast.accounts.operations import require_member, require_workspace_admin
 from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.models import (
     NotificationDelivery,
@@ -113,9 +113,9 @@ def configure_reminders(
 ) -> ReminderPreference:
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
-    require_member(actor, tenant_id)
     addresses = normalize_recipients(recipients)
     with transaction.atomic():
+        require_workspace_admin(actor, tenant_id)
         address_limit = recipient_limit(lock=True)
         actor.refresh_from_db(fields=["email"])
         region = Region.objects.select_for_update().get(

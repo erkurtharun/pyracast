@@ -15,6 +15,7 @@ from django.test import override_settings
 from rest_framework.test import APIClient
 
 from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.operations import reassign_workspace_admin
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import ProviderAccount
@@ -883,6 +884,9 @@ def test_plant_recipient_cap_is_shared_distinct_and_private_between_members() ->
     )
     other = User.objects.create(username="other", email="other@example.com")
     Membership.objects.create(user=other, tenant=system.tenant)
+    reassign_workspace_admin(
+        system.admin, system.tenant.pk, other.pk, expected_admin_id=system.member.pk
+    )
     with pytest.raises(ValidationError, match="in total"):
         configure_reminders(
             other,
@@ -959,6 +963,9 @@ def test_over_limit_lists_allow_gradual_reduction_and_disabling() -> None:
     )
     other = User.objects.create(username="other", email="other@example.com")
     Membership.objects.create(user=other, tenant=system.tenant)
+    reassign_workspace_admin(
+        system.admin, system.tenant.pk, other.pk, expected_admin_id=system.member.pk
+    )
     configure_reminders(
         other,
         system.tenant.pk,
@@ -979,6 +986,9 @@ def test_over_limit_lists_allow_gradual_reduction_and_disabling() -> None:
         now=NOW,
     )
     assert preference_payload(paused, NOW)["recipient_count"] == 5
+    reassign_workspace_admin(
+        system.admin, system.tenant.pk, system.member.pk, expected_admin_id=other.pk
+    )
     reduced = configure_reminders(
         system.member,
         system.tenant.pk,
@@ -1016,14 +1026,13 @@ def test_fallback_email_change_can_pause_every_member_at_plant_limit() -> None:
     system, _ = configured()
     other = User.objects.create(username="other", email="default@example.com")
     Membership.objects.create(user=other, tenant=system.tenant)
-    configure_reminders(
-        other,
-        system.tenant.pk,
-        system.region.pk,
+    ReminderPreference.objects.create(
+        user=other,
+        region=system.region,
         enabled=True,
         recipients=[],
         times=["10:00"],
-        now=NOW,
+        effective_from=NOW,
     )
     NotificationSettings.objects.filter(pk=1).update(max_recipients=1)
     saved(system)
@@ -1035,7 +1044,7 @@ def test_fallback_email_change_can_pause_every_member_at_plant_limit() -> None:
     assert not mail.outbox
 
 
-def test_concurrent_members_cannot_overbook_plant_recipient_capacity() -> None:
+def test_concurrent_viewer_cannot_change_shared_reminder_capacity() -> None:
     system, _ = configured()
     other = User.objects.create(username="other", email="default@example.com")
     Membership.objects.create(user=other, tenant=system.tenant)
@@ -1055,7 +1064,7 @@ def test_concurrent_members_cannot_overbook_plant_recipient_capacity() -> None:
                     times=["10:00"],
                     now=NOW,
                 )
-            except ValidationError:
+            except PermissionDenied:
                 return False
             return True
         finally:
@@ -1063,7 +1072,8 @@ def test_concurrent_members_cannot_overbook_plant_recipient_capacity() -> None:
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         outcomes = list(pool.map(configure, [system.member, other]))
-    assert sorted(outcomes) == [False, True]
+    assert outcomes == [True, False]
+    assert not ReminderPreference.objects.filter(user=other).exists()
 
 
 @pytest.mark.parametrize(

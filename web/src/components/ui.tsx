@@ -1,4 +1,5 @@
 "use client";
+import { useCanManageWorkspace } from "./workspace-access";
 import { useLocale, useTranslations } from "next-intl";
 import {
     createContext,
@@ -208,6 +209,7 @@ export function ActionForm({
     onSubmit: (data: FormData) => Promise<void>;
 }) {
     const t = useTranslations("Common");
+    const canManage = useCanManageWorkspace();
     const [state, setState] = useState<
         | { status: "idle" | "pending" | "success" }
         | { status: "error"; message: string; fields: Record<string, string> }
@@ -220,9 +222,10 @@ export function ActionForm({
     return (
         <form
             ref={formRef}
+            className={canManage ? undefined : "readonly-form"}
             onSubmit={async (event) => {
                 event.preventDefault();
-                if (state.status === "pending") return;
+                if (!canManage || state.status === "pending") return;
                 const data = new FormData(event.currentTarget);
                 setState({ status: "pending" });
                 try {
@@ -279,16 +282,20 @@ export function ActionForm({
                 </div>
             )}
             <FormErrors value={state.status === "error" ? state.fields : {}}>
-                <fieldset disabled={state.status === "pending"}>
+                <fieldset disabled={!canManage || state.status === "pending"}>
                     {children}
-                    <div className="form-footer">
-                        <button className="button" type="submit">
-                            {state.status === "pending" ? t("saving") : submit}
-                        </button>
-                        {state.status === "success" && (
-                            <span role="status">{t("saved")}</span>
-                        )}
-                    </div>
+                    {canManage && (
+                        <div className="form-footer">
+                            <button className="button" type="submit">
+                                {state.status === "pending"
+                                    ? t("saving")
+                                    : submit}
+                            </button>
+                            {state.status === "success" && (
+                                <span role="status">{t("saved")}</span>
+                            )}
+                        </div>
+                    )}
                 </fieldset>
             </FormErrors>
         </form>

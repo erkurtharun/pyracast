@@ -1,6 +1,7 @@
 "use client";
 import { useTranslations, useFormatter } from "next-intl";
 import { useEffect, useState } from "react";
+import { useCanManageWorkspace } from "./workspace-access";
 import { Reminders } from "./reminders";
 import { CollectionSchedule } from "./collection-schedule";
 import { RegionSettings } from "./region-settings";
@@ -41,6 +42,7 @@ export function PlantWorkspace({
 }) {
     const t = useTranslations("PlantWorkspace");
     const format = useFormatter();
+    const canManage = useCanManageWorkspace();
 
     const [tab, setTab] = useState("forecast"),
         [forecastView, setForecastView] = useState("generation"),
@@ -313,17 +315,19 @@ export function PlantWorkspace({
                             token={token}
                         />
                     )}
-                    <section className="panel">
-                        <h2>{t("deletePlant")}</h2>
-                        <p>{t("deletionHelp")}</p>
-                        <MoveToRecycleBin
-                            kind="plant"
-                            name={currentPlant.name}
-                            url={regionBase}
-                            token={token}
-                            onDeleted={onDeleted}
-                        />
-                    </section>
+                    {canManage && (
+                        <section className="panel">
+                            <h2>{t("deletePlant")}</h2>
+                            <p>{t("deletionHelp")}</p>
+                            <MoveToRecycleBin
+                                kind="plant"
+                                name={currentPlant.name}
+                                url={regionBase}
+                                token={token}
+                                onDeleted={onDeleted}
+                            />
+                        </section>
+                    )}
                 </>
             ) : tab === "production" ? (
                 <>
@@ -333,20 +337,24 @@ export function PlantWorkspace({
                             ["automatic", t("automaticProduction")],
                             ["import", t("productionImport")],
                             ["comparison", t("comparison")],
-                        ].map(([key, label]) => (
-                            <button
-                                key={key}
-                                className={
-                                    productionView === key ? "active" : ""
-                                }
-                                aria-current={
-                                    productionView === key ? "page" : undefined
-                                }
-                                onClick={() => setProductionView(key)}
-                            >
-                                {label}
-                            </button>
-                        ))}
+                        ]
+                            .filter(([key]) => canManage || key !== "import")
+                            .map(([key, label]) => (
+                                <button
+                                    key={key}
+                                    className={
+                                        productionView === key ? "active" : ""
+                                    }
+                                    aria-current={
+                                        productionView === key
+                                            ? "page"
+                                            : undefined
+                                    }
+                                    onClick={() => setProductionView(key)}
+                                >
+                                    {label}
+                                </button>
+                            ))}
                     </nav>
                     {productionView === "automatic" ? (
                         <EpiasProduction base={base} />
@@ -358,7 +366,7 @@ export function PlantWorkspace({
                         />
                     ) : !configuration ? (
                         <Notice>{t("productionUnavailable")}</Notice>
-                    ) : productionView === "import" ? (
+                    ) : productionView === "import" && canManage ? (
                         <ProductionImport
                             key={configuration.id}
                             base={base}

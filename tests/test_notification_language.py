@@ -12,7 +12,6 @@ from pyracast.forecasts.models import RequestAttempt
 from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.mail import NotSentError, build_message
 from pyracast.notifications.models import NotificationDelivery, ReminderPreference
-from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.models import Region
 from tests.test_domain import NOW, System
@@ -26,28 +25,26 @@ def other_owner(system: System, language: str) -> ReminderPreference:
     member = User.objects.create(username="other-reminder", email="other@example.com")
     Membership.objects.create(user=member, tenant=system.tenant)
     UserLanguagePreference.objects.create(user=member, language=language)
-    return configure_reminders(
-        member,
-        system.tenant.pk,
-        system.region.pk,
+    return ReminderPreference.objects.create(
+        user=member,
+        region=system.region,
         enabled=True,
         recipients=["other@example.com", "external@example.com"],
         times=["10:00"],
-        now=NOW,
+        effective_from=NOW,
     )
 
 
 def late_english_owner(system: System) -> ReminderPreference:
     member = User.objects.create(username="late-english", email="late-english@example.com")
     Membership.objects.create(user=member, tenant=system.tenant)
-    return configure_reminders(
-        member,
-        system.tenant.pk,
-        system.region.pk,
+    return ReminderPreference.objects.create(
+        user=member,
+        region=system.region,
         enabled=True,
         recipients=[],
         times=["10:00"],
-        now=NOW,
+        effective_from=NOW,
     )
 
 

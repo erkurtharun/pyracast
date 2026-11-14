@@ -24,6 +24,7 @@ from pyracast.accounts.language import explicit_language, save_user_language, se
 from pyracast.accounts.models import Tenant
 from pyracast.accounts.security import has_verified_mfa
 from pyracast.admin_forms import BindingActionForm, EpiasConnectionForm, ProviderSetupForm
+from pyracast.admin_tenants import WorkspaceAdministratorForm, tenant_list_context
 from pyracast.admin_workspace import (
     ReviewDecisionForm,
     operations_context,
@@ -94,6 +95,12 @@ class PlatformAdminSite(admin.AdminSite):
             ),
             path("operations/", self.admin_view(self.operations), name="workspace_operations"),
             path("settings/", self.admin_view(self.settings), name="workspace_settings"),
+            path("workspaces/", self.admin_view(self.tenants), name="workspace_tenants"),
+            path(
+                "workspaces/<int:tenant_id>/",
+                self.admin_view(self.tenant),
+                name="workspace_tenant",
+            ),
             path(
                 "password_change/",
                 self.admin_view(RedirectView.as_view(url="/?account=security")),
@@ -169,6 +176,49 @@ class PlatformAdminSite(admin.AdminSite):
             "settings",
             _("Settings"),
             context,
+            status=400 if request.method == "POST" else 200,
+        )
+
+    def tenants(self, request: HttpRequest) -> HttpResponse:
+        if request.method != "GET":
+            return HttpResponseNotAllowed(("GET",))
+        return self.workspace_response(
+            request,
+            "tenants",
+            _("Workspaces"),
+            tenant_list_context(
+                request.GET.get("q", "").strip()[:200], request.GET.get("page", "1")
+            ),
+        )
+
+    def tenant(self, request: HttpRequest, tenant_id: int) -> HttpResponse:
+        if request.method not in {"GET", "POST"}:
+            return HttpResponseNotAllowed(("GET", "POST"))
+        tenant = get_object_or_404(Tenant, pk=tenant_id)
+        form = WorkspaceAdministratorForm(
+            tenant, request.POST if request.method == "POST" else None
+        )
+        if request.method == "POST" and form.is_valid():
+            try:
+                form.apply(cast(User, request.user))
+            except ValidationError as error:
+                form.add_error(None, error)
+            else:
+                messages.success(request, _("Workspace administrator updated."))
+                return redirect("admin:workspace_tenant", tenant_id=tenant_id)
+        return self.workspace_response(
+            request,
+            "tenant",
+            tenant.name,
+            {
+                "tenant": tenant,
+                "administrator_form": form,
+                "has_automatic_calibration": Plant.objects.filter(
+                    region__tenant=tenant,
+                    deleted_at__isnull=True,
+                    automatic_calibration_enabled=True,
+                ).exists(),
+            },
             status=400 if request.method == "POST" else 200,
         )
 

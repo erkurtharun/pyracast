@@ -11,7 +11,7 @@ from django.utils import timezone
 from django.utils.translation import gettext, gettext_lazy
 from rest_framework.exceptions import APIException
 
-from pyracast.accounts.operations import require_member
+from pyracast.accounts.operations import require_workspace_admin
 from pyracast.incidents.models import IncidentRevision, PlantIncident
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.regions.models import Region
@@ -115,7 +115,7 @@ def select_incidents(
 
 
 def _scope(actor: User, tenant_id: int, region_id: int, plant_id: int) -> Plant:
-    require_member(actor, tenant_id)
+    require_workspace_admin(actor, tenant_id)
     Region.objects.select_for_update().get(
         pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
     )

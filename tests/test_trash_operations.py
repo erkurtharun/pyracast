@@ -421,7 +421,7 @@ def test_lifecycle_requires_membership_and_exact_tenant_scope(
     system, plant = make_plant(monkeypatch)
     other = Tenant.objects.create(name="Other")
     user = User.objects.create_user(username="outsider")
-    Membership.objects.create(user=user, tenant=other)
+    Membership.objects.create(user=user, tenant=other, role=Membership.Role.ADMIN)
     region_actions = {"trash_region": trash_region, "restore_region": restore_region}
     if action in region_actions:
         operation = region_actions[action]

@@ -1,4 +1,5 @@
 "use client";
+import { useCanManageWorkspace } from "./workspace-access";
 import { useTranslations, useLocale, useFormatter } from "next-intl";
 
 import { useState } from "react";
@@ -46,6 +47,7 @@ export function Outages({
     currentConfigurationId?: number;
 }) {
     const t = useTranslations("Outages");
+    const canManage = useCanManageWorkspace();
     const locale = useLocale();
     const formatNumber = useFormatter();
     const kinds: Record<string, string> = {
@@ -73,9 +75,11 @@ export function Outages({
                 <div>
                     <h2>{t("plantOutages")}</h2>
                 </div>
-                <button className="button" onClick={() => setEditor("new")}>
-                    {t("reportOutage")}
-                </button>
+                {canManage && (
+                    <button className="button" onClick={() => setEditor("new")}>
+                        {t("reportOutage")}
+                    </button>
+                )}
             </div>
             <p className="fine">
                 {t("deviceTimezone", { timezone: deviceTimezone })}
@@ -88,7 +92,7 @@ export function Outages({
                 <p>{t("reportingHelp")}</p>
                 <p className="fine">{t("editingHelp")}</p>
             </details>
-            {editor && (
+            {canManage && editor && (
                 <section
                     aria-label={
                         editor === "new" ? t("reportOutage") : t("editOutage")
@@ -240,7 +244,7 @@ export function Outages({
                                     currentConfigurationId && (
                                     <Notice>{t("configurationChanged")}</Notice>
                                 )}
-                            {outage.status !== "cancelled" && (
+                            {canManage && outage.status !== "cancelled" && (
                                 <div className="button-group">
                                     <button
                                         className="button secondary"
@@ -260,7 +264,7 @@ export function Outages({
                                     )}
                                 </div>
                             )}
-                            {resolving === outage.id && (
+                            {canManage && resolving === outage.id && (
                                 <ActionForm
                                     submit={t("saveResolution")}
                                     onSubmit={async (data) => {
@@ -301,7 +305,7 @@ export function Outages({
                                     />
                                 </ActionForm>
                             )}
-                            {outage.status !== "cancelled" && (
+                            {canManage && outage.status !== "cancelled" && (
                                 <details>
                                     <summary>
                                         {t("cancelAnIncorrectEntry")}

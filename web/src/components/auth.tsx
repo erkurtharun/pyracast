@@ -6,6 +6,7 @@ import { ApiError, request, type Session } from "@/lib/api";
 import { authRequest, type AuthResult } from "@/lib/auth-api";
 import { ActionForm, Field } from "./ui";
 import { LanguageSelect } from "./language-select";
+import { clearWorkspaceInvitation } from "./workspace-invitation";
 
 type Mode = "login" | "register" | "verify" | "mfa" | "forgot" | "reset";
 type AuthMessage =
@@ -14,11 +15,14 @@ type AuthMessage =
 export function Auth({
     session,
     onSession,
+    invitationToken,
 }: {
     session: Session;
+    invitationToken?: string | null;
     onSession: (session: Session) => void;
 }) {
     const t = useTranslations("Auth");
+    const invitationLabels = useTranslations("WorkspaceMembers");
     const [mode, setMode] = useState<Mode>("login");
     const [message, setMessage] = useState<AuthMessage>("");
     const [showPassword, setShowPassword] = useState(false);
@@ -133,7 +137,9 @@ export function Auth({
                         submit={
                             {
                                 login: t("signIn"),
-                                register: t("createCompany"),
+                                register: invitationToken
+                                    ? t("createAccount")
+                                    : t("createCompany"),
                                 verify: t("verifyEmail"),
                                 mfa: t("verifyCode"),
                                 forgot: t("sendReset"),
@@ -142,6 +148,8 @@ export function Auth({
                         }
                         onSubmit={async (data) => {
                             const payload = Object.fromEntries(data);
+                            if (mode === "register" && invitationToken)
+                                payload.invitation_token = invitationToken;
                             if (mode === "forgot") {
                                 await authRequest(
                                     "auth/password/request",
@@ -210,7 +218,7 @@ export function Auth({
                             }
                         }}
                     >
-                        {mode === "register" && (
+                        {mode === "register" && !invitationToken && (
                             <Field
                                 label={t("company")}
                                 name="company_name"
@@ -295,6 +303,18 @@ export function Auth({
                         >
                             {null}
                         </ActionForm>
+                    )}
+                    {invitationToken && (
+                        <button
+                            type="button"
+                            className="text-button"
+                            onClick={() => {
+                                clearWorkspaceInvitation();
+                                window.location.replace("/?workspace=customer");
+                            }}
+                        >
+                            {invitationLabels("cancel")}
+                        </button>
                     )}
                     {mode === "login" && (
                         <button

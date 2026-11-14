@@ -224,7 +224,7 @@ def test_duplicate_locations_use_six_decimal_tenant_scoped_identity() -> None:
     with pytest.raises(ValidationError, match="location_already_exists"):
         submit_site(system.member, system.tenant.pk, **site_values(latitude=41.1234562))
     other = Tenant.objects.create(name="Other")
-    Membership.objects.create(user=system.member, tenant=other)
+    Membership.objects.create(user=system.member, tenant=other, role=Membership.Role.ADMIN)
     assert submit_site(system.member, other.pk, **site_values()).pk != site.pk
     with pytest.raises(IntegrityError), transaction.atomic():
         Region.objects.create(

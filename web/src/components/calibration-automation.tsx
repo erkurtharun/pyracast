@@ -1,4 +1,5 @@
 "use client";
+import { useCanManageWorkspace } from "./workspace-access";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { request, type CalibrationAutomation } from "@/lib/api";
@@ -78,7 +79,9 @@ function AutomationStatus({
         refresh,
         30_000,
     );
+    const canManage = useCanManageWorkspace();
     async function toggle(enabled: boolean) {
+        if (!canManage) return;
         setPending(true);
         onPendingChange(true);
         setError(undefined);
@@ -117,7 +120,7 @@ function AutomationStatus({
                             type="checkbox"
                             aria-label={t("automatic_calibration_enabled")}
                             checked={data.enabled}
-                            disabled={disabled || pending}
+                            disabled={!canManage || disabled || pending}
                             onChange={(event) => toggle(event.target.checked)}
                         />{" "}
                         {t("enabled")}

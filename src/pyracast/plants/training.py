@@ -12,6 +12,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from pyracast.accounts.models import Tenant
 from pyracast.connections.models import ProviderAccount
 from pyracast.plants.calibration_data import build_calibration_dataset, current_source_validation
 from pyracast.plants.forecasting import power_limit
@@ -52,10 +53,11 @@ def _prepare_followup(plant: Plant, run: CalibrationRun, now: datetime) -> None:
 
 def _claim(run_id: int, now: datetime) -> _Lease | None:
     started = time.monotonic()
-    identity = CalibrationRun.objects.select_related("plant").filter(pk=run_id).first()
+    identity = CalibrationRun.objects.select_related("plant__region").filter(pk=run_id).first()
     if identity is None:
         return None
     with transaction.atomic():
+        Tenant.objects.select_for_update().get(pk=identity.plant.region.tenant_id)
         if not Region.objects.select_for_update().filter(pk=identity.plant.region_id).exists():
             return None
         plant = Plant.objects.select_for_update().filter(pk=identity.plant_id).first()
@@ -111,6 +113,7 @@ def _claim(run_id: int, now: datetime) -> _Lease | None:
 def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now: datetime) -> bool:
     started = time.monotonic()
     with transaction.atomic():
+        Tenant.objects.select_for_update().get(pk=lease.configuration.plant.region.tenant_id)
         Region.objects.select_for_update().get(pk=lease.configuration.binding.region_id)
         plant = Plant.objects.select_for_update().get(pk=lease.run.plant_id)
         run = CalibrationRun.objects.select_for_update().get(pk=lease.run.pk)
@@ -166,6 +169,7 @@ def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now:
 def _fail(lease: _Lease, now: datetime) -> None:
     started = time.monotonic()
     with transaction.atomic():
+        Tenant.objects.select_for_update().get(pk=lease.configuration.plant.region.tenant_id)
         Region.objects.select_for_update().get(pk=lease.configuration.binding.region_id)
         plant = Plant.objects.select_for_update().get(pk=lease.run.plant_id)
         run = CalibrationRun.objects.select_for_update().get(pk=lease.run.pk)

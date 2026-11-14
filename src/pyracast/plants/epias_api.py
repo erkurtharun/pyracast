@@ -7,6 +7,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
@@ -84,6 +85,7 @@ class EpiasHistoryOutput(serializers.Serializer[Any]):
 
 class EpiasConnectionView(ScopedView[EpiasConnection]):
     serializer_class = EpiasConnectionOutput
+    permission_classes = (IsAuthenticated,)
 
     def check_permissions(self, request: Request) -> None:
         super().check_permissions(request)

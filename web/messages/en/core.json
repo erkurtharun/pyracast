@@ -108,7 +108,9 @@
         "firstPlant": "Start with your first plant",
         "differentSearch": "Try a different name or approval status.",
         "addDetails": "Add its location and technical details in one request.",
-        "currentEmail": "Current address: {email}. A new address replaces it after verification."
+        "currentEmail": "Current address: {email}. A new address replaces it after verification.",
+        "members": "Workspace members",
+        "readOnly": "Read-only access"
     },
     "Common": {
         "invalidPage": "The server returned an invalid next page.",

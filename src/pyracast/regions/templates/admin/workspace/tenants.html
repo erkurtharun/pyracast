@@ -1,0 +1,42 @@
+{% extends "admin/workspace/base.html" %}
+{% load i18n %}
+{% block title %}{% translate "Workspaces" %}{% endblock %}
+{% block heading %}{% translate "Workspaces" %}{% endblock %}
+{% block content %}
+  <form method="get" class="panel filters" role="search" aria-label="{% translate "Search workspaces" %}">
+    <div class="field">
+      <label for="workspaces-q">{% translate "Workspace name" %}</label>
+      <input type="search" id="workspaces-q" name="q" value="{{ q }}" maxlength="200" autocomplete="off">
+    </div>
+    <div class="filters-actions">
+      <button type="submit" class="btn btn--primary">{% translate "Search" %}</button>
+      {% if q %}<a class="btn btn--quiet" href="{% url 'admin:workspace_tenants' %}">{% translate "Clear" %}</a>{% endif %}
+    </div>
+  </form>
+  <section class="panel" aria-labelledby="workspaces-title">
+    <div class="panel-head"><h2 id="workspaces-title">{% translate "Workspaces" %} <span class="muted">{{ page_obj.paginator.count }}</span></h2></div>
+    {% if page_obj.object_list %}
+      <div class="table-wrap" role="region" aria-labelledby="workspaces-title" tabindex="0">
+        <table class="table table--stack">
+          <thead><tr>
+            <th scope="col">{% translate "Workspace" %}</th>
+            <th scope="col">{% translate "Administrator" %}</th>
+            <th scope="col">{% translate "Members" %}</th>
+          </tr></thead>
+          <tbody>{% for tenant in page_obj %}<tr>
+            <th scope="row" data-label="{% translate "Workspace" %}"><a class="row-title" href="{% url 'admin:workspace_tenant' tenant.pk %}">{{ tenant.name }}</a></th>
+            <td data-label="{% translate "Administrator" %}">{% firstof tenant.administrator_email tenant.administrator_username "—" %}</td>
+            <td data-label="{% translate "Members" %}">{{ tenant.member_count }}</td>
+          </tr>{% endfor %}</tbody>
+        </table>
+      </div>
+    {% else %}<p class="empty">{% translate "No workspaces found." %}</p>{% endif %}
+    {% if page_obj.has_other_pages %}
+      <nav class="pagination" aria-label="{% translate "Workspace pages" %}">
+        {% if page_obj.has_previous %}<a class="btn btn--quiet" rel="prev" href="?q={{ q|urlencode }}&amp;page={{ page_obj.previous_page_number }}">{% translate "Previous" %}</a>{% endif %}
+        <span class="pagination-status">{% translate "Page" %} {{ page_obj.number }} {% translate "of" %} {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}<a class="btn btn--quiet" rel="next" href="?q={{ q|urlencode }}&amp;page={{ page_obj.next_page_number }}">{% translate "Next" %}</a>{% endif %}
+      </nav>
+    {% endif %}
+  </section>
+{% endblock %}

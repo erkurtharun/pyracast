@@ -4,12 +4,14 @@ from threading import Barrier, Event, current_thread
 from typing import Any, cast
 
 import pytest
+from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connections, transaction
 from django.test import Client
 from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.operations import reassign_workspace_admin
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.automation import (
     automation_status,
@@ -163,7 +165,8 @@ def test_automatic_evaluation_requires_recent_holdout_but_manual_selection_remai
 
 def promote(plant_id: int, run: CalibrationRun) -> bool:
     with transaction.atomic():
-        identity = Plant.objects.get(pk=plant_id)
+        identity = Plant.objects.select_related("region").get(pk=plant_id)
+        Tenant.objects.select_for_update().get(pk=identity.region.tenant_id)
         Region.objects.select_for_update().get(pk=identity.region_id)
         plant = Plant.objects.select_for_update().get(pk=plant_id)
         return promote_automatic_calibration(plant, run, NOW)
@@ -418,7 +421,7 @@ def test_next_promotion_waits_for_seven_wholly_new_holdout_dates(
     assert CalibrationActivation.objects.latest("pk").calibration_id == candidate.pk
 
 
-@pytest.mark.parametrize("revocation", ["inactive", "membership"])
+@pytest.mark.parametrize("revocation", ["inactive", "membership", "demoted"])
 def test_revoked_enabler_cannot_promote_or_prepare_daily_work(
     monkeypatch: pytest.MonkeyPatch, revocation: str
 ) -> None:
@@ -430,6 +433,8 @@ def test_revoked_enabler_cannot_promote_or_prepare_daily_work(
     if revocation == "inactive":
         system.member.is_active = False
         system.member.save(update_fields=("is_active",))
+    elif revocation == "demoted":
+        Membership.objects.filter(user=system.member).update(role=Membership.Role.VIEWER)
     else:
         Membership.objects.filter(user=system.member).delete()
     assert not promote(plant.pk, candidate)
@@ -459,12 +464,75 @@ def test_daily_catchup_is_bounded_idempotent_and_survives_missed_days(
         prepare_due_calibrations(datetime(2026, 11, 13))
 
 
+def test_new_administrator_must_explicitly_reauthorize_existing_automation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    scope = (system.tenant.pk, system.region.pk, plant.pk)
+    set_calibration_automation(system.member, *scope, enabled=True)
+    replacement = User.objects.create_user(username="new-administrator")
+    Membership.objects.create(user=replacement, tenant=system.tenant)
+    reassign_workspace_admin(
+        system.admin, system.tenant.pk, replacement.pk, expected_admin_id=system.member.pk
+    )
+    plant.refresh_from_db()
+    assert not automation_status(plant)["authorized"]
+    assert not plant.automatic_calibration_enabled
+    assert plant.automatic_calibration_enabled_by_id is None
+    plant = set_calibration_automation(replacement, *scope, enabled=True)
+    assert automation_status(plant)["authorized"]
+    assert plant.automatic_calibration_enabled_by_id == replacement.pk
+
+
+def test_returning_administrator_cannot_revive_revoked_automation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    scope = (system.tenant.pk, system.region.pk, plant.pk)
+    set_calibration_automation(system.member, *scope, enabled=True)
+    other = Tenant.objects.create(name="Unaffected")
+    Membership.objects.create(user=system.member, tenant=other, role=Membership.Role.ADMIN)
+    other_region = Region.objects.create(
+        tenant=other, name="Other site", latitude=41, longitude=30, timezone="UTC"
+    )
+    other_plant = Plant.objects.create(
+        region=other_region,
+        name="Other PV",
+        automatic_calibration_enabled=True,
+        automatic_calibration_enabled_by=system.member,
+        next_calibration_check_at=NOW,
+    )
+    replacement = User.objects.create_user(username="temporary-administrator")
+    Membership.objects.create(user=replacement, tenant=system.tenant)
+    reassign_workspace_admin(
+        system.admin, system.tenant.pk, replacement.pk, expected_admin_id=system.member.pk
+    )
+    reassign_workspace_admin(
+        system.admin, system.tenant.pk, system.member.pk, expected_admin_id=replacement.pk
+    )
+    plant.refresh_from_db()
+    assert not plant.automatic_calibration_enabled
+    assert plant.automatic_calibration_enabled_by_id is None
+    assert plant.next_calibration_check_at is None
+    assert not automation_status(plant)["authorized"]
+    assert (
+        PlantEvent.objects.get(plant=plant, action="calibration_automation_disabled").actor_id
+        == system.admin.pk
+    )
+    other_plant.refresh_from_db()
+    assert other_plant.automatic_calibration_enabled
+    assert other_plant.automatic_calibration_enabled_by_id == system.member.pk
+    assert other_plant.next_calibration_check_at == NOW
+    plant = set_calibration_automation(system.member, *scope, enabled=True)
+    assert automation_status(plant)["authorized"]
+
+
 def test_automation_endpoint_scopes_read_and_write_to_the_plant_tenant(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
     other = Tenant.objects.create(name="Other")
-    Membership.objects.create(user=system.member, tenant=other)
+    Membership.objects.create(user=system.member, tenant=other, role=Membership.Role.ADMIN)
     client = Client()
     client.force_login(system.member)
     wrong = (
@@ -551,7 +619,7 @@ def test_due_scan_rechecks_a_concurrent_disable_or_definition_removal(
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
     set_calibration_automation(*scope, enabled=True)
     before_lock, proceed = Event(), Event()
-    original = Region.objects.select_for_update
+    original = Tenant.objects.select_for_update
 
     def synchronized_lock(*args: Any, **kwargs: Any) -> Any:
         if current_thread().name.startswith("daily-scan"):
@@ -559,7 +627,7 @@ def test_due_scan_rechecks_a_concurrent_disable_or_definition_removal(
             assert proceed.wait(timeout=10)
         return original(*args, **kwargs)
 
-    monkeypatch.setattr(Region.objects, "select_for_update", synchronized_lock)
+    monkeypatch.setattr(Tenant.objects, "select_for_update", synchronized_lock)
 
     def dispatch_due() -> list[int]:
         close_old_connections()

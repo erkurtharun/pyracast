@@ -1,7 +1,7 @@
 from typing import Any, cast
 
 from django.contrib.auth.models import User
-from django.db.models import QuerySet
+from django.db.models import F, QuerySet
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -58,7 +58,11 @@ class TenantsView(GenericAPIView[Tenant]):
     serializer_class = TenantOutput
 
     def get_queryset(self) -> QuerySet[Tenant]:
-        return Tenant.objects.filter(membership__user=cast(User, self.request.user)).order_by("id")
+        return (
+            Tenant.objects.filter(membership__user=cast(User, self.request.user))
+            .annotate(role=F("membership__role"))
+            .order_by("id")
+        )
 
     @extend_schema(responses=TenantOutput(many=True))
     def get(self, _request: Request) -> Response:

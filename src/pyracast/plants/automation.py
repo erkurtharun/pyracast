@@ -9,8 +9,8 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from pyracast.accounts.models import Membership
-from pyracast.accounts.operations import require_member
+from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.operations import require_admin, require_workspace_admin
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.calibration_data import current_source_validation
 from pyracast.plants.models import CalibrationRun, Plant, PlantEvent
@@ -35,7 +35,10 @@ def _authorized(plant: Plant, *, lock: bool = False) -> bool:
     if actor_id is None:
         return False
     members = Membership.objects.filter(
-        user_id=actor_id, user__is_active=True, tenant_id=plant.region.tenant_id
+        user_id=actor_id,
+        user__is_active=True,
+        tenant_id=plant.region.tenant_id,
+        role=Membership.Role.ADMIN,
     )
     if lock:
         if not User.objects.select_for_update().filter(pk=actor_id, is_active=True).exists():
@@ -97,11 +100,31 @@ def update_automation(plant: Plant, actor: User, *, enabled: bool, now: datetime
     )
 
 
+@transaction.atomic
+def disable_workspace_automation(actor: User, tenant_id: int) -> None:
+    require_admin(actor)
+    Tenant.objects.select_for_update().get(pk=tenant_id)
+    region_ids = list(
+        Region.objects.select_for_update()
+        .filter(tenant_id=tenant_id)
+        .order_by("pk")
+        .values_list("pk", flat=True)
+    )
+    plants = (
+        Plant.objects.select_for_update()
+        .filter(region_id__in=region_ids, automatic_calibration_enabled=True)
+        .order_by("pk")
+    )
+    now = timezone.now()
+    for plant in plants:
+        update_automation(plant, actor, enabled=False, now=now)
+
+
 def set_calibration_automation(
     actor: User, tenant_id: int, region_id: int, plant_id: int, *, enabled: bool
 ) -> Plant:
-    require_member(actor, tenant_id)
     with transaction.atomic():
+        require_workspace_admin(actor, tenant_id)
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
@@ -257,11 +280,12 @@ def prepare_due_calibrations(now: datetime, limit: int = 100) -> list[int]:
             region__deleted_at__isnull=True,
         )
         .order_by("next_calibration_check_at", "pk")
-        .values_list("pk", "region_id")[:limit]
+        .values_list("pk", "region_id", "region__tenant_id")[:limit]
     )
     identifiers = []
-    for plant_id, region_id in due:
+    for plant_id, region_id, tenant_id in due:
         with transaction.atomic():
+            Tenant.objects.select_for_update().get(pk=tenant_id)
             region = Region.objects.select_for_update().filter(pk=region_id).first()
             if region is None or region.deleted_at is not None:
                 continue

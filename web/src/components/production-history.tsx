@@ -1,4 +1,5 @@
 "use client";
+import { useCanManageWorkspace } from "./workspace-access";
 import { useLocale, useTranslations } from "next-intl";
 import { ScrollRegion } from "./scroll-region";
 import { useEffect, useState } from "react";
@@ -29,6 +30,7 @@ export function ProductionHistory({
     onSaved: () => void;
 }) {
     const t = useTranslations("ProductionHistory");
+    const canManage = useCanManageWorkspace();
     const locale = useLocale();
     const enumLabel = (value: string) =>
         value === ""
@@ -139,6 +141,7 @@ export function ProductionHistory({
           ).length
         : 0;
     async function save() {
+        if (!canManage) return;
         if (!ready || saving) return;
         const submitted = history.intervals
             .filter(
@@ -406,6 +409,7 @@ export function ProductionHistory({
                                                                     min="0"
                                                                     step="any"
                                                                     disabled={
+                                                                        !canManage ||
                                                                         !row.can_enter
                                                                     }
                                                                     value={
@@ -455,20 +459,22 @@ export function ProductionHistory({
                                 </table>
                             </ScrollRegion>
                         )}
-                        <div className="journal-save">
-                            <span>
-                                {t("pending_readings", { count: pending })}
-                            </span>
-                            <button
-                                className="button"
-                                type="submit"
-                                disabled={saving || !pending}
-                            >
-                                {saving
-                                    ? t("saving")
-                                    : t("save_meter_readings")}
-                            </button>
-                        </div>
+                        {canManage && (
+                            <div className="journal-save">
+                                <span>
+                                    {t("pending_readings", { count: pending })}
+                                </span>
+                                <button
+                                    className="button"
+                                    type="submit"
+                                    disabled={saving || !pending}
+                                >
+                                    {saving
+                                        ? t("saving")
+                                        : t("save_meter_readings")}
+                                </button>
+                            </div>
+                        )}
                     </form>
                     {history.observations.length > 0 && (
                         <details>

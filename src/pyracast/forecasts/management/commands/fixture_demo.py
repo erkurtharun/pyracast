@@ -28,7 +28,9 @@ class Command(BaseCommand):
         if actor is None:
             raise CommandError("Create an active superuser first.")
         tenant, _ = Tenant.objects.get_or_create(name="Fixture demonstration")
-        Membership.objects.get_or_create(user=actor, tenant=tenant)
+        Membership.objects.get_or_create(
+            user=actor, tenant=tenant, defaults={"role": Membership.Role.ADMIN}
+        )
         region = submit_region(
             actor,
             tenant.pk,

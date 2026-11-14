@@ -25,6 +25,12 @@ from pyracast.api.views import (
     TransitionView,
     ValidateView,
 )
+from pyracast.api.workspaces import (
+    InvitationAcceptanceView,
+    WorkspaceInvitationsView,
+    WorkspaceInvitationView,
+    WorkspaceMembersView,
+)
 from pyracast.forecasts.views import CollectionScheduleView
 from pyracast.plants.site_api import SitesView, SiteView
 
@@ -67,6 +73,13 @@ urlpatterns = [
     path("api/session/language/", SessionLanguageView.as_view()),
     path("api/", include("pyracast.notifications.urls")),
     path("api/tenants/", TenantsView.as_view()),
+    path("api/tenants/<int:tenant_id>/members/", WorkspaceMembersView.as_view()),
+    path("api/tenants/<int:tenant_id>/invitations/", WorkspaceInvitationsView.as_view()),
+    path(
+        "api/tenants/<int:tenant_id>/invitations/<int:invitation_id>/",
+        WorkspaceInvitationView.as_view(),
+    ),
+    path("api/invitations/accept/", InvitationAcceptanceView.as_view()),
     path("api/tenants/<int:tenant_id>/sites/", SitesView.as_view()),
     path("api/tenants/<int:tenant_id>/sites/<int:region_id>/", SiteView.as_view()),
     path("api/tenants/<int:tenant_id>/trash/regions/", TrashedRegionsView.as_view()),

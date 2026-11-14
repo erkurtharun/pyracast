@@ -112,14 +112,32 @@ committed gettext binaries after editing their source catalogs.
 
 ## Approval flow
 
-Company registration creates a non-staff user, a new tenant and its initial membership
-in one transaction. It never joins an existing company by name or email. The
+Company registration creates a non-staff user, a new tenant and its administrator
+membership in one transaction. Workspace names are unique without case or surrounding
+space distinctions, enforced by PostgreSQL. It never joins an existing company by
+name or email. The
 django-allauth browser API owns registration, email verification, login, recovery,
 reauthentication, MFA and session management. Email ownership is mandatory before
 login. Django validates passwords with a 12-character minimum and common-password
 screening, hashes new passwords with Argon2 and rotates session identifiers on login.
 Mutations enforce CSRF before authentication. Allauth's account and IP rate limits
 share an atomic PostgreSQL JSON/TTL cache; ingress limits additionally protect capacity.
+
+Each workspace has one administrator; other members have read-only access. Workspace
+administrators can invite members and change that workspace's customer settings, but
+gain no platform privileges. Both the API and application operations enforce these
+permissions; mutations lock the tenant before its resources. Personal account,
+security and language settings remain available to each user. Verified platform
+administrators reassign the role at **Workspaces**, choosing an existing active member.
+Transfers check the previous administrator, serialize with writes and retain an audit
+record. Automatic calibration authorized by a former administrator stops until the
+new administrator enables it; previously authorized reminders remain deliverable.
+
+Invitations grant read-only membership after explicit acceptance by the authenticated
+owner of the verified invited email. New invited accounts do not create another
+workspace. Invitations expire after seven days, store only a random token's hash,
+and can be cancelled. A replacement invitation or administrator transfer invalidates
+the previous pending grant. Issuance is rate-limited per workspace and recipient.
 
 Customers navigate a single plant portfolio. Location and technical details are
 collected in three short steps with a review before submission. A plant has one
@@ -181,7 +199,7 @@ Members can rename a region without changing its revision or approval. Location 
   forecast job that failed authentication, without clearing its request ledger.
 - PostgreSQL owns retry scheduling, attempt budgets and leases. Dramatiq actors retain `max_retries=0`; HTTP adapters make one ledger-accounted request per attempt. Retry transport failures, HTTP 408/425/429 and transient 5xx responses; other HTTP failures, including 501/505, require a later configuration or service change. Preserve safe error codes and `Retry-After`, accepting delta seconds or an HTTP date as a minimum delay without shortening long hints. Add 0–30 seconds of jitter to bounded exponential backoff. Forecast jobs allow three execution attempts, including interrupted lease recovery; admission waits consume neither a request nor an execution attempt. Transient forecast-provider failures wait at least four and then eight minutes, so a five-minute outage can recover within the 15-minute preparation grace without increasing the three-request budget; calculation failures retain separate backoff. A newer configured forecast slot supersedes older unclaimed work, preventing an outage from replaying an obsolete backlog. Account quota and forecast reservations still apply to every actual retry.
 - Claim jobs with expiring leases and unique scheduling keys. Assume queue redelivery: persist results idempotently and recover interrupted work. Publish through a durable job/outbox record so a database commit cannot lose the collection request. Keep HTTP connection/read/write/pool limits distinct from job and business deadlines: HTTPX timeouts bound individual I/O waits, and Dramatiq's best-effort time limit is not a hard network deadline.
-- Members configure region-local daily forecast times, initially 16:00. Historical collection runs separately at 00:00 local time, refreshing yesterday and recovering missed days from the available seven-day window. Request `hours=168` explicitly and archive completed intervals; each acquisition remains immutable. Historical transport failures, empty responses and incomplete previous days retry no sooner than 30 minutes later, before 09:00. Restart catch-up is allowed inside that night window; disabling collection stops new night work. Account-wide UTC quota reservations preserve the remaining scheduled forecast needs before admitting a night request. Quota exhaustion or reserved forecast budget never creates a rapid retry loop. Configuration changes apply to future forecast slots; they do not invent missed forecast acquisitions. Reuse the pinned slot of existing work for the same target day and night deadline when the night start changes. Use unique slots, advance a nonexistent night start to the first valid half-hour before 09:00, choose the first repeated time and flag late acquisitions.
+- Workspace administrators configure region-local daily forecast times, initially 16:00. Historical collection runs separately at 00:00 local time, refreshing yesterday and recovering missed days from the available seven-day window. Request `hours=168` explicitly and archive completed intervals; each acquisition remains immutable. Historical transport failures, empty responses and incomplete previous days retry no sooner than 30 minutes later, before 09:00. Restart catch-up is allowed inside that night window; disabling collection stops new night work. Account-wide UTC quota reservations preserve the remaining scheduled forecast needs before admitting a night request. Quota exhaustion or reserved forecast budget never creates a rapid retry loop. Configuration changes apply to future forecast slots; they do not invent missed forecast acquisitions. Reuse the pinned slot of existing work for the same target day and night deadline when the night start changes. Use unique slots, advance a nonexistent night start to the first valid half-hour before 09:00, choose the first repeated time and flag late acquisitions.
 - Do not hold database transactions open during external HTTP calls. Recheck binding revision and approval before publication. Multiple scheduler instances must not duplicate work.
 - Preserve forecast vintages and configuration/model versions. Expose stale or incomplete results explicitly. Monitor last successful collection, queue lag, provider errors, quota, solver failures and coverage; logs carry correlation IDs without credentials.
 
@@ -502,7 +520,7 @@ When a plant was first configured after the selected day began, the ordinary out
 
 ## Saved-forecast email reminders
 
-Each member can configure daily local `HH:MM` times and a recipient list for an approved plant. An empty list uses the member's account email. Active members' saved lists share one plant-wide limit of five distinct, case-insensitively compared addresses by default, editable through the MFA-protected admin's **Email reminder settings**. Paused lists retain their places; clearing the addresses and times while paused releases them. Inactive users and departed members do not reserve places. The API returns aggregate counts without exposing another member's addresses. A lower limit preserves saved lists but pauses the plant's deliveries until the aggregate fits; edits that reduce an existing excess remain possible. Requests require a `recipients` list, and `effective_recipients` resolves an empty list to the account email. Store only the recipient list. Migration `notifications.0005` preserves legacy-only addresses before removing the redundant email column; its reverse recreates the single-recipient mirror, not obsolete shadow values that disagreed with a nonempty canonical list.
+Workspace administrators can configure their daily local `HH:MM` times and a recipient list for an approved plant. An empty list uses the member's account email. Active members' saved lists share one plant-wide limit of five distinct, case-insensitively compared addresses by default, editable through the MFA-protected admin's **Email reminder settings**. Paused lists retain their places; clearing the addresses and times while paused releases them. Inactive users and departed members do not reserve places. The API returns aggregate counts without exposing another member's addresses. A lower limit preserves saved lists but pauses the plant's deliveries until the aggregate fits; edits that reduce an existing excess remain possible. Requests require a `recipients` list, and `effective_recipients` resolves an empty list to the account email. Store only the recipient list. Migration `notifications.0005` preserves legacy-only addresses before removing the redundant email column; its reverse recreates the single-recipient mirror, not obsolete shadow values that disagreed with a nonempty canonical list.
 
 The current provider plan's daily request limit also caps daily reminder times; this is a product limit, not a quota reservation. Emails make **zero provider requests** and do not consume the request ledger. A reduced plan limit retains only the earliest configured times within the current limit.
 

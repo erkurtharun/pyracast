@@ -4,6 +4,7 @@ import { useState } from "react";
 import { type Region, type Plant } from "@/lib/api";
 import { Notice, useCollection } from "./ui";
 import { PlantWorkspace } from "./plant-workspace";
+import { useCanManageWorkspace } from "./workspace-access";
 import { PlantOnboarding } from "./plant-onboarding";
 
 export function RegionWorkspace({
@@ -22,6 +23,7 @@ export function RegionWorkspace({
     initialPlant?: Plant;
 }) {
     const t = useTranslations("RegionWorkspace");
+    const canManage = useCanManageWorkspace();
 
     const base = `/api/tenants/${tenant}/regions/${region.id}/`;
     const plants = useCollection<Plant>(`${base}plants/`, 0, 30_000);
@@ -57,7 +59,7 @@ export function RegionWorkspace({
                 <p role="status">{t("loadingPlant")}</p>
             ) : plants.error ? (
                 <Notice error>{plants.error}</Notice>
-            ) : (
+            ) : canManage ? (
                 <PlantOnboarding
                     existing={region}
                     tenant={tenant}
@@ -67,6 +69,8 @@ export function RegionWorkspace({
                         if (site.plant) setCreated(site.plant);
                     }}
                 />
+            ) : (
+                <Notice>{t("plantUnavailable")}</Notice>
             )}
         </>
     );

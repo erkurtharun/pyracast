@@ -3,7 +3,7 @@ from typing import Any, cast
 from django.utils.translation import gettext
 from rest_framework import serializers
 
-from pyracast.accounts.models import Tenant
+from pyracast.accounts.models import Membership, Tenant
 from pyracast.regions.models import Region, RegionLocationChangeRequest
 
 
@@ -17,9 +17,11 @@ class InputSerializer(serializers.Serializer[dict[str, Any]]):
 
 
 class TenantOutput(serializers.ModelSerializer[Tenant]):
+    role = serializers.ChoiceField(choices=Membership.Role.choices, read_only=True)
+
     class Meta:
         model = Tenant
-        fields = ("id", "name")
+        fields = ("id", "name", "role")
         read_only_fields = fields
 
 

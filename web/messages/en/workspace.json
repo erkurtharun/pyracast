@@ -125,7 +125,8 @@
     "RegionWorkspace": {
         "allPlants": "All plants",
         "loadingPlant": "Loading plant...",
-        "refreshFailed": "Unable to refresh this plant. Showing saved details. {error}"
+        "refreshFailed": "Unable to refresh this plant. Showing saved details. {error}",
+        "plantUnavailable": "Plant setup is pending."
     },
     "Reminders": {
         "preparing": "Preparing",
@@ -329,5 +330,23 @@
         "deletionHelp": "Collection will stop. You can restore this plant and its saved data for 30 days. After that, they are permanently deleted.",
         "retentionHelp": "Deleted plants and their data are kept for 30 days.",
         "restoreExpired": "The 30-day restore period has ended."
+    },
+    "WorkspaceMembers": {
+        "title": "Workspace members",
+        "invite": "Invite a member",
+        "sendInvitation": "Send invitation",
+        "email": "Email address",
+        "members": "Members",
+        "loading": "Loading…",
+        "admin": "Administrator",
+        "viewer": "Viewer",
+        "pending": "Pending invitations",
+        "noInvitations": "No pending invitations.",
+        "joinWorkspace": "Join workspace",
+        "accept": "Accept invitation",
+        "cancel": "Cancel invitation",
+        "deliveryUncertain": "Email delivery could not be confirmed.",
+        "useAnotherAccount": "Use another account",
+        "dismiss": "Cancel"
     }
 }

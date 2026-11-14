@@ -19,7 +19,7 @@ from pyracast.forecasts.models import (
 from pyracast.irradiance import local_day_bounds
 from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.mail import NotSentError
-from pyracast.notifications.models import NotificationDelivery
+from pyracast.notifications.models import NotificationDelivery, ReminderPreference
 from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.scheduler import PREPARATION_GRACE, enqueue_due
 from pyracast.notifications.views import preference_payload
@@ -188,14 +188,13 @@ def test_all_members_recipients_and_retries_keep_the_same_prepared_content() -> 
     old = complete_saved(system)
     member = User.objects.create(username="second-reminder", email="second@example.com")
     Membership.objects.create(user=member, tenant=system.tenant)
-    configure_reminders(
-        member,
-        system.tenant.pk,
-        system.region.pk,
+    ReminderPreference.objects.create(
+        user=member,
+        region=system.region,
         enabled=True,
         recipients=[],
         times=["10:00"],
-        now=NOW,
+        effective_from=NOW,
     )
     ids = enqueue_due(SLOT)
 

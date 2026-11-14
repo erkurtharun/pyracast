@@ -9,7 +9,7 @@ from django.db import transaction
 from django.db.models import Count
 from django.utils.translation import gettext
 
-from pyracast.accounts.operations import require_member
+from pyracast.accounts.operations import require_member, require_workspace_admin
 from pyracast.collection_window import HISTORY_CLOCK, HISTORY_END_CLOCK, NIGHT_RETRY_DELAY
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
@@ -40,8 +40,8 @@ def configure_schedule(
 ) -> CollectionSchedule:
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
-    require_member(actor, tenant_id)
     with transaction.atomic():
+        require_workspace_admin(actor, tenant_id)
         region = (
             Region.objects.select_for_update(of=("self",))
             .select_related("approved_binding__provider_account")

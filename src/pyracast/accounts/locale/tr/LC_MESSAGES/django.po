@@ -1,0 +1,36 @@
+msgid ""
+msgstr ""
+"Language: tr\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+msgid "Workspace administrator required."
+msgstr "Çalışma alanı yöneticisi yetkisi gereklidir."
+
+msgid "The workspace administrator changed. Reload before saving."
+msgstr "Çalışma alanı yöneticisi değişti. Kaydetmeden önce sayfayı yenileyin."
+
+msgid "Choose an active member of this workspace."
+msgstr "Bu çalışma alanının etkin bir üyesini seçin."
+
+msgid "The invitation is invalid or expired."
+msgstr "Davet geçersiz veya süresi dolmuş."
+
+msgid "This account already belongs to the workspace."
+msgstr "Bu hesap zaten çalışma alanının üyesi."
+
+msgid "Verify the invited email address before accepting."
+msgstr "Daveti kabul etmeden önce davet edilen e-posta adresini doğrulayın."
+
+msgid "Pyracast workspace invitation"
+msgstr "Pyracast çalışma alanı daveti"
+
+#, python-format
+msgid "You have been invited to %(workspace)s.\n\nSign in or create an account with %(email)s, verify your email, and accept:\n%(link)s\n\nThis invitation expires in seven days and grants read-only workspace access."
+msgstr "%(workspace)s çalışma alanına davet edildiniz.\n\n%(email)s adresiyle giriş yapın veya hesap oluşturun, e-posta adresinizi doğrulayın ve daveti kabul edin:\n%(link)s\n\nBu davet yedi gün sonra sona erer ve çalışma alanına salt okunur erişim sağlar."
+
+msgid "This workspace name is already in use."
+msgstr "Bu çalışma alanı adı zaten kullanılıyor."
+
+msgid "A workspace name is required."
+msgstr "Çalışma alanı adı gereklidir."

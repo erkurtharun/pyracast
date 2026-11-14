@@ -68,7 +68,7 @@ def make_system(*, approved: bool = False) -> System:
     member = User.objects.create(username="member")
     admin = User.objects.create(username="admin", is_superuser=True)
     tenant = Tenant.objects.create(name="Tenant")
-    Membership.objects.create(user=member, tenant=tenant)
+    Membership.objects.create(user=member, tenant=tenant, role=Membership.Role.ADMIN)
     region = submit_region(
         member, tenant.pk, name="Site", latitude=40, longitude=29, timezone="Europe/Istanbul"
     )
@@ -101,7 +101,7 @@ def test_tenant_and_platform_authorization() -> None:
     with pytest.raises(PermissionDenied):
         require_member(system.member, system.tenant.pk)
     system.member.is_active = True
-    Membership.objects.create(user=system.member, tenant=other)
+    Membership.objects.create(user=system.member, tenant=other, role=Membership.Role.ADMIN)
     with pytest.raises(Region.DoesNotExist):
         update_region(
             system.member,

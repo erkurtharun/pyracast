@@ -47,7 +47,7 @@ def test_contended_region_does_not_suppress_another_tenants_due_collection(
     system = make_system(approved=True)
     member = User.objects.create(username="another-collection-member")
     tenant = Tenant.objects.create(name="Another tenant")
-    Membership.objects.create(user=member, tenant=tenant)
+    Membership.objects.create(user=member, tenant=tenant, role=Membership.Role.ADMIN)
     region = submit_region(
         member,
         tenant.pk,

@@ -1,4 +1,5 @@
 "use client";
+import { useCanManageWorkspace } from "./workspace-access";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { request, type Calibration } from "@/lib/api";
@@ -27,6 +28,7 @@ export function Calibrations({
     currentConfigurationId: number | null;
 }) {
     const t = useTranslations("Calibrations");
+    const canManage = useCanManageWorkspace();
     const locale = useLocale();
     const enumLabel = (value: string) =>
         value === ""
@@ -57,6 +59,7 @@ export function Calibrations({
         30_000,
     );
     async function action(url: string) {
+        if (!canManage) return;
         setActionState({ status: "pending" });
         try {
             await request(url, "POST", {}, token);
@@ -118,16 +121,20 @@ export function Calibrations({
                         >
                             {t("refresh")}
                         </button>
-                        <button
-                            className="button secondary"
-                            disabled={
-                                actionState.status === "pending" ||
-                                automationPending
-                            }
-                            onClick={() => action(`${base}calibration/reset/`)}
-                        >
-                            {t("reset_to_baseline")}
-                        </button>
+                        {canManage && (
+                            <button
+                                className="button secondary"
+                                disabled={
+                                    actionState.status === "pending" ||
+                                    automationPending
+                                }
+                                onClick={() =>
+                                    action(`${base}calibration/reset/`)
+                                }
+                            >
+                                {t("reset_to_baseline")}
+                            </button>
+                        )}
                     </div>
                 </div>
                 {actionState.status === "error" && (
@@ -223,7 +230,8 @@ export function Calibrations({
                                                         )}
                                                     </span>
                                                 )}
-                                            {run.status === "ready" &&
+                                            {canManage &&
+                                                run.status === "ready" &&
                                                 run.configuration_id ===
                                                     currentConfigurationId && (
                                                     <button

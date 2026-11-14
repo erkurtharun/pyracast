@@ -40,7 +40,7 @@ pytestmark = pytest.mark.django_db
 def customer() -> tuple[Client, User, Tenant]:
     user = User.objects.create_user(username="customer")
     tenant = Tenant.objects.create(name="Customer")
-    Membership.objects.create(user=user, tenant=tenant)
+    Membership.objects.create(user=user, tenant=tenant, role=Membership.Role.ADMIN)
     client = Client()
     client.force_login(user)
     return client, user, tenant
@@ -106,7 +106,7 @@ def test_tenant_isolation_and_read_only_ownership(customer: tuple[Client, User, 
     assert client.get(f"{base}{region_id}/").json()["status"] == "pending"
     other = Tenant.objects.create(name="Other")
     other_user = User.objects.create_user(username="other")
-    Membership.objects.create(user=other_user, tenant=other)
+    Membership.objects.create(user=other_user, tenant=other, role=Membership.Role.ADMIN)
     client.force_login(other_user)
     assert client.get(base).status_code == 403
     assert client.get(f"{base}{region_id}/").status_code == 403

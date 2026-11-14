@@ -4,6 +4,22 @@
  */
 
 export interface paths {
+    "/api/invitations/accept/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["invitations_accept_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/session/": {
         parameters: {
             query?: never;
@@ -44,6 +60,54 @@ export interface paths {
             cookie?: never;
         };
         get: operations["tenants_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tenants/{tenant_id}/invitations/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["tenants_invitations_retrieve"];
+        put?: never;
+        post: operations["tenants_invitations_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tenants/{tenant_id}/invitations/{invitation_id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete: operations["tenants_invitations_destroy"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tenants/{tenant_id}/members/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["tenants_members_retrieve"];
         put?: never;
         post?: never;
         delete?: never;
@@ -547,9 +611,7 @@ export interface components {
             configuration_id: number | null;
             /** Format: date-time */
             next_check_at: string | null;
-            last_attempt:
-                | components["schemas"]["AutomaticCalibrationAttemptOutput"]
-                | null;
+            last_attempt: components["schemas"]["AutomaticCalibrationAttemptOutput"] | null;
         };
         CalibrationInput: {
             configuration_id: number;
@@ -591,14 +653,7 @@ export interface components {
          *     * `superseded` - superseded
          * @enum {string}
          */
-        CalibrationStatusEnum:
-            | "pending"
-            | "running"
-            | "ready"
-            | "insufficient"
-            | "rejected"
-            | "failed"
-            | "superseded";
+        CalibrationStatusEnum: "pending" | "running" | "ready" | "insufficient" | "rejected" | "failed" | "superseded";
         CalibrationSummaryOutput: {
             readonly id: number;
             configuration_id: number;
@@ -697,6 +752,13 @@ export interface components {
             /** Format: date-time */
             ends_at: string;
         };
+        /**
+         * @description * `pending` - Pending
+         *     * `accepted` - Accepted
+         *     * `uncertain` - Uncertain
+         * @enum {string}
+         */
+        DeliveryStatusEnum: "pending" | "accepted" | "uncertain";
         EpiasConnectionInput: {
             provider_plant_id: number;
             expected_eic: string;
@@ -722,12 +784,7 @@ export interface components {
             date: string;
             timezone: string;
             unit: string;
-            source_kind:
-                | (
-                      | components["schemas"]["EpiasHistoryOutputSourceKindEnum"]
-                      | components["schemas"]["NullEnum"]
-                  )
-                | null;
+            source_kind: (components["schemas"]["EpiasHistoryOutputSourceKindEnum"] | components["schemas"]["NullEnum"]) | null;
             complete: boolean;
             /** Format: double */
             reported_total_mwh: number | null;
@@ -744,15 +801,9 @@ export interface components {
          *     * `mixed` - mixed
          * @enum {string}
          */
-        EpiasHistoryOutputSourceKindEnum:
-            "realtime_generation" | "settlement_injection" | "mixed";
+        EpiasHistoryOutputSourceKindEnum: "realtime_generation" | "settlement_injection" | "mixed";
         EpiasReadingOutput: {
-            source_kind:
-                | (
-                      | components["schemas"]["EpiasSourceKindEnum"]
-                      | components["schemas"]["NullEnum"]
-                  )
-                | null;
+            source_kind: (components["schemas"]["EpiasSourceKindEnum"] | components["schemas"]["NullEnum"]) | null;
             snapshot_id: number | null;
             /** Format: date-time */
             provider_timestamp: string | null;
@@ -865,6 +916,25 @@ export interface components {
             available_export_mw?: number | null;
             expected_revision: number;
         };
+        InvitationAcceptanceInput: {
+            token: string;
+        };
+        InvitationAcceptanceOutput: {
+            tenant_id: number;
+            role: components["schemas"]["RoleEnum"];
+        };
+        InvitationInput: {
+            /** Format: email */
+            email: string;
+        };
+        InvitationOutput: {
+            readonly id: number;
+            /** Format: email */
+            readonly email: string;
+            /** Format: date-time */
+            readonly expires_at: string;
+            readonly delivery_status: components["schemas"]["DeliveryStatusEnum"];
+        };
         /**
          * @description * `inverter` - inverter
          *     * `panels` - panels
@@ -962,8 +1032,7 @@ export interface components {
          *     * `invalid` - Invalid
          * @enum {string}
          */
-        ObservationOutputQualityEnum:
-            "valid" | "outage" | "curtailed" | "invalid";
+        ObservationOutputQualityEnum: "valid" | "outage" | "curtailed" | "invalid";
         ObservationRow: {
             /** Format: date-time */
             starts_at: string;
@@ -1216,8 +1285,7 @@ export interface components {
             /** Format: double */
             scored_hours: number;
             metrics: components["schemas"]["PerformanceMetrics"] | null;
-            baseline_metrics:
-                components["schemas"]["PerformanceMetrics"] | null;
+            baseline_metrics: components["schemas"]["PerformanceMetrics"] | null;
             days: components["schemas"]["PerformanceDay"][];
             uncertainty: string;
         };
@@ -1232,12 +1300,7 @@ export interface components {
             calibration_id: number | null;
             freshness: string;
             source_kind: components["schemas"]["ForecastSourceKindEnum"];
-            unavailable_reason:
-                | (
-                      | components["schemas"]["UnavailableReasonEnum"]
-                      | components["schemas"]["NullEnum"]
-                  )
-                | null;
+            unavailable_reason: (components["schemas"]["UnavailableReasonEnum"] | components["schemas"]["NullEnum"]) | null;
             result: unknown;
             regional_irradiance: unknown;
             outage_scenario?: unknown;
@@ -1264,8 +1327,7 @@ export interface components {
             readonly id: number;
             readonly name: string;
             region_id: number;
-            current_configuration:
-                components["schemas"]["ConfigurationOutput"] | null;
+            current_configuration: components["schemas"]["ConfigurationOutput"] | null;
             submission: components["schemas"]["PlantSubmissionOutput"] | null;
             /** Format: date-time */
             readonly created_at: string;
@@ -1405,6 +1467,12 @@ export interface components {
         RevisionInput: {
             expected_revision: number;
         };
+        /**
+         * @description * `admin` - Administrator
+         *     * `viewer` - Viewer
+         * @enum {string}
+         */
+        RoleEnum: "admin" | "viewer";
         SessionOutput: {
             user: components["schemas"]["SessionUserOutput"] | null;
             csrf_token: string;
@@ -1460,6 +1528,7 @@ export interface components {
         TenantOutput: {
             readonly id: number;
             readonly name: string;
+            readonly role: components["schemas"]["RoleEnum"];
         };
         TrashedPlantOutput: {
             readonly id: number;
@@ -1488,16 +1557,25 @@ export interface components {
          *     * `estimated_actuals_unavailable` - estimated_actuals_unavailable
          * @enum {string}
          */
-        UnavailableReasonEnum:
-            | "configuration_unavailable"
-            | "forecast_unavailable"
-            | "estimated_actuals_unavailable";
+        UnavailableReasonEnum: "configuration_unavailable" | "forecast_unavailable" | "estimated_actuals_unavailable";
         /**
          * @description * `MWh` - MWh
          *     * `kWh` - kWh
          * @enum {string}
          */
         UnitEnum: "MWh" | "kWh";
+        WorkspaceInvitationsOutput: {
+            invitations: components["schemas"]["InvitationOutput"][];
+        };
+        WorkspaceMemberOutput: {
+            id: number;
+            /** Format: email */
+            email: string;
+            role: components["schemas"]["RoleEnum"];
+        };
+        WorkspaceMembersOutput: {
+            members: components["schemas"]["WorkspaceMemberOutput"][];
+        };
     };
     responses: never;
     parameters: never;
@@ -1507,6 +1585,31 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    invitations_accept_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvitationAcceptanceInput"];
+                "application/x-www-form-urlencoded": components["schemas"]["InvitationAcceptanceInput"];
+                "multipart/form-data": components["schemas"]["InvitationAcceptanceInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationAcceptanceOutput"];
+                };
+            };
+        };
+    };
     session_retrieve: {
         parameters: {
             query?: never;
@@ -1569,6 +1672,96 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaginatedTenantOutputList"];
+                };
+            };
+        };
+    };
+    tenants_invitations_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceInvitationsOutput"];
+                };
+            };
+        };
+    };
+    tenants_invitations_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvitationInput"];
+                "application/x-www-form-urlencoded": components["schemas"]["InvitationInput"];
+                "multipart/form-data": components["schemas"]["InvitationInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationOutput"];
+                };
+            };
+        };
+    };
+    tenants_invitations_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invitation_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    tenants_members_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMembersOutput"];
                 };
             };
         };
@@ -2171,11 +2364,7 @@ export interface operations {
                  *     * `estimated_actuals` - estimated_actuals
                  *     * `archived_forecast` - archived_forecast
                  */
-                data_source?:
-                    | "auto"
-                    | "forecast"
-                    | "estimated_actuals"
-                    | "archived_forecast";
+                data_source?: "auto" | "forecast" | "estimated_actuals" | "archived_forecast";
                 date: string;
                 /**
                  * @description * `30` - 30
@@ -2550,8 +2739,7 @@ export interface operations {
                  *     * `realtime_generation` - realtime_generation
                  *     * `settlement_injection` - settlement_injection
                  */
-                data_source?:
-                    "auto" | "realtime_generation" | "settlement_injection";
+                data_source?: "auto" | "realtime_generation" | "settlement_injection";
                 date?: string;
             };
             header?: never;

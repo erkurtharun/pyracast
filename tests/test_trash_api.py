@@ -100,7 +100,7 @@ def test_trash_and_restore_keep_tenant_boundaries_and_session_csrf(
     assert protected.post(detail + "restore/", {}).status_code == 403
     other = Tenant.objects.create(name="Other")
     outsider = User.objects.create_user("trash-outsider")
-    Membership.objects.create(tenant=other, user=outsider)
+    Membership.objects.create(tenant=other, user=outsider, role=Membership.Role.ADMIN)
     client.force_login(outsider)
     for path in (region, detail):
         assert client.delete(path).status_code == 403

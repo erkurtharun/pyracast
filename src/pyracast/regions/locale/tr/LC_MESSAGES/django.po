@@ -1511,3 +1511,47 @@ msgstr "· anahtar revizyonu"
 
 msgid "· revision"
 msgstr "· revizyon"
+
+msgid "Workspaces"
+msgstr "Çalışma alanları"
+
+msgid "Search workspaces"
+msgstr "Çalışma alanı ara"
+
+msgid "Workspace name"
+msgstr "Çalışma alanı adı"
+
+msgid "Administrator"
+msgstr "Yönetici"
+
+msgid "Members"
+msgstr "Üyeler"
+
+msgid "No workspaces found."
+msgstr "Çalışma alanı bulunamadı."
+
+msgid "Workspace pages"
+msgstr "Çalışma alanı sayfaları"
+
+msgid "Workspace administrator"
+msgstr "Çalışma alanı yöneticisi"
+
+msgid "Save administrator"
+msgstr "Yöneticiyi kaydet"
+
+msgid "Workspace administrator updated."
+msgstr "Çalışma alanı yöneticisi güncellendi."
+
+msgid ""
+"The administrator can invite members and edit this workspace. Other members "
+"have read-only access."
+msgstr ""
+"Yönetici üye davet edebilir ve bu çalışma alanını düzenleyebilir. Diğer "
+"üyeler yalnızca görüntüleyebilir."
+
+msgid ""
+"After a change, the new administrator must enable automatic calibration "
+"again."
+msgstr ""
+"Değişiklikten sonra yeni yönetici otomatik kalibrasyonu yeniden "
+"etkinleştirmelidir."

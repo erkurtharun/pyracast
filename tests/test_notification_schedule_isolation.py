@@ -31,7 +31,7 @@ pytestmark = pytest.mark.django_db(transaction=True)
 def another_tenant_preference(system: System) -> ReminderPreference:
     user = User.objects.create(username="healthy", email="healthy@example.com")
     tenant = Tenant.objects.create(name="Healthy tenant")
-    Membership.objects.create(user=user, tenant=tenant)
+    Membership.objects.create(user=user, tenant=tenant, role=Membership.Role.ADMIN)
     region = submit_region(
         user, tenant.pk, name="Healthy site", latitude=41, longitude=30, timezone="Europe/Istanbul"
     )
@@ -155,7 +155,7 @@ def test_invalid_recipient_health_count_only_includes_active_approved_member_pre
     User.objects.filter(pk=system.member.pk).update(is_active=True)
     Membership.objects.filter(user=system.member, tenant=system.tenant).delete()
     assert invalid_reminder_recipient_count() == 0
-    Membership.objects.create(user=system.member, tenant=system.tenant)
+    Membership.objects.create(user=system.member, tenant=system.tenant, role=Membership.Role.ADMIN)
     ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=False)
     assert invalid_reminder_recipient_count() == 0
     ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=True)

@@ -10,7 +10,7 @@ from django.utils import timezone as django_timezone
 from django.utils.translation import gettext
 
 from pyracast.accounts.models import Tenant
-from pyracast.accounts.operations import require_admin, require_member
+from pyracast.accounts.operations import require_admin, require_workspace_admin
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.models import CollectionJob
 from pyracast.regions.models import (
@@ -62,11 +62,11 @@ def submit_region(
     longitude: float,
     timezone: str,
 ) -> Region:
-    require_member(actor, tenant_id)
     validate_location(latitude, longitude, timezone)
     if not name.strip() or len(name) > 200:
         raise ValidationError(gettext("A region name of at most 200 characters is required."))
     with transaction.atomic():
+        require_workspace_admin(actor, tenant_id)
         require_available_location(tenant_id, latitude, longitude)
         return Region.objects.create(
             tenant_id=tenant_id,
@@ -84,10 +84,10 @@ def update_region(
     *,
     name: str,
 ) -> Region:
-    require_member(actor, tenant_id)
     if not name.strip() or len(name) > 200:
         raise ValidationError(gettext("A region name of at most 200 characters is required."))
     with transaction.atomic():
+        require_workspace_admin(actor, tenant_id)
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
@@ -112,12 +112,12 @@ def request_location_change(
     timezone: str,
     reason: str = "",
 ) -> RegionLocationChangeRequest:
-    require_member(actor, tenant_id)
     validate_location(latitude, longitude, timezone)
     latitude, longitude = canonical_coordinate(latitude), canonical_coordinate(longitude)
     if len(reason) > 1000:
         raise ValidationError(gettext("A reason of at most 1000 characters is required."))
     with transaction.atomic():
+        require_workspace_admin(actor, tenant_id)
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )

@@ -76,7 +76,7 @@ export async function mockApi(
                 csrf_token: signedIn ? "signed-token" : "anonymous-token",
             };
         } else if (path === "/api/tenants/")
-            data = paged([{ id: 1, name: "Sunfield Energy" }]);
+            data = paged([{ id: 1, name: "Sunfield Energy", role: "admin" }]);
         else if (
             path === "/api/tenants/1/regions/" ||
             path === "/api/tenants/1/sites/"

@@ -108,7 +108,9 @@
         "firstPlant": "İlk santralinizi ekleyin",
         "differentSearch": "Farklı bir ad veya onay durumu deneyin.",
         "addDetails": "Konumunu ve teknik bilgilerini tek seferde ekleyin.",
-        "currentEmail": "Mevcut adres: {email}. Yeni adres doğrulandıktan sonra bunun yerini alır."
+        "currentEmail": "Mevcut adres: {email}. Yeni adres doğrulandıktan sonra bunun yerini alır.",
+        "members": "Çalışma alanı üyeleri",
+        "readOnly": "Salt okunur erişim"
     },
     "Common": {
         "invalidPage": "Sunucu geçersiz bir sonraki sayfa döndürdü.",

@@ -375,7 +375,7 @@ def test_tenant_and_binding_boundaries(monkeypatch: pytest.MonkeyPatch) -> None:
     system, plant = make_plant(monkeypatch)
     stranger = User.objects.create(username="stranger")
     other = Tenant.objects.create(name="Other")
-    Membership.objects.create(user=stranger, tenant=other)
+    Membership.objects.create(user=stranger, tenant=other, role=Membership.Role.ADMIN)
     with pytest.raises(PermissionDenied):
         create_plant(stranger, system.tenant.pk, system.region.pk, name="X", dc_capacity_mw=1)
     with pytest.raises(Region.DoesNotExist):

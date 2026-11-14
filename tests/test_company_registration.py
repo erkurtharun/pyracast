@@ -50,7 +50,7 @@ def signup(client: Client, overrides: dict[str, Any] | None = None) -> Any:
 
 
 def test_signup_requires_verification_before_tenant_access() -> None:
-    other = Tenant.objects.create(name=DETAILS["company_name"])
+    other = Tenant.objects.create(name="Another workspace")
     client = Client(enforce_csrf_checks=True)
     assert (
         client.post(AUTH + "auth/signup", DETAILS, content_type="application/json").status_code
@@ -67,6 +67,7 @@ def test_signup_requires_verification_before_tenant_access() -> None:
     membership = Membership.objects.get(user=user)
     assert membership.tenant.name == DETAILS["company_name"]
     assert membership.tenant_id != other.pk
+    assert membership.role == Membership.Role.ADMIN
     assert not EmailAddress.objects.get(user=user).verified
     assert client.get("/api/session/").json()["user"] is None
     assert client.get("/api/tenants/").status_code in {401, 403}
@@ -107,7 +108,7 @@ def test_signup_requires_verification_before_tenant_access() -> None:
     assert login.status_code == 200
     assert login.json()["meta"]["is_authenticated"]
     assert client.get("/api/tenants/").json()["results"] == [
-        {"id": membership.tenant_id, "name": DETAILS["company_name"]}
+        {"id": membership.tenant_id, "name": DETAILS["company_name"], "role": "admin"}
     ]
     assert client.get(f"/api/tenants/{other.pk}/regions/").status_code == 403
 
@@ -246,7 +247,7 @@ def test_concurrent_signup_for_one_mailbox_can_be_recovered_by_its_owner(
             token = client.get("/api/session/").json()["csrf_token"]
             return client.post(
                 AUTH + "auth/signup",
-                DETAILS,
+                DETAILS | {"company_name": f"Mailbox race {order}"},
                 content_type="application/json",
                 HTTP_X_CSRFTOKEN=token,
                 HTTP_X_REGISTRATION_ORDER=order,
@@ -287,3 +288,32 @@ def test_concurrent_signup_for_one_mailbox_can_be_recovered_by_its_owner(
         ).status_code
         == 200
     )
+
+
+def test_concurrent_signup_for_same_workspace_returns_validation_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ready = Barrier(2)
+    clean_name = CompanySignupInput.clean_company_name
+
+    def synchronized_name(form: CompanySignupInput) -> str:
+        name = str(clean_name(form))
+        ready.wait(timeout=15)
+        return name
+
+    monkeypatch.setattr(CompanySignupInput, "clean_company_name", synchronized_name)
+
+    def register(order: int) -> int:
+        try:
+            return int(
+                signup(
+                    Client(enforce_csrf_checks=True), {"email": f"owner-{order}@example.com"}
+                ).status_code
+            )
+        finally:
+            connections.close_all()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        statuses = list(pool.map(register, (1, 2)))
+    assert sorted(statuses) == [400, 401]
+    assert User.objects.count() == Tenant.objects.count() == Membership.objects.count() == 1

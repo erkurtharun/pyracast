@@ -125,7 +125,8 @@
     "RegionWorkspace": {
         "allPlants": "Tüm santraller",
         "loadingPlant": "Santral yükleniyor...",
-        "refreshFailed": "Santral yenilenemedi. Kayıtlı bilgiler gösteriliyor. {error}"
+        "refreshFailed": "Santral yenilenemedi. Kayıtlı bilgiler gösteriliyor. {error}",
+        "plantUnavailable": "Tesis kurulumu bekleniyor."
     },
     "Reminders": {
         "preparing": "Hazırlanıyor",
@@ -329,5 +330,23 @@
         "deletionHelp": "Veri toplama duracak. Bu santrali ve kayıtlı verilerini 30 gün boyunca geri yükleyebilirsiniz. Sonrasında kalıcı olarak silinirler.",
         "retentionHelp": "Silinen santraller ve verileri 30 gün saklanır.",
         "restoreExpired": "30 günlük geri yükleme süresi doldu."
+    },
+    "WorkspaceMembers": {
+        "title": "Çalışma alanı üyeleri",
+        "invite": "Üye davet et",
+        "sendInvitation": "Davet gönder",
+        "email": "E-posta adresi",
+        "members": "Üyeler",
+        "loading": "Yükleniyor…",
+        "admin": "Yönetici",
+        "viewer": "Görüntüleyici",
+        "pending": "Bekleyen davetler",
+        "noInvitations": "Bekleyen davet yok.",
+        "joinWorkspace": "Çalışma alanına katıl",
+        "accept": "Daveti kabul et",
+        "cancel": "Daveti iptal et",
+        "deliveryUncertain": "E-posta teslimatı doğrulanamadı.",
+        "useAnotherAccount": "Başka hesap kullan",
+        "dismiss": "Vazgeç"
     }
 }

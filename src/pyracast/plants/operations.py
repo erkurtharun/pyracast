@@ -11,7 +11,7 @@ from django.db.models import Max
 from django.utils import timezone
 from django.utils.translation import gettext
 
-from pyracast.accounts.operations import require_member
+from pyracast.accounts.operations import require_workspace_admin
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.jobs import binding_is_current
@@ -190,7 +190,6 @@ def create_plant(
     surface_tilt: float | None = None,
     surface_azimuth: float | None = None,
 ) -> Plant:
-    require_member(actor, tenant_id)
     _validate_configuration(
         name,
         dc_capacity_mw,
@@ -202,6 +201,7 @@ def create_plant(
         surface_azimuth,
     )
     with transaction.atomic():
+        require_workspace_admin(actor, tenant_id)
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
@@ -239,7 +239,6 @@ def revise_plant(
     surface_tilt: float | None = None,
     surface_azimuth: float | None = None,
 ) -> Plant:
-    require_member(actor, tenant_id)
     _validate_configuration(
         name,
         dc_capacity_mw,
@@ -251,6 +250,7 @@ def revise_plant(
         surface_azimuth,
     )
     with transaction.atomic():
+        require_workspace_admin(actor, tenant_id)
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
@@ -387,10 +387,10 @@ def import_observations(
     unit: str,
     observations: list[ObservationInput],
 ) -> ObservationImportResult:
-    require_member(actor, tenant_id)
     if unit not in {"MWh", "kWh"} or not 1 <= len(observations) <= 2000:
         raise ValidationError(gettext("Use MWh or kWh and a batch of 1 to 2000 observations."))
     with transaction.atomic():
+        require_workspace_admin(actor, tenant_id)
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
@@ -463,8 +463,8 @@ def request_calibration(
     start_date: date,
     end_date: date,
 ) -> CalibrationRun:
-    require_member(actor, tenant_id)
     with transaction.atomic():
+        require_workspace_admin(actor, tenant_id)
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
@@ -618,8 +618,8 @@ def _validate_activation(
 def activate_calibration(
     actor: User, tenant_id: int, region_id: int, plant_id: int, calibration_id: int
 ) -> CalibrationActivation:
-    require_member(actor, tenant_id)
     with transaction.atomic():
+        require_workspace_admin(actor, tenant_id)
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
@@ -641,8 +641,8 @@ def activate_calibration(
 def reset_calibration(
     actor: User, tenant_id: int, region_id: int, plant_id: int
 ) -> CalibrationActivation:
-    require_member(actor, tenant_id)
     with transaction.atomic():
+        require_workspace_admin(actor, tenant_id)
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
