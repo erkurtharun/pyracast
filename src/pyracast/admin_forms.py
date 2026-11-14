@@ -13,6 +13,18 @@ from pyracast.regions.models import Region
 from pyracast.regions.operations import configure_binding
 
 
+class EpiasConnectionForm(forms.Form):
+    provider_plant_id = forms.IntegerField(min_value=1, label="EPİAŞ plant ID")
+    expected_eic = forms.RegexField(
+        r"^[A-Za-z0-9-]{16}$",
+        min_length=16,
+        max_length=16,
+        label="EIC",
+        help_text="Enter the plant's 16-character EIC to confirm its identity.",
+        error_messages={"invalid": "Use exactly 16 letters, digits or hyphens."},
+    )
+
+
 class ProviderSetupForm(forms.Form):
     expected_revision = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
     expected_binding_id = forms.IntegerField(min_value=1, required=False, widget=forms.HiddenInput)

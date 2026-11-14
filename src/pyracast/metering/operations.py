@@ -6,7 +6,7 @@ from django.db import transaction
 from django.db.models import Max, Min, Q
 from django.utils import timezone
 
-from pyracast.accounts.operations import require_member
+from pyracast.accounts.operations import require_admin, require_member
 from pyracast.epias import EpiasClient
 from pyracast.metering.client import get_epias_client
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
@@ -31,7 +31,10 @@ def connect_epias(
     expected_eic: str,
     client: EpiasClient | None = None,
 ) -> EpiasConnection:
-    plant = member_plant(plant_id, actor)
+    require_admin(actor)
+    plant = Plant.objects.select_related("region").get(
+        pk=plant_id, deleted_at__isnull=True, region__deleted_at__isnull=True
+    )
     if isinstance(provider_plant_id, bool) or provider_plant_id <= 0 or not expected_eic.strip():
         raise ValidationError("invalid_epias_plant")
     if plant.current_configuration is None or not configuration_is_current(
@@ -47,7 +50,7 @@ def connect_epias(
     with transaction.atomic():
         Region.objects.select_for_update().get(pk=plant.region_id)
         plant = Plant.objects.select_for_update().get(pk=plant.pk)
-        require_member(actor, plant.region.tenant_id)
+        require_admin(User.objects.select_for_update().get(pk=actor.pk))
         if (
             plant.deleted_at is not None
             or plant.region.deleted_at is not None
@@ -88,11 +91,14 @@ def connect_epias(
 
 
 def disconnect_epias(plant_id: int, *, actor: User) -> None:
-    plant = member_plant(plant_id, actor)
+    require_admin(actor)
+    plant = Plant.objects.select_related("region").get(
+        pk=plant_id, deleted_at__isnull=True, region__deleted_at__isnull=True
+    )
     with transaction.atomic():
         Region.objects.select_for_update().get(pk=plant.region_id)
         Plant.objects.select_for_update().get(pk=plant.pk)
-        require_member(actor, plant.region.tenant_id)
+        require_admin(User.objects.select_for_update().get(pk=actor.pk))
         connection = EpiasConnection.objects.select_for_update().filter(plant=plant).first()
         if connection is None:
             return
@@ -116,6 +122,10 @@ def disconnect_epias(plant_id: int, *, actor: User) -> None:
 def get_epias_status(plant_id: int, *, actor: User) -> dict[str, object]:
     plant = member_plant(plant_id, actor)
     connection = EpiasConnection.objects.filter(plant=plant).first()
+    return epias_connection_status(connection)
+
+
+def epias_connection_status(connection: EpiasConnection | None) -> dict[str, object]:
     if connection is None:
         return {
             "connected": False,

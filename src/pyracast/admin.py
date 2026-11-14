@@ -19,7 +19,7 @@ from rest_framework.exceptions import ValidationError as APIValidationError
 
 from pyracast.accounts.models import Tenant
 from pyracast.accounts.security import has_verified_mfa
-from pyracast.admin_forms import BindingActionForm, ProviderSetupForm
+from pyracast.admin_forms import BindingActionForm, EpiasConnectionForm, ProviderSetupForm
 from pyracast.admin_workspace import (
     ReviewDecisionForm,
     operations_context,
@@ -36,12 +36,15 @@ from pyracast.connections.operations import (
     validate_binding,
 )
 from pyracast.connections.recovery import clear_provider_cooldown
+from pyracast.epias import EpiasError
 from pyracast.forecasts.models import (
     CollectionJob,
     DispatcherStatus,
     ForecastResult,
     RequestAttempt,
 )
+from pyracast.metering.models import EpiasConnection
+from pyracast.metering.operations import connect_epias, disconnect_epias
 from pyracast.notifications.models import NotificationDelivery, NotificationSettings
 from pyracast.plants.models import (
     CalibrationActivation,
@@ -53,6 +56,7 @@ from pyracast.plants.models import (
     PlantSubmission,
     ProductionObservation,
 )
+from pyracast.plants.operations import configuration_is_current
 from pyracast.providers import adapter_for
 from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest
 from pyracast.regions.operations import approve_region, review_location_change, transition_region
@@ -285,6 +289,8 @@ class RegionAdmin(ReadOnlyAdmin):
     @method_decorator(sensitive_post_parameters("api_key"))
     @sensitive_variables()
     def setup(self, request: HttpRequest, object_id: int) -> HttpResponse:
+        if request.method not in {"GET", "POST"}:
+            return HttpResponseNotAllowed(("GET", "POST"))
         region = get_object_or_404(
             Region.objects.select_related("tenant"), pk=object_id, deleted_at__isnull=True
         )
@@ -294,6 +300,53 @@ class RegionAdmin(ReadOnlyAdmin):
             .order_by("-created_at", "-pk")
             .first()
         )
+        plants = Plant.objects.filter(region=region, deleted_at__isnull=True).select_related(
+            "current_configuration__binding__region"
+        )
+        plant = plants.first()
+        epias_connection = EpiasConnection.objects.filter(plant=plant).first() if plant else None
+        action = request.POST.get("action") if request.method == "POST" else None
+        epias_action = action in {"epias_connect", "epias_disconnect"}
+        epias_form = EpiasConnectionForm(
+            request.POST if action == "epias_connect" else None,
+            prefix="epias",
+            initial={
+                "provider_plant_id": epias_connection.provider_plant_id
+                if epias_connection
+                else None,
+                "expected_eic": epias_connection.eic if epias_connection else "",
+            },
+        )
+        if epias_action and (action == "epias_disconnect" or epias_form.is_valid()):
+            try:
+                if plant is None:
+                    raise ValidationError("configuration_unavailable")
+                actor = cast(User, request.user)
+                if action == "epias_disconnect":
+                    disconnect_epias(plant.pk, actor=actor)
+                    message = "EPİAŞ connection disconnected. Saved production remains available."
+                else:
+                    connect_epias(plant.pk, actor=actor, **epias_form.cleaned_data)
+                    message = "EPİAŞ connection saved. Initial production collection is queued."
+            except EpiasError as error:
+                epias_form.add_error(
+                    None,
+                    "EPİAŞ service credentials are unavailable. Contact the deployment operator."
+                    if str(error) == "credentials_unavailable"
+                    else "EPİAŞ is currently unavailable. Try connecting again later.",
+                )
+            except (ObjectDoesNotExist, ValidationError) as error:
+                epias_form.add_error(
+                    None,
+                    "The EPİAŞ plant ID and EIC did not match. Check both identifiers."
+                    if isinstance(error, ValidationError)
+                    and "epias_plant_identity_mismatch" in error.messages
+                    else "The plant configuration is unavailable or changed. "
+                    "Approve its current setup and reload before connecting.",
+                )
+            else:
+                self.message_user(request, message)
+                return redirect("admin:workspace_plant", object_id=region.pk)
         setup_form = ProviderSetupForm(
             request.POST
             if request.method == "POST" and request.POST.get("action") == "configure"
@@ -321,7 +374,7 @@ class RegionAdmin(ReadOnlyAdmin):
         )
         action_form = BindingActionForm(
             request.POST
-            if request.method == "POST" and request.POST.get("action") != "configure"
+            if request.method == "POST" and action != "configure" and not epias_action
             else None,
             initial={
                 "expected_revision": region.revision,
@@ -336,8 +389,7 @@ class RegionAdmin(ReadOnlyAdmin):
                 ),
             },
         )
-        if request.method == "POST":
-            action = request.POST.get("action")
+        if request.method == "POST" and not epias_action:
             action_form.fields["provider_recovered"].required = action == "clear_cooldown"
             form = setup_form if action == "configure" else action_form
             if form.is_valid():
@@ -402,9 +454,6 @@ class RegionAdmin(ReadOnlyAdmin):
                 else:
                     self.message_user(request, message)
                     return redirect("admin:workspace_plant", object_id=region.pk)
-        plants = Plant.objects.filter(region=region, deleted_at__isnull=True).select_related(
-            "current_configuration"
-        )
         submissions = PlantSubmission.objects.filter(plant__in=plants).select_related(
             "plant", "submitted_by"
         )
@@ -428,6 +477,13 @@ class RegionAdmin(ReadOnlyAdmin):
                 ),
                 "setup_form": setup_form,
                 "action_form": action_form,
+                "epias_form": epias_form,
+                "epias_connection": epias_connection,
+                "can_connect_epias": bool(
+                    plant
+                    and plant.current_configuration
+                    and configuration_is_current(plant.current_configuration)
+                ),
                 "can_approve": bool(
                     binding
                     and binding.validated_at

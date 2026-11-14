@@ -2,10 +2,9 @@
 import { ScrollRegion } from "./scroll-region";
 
 import { useState } from "react";
-import { request } from "@/lib/api";
 import type { components } from "@/lib/schema";
 import { localDay } from "./data-source";
-import { ActionForm, Notice, useResource } from "./ui";
+import { Notice, useResource } from "./ui";
 import { CsvDownload } from "./csv-download";
 import { dataIntervalRange } from "@/lib/intervals";
 
@@ -18,44 +17,16 @@ function shiftDay(day: string, offset: number) {
     return date.toISOString().slice(0, 10);
 }
 
-export function EpiasProduction({
-    base,
-    token,
-}: {
-    base: string;
-    token: string;
-}) {
+export function EpiasProduction({ base }: { base: string }) {
     const yesterday = localDay("Europe/Istanbul", -1);
     const [date, setDate] = useState(yesterday);
     const [source, setSource] = useState("auto");
     const [revision, setRevision] = useState(0);
-    const [editing, setEditing] = useState(false);
-    const [error, setError] = useState("");
-    const [working, setWorking] = useState(false);
     const connection = useResource<Connection>(
         `${base}production-source/`,
         revision,
     );
     const data = connection.data;
-
-    async function disconnect() {
-        setWorking(true);
-        setError("");
-        try {
-            await request(
-                `${base}production-source/`,
-                "DELETE",
-                undefined,
-                token,
-            );
-            setEditing(false);
-            setRevision((value) => value + 1);
-        } catch (reason) {
-            setError((reason as Error).message);
-        } finally {
-            setWorking(false);
-        }
-    }
 
     return (
         <section className="panel">
@@ -70,7 +41,6 @@ export function EpiasProduction({
                     archive.
                 </p>
             </details>
-            {error && <Notice error>{error}</Notice>}
             {connection.loading ? (
                 <p role="status">Loading connection…</p>
             ) : connection.error ? (
@@ -78,116 +48,39 @@ export function EpiasProduction({
             ) : (
                 data && (
                     <>
-                        {data.connected && !editing && (
-                            <>
-                                <p>
-                                    <strong>
-                                        {data.name || "EPİAŞ plant"}
-                                    </strong>{" "}
-                                    - Connected
-                                </p>
-                                {data.last_error && (
-                                    <Notice error>
-                                        Collection error: {data.last_error}
-                                    </Notice>
-                                )}
-                                <details>
-                                    <summary>
-                                        Connection settings and collection
-                                        status
-                                    </summary>
-                                    <p className="fine">
-                                        ID {data.provider_plant_id} - {data.eic}
-                                    </p>
-                                    <p className="fine">
-                                        Archived days: {data.archived_days} ·
-                                        Pending jobs: {data.pending_jobs}
-                                    </p>
-                                    <p className="fine">
-                                        Last successful collection:{" "}
-                                        {data.last_success_at
-                                            ? new Date(
-                                                  data.last_success_at,
-                                              ).toLocaleString()
-                                            : "Not yet collected"}
-                                    </p>
-                                    <div className="button-group">
-                                        <button
-                                            className="button secondary"
-                                            onClick={() => setEditing(true)}
-                                        >
-                                            Edit connection
-                                        </button>
-                                        <button
-                                            className="button secondary"
-                                            disabled={working}
-                                            onClick={disconnect}
-                                        >
-                                            Disconnect collection
-                                        </button>
-                                    </div>
-                                </details>
-                            </>
-                        )}
-                        {(!data.connected || editing) && (
-                            <ActionForm
-                                submit={
-                                    data.connected
-                                        ? "Save connection"
-                                        : "Connect EPİAŞ"
-                                }
-                                onSubmit={async (form) => {
-                                    await request<Connection>(
-                                        `${base}production-source/`,
-                                        "PUT",
-                                        {
-                                            provider_plant_id: Number(
-                                                form.get("provider_plant_id"),
-                                            ),
-                                            expected_eic: String(
-                                                form.get("expected_eic") ?? "",
-                                            ).trim(),
-                                        },
-                                        token,
-                                    );
-                                    setEditing(false);
-                                    setRevision((value) => value + 1);
-                                }}
-                            >
-                                <div className="form-grid">
-                                    <label className="field">
-                                        EPİAŞ plant ID
-                                        <input
-                                            name="provider_plant_id"
-                                            type="number"
-                                            min="1"
-                                            step="1"
-                                            required
-                                            defaultValue={
-                                                data.provider_plant_id ?? ""
-                                            }
-                                        />
-                                    </label>
-                                    <label className="field">
-                                        Plant EIC
-                                        <input
-                                            name="expected_eic"
-                                            required
-                                            maxLength={16}
-                                            defaultValue={data.eic}
-                                        />
-                                    </label>
-                                </div>
-                                {data.connected && (
-                                    <button
-                                        type="button"
-                                        className="button secondary"
-                                        onClick={() => setEditing(false)}
-                                    >
-                                        Cancel
-                                    </button>
-                                )}
-                            </ActionForm>
+                        <p>
+                            <strong>
+                                {data.connected
+                                    ? data.name || "EPİAŞ plant"
+                                    : "EPİAŞ"}
+                            </strong>{" "}
+                            · {data.connected ? "Connected" : "Not connected"}
+                        </p>
+                        <p className="fine">
+                            Your administrator manages the EPİAŞ connection.
+                            {!data.connected &&
+                                data.archived_days > 0 &&
+                                " Previously archived production remains available below."}
+                        </p>
+                        <p className="fine">
+                            Archived days: {data.archived_days}
+                            {data.connected && (
+                                <>
+                                    {" · Pending jobs: "}
+                                    {data.pending_jobs}
+                                    {" · Last successful collection: "}
+                                    {data.last_success_at
+                                        ? new Date(
+                                              data.last_success_at,
+                                          ).toLocaleString()
+                                        : "Not yet collected"}
+                                </>
+                            )}
+                        </p>
+                        {data.connected && data.last_error && (
+                            <Notice error>
+                                Collection error: {data.last_error}
+                            </Notice>
                         )}
                     </>
                 )
@@ -288,7 +181,7 @@ const blockers: Record<string, string> = {
     configuration_mismatch:
         "This acquisition belongs to another plant configuration.",
     source_disconnected:
-        "Connect the production source before using settlement injection for calibration.",
+        "Your administrator must connect the production source before settlement injection can be used for calibration.",
     measurement_basis_mismatch:
         "Provider production requires the plant measurement point to be net export.",
     production_unavailable:

@@ -14,6 +14,7 @@ from pyracast.metering import operations
 from pyracast.metering.jobs import run_epias_job
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
 from pyracast.plants.models import Plant, ProductionObservation
+from tests.test_api import verified_admin
 from tests.test_epias import PASSWORD, PLANT, USERNAME
 from tests.test_plant_api import setup_plant
 
@@ -24,6 +25,7 @@ def test_epias_api_connects_archives_native_values_and_preserves_history_after_d
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client, base, plant = setup_plant()
+    admin, _ = verified_admin()
     detail = f"{base}{plant['id']}/"
     source = detail + "production-source/"
     history = detail + "reported-production/"
@@ -50,7 +52,7 @@ def test_epias_api_connects_archives_native_values_and_preserves_history_after_d
     with httpx.Client(transport=httpx.MockTransport(handler)) as transport:
         provider = EpiasClient(transport, username=USERNAME, password=PASSWORD)
         monkeypatch.setattr(operations, "get_epias_client", lambda: provider)
-        connected = client.put(
+        connected = admin.put(
             source,
             {"provider_plant_id": PLANT.id, "expected_eic": PLANT.eic},
             content_type="application/json",
@@ -97,12 +99,12 @@ def test_epias_api_connects_archives_native_values_and_preserves_history_after_d
     assert "raw_payload" not in values["snapshot"]
     assert not ProductionObservation.objects.exists()
     assert client.get(source).json()["archived_days"] == 1
-    assert client.delete(source).status_code == 204
+    assert admin.delete(source).status_code == 204
     assert client.get(source).json()["connected"] is False
     assert (
         client.get(history, {"date": str(job.target_day)}).json()["snapshot"]["id"] == snapshot.pk
     )
-    assert client.delete(source).status_code == 204
+    assert admin.delete(source).status_code == 204
 
 
 @pytest.mark.parametrize(
@@ -118,6 +120,7 @@ def test_epias_api_validates_inputs_and_returns_safe_provider_errors(
     error_detail: str,
 ) -> None:
     client, base, plant = setup_plant()
+    admin, _ = verified_admin()
     detail = f"{base}{plant['id']}/"
     source = detail + "production-source/"
 
@@ -125,8 +128,8 @@ def test_epias_api_validates_inputs_and_returns_safe_provider_errors(
         raise EpiasError(error_detail)
 
     monkeypatch.setattr(operations, "get_epias_client", unavailable)
-    assert client.put(source, {}, content_type="application/json").status_code == 400
-    result = client.put(
+    assert admin.put(source, {}, content_type="application/json").status_code == 400
+    result = admin.put(
         source,
         {"provider_plant_id": PLANT.id, "expected_eic": PLANT.eic},
         content_type="application/json",
@@ -142,13 +145,14 @@ def test_epias_api_validates_inputs_and_returns_safe_provider_errors(
     assert client.get(detail + "reported-production/", {"data_source": "bad"}).status_code == 400
     today = timezone.now().astimezone(ZoneInfo("Europe/Istanbul")).date()
     assert client.get(detail + "reported-production/", {"date": str(today)}).status_code == 400
-    assert client.delete(source).status_code == 204
+    assert admin.delete(source).status_code == 204
 
 
 def test_epias_api_scopes_every_action_before_provider_access(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client, base, plant_data = setup_plant()
+    admin, _ = verified_admin()
     detail = f"{base}{plant_data['id']}/"
 
     def forbidden_provider() -> EpiasClient:
@@ -175,9 +179,9 @@ def test_epias_api_scopes_every_action_before_provider_access(
     plant.save(update_fields=("deleted_at",))
     assert client.get(detail + "production-source/").status_code == 404
     assert client.get(detail + "reported-production/").status_code == 404
-    assert client.delete(detail + "production-source/").status_code == 404
+    assert admin.delete(detail + "production-source/").status_code == 404
     assert (
-        client.put(detail + "production-source/", {}, content_type="application/json").status_code
+        admin.put(detail + "production-source/", {}, content_type="application/json").status_code
         == 404
     )
 

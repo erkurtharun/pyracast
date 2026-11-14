@@ -3,17 +3,20 @@ from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers
 from rest_framework.request import Request
 from rest_framework.response import Response
 
+from pyracast.api.views import PlatformAdmin
 from pyracast.epias import EpiasError
 from pyracast.metering import operations
 from pyracast.metering.history import PRODUCTION_SOURCES, read_production_day
 from pyracast.metering.models import EpiasConnection, EpiasSnapshot
 from pyracast.plants.api import ScopedView
+from pyracast.plants.models import Plant
 
 
 class EpiasConnectionInput(serializers.Serializer[Any]):
@@ -81,6 +84,23 @@ class EpiasHistoryOutput(serializers.Serializer[Any]):
 class EpiasConnectionView(ScopedView[EpiasConnection]):
     serializer_class = EpiasConnectionOutput
 
+    def check_permissions(self, request: Request) -> None:
+        super().check_permissions(request)
+        if request.method in {"PUT", "DELETE"} and not PlatformAdmin().has_permission(
+            request, self
+        ):
+            self.permission_denied(request)
+
+    def admin_plant(self) -> Plant:
+        return get_object_or_404(
+            Plant,
+            pk=self.kwargs["plant_id"],
+            region_id=self.kwargs["region_id"],
+            region__tenant_id=self.kwargs["tenant_id"],
+            deleted_at__isnull=True,
+            region__deleted_at__isnull=True,
+        )
+
     @extend_schema(responses=EpiasConnectionOutput)
     def get(self, request: Request, **_kwargs: Any) -> Response:
         result = operations.get_epias_status(self.plant().pk, actor=cast(User, request.user))
@@ -88,12 +108,12 @@ class EpiasConnectionView(ScopedView[EpiasConnection]):
 
     @extend_schema(request=EpiasConnectionInput, responses=EpiasConnectionOutput)
     def put(self, request: Request, **_kwargs: Any) -> Response:
-        plant = self.plant()
+        plant = self.admin_plant()
         data = EpiasConnectionInput(data=request.data)
         data.is_valid(raise_exception=True)
         actor = cast(User, request.user)
         try:
-            operations.connect_epias(plant.pk, actor=actor, **data.validated_data)
+            connection = operations.connect_epias(plant.pk, actor=actor, **data.validated_data)
         except EpiasError:
             return Response(
                 {
@@ -102,13 +122,11 @@ class EpiasConnectionView(ScopedView[EpiasConnection]):
                 },
                 status=502,
             )
-        return Response(
-            EpiasConnectionOutput(operations.get_epias_status(plant.pk, actor=actor)).data
-        )
+        return Response(EpiasConnectionOutput(operations.epias_connection_status(connection)).data)
 
     @extend_schema(responses={204: None})
     def delete(self, request: Request, **_kwargs: Any) -> Response:
-        operations.disconnect_epias(self.plant().pk, actor=cast(User, request.user))
+        operations.disconnect_epias(self.admin_plant().pk, actor=cast(User, request.user))
         return Response(status=204)
 
 

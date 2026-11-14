@@ -86,7 +86,7 @@ def connect(plant: Plant, actor: User, client: FixtureClient | None = None) -> E
 def connected(monkeypatch: pytest.MonkeyPatch) -> tuple[System, Plant, EpiasConnection]:
     monkeypatch.setattr("pyracast.metering.scheduler.get_epias_client", lambda: FixtureClient())
     system, plant = make_plant(monkeypatch)
-    return system, plant, connect(plant, system.member)
+    return system, plant, connect(plant, system.admin)
 
 
 def test_connection_scope_identity_and_missing_configuration(
@@ -105,7 +105,7 @@ def test_connection_scope_identity_and_missing_configuration(
         disconnect_epias(plant.pk, actor=stranger)
     assert client.calls == 0
     assert get_epias_status(plant.pk, actor=system.member)["connected"] is False
-    disconnect_epias(plant.pk, actor=system.member)
+    disconnect_epias(plant.pk, actor=system.admin)
     for kwargs, error in (
         ({"provider_plant_id": 0}, "invalid_epias_plant"),
         ({"provider_plant_id": True}, "invalid_epias_plant"),
@@ -118,20 +118,20 @@ def test_connection_scope_identity_and_missing_configuration(
         with pytest.raises(ValidationError, match=error):
             connect_epias(
                 plant.pk,
-                actor=system.member,
+                actor=system.admin,
                 client=cast(EpiasClient, client),
                 provider_plant_id=cast(int, values["provider_plant_id"]),
                 expected_eic=cast(str, values["expected_eic"]),
             )
     Plant.objects.filter(pk=plant.pk).update(current_configuration=None)
     with pytest.raises(ValidationError, match="configuration_unavailable"):
-        connect(plant, system.member)
+        connect(plant, system.admin)
     Plant.objects.filter(pk=plant.pk).update(deleted_at=NOW)
     with pytest.raises(Plant.DoesNotExist):
         get_epias_status(plant.pk, actor=system.member)
 
 
-@pytest.mark.parametrize("change", ["approval", "plant", "region", "configuration"])
+@pytest.mark.parametrize("change", ["approval", "plant", "region", "configuration", "admin"])
 def test_connection_rechecks_changes_after_validation(
     monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
@@ -144,11 +144,17 @@ def test_connection_rechecks_changes_after_validation(
             Plant.objects.filter(pk=plant.pk).update(deleted_at=NOW)
         elif change == "region":
             Region.objects.filter(pk=system.region.pk).update(deleted_at=NOW)
+        elif change == "admin":
+            User.objects.filter(pk=system.admin.pk).update(is_superuser=False)
         else:
             Plant.objects.filter(pk=plant.pk).update(current_configuration=None)
 
-    with pytest.raises(ValidationError, match="configuration_unavailable"):
-        connect(plant, system.member, FixtureClient(revoke))
+    if change == "admin":
+        with pytest.raises(PermissionDenied):
+            connect(plant, system.admin, FixtureClient(revoke))
+    else:
+        with pytest.raises(ValidationError, match="configuration_unavailable"):
+            connect(plant, system.admin, FixtureClient(revoke))
     assert not EpiasConnection.objects.exists()
 
 
@@ -209,15 +215,15 @@ def test_daily_reconciliation_preserves_acquisitions_and_history(
     assert status["archived_days"] == 1
     assert status["last_success_at"] is not None
     assert RequestAttempt.objects.count() == requests
-    disconnect_epias(plant.pk, actor=system.member)
+    disconnect_epias(plant.pk, actor=system.admin)
     assert get_epias_status(plant.pk, actor=system.member)["connected"] is False
     event = PlantEvent.objects.get(plant=plant, action="epias_disconnected")
-    assert event.actor_id == system.member.pk
+    assert event.actor_id == system.admin.pk
     assert event.details == {"provider_plant_id": 7, "eic": linked.eic, "revision": 1}
     assert enqueue_due_epias_jobs(now=next_day) == []
     assert read_epias_history(plant.pk, actor=system.member)[0].pk == history[0].pk
     monkeypatch.setattr(timezone, "now", lambda: next_day + timedelta(hours=1))
-    reconnected = connect(plant, system.member)
+    reconnected = connect(plant, system.admin)
     assert reconnected.revision == linked.revision + 1
     assert PlantEvent.objects.filter(plant=plant, action="epias_connected").count() == 2
     assert EpiasCollectionJob.objects.filter(status="superseded").exists()
@@ -347,7 +353,7 @@ def test_publication_rechecks_revocation_and_deletion(
         elif change == "configuration":
             Plant.objects.filter(pk=plant.pk).update(current_configuration=None)
         elif change == "disconnect":
-            disconnect_epias(plant.pk, actor=system.member)
+            disconnect_epias(plant.pk, actor=system.admin)
         else:
             linked.delete()
         return day_data(provider, day)
@@ -387,7 +393,7 @@ def test_expired_leases_exhaust_budget_and_ignore_old_response(
 def test_provider_failures_are_redacted_bounded_and_honor_retry_after(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _, _, linked = connected(monkeypatch)
+    system, _, linked = connected(monkeypatch)
     job = EpiasCollectionJob.objects.first()
     assert job is not None
 
@@ -405,7 +411,7 @@ def test_provider_failures_are_redacted_bounded_and_honor_retry_after(
     assert job.status == "failed"
     assert not run_epias_job(job.pk, fetch=fail, now=now)
     assert not EpiasSnapshot.objects.exists()
-    assert get_epias_status(linked.plant_id, actor=linked.connected_by)["last_success_at"] is None
+    assert get_epias_status(linked.plant_id, actor=system.member)["last_success_at"] is None
 
 
 def test_identity_mismatch_and_unexpected_errors_cannot_publish(
@@ -504,7 +510,7 @@ def test_reconnection_same_clock_starts_new_jobs_and_hides_previous_mapping(
     job = EpiasCollectionJob.objects.first()
     assert job is not None
     assert run_epias_job(job.pk, fetch=day_data, now=NOW)
-    reconnected = connect(plant, system.member)
+    reconnected = connect(plant, system.admin)
     assert reconnected.revision == linked.revision + 1
     assert EpiasCollectionJob.objects.filter(status="pending").count() == 90
     assert get_epias_status(plant.pk, actor=system.member)["archived_days"] == 1

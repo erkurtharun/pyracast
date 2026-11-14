@@ -2,7 +2,7 @@ import { expect, test } from "./support/test";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
 
-test("connects, displays partial reported production and disconnects", async ({
+test("shows administrator-managed connection status and preserves the production archive", async ({
     page,
 }) => {
     const paged = (results: unknown[]) => ({
@@ -38,6 +38,7 @@ test("connects, displays partial reported production and disconnects", async ({
         current_configuration: configuration,
     };
     let connected = false;
+    let archivedDays = 0;
     let requestedDate = "";
     let requestedSource = "";
     await page.route("**/api/**", async (route) => {
@@ -81,28 +82,17 @@ test("connects, displays partial reported production and disconnects", async ({
                 observations: [],
             };
         else if (path.endsWith("/production-source/")) {
-            if (route.request().method() === "PUT") {
-                expect(route.request().postDataJSON()).toEqual({
-                    provider_plant_id: 3154,
-                    expected_eic: "40W000005011621Y",
-                });
-                connected = true;
-            }
-            if (route.request().method() === "DELETE") {
-                connected = false;
-                await route.fulfill({ status: 204 });
-                return;
-            }
+            expect(route.request().method()).toBe("GET");
             data = {
                 connected,
                 provider_plant_id: connected ? 3154 : null,
                 settlement_plant_id: connected ? 55 : null,
                 eic: connected ? "40W000005011621Y" : "",
                 name: connected ? "G4-BOR-1 GES" : "",
-                last_success_at: null,
-                last_error: "",
-                pending_jobs: 0,
-                archived_days: 1,
+                last_success_at: connected ? "2026-01-03T12:00:00Z" : null,
+                last_error: connected ? "Temporary collection failure" : "",
+                pending_jobs: connected ? 2 : 0,
+                archived_days: archivedDays,
                 first_settlement_date: connected ? "2025-12-01" : null,
                 last_settlement_date: connected ? "2026-01-01" : null,
             };
@@ -215,10 +205,36 @@ test("connects, displays partial reported production and disconnects", async ({
     await expect(
         page.getByRole("button", { name: "Latest settlement day" }),
     ).toHaveCount(0);
-    await page.getByLabel("EPİAŞ plant ID").fill("3154");
-    await page.getByLabel("Plant EIC").fill("40W000005011621Y");
-    await page.getByRole("button", { name: "Connect EPİAŞ" }).click();
+    const mutationControls = page.getByRole("button", {
+        name: /Connect EPİAŞ|Save connection|Edit connection|Disconnect collection/,
+    });
+    await expect(mutationControls).toHaveCount(0);
+    await expect(page.getByLabel("EPİAŞ plant ID")).toHaveCount(0);
+    await expect(page.getByLabel("Plant EIC")).toHaveCount(0);
+    await expect(
+        page.getByText("EPİAŞ · Not connected", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByText(/Your administrator manages the EPİAŞ connection/),
+    ).toBeVisible();
+    await expect(
+        page.getByText(
+            /Previously archived production remains available below/,
+        ),
+    ).toHaveCount(0);
+    connected = true;
+    archivedDays = 1;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(page.getByText("G4-BOR-1 GES")).toBeVisible();
+    await expect(mutationControls).toHaveCount(0);
+    await expect(
+        page.getByText(
+            /Archived days: 1 · Pending jobs: 2 · Last successful collection:/,
+        ),
+    ).toBeVisible();
+    await expect(
+        page.getByText("Collection error: Temporary collection failure"),
+    ).toBeVisible();
     await expect(
         page.getByText(
             "Archived settlement injection (UEVM): 2025-12-01 to 2026-01-01",
@@ -330,12 +346,19 @@ test("connects, displays partial reported production and disconnects", async ({
             "Reported production is provisional and may differ from net export. Settlement injection (UEVM) is preferred. Eligible for calibration when valid interval coverage is complete.",
         ),
     ).toBeVisible();
-    await page
-        .getByText("Connection settings and collection status", { exact: true })
-        .click();
-    await page.getByRole("button", { name: "Disconnect collection" }).click();
+    connected = false;
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(
-        page.getByRole("button", { name: "Connect EPİAŞ" }),
+        page.getByText("EPİAŞ · Not connected", { exact: true }),
+    ).toBeVisible();
+    await expect(mutationControls).toHaveCount(0);
+    await expect(
+        page.getByText("Collection error: Temporary collection failure"),
+    ).toHaveCount(0);
+    await expect(
+        page.getByText(
+            /Previously archived production remains available below/,
+        ),
     ).toBeVisible();
     await expect(
         table.getByRole("cell", { name: "1", exact: true }),

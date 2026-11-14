@@ -12,11 +12,12 @@
   </dl>
 {% endblock %}
 {% block content %}
-  {% if setup_form.errors or action_form.errors or review_form.errors %}
+  {% if setup_form.errors or action_form.errors or review_form.errors or epias_form.errors %}
     <section class="notice notice--error" role="alert" tabindex="-1" data-error-summary aria-labelledby="errors-title">
       <h2 id="errors-title">Review the changes</h2>
       {% if setup_form.errors %}<p><a href="#provider-title">Check the connection fields and messages below.</a></p>{% endif %}
       {% if action_form.errors %}<p><a href="#approval-title">Review the validation or approval message.</a></p>{% endif %}
+      {% if epias_form.errors %}<p><a href="#epias-title">Check the EPİAŞ identifiers and message below.</a></p>{% endif %}
       {% if review_form.errors %}{{ review_form.errors }}{% endif %}
     </section>
   {% endif %}
@@ -258,6 +259,41 @@
       {% if region.status == "approved" %}<p class="row-meta">This plant is approved. Connection health and saved forecast availability are shown above.</p>{% elif not can_approve %}<p class="row-meta" id="approve-hint">Validate the current setup and key revision to enable approval.</p>{% endif %}
     {% else %}
       <p class="empty">Save the private connection to continue.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel" aria-labelledby="epias-title">
+    <div class="panel-head"><h2 id="epias-title">EPİAŞ production connection</h2><p class="row-meta">Reported production</p></div>
+    {% if epias_connection %}
+      <dl class="facts facts--tinted">
+        <div><dt>Status</dt><dd>{% if epias_connection.enabled %}Connected{% else %}Disconnected{% endif %}</dd></div>
+        <div><dt>EPİAŞ plant</dt><dd>{{ epias_connection.name }} · {{ epias_connection.provider_plant_id|unlocalize }}</dd></div>
+        <div><dt>EIC</dt><dd>{{ epias_connection.eic }}</dd></div>
+      </dl>
+    {% else %}
+      <p class="empty">Not connected to EPİAŞ.</p>
+    {% endif %}
+    {% if epias_connection.enabled %}<details class="disclosure"{% if epias_form.errors %} open{% endif %}><summary>Change EPİAŞ connection</summary>{% endif %}
+    <p class="row-meta">Connecting verifies the identifiers with EPİAŞ and queues initial production collection.</p>
+    {% if not can_connect_epias %}<p class="callout" id="epias-configuration-hint">Approve the plant's current technical configuration before connecting.</p>{% endif %}
+    <form method="post" class="form">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="epias_connect">
+      {{ epias_form.non_field_errors }}
+      <div class="field-grid">
+        {% for field in epias_form %}
+          <div class="field{% if field.errors %} field--error{% endif %}">{{ field.as_field_group }}</div>
+        {% endfor %}
+      </div>
+      <div class="form-actions"><button type="submit" class="btn btn--primary"{% if not can_connect_epias %} disabled aria-describedby="epias-configuration-hint"{% endif %}>Save EPİAŞ connection</button></div>
+    </form>
+    {% if epias_connection.enabled %}</details>{% endif %}
+    {% if epias_connection.enabled %}
+      <form method="post" class="form-actions">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="epias_disconnect">
+        <button type="submit" class="btn btn--quiet">Disconnect EPİAŞ</button>
+      </form>
     {% endif %}
   </section>
 

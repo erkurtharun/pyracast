@@ -361,7 +361,7 @@ export function PlantWorkspace({
                         ))}
                     </nav>
                     {productionView === "automatic" ? (
-                        <EpiasProduction base={base} token={token} />
+                        <EpiasProduction base={base} />
                     ) : productionView === "comparison" ? (
                         <ForecastPerformance
                             key={configuration?.id}

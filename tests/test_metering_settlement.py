@@ -74,7 +74,7 @@ def link_settlement(monkeypatch: pytest.MonkeyPatch) -> EpiasConnection:
     system, plant = make_plant(monkeypatch)
     return connect_epias(
         plant.pk,
-        actor=system.member,
+        actor=system.admin,
         provider_plant_id=PROVIDER_PLANT.id,
         expected_eic=cast(str, PROVIDER_PLANT.eic),
         client=cast(EpiasClient, SettlementClient()),

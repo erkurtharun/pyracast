@@ -299,8 +299,10 @@ References: [Django migrations](https://docs.djangoproject.com/en/6.1/topics/mig
 
 ## API and delivery
 
-EPİAŞ production uses a separate `metering` app and durable `epias` queue. A tenant
-member links a plant by provider ID and EIC; server-side `EPIAS_USERNAME` and
+EPİAŞ production uses a separate `metering` app and durable `epias` queue. Only an
+MFA-verified platform administrator connects, changes or disconnects a plant by
+provider ID and EIC from its administration page. Tenant members can view the
+connection status and saved production archive; server-side `EPIAS_USERNAME` and
 `EPIAS_PASSWORD` obtain a cached TGT without exposing credentials to the browser.
 Collect 90 completed Istanbul dates of reported production on connection or a new plant configuration,
 then reconcile the trailing seven dates at the region's independent 03:00 nightly

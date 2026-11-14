@@ -111,6 +111,17 @@ test("an MFA administrator reviews plants and operations on desktop and mobile u
     await expect(
         page.getByText("Confirm the revised survey coordinates."),
     ).toBeVisible();
+    await expect(
+        page.getByRole("heading", { name: "EPİAŞ production connection" }),
+    ).toBeVisible();
+    await expect(page.getByLabel("EPİAŞ plant ID")).toBeVisible();
+    await expect(page.getByLabel("EIC:", { exact: true })).toBeVisible();
+    await expect(
+        page.getByRole("button", {
+            name: "Save EPİAŞ connection",
+            exact: true,
+        }),
+    ).toBeDisabled();
     await checkPage(page, testInfo, "admin-plant-desktop");
 
     await page
@@ -179,6 +190,16 @@ test("an MFA administrator reviews plants and operations on desktop and mobile u
     await expect(
         page.getByRole("status").filter({ hasText: "Plant approved." }),
     ).toBeVisible();
+    await expect(
+        page.getByRole("button", {
+            name: "Save EPİAŞ connection",
+            exact: true,
+        }),
+    ).toBeEnabled();
+    await checkPage(page, testInfo, "admin-epias-mobile");
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await checkPage(page, testInfo, "admin-epias-desktop");
+    await page.setViewportSize({ width: 375, height: 812 });
 
     await page.goto("/admin/");
     await checkPage(page, testInfo, "admin-overview-mobile");
