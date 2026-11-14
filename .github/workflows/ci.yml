@@ -141,12 +141,10 @@ jobs:
 
   verify_ubuntu:
     name: Verify (ubuntu-latest)
-    strategy:
-      matrix:
-        shard: [full]
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    env: &verify-environment
+    env:
+      TEST_SHARD: full
       PGHOST: 127.0.0.1
       PGPORT: 55432
       PGUSER: pyracast
@@ -201,12 +199,12 @@ jobs:
           PYTEST_ADDOPTS: --junitxml=test-results/pytest.xml --durations=25
         run: >-
           uv run --locked --no-sync --no-build python scripts/check.py
-          --shard ${{ matrix.shard }}/2 --shard-output "${{ runner.temp }}/windows-shard-${{ matrix.shard }}"
+          --shard ${{ env.TEST_SHARD }}/2 --shard-output "${{ runner.temp }}/windows-shard-${{ env.TEST_SHARD }}"
       - name: Upload test timings
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
-          name: pytest-results-${{ runner.os }}-${{ matrix.shard || 'full' }}
+          name: pytest-results-${{ runner.os }}-${{ env.TEST_SHARD || 'full' }}
           path: test-results/pytest.xml
           if-no-files-found: ignore
           retention-days: 7
@@ -214,14 +212,14 @@ jobs:
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: windows-shard-${{ matrix.shard }}
-          path: ${{ runner.temp }}/windows-shard-${{ matrix.shard }}/
+          name: windows-shard-${{ env.TEST_SHARD }}
+          path: ${{ runner.temp }}/windows-shard-${{ env.TEST_SHARD }}/
           if-no-files-found: error
           retention-days: 1
       - run: uv build --no-sources
-        if: runner.os == 'Linux' || matrix.shard == 1
+        if: runner.os == 'Linux' || env.TEST_SHARD == '1'
       - name: Check wheel in an isolated environment
-        if: runner.os == 'Linux' || matrix.shard == 1
+        if: runner.os == 'Linux' || env.TEST_SHARD == '1'
         shell: python
         run: |
           import os
@@ -258,7 +256,14 @@ jobs:
         shard: [1, 2]
     runs-on: windows-latest
     timeout-minutes: 45
-    env: *verify-environment
+    env:
+      TEST_SHARD: ${{ matrix.shard }}
+      PGHOST: 127.0.0.1
+      PGPORT: 55432
+      PGUSER: pyracast
+      PGDATABASE: pyracast
+      PYRACAST_SECRET_KEY: ci-only-key-not-for-deployment
+      PYTEST_XDIST_AUTO_NUM_WORKERS: '2'
     steps: *verify-steps
 
   verify_windows:
