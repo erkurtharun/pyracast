@@ -257,7 +257,15 @@ test("a customer manages one plant site through the real API", async ({
 
     await page.getByRole("button", { name: "Production", exact: true }).click();
     await page.getByRole("button", { name: "Automatic production" }).click();
-    await expect(page.getByLabel("EPİAŞ plant ID")).toBeVisible();
+    await expect(page.getByLabel("EPİAŞ plant ID")).toHaveCount(0);
+    await expect(
+        page.getByText("Your administrator manages the EPİAŞ connection."),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", {
+            name: /Connect EPİAŞ|Edit connection|Disconnect collection/,
+        }),
+    ).toHaveCount(0);
     await expect(page.getByLabel(/Measurement point/)).toHaveCount(0);
     await page
         .getByLabel("Archive date")
