@@ -10,7 +10,7 @@ from pyracast.accounts.models import Membership, Tenant
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import ForecastResult, ForecastSnapshot, RequestAttempt
 from pyracast.irradiance import local_day_bounds
-from pyracast.plants.models import PlantForecast
+from pyracast.plants.models import PlantConfiguration, PlantForecast
 from pyracast.plants.operations import revise_plant
 from pyracast.regions.models import Region
 from pyracast.solar import daylight_window
@@ -19,6 +19,95 @@ from tests.test_plant_operations import make_plant, publish_snapshot, snapshot_f
 
 pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 14)
+
+
+@pytest.mark.parametrize("earlier_forecast", [False, True])
+def test_region_rechecks_publication_when_binding_timezone_narrows_saved_cutoff(
+    monkeypatch: pytest.MonkeyPatch, earlier_forecast: bool
+) -> None:
+    system, _plant = make_plant(monkeypatch)
+    start, end = local_day_bounds(DAY, system.binding.timezone)
+    earlier = (
+        publish_snapshot(
+            snapshot_for(system, DAY, power_kw=0.1, collected_at=start + timedelta(hours=10))
+        )
+        if earlier_forecast
+        else None
+    )
+    publish_snapshot(snapshot_for(system, DAY, power_kw=0.9, collected_at=end + timedelta(hours=1)))
+    Region.objects.filter(pk=system.region.pk).update(timezone="UTC")
+    monkeypatch.setattr(timezone, "now", lambda: end + timedelta(hours=4))
+    client = Client()
+    client.force_login(system.member)
+    path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/"
+    requests = RequestAttempt.objects.count()
+    response = client.get(path, {"date": DAY.isoformat(), "data_source": "auto"})
+    assert response.status_code == 200, response.content
+    payload = response.json()
+    if earlier is None:
+        assert payload["source_kind"] == "estimated_actuals"
+        assert payload["result"] is None
+        assert payload["unavailable_reason"] == "estimated_actuals_unavailable"
+    else:
+        assert payload["source_kind"] == "forecast"
+        assert payload["result"]["provenance"]["source_snapshot_ids"] == [earlier.pk]
+        assert (
+            payload["result"]["provenance"]["selection_cutoff"]
+            == (end - timedelta(microseconds=1)).isoformat()
+        )
+    assert RequestAttempt.objects.count() == requests
+
+
+def test_saved_fallback_does_not_assume_a_configuration_after_its_binding_day_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    start, end = local_day_bounds(DAY, system.binding.timezone)
+    publish_snapshot(
+        snapshot_for(system, DAY, power_kw=0.1, collected_at=start + timedelta(hours=10))
+    )
+    PlantConfiguration.objects.filter(plant=plant).update(created_at=end + timedelta(hours=1))
+    Region.objects.filter(pk=system.region.pk).update(timezone="UTC")
+    monkeypatch.setattr(timezone, "now", lambda: end + timedelta(hours=4))
+    client = Client()
+    client.force_login(system.member)
+    path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/"
+    response = client.get(path, {"date": DAY.isoformat(), "data_source": "auto"})
+    assert response.status_code == 200, response.content
+    assert response.json()["source_kind"] == "estimated_actuals"
+    assert response.json()["result"] is None
+    assert response.json()["unavailable_reason"] == "estimated_actuals_unavailable"
+    assert not PlantForecast.objects.exists()
+
+
+@pytest.mark.parametrize("error_type", [ValueError, ArithmeticError])
+def test_saved_actuals_calculation_failure_returns_validation_error_without_forecast_write(
+    monkeypatch: pytest.MonkeyPatch, error_type: type[Exception]
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    _, end = local_day_bounds(DAY, system.binding.timezone)
+    publish_snapshot(snapshot_for(system, DAY, source_kind="estimated_actuals", collected_at=end))
+    monkeypatch.setattr(timezone, "now", lambda: end + timedelta(hours=1))
+
+    def fail_calculation(_snapshot: ForecastSnapshot, _date: date) -> dict[str, object]:
+        raise error_type("Saved input cannot be calculated.")
+
+    monkeypatch.setattr("pyracast.plants.history.historical_irradiance", fail_calculation)
+    client = Client()
+    client.force_login(system.member)
+    path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/"
+    requests = RequestAttempt.objects.count()
+    response = client.get(path, {"date": DAY.isoformat(), "data_source": "auto"})
+    assert response.status_code == 400, response.content
+    assert response.json() == {
+        "code": "invalid_request",
+        "detail": [
+            "This forecast could not be calculated. "
+            "Choose another day or contact your administrator."
+        ],
+    }
+    assert not PlantForecast.objects.exists()
+    assert RequestAttempt.objects.count() == requests
 
 
 @pytest.mark.parametrize("scope", ["plant", "region"])

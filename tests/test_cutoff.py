@@ -71,6 +71,10 @@ def test_fall_fold_uses_first_cutoff_occurrence() -> None:
         scheduled_slot=datetime(2026, 10, 24, 12, tzinfo=UTC)
     )
     ids = enqueue_due(datetime(2026, 10, 25, 1, 15, tzinfo=UTC))
-    assert CollectionJob.objects.get(pk=ids[0]).scheduled_slot == datetime(
+    assert len(ids) == 2
+    assert CollectionJob.objects.get(pk__in=ids, endpoint="forecasts").scheduled_slot == datetime(
         2026, 10, 25, 0, 30, tzinfo=UTC
     )
+    history = CollectionJob.objects.get(pk__in=ids, endpoint="estimated_actuals")
+    assert history.scheduled_slot == datetime(2026, 10, 24, 22, tzinfo=UTC)
+    assert history.target_date.isoformat() == "2026-10-24"
