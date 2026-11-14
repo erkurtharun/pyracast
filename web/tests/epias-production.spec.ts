@@ -104,6 +104,12 @@ test("shows administrator-managed connection status and preserves the production
                 timezone: "Europe/Istanbul",
                 unit: "MWh",
                 source_kind: "realtime_generation",
+                reported_total_mwh:
+                    requestedDate === "2026-01-03"
+                        ? 276
+                        : requestedDate === "2026-01-04"
+                          ? 223.04
+                          : null,
                 available_sources: ["realtime_generation"],
                 calibration_eligible: true,
                 calibration_blocker: null,
@@ -120,17 +126,24 @@ test("shows administrator-managed connection status and preserves the production
                 readings: Array.from({ length: 24 }, (_, hour) => {
                     const period_start = `${requestedDate}T${String(hour).padStart(2, "0")}:00:00+03:00`;
                     const missing =
-                        requestedDate !== "2026-01-03" && hour === 8;
-                    const energy =
-                        requestedDate === "2026-01-03"
+                        requestedDate === "2026-01-04"
+                            ? hour >= 19
+                            : requestedDate !== "2026-01-03" && hour === 8;
+                    const energy = missing
+                        ? null
+                        : requestedDate === "2026-01-04"
+                          ? hour < 7
+                              ? 0
+                              : hour === 7
+                                ? 3.04
+                                : 20
+                          : requestedDate === "2026-01-03"
                             ? hour
                             : hour === 7
                               ? 1
                               : hour === 9
                                 ? 2
-                                : missing
-                                  ? null
-                                  : 0;
+                                : 0;
                     return {
                         provider_timestamp: missing ? null : period_start,
                         period_start,
@@ -309,15 +322,11 @@ test("shows administrator-managed connection status and preserves the production
     await expect.poll(() => requestedSource).toBe("realtime_generation");
     await expect(table.getByRole("cell", { name: "Missing" })).toBeVisible();
     await page.getByLabel("Archive date").fill("2026-01-03");
-    await expect(
-        page.getByText("Sum of provider-reported hours: 276 MWh"),
-    ).toBeVisible();
+    await expect(page.getByText("Reported total: 276 MWh")).toBeVisible();
     await expect(table.getByRole("row")).toHaveCount(24);
     await page.getByLabel("Production source").selectOption("auto");
     await expect(page.getByText(/Combined production/)).toBeVisible();
-    await expect(
-        page.getByText("Sum of provider-reported hours: 276 MWh"),
-    ).toBeVisible();
+    await expect(page.getByText("Reported total: 276 MWh")).toBeVisible();
     await expect(table.getByText("UEVM", { exact: true })).toHaveCount(11);
     await expect(table.getByText("Provisional", { exact: true })).toHaveCount(
         12,
@@ -344,6 +353,28 @@ test("shows administrator-managed connection status and preserves the production
             "Reported production is provisional and may differ from net export. Settlement injection (UEVM) is preferred. Eligible for calibration when valid interval coverage is complete.",
         ),
     ).toBeVisible();
+    await page.getByLabel("Archive date").fill("2026-01-04");
+    await expect(page.getByText("Reported total: 223.04 MWh")).toBeVisible();
+    await expect(
+        page.getByText("Incomplete provider hours — total unavailable"),
+    ).toHaveCount(0);
+    await expect(table.getByRole("row")).toHaveCount(13);
+    const partialDownload = page.waitForEvent("download");
+    await page
+        .getByRole("button", { name: "Download CSV", exact: true })
+        .click();
+    const partialRecords = Papa.parse<Record<string, string>>(
+        await readFile((await (await partialDownload).path())!, "utf8"),
+        { header: true, skipEmptyLines: true },
+    ).data;
+    expect(partialRecords).toHaveLength(24);
+    for (const record of partialRecords.slice(19))
+        expect(record).toMatchObject({
+            energy_mwh: "",
+            reported: "false",
+            provider_timestamp: "",
+        });
+    expect(partialRecords[7]).toMatchObject({ energy_mwh: "3.04" });
     connected = false;
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(
@@ -357,6 +388,6 @@ test("shows administrator-managed connection status and preserves the production
         page.getByText(/Saved production is still available/),
     ).toBeVisible();
     await expect(
-        table.getByRole("cell", { name: "1", exact: true }),
+        table.getByRole("cell", { name: "3.04", exact: true }),
     ).toBeVisible();
 });

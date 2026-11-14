@@ -713,6 +713,8 @@ export interface components {
                   )
                 | null;
             complete: boolean;
+            /** Format: double */
+            reported_total_mwh: number | null;
             available_sources: components["schemas"]["EpiasSourceKindEnum"][];
             calibration_eligible: boolean;
             calibration_blocker: string | null;

@@ -3306,6 +3306,11 @@
                     "complete": {
                         "type": "boolean"
                     },
+                    "reported_total_mwh": {
+                        "type": "number",
+                        "format": "double",
+                        "nullable": true
+                    },
                     "available_sources": {
                         "type": "array",
                         "items": {
@@ -3347,6 +3352,7 @@
                     "complete",
                     "date",
                     "readings",
+                    "reported_total_mwh",
                     "snapshot",
                     "source_kind",
                     "source_snapshots",

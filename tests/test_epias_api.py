@@ -369,12 +369,14 @@ def test_new_settlement_replaces_provisional_hours_without_rewriting_archive() -
     before = client.get(path, {"date": "2020-01-01"}).json()
     assert before["source_kind"] == "realtime_generation"
     assert before["complete"] is True
+    assert before["reported_total_mwh"] == 120
     assert before["calibration_eligible"] is True
     assert [snapshot["id"] for snapshot in before["source_snapshots"]] == [provisional.pk]
     final = archive_source(connection, "settlement_injection", {8: "0", 9: "7"})
     after = client.get(path, {"date": "2020-01-01"}).json()
     assert after["source_kind"] == "mixed"
     assert after["complete"] is True
+    assert after["reported_total_mwh"] == 117
     assert after["snapshot"]["id"] == final.pk
     assert after["readings"][8]["energy_mwh"] == 0
     assert after["readings"][8]["snapshot_id"] == final.pk
@@ -421,9 +423,69 @@ def test_complementary_partial_sources_form_complete_day() -> None:
     data = client.get(path, {"date": "2020-01-01"}).json()
     assert data["source_kind"] == "mixed"
     assert data["complete"] is True
+    assert data["reported_total_mwh"] == 0
     assert [snapshot["complete"] for snapshot in data["source_snapshots"]] == [False, False]
     assert [row["energy_mwh"] for row in data["readings"]] == [0] * 24
     assert [row["snapshot_id"] for row in data["readings"]] == [realtime.pk, final.pk] * 12
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        (dict.fromkeys(range(19), "10"), 190),
+        (dict.fromkeys(range(8, 18), "10"), 100),
+        (dict.fromkeys(range(8, 18), "0"), 0),
+        (dict.fromkeys(range(9, 18), "10"), None),
+        (dict.fromkeys(range(8, 17), "10"), None),
+        (dict.fromkeys(range(8, 18), "10") | {12: None}, None),
+        (dict.fromkeys(range(8, 18), "10") | {12: "-1"}, None),
+        (dict.fromkeys(range(8, 18), "10") | {22: "3"}, 103),
+        (dict.fromkeys(range(8, 18), "1e308"), None),
+        ({}, None),
+    ],
+)
+@pytest.mark.parametrize("source", ["auto", "realtime_generation"])
+def test_reported_total_requires_daylight_hours_and_preserves_missing_nights(
+    values: dict[int, str | None], expected: float | None, source: str
+) -> None:
+    client, path, connection = connected_source()
+    snapshot = archive_source(connection, "realtime_generation", values)
+    response = client.get(path, {"date": "2020-01-01", "data_source": source})
+    assert response.status_code == 200, response.content
+    data = response.json()
+    assert data["reported_total_mwh"] == expected
+    assert data["complete"] is False
+    if values:
+        assert data["readings"][23]["energy_mwh"] is None
+        assert data["readings"][23]["reported"] is False
+    snapshot.refresh_from_db()
+    assert snapshot.complete is False
+    assert len(snapshot.readings) == len(values)
+
+
+def test_reported_total_uses_archived_location_and_selected_source_hours() -> None:
+    client, path, connection = connected_source()
+    archive_source(connection, "realtime_generation", dict.fromkeys(range(8, 18), "10"))
+    archive_source(connection, "settlement_injection", {8: "0", 9: "7"})
+    region = connection.plant.region
+    region.latitude = 90
+    region.save(update_fields=("latitude",))
+    data = client.get(path, {"date": "2020-01-01"}).json()
+    assert data["source_kind"] == "mixed"
+    assert data["complete"] is False
+    assert data["reported_total_mwh"] == 87
+    assert data["readings"][8]["energy_mwh"] == 0
+
+
+@pytest.mark.parametrize("hours", [19, 24])
+def test_reported_total_requires_full_day_during_polar_night(hours: int) -> None:
+    client, path, connection = connected_source()
+    snapshot = archive_source(connection, "realtime_generation", dict.fromkeys(range(hours), "1"))
+    binding = snapshot.configuration.binding
+    binding.latitude = 90
+    binding.save(update_fields=("latitude",))
+    data = client.get(path, {"date": "2020-01-01"}).json()
+    assert data["reported_total_mwh"] == (24 if hours == 24 else None)
 
 
 def test_missing_values_in_both_sources_have_no_selected_acquisition() -> None:

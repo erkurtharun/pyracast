@@ -215,11 +215,7 @@ function EpiasArchive({
     const visibleRows = positiveRows.length
         ? positiveRows
         : dataIntervalRange(rows, (row) => row.energy_mwh !== null);
-    const total =
-        (selectedHistory?.complete ?? selectedHistory?.snapshot?.complete) &&
-        rows.every((row) => row.energy_mwh !== null)
-            ? rows.reduce((sum, row) => sum + (row.energy_mwh ?? 0), 0)
-            : null;
+    const total = selectedHistory?.reported_total_mwh ?? null;
     const time = (value: string) =>
         new Date(value).toLocaleString("en-GB", {
             timeZone: selectedHistory?.timezone,
@@ -308,7 +304,7 @@ function EpiasArchive({
                     <p>
                         {total === null
                             ? "Incomplete provider hours — total unavailable"
-                            : `Sum of provider-reported hours: ${total.toLocaleString(undefined, { maximumFractionDigits: 3 })} MWh`}
+                            : `Reported total: ${total.toLocaleString(undefined, { maximumFractionDigits: 3 })} MWh`}
                     </p>
                     <ScrollRegion label="EPİAŞ reported hourly production">
                         <table className="production-table">

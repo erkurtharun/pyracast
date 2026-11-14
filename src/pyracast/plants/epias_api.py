@@ -71,6 +71,7 @@ class EpiasHistoryOutput(serializers.Serializer[Any]):
     unit = serializers.CharField()
     source_kind = serializers.ChoiceField(choices=(*PRODUCTION_SOURCES, "mixed"), allow_null=True)
     complete = serializers.BooleanField()
+    reported_total_mwh = serializers.FloatField(allow_null=True)
     available_sources = serializers.ListField(
         child=serializers.ChoiceField(choices=PRODUCTION_SOURCES)
     )

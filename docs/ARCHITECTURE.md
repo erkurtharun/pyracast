@@ -337,6 +337,10 @@ native hourly labels, MWh, missing values, collection/publication times and a
 payload digest. Policy `hour-start-istanbul-v1` treats 10:00 as [10:00, 11:00).
 Missing provider rows have null values and an explicit `reported: false` flag.
 Latest revisions never fill their missing hours from older acquisitions.
+The reported total sums valid selected hours once every hour intersecting astronomical
+daylight is available. It includes reported nighttime values; missing nights remain
+null and do not block the total. `complete` still requires all 24 provider hours.
+Use the archived site's coordinates; polar nights require all 24 hours.
 
 Net-export calibration selects manual observations, then valid UEVM hours, then
 provisional reported-production hours. The latter are explicitly labeled proxies;

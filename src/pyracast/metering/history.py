@@ -1,5 +1,6 @@
 from datetime import date, datetime, time, timedelta
-from math import isfinite
+from math import fsum, isfinite
+from typing import cast
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
@@ -9,6 +10,7 @@ from pyracast.metering import operations
 from pyracast.metering.models import EpiasConnection, EpiasSnapshot
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import configuration_is_current
+from pyracast.solar import daylight_window
 
 PRODUCTION_SOURCES = ("realtime_generation", "settlement_injection")
 
@@ -98,6 +100,36 @@ def _calibration_blocker(plant: Plant, snapshot: EpiasSnapshot) -> str | None:
     return None
 
 
+def _reported_total(
+    snapshot: EpiasSnapshot | None, day: date, readings: list[dict[str, object]]
+) -> float | None:
+    if snapshot is None or len(readings) != 24:
+        return None
+    valid = [_valid_energy(row) for row in readings]
+    if not all(valid):
+        binding = snapshot.configuration.binding
+        daylight = daylight_window(day, "Europe/Istanbul", binding.latitude, binding.longitude)
+        required = [
+            index
+            for index, row in enumerate(readings)
+            if any(
+                cast(datetime, row["period_start"]) < end
+                and cast(datetime, row["period_end"]) > start
+                for start, end in daylight.windows
+            )
+        ]
+        if not required or not all(valid[index] for index in required):
+            return None
+    try:
+        return fsum(
+            float(cast(str | int | float, row["total_mwh"]))
+            for row, available in zip(readings, valid, strict=True)
+            if available
+        )
+    except OverflowError:
+        return None
+
+
 def read_production_day(
     plant: Plant, *, actor: User, day: date, source_kind: str = "auto"
 ) -> dict[str, object]:
@@ -143,6 +175,7 @@ def read_production_day(
         "unit": "MWh",
         "source_kind": selected,
         "complete": len(readings) == 24 and all(_valid_energy(row) for row in readings),
+        "reported_total_mwh": _reported_total(snapshot, day, readings),
         "available_sources": available,
         "calibration_eligible": blocker is None,
         "calibration_blocker": blocker,
