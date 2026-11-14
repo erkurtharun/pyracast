@@ -258,7 +258,13 @@ function Workspace({
                     </span>
                     <span className="topbar-label">{tenant?.name}</span>
                 </header>
-                <main id="main" tabIndex={-1}>
+                <main
+                    id="main"
+                    tabIndex={-1}
+                    className={
+                        view === "profile" ? "account-settings" : undefined
+                    }
+                >
                     {logoutError && <Notice error>{logoutError}</Notice>}
                     {tenants.error && <Notice error>{tenants.error}</Notice>}
                     {view === "profile" ? (

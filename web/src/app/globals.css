@@ -187,9 +187,11 @@ textarea:focus-visible,
 }
 .language-control {
     min-width: 0;
+    width: fit-content;
 }
 .sidebar .language-control {
     margin-top: 20px;
+    color: #f4f7ee;
 }
 .sidebar .language-select select {
     color: #f4f7ee;
@@ -197,26 +199,54 @@ textarea:focus-visible,
     border-color: #ffffff29;
 }
 .language-select {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+    position: relative;
+    display: inline-flex;
     font-size: 13px;
 }
+.language-select svg {
+    position: absolute;
+    inset-inline-start: 12px;
+    top: 13px;
+    pointer-events: none;
+}
+.language-select::after {
+    content: "";
+    position: absolute;
+    inset-inline-end: 14px;
+    top: 18px;
+    width: 6px;
+    height: 6px;
+    border-inline-end: 1.5px solid currentColor;
+    border-bottom: 1.5px solid currentColor;
+    transform: rotate(45deg);
+    pointer-events: none;
+}
 .language-select select {
-    width: auto;
+    appearance: none;
+    width: 128px;
     min-height: 44px;
     max-width: 100%;
-    padding: 8px 10px;
+    padding: 8px 32px 8px 38px;
     border: 1px solid var(--line);
-    border-radius: 8px;
+    border-radius: 22px;
+    background: var(--white);
+    color: inherit;
     font: inherit;
+    font-weight: 550;
+    cursor: pointer;
+}
+.language-select select:hover:not(:disabled) {
+    border-color: currentColor;
+}
+.language-select select:disabled {
+    cursor: wait;
 }
 .language-control > p,
 .language-control > span {
     font-size: 12px;
 }
 .auth-form-panel > .language-control {
+    align-self: flex-end;
     margin-bottom: 20px;
 }
 .loading-indicator {
@@ -478,6 +508,16 @@ button.context-label:hover {
 }
 .panel > :last-child {
     margin-bottom: 0;
+}
+.account-settings .panel > form + form {
+    margin-top: 24px;
+}
+.account-settings .panel > .button {
+    margin-inline-end: 12px;
+    margin-bottom: 8px;
+}
+.account-settings .panel > .text-button {
+    margin-inline-end: 12px;
 }
 .fine {
     font-size: 12px;
@@ -1576,20 +1616,6 @@ pre,
         grid-row: 1;
         justify-self: end;
         margin: 0;
-    }
-    .sidebar .language-select {
-        gap: 6px;
-    }
-    .sidebar .language-select label {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        overflow: hidden;
-        clip-path: inset(50%);
-    }
-    .sidebar .language-select select {
-        padding-inline: 8px;
-        font-size: 12px;
     }
     .sidebar .tenant-select {
         grid-column: 1/-1;
