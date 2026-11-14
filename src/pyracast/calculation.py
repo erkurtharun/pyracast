@@ -12,6 +12,7 @@ from pyracast.irradiance import (
     integrate_day,
 )
 from pyracast.irradiance.weather_reference import summarize_weather, unavailable_weather
+from pyracast.solar import daylight_energy_windows, daylight_window, summarize_daylight
 
 
 def _interval(row: dict[str, object]) -> PowerInterval:
@@ -50,6 +51,7 @@ def calculate(binding: SiteBinding, target_date: date, data: ProviderData) -> di
     )
     series = estimate_intervals([_interval(row) for row in data.intervals], configuration, vintage)
     result = integrate_day(series, target_date, binding.timezone)
+    daylight = daylight_window(target_date, binding.timezone, binding.latitude, binding.longitude)
     flags = set(result.quality_flags)
     if data.raw_payload.get("synthetic") is True:
         flags.add("synthetic_fixture")
@@ -68,6 +70,23 @@ def calculate(binding: SiteBinding, target_date: date, data: ProviderData) -> di
         "valid_coverage_seconds": result.valid_coverage_seconds,
         "coverage_fraction": result.coverage_fraction,
         "complete": result.complete,
+        "daylight": summarize_daylight(
+            daylight,
+            ((interval.start, interval.end, interval.ghi_wm2) for interval in result.intervals),
+            start=result.start,
+            end=result.end,
+            energy_windows=daylight_energy_windows(
+                daylight,
+                (
+                    (
+                        datetime.fromisoformat(str(row.get("original_start", row["start"]))),
+                        datetime.fromisoformat(str(row.get("original_end", row["end"]))),
+                    )
+                    for row in data.intervals
+                ),
+            ),
+            unit="kwh_m2",
+        ),
         "intervals": [
             {
                 "start": interval.start.isoformat(),

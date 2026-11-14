@@ -7,7 +7,12 @@ from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.incidents.operations import select_incidents
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_sources import apply_composition, replay_composition
-from pyracast.plants.forecasting import forecast_payload, power_intervals, power_limit
+from pyracast.plants.forecasting import (
+    forecast_daylight,
+    forecast_payload,
+    power_intervals,
+    power_limit,
+)
 from pyracast.plants.incident_policy import incidents_unchanged
 from pyracast.plants.measurements import production_identity_current
 from pyracast.plants.models import CalibrationRun, PlantConfiguration
@@ -27,6 +32,11 @@ def _limited_forecast(
     bounds: tuple[datetime, datetime],
     resolution_minutes: int,
 ) -> dict[str, Any]:
+    daylight, energy_windows = forecast_daylight(
+        configuration,
+        bounds[0].astimezone(ZoneInfo(configuration.binding.timezone)).date(),
+        snapshot.normalized_intervals if source_intervals is None else source_intervals,
+    )
     result: dict[str, Any] = forecast(
         affected_power(
             power_intervals(
@@ -45,6 +55,8 @@ def _limited_forecast(
         end=bounds[1],
         resolution_minutes=resolution_minutes,
         limit_mw=None,
+        daylight=daylight,
+        energy_windows=energy_windows,
     )
     for key in ("factor", "limit_mw", "model_version", "configuration"):
         result[key] = normal[key]

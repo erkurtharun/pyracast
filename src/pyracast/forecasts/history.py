@@ -165,9 +165,9 @@ def _regional_current_forecast(
     region: Region, target_date: date, now: datetime
 ) -> dict[str, object]:
     binding = region.approved_binding
+    start, end = local_day_bounds(target_date, binding.timezone if binding else region.timezone)
     snapshots: list[ForecastSnapshot] = []
     if binding is not None:
-        start, end = local_day_bounds(target_date, binding.timezone)
         snapshots = current_forecast_snapshots(
             binding_id=binding.pk, start=start, end=end, as_of=now
         )
@@ -182,6 +182,7 @@ def _regional_current_forecast(
                 target_date,
                 snapshot_data(snapshot, intervals=list(composition.intervals)),
             )
+            result["reference_capacity_normalization"] = normalization_provenance(snapshot)
             result["provenance"] = {
                 "snapshot_id": snapshot.pk,
                 "binding_id": binding.pk,

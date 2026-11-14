@@ -231,6 +231,9 @@ def test_outage_scenario_and_invalidated_calibration_keep_composite_morning(
     assert affected["intervals"][13]["mean_power_mw"] == pytest.approx(13)
     assert affected["intervals"][13]["source_snapshot_ids"] == [latest.pk]
     assert affected["energy_mwh"] == pytest.approx(331.5)
+    assert affected["daylight"]["complete"] is normal["daylight"]["complete"] is True
+    assert affected["daylight"]["windows"] == normal["daylight"]["windows"]
+    assert 0 < affected["daylight"]["energy_mwh"] < normal["daylight"]["energy_mwh"]
     assert affected["provenance"]["selection_policy"] == "latest-forecast-coverage-v2"
     for key in ("source_snapshots", "source_segments", "source_intervals"):
         assert affected["provenance"][key] == normal["provenance"][key]

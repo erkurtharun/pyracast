@@ -1,4 +1,5 @@
 from copy import deepcopy
+from dataclasses import replace
 from datetime import date, timedelta
 from typing import Any
 
@@ -133,6 +134,58 @@ def test_regional_forecast_selects_the_normalized_copy_of_the_same_vintage(
     body = response.json()
     assert body["binding_revision"] == target.pk
     assert body["result"]["reference_capacity_normalization"]["factor"] == 1000
+
+
+@pytest.mark.parametrize("normalized_primary", [False, True])
+def test_regional_composition_preserves_primary_normalization_and_each_source_identity(
+    monkeypatch: pytest.MonkeyPatch, normalized_primary: bool
+) -> None:
+    system, target = scaled_system(monkeypatch)
+    day = NOW.date()
+    original = snapshot_for(
+        system,
+        day,
+        power_kw=0.6,
+        collected_at=NOW - timedelta(hours=1) if normalized_primary else None,
+    )
+    if normalized_primary:
+        original.normalized_intervals = original.normalized_intervals[21:]
+    publish_snapshot(original)
+    (copied_id,) = normalize(system, target)
+    native = snapshot_for(
+        replace(system, binding=target),
+        day,
+        power_kw=600,
+        collected_at=None if normalized_primary else NOW - timedelta(hours=1),
+    )
+    if not normalized_primary:
+        native.normalized_intervals = native.normalized_intervals[21:]
+    publish_snapshot(native)
+    client = Client()
+    client.force_login(system.member)
+    response = client.get(
+        f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/",
+        {"date": day.isoformat(), "data_source": "forecast"},
+    )
+    assert response.status_code == 200
+    payload = response.json()["result"]
+    primary_id, earlier_id = (
+        (copied_id, native.pk) if normalized_primary else (native.pk, copied_id)
+    )
+    assert payload["complete"] is True
+    assert payload["energy_kwh_m2"] == pytest.approx(14.4)
+    assert payload["provenance"]["snapshot_id"] == primary_id
+    assert payload["provenance"]["source_snapshot_ids"] == [primary_id, earlier_id]
+    assert payload["intervals"][20]["source_snapshot_ids"] == [earlier_id]
+    assert payload["intervals"][21]["source_snapshot_ids"] == [primary_id]
+    normalization = payload["reference_capacity_normalization"]
+    if normalized_primary:
+        assert normalization["source_snapshot_id"] == original.pk
+        assert normalization["source_binding_id"] == system.binding.pk
+        assert normalization["target_capacity_kw"] == 1000
+        assert normalization["factor"] == 1000
+    else:
+        assert normalization is None
 
 
 @pytest.mark.parametrize("reference", ["", " " * 3, "x" * 1001])

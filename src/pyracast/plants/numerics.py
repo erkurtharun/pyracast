@@ -7,6 +7,8 @@ from statistics import median
 from typing import cast
 from zoneinfo import ZoneInfo
 
+from pyracast.solar import Daylight, TimeWindows, daylight_energy_windows, summarize_daylight
+
 MODEL_VERSION = "reference-power-transfer-v1"
 POLICY_VERSION = "regularized-huber-v6"
 DAYLIGHT_COVERAGE_POLICY = "whole-meter-intervals-cover-daylight-v1"
@@ -128,6 +130,8 @@ def forecast(
     resolution_minutes: int,
     limit_mw: float | None,
     factor: float = 1.0,
+    daylight: Daylight | None = None,
+    energy_windows: TimeWindows | None = None,
 ) -> dict[str, object]:
     start, end = _bounds(start, end)
     if resolution_minutes not in (30, 60):
@@ -171,7 +175,7 @@ def forecast(
     hours = (end - start).total_seconds() / 3600
     complete = abs(covered_hours - hours) < 1e-9
     _finite(partial, "Forecast total energy")
-    return {
+    result: dict[str, object] = {
         "start": start.isoformat(),
         "end": end.isoformat(),
         "resolution_minutes": resolution_minutes,
@@ -187,6 +191,31 @@ def forecast(
         + ([] if complete else ["incomplete"])
         + (["uniform_mean_proration"] if prorated else []),
     }
+    if daylight is not None:
+        result["daylight"] = summarize_daylight(
+            daylight,
+            (
+                (
+                    interval.start,
+                    interval.end,
+                    None
+                    if interval.power_mw is None
+                    else interval.power_mw * factor
+                    if limit_mw is None
+                    else min(limit_mw, interval.power_mw * factor),
+                )
+                for interval in intervals
+            ),
+            start=start,
+            end=end,
+            energy_windows=energy_windows
+            if energy_windows is not None
+            else daylight_energy_windows(
+                daylight, ((interval.start, interval.end) for interval in intervals)
+            ),
+            unit="mwh",
+        )
+    return result
 
 
 def _rows(

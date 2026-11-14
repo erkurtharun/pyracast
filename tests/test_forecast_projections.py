@@ -40,6 +40,8 @@ def saved_snapshot() -> ForecastSnapshot:
         region_revision=1,
         capacity_kw=1,
         capacity_semantics_verified=True,
+        latitude=37.80375,
+        longitude=34.460913,
         timezone="Europe/Istanbul",
     )
     snapshot = ForecastSnapshot(binding=binding, collected_at=NOW, source_kind="forecast")

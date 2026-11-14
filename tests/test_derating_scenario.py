@@ -78,6 +78,11 @@ def test_live_outlook_adds_a_conditional_scenario_for_a_suspected_derating(
     assert scenario["inverter_limit_scaled"] is False
     affected = scenario["result"]
     assert affected["partial_energy_mwh"] == pytest.approx(0.8 * normal["partial_energy_mwh"])
+    assert affected["daylight"]["complete"] is normal["daylight"]["complete"] is True
+    assert affected["daylight"]["windows"] == normal["daylight"]["windows"]
+    assert affected["daylight"]["energy_mwh"] == pytest.approx(
+        0.8 * normal["daylight"]["energy_mwh"]
+    )
     assert affected["factor"] == normal["factor"] == 0.5
     assert affected["model_version"] == normal["model_version"]
     assert affected["provenance"]["scenario_policy"] == "suspected-derating-v1"

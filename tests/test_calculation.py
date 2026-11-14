@@ -24,6 +24,8 @@ def binding() -> SiteBinding:
         provider_account=ProviderAccount(provider="fixture"),
         capacity_kw=2,
         capacity_semantics_verified=True,
+        latitude=0,
+        longitude=0,
         timezone="UTC",
     )
 

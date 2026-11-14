@@ -46,6 +46,24 @@ A constant 600 W/m² for 30 minutes contributes 0.3 kWh/m². Partial-interval pr
 
 Return partial energy, coverage and completeness separately. Initially require valid coverage of the entire local day, including night, for a complete total; otherwise return a null daily total and the available partial energy. Any later astronomical night-filling policy must be explicit, flag inferred values and preserve partially sunlit intervals. Sum only compatible intervals from one selected vintage, or disclose an explicit mixing policy. Do not label summed interval P10/P90 values as daily quantiles.
 
+Forecast projections additionally report a separate `daylight` summary using the
+shared `astral-3.2-sea-level-v1` windows. Its completeness and coverage require valid
+values during astronomical daylight. Its `whole_native_intervals` energy scope
+retains the whole source intervals overlapping those windows, clipped only to the
+selected local day: sunrise and sunset do not divide an interval mean into invented
+day/night energy. Original native boundaries determine this scope even after
+forecast-composition or outage splits, and electrical limits apply before aggregation.
+The energy total additionally requires valid values throughout those selected native
+boundary intervals; a missing boundary fragment can leave the total null even at
+100% astronomical daylight coverage. The summary is independent of the requested
+30/60-minute display resolution.
+Daylight source coverage and valid-value coverage remain separate; zero reference
+power with unknown sunlight still cannot establish GHI. Missing daylight values
+give a null daylight total and an available partial estimate. Polar night has no
+daylight total or coverage fraction. The frontend opens this scope, while existing
+full-day fields, saved outputs and raw intervals keep their original meaning; no
+missing nighttime values are filled or classified from this summary.
+
 ## Validation and output
 
 Primary metrics are daily kWh/m² MAE and signed bias against matched Solcast forecasts. Also measure daylight GHI error, low-sun behavior and coverage. Use chronological day blocks and held-out locations for geographic claims. Avoid relative errors near zero and leakage from later observations. A few weeks can verify the pipeline; they do not establish seasonal validity.

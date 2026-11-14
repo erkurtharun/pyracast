@@ -32,6 +32,7 @@ from pyracast.plants.transfer import (
     transfer_model,
 )
 from pyracast.regions.models import Region
+from pyracast.solar import Daylight, TimeWindows, daylight_energy_windows, daylight_window
 
 SELECTION_POLICY = "first-available-day-ahead-v1"
 RETROSPECTIVE_ACTIVATIONS = 60
@@ -210,6 +211,26 @@ def _historical_selection(
     return calibration, record
 
 
+def forecast_daylight(
+    configuration: PlantConfiguration,
+    target_date: date,
+    source_intervals: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+) -> tuple[Daylight, TimeWindows]:
+    binding = configuration.binding
+    daylight = daylight_window(target_date, binding.timezone, binding.latitude, binding.longitude)
+    windows = daylight_energy_windows(
+        daylight,
+        (
+            (
+                datetime.fromisoformat(row.get("original_start", row["start"])),
+                datetime.fromisoformat(row.get("original_end", row["end"])),
+            )
+            for row in source_intervals
+        ),
+    )
+    return daylight, windows
+
+
 def forecast_payload(
     configuration: PlantConfiguration,
     snapshot: ForecastSnapshot,
@@ -220,8 +241,14 @@ def forecast_payload(
     source_intervals: tuple[dict[str, Any], ...] | None = None,
 ) -> dict[str, object]:
     start, end = local_day_bounds(target_date, configuration.binding.timezone)
+    intervals = power_intervals(snapshot, configuration, source_intervals=source_intervals)
+    daylight, energy_windows = forecast_daylight(
+        configuration,
+        target_date,
+        snapshot.normalized_intervals if source_intervals is None else source_intervals,
+    )
     result = forecast(
-        power_intervals(snapshot, configuration, source_intervals=source_intervals),
+        intervals,
         start=start,
         end=end,
         resolution_minutes=resolution_minutes,
@@ -229,6 +256,8 @@ def forecast_payload(
         factor=calibration.factor
         if calibration is not None and calibration.factor is not None
         else 1,
+        daylight=daylight,
+        energy_windows=energy_windows,
     )
     flags = list(result["quality_flags"]) if isinstance(result["quality_flags"], list) else []
     result["model_version"] = transfer_model(configuration)

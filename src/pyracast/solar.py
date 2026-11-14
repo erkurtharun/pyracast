@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from math import isfinite
@@ -23,6 +24,94 @@ class Daylight:
     sunrise: datetime | None
     sunset: datetime | None
     status: Literal["normal", "polar_day", "polar_night"]
+
+
+type TimeWindows = tuple[tuple[datetime, datetime], ...]
+
+
+def daylight_energy_windows(
+    daylight: Daylight, native_bounds: Iterable[tuple[datetime, datetime]]
+) -> TimeWindows:
+    selected: list[tuple[datetime, datetime]] = []
+    for begin, stop in sorted(
+        (left.astimezone(UTC), right.astimezone(UTC)) for left, right in native_bounds
+    ):
+        if not any(begin < end and stop > start for start, end in daylight.windows):
+            continue
+        if selected and begin <= selected[-1][1]:
+            selected[-1] = (selected[-1][0], max(stop, selected[-1][1]))
+        else:
+            selected.append((begin, stop))
+    return tuple(selected)
+
+
+def summarize_daylight(
+    daylight: Daylight,
+    intervals: Iterable[tuple[datetime, datetime, float | None]],
+    *,
+    start: datetime,
+    end: datetime,
+    energy_windows: TimeWindows,
+    unit: Literal["mwh", "kwh_m2"],
+) -> dict[str, object]:
+    """Integrate validated native means, retaining complete daylight boundary intervals."""
+    coverage = valid_coverage = energy_coverage = timedelta()
+    energy = 0.0
+    scale = 3600 if unit == "mwh" else 3_600_000
+    start, end = start.astimezone(UTC), end.astimezone(UTC)
+    for begin, stop, value in intervals:
+        begin, stop = max(start, begin.astimezone(UTC)), min(end, stop.astimezone(UTC))
+        if begin >= stop:
+            continue
+        overlap = sum(
+            (
+                min(stop, right) - max(begin, left)
+                for left, right in daylight.windows
+                if begin < right and stop > left
+            ),
+            timedelta(),
+        )
+        coverage += overlap
+        if value is None:
+            continue
+        valid_coverage += overlap
+        for left, right in energy_windows:
+            if begin < right and stop > left:
+                covered = min(stop, right) - max(begin, left)
+                energy_coverage += covered
+                energy += value * (covered.total_seconds() / scale)
+    duration = sum((right - left for left, right in daylight.windows), timedelta())
+    energy_duration = sum(
+        (
+            min(end, right) - max(start, left)
+            for left, right in energy_windows
+            if left < end and right > start
+        ),
+        timedelta(),
+    )
+    complete = (
+        duration > timedelta() and valid_coverage == duration and energy_coverage == energy_duration
+    )
+    if not isfinite(energy):
+        raise ValueError("Daylight energy must be finite")
+    return {
+        "policy": DAYLIGHT_POLICY,
+        "energy_scope": "whole_native_intervals",
+        "status": daylight.status,
+        "sunrise": daylight.sunrise.isoformat() if daylight.sunrise is not None else None,
+        "sunset": daylight.sunset.isoformat() if daylight.sunset is not None else None,
+        "windows": [
+            {"start": left.isoformat(), "end": right.isoformat()}
+            for left, right in daylight.windows
+        ],
+        "duration_seconds": duration.total_seconds(),
+        "coverage_seconds": coverage.total_seconds(),
+        "valid_coverage_seconds": valid_coverage.total_seconds(),
+        "coverage_fraction": valid_coverage / duration if duration else None,
+        "complete": complete,
+        f"energy_{unit}": energy if complete else None,
+        f"partial_energy_{unit}": energy,
+    }
 
 
 def daylight_window(day: date, timezone: str, latitude: float, longitude: float) -> Daylight:
