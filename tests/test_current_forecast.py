@@ -57,9 +57,11 @@ def test_daily_acquisitions_refresh_live_outlook_and_keep_day_ahead_replay(
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=2))
     past = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, source=source)
     if source == "auto":
-        assert past["source_kind"] == "estimated_actuals"
-        assert past["result"] is None
-        assert past["unavailable_reason"] == "estimated_actuals_unavailable"
+        assert past["source_kind"] == "forecast"
+        past_payload = cast(dict[str, Any], past["result"])
+        assert past_payload["energy_mwh"] == pytest.approx(936)
+        assert past_payload["provenance"]["snapshot_id"] == snapshots[-1].pk
+        assert "forecast_fallback" in past_payload["quality_flags"]
     else:
         assert past["result"] == archived_payload
     assert PlantForecast.objects.get().payload == archived_payload

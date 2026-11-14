@@ -16,6 +16,16 @@ def automatic_forecast(
     plant: Plant, target_date: date, resolution_minutes: int, now: datetime
 ) -> dict[str, object]:
     latest = current_forecast(plant, target_date, resolution_minutes, now)
+    return reference_transition_forecast(plant, target_date, resolution_minutes, now, latest)
+
+
+def reference_transition_forecast(
+    plant: Plant,
+    target_date: date,
+    resolution_minutes: int,
+    now: datetime,
+    latest: dict[str, object],
+) -> dict[str, object]:
     payload = cast(dict[str, object] | None, latest["result"])
     if (
         target_date != now.astimezone(ZoneInfo(plant.region.timezone)).date()

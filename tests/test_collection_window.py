@@ -8,15 +8,22 @@ from pyracast.collection_window import nightly_window
 
 def test_night_window_uses_region_timezone() -> None:
     assert nightly_window(date(2026, 11, 12), "Europe/Istanbul") == (
-        datetime(2026, 11, 12, 0, tzinfo=UTC),
+        datetime(2026, 11, 11, 21, tzinfo=UTC),
         datetime(2026, 11, 12, 6, tzinfo=UTC),
     )
 
 
 def test_night_window_starts_at_first_real_half_hour_after_clock_gap() -> None:
-    assert nightly_window(date(2026, 3, 29), "Europe/Helsinki") == (
-        datetime(2026, 3, 29, 1, tzinfo=UTC),
-        datetime(2026, 3, 29, 6, tzinfo=UTC),
+    assert nightly_window(date(2026, 9, 6), "America/Santiago") == (
+        datetime(2026, 9, 6, 4, tzinfo=UTC),
+        datetime(2026, 9, 6, 12, tzinfo=UTC),
+    )
+
+
+def test_night_window_uses_first_repeated_midnight() -> None:
+    assert nightly_window(date(2015, 11, 1), "America/Havana") == (
+        datetime(2015, 11, 1, 4, tzinfo=UTC),
+        datetime(2015, 11, 1, 14, tzinfo=UTC),
     )
 
 

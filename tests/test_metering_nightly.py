@@ -44,7 +44,7 @@ def test_initial_yesterday_collection_uses_the_remaining_night_window(
 
 
 @pytest.mark.parametrize(
-    ("minutes", "enabled"), [(-1, True), (360, True), (400, True), (93, False)]
+    ("minutes", "enabled"), [(-181, True), (360, True), (400, True), (93, False)]
 )
 def test_initial_backfill_outside_an_enabled_night_keeps_its_independent_budget(
     monkeypatch: pytest.MonkeyPatch, minutes: int, enabled: bool
@@ -94,19 +94,21 @@ def test_initial_yesterday_partial_data_can_recover_after_three_attempts(
     assert EpiasSnapshot.objects.filter(job=job, complete=True).count() == 1
 
 
-def test_three_am_slot_and_nine_am_deadline_are_independent_of_forecasts(
+def test_midnight_slot_and_nine_am_deadline_are_independent_of_forecasts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, _, _ = connected(monkeypatch)
     assert not EpiasCollectionJob.objects.filter(retry_until__isnull=False).exists()
     CollectionSchedule.objects.create(
-        region=system.region, times=[], effective_from=NEXT_NIGHT - timedelta(hours=1)
+        region=system.region, times=[], effective_from=NEXT_NIGHT - timedelta(hours=4)
     )
-    assert enqueue_due_epias_jobs(now=NEXT_NIGHT - timedelta(minutes=1)) == []
-    identifiers = enqueue_due_epias_jobs(now=NEXT_NIGHT)
+    midnight = NEXT_NIGHT - timedelta(hours=3)
+    assert enqueue_due_epias_jobs(now=midnight - timedelta(minutes=1)) == []
+    identifiers = enqueue_due_epias_jobs(now=midnight)
     assert len(identifiers) == 7
+    assert enqueue_due_epias_jobs(now=midnight + timedelta(seconds=1)) == identifiers
     jobs = EpiasCollectionJob.objects.filter(pk__in=identifiers)
-    assert set(jobs.values_list("scheduled_for", flat=True)) == {NEXT_NIGHT}
+    assert set(jobs.values_list("scheduled_for", flat=True)) == {midnight}
     nightly = jobs.get(target_day=NEXT_NIGHT.date() - timedelta(days=1))
     assert nightly.target_day == NEXT_NIGHT.date() - timedelta(days=1)
     assert nightly.retry_until == NEXT_NIGHT + timedelta(hours=6)
@@ -120,6 +122,23 @@ def test_three_am_slot_and_nine_am_deadline_are_independent_of_forecasts(
     jobs.delete()
     assert enqueue_due_epias_jobs(now=NEXT_NIGHT + timedelta(hours=6)) == []
     assert EpiasCollectionJob.objects.count() == 90
+
+
+@pytest.mark.parametrize("complete", [False, True])
+def test_midnight_rollout_reuses_existing_three_am_production_slots(
+    monkeypatch: pytest.MonkeyPatch, complete: bool
+) -> None:
+    job = nightly_job(monkeypatch)
+    jobs = EpiasCollectionJob.objects.filter(connection=job.connection, retry_until=job.retry_until)
+    jobs.update(scheduled_for=NEXT_NIGHT)
+    identifiers = set(jobs.values_list("pk", flat=True))
+    if complete:
+        assert run_epias_job(job.pk, fetch=day_data, now=NEXT_NIGHT)
+    assert set(enqueue_due_epias_jobs(now=NEXT_NIGHT + timedelta(minutes=1))) == identifiers
+    assert EpiasCollectionJob.objects.count() == 97
+    job.refresh_from_db()
+    assert job.scheduled_for == NEXT_NIGHT
+    assert job.status == ("succeeded" if complete else "pending")
 
 
 @pytest.mark.parametrize("empty", [True, False])
@@ -174,7 +193,7 @@ def test_older_daily_reconciliation_retains_three_attempt_cap(
     job = nightly_job(monkeypatch)
     job = EpiasCollectionJob.objects.get(
         connection=job.connection,
-        scheduled_for=NEXT_NIGHT,
+        scheduled_for=NEXT_NIGHT - timedelta(hours=3),
         target_day=job.target_day - timedelta(days=1),
     )
     monkeypatch.setattr("pyracast.metering.jobs.time.monotonic", lambda: 0.0)
@@ -314,7 +333,7 @@ def test_response_started_before_deadline_can_archive_after_nine(
     assert snapshot.complete is complete
 
 
-@pytest.mark.parametrize("offset", [-1, 360, 500])
+@pytest.mark.parametrize("offset", [-181, 360, 500])
 def test_settlement_identity_lookup_avoids_requests_outside_night_window(
     monkeypatch: pytest.MonkeyPatch, offset: int
 ) -> None:

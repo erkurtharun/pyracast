@@ -120,7 +120,7 @@ def test_reference_fallback_keeps_current_known_outage_visible(
     assert scenario["result"]["intervals"][12]["mean_power_mw"] is None
 
 
-def test_past_automatic_keeps_missing_solcast_actuals_distinct_from_forecasts(
+def test_past_automatic_labels_saved_forecast_when_solcast_actuals_are_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
@@ -135,9 +135,10 @@ def test_past_automatic_keeps_missing_solcast_actuals_distinct_from_forecasts(
         resolution_minutes=60,
         source="auto",
     )
-    assert result["source_kind"] == "estimated_actuals"
-    assert result["result"] is None
-    assert result["unavailable_reason"] == "estimated_actuals_unavailable"
+    assert result["source_kind"] == "forecast"
+    payload = cast(dict[str, Any], result["result"])
+    assert payload["provenance"]["fallback_reason"] == "estimated_actuals_unavailable"
+    assert result["unavailable_reason"] is None
 
 
 def test_reference_transition_before_first_new_acquisition_keeps_published_forecast(

@@ -12,7 +12,11 @@ from pyracast.forecasts.capacity_normalization import normalization_provenance
 from pyracast.forecasts.coverage import history_day_complete
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import ForecastResult, ForecastSnapshot
-from pyracast.forecasts.sources import current_forecast_snapshots, snapshot_data
+from pyracast.forecasts.sources import (
+    current_forecast_snapshots,
+    mark_forecast_fallback,
+    snapshot_data,
+)
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_sources import apply_composition, compose_snapshots
 from pyracast.regions.models import Region
@@ -86,10 +90,27 @@ def historical_irradiance(snapshot: ForecastSnapshot, target_date: date) -> dict
     return result
 
 
-def regional_history(region: Region, target_date: date, as_of: datetime) -> dict[str, object]:
+def actuals_ready(
+    snapshot: ForecastSnapshot | None, target_date: date, payload: dict[str, object]
+) -> bool:
+    daylight = cast(dict[str, object], payload["daylight"])
+    if daylight["status"] == "polar_night":
+        return snapshot is not None and history_day_complete(
+            snapshot, target_date, snapshot.binding.timezone
+        )
+    return daylight["input_coverage_fraction"] == 1
+
+
+def regional_history(
+    region: Region, target_date: date, as_of: datetime, *, fallback_forecast: bool = False
+) -> dict[str, object]:
     binding = region.approved_binding
     snapshot = select_actual_snapshot(binding, target_date, as_of) if binding else None
     result = historical_irradiance(snapshot, target_date) if snapshot else None
+    if fallback_forecast and (result is None or not actuals_ready(snapshot, target_date, result)):
+        fallback = _regional_saved_forecast(region, target_date, as_of)
+        if fallback["result"] is not None:
+            return fallback
     return {
         "region_id": region.pk,
         "date": target_date,
@@ -122,8 +143,10 @@ def regional_outlook(
         raise OutlookRequestError("date_out_of_range")
     if source == "estimated_actuals" and target_date >= today:
         raise OutlookRequestError("completed_day_required")
-    if source == "estimated_actuals" or (source == "auto" and target_date < today):
+    if source == "estimated_actuals":
         return regional_history(region, target_date, now)
+    if source == "auto" and target_date < today:
+        return regional_history(region, target_date, now, fallback_forecast=True)
     if target_date >= today:
         return _regional_current_forecast(region, target_date, now)
     saved = (
@@ -164,12 +187,66 @@ def regional_outlook(
 def _regional_current_forecast(
     region: Region, target_date: date, now: datetime
 ) -> dict[str, object]:
-    binding = region.approved_binding
+    return _regional_composed_forecast(region, target_date, now, now, region.approved_binding)
+
+
+def _regional_saved_forecast(region: Region, target_date: date, now: datetime) -> dict[str, object]:
+    start, end = local_day_bounds(target_date, region.timezone)
+    cutoff = min(now, end - timedelta(microseconds=1))
+    candidates = (
+        ForecastSnapshot.objects.select_related("binding__provider_account")
+        .filter(
+            binding__region=region,
+            job__status="succeeded",
+            source_kind="forecast",
+            binding__created_at__lte=cutoff,
+            coverage_start__lt=end,
+            coverage_end__gt=start,
+            collected_at__lte=cutoff,
+            available_at__lte=cutoff,
+            forecastresult__published_at__lte=cutoff,
+        )
+        .filter(Q(issued_at__isnull=True) | Q(issued_at__lte=cutoff))
+        .order_by("-collected_at", "-available_at", "-pk")
+    )
+    latest = candidates.first()
+    binding = latest.binding if latest else None
+    while binding is not None:
+        _, configured_end = local_day_bounds(target_date, binding.timezone)
+        narrowed = min(cutoff, configured_end - timedelta(microseconds=1))
+        if narrowed == cutoff:
+            break
+        cutoff = narrowed
+        latest = (
+            candidates.filter(
+                binding__created_at__lte=cutoff,
+                collected_at__lte=cutoff,
+                available_at__lte=cutoff,
+                forecastresult__published_at__lte=cutoff,
+            )
+            .filter(Q(issued_at__isnull=True) | Q(issued_at__lte=cutoff))
+            .first()
+        )
+        binding = latest.binding if latest else None
+    outlook = _regional_composed_forecast(region, target_date, cutoff, now, binding)
+    payload = cast(dict[str, object] | None, outlook["result"])
+    if payload is not None:
+        mark_forecast_fallback(payload, cutoff)
+    return outlook
+
+
+def _regional_composed_forecast(
+    region: Region,
+    target_date: date,
+    cutoff: datetime,
+    now: datetime,
+    binding: SiteBinding | None,
+) -> dict[str, object]:
     start, end = local_day_bounds(target_date, binding.timezone if binding else region.timezone)
     snapshots: list[ForecastSnapshot] = []
     if binding is not None:
         snapshots = current_forecast_snapshots(
-            binding_id=binding.pk, start=start, end=end, as_of=now
+            binding_id=binding.pk, start=start, end=end, as_of=cutoff
         )
     snapshot = snapshots[0] if snapshots else None
     result = None

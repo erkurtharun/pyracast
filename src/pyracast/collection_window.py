@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 from pyracast.notifications.schedule import local_slot
 
-HISTORY_CLOCK = "03:00"
+HISTORY_CLOCK = "00:00"
 HISTORY_END_CLOCK = "09:00"
 NIGHT_RETRY_DELAY = timedelta(minutes=30)
 

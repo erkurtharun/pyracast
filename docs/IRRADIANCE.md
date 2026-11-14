@@ -451,7 +451,7 @@ prevents the oldest day of a rolling 168-hour window from hiding an earlier whol
 day. Completion requires finite nonnegative power and contiguous, non-overlapping
 elapsed-time coverage, including valid nighttime zeroes and 23/25-hour local days;
 it does not require reconstructed GHI to be identifiable. Night collection starts
-at 03:00 and retries incomplete or failed input at 30-minute intervals before
+at 00:00 local time and retries incomplete or failed input at 30-minute intervals before
 09:00, within the account's available budget after scheduled forecasts. Old
 requests retain pinned acquisitions; already active factors remain historical
 selections, while old-policy ready candidates require a new request before

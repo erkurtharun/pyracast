@@ -34,7 +34,9 @@ def history_job() -> CollectionJob:
     return CollectionJob.objects.get(endpoint="estimated_actuals")
 
 
-@pytest.mark.parametrize(("hour", "created"), [(23, False), (0, True), (5, True), (6, False)])
+@pytest.mark.parametrize(
+    ("hour", "created"), [(-4, False), (-3, True), (0, True), (5, True), (6, False)]
+)
 def test_night_history_uses_local_window_independent_of_forecast_clocks(
     hour: int, created: bool
 ) -> None:
@@ -47,14 +49,16 @@ def test_night_history_uses_local_window_independent_of_forecast_clocks(
         times=["16:00"],
         now=NOW,
     )
-    now = NIGHT.replace(hour=hour) - (timedelta(days=1) if hour == 23 else timedelta())
+    now = NIGHT + timedelta(hours=hour)
     enqueue_due(now)
     assert CollectionJob.objects.filter(endpoint="estimated_actuals").exists() is created
     if created:
         job = CollectionJob.objects.get(endpoint="estimated_actuals")
-        assert job.scheduled_slot == NIGHT
+        assert job.scheduled_slot == NIGHT - timedelta(hours=3)
         assert job.retry_until == NIGHT + timedelta(hours=6)
         assert job.target_date == NIGHT.date() - timedelta(days=1)
+        enqueue_due(now + timedelta(seconds=1))
+        assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 1
         assert claim(job.pk, now) is not None
 
 
@@ -92,6 +96,21 @@ def test_partial_history_is_immutable_available_and_retried_with_fresh_acquisiti
     assert ForecastSnapshot.objects.count() == 2
     assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 2
     assert RequestAttempt.objects.filter(purpose="estimated_actuals").count() == 2
+
+
+@pytest.mark.parametrize("status", ["pending", "retry", "succeeded"])
+def test_midnight_rollout_reuses_existing_three_am_history_slot(status: str) -> None:
+    make_system(approved=True)
+    job = history_job()
+    CollectionJob.objects.filter(pk=job.pk).update(scheduled_slot=NIGHT, status=status)
+    if status == "succeeded":
+        CollectionJob.objects.filter(pk=job.pk).update(status="pending")
+        assert collect(job.pk, HistoricalFixture(NIGHT), no_calculation, NIGHT)
+    enqueue_due(NIGHT + timedelta(minutes=1))
+    assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 1
+    job.refresh_from_db()
+    assert job.scheduled_slot == NIGHT
+    assert job.status == status
 
 
 def test_history_transport_retries_half_hour_without_forecast_three_attempt_cap() -> None:

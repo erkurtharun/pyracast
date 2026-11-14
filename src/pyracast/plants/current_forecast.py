@@ -7,11 +7,15 @@ from django.core.exceptions import ValidationError
 from pyracast.calculation import calculate
 from pyracast.connections.models import ProviderAccount
 from pyracast.forecasts.models import ForecastSnapshot
-from pyracast.forecasts.sources import current_forecast_snapshots, snapshot_data
+from pyracast.forecasts.sources import (
+    current_forecast_snapshots,
+    mark_forecast_fallback,
+    snapshot_data,
+)
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_sources import SELECTION_POLICY, apply_composition, compose_snapshots
 from pyracast.plants.forecasting import calibration_at, forecast_payload
-from pyracast.plants.measurements import production_identity_current
+from pyracast.plants.measurements import production_identity_at, production_identity_current
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.plants.operations import configuration_is_current
 
@@ -40,6 +44,49 @@ def current_forecast(
         configuration.binding.provider_account.refresh_from_db()
         if not configuration_is_current(configuration):
             configuration = None
+    return _composed_forecast(plant, target_date, resolution_minutes, now, now, configuration)
+
+
+def saved_forecast(
+    plant: Plant, target_date: date, resolution_minutes: int, now: datetime
+) -> dict[str, object]:
+    from pyracast.plants.automatic_forecast import reference_transition_forecast
+
+    _, end = local_day_bounds(target_date, plant.region.timezone)
+    cutoff = min(now, end - timedelta(microseconds=1))
+    configurations = (
+        PlantConfiguration.objects.select_related("binding__provider_account")
+        .filter(plant=plant)
+        .order_by("-created_at", "-pk")
+    )
+    configuration = configurations.filter(created_at__lte=cutoff).first()
+    while configuration is not None:
+        _, configured_end = local_day_bounds(target_date, configuration.binding.timezone)
+        cutoff = min(cutoff, configured_end - timedelta(microseconds=1))
+        if configuration.created_at <= cutoff:
+            break
+        configuration = configurations.filter(created_at__lte=cutoff).first()
+    outlook = _composed_forecast(
+        plant, target_date, resolution_minutes, cutoff, now, configuration, historical=True
+    )
+    outlook = reference_transition_forecast(plant, target_date, resolution_minutes, cutoff, outlook)
+    for key in ("result", "regional_irradiance"):
+        payload = cast(dict[str, object] | None, outlook[key])
+        if payload is not None:
+            mark_forecast_fallback(payload, cutoff)
+    return outlook
+
+
+def _composed_forecast(
+    plant: Plant,
+    target_date: date,
+    resolution_minutes: int,
+    cutoff: datetime,
+    now: datetime,
+    configuration: PlantConfiguration | None,
+    *,
+    historical: bool = False,
+) -> dict[str, object]:
     snapshot = None
     calibration = None
     result = None
@@ -48,11 +95,15 @@ def current_forecast(
     if configuration is not None:
         start, end = local_day_bounds(target_date, configuration.binding.timezone)
         snapshots = current_forecast_snapshots(
-            binding_id=configuration.binding_id, start=start, end=end, as_of=now
+            binding_id=configuration.binding_id, start=start, end=end, as_of=cutoff
         )
         snapshot = snapshots[0] if snapshots else None
-        calibration = calibration_at(configuration, now)
-        if calibration is not None and not production_identity_current(calibration):
+        calibration = calibration_at(configuration, cutoff)
+        if calibration is not None and not (
+            production_identity_at(calibration, cutoff)
+            if historical
+            else production_identity_current(calibration)
+        ):
             calibration = None
         if snapshot is not None:
             try:
@@ -86,7 +137,9 @@ def current_forecast(
             cast(dict[str, object], result["provenance"])["selection_policy"] = SELECTION_POLICY
             configuration.binding.refresh_from_db()
             configuration.binding.provider_account.refresh_from_db()
-            if not configuration_is_current(configuration):
+            if historical and configuration.pk != plant.current_configuration_id:
+                cast(list[str], result["quality_flags"]).append("previous_configuration")
+            if not historical and not configuration_is_current(configuration):
                 configuration = None
                 snapshot = None
                 calibration = None
@@ -96,7 +149,7 @@ def current_forecast(
         "plant_id": plant.pk,
         "date": target_date.isoformat(),
         "timezone": configuration.binding.timezone if configuration else plant.region.timezone,
-        "as_of": now.isoformat(),
+        "as_of": cutoff.isoformat(),
         "configuration_id": configuration.pk if configuration else None,
         "calibration_id": calibration.pk if calibration else None,
         "source_kind": "forecast",

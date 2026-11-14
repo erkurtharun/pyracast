@@ -226,6 +226,9 @@ def test_schedule_configuration_quota_and_effective_boundary() -> None:
     payload = schedule_payload(default, NOW)
     assert payload["used_today"] == 1
     assert payload["remaining_today"] == payload["max_forecast_times"] == 9
+    assert payload["history_local_time"] == "00:00"
+    assert payload["history_retry_until_local"] == "09:00"
+    assert payload["history_retry_minutes"] == 30
     configured = configure_schedule(
         system.member,
         system.tenant.pk,
@@ -580,7 +583,7 @@ def test_reconfigured_first_slot_reschedules_cancelled_unacquired_history() -> N
     new_slot = NIGHT + timedelta(hours=1)
     enqueue_due(new_slot)
     history.refresh_from_db()
-    assert history.scheduled_slot == NIGHT
+    assert history.scheduled_slot == NIGHT - timedelta(hours=3)
     assert history.status == "pending"
     assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 1
     assert collect(history.pk, HistoricalFixture(new_slot), no_calculation, new_slot)
@@ -637,7 +640,7 @@ def test_reconfiguration_preserves_published_history_and_forecast_archives() -> 
     enqueue_due(NIGHT + timedelta(hours=1))
     history.refresh_from_db()
     history_snapshot.refresh_from_db()
-    assert history.scheduled_slot == NIGHT
+    assert history.scheduled_slot == NIGHT - timedelta(hours=3)
     assert history.status == "succeeded"
     assert (
         history_snapshot.raw_payload,

@@ -9,6 +9,18 @@ from pyracast.irradiance import SourceKind
 from pyracast.weather import WeatherError, restore_weather
 
 
+def mark_forecast_fallback(payload: dict[str, object], cutoff: datetime) -> None:
+    flags = payload.get("quality_flags")
+    payload["quality_flags"] = [*(flags if isinstance(flags, list) else []), "forecast_fallback"]
+    provenance = payload.get("provenance")
+    if not isinstance(provenance, dict):
+        provenance = {}
+        payload["provenance"] = provenance
+    provenance.update(
+        fallback_reason="estimated_actuals_unavailable", selection_cutoff=cutoff.isoformat()
+    )
+
+
 def current_forecast_snapshots(
     *, binding_id: int, start: datetime, end: datetime, as_of: datetime
 ) -> list[ForecastSnapshot]:

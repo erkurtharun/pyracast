@@ -68,6 +68,24 @@ def enqueue_connection(
         scheduled_for = window[0]
         retry_until = window[1]
     today = scheduled_for.astimezone(MARKET_ZONE).date()
+    if not initial:
+        existing_slot = (
+            EpiasCollectionJob.objects.filter(
+                connection=connection,
+                connection_revision=connection.revision,
+                configuration=configuration,
+                target_day=today - timedelta(days=1),
+                source_kind="realtime_generation",
+                scheduled_for__gte=scheduled_for,
+                scheduled_for__lt=retry_until,
+                retry_until=retry_until,
+            )
+            .order_by("scheduled_for", "pk")
+            .values_list("scheduled_for", flat=True)
+            .first()
+        )
+        if existing_slot is not None:
+            scheduled_for = existing_slot
     jobs = []
     for offset in range(1, 91 if initial else 8):
         job, _ = EpiasCollectionJob.objects.get_or_create(

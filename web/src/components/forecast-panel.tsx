@@ -252,6 +252,13 @@ export function ForecastPanel({
                             {t("satellitemodel_estimates_not_meter_readings")}
                         </p>
                     )}
+                    {forecast.source_kind === "forecast" &&
+                        Array.isArray(result.quality_flags) &&
+                        result.quality_flags.includes("forecast_fallback") && (
+                            <p className="fine">
+                                {t("saved_forecast_pending_history")}
+                            </p>
+                        )}
                 </div>
                 <div className="button-group">
                     <CsvDownload

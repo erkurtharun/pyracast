@@ -55,16 +55,30 @@ def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
         today = now.astimezone(zone).date()
         window = nightly_window(today, region.timezone)
         if window is not None and window[0] <= now < window[1]:
-            history, _ = CollectionJob.objects.get_or_create(
-                binding=binding,
-                endpoint="estimated_actuals",
-                scheduled_slot=window[0],
-                defaults={
-                    "target_date": today - timedelta(days=1),
-                    "available_at": now,
-                    "retry_until": window[1],
-                },
+            history = (
+                CollectionJob.objects.filter(
+                    binding=binding,
+                    endpoint="estimated_actuals",
+                    reference_import__isnull=True,
+                    target_date=today - timedelta(days=1),
+                    scheduled_slot__gte=window[0],
+                    scheduled_slot__lt=window[1],
+                    retry_until=window[1],
+                )
+                .order_by("scheduled_slot", "pk")
+                .first()
             )
+            if history is None:
+                history, _ = CollectionJob.objects.get_or_create(
+                    binding=binding,
+                    endpoint="estimated_actuals",
+                    scheduled_slot=window[0],
+                    defaults={
+                        "target_date": today - timedelta(days=1),
+                        "available_at": now,
+                        "retry_until": window[1],
+                    },
+                )
             CollectionJob.objects.filter(
                 binding=binding,
                 endpoint="estimated_actuals",

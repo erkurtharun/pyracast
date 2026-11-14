@@ -9,6 +9,7 @@
         "electrical_generation": "Elektrik üretimi",
         "irradiance": "Işınım",
         "satellitemodel_estimates_not_meter_readings": "Uydu ve model tahminleridir; sayaç ölçümü değildir.",
+        "saved_forecast_pending_history": "Kayıtlı tahmin · Geçmiş veri bekleniyor",
         "download_both_scenarios_csv": "İki senaryoyu CSV olarak indir",
         "download_csv": "CSV indir",
         "mixed_forecast_updates": "Birleştirilmiş tahmin güncellemeleri",

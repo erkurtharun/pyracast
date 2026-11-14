@@ -9,6 +9,7 @@
         "electrical_generation": "Electrical generation",
         "irradiance": "Irradiance",
         "satellitemodel_estimates_not_meter_readings": "Satellite/model estimates, not meter readings.",
+        "saved_forecast_pending_history": "Saved forecast · Historical estimates pending",
         "download_both_scenarios_csv": "Download both scenarios CSV",
         "download_csv": "Download CSV",
         "mixed_forecast_updates": "Mixed forecast updates",

@@ -9,11 +9,11 @@ from django.utils import timezone
 from django.utils.translation import gettext
 
 from pyracast.accounts.operations import require_member
-from pyracast.forecasts.history import historical_irradiance, select_actual_snapshot
+from pyracast.forecasts.history import actuals_ready, historical_irradiance, select_actual_snapshot
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.automatic_forecast import automatic_forecast
-from pyracast.plants.current_forecast import current_forecast
+from pyracast.plants.current_forecast import current_forecast, saved_forecast
 from pyracast.plants.forecasting import (
     archived_forecast,
     calibration_for_day,
@@ -163,6 +163,20 @@ def _plant_outlook(
             configuration = configurations.order_by(*ordering).first()
         if configuration is not None:
             snapshot = select_actual_snapshot(configuration.binding, target_date, cutoff)
+    irradiance = None
+    if snapshot is not None:
+        try:
+            irradiance = historical_irradiance(snapshot, target_date)
+        except (ValueError, ArithmeticError) as exc:
+            raise ValidationError("calculation_out_of_range") from exc
+    if (
+        source == "auto"
+        and as_of is None
+        and (irradiance is None or not actuals_ready(snapshot, target_date, irradiance))
+    ):
+        fallback = saved_forecast(plant, target_date, resolution_minutes, now)
+        if fallback["result"] is not None:
+            return fallback
     if snapshot is None and source == "auto" and as_of is not None:
         return _forecast_outlook(
             actor,
@@ -175,13 +189,11 @@ def _plant_outlook(
             projection_at=now if as_of is None else None,
         )
     result = None
-    irradiance = None
     if snapshot is not None and configuration is not None:
         try:
             result = forecast_payload(
                 configuration, snapshot, calibration, target_date, resolution_minutes
             )
-            irradiance = historical_irradiance(snapshot, target_date)
         except (ValueError, ArithmeticError) as exc:
             raise ValidationError("calculation_out_of_range") from exc
         if calibration is not None:

@@ -279,14 +279,14 @@ def test_daily_slot_uses_region_night_independently_of_forecast_times(
     system, _, _ = connected(monkeypatch)
     Region.objects.filter(pk=system.region.pk).update(timezone="America/New_York")
     CollectionSchedule.objects.create(region=system.region, times=["14:00"], effective_from=NOW)
-    before_slot = NEXT_NIGHT + timedelta(hours=7, minutes=59)
-    after_slot = NEXT_NIGHT + timedelta(hours=8)
+    before_slot = NEXT_NIGHT + timedelta(hours=4, minutes=59)
+    after_slot = NEXT_NIGHT + timedelta(hours=5)
     assert enqueue_due_epias_jobs(now=before_slot) == []
     first = enqueue_due_epias_jobs(now=after_slot)
     assert len(first) == 7
     assert enqueue_due_epias_jobs(now=after_slot + timedelta(minutes=1)) == first
     jobs = EpiasCollectionJob.objects.filter(pk__in=first)
-    assert set(jobs.values_list("scheduled_for", flat=True)) == {NEXT_NIGHT + timedelta(hours=8)}
+    assert set(jobs.values_list("scheduled_for", flat=True)) == {after_slot}
     assert set(jobs.values_list("target_day", flat=True)) == {
         NEXT_NIGHT.date() - timedelta(days=offset) for offset in range(1, 8)
     }

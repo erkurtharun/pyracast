@@ -6,20 +6,25 @@ from math import isfinite
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from django.db.models import Q, QuerySet
+from django.db.models import F, Q, QuerySet
 
 from pyracast.epias import TIMEZONE
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY, select_actual_snapshot
 from pyracast.incidents.operations import pinned_incidents, select_incidents
 from pyracast.irradiance import local_day_bounds
-from pyracast.metering.models import EpiasConnection, EpiasSnapshot
+from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
 from pyracast.plants.measurement_policy import (
     LEGACY_MEASUREMENT_POLICY as LEGACY_MEASUREMENT_POLICY,
 )
 from pyracast.plants.measurement_policy import (
     MEASUREMENT_POLICY as MEASUREMENT_POLICY,
 )
-from pyracast.plants.models import CalibrationRun, PlantConfiguration, ProductionObservation
+from pyracast.plants.models import (
+    CalibrationRun,
+    PlantConfiguration,
+    PlantEvent,
+    ProductionObservation,
+)
 
 
 def _source_kinds(policy: str) -> list[str]:
@@ -343,3 +348,87 @@ def production_identity_current(run: CalibrationRun) -> bool:
         and snapshot.normalization_policy == "hour-start-istanbul-v1"
         for snapshot in snapshots
     )
+
+
+def production_identity_at(run: CalibrationRun, as_of: datetime) -> bool:
+    if not run.production_snapshot_ids:
+        return True
+    event = (
+        PlantEvent.objects.filter(
+            plant_id=run.plant_id, action="epias_connected", created_at__lte=as_of
+        )
+        .order_by("-created_at", "-pk")
+        .first()
+    )
+    if event is None:
+        return False
+    identity = event.details
+    revision = _provider_identifier(identity.get("revision"))
+    if (
+        revision is None
+        or _provider_identifier(identity.get("provider_plant_id")) is None
+        or not isinstance(identity.get("eic"), str)
+        or not identity["eic"]
+    ):
+        return False
+    snapshots = list(
+        EpiasSnapshot.objects.filter(
+            pk__in=run.production_snapshot_ids,
+            configuration_id=run.configuration_id,
+            configuration__plant_id=run.plant_id,
+            connection__plant_id=run.plant_id,
+            job__connection_id=F("connection_id"),
+            job__configuration_id=run.configuration_id,
+            job__plant_id=run.plant_id,
+            job__created_at__lte=as_of,
+            source_kind__in=_source_kinds(run.measurement_selection_policy),
+            collected_at__lte=as_of,
+            available_at__lte=as_of,
+        ).select_related("job")
+    )
+    if len(snapshots) != len(run.production_snapshot_ids):
+        return False
+    settlement_providers = (
+        list(
+            EpiasCollectionJob.objects.filter(
+                connection__plant_id=run.plant_id,
+                plant_id=run.plant_id,
+                connection_revision=revision,
+                source_kind="settlement_injection",
+                created_at__lte=as_of,
+            ).values_list("provider_plant", flat=True)
+        )
+        if any(snapshot.source_kind == "settlement_injection" for snapshot in snapshots)
+        else []
+    )
+    return all(
+        _historical_provider_matches(snapshot, identity, settlement_providers)
+        for snapshot in snapshots
+    )
+
+
+def _historical_provider_matches(
+    snapshot: EpiasSnapshot,
+    identity: dict[str, Any],
+    settlement_providers: list[dict[str, Any]],
+) -> bool:
+    provider = snapshot.provider_plant
+    if (
+        _provider_identifier(provider.get("id")) is None
+        or provider.get("eic") != identity.get("eic")
+        or snapshot.job.source_kind != snapshot.source_kind
+        or snapshot.normalization_policy != "hour-start-istanbul-v1"
+    ):
+        return False
+    if snapshot.source_kind == "realtime_generation":
+        return bool(provider.get("id") == identity.get("provider_plant_id"))
+    # Settlement IDs occupy a separate namespace and are absent from connection events.
+    return bool(settlement_providers) and all(
+        _provider_identifier(row.get("id")) == provider.get("id")
+        and row.get("eic") == provider.get("eic")
+        for row in settlement_providers
+    )
+
+
+def _provider_identifier(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
