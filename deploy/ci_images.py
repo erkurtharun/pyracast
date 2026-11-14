@@ -4,7 +4,6 @@ import json
 import re
 import tarfile
 from pathlib import Path
-from typing import cast
 
 IMAGES = ("backend", "web", "gateway", "postgres")
 INDEX = "application/vnd.oci.image.index.v1+json"
@@ -15,7 +14,12 @@ PROVENANCE = {"https://slsa.dev/provenance/v0.2", "https://slsa.dev/provenance/v
 def _object(value: object) -> dict[str, object]:
     if not isinstance(value, dict):
         raise ValueError("Expected a JSON object")
-    return cast(dict[str, object], value)
+    result: dict[str, object] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise ValueError("JSON object keys must be strings")
+        result[key] = item
+    return result
 
 
 def _objects(value: object) -> list[dict[str, object]]:
@@ -35,10 +39,14 @@ def _json(archive: tarfile.TarFile, name: str) -> dict[str, object]:
         return _object(json.load(stream))
 
 
-def _blob(archive: tarfile.TarFile, descriptor: dict[str, object]) -> str:
-    digest = descriptor.get("digest")
-    if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+def _digest(value: object) -> str:
+    if not isinstance(value, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", value):
         raise ValueError("Invalid OCI digest")
+    return value
+
+
+def _blob(archive: tarfile.TarFile, descriptor: dict[str, object]) -> str:
+    digest = _digest(descriptor.get("digest"))
     name = "blobs/sha256/" + digest[7:]
     try:
         member = archive.getmember(name)
@@ -72,7 +80,7 @@ def _check_entries(archive: tarfile.TarFile) -> None:
         if member.isdir() and member.name in {"blobs", "blobs/sha256"}:
             continue
         if not member.isfile() or not re.fullmatch(
-            r"(?:oci-layout|index\.json|blobs/sha256/[0-9a-f]{64})", member.name
+            r"oci-layout|index\.json|blobs/sha256/[0-9a-f]{64}", member.name
         ):
             raise ValueError("Unsafe OCI archive entry")
         if member.name.startswith("blobs/"):
@@ -112,7 +120,7 @@ def _check_attestations(
                 raise ValueError("Expected an in-toto attestation")
             statement = _json(archive, _blob(archive, layer))
             subjects = _objects(statement.get("subject"))
-            expected_subject = {"sha256": str(runtime["digest"])[7:]}
+            expected_subject = {"sha256": _digest(runtime["digest"])[7:]}
             if not subjects or any(
                 _object(item.get("digest")) != expected_subject for item in subjects
             ):
@@ -162,7 +170,7 @@ def inspect_archive(path: Path, sha: str, expected_digest: str) -> dict[str, str
         _check_attestations(archive, descriptors, runtime[0])
     return {
         "digest": expected_digest,
-        "config_digest": str(config_descriptor["digest"]),
+        "config_digest": _digest(config_descriptor["digest"]),
         "archive_sha256": archive_sha256,
     }
 

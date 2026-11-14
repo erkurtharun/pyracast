@@ -1,5 +1,5 @@
 from datetime import date, timedelta
-from math import ceil
+from math import ceil, nextafter
 
 import pytest
 from django.db import transaction
@@ -153,16 +153,21 @@ def test_durable_identity_recovery_obeys_promotion_and_observation_guards(
         assert CalibrationActivation.objects.count() == 1
     if case == "forged_identity_kind":
         candidate.result["candidate_kind"] = "identity_recovery"
-        candidate.save(update_fields=("result",))
+        assert candidate.factor is not None
         assert candidate.completed_at is not None
-        with transaction.atomic():
-            Region.objects.select_for_update().get(pk=plant.region_id)
-            locked = Plant.objects.select_for_update().get(pk=plant.pk)
-            assert not promote_automatic_calibration(
-                locked, candidate, candidate.completed_at + timedelta(seconds=1)
-            )
-        assert CalibrationActivation.objects.count() == 1
-        assert CalibrationActivation.objects.get().calibration_id == incumbent.pk
+        for forged_factor in (candidate.factor, nextafter(1.0, 2.0)):
+            candidate.factor = forged_factor
+            candidate.save(update_fields=("factor", "result"))
+            with transaction.atomic():
+                Region.objects.select_for_update().get(pk=plant.region_id)
+                locked = Plant.objects.select_for_update().get(pk=plant.pk)
+                assert not promote_automatic_calibration(
+                    locked, candidate, candidate.completed_at + timedelta(seconds=1)
+                )
+            assert CalibrationActivation.objects.count() == 1
+            assert CalibrationActivation.objects.get().calibration_id == incumbent.pk
+            skipped = PlantEvent.objects.filter(action="calibration_automatic_skipped").latest("pk")
+            assert skipped.details["reason"] == "derating_suspected"
 
 
 def test_zero_only_holdout_cannot_validate_first_automatic_calibration(

@@ -15,6 +15,11 @@ INDEX = "application/vnd.oci.image.index.v1+json"
 MANIFEST = "application/vnd.oci.image.manifest.v1+json"
 
 
+def test_json_object_rejects_non_string_keys() -> None:
+    with pytest.raises(ValueError, match="JSON object keys must be strings"):
+        ci_images._object({"name": "image", 1: "invalid"})
+
+
 def _archive(
     directory: Path, *, revision: str = SHA, defect: str = "", modern: bool = True
 ) -> tuple[Path, str, str]:
