@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import date, timedelta
 from typing import Any, cast
 
@@ -18,20 +19,33 @@ from pyracast.plants.operations import activate_calibration
 from pyracast.plants.tracking import MODEL_VERSION as TRACKING_MODEL_VERSION
 from tests.test_calibration_automation import declare_native_sources, evaluated_run, promote
 from tests.test_domain import NOW, System
+from tests.test_incident_calibration import incident
 from tests.test_plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
 SUSPECTED = {
-    "policy": "strong-unclipped-power-median-v1",
+    "policy": "strong-unclipped-power-diagnostics-v2",
     "status": "suspected",
     "baseline_factor": 0.5,
     "performance_ratio": 0.8,
     "threshold": 0.92,
     "window_start": "2026-10-30",
     "window_end": "2026-11-08",
-    "days": [{"day": "2026-11-08", "performance_index": 0.8, "hours": 6.0}],
+    "days": [
+        {
+            "day": "2026-11-08",
+            "performance_index": 0.8,
+            "hours": 6.0,
+            "status": "shortfall",
+            "observed_zero": False,
+        }
+    ],
     "limit_reached": False,
+    "reference_kind": "active_calibration",
+    "latest_matched_day": "2026-11-08",
+    "latest_day_status": "shortfall",
+    "latest_performance_index": 0.8,
 }
 
 
@@ -61,72 +75,65 @@ def _suspect(run: CalibrationRun, **changes: object) -> None:
     run.save(update_fields=("result",))
 
 
-def test_live_outlook_adds_a_conditional_scenario_for_a_suspected_derating(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("status", ["suspected", "normal", "insufficient"])
+def test_live_production_diagnostic_does_not_change_the_forecast(
+    monkeypatch: pytest.MonkeyPatch, status: str
 ) -> None:
     system, plant, run = _live_plant(monkeypatch)
-    assert _outlook(system, plant)["derating_scenario"] is None
+    baseline = _outlook(system, plant)
+    assert baseline["production_diagnostic"] is None
+    normal = deepcopy(baseline["result"])
+    _suspect(run, status=status)
+    result = _outlook(system, plant)
+    diagnostic = cast(dict[str, Any], result["production_diagnostic"])
+    assert result["outage_scenario"] is None
+    assert diagnostic == SUSPECTED | {
+        "status": status,
+        "evaluated_at": NOW.isoformat(),
+        "calibration_id": run.pk,
+        "evidence_state": "current",
+    }
+    assert result["result"] == normal
+    assert "result" not in diagnostic
+    assert "derating_scenario" not in result
+
+
+@pytest.mark.parametrize("inverter", [25, None])
+def test_production_diagnostic_does_not_infer_lost_capacity(
+    monkeypatch: pytest.MonkeyPatch, inverter: int | None
+) -> None:
+    system, plant, run = _live_plant(monkeypatch)
+    PlantConfiguration.objects.filter(plant=plant).update(inverter_capacity_mw=inverter)
+    baseline = deepcopy(_outlook(system, plant)["result"])
     _suspect(run)
     result = _outlook(system, plant)
-    normal = cast(dict[str, Any], result["result"])
-    scenario = cast(dict[str, Any], result["derating_scenario"])
-    assert result["outage_scenario"] is None
-    assert scenario["status"] == "suspected"
-    assert scenario["calibration_id"] == run.pk
-    assert scenario["performance_ratio"] == 0.8
-    assert scenario["days"] == SUSPECTED["days"]
-    assert scenario["inverter_limit_scaled"] is False
-    affected = scenario["result"]
-    assert affected["partial_energy_mwh"] == pytest.approx(0.8 * normal["partial_energy_mwh"])
-    assert affected["daylight"]["complete"] is normal["daylight"]["complete"] is True
-    assert affected["daylight"]["windows"] == normal["daylight"]["windows"]
-    assert affected["daylight"]["energy_mwh"] == pytest.approx(
-        0.8 * normal["daylight"]["energy_mwh"]
-    )
-    assert affected["factor"] == normal["factor"] == 0.5
-    assert affected["model_version"] == normal["model_version"]
-    assert affected["provenance"]["scenario_policy"] == "suspected-derating-v1"
-    assert affected["provenance"]["derating_calibration_id"] == run.pk
-    assert "conditional_on_suspected_derating" in affected["quality_flags"]
-    assert [row["source_snapshot_ids"] for row in affected["intervals"]] == [
-        row["source_snapshot_ids"] for row in normal["intervals"]
-    ]
-
-
-def test_inverter_capacity_follows_the_ratio_but_the_export_limit_does_not(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    system, plant, run = _live_plant(monkeypatch)
-    PlantConfiguration.objects.filter(plant=plant).update(inverter_capacity_mw=25)
-    _suspect(run)
-    scenario = cast(dict[str, Any], _outlook(system, plant)["derating_scenario"])
-    assert scenario["inverter_limit_scaled"] is True
-    assert max(row["mean_power_mw"] for row in scenario["result"]["intervals"]) == 20
-    _suspect(run, limit_reached=True)
-    reached = cast(dict[str, Any], _outlook(system, plant)["derating_scenario"])
-    assert reached["inverter_limit_scaled"] is False
-    assert max(row["mean_power_mw"] for row in reached["result"]["intervals"]) == pytest.approx(
-        0.8 * 26
-    )
+    assert result["production_diagnostic"] is not None
+    assert result["result"] == baseline
+    configuration = PlantConfiguration.objects.get(plant=plant)
+    assert configuration.dc_capacity_mw == 130
+    assert configuration.inverter_capacity_mw == inverter
+    assert configuration.export_limit_mw == 100
 
 
 @pytest.mark.parametrize(
     "changes",
     [
-        {"status": "normal"},
         {"baseline_factor": 0.75},
-        {"window_end": "2026-10-29"},
-        {"window_end": None},
+        {"policy": "strong-unclipped-power-median-v1"},
+        {"latest_matched_day": None},
+        {"latest_matched_day": "invalid"},
+        {"latest_matched_day": "2026-11-09"},
+        {"latest_matched_day": "2026-11-10"},
         {"other": {"result": {"transfer_model": TRACKING_MODEL_VERSION}}},
         {"other": {"production_snapshot_ids": [999]}},
         {"explicit_cutoff": True},
     ],
 )
-def test_scenario_requires_fresh_evidence_against_the_factor_in_use(
+def test_diagnostic_rejects_incompatible_latest_evidence_without_falling_back(
     monkeypatch: pytest.MonkeyPatch, changes: dict[str, Any]
 ) -> None:
     system, plant, run = _live_plant(monkeypatch)
-    fields = ("status", "baseline_factor", "window_end")
+    fields = ("policy", "baseline_factor", "latest_matched_day")
     _suspect(run, **{key: changes[key] for key in fields if key in changes})
     options: dict[str, Any] = {}
     if "other" in changes:
@@ -140,16 +147,66 @@ def test_scenario_requires_fresh_evidence_against_the_factor_in_use(
         publish_snapshot(
             snapshot_for(system, NOW.date(), collected_at=NOW - timedelta(days=1, hours=2))
         )
-    assert _outlook(system, plant, **options)["derating_scenario"] is None
+    assert _outlook(system, plant, **options)["production_diagnostic"] is None
 
 
-def test_uncalibrated_outlook_has_no_derating_scenario(monkeypatch: pytest.MonkeyPatch) -> None:
-    system, plant = make_plant(monkeypatch)
-    PlantConfiguration.objects.filter(plant=plant).update(created_at=NOW)
-    publish_snapshot(snapshot_for(system, NOW.date(), collected_at=NOW))
+@pytest.mark.parametrize("status", ["ready", "rejected", "insufficient"])
+def test_uncalibrated_outlook_reports_persisted_evidence_without_applying_a_factor(
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    system, plant, run = _live_plant(monkeypatch)
+    CalibrationActivation.objects.all().delete()
+    _suspect(run, baseline_factor=1.0, reference_kind="uncalibrated_reference")
+    run.status = status
+    run.save(update_fields=("status",))
     result = _outlook(system, plant)
     assert result["calibration_id"] is None
-    assert result["derating_scenario"] is None
+    diagnostic = cast(dict[str, Any], result["production_diagnostic"])
+    assert diagnostic["reference_kind"] == "uncalibrated_reference"
+    assert diagnostic["calibration_id"] == run.pk
+    assert cast(dict[str, Any], result["result"])["factor"] == 1
+
+
+@pytest.mark.parametrize(
+    ("latest_day", "evidence_state"), [("2026-11-07", "current"), ("2026-11-06", "stale")]
+)
+def test_evidence_freshness_is_a_display_state_and_does_not_change_output(
+    monkeypatch: pytest.MonkeyPatch, latest_day: str, evidence_state: str
+) -> None:
+    system, plant, run = _live_plant(monkeypatch)
+    baseline = deepcopy(_outlook(system, plant)["result"])
+    _suspect(run, latest_matched_day=latest_day)
+    result = _outlook(system, plant)
+    diagnostic = cast(dict[str, Any], result["production_diagnostic"])
+    assert diagnostic["evidence_state"] == evidence_state
+    assert result["result"] == baseline
+
+
+def test_declared_outage_scenario_remains_separate_from_compatible_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant, run = _live_plant(monkeypatch)
+    _suspect(run)
+    baseline = deepcopy(_outlook(system, plant)["result"])
+    incident(system, plant, NOW, None)
+    result = _outlook(system, plant)
+    assert result["production_diagnostic"] is not None
+    assert result["result"] == baseline
+    scenario = cast(dict[str, Any], result["outage_scenario"])
+    assert scenario["result"]["intervals"][-1]["mean_power_mw"] == pytest.approx(13)
+
+
+def test_revised_training_incidents_hide_uncalibrated_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant, run = _live_plant(monkeypatch)
+    CalibrationActivation.objects.all().delete()
+    _suspect(run, baseline_factor=1.0, reference_kind="uncalibrated_reference")
+    assert _outlook(system, plant)["production_diagnostic"] is not None
+    incident(system, plant, NOW - timedelta(days=3), NOW - timedelta(days=2))
+    result = _outlook(system, plant)
+    assert result["production_diagnostic"] is None
+    assert cast(dict[str, Any], result["result"])["factor"] == 1
 
 
 def test_first_calibration_is_promoted_despite_a_suspected_derating(

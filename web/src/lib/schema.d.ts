@@ -1122,6 +1122,8 @@ export interface components {
             collected_at: string | null;
             /** Format: date-time */
             available_at: string | null;
+            /** Format: date-time */
+            selection_cutoff: string | null;
             calibration_id: number | null;
             /** Format: double */
             factor: number | null;
@@ -1171,6 +1173,8 @@ export interface components {
             evaluation_kind: string;
             selection_policy: string;
             comparison: components["schemas"]["ComparisonEnum"];
+            /** Format: time */
+            issuance_cutoff: string | null;
             measurement_policy: string;
             /** Format: date-time */
             configuration_created_at: string | null;
@@ -1179,6 +1183,11 @@ export interface components {
             daylight_policy: string | null;
             matched_days: number;
             requested_days: number;
+            missing_days: number;
+            excluded_days: number;
+            scored_intervals: number;
+            /** Format: double */
+            scored_hours: number;
             metrics: components["schemas"]["PerformanceMetrics"] | null;
             baseline_metrics:
                 components["schemas"]["PerformanceMetrics"] | null;
@@ -1205,7 +1214,7 @@ export interface components {
             result: unknown;
             regional_irradiance: unknown;
             outage_scenario?: unknown;
-            derating_scenario?: unknown;
+            production_diagnostic?: unknown;
         };
         PlantInput: {
             name: string;
@@ -2350,6 +2359,7 @@ export interface operations {
                 comparison?: "archived_forecast" | "historical_model";
                 daylight_only?: boolean;
                 end_date?: string;
+                issuance_cutoff?: string | null;
                 start_date?: string;
             };
             header?: never;

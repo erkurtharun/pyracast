@@ -58,7 +58,7 @@ def test_past_day_inside_the_training_period_uses_that_calibration(
     assert payload["energy_mwh"] == pytest.approx(0.5 * 24 * 52)
     assert "retrospective_calibration" in payload["quality_flags"]
     assert "uncalibrated" not in payload["quality_flags"]
-    assert result["derating_scenario"] is None
+    assert result["production_diagnostic"] is None
     assert not PlantForecast.objects.exists()
 
 

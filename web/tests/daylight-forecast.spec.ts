@@ -335,7 +335,7 @@ test("polar night shows no daylight without a complete zero total", async ({
     await expect(page.getByRole("status")).toHaveCount(0);
 });
 
-for (const name of ["outage_scenario", "derating_scenario"]) {
+for (const name of ["outage_scenario"]) {
     test(`${name} uses its daylight energy alongside normal capacity`, async ({
         page,
     }) => {
@@ -343,7 +343,7 @@ for (const name of ["outage_scenario", "derating_scenario"]) {
         Object.assign(affected.daylight, { energy_mwh: 15 });
         const scenario = {
             [name]: {
-                status: name === "outage_scenario" ? "estimated" : "suspected",
+                status: "estimated",
                 performance_ratio: 0.8,
                 window_start: "2026-11-08",
                 window_end: "2026-11-13",
@@ -356,10 +356,7 @@ for (const name of ["outage_scenario", "derating_scenario"]) {
         ).toContainText("30 MWh");
         await expect(
             page.locator(".stat").filter({
-                hasText:
-                    name === "outage_scenario"
-                        ? /^With outages/
-                        : /^If derating persists/,
+                hasText: /^With outages/,
             }),
         ).toContainText("15 MWh");
         await expect(

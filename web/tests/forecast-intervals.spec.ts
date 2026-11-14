@@ -19,7 +19,7 @@ async function openForecast(
     page: Page,
     options: {
         electrical?: boolean;
-        scenario?: "derating" | "outage";
+        scenario?: "outage";
         missing?: boolean;
         flagged?: boolean;
     } = {},
@@ -69,10 +69,7 @@ async function openForecast(
                     ...(scenario
                         ? {
                               [`${scenario}_scenario`]: {
-                                  status:
-                                      scenario === "derating"
-                                          ? "suspected"
-                                          : "estimated",
+                                  status: "estimated",
                                   performance_ratio: 0.5,
                                   window_start: "2026-11-01",
                                   window_end: "2026-11-13",
@@ -165,7 +162,7 @@ test("generation intervals show energy without redundant visible power columns",
     });
 });
 
-for (const scenario of ["derating", "outage"] as const) {
+for (const scenario of ["outage"] as const) {
     test(`${scenario} keeps both energies and moves only flagged intervals into collapsed notes`, async ({
         page,
     }, testInfo) => {
@@ -175,13 +172,12 @@ for (const scenario of ["derating", "outage"] as const) {
         await expect(
             page.getByRole("img", {
                 name: new RegExp(
-                    `Normal capacity and ${scenario === "derating" ? "if derating persists" : "with outages"} power by interval`,
+                    `Normal capacity and with outages power by interval`,
                 ),
             }),
         ).toBeVisible();
         await page.getByText("View interval data (2 intervals)").click();
-        const affected =
-            scenario === "derating" ? "If derating persists" : "With outages";
+        const affected = "With outages";
         const table = page.getByRole("table");
         await expect(table.getByRole("columnheader")).toHaveText([
             "Time interval",

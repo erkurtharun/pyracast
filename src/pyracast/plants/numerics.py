@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from pyracast.solar import Daylight, TimeWindows, daylight_energy_windows, summarize_daylight
 
 MODEL_VERSION = "reference-power-transfer-v1"
-POLICY_VERSION = "regularized-huber-v6"
+POLICY_VERSION = "regularized-huber-v7"
 DAYLIGHT_COVERAGE_POLICY = "whole-meter-intervals-cover-daylight-v1"
 type RequiredWindows = Mapping[date, tuple[tuple[datetime, datetime], ...]]
 FACTOR_MIN = 0.25
@@ -25,7 +25,7 @@ MIN_LEVERAGE_HOURS = 0.02
 COMPARISON_TOLERANCE = 1e-9
 TRAINING_WINDOW_POLICY = "recent-calendar-days-v1"
 TRAINING_LOOKBACK_DAYS = 30
-DERATING_POLICY = "strong-unclipped-power-median-v1"
+DERATING_POLICY = "strong-unclipped-power-diagnostics-v2"
 DERATING_LOOKBACK_DAYS = 10
 DERATING_MIN_DAYS = 3
 DERATING_MIN_HOURS = 3.0
@@ -222,7 +222,6 @@ def _rows(
     samples: tuple[CalibrationSample, ...],
     zone: ZoneInfo,
     *,
-    require_informative_day: bool = True,
     required_windows: RequiredWindows | None = None,
 ) -> tuple[list[_Row], dict[str, int], list[date]]:
     rows: list[_Row] = []
@@ -267,17 +266,7 @@ def _rows(
             if windows_by_day is None
             else windows_by_day.get(day, ())
         )
-        if (
-            windows
-            and all(_covers_window(day_rows, start, end) for start, end in windows)
-            and (
-                not require_informative_day
-                or any(
-                    row.sample.energy_mwh > 0 and any(p > 0 for p, _ in row.pieces)
-                    for row in day_rows
-                )
-            )
-        ):
+        if windows and all(_covers_window(day_rows, start, end) for start, end in windows):
             valid.append(day)
         else:
             exclusions["incomplete_day"] += len(day_rows)
@@ -437,7 +426,6 @@ def evaluate_samples(
     rows, exclusions, days = _rows(
         samples,
         ZoneInfo(timezone),
-        require_informative_day=False,
         required_windows=required_windows,
     )
     daily = []
@@ -472,10 +460,16 @@ def evaluate_samples(
 
 
 def _eligible(rows: list[_Row], cap: float | None) -> list[_Row]:
+    informative_days = {
+        row.day
+        for row in rows
+        if row.sample.energy_mwh > 0 and any(power > 0 for power, _ in row.pieces)
+    }
     return [
         row
         for row in rows
-        if any(power > 0 for power, _ in row.pieces)
+        if row.day in informative_days
+        and any(power > 0 for power, _ in row.pieces)
         and (cap is None or row.sample.energy_mwh / row.hours < CAP_MARGIN * cap)
     ]
 
@@ -519,14 +513,18 @@ def _support(
 
 
 def _derating(
-    rows: list[_Row], end: date, baseline: float, normalization: float, cap: float | None
+    rows: list[_Row],
+    end: date | None,
+    baseline: float,
+    normalization: float,
+    cap: float | None,
+    reference_kind: str,
 ) -> dict[str, object]:
-    """Compare recent strong, unclipped meter intervals with the healthy baseline factor."""
-    first = end - timedelta(days=DERATING_LOOKBACK_DAYS - 1)
+    first = end - timedelta(days=DERATING_LOOKBACK_DAYS - 1) if end is not None else None
     totals: dict[date, list[float]] = {}
     limit_reached = False
     for row in rows:
-        if row.day < first:
+        if first is not None and row.day < first:
             continue
         predicted = _energy(row.pieces, baseline, cap)
         ceiling = None if cap is None else CAP_MARGIN * cap * row.hours
@@ -545,6 +543,10 @@ def _derating(
             "day": day.isoformat(),
             "performance_index": _finite(measured / predicted, "Performance index"),
             "hours": hours,
+            "status": "shortfall"
+            if measured / predicted < DERATING_THRESHOLD
+            else "within_threshold",
+            "observed_zero": not any(row.sample.energy_mwh > 0 for row in rows if row.day == day),
         }
         for day, (measured, predicted, hours) in sorted(totals.items())
         if hours >= DERATING_MIN_HOURS
@@ -554,6 +556,7 @@ def _derating(
         if len(daily) >= DERATING_MIN_DAYS
         else None
     )
+    latest = next((day for day in daily if day["day"] == str(end)), None)
     return {
         "policy": DERATING_POLICY,
         "status": "insufficient"
@@ -562,10 +565,18 @@ def _derating(
         if ratio < DERATING_THRESHOLD
         else "normal",
         "baseline_factor": baseline,
+        "reference_kind": reference_kind,
         "performance_ratio": ratio,
         "threshold": DERATING_THRESHOLD,
-        "window_start": first.isoformat(),
-        "window_end": end.isoformat(),
+        "window_start": first.isoformat() if first is not None else None,
+        "window_end": end.isoformat() if end is not None else None,
+        "latest_matched_day": end.isoformat() if end is not None else None,
+        "latest_day_status": latest["status"]
+        if latest is not None
+        else "insufficient"
+        if end is not None
+        else "unavailable",
+        "latest_performance_index": latest["performance_index"] if latest is not None else None,
         "days": daily,
         "limit_reached": limit_reached,
     }
@@ -573,6 +584,18 @@ def _derating(
 
 def _worse(candidate: float, reference: float) -> bool:
     return candidate > reference + COMPARISON_TOLERANCE * max(1, abs(reference))
+
+
+def _meaningful_improvement(candidate: dict[str, float], reference: dict[str, float]) -> bool:
+    return all(
+        candidate[metric]
+        < reference[metric] - COMPARISON_TOLERANCE * max(1, abs(reference[metric]))
+        and candidate[metric] <= reference[metric] * (1 - MIN_IMPROVEMENT)
+        for metric in ("interval_mae_mw", "daily_mae_mwh")
+    ) and all(
+        not _worse(abs(candidate[metric]), abs(reference[metric]))
+        for metric in ("bias_mw", "daily_bias_mwh")
+    )
 
 
 def _rolling_origin(
@@ -608,6 +631,7 @@ def fit_calibration(
     normalization_mw: float,
     limit_mw: float | None,
     incumbent_factor: float = 1.0,
+    incumbent_is_active: bool | None = None,
     required_windows: RequiredWindows | None = None,
 ) -> FitResult:
     _positive(normalization_mw, "normalization_mw")
@@ -638,7 +662,17 @@ def fit_calibration(
         "incumbent_factor": incumbent_factor,
         "reasons": [],
         "rolling_origin": {"status": "insufficient", "folds": []},
-        "derating": {"policy": DERATING_POLICY, "status": "not_evaluated"},
+        "candidate_kind": None,
+        "derating": _derating(
+            rows,
+            days[-1] if days else None,
+            incumbent_factor,
+            normalization_mw,
+            limit_mw,
+            "active_calibration"
+            if (incumbent_factor != 1 if incumbent_is_active is None else incumbent_is_active)
+            else "uncalibrated_reference",
+        ),
         "training_window": {
             "policy": TRAINING_WINDOW_POLICY,
             "lookback_days": TRAINING_LOOKBACK_DAYS,
@@ -653,9 +687,13 @@ def fit_calibration(
     training_days = [day for day in days[:-holdout_count] if day >= first_training_day]
     training = [row for row in rows if first_training_day <= row.day < holdout_days[0]]
     validation = [row for row in rows if row.day in holdout_days]
-    informative = [row for row in training if any(power > 0 for power, _ in row.pieces)]
+    informative = _eligible(training, None)
     eligible = _eligible(informative, limit_mw)
     exclusions["uninformative_training"] = len(training) - len(informative)
+    exclusions["zero_production_training_days"] = sum(
+        not any(row.sample.energy_mwh > 0 for row in training if row.day == day)
+        for day in training_days
+    )
     exclusions["censored_training"] = len(informative) - len(eligible)
     support = _support(eligible, training_days, normalization_mw, limit_mw)
     report.update(
@@ -681,6 +719,9 @@ def fit_calibration(
     report.update(
         {
             "candidate_factor": factor,
+            "candidate_kind": "huber",
+            "fitted_factor": factor,
+            "fitted_metrics": candidate,
             "baseline": baseline,
             "candidate": candidate,
             "incumbent": incumbent,
@@ -710,16 +751,17 @@ def fit_calibration(
             for metric in ("bias_mw", "daily_bias_mwh")
         ):
             reasons.append(f"{name}_bias_regression")
+    if reasons and incumbent_factor != 1 and _meaningful_improvement(baseline, incumbent):
+        factor, candidate, reasons = 1.0, baseline, []
+        report.update(
+            {
+                "candidate_kind": "identity_recovery",
+                "candidate_factor": factor,
+                "candidate": candidate,
+            }
+        )
     report["reasons"] = reasons
     accepted = not reasons
-    if incumbent_factor != 1 or accepted:
-        report["derating"] = _derating(
-            rows,
-            days[-1],
-            incumbent_factor if incumbent_factor != 1 else factor,
-            normalization_mw,
-            limit_mw,
-        )
     return FitResult(
         "ready" if accepted else "rejected",
         factor if accepted else None,

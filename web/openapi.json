@@ -1883,6 +1883,15 @@
                         }
                     },
                     {
+                        "in": "query",
+                        "name": "issuance_cutoff",
+                        "schema": {
+                            "type": "string",
+                            "format": "time",
+                            "nullable": true
+                        }
+                    },
+                    {
                         "in": "path",
                         "name": "plant_id",
                         "schema": {
@@ -4291,6 +4300,11 @@
                         "format": "date-time",
                         "nullable": true
                     },
+                    "selection_cutoff": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
                     "calibration_id": {
                         "type": "integer",
                         "nullable": true
@@ -4364,6 +4378,7 @@
                     "provisional_production",
                     "provisional_snapshot_ids",
                     "reason",
+                    "selection_cutoff",
                     "settlement_snapshot_ids",
                     "snapshot_id",
                     "source_kind",
@@ -4442,6 +4457,11 @@
                     "comparison": {
                         "$ref": "#/components/schemas/ComparisonEnum"
                     },
+                    "issuance_cutoff": {
+                        "type": "string",
+                        "format": "time",
+                        "nullable": true
+                    },
                     "measurement_policy": {
                         "type": "string"
                     },
@@ -4466,6 +4486,19 @@
                     },
                     "requested_days": {
                         "type": "integer"
+                    },
+                    "missing_days": {
+                        "type": "integer"
+                    },
+                    "excluded_days": {
+                        "type": "integer"
+                    },
+                    "scored_intervals": {
+                        "type": "integer"
+                    },
+                    "scored_hours": {
+                        "type": "number",
+                        "format": "double"
                     },
                     "metrics": {
                         "allOf": [
@@ -4503,13 +4536,18 @@
                     "end_date",
                     "evaluated_at",
                     "evaluation_kind",
+                    "excluded_days",
+                    "issuance_cutoff",
                     "matched_days",
                     "measurement_basis",
                     "measurement_policy",
                     "metric_scope",
                     "metrics",
+                    "missing_days",
                     "plant_id",
                     "requested_days",
+                    "scored_hours",
+                    "scored_intervals",
                     "selection_policy",
                     "start_date",
                     "timezone",
@@ -4567,7 +4605,7 @@
                     "outage_scenario": {
                         "nullable": true
                     },
-                    "derating_scenario": {
+                    "production_diagnostic": {
                         "nullable": true
                     }
                 },
@@ -5501,7 +5539,7 @@
             "cookieAuth": {
                 "type": "apiKey",
                 "in": "cookie",
-                "name": "__Host-pyracast-sessionid"
+                "name": "sessionid"
             }
         }
     }

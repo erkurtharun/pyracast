@@ -79,4 +79,4 @@ def test_outage_scenario_replays_the_transfer_model_of_its_saved_forecast(
     scenario = cast(dict[str, Any], result["outage_scenario"])["result"]
     assert normal["model_version"] == scenario["model_version"] == MODEL_VERSION
     assert scenario["partial_energy_mwh"] == pytest.approx(0.5 * normal["partial_energy_mwh"])
-    assert result["derating_scenario"] is None
+    assert result["production_diagnostic"] is None

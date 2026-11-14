@@ -130,7 +130,7 @@ def test_explicit_cutoff_keeps_new_configuration_unavailable(
     result = plant_outlook(
         *args, target_date=DAY, resolution_minutes=30, source=source, as_of=cutoff
     )
-    assert result == strict | {"outage_scenario": None, "derating_scenario": None}
+    assert result == strict | {"outage_scenario": None, "production_diagnostic": None}
     assert not PlantForecast.objects.exists()
 
 

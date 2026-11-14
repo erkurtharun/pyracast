@@ -26,14 +26,24 @@ type OutageScenario = {
     incidents: Record<string, unknown>[];
     result: Record<string, unknown>;
 };
-type DeratingScenario = {
-    evaluated_at: string;
-    status: "suspected";
-    performance_ratio: number;
-    window_start: string;
-    window_end: string;
-    days?: { day: string; performance_index: number; hours: number }[];
-    result: Record<string, unknown>;
+type ProductionDiagnostic = {
+    status: "suspected" | "normal" | "insufficient";
+    performance_ratio: number | null;
+    reference_kind: "active_calibration" | "uncalibrated_reference";
+    window_start: string | null;
+    window_end: string | null;
+    days: {
+        day: string;
+        performance_index: number;
+        hours: number;
+        status: "shortfall" | "within_threshold";
+        observed_zero: boolean;
+    }[];
+    latest_matched_day: string | null;
+    latest_day_status:
+        "shortfall" | "within_threshold" | "insufficient" | "unavailable";
+    latest_performance_index: number | null;
+    evidence_state: "current" | "stale";
 };
 function fullDayIntervals(
     rows: Interval[],
@@ -111,13 +121,19 @@ export function ForecastPanel({
         );
     const scenarios = forecast as Forecast & {
         outage_scenario?: OutageScenario | null;
-        derating_scenario?: DeratingScenario | null;
+        production_diagnostic?: ProductionDiagnostic | null;
     };
     const outage = electrical ? scenarios.outage_scenario : null;
-    const derating = electrical && !outage ? scenarios.derating_scenario : null;
-    const scenario = outage ?? derating ?? null;
-    const affected = derating ? "if derating persists" : "with outages";
-    const Affected = derating ? "If derating persists" : "With outages";
+    const diagnostic = electrical ? scenarios.production_diagnostic : null;
+    const scenario = outage ?? null;
+    const affected = "with outages";
+    const Affected = "With outages";
+    const diagnosticModel =
+        diagnostic?.reference_kind === "uncalibrated_reference"
+            ? "uncalibrated model"
+            : "model";
+    const latestShortfall = diagnostic?.latest_day_status === "shortfall";
+    const diagnosticDays = diagnostic?.days.map((day) => day.day).sort() ?? [];
     const result = forecast.result as Record<string, unknown>;
     const daylight = result.daylight as DaylightSummary | undefined;
     const primary = daylight ?? result;
@@ -145,7 +161,6 @@ export function ForecastPanel({
         typeof result.coverage_fraction === "number"
             ? result.coverage_fraction * dayHours
             : Number.NaN;
-    const deratingDays = derating?.days?.map((day) => day.day).sort() ?? [];
     const mixedVintages =
         Array.isArray(result.quality_flags) &&
         result.quality_flags.includes("mixed_forecast_vintages");
@@ -247,9 +262,7 @@ export function ForecastPanel({
                             },
                             ...(scenario
                                 ? {
-                                      [derating
-                                          ? "derating_scenario"
-                                          : "outage_scenario"]: {
+                                      outage_scenario: {
                                           ...scenario,
                                           result: {
                                               ...scenario.result,
@@ -289,20 +302,18 @@ export function ForecastPanel({
                     }
                 />
             )}
-            {derating && (
+            {diagnostic?.evidence_state === "stale" ? (
+                <Notice>Production comparison is out of date.</Notice>
+            ) : diagnostic &&
+              (latestShortfall || diagnostic.status === "suspected") ? (
                 <Notice>
-                    Median shortfall:{" "}
-                    {number(
-                        Math.round((1 - derating.performance_ratio) * 1000) /
-                            10,
-                    )}
-                    %
-                    {deratingDays.length > 0
-                        ? ` over ${deratingDays.length} comparable days`
-                        : ""}
-                    . Outage unconfirmed.
+                    {latestShortfall &&
+                    diagnostic.latest_performance_index !== null &&
+                    diagnostic.latest_matched_day
+                        ? `Production below ${diagnosticModel}: ${number(Math.round((1 - diagnostic.latest_performance_index) * 1000) / 10)}% on ${diagnostic.latest_matched_day}.`
+                        : `Earlier production was below the ${diagnosticModel}.`}
                 </Notice>
-            )}
+            ) : null}
             {scenario?.status === "unknown_impact" && (
                 <Notice>Outage impact is unknown for some intervals.</Notice>
             )}
@@ -477,13 +488,23 @@ export function ForecastPanel({
             )}
             <details className="provenance">
                 <summary>Source & quality</summary>
-                {derating && (
+                {diagnostic && (
                     <p>
-                        {deratingDays.length > 0
-                            ? `${deratingDays.length} qualifying days: ${deratingDays[0]} to ${deratingDays[deratingDays.length - 1]}. `
-                            : `Assessment window: ${derating.window_start} to ${derating.window_end}. `}
-                        Median daily production/reference ratio over matched
-                        hours.
+                        {diagnostic.reference_kind === "uncalibrated_reference"
+                            ? "Uncalibrated reference model"
+                            : "Active calibration reference"}
+                        .
+                        {diagnosticDays.length > 0 &&
+                            ` ${diagnosticDays.length} qualifying days: ${diagnosticDays[0]} to ${diagnosticDays[diagnosticDays.length - 1]}.`}
+                        {diagnostic.performance_ratio !== null &&
+                            ` Median production/reference ratio: ${number(diagnostic.performance_ratio)}.`}
+                        {diagnostic.latest_day_status === "within_threshold" &&
+                            diagnostic.latest_matched_day &&
+                            ` Latest comparison within threshold on ${diagnostic.latest_matched_day}.`}
+                        {diagnostic.latest_day_status === "insufficient" &&
+                            " Latest day has insufficient comparable data."}
+                        {diagnostic.latest_day_status === "unavailable" &&
+                            " Latest comparison is unavailable."}
                     </p>
                 )}
                 {daylight && (
@@ -554,9 +575,7 @@ export function ForecastPanel({
                     )}
                 {scenario && (
                     <p className="fine">
-                        {derating
-                            ? "The alternative scenario assumes the measured shortfall persists."
-                            : "The outage scenario uses reported remaining capacity."}
+                        The outage scenario uses reported remaining capacity.
                     </p>
                 )}
                 <p>

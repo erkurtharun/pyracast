@@ -347,105 +347,142 @@ test("outage comparison CSV retains normal forecast source IDs", async ({
     expect(csv).toContain("[6]");
 });
 
-test("suspected derating shows a second scenario with its evidence", async ({
-    page,
-}) => {
-    await mockApi(page);
-    const interval = {
-        start: "2026-11-11T04:00:00Z",
-        end: "2026-11-11T04:30:00Z",
-        mean_power_mw: 10,
-        energy_mwh: 5,
-        source_snapshot_ids: [6],
-    };
-    await page.route("**/plants/21/forecast/**", (route) =>
-        route.fulfill({
-            json: {
-                date: "2026-11-11",
-                timezone: region.timezone,
-                source_kind: "forecast",
-                freshness: "fresh",
-                result: {
-                    complete: true,
-                    energy_mwh: 5,
-                    intervals: [interval],
-                },
-                outage_scenario: null,
-                derating_scenario: {
-                    status: "suspected",
-                    performance_ratio: 0.875,
-                    window_start: "2026-11-04",
-                    window_end: "2026-11-13",
-                    days: [
-                        { day: "2026-11-08", performance_index: 0.9, hours: 9 },
-                        { day: "2026-11-09", performance_index: 0.8, hours: 9 },
-                        {
-                            day: "2026-11-11",
-                            performance_index: 1.03,
-                            hours: 8,
-                        },
-                        {
-                            day: "2026-11-12",
-                            performance_index: 0.875,
-                            hours: 5,
-                        },
-                        {
-                            day: "2026-11-13",
-                            performance_index: 0.86,
-                            hours: 3,
-                        },
-                    ],
+for (const state of [
+    "shortfall",
+    "zero",
+    "recovered",
+    "stale",
+    "insufficient",
+] as const) {
+    test(`production diagnostic ${state} keeps one forecast and its original CSV`, async ({
+        page,
+    }) => {
+        await page.setViewportSize({ width: 320, height: 844 });
+        await mockApi(page);
+        const latestRatio =
+            state === "zero" ? 0 : state === "recovered" ? 1.03 : 0.86;
+        await page.route("**/plants/21/forecast/**", (route) =>
+            route.fulfill({
+                json: {
+                    date: "2026-11-14",
+                    timezone: region.timezone,
+                    source_kind: "forecast",
+                    freshness: "fresh",
                     result: {
                         complete: true,
-                        energy_mwh: 4.375,
+                        energy_mwh: 5,
                         intervals: [
                             {
-                                ...interval,
-                                mean_power_mw: 8.75,
-                                energy_mwh: 4.375,
+                                start: "2026-11-14T09:00:00Z",
+                                end: "2026-11-14T09:30:00Z",
+                                mean_power_mw: 10,
+                                energy_mwh: 5,
+                                source_snapshot_ids: [6],
+                            },
+                        ],
+                    },
+                    outage_scenario: null,
+                    production_diagnostic: {
+                        status:
+                            state === "insufficient"
+                                ? "insufficient"
+                                : "suspected",
+                        performance_ratio: 0.875,
+                        threshold: 0.92,
+                        baseline_factor: 1,
+                        reference_kind: "uncalibrated_reference",
+                        window_start: "2026-11-04",
+                        window_end: "2026-11-13",
+                        latest_matched_day: "2026-11-13",
+                        latest_day_status:
+                            state === "recovered"
+                                ? "within_threshold"
+                                : state === "insufficient"
+                                  ? "insufficient"
+                                  : "shortfall",
+                        latest_performance_index: latestRatio,
+                        evaluated_at: "2026-11-14T01:00:00Z",
+                        calibration_id: 4,
+                        evidence_state: state === "stale" ? "stale" : "current",
+                        days: [
+                            {
+                                day: "2026-11-08",
+                                performance_index: 0.875,
+                                hours: 5,
+                                status: "shortfall",
+                                observed_zero: false,
+                            },
+                            {
+                                day: "2026-11-13",
+                                performance_index: latestRatio,
+                                hours: 5,
+                                status:
+                                    state === "recovered"
+                                        ? "within_threshold"
+                                        : "shortfall",
+                                observed_zero: state === "zero",
                             },
                         ],
                     },
                 },
-            },
-        }),
-    );
-    await page.goto("/");
-    await page
-        .getByRole("button", { name: /East array|Antalya solar park/ })
-        .click();
-    await expect(
-        page.getByText(
-            "Median shortfall: 12.5% over 5 comparable days. Outage unconfirmed.",
-            { exact: false },
-        ),
-    ).toBeVisible();
-    await expect(page.getByRole("status")).not.toContainText("2026-11-04");
-    await expect(page.getByRole("status")).toContainText("Outage unconfirmed.");
-    await page.getByText("Source & quality", { exact: true }).click();
-    await expect(page.locator(".provenance")).toContainText(
-        "5 qualifying days: 2026-11-08 to 2026-11-13. Median daily production/reference ratio over matched hours.",
-    );
-    await expect(
-        page
-            .locator(".stat")
-            .getByText("If derating persists", { exact: true }),
-    ).toBeVisible();
-    await page.getByText("View interval data (1 intervals)").click();
-    await expect(
-        page.getByRole("columnheader", { name: "If derating persists (MWh)" }),
-    ).toBeVisible();
-    await expect(
-        page
-            .getByRole("table")
-            .locator(".interval-value")
-            .filter({ hasText: "4.375" }),
-    ).toBeVisible();
-    const downloadPromise = page.waitForEvent("download");
-    await page
-        .getByRole("button", { name: "Download both scenarios CSV" })
-        .click();
-    const download = await downloadPromise;
-    const csv = await readFile(await download.path(), "utf8");
-    expect(csv).toContain("derating_scenario.performance_ratio");
-});
+            }),
+        );
+        await page.goto("/");
+        await page
+            .getByRole("button", { name: /East array|Antalya solar park/ })
+            .click();
+        if (state === "stale")
+            await expect(page.getByRole("status")).toHaveText(
+                "Production comparison is out of date.",
+            );
+        else if (state === "insufficient")
+            await expect(page.getByRole("status")).toHaveCount(0);
+        else if (state === "recovered")
+            await expect(page.getByRole("status")).toHaveText(
+                "Earlier production was below the uncalibrated model.",
+            );
+        else
+            await expect(page.getByRole("status")).toHaveText(
+                `Production below uncalibrated model: ${state === "zero" ? 100 : 14}% on 2026-11-13.`,
+            );
+        await expect(
+            page.getByText("If derating persists", { exact: true }),
+        ).toHaveCount(0);
+        await expect(
+            page.getByRole("button", { name: "Download both scenarios CSV" }),
+        ).toHaveCount(0);
+        await expect(
+            page.getByRole("img", { name: /^Power by interval/ }),
+        ).toBeVisible();
+        await page.getByText("View interval data (1 intervals)").click();
+        await expect(page.getByRole("columnheader")).toHaveCount(2);
+        await expect(
+            page.getByRole("table").locator(".interval-value"),
+        ).toHaveText(["5"]);
+        await page.getByText("Source & quality", { exact: true }).click();
+        await expect(page.locator(".provenance")).toContainText(
+            "Uncalibrated reference model",
+        );
+        await expect(page.locator(".provenance")).toContainText(
+            "2 qualifying days: 2026-11-08 to 2026-11-13.",
+        );
+        if (state === "recovered")
+            await expect(page.locator(".provenance")).toContainText(
+                "Latest comparison within threshold on 2026-11-13.",
+            );
+        expect(
+            await page.evaluate(() => document.documentElement.scrollWidth),
+        ).toBeLessThanOrEqual(320);
+        const downloadPromise = page.waitForEvent("download");
+        await page
+            .getByRole("button", { name: "Download CSV", exact: true })
+            .click();
+        const csv = await readFile(
+            await (await downloadPromise).path(),
+            "utf8",
+        );
+        expect(csv).toContain("production_diagnostic.performance_ratio");
+        expect(csv).not.toContain("affected_energy_mwh");
+        expect(csv).not.toContain("derating_scenario");
+    });
+}

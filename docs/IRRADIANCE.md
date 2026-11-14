@@ -226,7 +226,7 @@ domain [0.25, 2]. The one-dimensional solver considers every clipping breakpoint
 and each convex segment; it does not assume the entire capped objective is convex.
 These are versioned engineering defaults, not universal statistical constants.
 
-Policy `regularized-huber-v6` uses completed local days with complete, matched
+Policy `regularized-huber-v7` uses completed local days with complete, matched
 astronomical daylight coverage and `valid` observations. Select whole meter
 intervals with positive overlap with daylight; keep sunrise/sunset boundary slots
 and their full energy without prorating. Valid measurements must cover every
@@ -235,7 +235,11 @@ Exclude days containing daylight gaps, invalid records, outages or declared curt
 Night readings are optional and excluded from this scope, never synthesized as zeros.
 Do not infer outages from low output alone. Exclude measurements at or above 98% of the known cap from
 training because clipping hides uncapped performance; retain valid clipped intervals
-in evaluation. Zero-source samples do not identify a multiplicative factor.
+in evaluation. Complete valid zero-production and zero-source days remain in the
+chronological split and holdout scoring, including their errors. A training day
+must contain positive measured energy with positive reference power; otherwise
+exclude it from factor learning and report zero-production training-day counts.
+Zero-source samples do not identify a multiplicative factor.
 An incident overlapping any part of a meter interval excludes that entire interval;
 the complete-day coverage rule can consequently exclude the day. Pin immutable
 incident revision IDs in the dataset. Later corrections preserve old fit evidence
@@ -250,8 +254,11 @@ DC capacity reach this threshold. These conservative support thresholds prevent 
 fit based on one useful measurement; they are engineering guards, not confidence
 levels or a requirement for distinct power values in a one-parameter model.
 
-At least seven complete matched days are required. For 7–29 days, reserve the last
-max(2, ceil(20% of days)) for evaluation; for 30 or more, reserve the last seven.
+One complete valid matched day can prepare an analysis job. With one to six days,
+the result is `insufficient`: retain production diagnostics without fitting or
+activating a factor. At least seven complete matched days are required for fitting.
+For 7–29 days, reserve the last max(2, ceil(20% of days)) for evaluation; for 30 or
+more, reserve the last seven.
 Fit only earlier days and do not refit on the holdout. Seven days can check the
 pipeline and support a **provisional** fit; a month covers more conditions but
 neither duration proves seasonal validity. Intervals within a day are correlated,
@@ -277,24 +284,33 @@ Report interval power MAE/bias (MW), per-day daylight-interval energy MAE/bias (
 included/excluded days, censored counts and the exact chronological split. These
 energy sums are not 24-hour totals. Preserve `metric_scope`, astronomical policy
 and UTC daylight windows in the dataset manifest; compare all factors on identical
-meter intervals. A candidate is `ready`
-only when both holdout interval MAE and daily MAE improve by at least 1% over factor
-1 and the fitted factor is inside the allowed bounds. Neither MAE may worsen against
-the incumbent factor, and absolute power/energy bias may not worsen against either
+meter intervals. A Huber candidate is `ready` only when both holdout interval MAE
+and daily MAE improve by at least 1% over factor 1 and the fitted factor is inside
+the allowed bounds. Neither MAE may worsen against the incumbent factor, and
+absolute power/energy bias may not worsen against either
 comparator (apart from numerical tolerance). Pin the incumbent activation when the
 job is created and retain it in the dataset manifest. Activation fails if the current
 selection has changed since that comparison. Old policy candidates cannot be newly
 activated; existing activation history remains valid. Rejected candidates cannot
 be activated; the current activation remains unchanged.
+If the Huber candidate fails these guards and the incumbent differs from 1,
+evaluate the explicit `identity_recovery` candidate, factor 1. It must improve both
+holdout MAEs by at least 1% over the incumbent, beyond numerical tolerance, without
+worsening either absolute bias. It equals the factor-1 baseline rather than beating
+it. Preserve the fitted Huber factor and metrics and identify the selected candidate
+kind. This recovery option retains the same training-support, chronological,
+source, authorization and activation guards; it never resets an aging factor merely
+because time has passed or assumes factor 1 is correct.
 The 1% margin is an operational acceptance rule, not a significance test. Confidence
 intervals are not estimated in this version; do not expose invented probability
 bands. Fitting and activation remain separate transactions. An authorized member can
 enable automatic calibration before an eligible fit exists. Daily durable checks and
 new acquisitions prepare fits without provider calls from the calibration worker.
 Automatic promotion requires at least 30 matched days, seven held-out days, and at
-least 1% improvement in both MAEs against the pinned incumbent as well as the baseline
-and bias guards above. The latest holdout day must be within seven completed calendar
-days and all seven must lie within the last fourteen days. These are operational
+least 1% improvement in both MAEs against the pinned incumbent, together with the
+candidate-specific baseline and bias guards above. The latest holdout day must be
+within seven completed calendar days and all seven must lie within the last
+fourteen days. These are operational
 freshness guards, not statistical confidence limits; an old native cohort cannot
 be promoted simply because a recent historical import triggered another fit.
 After a promotion, require seven entirely new holdout dates
@@ -310,37 +326,42 @@ they neither tune hyperparameters nor establish operational forecast accuracy.
 Report source-positive interval MAE separately, using whole meter intervals with
 positive reference power; it is not an astronomical daylight classification.
 
-Every fit with an applied baseline also reports a derating assessment,
-`strong-unclipped-power-median-v1`. The baseline is the pinned incumbent factor, or the
-accepted candidate when no calibration is active. Over the last ten calendar days of the
-dataset, keep whole meter intervals whose baseline prediction is at least 25% of DC capacity
-and where neither prediction nor measurement reaches 98% of the cap. A day qualifies with at
-least three such hours. With three qualifying days, a median daily measured/predicted ratio
-below 0.92 is `suspected`. On the case year, with the baseline refit weekly on the preceding
-60 days, this rule fired on May 29 inside a known outage week and from October 31 onward,
-where the operator later reported about 10% of inverter capacity out of service; the
-estimated ratio was 0.88–0.91. A suspected derating blocks automatic promotion over an
-active calibration, so the healthy baseline is not refitted to a fault. Recording the outage
-excludes its intervals and prepares a new fit; manual activation remains available. Live
-outlooks without a reported outage add `derating_scenario`: DC capacity is scaled by the
-ratio, and the inverter limit too unless the window still reached the cap. This is a
-conditional estimate, not a diagnosis, and its thresholds are engineering defaults.
-Show the actual qualifying dates and day count, not the ten-day search window as
-observed history. The percentage describes the median of these selected daily ratios,
-not the total production loss over that period. A first provisional calibration is
-not an independently established healthy baseline; record an outage only when known.
+Every analysis reports independent production evidence under
+`strong-unclipped-power-diagnostics-v2`, including insufficient or rejected fits.
+Its reference is the pinned eligible active calibration, explicitly identified by
+`reference_kind`, or uncalibrated factor 1 when none is eligible. The newly fitted
+candidate is never its own reference, and neither reference establishes a healthy
+plant. Anchor the ten-calendar-day search window on the latest complete valid
+matched day, retaining observed zero-production days. Keep whole meter intervals
+whose reference prediction is at least 25% of DC capacity and where neither
+prediction nor measurement reaches 98% of the cap. A day qualifies with at least
+three such hours.
 
-A fault inside the training window pulls the factor toward the reduced level. Three
-mechanisms keep the factor describing the healthy plant: reported outage intervals never
-enter training; automatic promotion pauses while a derating is suspected against an
-active calibration; and after the fault ends, a candidate that still contains those days
-must beat the healthy incumbent on recent holdout days. A first calibration fitted during
-an unreported fault cannot be told apart from the plant's normal level; once later days
-are healthy it follows the plant upward through the ordinary gated updates. Splitting the
-training window automatically at its largest level shift was tested on the case year and
-rejected: it triggered at 19 of 46 weekly origins, mostly on weather and snow-soiled
-reference days, and raised next-week interval MAE from 7.07 to 7.63 MW. Reporting the
-outage remains the reliable way to keep it out of the factor.
+Report each qualifying day's measured/predicted ratio, hours, `shortfall` or
+`within_threshold` status, and whether all matched meter intervals in the selected
+metric scope had zero measured energy. One or two qualifying days remain visible
+even though the aggregate assessment is `insufficient`. With at least three
+qualifying days, a median ratio
+below 0.92 retains the guard status `suspected`; otherwise it is `normal`. Also
+report the latest matched date, that day's status and ratio; a latest day without
+enough qualifying hours is `insufficient`, not evidence of recovery. Daily evidence
+can therefore show a recent drop or improvement while the longer median differs.
+Show the actual qualifying dates and day count. The median is not total production
+loss, a fault diagnosis or a capacity estimate; these thresholds are engineering
+guards, not confidence levels.
+
+Current/future forecast outlooks expose this evidence as `production_diagnostic`
+when its configuration, source identity, incidents and reference factor remain
+applicable. Evidence older than two completed local days is labeled `stale`.
+The diagnostic changes neither forecast power nor DC/inverter/export capacity.
+Only reported operating limits drive the separate outage scenario. A `suspected`
+aggregate assessment still pauses automatic promotion over an active calibration;
+manual activation retains its existing guards. Reported outage intervals remain
+excluded from calibration. Unreported partial losses can still affect training,
+and a first fit cannot distinguish their cause from normal model-transfer bias.
+Later candidates, including identity recovery, must pass the unchanged paired
+holdout and activation gates. Recording an incident remains necessary when its
+operating history is known.
 
 The dataset pairs manual metered production or settlement injection with matching Solcast estimated actuals,
 never archived forecasts. Prefer complete current Hobby acquisitions under the
@@ -430,8 +451,11 @@ archived forecasts retain the factor available then. Holdout improvement against
 estimated actuals does not establish improvement in future forecast accuracy.
 
 Meter entry requires matching archived estimated actuals for the entire interval.
-Saving at least seven days with complete valid matched daylight coverage automatically
-schedules fitting; daylight gaps and outage labels do not satisfy this threshold.
+Saving at least one day with complete valid matched daylight coverage automatically
+schedules analysis; one to six days produce diagnostics with an insufficient fit.
+Fitting still requires seven complete days and sufficient informative training
+support, and automatic promotion requires at least thirty matched days. Daylight
+gaps and outage labels do not satisfy complete-day coverage.
 Use a 60-day matching pool ending on the latest recorded local day and elapsed durations, including DST
 days. Capture both an observation timestamp cutoff and an ID watermark so readings
 saved during fitting cannot enter that dataset, even with identical timestamps.
@@ -455,11 +479,15 @@ the separate day-ahead information cutoff; live intraday updates do not enter it
 
 The plant performance endpoint replays archived day-ahead forecast inputs against
 meter energy for 1–90 completed local days. It uses only the current configuration's
-observations, and excludes days before that configuration existed. Select the first
-forecast acquired on the preceding local day, published before the target day,
-with a successful collection and no later provider issue time. Use only the
-calibration activated and completed before that day. Never fall back to estimated
-actuals or a retrospectively declared configuration.
+observations. Policy `latest-published-before-local-cutoff-v1` selects the newest
+successfully collected forecast acquired on the preceding local day and published
+by the selection cutoff. By default the cutoff is immediately before target-day
+start. Optional `issuance_cutoff` is an offset-free local time on the preceding
+day; ambiguous or nonexistent local times are rejected. Acquisition, publication
+and any known provider issue time must all be at or before that cutoff. The current
+configuration must already exist then, and only calibration activated and completed
+by that same cutoff is eligible. Never fall back to estimated actuals or a
+retrospectively declared configuration.
 
 Mark this as `historical_input_replay`: it does not prove that an electrical output
 was actually published at that historical time. Compare the selected historical
@@ -467,11 +495,15 @@ factor and factor 1 on the same complete, valid days. With `daylight_only=true`,
 require complete daylight coverage and report `metric_scope: daylight_intervals`;
 this is the frontend default. The API's full-day mode retains 24-hour coverage and
 metrics. Both modes preserve whole meter boundary intervals. Keep valid zero-production
-and zero-source days in evaluation, including their errors; do not infer outages
-from zero alone. Source-positive MAE is null when no such intervals exist.
+and zero-source days in evaluation, including their errors. Reported incidents do
+not remove otherwise valid production from archived forecast scoring; explicit
+invalid/outage-quality readings remain excluded. Do not infer outages from zero
+alone. Source-positive MAE is null when no such intervals exist.
 Return daily measured/predicted/baseline MWh, signed error, snapshot and calibration
-identities, excluded-day reasons and aggregate MAE/bias. Missing days cannot become
-zero errors. This diagnostic does not train or activate a model and does not produce
+identities, selection cutoffs, excluded-day reasons and aggregate MAE/bias. Return
+requested, matched, missing and excluded day counts plus scored interval/hour
+coverage. Missing days cannot become zero errors. This diagnostic does not train
+or activate a model and does not produce
 confidence intervals from a short or selectively observed history.
 
 The separate `historical_model` comparison uses saved estimated actuals available

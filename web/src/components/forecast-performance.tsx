@@ -36,14 +36,21 @@ export function ForecastPerformance({
     const [start, setStart] = useState(() => localDay(timezone, -30));
     const [end, setEnd] = useState(() => localDay(timezone, -1));
     const [comparison, setComparison] = useState("historical_model");
+    const [issuanceCutoff, setIssuanceCutoff] = useState("");
     const [url, setUrl] = useState(
         `${base}performance/?daylight_only=true&comparison=historical_model`,
     );
     function load(event: FormEvent) {
         event.preventDefault();
-        setUrl(
-            `${base}performance/?${new URLSearchParams({ start_date: start, end_date: end, daylight_only: "true", comparison })}`,
-        );
+        const params = new URLSearchParams({
+            start_date: start,
+            end_date: end,
+            daylight_only: "true",
+            comparison,
+        });
+        if (comparison === "archived_forecast" && issuanceCutoff)
+            params.set("issuance_cutoff", issuanceCutoff);
+        setUrl(`${base}performance/?${params}`);
     }
     return (
         <section className="panel">
@@ -59,25 +66,22 @@ export function ForecastPerformance({
             <details>
                 <summary>How comparison is measured</summary>
                 <p>
-                    Historical model comparison uses saved historical weather
-                    estimates with the current plant configuration. A
-                    calibration applies from the start of its training period;
-                    earlier days and the baseline use factor 1. It assumes that
-                    configuration for past dates and can include provisional
-                    reported production. It does not measure forecast accuracy
-                    or establish the production meter boundary.
+                    Historical model uses saved weather estimates and the
+                    current configuration. Calibration applies from its training
+                    period onward. This retrospective comparison can include
+                    provisional production. It does not measure forecast
+                    accuracy.
                 </p>
                 <p>
-                    Archived forecast performance uses day-ahead forecasts and
-                    the configuration and calibration available before each day.
-                    This does not establish that the plant prediction was
-                    published at the time.
+                    Archived performance replays the forecast, configuration and
+                    calibration available at the previous-day cutoff. A blank
+                    cutoff uses the end of the previous local day. This does not
+                    establish publication at the time.
                 </p>
                 <p>
-                    Results compare production intervals overlapping daylight.
-                    Whole boundary intervals retain their energy. The complete
-                    daylight window must be covered. Dates are local to{" "}
-                    {timezone}; choose up to 90 completed days.
+                    Whole intervals overlapping daylight retain their energy.
+                    Complete daylight coverage is required. Select up to 90
+                    completed local days in {timezone}.
                 </p>
             </details>
             <form className="forecast-controls" onSubmit={load}>
@@ -95,6 +99,18 @@ export function ForecastPerformance({
                         </option>
                     </select>
                 </label>
+                {comparison === "archived_forecast" && (
+                    <label className="field">
+                        Previous-day cutoff
+                        <input
+                            type="time"
+                            value={issuanceCutoff}
+                            onChange={(event) =>
+                                setIssuanceCutoff(event.target.value)
+                            }
+                        />
+                    </label>
+                )}
                 <label className="field">
                     Start date
                     <input
@@ -173,10 +189,17 @@ function PerformanceResults({
                                     <Stat
                                         label="Missing days"
                                         value={
+                                            resource.data.missing_days ??
                                             resource.data.requested_days -
-                                            resource.data.matched_days
+                                                resource.data.matched_days
                                         }
                                     />
+                                    {(resource.data.excluded_days ?? 0) > 0 && (
+                                        <Stat
+                                            label="Excluded days"
+                                            value={resource.data.excluded_days}
+                                        />
+                                    )}
                                     <Stat
                                         label="Daylight energy error"
                                         value={
@@ -215,6 +238,15 @@ function PerformanceResults({
                                             unit="MW"
                                         />
                                     </div>
+                                    {resource.data.scored_intervals != null && (
+                                        <p className="fine">
+                                            Scored:{" "}
+                                            {resource.data.scored_intervals}{" "}
+                                            intervals /{" "}
+                                            {format(resource.data.scored_hours)}{" "}
+                                            hours.
+                                        </p>
+                                    )}
                                     <p className="fine">
                                         Bias is predicted minus measured. Daily
                                         energy error is mean absolute error.

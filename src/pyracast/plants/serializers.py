@@ -163,6 +163,7 @@ class PerformanceQuery(InputSerializer):
     comparison = serializers.ChoiceField(
         choices=("archived_forecast", "historical_model"), default="archived_forecast"
     )
+    issuance_cutoff = serializers.TimeField(required=False, allow_null=True)
 
 
 class PerformanceMetrics(serializers.Serializer[dict[str, Any]]):
@@ -180,6 +181,7 @@ class PerformanceDay(serializers.Serializer[dict[str, Any]]):
     snapshot_id = serializers.IntegerField(allow_null=True)
     collected_at = serializers.DateTimeField(allow_null=True)
     available_at = serializers.DateTimeField(allow_null=True)
+    selection_cutoff = serializers.DateTimeField(allow_null=True)
     calibration_id = serializers.IntegerField(allow_null=True)
     factor = serializers.FloatField(allow_null=True)
     measured_energy_mwh = serializers.FloatField(allow_null=True)
@@ -204,6 +206,7 @@ class PerformanceOutput(serializers.Serializer[dict[str, Any]]):
     evaluation_kind = serializers.CharField()
     selection_policy = serializers.CharField()
     comparison = serializers.ChoiceField(choices=("archived_forecast", "historical_model"))
+    issuance_cutoff = serializers.TimeField(allow_null=True)
     measurement_policy = serializers.CharField()
     configuration_created_at = serializers.DateTimeField(allow_null=True)
     measurement_basis = serializers.CharField(allow_null=True)
@@ -211,6 +214,10 @@ class PerformanceOutput(serializers.Serializer[dict[str, Any]]):
     daylight_policy = serializers.CharField(allow_null=True)
     matched_days = serializers.IntegerField()
     requested_days = serializers.IntegerField()
+    missing_days = serializers.IntegerField()
+    excluded_days = serializers.IntegerField()
+    scored_intervals = serializers.IntegerField()
+    scored_hours = serializers.FloatField()
     metrics = PerformanceMetrics(allow_null=True)
     baseline_metrics = PerformanceMetrics(allow_null=True)
     days = PerformanceDay(many=True)
@@ -357,7 +364,7 @@ class PlantForecastOutput(serializers.Serializer[dict[str, Any]]):
     result = serializers.JSONField(allow_null=True)
     regional_irradiance = serializers.JSONField(allow_null=True)
     outage_scenario = serializers.JSONField(allow_null=True, default=None)
-    derating_scenario = serializers.JSONField(allow_null=True, default=None)
+    production_diagnostic = serializers.JSONField(allow_null=True, default=None)
 
 
 def calibration_status_choices() -> Any:

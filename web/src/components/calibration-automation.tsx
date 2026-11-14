@@ -7,7 +7,7 @@ const reasons: Record<string, string> = {
     insufficient_current_source_validation:
         "Needs 30 days from this reference source, including seven live validation days.",
     derating_suspected:
-        "Production is below the current calibration. Check for an outage.",
+        "Production is below the current calibration. Review the comparison.",
     authorization_revoked: "Authorization is no longer available.",
     configuration_changed: "The plant configuration changed.",
     insufficient_automatic_evaluation:

@@ -1,9 +1,11 @@
 import { expect, test } from "./support/test";
 import { mockApi } from "./support/workspace";
+import AxeBuilder from "@axe-core/playwright";
 
 test("available historical model days appear without empty grid rows", async ({
     page,
 }) => {
+    await page.setViewportSize({ width: 320, height: 844 });
     await mockApi(page);
     let query = "";
     await page.route("**/plants/21/performance/**", async (route) => {
@@ -15,6 +17,10 @@ test("available historical model days appear without empty grid rows", async ({
                 end_date: "2026-11-10",
                 matched_days: 8,
                 requested_days: 30,
+                missing_days: 21,
+                excluded_days: 1,
+                scored_intervals: 64,
+                scored_hours: 64,
                 metrics: {
                     daily_mae_mwh: 2,
                     daily_bias_mwh: 2,
@@ -25,7 +31,11 @@ test("available historical model days appear without empty grid rows", async ({
                     date: `2026-${index < 20 ? "10" : "11"}-${String(index < 20 ? index + 12 : index - 19).padStart(2, "0")}`,
                     status: index < 22 ? "missing" : "matched",
                     reason:
-                        index < 22 ? "estimated_actuals_not_available" : null,
+                        index === 0
+                            ? "invalid_forecast_data"
+                            : index < 22
+                              ? "estimated_actuals_not_available"
+                              : null,
                     measured_energy_mwh: index < 22 ? null : 10,
                     predicted_energy_mwh: index < 22 ? null : 12,
                     error_mwh: index < 22 ? null : 2,
@@ -51,12 +61,28 @@ test("available historical model days appear without empty grid rows", async ({
         comparison.getByRole("combobox", { name: /^Comparison/ }),
     ).toHaveValue("historical_model");
     expect(query).toContain("comparison=historical_model");
+    await expect(comparison.getByLabel("Previous-day cutoff")).toHaveCount(0);
     await expect(comparison.getByRole("row")).toHaveCount(9);
+    await expect(
+        comparison.locator(".stat").filter({ hasText: "Missing days" }),
+    ).toContainText("21");
+    await expect(
+        comparison.locator(".stat").filter({ hasText: "Excluded days" }),
+    ).toContainText("1");
+    await comparison
+        .getByText("Additional metrics & interpretation", { exact: true })
+        .click();
+    await expect(
+        comparison.getByText("Scored: 64 intervals / 64 hours."),
+    ).toBeVisible();
     await expect(
         comparison.getByRole("columnheader", { name: "Model (MWh)" }),
     ).toBeVisible();
     await expect(
-        comparison.getByText("Provisional production", { exact: false }),
+        comparison.getByRole("cell", {
+            name: "Provisional production",
+            exact: true,
+        }),
     ).toHaveCount(8);
     await expect(
         comparison.getByText("Includes provisional reported production", {
@@ -67,13 +93,36 @@ test("available historical model days appear without empty grid rows", async ({
         .getByText("Unavailable dates (22)", { exact: true })
         .click();
     await expect(comparison.getByRole("listitem")).toHaveText([
-        "Historical weather estimates are not available: 22 days",
+        "Saved reference data is invalid: 1 day",
+        "Historical weather estimates are not available: 21 days",
     ]);
     await comparison
         .getByRole("combobox", { name: /^Comparison/ })
         .selectOption("archived_forecast");
     await comparison.getByRole("button", { name: "Load performance" }).click();
     await expect.poll(() => query).toContain("comparison=archived_forecast");
+    expect(query).not.toContain("issuance_cutoff");
+    expect(
+        await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(320);
+    const scan = await new AxeBuilder({ page })
+        .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+        .analyze();
+    expect(scan.violations).toEqual([]);
+    await comparison.getByLabel("Previous-day cutoff").fill("09:30");
+    await comparison.getByRole("button", { name: "Load performance" }).click();
+    await expect
+        .poll(() => new URLSearchParams(query).get("issuance_cutoff"))
+        .toBe("09:30");
+    await comparison
+        .getByRole("combobox", { name: /^Comparison/ })
+        .selectOption("historical_model");
+    await comparison.getByRole("button", { name: "Load performance" }).click();
+    await expect.poll(() => query).toContain("comparison=historical_model");
+    expect(query).not.toContain("issuance_cutoff");
+    expect(
+        await page.evaluate(() => document.documentElement.scrollWidth),
+    ).toBeLessThanOrEqual(320);
 });
 
 test("a completely unavailable comparison stays compact", async ({ page }) => {

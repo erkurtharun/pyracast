@@ -120,7 +120,7 @@ def prepare_calibration(plant_id: int, now: datetime | None = None) -> Calibrati
             configuration, start, end, moment, observation_id_cutoff=watermark
         )
         days = _matched_days(configuration, rows, moment)
-        if len(days) < 7:
+        if not days:
             return None
         window_start, _ = local_day_bounds(days[0], configuration.binding.timezone)
         _, window_end = local_day_bounds(days[-1], configuration.binding.timezone)

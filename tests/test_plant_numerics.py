@@ -307,9 +307,9 @@ def test_nonfinite_calibration_metrics_are_rejected() -> None:
         fit_calibration(tuple(samples), timezone="UTC", normalization_mw=130, limit_mw=100)
 
 
-def test_nonfinite_calibration_loss_is_rejected() -> None:
+def test_nonfinite_reference_diagnostic_is_rejected() -> None:
     samples = tuple(replace(sample, energy_mwh=2.0) for sample in _samples(7, power=1e-308))
-    with pytest.raises(ValueError, match="Calibration loss must be finite"):
+    with pytest.raises(ValueError, match="Performance index must be finite"):
         fit_calibration(samples, timezone="UTC", normalization_mw=1e-308, limit_mw=None)
 
 
@@ -454,12 +454,53 @@ def test_zero_days_and_censored_only_samples_are_not_informative() -> None:
         _samples(7, power=0), timezone="UTC", normalization_mw=100, limit_mw=None
     )
     assert result.status == "insufficient"
-    assert result.report["valid_days"] == 0
+    assert result.report["valid_days"] == 7
     clipped = fit_calibration(
         _samples(7, factor=1, power=100), timezone="UTC", normalization_mw=100, limit_mw=100
     )
     assert clipped.status == "insufficient"
     assert clipped.report["fit_samples"] == 0
+
+
+def test_zero_production_holdout_is_scored_without_backdating_the_evaluation() -> None:
+    samples = tuple(
+        sample if sample.start < START + timedelta(days=23) else replace(sample, energy_mwh=0)
+        for sample in _samples(30)
+    )
+    result = fit_calibration(
+        samples, timezone="UTC", normalization_mw=100, limit_mw=100, incumbent_factor=0.8
+    )
+    assert result.status == "rejected"
+    assert result.report["valid_days"] == 30
+    assert result.report["holdout_start"] == "2026-06-24"
+    assert result.report["holdout_day_dates"] == [f"2026-06-{day}" for day in range(24, 31)]
+    incumbent = cast(dict[str, float], result.report["incumbent"])
+    assert incumbent["interval_mae_mw"] == 16
+    assert incumbent["daily_mae_mwh"] == 384
+
+
+def test_zero_production_training_days_do_not_pull_down_the_healthy_factor() -> None:
+    samples = tuple(
+        replace(sample, energy_mwh=0) if sample.start < START + timedelta(days=5) else sample
+        for sample in _samples(30)
+    )
+    result = fit_calibration(samples, timezone="UTC", normalization_mw=100, limit_mw=100)
+    assert result.status == "ready"
+    assert result.factor is not None
+    assert 0.8 < result.factor < 0.81
+    assert result.report["training_days"] == 23
+    assert result.report["fit_samples"] == 18 * 12
+    assert cast(dict[str, int], result.report["exclusions"])["zero_production_training_days"] == 5
+
+
+def test_all_zero_production_days_do_not_support_a_factor() -> None:
+    result = fit_calibration(
+        _samples(30, factor=0), timezone="UTC", normalization_mw=100, limit_mw=100
+    )
+    assert result.status == "insufficient"
+    assert result.report["valid_days"] == 30
+    assert result.report["fit_samples"] == 0
+    assert result.report["reasons"] == ["insufficient_training_support"]
 
 
 def test_training_excludes_censoring_but_holdout_retains_clipped_intervals() -> None:
@@ -596,6 +637,83 @@ def test_candidate_cannot_replace_a_better_incumbent() -> None:
     )
     assert result.status == "rejected"
     assert "incumbent_mae_regression" in cast(list[str], result.report["reasons"])
+
+
+def test_identity_recovery_can_replace_a_depressed_incumbent_after_production_recovers() -> None:
+    samples = tuple(
+        sample
+        if sample.start < START + timedelta(days=23)
+        else replace(sample, energy_mwh=sample.energy_mwh / 0.8)
+        for sample in _samples(30)
+    )
+    result = fit_calibration(
+        samples, timezone="UTC", normalization_mw=100, limit_mw=100, incumbent_factor=0.8
+    )
+    assert result.status == "ready"
+    assert result.factor == 1
+    assert result.report["candidate_kind"] == "identity_recovery"
+    assert cast(float, result.report["fitted_factor"]) < 0.81
+    assert result.report["candidate"] == result.report["baseline"]
+    assert result.report["reasons"] == []
+    assert result.report["holdout_day_dates"] == [f"2026-06-{day}" for day in range(24, 31)]
+
+
+def test_identity_recovery_still_requires_meaningful_paired_improvement_and_bias_guards() -> None:
+    samples = _samples(7, factor=0.9)
+    result = fit_calibration(
+        samples, timezone="UTC", normalization_mw=100, limit_mw=100, incumbent_factor=0.9
+    )
+    assert result.status == "rejected"
+    assert result.report["candidate_kind"] == "huber"
+    improved = fit_calibration(
+        samples, timezone="UTC", normalization_mw=100, limit_mw=100, incumbent_factor=0.8
+    )
+    assert improved.status == "ready"
+    assert improved.report["candidate_kind"] == "huber"
+    assert improved.factor is not None
+    assert 0.9 < improved.factor < 0.91
+
+
+def test_tiny_identity_improvement_does_not_trigger_recovery() -> None:
+    samples = tuple(
+        sample
+        if sample.start < START + timedelta(days=5)
+        else replace(sample, energy_mwh=sample.energy_mwh / 0.4 * 0.90005)
+        for sample in _samples(7, factor=0.4)
+    )
+    result = fit_calibration(
+        samples, timezone="UTC", normalization_mw=100, limit_mw=None, incumbent_factor=0.8
+    )
+    assert result.status == "rejected"
+    assert result.report["candidate_kind"] == "huber"
+
+
+def test_identity_recovery_cannot_trade_lower_mae_for_worse_bias() -> None:
+    samples = []
+    for sample in _samples(7):
+        if sample.start < START + timedelta(days=5) or not 6 <= sample.start.hour < 18:
+            samples.append(sample)
+        else:
+            power, measured = (
+                (45, 46) if sample.start.date() == (START + timedelta(days=5)).date() else (20, 6)
+            )
+            samples.append(
+                replace(
+                    sample,
+                    energy_mwh=measured,
+                    intervals=(PowerInterval(sample.start, sample.end, power),),
+                )
+            )
+    result = fit_calibration(
+        tuple(samples), timezone="UTC", normalization_mw=100, limit_mw=None, incumbent_factor=0.8
+    )
+    baseline = cast(dict[str, float], result.report["baseline"])
+    incumbent = cast(dict[str, float], result.report["incumbent"])
+    assert baseline["interval_mae_mw"] < incumbent["interval_mae_mw"]
+    assert baseline["daily_mae_mwh"] < incumbent["daily_mae_mwh"]
+    assert abs(baseline["daily_bias_mwh"]) > abs(incumbent["daily_bias_mwh"])
+    assert result.status == "rejected"
+    assert result.report["candidate_kind"] == "huber"
 
 
 def test_smaller_mae_cannot_hide_worse_absolute_daily_bias() -> None:

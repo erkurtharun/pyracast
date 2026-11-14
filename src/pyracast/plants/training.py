@@ -211,6 +211,7 @@ def run_calibration(run_id: int, now: datetime | None = None) -> bool:
             normalization_mw=lease.configuration.dc_capacity_mw,
             limit_mw=power_limit(lease.configuration),
             incumbent_factor=dataset.incumbent_factor,
+            incumbent_is_active=dataset.incumbent_is_active,
             required_windows=dataset.required_windows,
         )
         result.report["comparison_activation_id"] = lease.run.comparison_activation_id

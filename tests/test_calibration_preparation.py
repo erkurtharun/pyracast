@@ -111,22 +111,42 @@ def test_daylight_meter_gap_does_not_prepare_a_complete_day(
     )
     index = {"dawn": 0, "noon": len(observations) // 2, "dusk": -1}[slot]
     observations[index].delete()
-    assert prepare_calibration(plant.pk) is None
-    assert not CalibrationRun.objects.exists()
+    run = prepare_calibration(plant.pk)
+    assert run is not None
+    assert (run.window_start, run.window_end) == (date(2026, 11, 1), date(2026, 11, 6))
+    assert training.run_calibration(run.pk, NOW)
+    run.refresh_from_db()
+    assert run.status == "insufficient"
+    assert run.result["included_day_dates"] == [f"2026-11-{day:02d}" for day in range(1, 7)]
+    assert not CalibrationActivation.objects.exists()
 
 
 @pytest.mark.parametrize("invalid", [False, True])
-def test_only_seven_complete_valid_matched_days_schedule(
+def test_six_day_diagnostics_wait_for_seven_complete_valid_days_before_fitting(
     monkeypatch: pytest.MonkeyPatch, invalid: bool
 ) -> None:
     system, plant = make_plant(monkeypatch)
     add_days(system, plant, 1, 6)
-    assert not CalibrationRun.objects.exists()
+    diagnostic = CalibrationRun.objects.get()
+    assert training.run_calibration(diagnostic.pk, NOW)
+    diagnostic.refresh_from_db()
+    assert diagnostic.status == "insufficient"
+    assert diagnostic.factor is None
+    assert diagnostic.result["valid_days"] == 6
+    assert diagnostic.result["derating"]["latest_matched_day"] == "2026-11-06"
+    assert not CalibrationActivation.objects.exists()
     add_days(system, plant, 7, 1, invalid=invalid)
     if invalid:
-        assert not CalibrationRun.objects.exists()
+        assert prepare_calibration(plant.pk) is None
+        assert CalibrationRun.objects.count() == 1
+        diagnostic.refresh_from_db()
+        assert diagnostic.status == "insufficient"
+        assert diagnostic.result["included_day_dates"] == [
+            f"2026-11-{day:02d}" for day in range(1, 7)
+        ]
+        assert not CalibrationActivation.objects.exists()
         return
-    run = CalibrationRun.objects.get()
+    run = CalibrationRun.objects.exclude(pk=diagnostic.pk).get()
     assert (run.status, run.window_start, run.window_end) == (
         "pending",
         date(2026, 11, 1),
@@ -135,6 +155,10 @@ def test_only_seven_complete_valid_matched_days_schedule(
     latest = ProductionObservation.objects.latest("pk")
     assert run.observation_id_cutoff == latest.pk
     assert prepare_calibration(plant.pk) is None
+    assert training.run_calibration(run.pk, NOW)
+    run.refresh_from_db()
+    assert run.status == "ready"
+    assert run.result["valid_days"] == 7
     assert not CalibrationActivation.objects.exists()
 
 
@@ -302,8 +326,14 @@ def test_missing_actual_history_does_not_count_as_a_matched_day(
     source = ForecastSnapshot.objects.order_by("pk").first()
     assert source is not None
     ForecastSnapshot.objects.filter(pk=source.pk).update(source_kind="forecast")
-    assert prepare_calibration(plant.pk) is None
-    assert not CalibrationRun.objects.exists()
+    run = prepare_calibration(plant.pk)
+    assert run is not None
+    assert (run.window_start, run.window_end) == (date(2026, 11, 2), date(2026, 11, 7))
+    assert training.run_calibration(run.pk, NOW)
+    run.refresh_from_db()
+    assert run.status == "insufficient"
+    assert run.result["included_day_dates"] == [f"2026-11-{day:02d}" for day in range(2, 8)]
+    assert not CalibrationActivation.objects.exists()
 
 
 def test_narrow_manual_run_does_not_suppress_wider_automatic_window(
@@ -402,8 +432,13 @@ def test_legacy_run_without_watermark_preserves_timestamp_cutoff(
 ) -> None:
     system, plant = make_plant(monkeypatch)
     add_days(system, plant, 1, 3)
+    diagnostic = CalibrationRun.objects.get()
+    assert training.run_calibration(diagnostic.pk, NOW)
+    diagnostic.refresh_from_db()
+    assert diagnostic.status == "insufficient"
     add_days(system, plant, 5, 4)
-    run = CalibrationRun.objects.get()
+    run = CalibrationRun.objects.exclude(pk=diagnostic.pk).get()
+    assert (run.window_start, run.window_end) == (date(2026, 11, 1), date(2026, 11, 8))
     CalibrationRun.objects.filter(pk=run.pk).update(
         observation_id_cutoff=None, reference_snapshot_ids=None
     )
@@ -486,8 +521,12 @@ def test_automatic_pool_keeps_sixty_days_ending_on_the_latest_recorded_day(
                 for hour in range(24)
             ],
         )
+        diagnostic = CalibrationRun.objects.get(status="pending")
+        assert training.run_calibration(diagnostic.pk, NOW)
+        diagnostic.refresh_from_db()
+        assert diagnostic.status == "insufficient"
     add_days(system, plant, 1, 7)
-    run = CalibrationRun.objects.get()
+    run = CalibrationRun.objects.get(status="pending")
     assert (run.window_start, run.window_end) == (date(2026, 9, 9), date(2026, 11, 7))
     assert run.reference_snapshot_ids is not None
     assert len(run.reference_snapshot_ids) == 8

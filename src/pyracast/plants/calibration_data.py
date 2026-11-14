@@ -38,6 +38,7 @@ class CalibrationDataset:
     selection: dict[str, object]
     required_windows: RequiredWindows
     incumbent_factor: float
+    incumbent_is_active: bool
 
 
 def _daylight_windows(
@@ -271,7 +272,10 @@ def build_calibration_dataset(
     run: CalibrationRun, configuration: PlantConfiguration
 ) -> CalibrationDataset:
     required_windows = _daylight_windows(run, configuration)
-    incumbent_factor = _comparison_factor(run)
+    comparison = _comparison_calibration(run)
+    incumbent_factor = comparison.factor if comparison is not None else 1.0
+    if incumbent_factor is None:
+        raise ValueError("The comparison calibration has no factor.")
     zone = ZoneInfo(configuration.binding.timezone)
     start, _ = local_day_bounds(run.window_start, str(zone))
     _, end = local_day_bounds(run.window_end, str(zone))
@@ -386,20 +390,19 @@ def build_calibration_dataset(
             {row.source if row.snapshot else "manual" for row in fit_observations}
         ),
     }
-    return CalibrationDataset(fit_samples, manifest, report, fit_windows, incumbent_factor)
+    return CalibrationDataset(
+        fit_samples, manifest, report, fit_windows, incumbent_factor, comparison is not None
+    )
 
 
-def _comparison_factor(run: CalibrationRun) -> float:
+def _comparison_calibration(run: CalibrationRun) -> CalibrationRun | None:
     activation = run.comparison_activation
     if activation is None or activation.calibration is None:
-        return 1.0
+        return None
     if (
         not incidents_unchanged(activation.calibration, run.cutoff_at)
         or not production_identity_current(activation.calibration)
         or not calibration_matches_transfer(activation.calibration, run.configuration)
     ):
-        return 1.0
-    factor = activation.calibration.factor
-    if factor is None:
-        raise ValueError("The comparison calibration has no factor.")
-    return factor
+        return None
+    return activation.calibration
