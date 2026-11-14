@@ -140,11 +140,11 @@ export function ForecastPanel({
     const dayHours =
         typeof result.start === "string" && typeof result.end === "string"
             ? (Date.parse(result.end) - Date.parse(result.start)) / 3_600_000
-            : NaN;
+            : Number.NaN;
     const coveredHours =
         typeof result.coverage_fraction === "number"
             ? result.coverage_fraction * dayHours
-            : NaN;
+            : Number.NaN;
     const deratingDays = derating?.days?.map((day) => day.day).sort() ?? [];
     const mixedVintages =
         Array.isArray(result.quality_flags) &&

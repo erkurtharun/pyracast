@@ -246,9 +246,15 @@ test("an MFA administrator reviews plants and operations on desktop and mobile u
     await page.getByRole("link", { name: "Administration" }).click();
     await expect(page).toHaveURL("/admin/");
     await page.locator("summary").filter({ hasText: "Menu" }).click();
+    const signedOutSession = page.waitForResponse(
+        (response) =>
+            response.request().method() === "GET" &&
+            new URL(response.url()).pathname === "/api/session/",
+    );
     await page.getByRole("button", { name: "Sign out", exact: true }).click();
+    const sessionResponse = await signedOutSession;
+    expect(sessionResponse.status()).toBe(200);
+    expect((await sessionResponse.json()).user).toBeNull();
     await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
-    const signedOutSession = await page.request.get("/api/session/");
-    expect((await signedOutSession.json()).user).toBeNull();
     expect(violations).toEqual([]);
 });
