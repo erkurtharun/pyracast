@@ -163,7 +163,9 @@ class PerformanceQuery(InputSerializer):
     comparison = serializers.ChoiceField(
         choices=("archived_forecast", "historical_model"), default="archived_forecast"
     )
-    issuance_cutoff = serializers.TimeField(required=False, allow_null=True)
+    issuance_cutoff = serializers.TimeField(
+        required=False, allow_null=True, input_formats=("%H:%M", "%H:%M:%S", "%H:%M:%S.%f")
+    )
 
 
 class PerformanceMetrics(serializers.Serializer[dict[str, Any]]):

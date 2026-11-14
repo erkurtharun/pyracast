@@ -3,6 +3,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from django.core.exceptions import ValidationError
+from django.test import Client
 
 from pyracast.connections.models import SiteBinding
 from pyracast.irradiance import local_day_bounds
@@ -15,6 +16,54 @@ from tests.test_plant_operations import make_plant, snapshot_for
 from tests.test_settlement_calibration import settlement
 
 pytestmark = pytest.mark.django_db(transaction=True)
+
+
+@pytest.mark.parametrize("cutoff", ["16:00+03:00", "16:00Z"])
+def test_performance_api_rejects_offset_cutoff_strings(
+    monkeypatch: pytest.MonkeyPatch, cutoff: str
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    client = Client()
+    client.force_login(system.member)
+    response = client.get(
+        f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/performance/",
+        {"start_date": DAY.isoformat(), "end_date": DAY.isoformat(), "issuance_cutoff": cutoff},
+    )
+    assert response.status_code == 400
+    assert "issuance_cutoff" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("value", "clock"),
+    [
+        ("16:00", time(16)),
+        ("16:00:27", time(16, 0, 27)),
+        ("16:00:27.123456", time(16, 0, 27, 123456)),
+    ],
+)
+def test_performance_api_preserves_local_cutoff_precision(
+    monkeypatch: pytest.MonkeyPatch, value: str, clock: time
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    configuration = plant.current_configuration
+    assert configuration is not None
+    cutoff = datetime.combine(DAY - timedelta(days=1), clock, ZoneInfo(system.binding.timezone))
+    source = snapshot_for(system, DAY, power_kw=0.4, collected_at=cutoff, issued_at=cutoff)
+    publish(source)
+    measurements(system, configuration, 52)
+    client = Client()
+    client.force_login(system.member)
+    response = client.get(
+        f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/performance/",
+        {"start_date": DAY.isoformat(), "end_date": DAY.isoformat(), "issuance_cutoff": value},
+    )
+    assert response.status_code == 200
+    result = response.json()
+    assert result["issuance_cutoff"] == clock.isoformat()
+    assert datetime.fromisoformat(result["days"][0]["selection_cutoff"]) == cutoff
+    assert result["days"][0]["snapshot_id"] == source.pk
+    assert result["matched_days"] == 1
+    assert result["metrics"]["daily_mae_mwh"] == pytest.approx(0)
 
 
 def test_default_day_ahead_evaluation_uses_latest_prior_day_forecast(
