@@ -1,4 +1,5 @@
 "use client";
+import { useTranslations, useFormatter } from "next-intl";
 import { useEffect, useState } from "react";
 import { Reminders } from "./reminders";
 import { CollectionSchedule } from "./collection-schedule";
@@ -38,6 +39,9 @@ export function PlantWorkspace({
     onBack: () => void;
     onDeleted: () => void;
 }) {
+    const t = useTranslations("PlantWorkspace");
+    const format = useFormatter();
+
     const [tab, setTab] = useState("forecast"),
         [forecastView, setForecastView] = useState("generation"),
         [productionView, setProductionView] = useState("journal"),
@@ -72,20 +76,28 @@ export function PlantWorkspace({
     return (
         <>
             <button className="back-button" onClick={onBack}>
-                ← All plants
+                {t("allPlants")}
             </button>
             <div className="page-heading plant-identity">
                 <div>
-                    <p className="eyebrow">Solar plant</p>
+                    <p className="eyebrow">{t("solarPlant")}</p>
                     <h1>{currentPlant.name}</h1>
                     <p>
-                        {region.latitude}°, {region.longitude}° · {timezone}
+                        {t("locationSummary", {
+                            latitude: format.number(region.latitude, {
+                                maximumFractionDigits: 6,
+                            }),
+                            longitude: format.number(region.longitude, {
+                                maximumFractionDigits: 6,
+                            }),
+                            timezone,
+                        })}
                     </p>
                 </div>
                 <div className="button-group">
                     <Tag>{region.status}</Tag>
                     <CsvDownload
-                        label="Download plant CSV"
+                        label={t("downloadPlantCSV")}
                         filename={`plant-${currentPlant.id}`}
                         records={[currentPlant]}
                         metadata={{ timezone }}
@@ -95,17 +107,19 @@ export function PlantWorkspace({
             {region.status !== "approved" && (
                 <Notice>
                     {region.status === "pending"
-                        ? "Awaiting administrator approval. Your plant details are saved; forecasts become available after the data connection is approved and collection succeeds."
-                        : `Plant approval is ${region.status}. Contact your administrator to resume collection.`}
+                        ? t("awaitingApproval")
+                        : t("approvalStatus", {
+                              status: t(`approval_${region.status}`),
+                          })}
                 </Notice>
             )}
-            <nav className="tabs" aria-label="Plant sections">
+            <nav className="tabs" aria-label={t("plantSections")}>
                 {[
-                    ["forecast", "Forecast"],
-                    ["production", "Production"],
-                    ["calibration", "Calibration"],
-                    ["outages", "Outages"],
-                    ["settings", "Settings"],
+                    ["forecast", t("forecast")],
+                    ["production", t("production")],
+                    ["calibration", t("calibration")],
+                    ["outages", t("outages")],
+                    ["settings", t("settings")],
                 ].map(([key, label]) => (
                     <button
                         key={key}
@@ -125,10 +139,10 @@ export function PlantWorkspace({
             </nav>
             {tab === "forecast" ? (
                 <>
-                    <nav className="subnav" aria-label="Forecast views">
+                    <nav className="subnav" aria-label={t("forecastViews")}>
                         {[
-                            ["generation", "Generation"],
-                            ["irradiance", "Irradiance"],
+                            ["generation", t("generation")],
+                            ["irradiance", t("irradiance")],
                         ].map(([key, label]) => (
                             <button
                                 key={key}
@@ -151,7 +165,7 @@ export function PlantWorkspace({
                     </nav>
                     <div className="forecast-controls">
                         <label className="field">
-                            Forecast date
+                            {t("forecastDate")}
                             <input
                                 type="date"
                                 value={date}
@@ -188,29 +202,26 @@ export function PlantWorkspace({
                         />
                         {forecastView === "generation" && (
                             <label className="field">
-                                Resolution
+                                {t("resolution")}
                                 <select
                                     value={resolution}
                                     onChange={(event) =>
                                         setResolution(event.target.value)
                                     }
                                 >
-                                    <option value="30">30 minutes</option>
-                                    <option value="60">60 minutes</option>
+                                    <option value="30">{t("minutes30")}</option>
+                                    <option value="60">{t("minutes60")}</option>
                                 </select>
                             </label>
                         )}
-                        <span className="fine">Local dates in {timezone}</span>
+                        <span className="fine">
+                            {t("localDates", { timezone })}
+                        </span>
                     </div>
                     {source === "estimated_actuals" && date > yesterday ? (
-                        <Notice>
-                            Choose a completed local day for estimated actuals.
-                        </Notice>
+                        <Notice>{t("selectCompletedDay")}</Notice>
                     ) : source === "archived_forecast" && date > today ? (
-                        <Notice>
-                            Choose today or an earlier day for archived
-                            forecasts.
-                        </Notice>
+                        <Notice>{t("selectArchivedDay")}</Notice>
                     ) : (
                         <PlantForecast
                             key={`${forecastView}-${date}-${resolution}-${source}-${configuration?.id}-${outageRevision}`}
@@ -233,12 +244,12 @@ export function PlantWorkspace({
                 />
             ) : tab === "settings" ? (
                 <>
-                    <nav className="subnav" aria-label="Plant settings">
+                    <nav className="subnav" aria-label={t("plantSettings")}>
                         {[
-                            ["configuration", "Technical details"],
-                            ["location", "Location"],
-                            ["collection", "Data collection"],
-                            ["reminders", "Email reminders"],
+                            ["configuration", t("technicalDetails")],
+                            ["location", t("location")],
+                            ["collection", t("dataCollection")],
+                            ["reminders", t("emailReminders")],
                         ].map(([key, label]) => (
                             <button
                                 key={key}
@@ -254,10 +265,10 @@ export function PlantWorkspace({
                     </nav>
                     {settingsView === "configuration" ? (
                         <section className="panel">
-                            <h2>Technical details</h2>
+                            <h2>{t("technicalDetails")}</h2>
                             {metadata ? (
                                 <ActionForm
-                                    submit="Save configuration"
+                                    submit={t("saveConfiguration")}
                                     onSubmit={async (data) => {
                                         setSavedPlant(
                                             await request<Plant>(
@@ -275,16 +286,12 @@ export function PlantWorkspace({
                                     />
                                     {configuration && (
                                         <p className="fine">
-                                            Changes may replace pending
-                                            calibration.
+                                            {t("calibrationChangeNote")}
                                         </p>
                                     )}
                                 </ActionForm>
                             ) : (
-                                <Notice>
-                                    Complete technical details to request
-                                    approval.
-                                </Notice>
+                                <Notice>{t("approvalDetailsRequired")}</Notice>
                             )}
                         </section>
                     ) : settingsView === "location" ? (
@@ -307,11 +314,8 @@ export function PlantWorkspace({
                         />
                     )}
                     <section className="panel">
-                        <h2>Delete plant</h2>
-                        <p>
-                            Move this plant, its location and associated history
-                            to the recycle bin for 30 days.
-                        </p>
+                        <h2>{t("deletePlant")}</h2>
+                        <p>{t("deletionHelp")}</p>
                         <MoveToRecycleBin
                             kind="plant"
                             name={currentPlant.name}
@@ -323,12 +327,12 @@ export function PlantWorkspace({
                 </>
             ) : tab === "production" ? (
                 <>
-                    <nav className="subnav" aria-label="Production views">
+                    <nav className="subnav" aria-label={t("productionViews")}>
                         {[
-                            ["journal", "Manual journal"],
-                            ["automatic", "Automatic production"],
-                            ["import", "Production import"],
-                            ["comparison", "Comparison"],
+                            ["journal", t("manualJournal")],
+                            ["automatic", t("automaticProduction")],
+                            ["import", t("productionImport")],
+                            ["comparison", t("comparison")],
                         ].map(([key, label]) => (
                             <button
                                 key={key}
@@ -353,11 +357,7 @@ export function PlantWorkspace({
                             timezone={timezone}
                         />
                     ) : !configuration ? (
-                        <Notice>
-                            Production entry becomes available after
-                            administrator approval and matching historical data
-                            collection.
-                        </Notice>
+                        <Notice>{t("productionUnavailable")}</Notice>
                     ) : productionView === "import" ? (
                         <ProductionImport
                             key={configuration.id}
@@ -378,10 +378,7 @@ export function PlantWorkspace({
                     )}
                 </>
             ) : !configuration ? (
-                <Notice>
-                    Calibration becomes available after administrator approval
-                    and matched production history.
-                </Notice>
+                <Notice>{t("calibrationUnavailable")}</Notice>
             ) : (
                 <Calibrations
                     key={`calibration-${configuration.id}`}
@@ -437,12 +434,15 @@ function PlantForecast({
     url: string;
     electrical: boolean;
 }) {
+    const t = useTranslations("PlantWorkspace");
     const resource = useResource<Forecast>(url, 0, 30_000);
     return (
         <section className="panel">
             {resource.loading ? (
                 <p role="status">
-                    Loading {electrical ? "generation" : "irradiance"} forecast…
+                    {electrical
+                        ? t("loadingGeneration")
+                        : t("loadingIrradiance")}
                 </p>
             ) : resource.error ? (
                 <Notice error>{resource.error}</Notice>

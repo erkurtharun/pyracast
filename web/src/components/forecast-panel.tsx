@@ -1,4 +1,5 @@
 "use client";
+import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import {
     ForecastIntervals,
@@ -75,13 +76,7 @@ function fullDayIntervals(
         });
     return result;
 }
-function number(value: unknown): string {
-    return typeof value === "number"
-        ? new Intl.NumberFormat("en", { maximumFractionDigits: 3 }).format(
-              value,
-          )
-        : "—";
-}
+
 export function ForecastPanel({
     forecast,
     electrical = false,
@@ -89,6 +84,24 @@ export function ForecastPanel({
     forecast: Forecast;
     electrical?: boolean;
 }) {
+    const t = useTranslations("Forecast");
+    const quality = useTranslations("Forecast.qualityFlags");
+    const flagLabel = (flag: string) =>
+        quality.has(flag)
+            ? quality(flag)
+            : quality("unknown", {
+                  value: locale === "en" ? flag.replaceAll("_", " ") : flag,
+              });
+
+    const locale = useLocale();
+    function number(value: unknown): string {
+        return typeof value === "number"
+            ? new Intl.NumberFormat(locale, {
+                  maximumFractionDigits: 3,
+              }).format(value)
+            : "—";
+    }
+
     const [showFullDay, setShowFullDay] = useState(false);
     if (
         !forecast.result ||
@@ -100,21 +113,18 @@ export function ForecastPanel({
                 <Tag>{forecast.freshness}</Tag>
                 {forecast.unavailable_reason ===
                 "estimated_actuals_unavailable" ? (
-                    <Empty title="No estimated actuals for this day">
-                        Estimated actuals are not available for this day yet.
-                        Try an archived forecast or another date.
+                    <Empty title={t("no_estimated_actuals_for_this_day")}>
+                        {t("estimated_actuals_are_not_available_for_this")}
                     </Empty>
                 ) : electrical &&
                   forecast.unavailable_reason ===
                       "configuration_unavailable" ? (
-                    <Empty title="No configuration for this day">
-                        No configuration existed before the selected day began.
-                        Choose a later date.
+                    <Empty title={t("no_configuration_for_this_day")}>
+                        {t("no_configuration_existed_before_the_selected_day")}
                     </Empty>
                 ) : (
-                    <Empty title="No forecast for this day yet">
-                        A missing forecast is not zero production. Try another
-                        date, or check back after the next scheduled collection.
+                    <Empty title={t("no_forecast_for_this_day_yet")}>
+                        {t("a_missing_forecast_is_not_zero_production")}
                     </Empty>
                 )}
             </>
@@ -126,12 +136,9 @@ export function ForecastPanel({
     const outage = electrical ? scenarios.outage_scenario : null;
     const diagnostic = electrical ? scenarios.production_diagnostic : null;
     const scenario = outage ?? null;
-    const affected = "with outages";
-    const Affected = "With outages";
-    const diagnosticModel =
-        diagnostic?.reference_kind === "uncalibrated_reference"
-            ? "uncalibrated model"
-            : "model";
+    const Affected = t("with_outages_title");
+    const uncalibrated =
+        diagnostic?.reference_kind === "uncalibrated_reference";
     const latestShortfall = diagnostic?.latest_day_status === "shortfall";
     const diagnosticDays = diagnostic?.days.map((day) => day.day).sort() ?? [];
     const result = forecast.result as Record<string, unknown>;
@@ -222,7 +229,7 @@ export function ForecastPanel({
         ),
     );
     const time = (value: string) =>
-        new Intl.DateTimeFormat("en", {
+        new Intl.DateTimeFormat(locale, {
             timeZone: forecast.timezone,
             hour: "2-digit",
             minute: "2-digit",
@@ -233,14 +240,16 @@ export function ForecastPanel({
             <div className="section-heading">
                 <div>
                     <h2>
-                        {electrical ? "Electrical generation" : "Irradiance"}
+                        {electrical
+                            ? t("electrical_generation")
+                            : t("irradiance")}
                     </h2>
                     <p className="fine">
                         {forecast.date} · {forecast.timezone}
                     </p>
                     {forecast.source_kind === "estimated_actuals" && (
                         <p className="fine">
-                            Satellite/model estimates, not meter readings.
+                            {t("satellitemodel_estimates_not_meter_readings")}
                         </p>
                     )}
                 </div>
@@ -249,8 +258,8 @@ export function ForecastPanel({
                         filename={`${electrical ? "plant" : "region"}-${forecast.date}-${forecast.source_kind}`}
                         label={
                             scenario
-                                ? "Download both scenarios CSV"
-                                : "Download CSV"
+                                ? t("download_both_scenarios_csv")
+                                : t("download_csv")
                         }
                         records={csvRows}
                         metadata={{
@@ -274,23 +283,23 @@ export function ForecastPanel({
                         }}
                     />
                     <Tag>{forecast.freshness}</Tag>
-                    {mixedVintages && <Tag>Mixed forecast updates</Tag>}
+                    {mixedVintages && <Tag>{t("mixed_forecast_updates")}</Tag>}
                     {Array.isArray(result.quality_flags) &&
                         result.quality_flags.includes("archived_forecast") && (
-                            <Tag>Archived forecast</Tag>
+                            <Tag>{t("archived_forecast")}</Tag>
                         )}
                     {Array.isArray(result.quality_flags) &&
                         result.quality_flags.includes(
                             "provisional_production_calibration",
                         ) && (
                             <Tag tone="warning">
-                                Provisional production calibration
+                                {t("provisional_production_calibration")}
                             </Tag>
                         )}
                     {Array.isArray(result.quality_flags) &&
                         result.quality_flags.includes(
                             "unvalidated_reference_transfer",
-                        ) && <Tag tone="warning">Needs validation</Tag>}
+                        ) && <Tag tone="warning">{t("needs_validation")}</Tag>}
                 </div>
             </div>
             {!electrical && result.weather_reference != null && (
@@ -303,19 +312,39 @@ export function ForecastPanel({
                 />
             )}
             {diagnostic?.evidence_state === "stale" ? (
-                <Notice>Production comparison is out of date.</Notice>
+                <Notice>{t("production_comparison_is_out_of_date")}</Notice>
             ) : diagnostic &&
               (latestShortfall || diagnostic.status === "suspected") ? (
                 <Notice>
                     {latestShortfall &&
                     diagnostic.latest_performance_index !== null &&
                     diagnostic.latest_matched_day
-                        ? `Production below ${diagnosticModel}: ${number(Math.round((1 - diagnostic.latest_performance_index) * 1000) / 10)}% on ${diagnostic.latest_matched_day}.`
-                        : `Earlier production was below the ${diagnosticModel}.`}
+                        ? t(
+                              uncalibrated
+                                  ? "production_below_uncalibrated"
+                                  : "production_below_model",
+                              {
+                                  percent: number(
+                                      Math.round(
+                                          (1 -
+                                              diagnostic.latest_performance_index) *
+                                              1000,
+                                      ) / 10,
+                                  ),
+                                  date: diagnostic.latest_matched_day,
+                              },
+                          )
+                        : t(
+                              uncalibrated
+                                  ? "earlier_below_uncalibrated"
+                                  : "earlier_below_model",
+                          )}
                 </Notice>
             ) : null}
             {scenario?.status === "unknown_impact" && (
-                <Notice>Outage impact is unknown for some intervals.</Notice>
+                <Notice>
+                    {t("outage_impact_is_unknown_for_some_intervals")}
+                </Notice>
             )}
             {scenario &&
                 ((Array.isArray(scenario.result.quality_flags) &&
@@ -328,8 +357,7 @@ export function ForecastPanel({
                         ),
                     )) && (
                     <Notice>
-                        Update remaining capacity in Outages after this
-                        configuration change.
+                        {t("update_remaining_capacity_in_outages_after_this")}
                     </Notice>
                 )}
             {electrical &&
@@ -338,32 +366,38 @@ export function ForecastPanel({
                     "historical_configuration_assumed",
                 ) && (
                     <Notice>
-                        Estimated using settings recorded after this date.
+                        {t("estimated_using_settings_recorded_after_this_date")}
                     </Notice>
                 )}
             {daylight &&
                 (noDaylight ? (
-                    <p className="fine">No daylight on this date.</p>
+                    <p className="fine">{t("no_daylight_on_this_date")}</p>
                 ) : !daylight.complete ? (
                     <Notice>
                         {coverage === 1
                             ? electrical
-                                ? "Some interval values are unavailable."
-                                : "Some irradiance values could not be calculated."
-                            : "Some forecast data is missing."}
+                                ? t("some_interval_values_are_unavailable")
+                                : t(
+                                      "some_irradiance_values_could_not_be_calculated",
+                                  )
+                            : t("some_forecast_data_is_missing")}
                     </Notice>
                 ) : null)}
             {!daylight && result.complete !== true && (
-                <Notice>Some forecast data is missing.</Notice>
+                <Notice>{t("some_forecast_data_is_missing")}</Notice>
             )}
             <div className="stats forecast-stats">
                 <Stat
                     label={
                         scenario
-                            ? `Normal capacity${partial ? " · partial" : ""}`
+                            ? t(
+                                  partial
+                                      ? "normal_capacity_partial"
+                                      : "normal_capacity",
+                              )
                             : partial
-                              ? "Partial estimate"
-                              : "Estimated energy"
+                              ? t("partial_estimate")
+                              : t("estimated_energy")
                     }
                     value={
                         partial && primary.coverage_fraction === 0
@@ -376,7 +410,11 @@ export function ForecastPanel({
                 />
                 {scenario && (
                     <Stat
-                        label={`${Affected}${affectedPartial ? " · partial" : ""}`}
+                        label={t(
+                            affectedPartial
+                                ? "outage_partial"
+                                : "with_outages_title",
+                        )}
                         value={
                             affectedPartial &&
                             affectedSummary?.coverage_fraction === 0
@@ -391,7 +429,7 @@ export function ForecastPanel({
                     />
                 )}
                 <Stat
-                    label="Coverage"
+                    label={t("coverage")}
                     value={
                         typeof coverage === "number"
                             ? coverage * 100
@@ -409,17 +447,17 @@ export function ForecastPanel({
                             setShowFullDay(event.target.checked)
                         }
                     />{" "}
-                    Show full day
+                    {t("show_full_day")}
                 </span>
             </label>
-            {rows.length === 0 && <p>No interval data available.</p>}
+            {rows.length === 0 && <p>{t("no_interval_data_available")}</p>}
             {rows.length > 0 && (
                 <>
                     <div className="chart-title">
                         <strong>
                             {electrical
-                                ? "Power across the day"
-                                : "Irradiance across the day"}
+                                ? t("power_across_the_day")
+                                : t("irradiance_across_the_day")}
                         </strong>
                         <span>{unit}</span>
                     </div>
@@ -427,7 +465,7 @@ export function ForecastPanel({
                         <div className="chart-legend">
                             <span>
                                 <i className="normal" aria-hidden="true" />
-                                Normal capacity
+                                {t("normal_capacity")}
                             </span>
                             <span>
                                 <i className="affected" aria-hidden="true" />
@@ -438,7 +476,13 @@ export function ForecastPanel({
                     <div
                         className="chart"
                         role="img"
-                        aria-label={`${scenario ? `Normal capacity and ${affected} power` : electrical ? "Power" : "Irradiance"} by interval. ${electrical ? "The following table shows interval energy with average power descriptions." : "Values are available in the following table."} Missing values are gaps.`}
+                        aria-label={t(
+                            scenario
+                                ? "scenario_chart"
+                                : electrical
+                                  ? "power_chart"
+                                  : "irradiance_chart",
+                        )}
                     >
                         {rows.map((row, index) => (
                             <div
@@ -449,7 +493,22 @@ export function ForecastPanel({
                                         Date.parse(row.end) -
                                         Date.parse(row.start),
                                 }}
-                                title={`${time(row.start)}: ${scenario ? "normal capacity " : ""}${number(row[metric])} ${unit}${scenario ? `; ${affected} ${number(row.affected_mean_power_mw)} MW` : ""}`}
+                                title={
+                                    scenario
+                                        ? t("scenario_tooltip", {
+                                              time: time(row.start),
+                                              normal: number(row[metric]),
+                                              affected: number(
+                                                  row.affected_mean_power_mw,
+                                              ),
+                                              unit,
+                                          })
+                                        : t("interval_tooltip", {
+                                              time: time(row.start),
+                                              value: number(row[metric]),
+                                              unit,
+                                          })
+                                }
                             >
                                 <div
                                     style={{
@@ -469,7 +528,9 @@ export function ForecastPanel({
                     </div>
                     <div className="chart-axis">
                         <span>{time(rows[0].start)}</span>
-                        <span>Local time · {forecast.timezone}</span>
+                        <span>
+                            {t("local_time", { timezone: forecast.timezone })}
+                        </span>
                         <span>{time(rows[rows.length - 1].end)}</span>
                     </div>
                     <ForecastIntervals
@@ -478,8 +539,8 @@ export function ForecastPanel({
                         scenarioLabel={scenario ? Affected : undefined}
                         label={
                             forecast.source_kind === "estimated_actuals"
-                                ? "Estimated actual intervals"
-                                : "Forecast intervals"
+                                ? t("estimated_actual_intervals")
+                                : t("forecast_intervals")
                         }
                         timezone={forecast.timezone}
                         formatTime={time}
@@ -487,115 +548,157 @@ export function ForecastPanel({
                 </>
             )}
             <details className="provenance">
-                <summary>Source & quality</summary>
+                <summary>{t("source_quality")}</summary>
                 {diagnostic && (
                     <p>
                         {diagnostic.reference_kind === "uncalibrated_reference"
-                            ? "Uncalibrated reference model"
-                            : "Active calibration reference"}
+                            ? t("uncalibrated_reference_model")
+                            : t("active_calibration_reference")}
                         .
                         {diagnosticDays.length > 0 &&
-                            ` ${diagnosticDays.length} qualifying days: ${diagnosticDays[0]} to ${diagnosticDays[diagnosticDays.length - 1]}.`}
+                            t("qualifying_days", {
+                                count: diagnosticDays.length,
+                                start: diagnosticDays[0],
+                                end: diagnosticDays[diagnosticDays.length - 1],
+                            })}
                         {diagnostic.performance_ratio !== null &&
-                            ` Median production/reference ratio: ${number(diagnostic.performance_ratio)}.`}
+                            t("median_ratio", {
+                                ratio: number(diagnostic.performance_ratio),
+                            })}
                         {diagnostic.latest_day_status === "within_threshold" &&
                             diagnostic.latest_matched_day &&
-                            ` Latest comparison within threshold on ${diagnostic.latest_matched_day}.`}
+                            t("latest_within_threshold", {
+                                date: diagnostic.latest_matched_day,
+                            })}
                         {diagnostic.latest_day_status === "insufficient" &&
-                            " Latest day has insufficient comparable data."}
+                            t("_latest_day_has_insufficient_comparable_data")}
                         {diagnostic.latest_day_status === "unavailable" &&
-                            " Latest comparison is unavailable."}
+                            t("_latest_comparison_is_unavailable")}
                     </p>
                 )}
                 {daylight && (
                     <p>
-                        Energy includes whole source intervals overlapping
-                        daylight.
+                        {t(
+                            "energy_includes_whole_source_intervals_overlapping_daylight",
+                        )}
                     </p>
                 )}
                 {!electrical &&
                     daylight?.input_coverage_fraction !== undefined && (
                         <p>
-                            Source data coverage:{" "}
-                            {number(
-                                daylight.input_coverage_fraction === null
-                                    ? null
-                                    : daylight.input_coverage_fraction * 100,
-                            )}
-                            %.
+                            {t("source_coverage", {
+                                percent: number(
+                                    daylight.input_coverage_fraction === null
+                                        ? null
+                                        : daylight.input_coverage_fraction *
+                                              100,
+                                ),
+                            })}
                         </p>
                     )}
                 {!electrical && daylight && (
                     <p>
-                        Usable irradiance coverage:{" "}
-                        {number(
-                            daylight.coverage_fraction === null
-                                ? null
-                                : daylight.coverage_fraction * 100,
-                        )}
-                        %.
+                        {t("irradiance_coverage", {
+                            percent: number(
+                                daylight.coverage_fraction === null
+                                    ? null
+                                    : daylight.coverage_fraction * 100,
+                            ),
+                        })}
                     </p>
                 )}
                 <p>
-                    Full-day coverage:
-                    {` ${number(typeof result.coverage_fraction === "number" ? result.coverage_fraction * 100 : undefined)}%.`}
+                    {t("full_day_coverage", {
+                        percent: number(
+                            typeof result.coverage_fraction === "number"
+                                ? result.coverage_fraction * 100
+                                : undefined,
+                        ),
+                    })}
                     {Number.isFinite(coveredHours) && Number.isFinite(dayHours)
-                        ? ` ${number(coveredHours)} of ${number(dayHours)} hours.`
+                        ? t("covered_hours", {
+                              covered: number(coveredHours),
+                              total: number(dayHours),
+                          })
                         : ""}
                 </p>
                 <p>
-                    {result.complete === true
-                        ? "Full-day energy"
-                        : "Full-day partial estimate"}
-                    :{" "}
-                    {number(
-                        result.complete !== true &&
-                            result.coverage_fraction === 0
-                            ? undefined
-                            : result[
-                                  result.complete === true
-                                      ? energyField
-                                      : partialEnergyField
-                              ],
-                    )}{" "}
-                    {electrical ? "MWh" : "kWh/m²"}.
+                    {t(
+                        result.complete === true
+                            ? "full_day_energy"
+                            : "full_day_partial_energy",
+                        {
+                            energy: number(
+                                result.complete !== true &&
+                                    result.coverage_fraction === 0
+                                    ? undefined
+                                    : result[
+                                          result.complete === true
+                                              ? energyField
+                                              : partialEnergyField
+                                      ],
+                            ),
+                            unit: electrical ? "MWh" : "kWh/m²",
+                        },
+                    )}
                 </p>
                 {!electrical && typeof result.coverage_seconds === "number" && (
                     <p>
-                        Received source intervals:{" "}
-                        {number(result.coverage_seconds / 3600)} hours.
+                        {t("received_intervals", {
+                            hours: number(result.coverage_seconds / 3600),
+                        })}
                     </p>
                 )}
                 {!electrical &&
                     Array.isArray(result.quality_flags) &&
                     result.quality_flags.includes("ambiguous_zero_power") && (
                         <p>
-                            Zero PV output cannot uniquely determine irradiance.
+                            {t(
+                                "zero_pv_output_cannot_uniquely_determine_irradiance",
+                            )}
                         </p>
                     )}
                 {scenario && (
                     <p className="fine">
-                        The outage scenario uses reported remaining capacity.
+                        {t(
+                            "the_outage_scenario_uses_reported_remaining_capacity",
+                        )}
                     </p>
                 )}
                 <p>
                     {forecast.collected_at
-                        ? `Collected ${new Date(forecast.collected_at).toLocaleString("en", { timeZone: forecast.timezone })}. `
+                        ? t("collected_at", {
+                              date: new Date(
+                                  forecast.collected_at,
+                              ).toLocaleString(locale, {
+                                  timeZone: forecast.timezone,
+                              }),
+                          })
                         : ""}
-                    Model: {String(result.model_version ?? "—")}.{" "}
+                    {t("model_version", {
+                        version: String(result.model_version ?? "—"),
+                    })}{" "}
                     {forecast.configuration_id
-                        ? `Configuration ${forecast.configuration_id}. `
+                        ? t("configuration_id", {
+                              id: forecast.configuration_id,
+                          })
                         : ""}
                     {electrical &&
                     forecast.source_kind === "estimated_actuals" &&
                     !forecast.calibration_id
-                        ? "Baseline estimate using the current configuration; no calibration factor applied."
+                        ? t(
+                              "baseline_estimate_using_the_current_configuration_no",
+                          )
                         : electrical
                           ? forecast.calibration_id
                               ? forecast.source_kind === "estimated_actuals"
-                                  ? `Calibration ${forecast.calibration_id}, applied retrospectively.`
-                                  : `Calibration ${forecast.calibration_id}.`
-                              : "Baseline (no active calibration)."
+                                  ? t("retrospective_calibration", {
+                                        id: forecast.calibration_id,
+                                    })
+                                  : t("calibration_id", {
+                                        id: forecast.calibration_id,
+                                    })
+                              : t("baseline_no_active_calibration")
                           : ""}
                 </p>
                 {mixedVintages &&
@@ -603,12 +706,13 @@ export function ForecastPanel({
                         <ul>
                             {provenance.source_snapshots.map((source) => (
                                 <li key={source.snapshot_id}>
-                                    Forecast update {source.snapshot_id}:
-                                    collected{" "}
-                                    {new Date(
-                                        source.collected_at,
-                                    ).toLocaleString("en", {
-                                        timeZone: forecast.timezone,
+                                    {t("forecast_update", {
+                                        id: source.snapshot_id,
+                                        date: new Date(
+                                            source.collected_at,
+                                        ).toLocaleString(locale, {
+                                            timeZone: forecast.timezone,
+                                        }),
                                     })}
                                 </li>
                             ))}
@@ -618,9 +722,7 @@ export function ForecastPanel({
                     result.quality_flags.length > 0 && (
                         <div className="tags">
                             {result.quality_flags.map((flag, index) => (
-                                <Tag key={index}>
-                                    {String(flag).replaceAll("_", " ")}
-                                </Tag>
+                                <Tag key={index}>{flagLabel(String(flag))}</Tag>
                             ))}
                         </div>
                     )}
@@ -632,7 +734,7 @@ export function ForecastPanel({
                         daylight: result.daylight,
                         issued_at: forecast.issued_at,
                     }}
-                    label="Source & configuration details"
+                    label={t("source_configuration_details")}
                 />
             </details>
         </>

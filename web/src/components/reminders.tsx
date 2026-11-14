@@ -1,49 +1,11 @@
 "use client";
+import { useTranslations, useLocale, useFormatter } from "next-intl";
 import { ScrollRegion } from "./scroll-region";
 import { useEffect, useId, useRef, useState } from "react";
 import type { components } from "@/lib/schema";
 import { request, type Region } from "@/lib/api";
 import { ActionForm, Empty, Notice, Tag, useResource } from "./ui";
 type Preference = components["schemas"]["ReminderOutput"];
-const deliveryLabels: Record<string, string> = {
-    pending: "Preparing",
-    retry: "Retry scheduled",
-    sending: "Sending",
-    sent: "Accepted by mail service",
-    failed: "Not sent",
-    uncertain: "Acceptance unconfirmed",
-    skipped: "Skipped",
-    cancelled: "Cancelled",
-    unavailable: "Forecast unavailable",
-};
-const forecastLabels: Record<string, string> = {
-    current: "New forecast",
-    saved_complete: "Saved forecast",
-    saved_partial: "Partial forecast",
-    unavailable: "No forecast available",
-};
-const deliveryDetails: Record<string, string> = {
-    mail_not_sent:
-        "The mail service was unavailable. Retry is bounded by the delivery window.",
-    mail_rejected:
-        "The mail service rejected the message. Check the recipient and mail settings.",
-    mail_authentication_failed:
-        "Mail service credentials need administrator attention. Delivery will retry within the sending window.",
-    interrupted_connection:
-        "The connection was interrupted before sending. A retry is scheduled.",
-    authority_or_deadline_changed:
-        "Sending stopped because access changed or the delivery window ended.",
-    mail_outcome_uncertain:
-        "Check the mail service before resending to avoid a duplicate.",
-    interrupted_send:
-        "Sending was interrupted. Check mail service acceptance before resending.",
-    missed_schedule: "The delivery window has ended.",
-    mail_deadline_exceeded:
-        "The mail service did not accept the message within the delivery window.",
-    preference_or_authority_changed: "Delivery settings or access changed.",
-    missing_recipient: "No valid email address is available.",
-    no_saved_forecast: "No saved forecast covers the requested day.",
-};
 function useRowFocus(rows: { id: number }[]) {
     const prefix = useId();
     const pending = useRef<number | null>(null);
@@ -67,6 +29,8 @@ function DeliveryTimes({
     data: Preference;
     timezone: string;
 }) {
+    const t = useTranslations("Reminders");
+
     const [rows, setRows] = useState(() =>
         (data.times.length ? data.times : [""]).map((value, id) => ({
             id,
@@ -77,11 +41,11 @@ function DeliveryTimes({
     const limit = data.quota?.daily_reminder_limit;
     return (
         <fieldset className="reminder-recipients">
-            <legend>Delivery times ({timezone})</legend>
+            <legend>{t("deliveryTimes", { timezone })}</legend>
             {rows.map((row, index) => (
                 <div className="recipient-row" key={row.id}>
                     <label className="field" htmlFor={`${prefix}-${row.id}`}>
-                        Delivery time {index + 1}
+                        {t("deliveryTime", { index: index + 1 })}
                         <input
                             id={`${prefix}-${row.id}`}
                             type="time"
@@ -105,7 +69,9 @@ function DeliveryTimes({
                         <button
                             type="button"
                             className="button secondary"
-                            aria-label={`Remove delivery time ${index + 1}`}
+                            aria-label={t("removeDeliveryTime", {
+                                index: index + 1,
+                            })}
                             onClick={() => {
                                 focusRow(
                                     (rows[index + 1] ?? rows[index - 1]).id,
@@ -115,7 +81,7 @@ function DeliveryTimes({
                                 );
                             }}
                         >
-                            Remove
+                            {t("remove")}
                         </button>
                     )}
                 </div>
@@ -136,18 +102,23 @@ function DeliveryTimes({
                     ]);
                 }}
             >
-                Add time
+                {t("addTime")}
             </button>
             {limit != null && (
                 <span className="fine">
                     {" "}
-                    {rows.filter((row) => row.value).length} / {limit}
+                    {t("quotaCount", {
+                        count: rows.filter((row) => row.value).length,
+                        limit,
+                    })}
                 </span>
             )}
         </fieldset>
     );
 }
 function RecipientFields({ data }: { data: Preference }) {
+    const t = useTranslations("Reminders");
+
     const [rows, setRows] = useState(() =>
         (data.effective_recipients.length
             ? data.effective_recipients
@@ -161,17 +132,18 @@ function RecipientFields({ data }: { data: Preference }) {
     const count = rows.filter((row) => row.value.trim()).length;
     return (
         <fieldset className="reminder-recipients">
-            <legend>Email recipients</legend>
+            <legend>{t("emailRecipients")}</legend>
             {data.recipient_limit_exceeded && (
                 <Notice>
-                    Sending is paused. Reduce the plant's saved recipients to{" "}
-                    {data.recipient_limit} to resume.
+                    {t("recipientLimitExceeded", {
+                        limit: data.recipient_limit,
+                    })}
                 </Notice>
             )}
             {rows.map((row, index) => (
                 <div className="recipient-row" key={row.id}>
                     <label className="field" htmlFor={`${prefix}-${row.id}`}>
-                        Email address {index + 1}
+                        {t("emailAddress", { index: index + 1 })}
                         <input
                             id={`${prefix}-${row.id}`}
                             name="recipients"
@@ -195,7 +167,9 @@ function RecipientFields({ data }: { data: Preference }) {
                         <button
                             className="button secondary"
                             type="button"
-                            aria-label={`Remove email address ${index + 1}`}
+                            aria-label={t("removeEmailAddress", {
+                                index: index + 1,
+                            })}
                             onClick={() => {
                                 focusRow(
                                     (rows[index + 1] ?? rows[index - 1]).id,
@@ -205,7 +179,7 @@ function RecipientFields({ data }: { data: Preference }) {
                                 );
                             }}
                         >
-                            Remove
+                            {t("remove")}
                         </button>
                     )}
                 </div>
@@ -226,11 +200,11 @@ function RecipientFields({ data }: { data: Preference }) {
                     ]);
                 }}
             >
-                Add address
+                {t("addAddress")}
             </button>
             <span className="fine">
                 {" "}
-                {count} / {data.recipient_limit}
+                {t("quotaCount", { count, limit: data.recipient_limit })}
             </span>
         </fieldset>
     );
@@ -244,9 +218,45 @@ export function Reminders({
     region: Region;
     token: string;
 }) {
+    const t = useTranslations("Reminders");
+    const locale = useLocale();
+    const format = useFormatter();
+    const deliveryLabels: Record<string, string> = {
+        pending: t("preparing"),
+        retry: t("retryScheduled"),
+        sending: t("sending"),
+        sent: t("acceptedByMailService"),
+        failed: t("notSent"),
+        uncertain: t("acceptanceUnconfirmed"),
+        skipped: t("skipped"),
+        cancelled: t("cancelled"),
+        unavailable: t("forecastUnavailable"),
+    };
+    const forecastLabels: Record<string, string> = {
+        current: t("newForecast"),
+        saved_complete: t("savedForecast"),
+        saved_partial: t("partialForecast"),
+        unavailable: t("noForecastAvailable"),
+    };
+    const deliveryDetails: Record<string, string> = {
+        mail_not_sent: t("mailNotSent"),
+        mail_rejected: t("mailRejected"),
+        mail_authentication_failed: t("mailAuthenticationFailed"),
+        interrupted_connection: t("interruptedConnection"),
+        authority_or_deadline_changed: t("authorityChanged"),
+        mail_outcome_uncertain: t("outcomeUncertain"),
+        interrupted_send: t("interruptedSend"),
+        missed_schedule: t("missedSchedule"),
+        mail_deadline_exceeded: t("deadlineExceeded"),
+        preference_or_authority_changed: t("preferenceChanged"),
+        missing_recipient: t("missingRecipient"),
+        no_saved_forecast: t("noSavedForecast"),
+    };
+
     const [version, setVersion] = useState(0);
     const resource = useResource<Preference>(`${base}reminders/`, version);
-    if (resource.loading) return <p role="status">Loading email reminders…</p>;
+    if (resource.loading)
+        return <p role="status">{t("loadingEmailReminders")}</p>;
     if (resource.error) return <Notice error>{resource.error}</Notice>;
     const data = resource.data!;
     return (
@@ -254,17 +264,17 @@ export function Reminders({
             <section className="panel">
                 <div className="section-heading">
                     <div>
-                        <h2>Email reminders</h2>
+                        <h2>{t("emailReminders")}</h2>
                     </div>
-                    <Tag>
+                    <Tag tone="neutral">
                         {data.enabled && !data.recipient_limit_exceeded
-                            ? "Enabled"
-                            : "Paused"}
+                            ? t("enabled")
+                            : t("paused")}
                     </Tag>
                 </div>
                 <ActionForm
                     key={JSON.stringify(data)}
-                    submit="Save reminders"
+                    submit={t("saveReminders")}
                     onSubmit={async (form) => {
                         const times = form
                             .getAll("times")
@@ -276,7 +286,7 @@ export function Reminders({
                                     !/^([01]\d|2[0-3]):[0-5]\d$/.test(time),
                             )
                         )
-                            throw new Error("Enter a valid delivery time.");
+                            throw new Error(t("invalidDeliveryTime"));
                         const enteredRecipients = form
                             .getAll("recipients")
                             .map((value) => String(value).trim())
@@ -290,7 +300,7 @@ export function Reminders({
                                 : enteredRecipients;
                         const enabled = form.get("enabled") === "on";
                         if (enabled && !times.length)
-                            throw new Error("Add at least one delivery time.");
+                            throw new Error(t("deliveryTimeRequired"));
                         if (
                             enabled &&
                             recipients.length > data.recipient_limit &&
@@ -300,16 +310,16 @@ export function Reminders({
                             )
                         )
                             throw new Error(
-                                `Use at most ${data.recipient_limit} email addresses.`,
+                                t("recipientLimit", {
+                                    limit: data.recipient_limit,
+                                }),
                             );
                         if (
                             new Set(
                                 recipients.map((email) => email.toLowerCase()),
                             ).size !== recipients.length
                         )
-                            throw new Error(
-                                "Enter each email address only once.",
-                            );
+                            throw new Error(t("duplicateEmail"));
                         await request(
                             `${base}reminders/`,
                             "PUT",
@@ -334,47 +344,55 @@ export function Reminders({
                             defaultChecked={data.enabled}
                             disabled={region.status !== "approved"}
                         />{" "}
-                        Enable forecast emails for this plant
+                        {t("enableForecastEmailsForThisPlant")}
                     </label>
                     {region.status !== "approved" && (
-                        <Notice>
-                            Reminders can be enabled once this plant is
-                            approved.
-                        </Notice>
+                        <Notice>{t("approvalRequired")}</Notice>
                     )}
                     <DeliveryTimes data={data} timezone={region.timezone} />
                     <RecipientFields data={data} />
                     <details>
-                        <summary>Reminder details</summary>
+                        <summary>{t("reminderDetails")}</summary>
                         <p className="fine">
-                            Emails use the latest saved forecast and show its
-                            collection time and age; they do not request new
-                            provider data. Daylight-saving gaps are skipped and
-                            repeated local times run once. Daily limit:{" "}
-                            {data.quota?.daily_reminder_limit ?? "?"}. Provider
-                            queries per email:{" "}
-                            {data.quota?.queries_per_email ?? "?"}.
+                            {t("reminderPolicy", {
+                                limit:
+                                    data.quota?.daily_reminder_limit == null
+                                        ? "?"
+                                        : format.number(
+                                              data.quota.daily_reminder_limit,
+                                          ),
+                                queries:
+                                    data.quota?.queries_per_email == null
+                                        ? "?"
+                                        : format.number(
+                                              data.quota.queries_per_email,
+                                          ),
+                            })}
                         </p>
                     </details>
                 </ActionForm>
             </section>
             <details className="panel">
-                <summary>Recent deliveries</summary>
+                <summary>{t("recentDeliveries")}</summary>
                 {data.deliveries.length ? (
-                    <ScrollRegion label="Recent forecast email deliveries">
+                    <ScrollRegion label={t("recentForecastEmailDeliveries")}>
                         <table>
                             <caption className="sr-only">
-                                Recent forecast email deliveries
+                                {t("recentForecastEmailDeliveries")}
                             </caption>
                             <thead>
                                 <tr>
-                                    <th>Scheduled ({region.timezone})</th>
-                                    <th>Recipient</th>
-                                    <th>Status</th>
-                                    <th>Collected</th>
-                                    <th>Data age</th>
-                                    <th>Sent</th>
-                                    <th>Details</th>
+                                    <th>
+                                        {t("scheduled", {
+                                            timezone: region.timezone,
+                                        })}
+                                    </th>
+                                    <th>{t("recipient")}</th>
+                                    <th>{t("status")}</th>
+                                    <th>{t("collected")}</th>
+                                    <th>{t("dataAge")}</th>
+                                    <th>{t("sent")}</th>
+                                    <th>{t("details")}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -383,21 +401,40 @@ export function Reminders({
                                         <td>
                                             {new Date(
                                                 row.scheduled_for,
-                                            ).toLocaleString("en", {
+                                            ).toLocaleString(locale, {
                                                 timeZone: region.timezone,
                                             })}
                                         </td>
                                         <td>{row.recipient}</td>
                                         <td>
-                                            <Tag>
+                                            <Tag
+                                                tone={
+                                                    row.status === "failed"
+                                                        ? "danger"
+                                                        : row.status === "sent"
+                                                          ? "success"
+                                                          : [
+                                                                  "pending",
+                                                                  "retry",
+                                                                  "uncertain",
+                                                              ].includes(
+                                                                  row.status,
+                                                              )
+                                                            ? "warning"
+                                                            : "neutral"
+                                                }
+                                            >
                                                 {deliveryLabels[row.status] ??
-                                                    row.status}
+                                                    t("statusUnavailable")}
                                             </Tag>
                                             {row.forecast_status && (
                                                 <div className="fine">
                                                     {forecastLabels[
                                                         row.forecast_status
-                                                    ] ?? "Forecast unavailable"}
+                                                    ] ??
+                                                        t(
+                                                            "forecastUnavailable",
+                                                        )}
                                                 </div>
                                             )}
                                         </td>
@@ -405,7 +442,7 @@ export function Reminders({
                                             {row.collected_at
                                                 ? new Date(
                                                       row.collected_at,
-                                                  ).toLocaleString("en", {
+                                                  ).toLocaleString(locale, {
                                                       timeZone: region.timezone,
                                                   })
                                                 : "—"}
@@ -413,25 +450,35 @@ export function Reminders({
                                         <td>
                                             {row.source_age_seconds == null
                                                 ? "—"
-                                                : `${Math.floor(row.source_age_seconds / 3600)}h ${Math.floor((row.source_age_seconds % 3600) / 60)}m`}
-                                            {row.stale && <Tag>Stale</Tag>}
+                                                : t("sourceAge", {
+                                                      hours: Math.floor(
+                                                          row.source_age_seconds /
+                                                              3600,
+                                                      ),
+                                                      minutes: Math.floor(
+                                                          (row.source_age_seconds %
+                                                              3600) /
+                                                              60,
+                                                      ),
+                                                  })}
+                                            {row.stale && <Tag>stale</Tag>}
                                         </td>
                                         <td>
                                             {row.sent_at
                                                 ? new Date(
                                                       row.sent_at,
-                                                  ).toLocaleString("en", {
+                                                  ).toLocaleString(locale, {
                                                       timeZone: region.timezone,
                                                   })
                                                 : "—"}
                                         </td>
                                         <td>
-                                            {row.late ? "Late delivery. " : ""}
+                                            {row.late ? t("lateDelivery") : ""}
                                             {row.last_error
                                                 ? (deliveryDetails[
                                                       row.last_error
                                                   ] ??
-                                                  "Delivery needs attention.")
+                                                  t("deliveryNeedsAttention"))
                                                 : "—"}
                                         </td>
                                     </tr>
@@ -440,8 +487,8 @@ export function Reminders({
                         </table>
                     </ScrollRegion>
                 ) : (
-                    <Empty title="No deliveries yet">
-                        Scheduled deliveries appear here.
+                    <Empty title={t("noDeliveriesYet")}>
+                        {t("scheduledDeliveriesAppearHere")}
                     </Empty>
                 )}
             </details>

@@ -1,4 +1,5 @@
 "use client";
+import { useLocale, useTranslations } from "next-intl";
 import { ScrollRegion } from "./scroll-region";
 
 import { useState } from "react";
@@ -18,6 +19,9 @@ function shiftDay(day: string, offset: number) {
 }
 
 export function EpiasProduction({ base }: { base: string }) {
+    const t = useTranslations("EpiasProduction");
+    const locale = useLocale();
+
     const yesterday = localDay("Europe/Istanbul", -1);
     const [date, setDate] = useState(yesterday);
     const [source, setSource] = useState("auto");
@@ -30,19 +34,17 @@ export function EpiasProduction({ base }: { base: string }) {
 
     return (
         <section className="panel">
-            <h2>Automatic production</h2>
+            <h2>{t("automatic_production")}</h2>
             <details>
-                <summary>Sources and calibration eligibility</summary>
+                <summary>{t("sources_and_calibration_eligibility")}</summary>
                 <p className="fine">
-                    Automatic selection prefers settlement injection (UEVM),
-                    then provisional reported production. Reported production
-                    can support provisional calibration; UEVM matching net
-                    export is preferred. Disconnecting collection retains the
-                    archive.
+                    {t(
+                        "automatic_selection_prefers_settlement_injection_uevm_then",
+                    )}
                 </p>
             </details>
             {connection.loading ? (
-                <p role="status">Loading connection…</p>
+                <p role="status">{t("loading_connection")}</p>
             ) : connection.error ? (
                 <Notice error>{connection.error}</Notice>
             ) : (
@@ -51,48 +53,58 @@ export function EpiasProduction({ base }: { base: string }) {
                         <p>
                             <strong>
                                 {data.connected
-                                    ? data.name || "EPİAŞ plant"
+                                    ? data.name || t("epia_plant")
                                     : "EPİAŞ"}
                             </strong>{" "}
-                            · {data.connected ? "Connected" : "Not connected"}
+                            ·{" "}
+                            {data.connected
+                                ? t("connected")
+                                : t("not_connected")}
                         </p>
                         {!data.connected && (
                             <p className="fine">
-                                Contact your administrator to connect EPİAŞ.
+                                {t(
+                                    "contact_your_administrator_to_connect_epia",
+                                )}
                                 {data.archived_days > 0 &&
-                                    " Saved production is still available."}
+                                    t("_saved_production_is_still_available")}
                             </p>
                         )}
                         <p className="fine">
-                            Archived days: {data.archived_days}
+                            {t("archived_days", { count: data.archived_days })}
                             {data.connected && (
                                 <>
-                                    {" · Pending jobs: "}
-                                    {data.pending_jobs}
-                                    {" · Last successful collection: "}
-                                    {data.last_success_at
-                                        ? new Date(
-                                              data.last_success_at,
-                                          ).toLocaleString()
-                                        : "Not yet collected"}
+                                    {t("collection_status", {
+                                        count: data.pending_jobs,
+                                        date: data.last_success_at
+                                            ? new Date(
+                                                  data.last_success_at,
+                                              ).toLocaleString(locale, {
+                                                  timeZone: "Europe/Istanbul",
+                                              })
+                                            : t("not_yet_collected"),
+                                    })}
                                 </>
                             )}
                         </p>
                         {data.connected && data.last_error && (
                             <Notice error>
-                                Collection error: {data.last_error}
+                                {t("collection_error", {
+                                    error: data.last_error,
+                                })}
                             </Notice>
                         )}
                     </>
                 )
             )}
-            <h3>Reported production archive</h3>
+            <h3>{t("reported_production_archive")}</h3>
             {data?.first_settlement_date && data.last_settlement_date && (
                 <div className="button-group">
                     <p>
-                        Archived settlement injection (UEVM):{" "}
-                        {data.first_settlement_date} to{" "}
-                        {data.last_settlement_date}
+                        {t("settlement_dates", {
+                            start: data.first_settlement_date,
+                            end: data.last_settlement_date,
+                        })}
                     </p>
                     <button
                         type="button"
@@ -102,7 +114,7 @@ export function EpiasProduction({ base }: { base: string }) {
                             setSource("settlement_injection");
                         }}
                     >
-                        Latest settlement day
+                        {t("latest_settlement_day")}
                     </button>
                 </div>
             )}
@@ -110,13 +122,13 @@ export function EpiasProduction({ base }: { base: string }) {
                 <div className="archive-date-nav">
                     <button
                         className="button secondary"
-                        aria-label="Previous day"
+                        aria-label={t("previous_day")}
                         onClick={() => setDate(shiftDay(date, -1))}
                     >
                         <span aria-hidden="true">←</span>
                     </button>
                     <label className="field">
-                        Archive date
+                        {t("archive_date")}
                         <input
                             type="date"
                             value={date}
@@ -132,7 +144,7 @@ export function EpiasProduction({ base }: { base: string }) {
                     </label>
                     <button
                         className="button secondary"
-                        aria-label="Next day"
+                        aria-label={t("next_day")}
                         disabled={date >= yesterday}
                         onClick={() => setDate(shiftDay(date, 1))}
                     >
@@ -140,17 +152,17 @@ export function EpiasProduction({ base }: { base: string }) {
                     </button>
                 </div>
                 <label className="field">
-                    Production source
+                    {t("production_source")}
                     <select
                         value={source}
                         onChange={(event) => setSource(event.target.value)}
                     >
-                        <option value="auto">Automatic</option>
+                        <option value="auto">{t("automatic")}</option>
                         <option value="realtime_generation">
-                            Reported production (provisional)
+                            {t("reported_production_provisional")}
                         </option>
                         <option value="settlement_injection">
-                            Settlement injection (UEVM)
+                            {t("settlement_injection_uevm")}
                         </option>
                     </select>
                 </label>
@@ -158,7 +170,7 @@ export function EpiasProduction({ base }: { base: string }) {
                     className="button secondary"
                     onClick={() => setRevision((value) => value + 1)}
                 >
-                    Refresh
+                    {t("refresh")}
                 </button>
             </div>
             <EpiasArchive
@@ -171,24 +183,6 @@ export function EpiasProduction({ base }: { base: string }) {
     );
 }
 
-const sourceLabels: Record<string, string> = {
-    realtime_generation: "Reported production (provisional)",
-    settlement_injection: "Settlement injection (UEVM)",
-    mixed: "Combined production",
-};
-const blockers: Record<string, string> = {
-    configuration_unavailable:
-        "No plant configuration is available for calibration.",
-    configuration_mismatch:
-        "This acquisition belongs to another plant configuration.",
-    source_disconnected:
-        "Your administrator must connect the production source before settlement injection can be used for calibration.",
-    measurement_basis_mismatch:
-        "Provider production requires the plant measurement point to be net export.",
-    production_unavailable:
-        "No reported production is available for calibration.",
-};
-
 function EpiasArchive({
     base,
     date,
@@ -198,6 +192,31 @@ function EpiasArchive({
     date: string;
     source: string;
 }) {
+    const t = useTranslations("EpiasProduction");
+    const locale = useLocale();
+    const blockers: Record<string, string> = {
+        configuration_unavailable: t(
+            "no_plant_configuration_is_available_for_calibration",
+        ),
+        configuration_mismatch: t(
+            "this_acquisition_belongs_to_another_plant_configuration",
+        ),
+        source_disconnected: t(
+            "your_administrator_must_connect_the_production_source",
+        ),
+        measurement_basis_mismatch: t(
+            "provider_production_requires_the_plant_measurement_point",
+        ),
+        production_unavailable: t(
+            "no_reported_production_is_available_for_calibration",
+        ),
+    };
+    const sourceLabels: Record<string, string> = {
+        realtime_generation: t("reported_production_provisional"),
+        settlement_injection: t("settlement_injection_uevm"),
+        mixed: t("combined_production"),
+    };
+
     const history = useResource<History>(
         `${base}reported-production/?${new URLSearchParams({ date, data_source: source })}`,
     );
@@ -217,7 +236,7 @@ function EpiasArchive({
         : dataIntervalRange(rows, (row) => row.energy_mwh !== null);
     const total = selectedHistory?.reported_total_mwh ?? null;
     const time = (value: string) =>
-        new Date(value).toLocaleString("en-GB", {
+        new Date(value).toLocaleString(locale, {
             timeZone: selectedHistory?.timezone,
             hour: "2-digit",
             minute: "2-digit",
@@ -226,7 +245,7 @@ function EpiasArchive({
     return (
         <>
             {history.loading ? (
-                <p role="status">Loading reported production…</p>
+                <p role="status">{t("loading_reported_production")}</p>
             ) : history.error ? (
                 <Notice error>{history.error}</Notice>
             ) : selectedHistory?.snapshot ? (
@@ -240,27 +259,37 @@ function EpiasArchive({
                         }}
                     />
                     <details>
-                        <summary>Acquisition details</summary>
+                        <summary>{t("acquisition_details")}</summary>
                         {snapshots.map((snapshot) => (
                             <div key={snapshot.id}>
                                 <p className="fine">
-                                    {sourceLabels[snapshot.source_kind] ??
-                                        snapshot.source_kind}{" "}
-                                    - Collected{" "}
-                                    {new Date(
-                                        snapshot.collected_at,
-                                    ).toLocaleString()}
-                                    {" - Published "}
-                                    {new Date(
-                                        snapshot.available_at,
-                                    ).toLocaleString()}
+                                    {t("source_acquired", {
+                                        source:
+                                            sourceLabels[
+                                                snapshot.source_kind
+                                            ] ?? snapshot.source_kind,
+                                        collected: new Date(
+                                            snapshot.collected_at,
+                                        ).toLocaleString(locale, {
+                                            timeZone: selectedHistory.timezone,
+                                        }),
+                                        published: new Date(
+                                            snapshot.available_at,
+                                        ).toLocaleString(locale, {
+                                            timeZone: selectedHistory.timezone,
+                                        }),
+                                    })}
                                 </p>
                                 <p className="fine">
-                                    Acquisition #{snapshot.id} - Policy:{" "}
-                                    {snapshot.normalization_policy}
+                                    {t("acquisition_policy", {
+                                        id: snapshot.id,
+                                        policy: snapshot.normalization_policy,
+                                    })}
                                 </p>
                                 <p className="fine">
-                                    Payload digest: {snapshot.content_sha256}
+                                    {t("payload_digest", {
+                                        digest: snapshot.content_sha256,
+                                    })}
                                 </p>
                             </div>
                         ))}
@@ -272,18 +301,24 @@ function EpiasArchive({
                                 (row) =>
                                     row.source_kind === "realtime_generation",
                             )) &&
-                            "Reported production is provisional and may differ from net export. Settlement injection (UEVM) is preferred. "}
+                            t(
+                                "reported_production_is_provisional_and_may_differ",
+                            )}
                         {selectedHistory.calibration_eligible
-                            ? "Eligible for calibration when valid interval coverage is complete."
+                            ? t(
+                                  "eligible_for_calibration_when_valid_interval_coverage",
+                              )
                             : (blockers[
                                   selectedHistory.calibration_blocker ?? ""
                               ] ??
-                              "This production source is excluded from calibration because its measurement point does not match net export.")}
+                              t(
+                                  "this_production_source_is_excluded_from_calibration",
+                              ))}
                     </Notice>
                     <p className="fine">
                         EPİAŞ -{" "}
                         {sourceLabels[selectedHistory.source_kind ?? ""] ??
-                            "Reported production"}
+                            t("reported_production")}
                         {" - "}
                         {selectedHistory.timezone}
                     </p>
@@ -293,26 +328,37 @@ function EpiasArchive({
                             (row) =>
                                 row.energy_mwh === null || row.energy_mwh === 0,
                         ) && (
-                            <p>All available intervals have zero production.</p>
+                            <p>
+                                {t(
+                                    "all_available_intervals_have_zero_production",
+                                )}
+                            </p>
                         )}
                     {!visibleRows.length && (
                         <p>
-                            No interval production values are available. Missing
-                            values are not zero.
+                            {t(
+                                "no_interval_production_values_are_available_missing",
+                            )}
                         </p>
                     )}
                     <p>
                         {total === null
-                            ? "Incomplete provider hours — total unavailable"
-                            : `Reported total: ${total.toLocaleString(undefined, { maximumFractionDigits: 3 })} MWh`}
+                            ? t("incomplete_provider_hours_total_unavailable")
+                            : t("reported_total", {
+                                  total: total.toLocaleString(locale, {
+                                      maximumFractionDigits: 3,
+                                  }),
+                              })}
                     </p>
-                    <ScrollRegion label="EPİAŞ reported hourly production">
+                    <ScrollRegion label={t("epia_reported_hourly_production")}>
                         <table className="production-table">
-                            <caption>EPİAŞ reported hourly production</caption>
+                            <caption>
+                                {t("epia_reported_hourly_production")}
+                            </caption>
                             <thead>
                                 <tr>
-                                    <th>Local interval</th>
-                                    <th>Production (MWh)</th>
+                                    <th>{t("local_interval")}</th>
+                                    <th>{t("production_mwh")}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -330,15 +376,15 @@ function EpiasArchive({
                                                         {row.source_kind ===
                                                         "settlement_injection"
                                                             ? "UEVM"
-                                                            : "Provisional"}
+                                                            : t("provisional")}
                                                     </div>
                                                 )}
                                         </td>
                                         <td>
                                             {row.energy_mwh === null
-                                                ? "Missing"
+                                                ? t("missing")
                                                 : row.energy_mwh.toLocaleString(
-                                                      undefined,
+                                                      locale,
                                                       {
                                                           maximumFractionDigits: 3,
                                                       },
@@ -351,7 +397,7 @@ function EpiasArchive({
                     </ScrollRegion>
                 </>
             ) : (
-                <p>No EPİAŞ data has been archived for this day.</p>
+                <p>{t("no_epia_data_has_been_archived_for")}</p>
             )}
         </>
     );

@@ -7,6 +7,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone as django_timezone
+from django.utils.translation import gettext
 
 from pyracast.accounts.models import Tenant
 from pyracast.accounts.operations import require_admin, require_member
@@ -43,13 +44,13 @@ def require_available_location(
 
 def validate_location(latitude: float, longitude: float, timezone: str) -> None:
     if not math.isfinite(latitude) or not -90 <= latitude <= 90:
-        raise ValidationError("Latitude must be between -90 and 90 degrees.")
+        raise ValidationError(gettext("Latitude must be between -90 and 90 degrees."))
     if not math.isfinite(longitude) or not -180 <= longitude <= 180:
-        raise ValidationError("Longitude must be between -180 and 180 degrees.")
+        raise ValidationError(gettext("Longitude must be between -180 and 180 degrees."))
     try:
         ZoneInfo(timezone)
     except (ZoneInfoNotFoundError, ValueError) as exc:
-        raise ValidationError("An IANA timezone is required.") from exc
+        raise ValidationError(gettext("An IANA timezone is required.")) from exc
 
 
 def submit_region(
@@ -64,7 +65,7 @@ def submit_region(
     require_member(actor, tenant_id)
     validate_location(latitude, longitude, timezone)
     if not name.strip() or len(name) > 200:
-        raise ValidationError("A region name of at most 200 characters is required.")
+        raise ValidationError(gettext("A region name of at most 200 characters is required."))
     with transaction.atomic():
         require_available_location(tenant_id, latitude, longitude)
         return Region.objects.create(
@@ -85,7 +86,7 @@ def update_region(
 ) -> Region:
     require_member(actor, tenant_id)
     if not name.strip() or len(name) > 200:
-        raise ValidationError("A region name of at most 200 characters is required.")
+        raise ValidationError(gettext("A region name of at most 200 characters is required."))
     with transaction.atomic():
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
@@ -115,7 +116,7 @@ def request_location_change(
     validate_location(latitude, longitude, timezone)
     latitude, longitude = canonical_coordinate(latitude), canonical_coordinate(longitude)
     if len(reason) > 1000:
-        raise ValidationError("A reason of at most 1000 characters is required.")
+        raise ValidationError(gettext("A reason of at most 1000 characters is required."))
     with transaction.atomic():
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True

@@ -1,40 +1,11 @@
 "use client";
+import { useTranslations, useLocale, useFormatter } from "next-intl";
 import { useEffect, useState } from "react";
 import type { components } from "@/lib/schema";
 import { request, type Region } from "@/lib/api";
 import { ActionForm, Notice, Stat } from "./ui";
 
 type Schedule = components["schemas"]["CollectionScheduleOutput"];
-
-const endpointLabels: Record<string, string> = {
-    forecasts: "Forecast",
-    estimated_actuals: "Historical estimates",
-};
-const statusLabels: Record<string, string> = {
-    pending: "Waiting",
-    running: "In progress",
-    succeeded: "Succeeded",
-    retry: "Retry scheduled",
-    failed: "Failed",
-    stale: "Superseded or no longer eligible",
-};
-const errorLabels: Record<string, string> = {
-    provider_failure: "Provider request failed",
-    quota_exhausted: "Daily account budget exhausted",
-    invalid_source_kind: "Unexpected provider data",
-    calculation_failure: "Forecast calculation failed",
-    history_not_supported: "Historical estimates unavailable",
-    history_incomplete: "Historical data is incomplete",
-    history_budget_reserved: "Remaining budget is reserved for forecasts",
-    retry_window_expired: "Morning retry window ended",
-    history_window_closed: "Morning retry window ended",
-    provider_authentication_failed:
-        "Connection credentials need administrator attention",
-    provider_throttled: "Waiting for the provider's request limit to reset",
-    provider_rejected: "The provider rejected this request",
-    attempts_exhausted: "Retry limit reached",
-    superseded_forecast_slot: "Replaced by the latest scheduled collection",
-};
 
 export function CollectionSchedule({
     base,
@@ -45,6 +16,8 @@ export function CollectionSchedule({
     region: Region;
     token: string;
 }) {
+    const t = useTranslations("CollectionSchedule");
+
     const [version, setVersion] = useState(0);
     const [data, setData] = useState<Schedule>();
     const [error, setError] = useState("");
@@ -76,7 +49,7 @@ export function CollectionSchedule({
         return error ? (
             <Notice error>{error}</Notice>
         ) : (
-            <p role="status">Loading collection schedule...</p>
+            <p role="status">{t("loadingCollectionSchedule")}</p>
         );
     return (
         <>
@@ -106,10 +79,42 @@ function ScheduleEditor({
     token: string;
     onSaved: () => void;
 }) {
+    const t = useTranslations("CollectionSchedule");
+    const locale = useLocale();
+    const format = useFormatter();
+    const endpointLabels: Record<string, string> = {
+        forecasts: t("forecast"),
+        estimated_actuals: t("historicalEstimates"),
+    };
+    const statusLabels: Record<string, string> = {
+        pending: t("waiting"),
+        running: t("inProgress"),
+        succeeded: t("succeeded"),
+        retry: t("retryScheduled"),
+        failed: t("failed"),
+        stale: t("supersededOrNoLongerEligible"),
+    };
+    const errorLabels: Record<string, string> = {
+        provider_failure: t("providerRequestFailed"),
+        quota_exhausted: t("dailyAccountBudgetExhausted"),
+        invalid_source_kind: t("unexpectedProviderData"),
+        calculation_failure: t("forecastCalculationFailed"),
+        history_not_supported: t("historicalEstimatesUnavailable"),
+        history_incomplete: t("historicalDataIsIncomplete"),
+        history_budget_reserved: t("remainingBudgetIsReservedForForecasts"),
+        retry_window_expired: t("morningRetryWindowEnded"),
+        history_window_closed: t("morningRetryWindowEnded"),
+        provider_authentication_failed: t("credentialAttention"),
+        provider_throttled: t("providerThrottle"),
+        provider_rejected: t("providerRejected"),
+        attempts_exhausted: t("retryLimitReached"),
+        superseded_forecast_slot: t("superseded"),
+    };
+
     const [times, setTimes] = useState(data.times);
     const nextReset = new Date(
         Date.parse(`${data.quota_utc_day}T00:00:00Z`) + 86_400_000,
-    ).toLocaleString("en", {
+    ).toLocaleString(locale, {
         timeZone: data.timezone,
         dateStyle: "medium",
         timeStyle: "short",
@@ -117,10 +122,10 @@ function ScheduleEditor({
     return (
         <>
             <section className="panel">
-                <h2>Data collection</h2>
-                <p>Choose forecast collection times in {data.timezone}.</p>
+                <h2>{t("dataCollection")}</h2>
+                <p>{t("chooseTimes", { timezone: data.timezone })}</p>
                 <ActionForm
-                    submit="Save collection schedule"
+                    submit={t("saveCollectionSchedule")}
                     onSubmit={async (form) => {
                         const enabled = form.get("enabled") === "on";
                         if (
@@ -129,15 +134,13 @@ function ScheduleEditor({
                                     !/^([01]\d|2[0-3]):[0-5]\d$/.test(time),
                             )
                         )
-                            throw new Error("Enter a valid time in every row.");
+                            throw new Error(t("enterAValidTimeInEveryRow"));
                         if (new Set(times).size !== times.length)
                             throw new Error(
-                                "Each collection time must be unique.",
+                                t("eachCollectionTimeMustBeUnique"),
                             );
                         if (enabled && times.length === 0)
-                            throw new Error(
-                                "Add at least one collection time.",
-                            );
+                            throw new Error(t("addAtLeastOneCollectionTime"));
                         const compareTimes = (a: string, b: string) =>
                             Number(a.replace(":", "")) -
                             Number(b.replace(":", ""));
@@ -166,24 +169,24 @@ function ScheduleEditor({
                             defaultChecked={data.enabled}
                             disabled={region.status !== "approved"}
                         />{" "}
-                        Enable data collection
+                        {t("enableDataCollection")}
                     </label>
                     {region.status !== "approved" && (
-                        <Notice>
-                            Data collection can be enabled once this plant is
-                            approved and connected.
-                        </Notice>
+                        <Notice>{t("approvalRequired")}</Notice>
                     )}
-                    <p>Collection times ({data.timezone})</p>
+                    <p>{t("collectionTimes", { timezone: data.timezone })}</p>
                     {times.map((time, index) => (
                         <div className="button-group" key={index}>
                             <label className="field">
                                 <span className="sr-only">
-                                    Time {index + 1}
+                                    {t("time", { index: index + 1 })}
                                 </span>
                                 <input
                                     type="time"
-                                    aria-label={`Collection time ${index + 1} (${data.timezone})`}
+                                    aria-label={t("collectionTime", {
+                                        index: index + 1,
+                                        timezone: data.timezone,
+                                    })}
                                     value={time}
                                     onChange={(event) =>
                                         setTimes(
@@ -204,9 +207,11 @@ function ScheduleEditor({
                                         times.filter((_, i) => i !== index),
                                     )
                                 }
-                                aria-label={`Remove collection time ${index + 1}`}
+                                aria-label={t("removeTime", {
+                                    index: index + 1,
+                                })}
                             >
-                                Remove
+                                {t("remove")}
                             </button>
                         </div>
                     ))}
@@ -216,79 +221,82 @@ function ScheduleEditor({
                         disabled={times.length >= data.max_forecast_times}
                         onClick={() => setTimes([...times, ""])}
                     >
-                        + Add time
+                        {t("addTime")}
                     </button>
                     <p className="fine">
-                        Daily history: {data.history_local_time} (
-                        {data.timezone}). Pausing also stops history collection.
+                        {t("dailyHistory", {
+                            time: data.history_local_time,
+                            timezone: data.timezone,
+                        })}
                     </p>
                     <details>
-                        <summary>Collection details</summary>
-                        <p className="fine">
-                            Historical estimate retries preserve requests for
-                            scheduled forecasts. Validation and retries can use
-                            additional requests. Email reminders do not request
-                            provider data. Historical estimates are modeled;
-                            EPİAŞ reported production and settlement injection
-                            are separate records.
-                        </p>
+                        <summary>{t("collectionDetails")}</summary>
+                        <p className="fine">{t("historyHelp")}</p>
                     </details>
                 </ActionForm>
             </section>
             <section className="panel">
-                <h3>Account usage today (UTC)</h3>
+                <h3>{t("accountUsageTodayUTC")}</h3>
                 <div className="stats">
-                    <Stat label="Requests used" value={data.used_today} />
                     <Stat
-                        label="Tracked remaining"
-                        value={data.remaining_today}
+                        label={t("requestsUsed")}
+                        value={format.number(data.used_today)}
                     />
                     <Stat
-                        label="Daily limit"
-                        value={data.daily_request_limit}
+                        label={t("trackedRemaining")}
+                        value={format.number(data.remaining_today)}
+                    />
+                    <Stat
+                        label={t("dailyLimit")}
+                        value={format.number(data.daily_request_limit)}
                     />
                 </div>
                 <details>
-                    <summary>Usage details</summary>
+                    <summary>{t("usageDetails")}</summary>
                     <p className="fine">
-                        UTC day: {data.quota_utc_day}; resets at 00:00 UTC (
-                        {nextReset} in {data.timezone}). Up to{" "}
-                        {data.max_forecast_times} forecast times can be set per
-                        plant. The daily request budget is shared across
-                        connected plants. Tracked usage includes validation and
-                        retries, but excludes requests made outside Pyracast, so
-                        remaining requests are not guaranteed.
+                        {t("usagePolicy", {
+                            day: data.quota_utc_day,
+                            reset: nextReset,
+                            timezone: data.timezone,
+                            limit: data.max_forecast_times,
+                        })}
                     </p>
                     {data.requests_by_outcome && (
                         <p className="fine">
-                            Tracked attempts:{" "}
-                            {data.requests_by_outcome.succeeded} succeeded,{" "}
-                            {data.requests_by_outcome.failed} failed,{" "}
-                            {data.requests_by_outcome.uncertain} uncertain.
+                            {t("trackedAttempts", {
+                                succeeded: data.requests_by_outcome.succeeded,
+                                failed: data.requests_by_outcome.failed,
+                                uncertain: data.requests_by_outcome.uncertain,
+                            })}
                         </p>
                     )}
                 </details>
             </section>
             {data.recent_jobs?.length > 0 && (
                 <details className="panel">
-                    <summary>Recent collection jobs</summary>
+                    <summary>{t("recentCollectionJobs")}</summary>
                     <ul>
                         {data.recent_jobs.map((job) => (
                             <li key={job.id}>
-                                {endpointLabels[job.endpoint] ?? "Collection"} -{" "}
-                                {job.last_error === "history_incomplete"
-                                    ? "Partially collected"
-                                    : (statusLabels[job.status] ??
-                                      "Status unavailable")}{" "}
-                                -{" "}
-                                {new Date(
-                                    job.scheduled_slot ?? job.available_at,
-                                ).toLocaleString("en", {
-                                    timeZone: data.timezone,
-                                })}{" "}
-                                ({data.timezone}) - {job.attempts} attempts
+                                {t("jobSummary", {
+                                    endpoint:
+                                        endpointLabels[job.endpoint] ??
+                                        t("collection"),
+                                    status:
+                                        job.last_error === "history_incomplete"
+                                            ? t("partiallyCollected")
+                                            : (statusLabels[job.status] ??
+                                              t("statusUnavailable")),
+                                    time: new Date(
+                                        job.scheduled_slot ?? job.available_at,
+                                    ).toLocaleString(locale, {
+                                        timeZone: data.timezone,
+                                    }),
+                                    timezone: data.timezone,
+                                    attempts: job.attempts,
+                                })}
                                 {job.last_error && job.status !== "succeeded"
-                                    ? ` - ${errorLabels[job.last_error] ?? "Collection could not be completed"}`
+                                    ? ` - ${errorLabels[job.last_error] ?? t("collectionNotCompleted")}`
                                     : ""}
                             </li>
                         ))}

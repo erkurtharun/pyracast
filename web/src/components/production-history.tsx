@@ -1,4 +1,5 @@
 "use client";
+import { useLocale, useTranslations } from "next-intl";
 import { ScrollRegion } from "./scroll-region";
 import { useEffect, useState } from "react";
 import { CsvDownload } from "./csv-download";
@@ -10,16 +11,7 @@ import { Notice } from "./ui";
 
 type History = components["schemas"]["ProductionHistoryOutput"];
 type Draft = { energy: string; unit: string };
-const reasons: Record<string, string> = {
-    configuration_unavailable: "No plant configuration for this interval.",
-    configuration_not_current:
-        "This interval belongs to an earlier configuration.",
-    observation_overlap:
-        "A saved reading overlaps this interval. See saved readings below.",
-    estimated_actuals_unavailable:
-        "No archived estimated actuals for this interval.",
-    already_recorded: "Already saved.",
-};
+
 function shiftDay(day: string, amount: number) {
     const value = new Date(`${day}T12:00:00Z`);
     value.setUTCDate(value.getUTCDate() + amount);
@@ -36,6 +28,31 @@ export function ProductionHistory({
     token: string;
     onSaved: () => void;
 }) {
+    const t = useTranslations("ProductionHistory");
+    const locale = useLocale();
+    const enumLabel = (value: string) =>
+        value === ""
+            ? ""
+            : t.has(`values.${value}`)
+              ? t(`values.${value}`)
+              : t("unknown_value", {
+                    value: locale === "en" ? value.replaceAll("_", " ") : value,
+                });
+
+    const reasons: Record<string, string> = {
+        configuration_unavailable: t(
+            "no_plant_configuration_for_this_interval",
+        ),
+        configuration_not_current: t(
+            "this_interval_belongs_to_an_earlier_configuration",
+        ),
+        observation_overlap: t("a_saved_reading_overlaps_this_interval_see"),
+        estimated_actuals_unavailable: t(
+            "no_archived_estimated_actuals_for_this_interval",
+        ),
+        already_recorded: t("already_saved"),
+    };
+
     const [date, setDate] = useState("");
     const [resolution, setResolution] = useState("60");
     const [history, setHistory] = useState<History>();
@@ -71,7 +88,7 @@ export function ProductionHistory({
     }, [query, version]);
     const ready = history && query === loadedQuery;
     const datedTime = (value: string) =>
-        new Intl.DateTimeFormat("en-GB", {
+        new Intl.DateTimeFormat(locale, {
             timeZone: history?.timezone,
             year: "numeric",
             month: "short",
@@ -90,7 +107,7 @@ export function ProductionHistory({
                   Boolean(drafts[`${row.starts_at}/${row.ends_at}`]?.energy),
           )
         : [];
-    const offsetFormatter = new Intl.DateTimeFormat("en-GB", {
+    const offsetFormatter = new Intl.DateTimeFormat(locale, {
         timeZone: history?.timezone,
         timeZoneName: "shortOffset",
     });
@@ -104,7 +121,7 @@ export function ProductionHistory({
             ),
         ),
     );
-    const timeFormatter = new Intl.DateTimeFormat("en-GB", {
+    const timeFormatter = new Intl.DateTimeFormat(locale, {
         timeZone: history?.timezone,
         hour: "2-digit",
         minute: "2-digit",
@@ -161,9 +178,7 @@ export function ProductionHistory({
                     if (next[row.key] === row.draft) delete next[row.key];
                 return next;
             });
-            setMessage(
-                `${submitted.length} meter ${submitted.length === 1 ? "reading" : "readings"} saved.`,
-            );
+            setMessage(t("saved_readings", { count: submitted.length }));
             setVersion((current) => current + 1);
             onSaved();
         } catch (failure) {
@@ -177,25 +192,25 @@ export function ProductionHistory({
         <section className="panel journal">
             <div className="section-heading">
                 <div>
-                    <h2>Production journal</h2>
+                    <h2>{t("production_journal")}</h2>
                 </div>
             </div>
             <p className="fine">
-                Blank entries stay missing. Saved readings are permanent.
+                {t("blank_entries_stay_missing_saved_readings_are")}
             </p>
             <div className="journal-controls">
                 <div className="journal-date-nav">
                     <button
                         type="button"
                         className="button secondary"
-                        aria-label="Previous day"
+                        aria-label={t("previous_day")}
                         disabled={!date}
                         onClick={() => setDate(shiftDay(date, -1))}
                     >
                         ←
                     </button>
                     <label className="field">
-                        Day
+                        {t("day")}
                         <input
                             type="date"
                             disabled={!history}
@@ -207,7 +222,7 @@ export function ProductionHistory({
                     <button
                         type="button"
                         className="button secondary"
-                        aria-label="Next day"
+                        aria-label={t("next_day")}
                         disabled={!date || date >= (maxDate ?? "")}
                         onClick={() => setDate(shiftDay(date, 1))}
                     >
@@ -215,17 +230,17 @@ export function ProductionHistory({
                     </button>
                 </div>
                 <label className="field">
-                    Meter interval
+                    {t("meter_interval")}
                     <select
                         value={resolution}
                         onChange={(event) => setResolution(event.target.value)}
                     >
-                        <option value="30">30 minutes</option>
-                        <option value="60">60 minutes</option>
+                        <option value="30">{t("30_minutes")}</option>
+                        <option value="60">{t("60_minutes")}</option>
                     </select>
                 </label>
                 <label className="field">
-                    Entry energy unit
+                    {t("entry_energy_unit")}
                     <select
                         value={unit}
                         onChange={(event) => setUnit(event.target.value)}
@@ -237,30 +252,35 @@ export function ProductionHistory({
             </div>
             {history && (
                 <p className="fine">
-                    Available comparison dates:{" "}
                     {history.available_start_date && history.available_end_date
-                        ? `${history.available_start_date} to ${history.available_end_date}`
-                        : "No archived estimated actuals yet"}
-                    . Local times in {history.timezone}.
+                        ? t("available_dates", {
+                              start: history.available_start_date,
+                              end: history.available_end_date,
+                              timezone: history.timezone,
+                          })
+                        : t("no_available_dates", {
+                              timezone: history.timezone,
+                          })}
                 </p>
             )}
             {error && <Notice error>{error}</Notice>}
             {message && <Notice>{message}</Notice>}
             {!ready ? (
                 failedQuery === query ? null : (
-                    <p role="status">Loading production history…</p>
+                    <p role="status">{t("loading_production_history")}</p>
                 )
             ) : (
                 <>
                     <details>
-                        <summary>Journal entry rules</summary>
+                        <summary>{t("journal_entry_rules")}</summary>
                         <p className="fine">
-                            Archived estimated actuals unlock entry. Complete
-                            daylight coverage helps prepare calibration.
+                            {t(
+                                "archived_estimated_actuals_unlock_entry_complete_daylight",
+                            )}
                         </p>
                     </details>
                     <CsvDownload
-                        label="Download production journal CSV"
+                        label={t("download_production_journal_csv")}
                         filename={`production-journal-${history.start_date}-${history.end_date}`}
                         records={history.intervals.map((row) => {
                             const draft =
@@ -282,19 +302,25 @@ export function ProductionHistory({
                     {day && (
                         <div className="journal-summary">
                             <div>
-                                <strong>{day.recorded_count} recorded</strong>
+                                <strong>
+                                    {t("recorded_count", {
+                                        count: day.recorded_count,
+                                    })}
+                                </strong>
                                 <span>
-                                    {day.missing_count} missing ·{" "}
-                                    {day.available_count} with comparison data
+                                    {t("missing_count", {
+                                        missing: day.missing_count,
+                                        available: day.available_count,
+                                    })}
                                 </span>
                             </div>
                             <div>
-                                <strong>Daylight</strong>
+                                <strong>{t("daylight")}</strong>
                                 <span>
                                     {day.daylight_status === "polar_day"
-                                        ? "Sun above horizon all day"
+                                        ? t("sun_above_horizon_all_day")
                                         : day.daylight_status === "polar_night"
-                                          ? "No daylight this day"
+                                          ? t("no_daylight_this_day")
                                           : day.daylight_windows?.length > 1
                                             ? day.daylight_windows
                                                   .map((window) =>
@@ -315,7 +341,9 @@ export function ProductionHistory({
                                                           ),
                                                       )
                                                       .join(", ")
-                                                : "Daylight times unavailable"}
+                                                : t(
+                                                      "daylight_times_unavailable",
+                                                  )}
                                 </span>
                             </div>
                         </div>
@@ -328,20 +356,23 @@ export function ProductionHistory({
                     >
                         {visibleIntervals.length === 0 ? (
                             <p>
-                                No comparison data or saved meter intervals are
-                                available for this day.
+                                {t(
+                                    "no_comparison_data_or_saved_meter_intervals",
+                                )}
                             </p>
                         ) : (
-                            <ScrollRegion label="Meter entries">
+                            <ScrollRegion label={t("meter_entries")}>
                                 <table className="journal-table">
                                     <caption>
-                                        Meter entries · {resolution} minutes
+                                        {t("meter_caption", {
+                                            minutes: resolution,
+                                        })}
                                     </caption>
                                     <thead>
                                         <tr>
-                                            <th>Local interval</th>
-                                            <th>Production</th>
-                                            <th>Status</th>
+                                            <th>{t("local_interval")}</th>
+                                            <th>{t("production")}</th>
+                                            <th>{t("status")}</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -358,12 +389,17 @@ export function ProductionHistory({
                                                     </th>
                                                     <td>
                                                         {row.observation ? (
-                                                            `${row.observation.energy_mwh} MWh`
+                                                            `${new Intl.NumberFormat(locale, { maximumFractionDigits: 3 }).format(row.observation.energy_mwh)} MWh`
                                                         ) : (
                                                             <>
                                                                 <input
                                                                     className="meter-input"
-                                                                    aria-label={`Production ${row.starts_at}`}
+                                                                    aria-label={t(
+                                                                        "production_at",
+                                                                        {
+                                                                            start: row.starts_at,
+                                                                        },
+                                                                    )}
                                                                     type="number"
                                                                     min="0"
                                                                     step="any"
@@ -401,12 +437,14 @@ export function ProductionHistory({
                                                         {row.observation
                                                             ? `${row.observation.quality} · ${row.observation.source}`
                                                             : row.can_enter
-                                                              ? "Not entered"
+                                                              ? t("not_entered")
                                                               : (reasons[
                                                                     row.unavailable_reason ??
                                                                         ""
                                                                 ] ??
-                                                                "Unavailable for entry.")}
+                                                                t(
+                                                                    "unavailable_for_entry",
+                                                                ))}
                                                     </td>
                                                 </tr>
                                             );
@@ -417,27 +455,28 @@ export function ProductionHistory({
                         )}
                         <div className="journal-save">
                             <span>
-                                {pending}{" "}
-                                {pending === 1 ? "reading" : "readings"} ready
-                                to save
+                                {t("pending_readings", { count: pending })}
                             </span>
                             <button
                                 className="button"
                                 type="submit"
                                 disabled={saving || !pending}
                             >
-                                {saving ? "Saving…" : "Save meter readings"}
+                                {saving
+                                    ? t("saving")
+                                    : t("save_meter_readings")}
                             </button>
                         </div>
                     </form>
                     {history.observations.length > 0 && (
                         <details>
                             <summary>
-                                Saved meter readings (
-                                {history.observations.length})
+                                {t("saved_reading_count", {
+                                    count: history.observations.length,
+                                })}
                             </summary>
                             <CsvDownload
-                                label="Download saved readings CSV"
+                                label={t("download_saved_readings_csv")}
                                 filename={`meter-readings-${history.start_date}-${history.end_date}`}
                                 records={history.observations}
                                 metadata={{
@@ -445,31 +484,49 @@ export function ProductionHistory({
                                     plant_id: history.plant_id,
                                 }}
                             />
-                            <ScrollRegion label="Saved production readings">
+                            <ScrollRegion
+                                label={t("saved_production_readings")}
+                            >
                                 <table>
                                     <caption>
-                                        Saved readings · original intervals and
-                                        configuration
+                                        {t(
+                                            "saved_readings_original_intervals_and_configuration",
+                                        )}
                                     </caption>
                                     <thead>
                                         <tr>
-                                            <th>Local interval</th>
-                                            <th>Energy (MWh)</th>
-                                            <th>Quality</th>
-                                            <th>Source</th>
-                                            <th>Configuration</th>
+                                            <th>{t("local_interval")}</th>
+                                            <th>{t("energy_mwh")}</th>
+                                            <th>{t("quality")}</th>
+                                            <th>{t("source")}</th>
+                                            <th>{t("configuration")}</th>
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {history.observations.map((row) => (
                                             <tr key={row.id}>
                                                 <th>
-                                                    {datedTime(row.starts_at)}{" "}
-                                                    to {datedTime(row.ends_at)}
+                                                    {t("reading_interval", {
+                                                        start: datedTime(
+                                                            row.starts_at,
+                                                        ),
+                                                        end: datedTime(
+                                                            row.ends_at,
+                                                        ),
+                                                    })}
                                                 </th>
-                                                <td>{row.energy_mwh}</td>
-                                                <td>{row.quality}</td>
-                                                <td>{row.source}</td>
+                                                <td>
+                                                    {new Intl.NumberFormat(
+                                                        locale,
+                                                        {
+                                                            maximumFractionDigits: 3,
+                                                        },
+                                                    ).format(row.energy_mwh)}
+                                                </td>
+                                                <td>
+                                                    {enumLabel(row.quality)}
+                                                </td>
+                                                <td>{enumLabel(row.source)}</td>
                                                 <td>{row.configuration_id}</td>
                                             </tr>
                                         ))}

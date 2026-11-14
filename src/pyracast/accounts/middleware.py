@@ -38,6 +38,7 @@ class TrustedProxyHeaders:
         forwarded_proto = request.META.get("HTTP_X_FORWARDED_PROTO")
         forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR")
         client_ip = request.META.get("HTTP_X_REAL_IP")
+        country = request.META.pop("HTTP_CF_IPCOUNTRY", None)
         for name in tuple(request.META):
             if name.startswith("HTTP_X_FORWARDED_") or name in {
                 "HTTP_FORWARDED",
@@ -60,6 +61,10 @@ class TrustedProxyHeaders:
                 raise PermissionDenied("Invalid trusted proxy headers.") from None
             request.META["HTTP_X_FORWARDED_PROTO"] = forwarded_proto
             request.META["HTTP_X_REAL_IP"] = client_ip
+            if country and self.upstream_networks and forwarded_for:
+                upstream = ip_address(normalize_client_ip(forwarded_for.rsplit(",", 1)[-1].strip()))
+                if any(upstream in network for network in self.upstream_networks):
+                    request.META["HTTP_CF_IPCOUNTRY"] = country
         return self.get_response(request)
 
     def _forwarded_client_ip(self, forwarded_for: str | None) -> str:

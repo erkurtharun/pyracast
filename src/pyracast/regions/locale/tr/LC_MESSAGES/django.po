@@ -1,0 +1,1492 @@
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Pyracast\n"
+"Language: tr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+msgid ""
+"%(field)s must be finite, nonnegative, and no greater than the known "
+"configured capacity."
+msgstr ""
+"%(field)s sonlu, sıfır veya pozitif olmalı ve bilinen yapılandırılmış "
+"kapasiteyi aşmamalıdır."
+
+msgid "%(provider)s · %(identity)s · key revision %(revision)s"
+msgstr "%(provider)s · %(identity)s · anahtar revizyonu %(revision)s"
+
+msgid ""
+". Clear this delay only after confirming recovery with the provider. The "
+"daily request budget is preserved."
+msgstr ""
+". Bu beklemeyi yalnız sağlayıcıdan düzelmeyi doğruladıktan sonra kaldırın. "
+"Günlük istek bütçesi korunur."
+
+msgid "A calibration is already pending."
+msgstr "Bekleyen bir kalibrasyon zaten var."
+
+msgid "A cancelled incident cannot be changed."
+msgstr "İptal edilmiş bir kesinti değiştirilemez."
+
+msgid "A plant configuration is required."
+msgstr "Santral yapılandırması gereklidir."
+
+msgid "A plant name of at most 200 characters is required."
+msgstr "En fazla 200 karakterlik bir santral adı girin."
+
+msgid "A reason of at most 1000 characters is required."
+msgstr "Gerekçe en fazla 1000 karakter olmalıdır."
+
+msgid "A region name of at most 200 characters is required."
+msgstr "En fazla 200 karakterlik bir konum adı girin."
+
+msgid "A replacement affects every plant using the selected account."
+msgstr "Değişiklik, seçili hesabı kullanan tüm santralleri etkiler."
+
+msgid "A timezone-aware ISO 8601 timestamp is required."
+msgstr "Saat dilimi içeren bir ISO 8601 zamanı girin."
+
+msgid ""
+"A title of at most 200 characters and notes of at most 2000 characters are "
+"required."
+msgstr "Başlık en fazla 200, notlar en fazla 2000 karakter olmalıdır."
+
+msgid "AC generation"
+msgstr "AC üretimi"
+
+msgid "Acceptance unknown"
+msgstr "Kabul durumu bilinmiyor"
+
+msgid "Accepted"
+msgstr "Kabul edildi"
+
+msgid "Accepted by email service"
+msgstr "E-posta hizmeti kabul etti"
+
+msgid ""
+"Accepting the new location removes approval. Set up, validate and approve a "
+"replacement connection before collection resumes."
+msgstr ""
+"Yeni konumu kabul etmek onayı kaldırır. Veri toplamaya devam etmeden önce "
+"yeni bağlantıyı kurun, doğrulayın ve onaylayın."
+
+msgid "Account"
+msgstr "Hesap"
+
+msgid "Account security"
+msgstr "Hesap güvenliği"
+
+msgid "Add this plant's Solcast account"
+msgstr "Bu santralin Solcast hesabını ekle"
+
+msgid "Advanced reference settings"
+msgstr "Gelişmiş referans ayarları"
+
+msgid "All awaiting approval"
+msgstr "Onay bekleyenlerin tümü"
+
+msgid "All checks clear"
+msgstr "Tüm denetimler başarılı"
+
+msgid "All operations"
+msgstr "Tüm işlemler"
+
+msgid "An IANA timezone is required."
+msgstr "Geçerli bir IANA saat dilimi girin."
+
+msgid "An approved current provider binding is required."
+msgstr "Güncel ve onaylı bir sağlayıcı bağlantısı gereklidir."
+
+msgid "An approved current region and at least one time are required."
+msgstr "Güncel ve onaylı bir konum ile en az bir saat gereklidir."
+
+msgid "An issuance cutoff requires archived_forecast comparison."
+msgstr "Yayın kesim saati için arşiv tahmini karşılaştırmasını seçin."
+
+msgid "An observation source of at most 200 characters is required."
+msgstr "En fazla 200 karakterlik bir üretim kaynağı girin."
+
+msgid "Another location request is pending. Reopen the editor to see it."
+msgstr ""
+"Bekleyen başka bir konum talebi var. Görmek için düzenleyiciyi yeniden açın."
+
+msgid "Any status"
+msgstr "Tüm durumlar"
+
+msgid "Apply language"
+msgstr "Dili uygula"
+
+msgid "Approve"
+msgstr "Onayla"
+
+msgid "Approve location change"
+msgstr "Konum değişikliğini onayla"
+
+msgid "Approve location change (new binding validation and approval required)"
+msgstr ""
+"Konum değişikliğini onayla (yeni bağlantının doğrulanması ve onaylanması "
+"gerekir)"
+
+msgid "Approve plant"
+msgstr "Santrali onayla"
+
+msgid "Approve the plant's current technical configuration before connecting."
+msgstr "Bağlamadan önce santralin güncel teknik yapılandırmasını onaylayın."
+
+msgid "Approve validated reference binding"
+msgstr "Doğrulanmış referans bağlantısını onayla"
+
+msgid "Approved"
+msgstr "Onaylandı"
+
+msgid "Ask the member to correct the saved recipient addresses."
+msgstr "Üyeden kayıtlı alıcı adreslerini düzeltmesini isteyin."
+
+msgid "Attempts"
+msgstr "Denemeler"
+
+msgid "Attempts exhausted"
+msgstr "Deneme sınırına ulaşıldı"
+
+msgid "Awaiting approval"
+msgstr "Onay bekliyor"
+
+msgid "Awaiting publication"
+msgstr "Yayımlama bekleniyor"
+
+msgid "Azimuth (degrees)"
+msgstr "Azimut (derece)"
+
+msgid "Back to plants"
+msgstr "Santrallere dön"
+
+msgid "Based on revision"
+msgstr "Esas alınan revizyon"
+
+msgid "Both start_date and end_date are required."
+msgstr "Başlangıç ve bitiş tarihlerini birlikte girin."
+
+msgid "Calculation failure"
+msgstr "Hesaplama başarısız"
+
+msgid "Calibration"
+msgstr "Kalibrasyon"
+
+msgid "Calibration requires the current configuration."
+msgstr "Kalibrasyon için güncel yapılandırma gereklidir."
+
+msgid "Cancelled"
+msgstr "İptal edildi"
+
+msgid "Capacities must be finite and positive."
+msgstr "Kapasiteler sonlu ve sıfırdan büyük olmalıdır."
+
+msgid "Change EPİAŞ connection"
+msgstr "EPİAŞ bağlantısını değiştir"
+
+msgid "Check"
+msgstr "Denetim"
+
+msgid "Check deployment mail credentials."
+msgstr "Dağıtımdaki e-posta kimlik bilgilerini denetleyin."
+
+msgid "Check notification worker availability and the delivery deadline."
+msgstr ""
+"Bildirim işçisinin kullanılabilirliğini ve teslim son tarihini denetleyin."
+
+msgid "Check the EPİAŞ identifiers and message below."
+msgstr "EPİAŞ kimliklerini ve aşağıdaki mesajı denetleyin."
+
+msgid "Check the collection dispatcher and worker."
+msgstr "Veri toplama dağıtıcısını ve işçisini denetleyin."
+
+msgid "Check the connection fields and messages below."
+msgstr "Bağlantı alanlarını ve aşağıdaki mesajları denetleyin."
+
+msgid "Check the dedicated notification worker."
+msgstr "Ayrı bildirim işçisini denetleyin."
+
+msgid "Check the production dispatcher and worker."
+msgstr "Üretim dağıtıcısını ve işçisini denetleyin."
+
+msgid "Check the value and messages below."
+msgstr "Değeri ve aşağıdaki mesajları denetleyin."
+
+msgid "Choose a completed local day for historical estimates."
+msgstr "Geçmiş tahminleri için tamamlanmış bir yerel gün seçin."
+
+msgid "Choose a date within the available forecast range."
+msgstr "Kullanılabilir tahmin aralığında bir tarih seçin."
+
+msgid "Choose a review action and reload the current plant before continuing."
+msgstr ""
+"Devam etmeden önce bir inceleme işlemi seçin ve güncel santrali yeniden "
+"yükleyin."
+
+msgid "Choose a setup action."
+msgstr "Bir kurulum işlemi seçin."
+
+msgid "Clear"
+msgstr "Temizle"
+
+msgid "Clear confirmed provider delay"
+msgstr "Doğrulanmış sağlayıcı beklemesini kaldır"
+
+msgid "Collection"
+msgstr "Veri toplama"
+
+msgid "Collection and email status."
+msgstr "Veri toplama ve e-posta durumu."
+
+msgid "Collection times must use HH:MM."
+msgstr "Veri toplama saatleri SS:DD biçiminde olmalıdır."
+
+msgid "Company"
+msgstr "Şirket"
+
+msgid "Complete the plant's technical details before requesting approval."
+msgstr "Onay istemeden önce santralin teknik bilgilerini tamamlayın."
+
+msgid "Completed 30 or 60 minute observations are required."
+msgstr "Tamamlanmış 30 veya 60 dakikalık üretim kayıtları gereklidir."
+
+msgid "Configuration revision"
+msgstr "Yapılandırma revizyonu"
+
+msgid "Confirm replacement of the selected account's key"
+msgstr "Seçili hesabın anahtar değişikliğini onayla"
+
+msgid "Confirm replacing the shared account key."
+msgstr "Paylaşılan hesap anahtarının değiştirilmesini onaylayın."
+
+msgid "Conflicting or overlapping observation."
+msgstr ""
+"Üretim kaydı mevcut bir kayıtla çelişiyor veya zaman aralığı çakışıyor."
+
+msgid "Connected"
+msgstr "Bağlı"
+
+msgid ""
+"Connecting verifies the identifiers with EPİAŞ and queues initial production"
+" collection."
+msgstr ""
+"Bağlantı, kimlikleri EPİAŞ üzerinden doğrular ve ilk üretim verisi toplama "
+"işini sıraya alır."
+
+msgid "Connection"
+msgstr "Bağlantı"
+
+msgid "Connection validated"
+msgstr "Bağlantı doğrulandı"
+
+msgid ""
+"Connection validation failed. Check the private credentials and site "
+"settings."
+msgstr ""
+"Bağlantı doğrulanamadı. Özel kimlik bilgilerini ve tesis ayarlarını "
+"denetleyin."
+
+msgid "Current"
+msgstr "Güncel"
+
+msgid "Current limit"
+msgstr "Güncel sınır"
+
+msgid "Current location:"
+msgstr "Güncel konum:"
+
+msgid "Customer declaration"
+msgstr "Müşteri beyanı"
+
+msgid "Customer workspace"
+msgstr "Müşteri çalışma alanı"
+
+msgid "DC nameplate"
+msgstr "DC kurulu güç"
+
+msgid "Data"
+msgstr "Veri"
+
+msgid "Data collection"
+msgstr "Veri toplama"
+
+msgid "Delayed collections"
+msgstr "Geciken veri toplama işleri"
+
+msgid "Delayed emails"
+msgstr "Geciken e-postalar"
+
+msgid "Delayed production collection"
+msgstr "Geciken üretim verisi toplama işleri"
+
+msgid "Delivery deadline exceeded"
+msgstr "Teslim süresi aşıldı"
+
+msgid "Disconnect EPİAŞ"
+msgstr "EPİAŞ bağlantısını kes"
+
+msgid "Disconnected"
+msgstr "Bağlı değil"
+
+msgid "Dispatch"
+msgstr "Dağıtım"
+
+msgid "Done"
+msgstr "Tamamlandı"
+
+msgid "EPİAŞ connection disconnected. Saved production remains available."
+msgstr "EPİAŞ bağlantısı kesildi. Kayıtlı üretim verileri erişilebilir kalır."
+
+msgid "EPİAŞ connection saved. Initial production collection is queued."
+msgstr ""
+"EPİAŞ bağlantısı kaydedildi. İlk üretim verisi toplama işi sıraya alındı."
+
+msgid "EPİAŞ is currently unavailable. Try connecting again later."
+msgstr "EPİAŞ şu anda kullanılamıyor. Daha sonra yeniden bağlanmayı deneyin."
+
+msgid "EPİAŞ plant"
+msgstr "EPİAŞ santrali"
+
+msgid "EPİAŞ plant ID"
+msgstr "EPİAŞ santral kimliği"
+
+msgid "EPİAŞ production connection"
+msgstr "EPİAŞ üretim bağlantısı"
+
+msgid ""
+"EPİAŞ service credentials are unavailable. Contact the deployment operator."
+msgstr ""
+"EPİAŞ hizmeti kimlik bilgileri kullanılamıyor. Dağıtım sorumlusuyla "
+"iletişime geçin."
+
+msgid "Email authentication failures"
+msgstr "E-posta kimlik doğrulama hataları"
+
+msgid "Email delivery"
+msgstr "E-posta teslimi"
+
+msgid "Email needing attention"
+msgstr "İşlem gerektiren e-postalar"
+
+msgid "Email reminder settings"
+msgstr "E-posta hatırlatma ayarları"
+
+msgid "Email reminder settings saved."
+msgstr "E-posta hatırlatma ayarları kaydedildi."
+
+msgid "Email reminders"
+msgstr "E-posta hatırlatmaları"
+
+msgid "Emails with partial forecasts"
+msgstr "Kısmi tahmin içeren e-postalar"
+
+msgid "Emails without saved forecasts"
+msgstr "Kayıtlı tahmin bulunmayan e-postalar"
+
+msgid "End must be aware, after start and no later than now."
+msgstr ""
+"Bitiş saat dilimi içermeli, başlangıçtan sonra olmalı ve şu anı aşmamalıdır."
+
+msgid "English"
+msgstr "English"
+
+msgid "Enter a location different from the current location."
+msgstr "Mevcut konumdan farklı bir konum girin."
+
+msgid "Enter an API key for the new account."
+msgstr "Yeni hesap için bir API anahtarı girin."
+
+msgid "Enter the plant's 16-character EIC to confirm its identity."
+msgstr "Santralin kimliğini doğrulamak için 16 karakterli EIC kodunu girin."
+
+msgid ""
+"Entering a key above replaces the selected account's key for every plant "
+"that shares it. Leave the key blank to keep the current one."
+msgstr ""
+"Yukarıya bir anahtar girmeniz, seçili hesabın anahtarını hesabı paylaşan tüm"
+" santraller için değiştirir. Mevcut anahtarı korumak için boş bırakın."
+
+msgid "Epias provider failure"
+msgstr "EPİAŞ sağlayıcı hatası"
+
+msgid "Epias response identity mismatch"
+msgstr "EPİAŞ yanıt kimliği eşleşmedi"
+
+msgid "Error"
+msgstr "Hata"
+
+msgid "Estimated actuals require a completed local day within the past year."
+msgstr ""
+"Geçmiş tahminleri için son bir yıl içinde tamamlanmış bir yerel gün seçin."
+
+msgid "Existing Solcast account"
+msgstr "Mevcut Solcast hesabı"
+
+msgid "Existing account"
+msgstr "Mevcut hesap"
+
+msgid "Existing accounts retain their shared limit."
+msgstr "Mevcut hesapların paylaşılan sınırı korunur."
+
+msgid "Failed"
+msgstr "Başarısız"
+
+msgid "Failed collections"
+msgstr "Başarısız veri toplama işleri"
+
+msgid "Failed production collection"
+msgstr "Başarısız üretim verisi toplama işleri"
+
+msgid "Filter plants"
+msgstr "Santralleri filtrele"
+
+msgid "Find a plant, then open it to review, connect or approve."
+msgstr "Bir santral bulun; incelemek, bağlamak veya onaylamak için açın."
+
+msgid "Fixed"
+msgstr "Sabit"
+
+msgid "Fixed-array tilt / azimuth"
+msgstr "Sabit panel eğimi / azimutu"
+
+msgid "Forecast"
+msgstr "Tahmin"
+
+msgid "Forecast superseded"
+msgstr "Tahminin yerini yenisi aldı"
+
+msgid "Grid export limit"
+msgstr "Şebekeye veriş sınırı"
+
+msgid "Health checks"
+msgstr "Sağlık denetimleri"
+
+msgid "Healthy"
+msgstr "Sağlıklı"
+
+msgid "History budget reserved"
+msgstr "Geçmiş veriler için bütçe ayrıldı"
+
+msgid "History incomplete"
+msgstr "Geçmiş veriler eksik"
+
+msgid "History not supported"
+msgstr "Geçmiş veriler desteklenmiyor"
+
+msgid "History window closed"
+msgstr "Geçmiş veri toplama aralığı kapandı"
+
+msgid ""
+"I verified a horizontal reference and matching power and capacity "
+"units/basis"
+msgstr ""
+"Yatay referansı ve eşleşen güç ile kapasite birimlerini/esasını doğruladım"
+
+msgid "Incident fields are incomplete or unsupported."
+msgstr "Kesinti alanları eksik veya desteklenmiyor."
+
+msgid "Incident periods must not overlap."
+msgstr "Kesinti dönemleri birbiriyle çakışmamalıdır."
+
+msgid "Incident revision changed."
+msgstr "Kesinti kaydı değişti. Listeyi yeniden yükleyip tekrar deneyin."
+
+msgid "Installation date"
+msgstr "Kurulum tarihi"
+
+msgid "Interrupted collections"
+msgstr "Kesintiye uğrayan veri toplama işleri"
+
+msgid "Interrupted connection"
+msgstr "Bağlantı kesintiye uğradı"
+
+msgid "Interrupted emails"
+msgstr "Kesintiye uğrayan e-postalar"
+
+msgid "Interrupted production collection"
+msgstr "Kesintiye uğrayan üretim verisi toplama işleri"
+
+msgid "Interrupted send"
+msgstr "Gönderim kesintiye uğradı"
+
+msgid "Invalid email recipients"
+msgstr "Geçersiz e-posta alıcıları"
+
+msgid "Invalid source kind"
+msgstr "Geçersiz kaynak türü"
+
+msgid "Inverter AC capacity"
+msgstr "İnvertör AC kapasitesi"
+
+msgid "Key replacement for an existing account"
+msgstr "Mevcut hesap için anahtar değişikliği"
+
+msgid "Language"
+msgstr "Dil"
+
+msgid "Last attempt"
+msgstr "Son deneme"
+
+msgid "Last error"
+msgstr "Son hata"
+
+msgid "Last saved forecast"
+msgstr "Son kayıtlı tahmin"
+
+msgid "Last success"
+msgstr "Son başarı"
+
+msgid "Last validation"
+msgstr "Son doğrulama"
+
+msgid "Latest 20 deliveries"
+msgstr "Son 20 teslim"
+
+msgid "Latest 20 jobs"
+msgstr "Son 20 iş"
+
+msgid "Latitude must be between -90 and 90 degrees."
+msgstr "Enlem -90 ile 90 derece arasında olmalıdır."
+
+msgid "Local timezone"
+msgstr "Yerel saat dilimi"
+
+msgid "Location"
+msgstr "Konum"
+
+msgid "Location change approved"
+msgstr "Konum değişikliği onaylandı"
+
+msgid "Location change rejected"
+msgstr "Konum değişikliği reddedildi"
+
+msgid "Location change requests"
+msgstr "Konum değişikliği talepleri"
+
+msgid "Location changes"
+msgstr "Konum değişiklikleri"
+
+msgid "Location revision"
+msgstr "Konum revizyonu"
+
+msgid "Longitude must be between -180 and 180 degrees."
+msgstr "Boylam -180 ile 180 derece arasında olmalıdır."
+
+msgid "Losses (%)"
+msgstr "Kayıplar (%)"
+
+msgid ""
+"Lowering the limit pauses reminders for plants whose saved recipient list is"
+" over it. Their lists are kept, not deleted, and reminders resume once the "
+"list is shortened or the limit is raised."
+msgstr ""
+"Sınırın düşürülmesi, kayıtlı alıcı listesi sınırı aşan santrallerin "
+"hatırlatmalarını duraklatır. Listeleri korunur; liste kısaltıldığında veya "
+"sınır artırıldığında hatırlatmalar devam eder."
+
+msgid "Mail authentication failed"
+msgstr "E-posta kimlik doğrulaması başarısız"
+
+msgid "Mail outcome uncertain"
+msgstr "E-posta sonucu belirsiz"
+
+msgid "Mail preparation failed"
+msgstr "E-posta hazırlanamadı"
+
+msgid "Mail rejected"
+msgstr "E-posta reddedildi"
+
+msgid ""
+"Matching historical estimates are unavailable. Choose a day with collected "
+"data."
+msgstr "Eşleşen geçmiş tahminleri yok. Veri toplanmış bir gün seçin."
+
+msgid "Measurement point"
+msgstr "Ölçüm noktası"
+
+msgid "Menu"
+msgstr "Menü"
+
+msgid "Metering"
+msgstr "Sayaç verileri"
+
+msgid "Missed email times"
+msgstr "Kaçırılan e-posta zamanları"
+
+msgid "Missed schedule"
+msgstr "Planlanan zaman kaçırıldı"
+
+msgid "Missing recipient"
+msgstr "Alıcı eksik"
+
+msgid "Mounting"
+msgstr "Montaj"
+
+msgid "Needs attention"
+msgstr "İşlem gerekiyor"
+
+msgid "Needs validation"
+msgstr "Doğrulama gerekiyor"
+
+msgid "Net export"
+msgstr "Net şebekeye veriş"
+
+msgid "Never"
+msgstr "Hiçbir zaman"
+
+msgid "New Solcast account identity"
+msgstr "Yeni Solcast hesap kimliği"
+
+msgid "New account"
+msgstr "Yeni hesap"
+
+msgid "New account daily request limit"
+msgstr "Yeni hesap günlük istek sınırı"
+
+msgid "New account service authorization reference"
+msgstr "Yeni hesap hizmet yetkilendirme referansı"
+
+msgid "Next"
+msgstr "Sonraki"
+
+msgid "No collection jobs yet."
+msgstr "Henüz veri toplama işi yok."
+
+msgid "No email deliveries yet."
+msgstr "Henüz e-posta teslimi yok."
+
+msgid "No location changes are waiting for review."
+msgstr "İnceleme bekleyen konum değişikliği yok."
+
+msgid "No plant has been submitted for this location."
+msgstr "Bu konum için santral başvurusu yapılmamış."
+
+msgid "No plants match"
+msgstr "Eşleşen santral yok"
+
+msgid "No reason given"
+msgstr "Gerekçe belirtilmedi"
+
+msgid "No recorded activity yet."
+msgstr "Henüz kayıtlı etkinlik yok."
+
+msgid "No saved technical configuration or customer submission."
+msgstr "Kayıtlı teknik yapılandırma veya müşteri başvurusu yok."
+
+msgid "None"
+msgstr "Yok"
+
+msgid "None saved yet"
+msgstr "Henüz kaydedilmedi"
+
+msgid "Not configured"
+msgstr "Yapılandırılmadı"
+
+msgid "Not confirmed"
+msgstr "Doğrulanmadı"
+
+msgid "Not connected to EPİAŞ."
+msgstr "EPİAŞ bağlantısı yok."
+
+msgid "Not sent"
+msgstr "Gönderilmedi"
+
+msgid "Not set"
+msgstr "Ayarlanmadı"
+
+msgid "Not validated"
+msgstr "Doğrulanmadı"
+
+msgid "Nothing is waiting for review."
+msgstr "İnceleme bekleyen kayıt yok."
+
+msgid "Notifications"
+msgstr "Bildirimler"
+
+msgid "Observation timestamps must be timezone-aware."
+msgstr "Üretim kayıtlarının zamanları saat dilimi bilgisi içermelidir."
+
+msgid "Observations must align to local half-hour boundaries."
+msgstr ""
+"Üretim kayıtları yerel saatle tam veya yarım saatte başlamalı ve bitmelidir."
+
+msgid "Observations must not cross local midnight."
+msgstr "Üretim kayıtları yerel gece yarısını aşmamalıdır."
+
+msgid "Observed energy must be finite and nonnegative."
+msgstr "Ölçülen enerji sonlu, sıfır veya pozitif olmalıdır."
+
+msgid "Ok"
+msgstr "Başarılı"
+
+msgid "Onboarding"
+msgstr "Kurulum"
+
+msgid "Only a completed, held-out evaluated calibration can be activated."
+msgstr ""
+"Yalnızca tamamlanmış ve ayrı doğrulama verileriyle değerlendirilmiş bir "
+"kalibrasyon etkinleştirilebilir."
+
+msgid "Only fixed mounting permits surface angles."
+msgstr "Yüzey açıları yalnızca sabit montajda kullanılabilir."
+
+msgid "Open"
+msgstr "Aç"
+
+msgid "Open operations"
+msgstr "İşlemleri aç"
+
+msgid "Operations"
+msgstr "İşlemler"
+
+msgid "Other decisions"
+msgstr "Diğer kararlar"
+
+msgid "Overview"
+msgstr "Genel bakış"
+
+msgid "Page"
+msgstr "Sayfa"
+
+msgid "Partial data"
+msgstr "Kısmi veri"
+
+msgid "Past estimates"
+msgstr "Geçmiş tahminler"
+
+msgid "Pending"
+msgstr "Bekliyor"
+
+msgid "Phase"
+msgstr "Aşama"
+
+msgid "Plant"
+msgstr "Santral"
+
+msgid "Plant approved"
+msgstr "Santral onaylandı"
+
+msgid "Plant approved. The first saved forecast is being prepared."
+msgstr "Santral onaylandı. İlk kayıtlı tahmin hazırlanıyor."
+
+msgid ""
+"Plant configuration is unavailable. Complete setup and wait for "
+"administrator approval."
+msgstr ""
+"Santral yapılandırması kullanılamıyor. Kurulumu tamamlayıp yönetici onayını "
+"bekleyin."
+
+msgid "Plant location"
+msgstr "Santral konumu"
+
+msgid "Plant pages"
+msgstr "Santral sayfaları"
+
+msgid "Plant rejected"
+msgstr "Santral reddedildi"
+
+msgid "Plant review saved."
+msgstr "Santral incelemesi kaydedildi."
+
+msgid "Plant submitted"
+msgstr "Santral başvurusu yapıldı"
+
+msgid "Plant suspended"
+msgstr "Santral askıya alındı"
+
+msgid "Plant totals"
+msgstr "Santral toplamları"
+
+msgid "Plant, location or company"
+msgstr "Santral, konum veya şirket"
+
+msgid "Plants"
+msgstr "Santraller"
+
+msgid "Plants without recent forecasts"
+msgstr "Yakın tarihli tahmini bulunmayan santraller"
+
+msgid "Platform administration"
+msgstr "Platform yönetimi"
+
+msgid "Platform-wide limits."
+msgstr "Platform genelindeki sınırlar."
+
+msgid "Preference or authority changed"
+msgstr "Tercih veya yetki değişti"
+
+msgid "Previous"
+msgstr "Önceki"
+
+msgid "Private connection"
+msgstr "Özel bağlantı"
+
+msgid "Private connection saved"
+msgstr "Özel bağlantı kaydedildi"
+
+msgid "Private provider setup saved. Validate the connection before approval."
+msgstr ""
+"Özel sağlayıcı kurulumu kaydedildi. Onaydan önce bağlantıyı doğrulayın."
+
+msgid "Production entry requires the current approved configuration."
+msgstr "Üretim girişi için güncel ve onaylı yapılandırma gereklidir."
+
+msgid "Provide at most %(limit)s distinct local HH:MM times."
+msgstr "SS:DD biçiminde en fazla %(limit)s farklı yerel saat girin."
+
+msgid ""
+"Provide at most %(limit)s distinct local times; history uses one daily "
+"request."
+msgstr ""
+"En fazla %(limit)s farklı yerel saat girin; geçmiş verileri günde bir istek "
+"kullanır."
+
+msgid "Provider authentication failed"
+msgstr "Sağlayıcı kimlik doğrulaması başarısız"
+
+msgid "Provider connection configured"
+msgstr "Sağlayıcı bağlantısı yapılandırıldı"
+
+msgid "Provider connection validated"
+msgstr "Sağlayıcı bağlantısı doğrulandı"
+
+msgid "Provider delay"
+msgstr "Sağlayıcı beklemesi"
+
+msgid "Provider failure"
+msgstr "Sağlayıcı hatası"
+
+msgid "Provider keys awaiting validation"
+msgstr "Doğrulama bekleyen sağlayıcı anahtarları"
+
+msgid "Provider keys needing attention"
+msgstr "İşlem gerektiren sağlayıcı anahtarları"
+
+msgid "Provider request delay"
+msgstr "Sağlayıcı istek beklemesi"
+
+msgid "Provider request delays"
+msgstr "Sağlayıcı istek beklemeleri"
+
+msgid "Provider throttled"
+msgstr "Sağlayıcı istek sınırına ulaşıldı"
+
+msgid "Provider unexpected failure"
+msgstr "Beklenmeyen sağlayıcı hatası"
+
+msgid ""
+"Provider wait cleared. Queued collection can resume within the remaining "
+"quota."
+msgstr ""
+"Sağlayıcı beklemesi kaldırıldı. Sıradaki veri toplama işleri kalan kota "
+"içinde devam edebilir."
+
+msgid "Pyracast operations"
+msgstr "Pyracast işlemleri"
+
+msgid "Queued"
+msgstr "Sırada"
+
+msgid "Quota exhausted"
+msgstr "Kota tükendi"
+
+msgid "Reason"
+msgstr "Gerekçe"
+
+msgid "Recent activity"
+msgstr "Son etkinlikler"
+
+msgid "Recent outcomes"
+msgstr "Son sonuçlar"
+
+msgid "Recipient"
+msgstr "Alıcı"
+
+msgid "Recipient addresses cannot exceed %(limit)s characters."
+msgstr "Alıcı adresleri %(limit)s karakteri aşamaz."
+
+msgid "Recipient addresses must be distinct (case-insensitive)."
+msgstr ""
+"Alıcı adresleri büyük/küçük harf ayrımı olmadan birbirinden farklı "
+"olmalıdır."
+
+msgid "Recipients per plant"
+msgstr "Santral başına alıcı"
+
+msgid ""
+"Record the authorization permitting this account to be used by this service."
+msgstr ""
+"Bu hesabın hizmet tarafından kullanılmasına izin veren yetkilendirmeyi "
+"kaydedin."
+
+msgid ""
+"Record where the provider site's installation and model settings were "
+"checked."
+msgstr ""
+"Sağlayıcı tesisinin kurulum ve model ayarlarının nerede denetlendiğini "
+"kaydedin."
+
+msgid "Reference DC capacity (kW, optional)"
+msgstr "Referans DC kapasitesi (kW, isteğe bağlı)"
+
+msgid "Reference capacity (kW)"
+msgstr "Referans kapasitesi (kW)"
+
+msgid "Reference power and capacity basis"
+msgstr "Referans güç ve kapasite esası"
+
+msgid "Reference site"
+msgstr "Referans tesis"
+
+msgid "Reject location change"
+msgstr "Konum değişikliğini reddet"
+
+msgid "Reject plant"
+msgstr "Santrali reddet"
+
+msgid "Reject region"
+msgstr "Bölgeyi reddet"
+
+msgid "Reject this plant"
+msgstr "Bu santrali reddet"
+
+msgid "Rejected"
+msgstr "Reddedildi"
+
+msgid "Rejected."
+msgstr "Reddedildi."
+
+msgid ""
+"Rejecting closes this review without approval. The saved connection is not "
+"changed."
+msgstr ""
+"Reddetmek bu incelemeyi onay vermeden kapatır. Kayıtlı bağlantı değişmez."
+
+msgid "Reminder times must use HH:MM."
+msgstr "Hatırlatıcı saatleri SS:DD biçiminde olmalıdır."
+
+msgid "Replace connection"
+msgstr "Bağlantıyı değiştir"
+
+msgid "Replace the private key, then validate the connection."
+msgstr "Özel anahtarı değiştirin, ardından bağlantıyı doğrulayın."
+
+msgid "Reported production"
+msgstr "Bildirilen üretim"
+
+msgid "Requested by"
+msgstr "Talep eden"
+
+msgid "Requested location"
+msgstr "Talep edilen konum"
+
+msgid "Requested timezone"
+msgstr "Talep edilen saat dilimi"
+
+msgid "Requests wait until"
+msgstr "İstekler şu zamana kadar bekler:"
+
+msgid "Resolution must be 30 or 60 minutes."
+msgstr "Çözünürlük 30 veya 60 dakika olmalıdır."
+
+msgid "Resource ID"
+msgstr "Kaynak kimliği"
+
+msgid "Restore this plant's location before restoring the plant."
+msgstr "Santrali geri yüklemeden önce konumunu geri yükleyin."
+
+msgid "Retention"
+msgstr "Saklama"
+
+msgid "Retry"
+msgstr "Yeniden denenecek"
+
+msgid "Retry window expired"
+msgstr "Yeniden deneme süresi doldu"
+
+msgid "Review"
+msgstr "İncele"
+
+msgid "Review and set up"
+msgstr "İncele ve kur"
+
+msgid "Review and set up %(name)s"
+msgstr "%(name)s için inceleme ve kurulum"
+
+msgid "Review and set up provider"
+msgstr "Sağlayıcıyı incele ve kur"
+
+msgid "Review dispatcher status"
+msgstr "Dağıtıcı durumunu incele"
+
+msgid "Review progress"
+msgstr "İnceleme ilerlemesi"
+
+msgid "Review queue"
+msgstr "İnceleme sırası"
+
+msgid "Review saved acquisition times and collection settings."
+msgstr "Kayıtlı veri edinme zamanlarını ve toplama ayarlarını inceleyin."
+
+msgid "Review saved forecast coverage; missing intervals are not zero."
+msgstr "Kayıtlı tahmin kapsamını inceleyin; eksik aralıklar sıfır değildir."
+
+msgid "Review status"
+msgstr "İnceleme durumu"
+
+msgid "Review the changes"
+msgstr "Değişiklikleri inceleyin"
+
+msgid ""
+"Review the outcome; uncertain transmission must not be resent automatically."
+msgstr ""
+"Sonucu inceleyin; iletimi belirsiz mesajlar otomatik yeniden "
+"gönderilmemelidir."
+
+msgid "Review the plant collection history and approved connection."
+msgstr "Santralin veri toplama geçmişini ve onaylı bağlantısını inceleyin."
+
+msgid "Review the plant connection and recorded error."
+msgstr "Santral bağlantısını ve kayıtlı hatayı inceleyin."
+
+msgid "Review the recipient limit"
+msgstr "Alıcı sınırını inceleyin"
+
+msgid "Review the reported-production connection."
+msgstr "Bildirilen üretim bağlantısını inceleyin."
+
+msgid "Review the validation or approval message."
+msgstr "Doğrulama veya onay mesajını inceleyin."
+
+msgid "Reviews and service status."
+msgstr "İncelemeler ve hizmet durumu."
+
+msgid "Revision"
+msgstr "Revizyon"
+
+msgid "Running"
+msgstr "Çalışıyor"
+
+msgid "Save EPİAŞ connection"
+msgstr "EPİAŞ bağlantısını kaydet"
+
+msgid "Save limit"
+msgstr "Sınırı kaydet"
+
+msgid "Save private setup"
+msgstr "Özel kurulumu kaydet"
+
+msgid "Save the private connection to continue."
+msgstr "Devam etmek için özel bağlantıyı kaydedin."
+
+msgid "Saved"
+msgstr "Kaydedildi"
+
+msgid "Saved connection"
+msgstr "Kayıtlı bağlantı"
+
+msgid ""
+"Saving always creates a new pending revision that must be validated and "
+"approved again."
+msgstr ""
+"Kaydetme işlemi, yeniden doğrulanması ve onaylanması gereken yeni bir "
+"bekleyen revizyon oluşturur."
+
+msgid "Scheduled for"
+msgstr "Planlanan zaman"
+
+msgid "Search"
+msgstr "Ara"
+
+msgid "Select an account"
+msgstr "Bir hesap seçin"
+
+msgid "Select an authorized provider account."
+msgstr "Yetkili bir sağlayıcı hesabı seçin."
+
+msgid "Sending"
+msgstr "Gönderiliyor"
+
+msgid "Service health"
+msgstr "Hizmet sağlığı"
+
+msgid "Settings"
+msgstr "Ayarlar"
+
+msgid "Settings changed. Reload before saving."
+msgstr "Ayarlar değişti. Kaydetmeden önce yeniden yükleyin."
+
+msgid "Settings verification reference"
+msgstr "Ayar doğrulama referansı"
+
+msgid "Sign out"
+msgstr "Çıkış yap"
+
+msgid "Signed in as"
+msgstr "Oturum açan kullanıcı:"
+
+msgid "Skip to main content"
+msgstr "Ana içeriğe geç"
+
+msgid "Skipped"
+msgstr "Atlandı"
+
+msgid "Solcast API key"
+msgstr "Solcast API anahtarı"
+
+msgid "Solcast account"
+msgstr "Solcast hesabı"
+
+msgid "Solcast account for this plant"
+msgstr "Bu santral için Solcast hesabı"
+
+msgid "Solcast resource ID"
+msgstr "Solcast kaynak kimliği"
+
+msgid "Solcast setup for this plant"
+msgstr "Bu santral için Solcast kurulumu"
+
+msgid "State"
+msgstr "Durum"
+
+msgid "Status"
+msgstr "Durum"
+
+msgid "Submitted"
+msgstr "Başvuru tarihi:"
+
+msgid "Submitted by"
+msgstr "Başvuran"
+
+msgid "Succeeded"
+msgstr "Başarılı"
+
+msgid "Surface angles must be finite and inside the allowed bounds."
+msgstr "Yüzey açıları sonlu ve izin verilen sınırlar içinde olmalıdır."
+
+msgid "Suspend plant"
+msgstr "Santrali askıya al"
+
+msgid "Suspend region"
+msgstr "Bölgeyi askıya al"
+
+msgid "Suspend this plant"
+msgstr "Bu santrali askıya al"
+
+msgid "Suspended"
+msgstr "Askıya alındı"
+
+msgid "Suspended."
+msgstr "Askıya alındı."
+
+msgid "Suspending withdraws approval. The saved connection is not changed."
+msgstr "Askıya almak onayı kaldırır. Kayıtlı bağlantı değişmez."
+
+msgid "The 30-day restore period has ended."
+msgstr "30 günlük geri yükleme süresi doldu."
+
+msgid "The EPİAŞ plant ID and EIC did not match. Check both identifiers."
+msgstr "EPİAŞ santral kimliği ile EIC eşleşmedi. Her iki kimliği denetleyin."
+
+msgid "The account changed. Reload this page before saving."
+msgstr "Hesap değişti. Kaydetmeden önce bu sayfayı yeniden yükleyin."
+
+msgid "The active calibration changed; request a new comparison."
+msgstr "Etkin kalibrasyon değişti; yeni bir karşılaştırma isteyin."
+
+msgid ""
+"The current provider connection is validated. The plant can now be approved."
+msgstr "Güncel sağlayıcı bağlantısı doğrulandı. Santral artık onaylanabilir."
+
+msgid "The durable dispatcher recovers expired leases."
+msgstr "Kalıcı dağıtıcı, süresi dolan iş sahipliklerini kurtarır."
+
+msgid "The incident is already closed."
+msgstr "Kesinti zaten kapatılmış."
+
+msgid "The local issuance cutoff is ambiguous or does not exist."
+msgstr ""
+"Yerel yayın kesim saati belirsiz veya mevcut değil. Başka bir saat seçin."
+
+msgid ""
+"The mail server's acceptance is unknown. Confirm with the mail provider "
+"before a manual resend."
+msgstr ""
+"Posta sunucusunun kabul durumu bilinmiyor. Elle yeniden göndermeden önce "
+"e-posta sağlayıcısıyla doğrulayın."
+
+msgid "The outage history changed; request a new calibration."
+msgstr "Kesinti geçmişi değişti; yeni bir kalibrasyon isteyin."
+
+msgid "The plant changed. Reload before reviewing it."
+msgstr "Santral değişti. İncelemeden önce yeniden yükleyin."
+
+msgid "The plant changed. Reload this page before saving."
+msgstr "Santral değişti. Kaydetmeden önce bu sayfayı yeniden yükleyin."
+
+msgid "The plant configuration is no longer current."
+msgstr "Santral yapılandırması artık güncel değil. Santrali yeniden açın."
+
+msgid ""
+"The plant configuration is unavailable or changed. Approve its current setup"
+" and reload before connecting."
+msgstr ""
+"Santral yapılandırması kullanılamıyor veya değişti. Bağlamadan önce güncel "
+"kurulumu onaylayın ve yeniden yükleyin."
+
+msgid "The plant location changed. Reopen the plant and try again."
+msgstr "Santral konumu değişti. Santrali yeniden açıp tekrar deneyin."
+
+msgid "The production source changed; request a new calibration."
+msgstr "Üretim kaynağı değişti; yeni bir kalibrasyon isteyin."
+
+msgid "The provider has confirmed that this account can make requests again."
+msgstr "Sağlayıcı, bu hesabın yeniden istek gönderebildiğini doğruladı."
+
+msgid "The provider is limiting requests. Wait before validating again."
+msgstr "Sağlayıcı istekleri sınırlıyor. Yeniden doğrulamadan önce bekleyin."
+
+msgid "The provider setup changed. Reload this page before saving."
+msgstr ""
+"Sağlayıcı kurulumu değişti. Kaydetmeden önce bu sayfayı yeniden yükleyin."
+
+msgid "The provider's request budget is unavailable. Try validation later."
+msgstr ""
+"Sağlayıcının istek bütçesi kullanılamıyor. Doğrulamayı daha sonra deneyin."
+
+msgid "The request is stale or already reviewed; review the current region."
+msgstr "Talep güncelliğini yitirdi veya incelendi; güncel bölgeyi inceleyin."
+
+msgid "The review could not be applied. Reload and review the current plant."
+msgstr "İnceleme uygulanamadı. Yeniden yükleyip güncel santrali inceleyin."
+
+msgid ""
+"The selected account's key and daily quota are shared by every plant using "
+"that account."
+msgstr ""
+"Seçili hesabın anahtarı ve günlük kotası, hesabı kullanan tüm santraller "
+"tarafından paylaşılır."
+
+msgid "The settings changed. Reload this page before saving."
+msgstr "Ayarlar değişti. Kaydetmeden önce bu sayfayı yeniden yükleyin."
+
+msgid "The setup changed. Reload this page before continuing."
+msgstr "Kurulum değişti. Devam etmeden önce bu sayfayı yeniden yükleyin."
+
+msgid ""
+"The setup could not be applied. Check the values or reload if the plant or "
+"account changed."
+msgstr ""
+"Kurulum uygulanamadı. Değerleri denetleyin; santral veya hesap değiştiyse "
+"yeniden yükleyin."
+
+msgid "This decision is unavailable for the current review status."
+msgstr "Bu karar güncel inceleme durumu için kullanılamaz."
+
+msgid ""
+"This forecast could not be calculated. Choose another day or contact your "
+"administrator."
+msgstr ""
+"Bu tahmin hesaplanamadı. Başka bir gün seçin veya yöneticinizle iletişime "
+"geçin."
+
+msgid "This is required for a new account."
+msgstr "Yeni hesap için bu alan zorunludur."
+
+msgid "This location already has an active plant. Open the existing plant."
+msgstr "Bu konumda zaten etkin bir santral var. Mevcut santrali açın."
+
+msgid ""
+"This location is already in your company's portfolio. Open the existing "
+"plant."
+msgstr "Bu konum şirketinizin portföyünde zaten var. Mevcut santrali açın."
+
+msgid "This location request has already been reviewed. Refresh the page."
+msgstr "Bu konum talebi zaten değerlendirilmiş. Sayfayı yenileyin."
+
+msgid ""
+"This plant allows at most %(limit)s distinct recipient addresses in total."
+msgstr ""
+"Bu santral toplam en fazla %(limit)s farklı alıcı adresine izin verir."
+
+msgid ""
+"This plant is approved. Connection health and saved forecast availability "
+"are shown above."
+msgstr ""
+"Bu santral onaylıdır. Bağlantı sağlığı ve kayıtlı tahminin "
+"kullanılabilirliği yukarıda gösterilir."
+
+msgid ""
+"This plant is not approved. This is a review decision and says nothing about"
+" the connection, which is reported separately above."
+msgstr ""
+"Bu santral onaylı değildir. Bu bir inceleme kararıdır; yukarıda ayrıca "
+"belirtilen bağlantının durumu hakkında bilgi vermez."
+
+msgid "To do"
+msgstr "Yapılacak"
+
+msgid "Tracking"
+msgstr "Takip sistemli"
+
+msgid "Türkçe"
+msgstr "Türkçe"
+
+msgid "Uncertain"
+msgstr "Belirsiz"
+
+msgid "Uncertain transmission must be reconciled before any manual resend."
+msgstr ""
+"Elle yeniden göndermeden önce belirsiz iletim sonucu kesinleştirilmelidir."
+
+msgid "Unknown"
+msgstr "Bilinmiyor"
+
+msgid "Unknown comparison mode."
+msgstr "Geçerli bir karşılaştırma türü seçin."
+
+msgid "Unknown fields are not accepted."
+msgstr "Bilinmeyen alanlar kabul edilmez."
+
+msgid "Unpublished data"
+msgstr "Yayımlanmamış veri"
+
+msgid "Unsupported data source."
+msgstr "Geçerli bir veri kaynağı seçin."
+
+msgid "Unsupported incident kind."
+msgstr "Geçerli bir kesinti türü seçin."
+
+msgid "Unsupported meter basis."
+msgstr "Geçerli bir ölçüm noktası seçin."
+
+msgid "Unsupported mounting type."
+msgstr "Geçerli bir montaj türü seçin."
+
+msgid "Unsupported observation quality."
+msgstr "Geçerli bir üretim kaydı kalitesi seçin."
+
+msgid "Update the private API key before validating this connection again."
+msgstr ""
+"Bu bağlantıyı yeniden doğrulamadan önce özel API anahtarını güncelleyin."
+
+msgid "Use 1 to 90 completed local days within the past year."
+msgstr "Son bir yıl içinde tamamlanmış 1 ile 90 arasında yerel gün seçin."
+
+msgid "Use 7 to 90 completed local days."
+msgstr "Tamamlanmış 7 ile 90 arasında yerel gün seçin."
+
+msgid "Use MWh or kWh and a batch of 1 to 2000 observations."
+msgstr ""
+"MWh veya kWh birimini ve her aktarımda 1 ile 2000 arasında üretim kaydını "
+"kullanın."
+
+msgid "Use a local issuance cutoff without a UTC offset."
+msgstr "UTC farkı içermeyen yerel bir yayın kesim saati kullanın."
+
+msgid "Use a range of 1 to 31 days and 30 or 60 minute resolution."
+msgstr "1 ile 31 günlük bir aralık ve 30 veya 60 dakikalık çözünürlük seçin."
+
+msgid "Use an existing account (shared key and quota)"
+msgstr "Mevcut hesap kullan (paylaşılan anahtar ve kota)"
+
+msgid ""
+"Use aware timestamps: start must not be in the future; end must be after "
+"start and no later than now."
+msgstr ""
+"Saat dilimi içeren zamanlar kullanın: başlangıç gelecekte olmamalı; bitiş "
+"başlangıçtan sonra olmalı ve şu anı aşmamalıdır."
+
+msgid "Use exactly 16 letters, digits or hyphens."
+msgstr "Tam olarak 16 harf, rakam veya kısa çizgi kullanın."
+
+msgid "Validate"
+msgstr "Doğrula"
+
+msgid "Validate and approve"
+msgstr "Doğrula ve onayla"
+
+msgid "Validate connection"
+msgstr "Bağlantıyı doğrula"
+
+msgid "Validate the current binding before approval."
+msgstr "Onaydan önce güncel bağlantıyı doğrulayın."
+
+msgid "Validate the current private key before collections resume."
+msgstr "Veri toplamaya devam etmeden önce güncel özel anahtarı doğrulayın."
+
+msgid "Validate the current setup and key revision to enable approval."
+msgstr ""
+"Onayı etkinleştirmek için güncel kurulumu ve anahtar revizyonunu doğrulayın."
+
+msgid "Verification"
+msgstr "Doğrulama"
+
+msgid "Wait for provider recovery; preserve the shared daily quota."
+msgstr "Sağlayıcının düzelmesini bekleyin; paylaşılan günlük kotayı koruyun."
+
+msgid "Weather acquisition failed"
+msgstr "Hava durumu verileri alınamadı"
+
+msgid "Weather acquisition interrupted"
+msgstr "Hava durumu verisi alımı kesintiye uğradı"
+
+msgid "Workspace"
+msgstr "Çalışma alanı"
+
+msgid ""
+"Write only. Required for a new account; leave blank to keep an existing key."
+msgstr ""
+"Yalnız yazılabilir. Yeni hesap için zorunlu; mevcut anahtarı korumak için "
+"boş bırakın."
+
+msgid "as_of must be aware and no later than now."
+msgstr "Veri kesim zamanı saat dilimi içermeli ve şu anı aşmamalıdır."
+
+msgid "location change"
+msgstr "konum değişikliği"
+
+msgid "of"
+msgstr "/"
+
+msgid "per plant"
+msgstr "santral başına"
+
+msgid "plant"
+msgstr "santral"
+
+msgid ""
+"queues the first forecast. Customers see data only after it has been saved."
+msgstr ""
+"ilk tahmini sıraya alır. Müşteriler verileri ancak kaydedildikten sonra "
+"görür."
+
+msgid "recipient"
+msgstr "alıcı"
+
+msgid ""
+"sends a real Solcast request and uses the selected account's daily quota."
+msgstr ""
+"gerçek bir Solcast isteği gönderir ve seçili hesabın günlük kotasını "
+"kullanır."
+
+msgid "these filters"
+msgstr "bu filtreler"
+
+msgid "· Plant review"
+msgstr "· Santral incelemesi"
+
+msgid "· Pyracast operations"
+msgstr "· Pyracast işlemleri"
+
+msgid "· Requested"
+msgstr "· Talep tarihi:"
+
+msgid "· key revision"
+msgstr "· anahtar revizyonu"
+
+msgid "· revision"
+msgstr "· revizyon"

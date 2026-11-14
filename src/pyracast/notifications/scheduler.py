@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections, transaction
 
+from pyracast.accounts.language import user_language
 from pyracast.accounts.models import Membership
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.notifications.eligibility import binding_can_notify
@@ -112,12 +113,14 @@ def _enqueue_preference(preference: ReminderPreference, now: datetime) -> list[i
                     .order_by("-collected_at", "-pk")
                     .first()
                 )
+                language = user_language(current.user) or "en"
                 for recipient in recipients:
                     delivery, _ = NotificationDelivery.objects.get_or_create(
                         preference=current,
                         scheduled_for=slot,
                         recipient=recipient,
                         defaults={
+                            "language": language,
                             "snapshot": snapshot,
                             "binding": binding,
                             "preparation_deadline": slot + PREPARATION_GRACE,

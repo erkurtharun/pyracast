@@ -1,11 +1,15 @@
 "use client";
+import { useTranslations } from "next-intl";
 
 import { useEffect, useState } from "react";
 import { ApiError, request, type Session } from "@/lib/api";
 import { authRequest, type AuthResult } from "@/lib/auth-api";
 import { ActionForm, Field } from "./ui";
+import { LanguageSelect } from "./language-select";
 
 type Mode = "login" | "register" | "verify" | "mfa" | "forgot" | "reset";
+type AuthMessage =
+    "" | "codeSent" | "resetSent" | "resetDone" | "verified" | "codeRequested";
 
 export function Auth({
     session,
@@ -14,8 +18,9 @@ export function Auth({
     session: Session;
     onSession: (session: Session) => void;
 }) {
+    const t = useTranslations("Auth");
     const [mode, setMode] = useState<Mode>("login");
-    const [message, setMessage] = useState("");
+    const [message, setMessage] = useState<AuthMessage>("");
     const [showPassword, setShowPassword] = useState(false);
 
     async function finish(result: AuthResult) {
@@ -26,14 +31,14 @@ export function Auth({
         const pending = result.data?.flows?.find((flow) => flow.is_pending)?.id;
         if (pending === "verify_email") {
             setMode("verify");
-            setMessage("Enter the code sent to your email in this browser.");
+            setMessage("codeSent");
         } else if (pending === "mfa_authenticate") {
             setMode("mfa");
             setMessage("");
         } else {
             throw new ApiError(
                 result.errors?.map((error) => error.message).join(" ") ||
-                    "Unable to sign in. Please check your details and try again.",
+                    t("unableSignIn"),
             );
         }
     }
@@ -66,12 +71,12 @@ export function Auth({
     }, [session.csrf_token]);
 
     const titles: Record<Mode, string> = {
-        login: "Welcome back",
-        register: "Create your company account",
-        verify: "Verify your email",
-        mfa: "Two-factor authentication",
-        forgot: "Reset your password",
-        reset: "Choose a new password",
+        login: t("welcome"),
+        register: t("registerTitle"),
+        verify: t("verifyTitle"),
+        mfa: t("twoFactor"),
+        forgot: t("forgotTitle"),
+        reset: t("resetTitle"),
     };
     return (
         <main className="auth-page">
@@ -81,26 +86,25 @@ export function Auth({
                         pyracast<span className="brand-dot">.</span>
                     </div>
                     <div>
-                        <p className="eyebrow">Solar intelligence</p>
+                        <p className="eyebrow">{t("solarIntelligence")}</p>
                         <h2>
-                            Your solar portfolio.
+                            {t("portfolio")}
                             <br />
-                            One clear view.
+
+                            {t("oneView")}
                         </h2>
-                        <p>
-                            Forecasts, production and performance for every
-                            plant.
-                        </p>
+                        <p>{t("intro")}</p>
                     </div>
                     <div className="auth-story-footer">
-                        Built around your energy.
+                        {t("builtForEnergy")}
                     </div>
                 </section>
                 <section
                     className="auth-form-panel"
                     aria-labelledby="auth-title"
                 >
-                    <nav className="auth-mode-nav" aria-label="Account access">
+                    <LanguageSelect session={session} onSession={onSession} />
+                    <nav className="auth-mode-nav" aria-label={t("access")}>
                         <button
                             type="button"
                             aria-pressed={mode === "login"}
@@ -109,7 +113,7 @@ export function Auth({
                                 setMessage("");
                             }}
                         >
-                            Sign in
+                            {t("signIn")}
                         </button>
                         <button
                             type="button"
@@ -119,21 +123,21 @@ export function Auth({
                                 setMessage("");
                             }}
                         >
-                            Create account
+                            {t("createAccount")}
                         </button>
                     </nav>
                     <h1 id="auth-title">{titles[mode]}</h1>
-                    {message && <p role="status">{message}</p>}
+                    {message && <p role="status">{t(message)}</p>}
                     <ActionForm
                         key={mode}
                         submit={
                             {
-                                login: "Sign in",
-                                register: "Create company account",
-                                verify: "Verify email",
-                                mfa: "Verify code",
-                                forgot: "Send reset code",
-                                reset: "Reset password",
+                                login: t("signIn"),
+                                register: t("createCompany"),
+                                verify: t("verifyEmail"),
+                                mfa: t("verifyCode"),
+                                forgot: t("sendReset"),
+                                reset: t("resetPassword"),
                             }[mode]
                         }
                         onSubmit={async (data) => {
@@ -145,9 +149,7 @@ export function Auth({
                                     session.csrf_token,
                                     payload,
                                 );
-                                setMessage(
-                                    "If an account exists for this address, a reset code will be sent.",
-                                );
+                                setMessage("resetSent");
                                 setMode("reset");
                             } else if (mode === "reset") {
                                 const result = await authRequest(
@@ -173,13 +175,10 @@ export function Auth({
                                     throw new ApiError(
                                         result.errors
                                             ?.map((error) => error.message)
-                                            .join(" ") ||
-                                            "This reset code is invalid or expired.",
+                                            .join(" ") || t("invalidReset"),
                                     );
                                 setMode("login");
-                                setMessage(
-                                    "Password reset. Sign in with your new password.",
-                                );
+                                setMessage("resetDone");
                             } else {
                                 const path = {
                                     login: "auth/login",
@@ -204,9 +203,7 @@ export function Auth({
                                     )
                                 ) {
                                     setMode("login");
-                                    setMessage(
-                                        "Email verified. You can sign in now.",
-                                    );
+                                    setMessage("verified");
                                 } else {
                                     await finish(result);
                                 }
@@ -215,7 +212,7 @@ export function Auth({
                     >
                         {mode === "register" && (
                             <Field
-                                label="Company name"
+                                label={t("company")}
                                 name="company_name"
                                 autoComplete="organization"
                                 maxLength={200}
@@ -223,7 +220,7 @@ export function Auth({
                         )}
                         {(mode === "verify" || mode === "reset") && (
                             <Field
-                                label="Email code"
+                                label={t("emailCode")}
                                 name="key"
                                 autoComplete="one-time-code"
                             />
@@ -232,7 +229,7 @@ export function Auth({
                             mode === "register" ||
                             mode === "forgot") && (
                             <Field
-                                label="Email"
+                                label={t("email")}
                                 name="email"
                                 type="email"
                                 autoComplete="email"
@@ -244,7 +241,7 @@ export function Auth({
                             mode === "reset") && (
                             <>
                                 <Field
-                                    label="Password"
+                                    label={t("password")}
                                     name="password"
                                     type={showPassword ? "text" : "password"}
                                     autoComplete={
@@ -266,14 +263,14 @@ export function Auth({
                                     }
                                 >
                                     {showPassword
-                                        ? "Hide password"
-                                        : "Show password"}
+                                        ? t("hidePassword")
+                                        : t("showPassword")}
                                 </button>
                             </>
                         )}
                         {mode === "mfa" && (
                             <Field
-                                label="Authenticator or recovery code"
+                                label={t("authenticatorCode")}
                                 name="code"
                                 autoComplete="one-time-code"
                             />
@@ -281,7 +278,7 @@ export function Auth({
                     </ActionForm>
                     {mode === "verify" && (
                         <ActionForm
-                            submit="Resend verification code"
+                            submit={t("resendCode")}
                             onSubmit={async () => {
                                 const result = await authRequest(
                                     "auth/email/verify/resend",
@@ -291,9 +288,9 @@ export function Auth({
                                 );
                                 if (result.status !== 200)
                                     throw new ApiError(
-                                        "The verification session has expired. Please start again.",
+                                        t("verificationExpired"),
                                     );
-                                setMessage("A new code was requested.");
+                                setMessage("codeRequested");
                             }}
                         >
                             {null}
@@ -308,7 +305,7 @@ export function Auth({
                                 setMessage("");
                             }}
                         >
-                            Forgot password?
+                            {t("forgotPassword")}
                         </button>
                     )}
                 </section>

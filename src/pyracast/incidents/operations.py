@@ -8,6 +8,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import OuterRef, Subquery
 from django.utils import timezone
+from django.utils.translation import gettext, gettext_lazy
 from rest_framework.exceptions import APIException
 
 from pyracast.accounts.operations import require_member
@@ -18,7 +19,7 @@ from pyracast.regions.models import Region
 
 class RevisionConflict(APIException):
     status_code = 409
-    default_detail = "Incident revision changed."
+    default_detail = gettext_lazy("Incident revision changed.")
 
 
 @dataclass(frozen=True)
@@ -136,7 +137,7 @@ def _validate(values: dict[str, Any], configuration: PlantConfiguration, now: da
         "available_inverter_mw",
         "available_export_mw",
     }:
-        raise ValidationError("Incident fields are incomplete or unsupported.")
+        raise ValidationError(gettext("Incident fields are incomplete or unsupported."))
     start, end = values["starts_at"], values["ends_at"]
     if (
         start.utcoffset() is None
@@ -144,11 +145,13 @@ def _validate(values: dict[str, Any], configuration: PlantConfiguration, now: da
         or (end is not None and (end.utcoffset() is None or end <= start or end > now))
     ):
         raise ValidationError(
-            "Use aware timestamps: start must not be in the future; "
-            "end must be after start and no later than now."
+            gettext(
+                "Use aware timestamps: start must not be in the future; "
+                "end must be after start and no later than now."
+            )
         )
     if values["kind"] not in {"inverter", "panels", "grid", "other", "multiple"}:
-        raise ValidationError("Unsupported incident kind.")
+        raise ValidationError(gettext("Unsupported incident kind."))
     if (
         not isinstance(values["title"], str)
         or not values["title"].strip()
@@ -157,7 +160,10 @@ def _validate(values: dict[str, Any], configuration: PlantConfiguration, now: da
         or len(values["notes"]) > 2000
     ):
         raise ValidationError(
-            "A title of at most 200 characters and notes of at most 2000 characters are required."
+            gettext(
+                "A title of at most 200 characters and notes of at most "
+                "2000 characters are required."
+            )
         )
     for field, baseline in (
         ("available_dc_mw", configuration.dc_capacity_mw),
@@ -173,8 +179,11 @@ def _validate(values: dict[str, Any], configuration: PlantConfiguration, now: da
             or (baseline is not None and value > baseline)
         ):
             raise ValidationError(
-                f"{field} must be finite, nonnegative, "
-                "and no greater than the known configured capacity."
+                gettext(
+                    "%(field)s must be finite, nonnegative, "
+                    "and no greater than the known configured capacity."
+                ),
+                params={"field": field},
             )
 
 
@@ -202,7 +211,7 @@ def save_incident(
         if incident_id is None:
             configuration = plant.current_configuration
             if configuration is None:
-                raise ValidationError("A plant configuration is required.")
+                raise ValidationError(gettext("A plant configuration is required."))
             row = PlantIncident(
                 plant=plant,
                 declared_configuration=configuration,
@@ -218,12 +227,12 @@ def save_incident(
             if expected_revision != row.revision:
                 raise RevisionConflict
             if row.cancelled_at is not None:
-                raise ValidationError("A cancelled incident cannot be changed.")
+                raise ValidationError(gettext("A cancelled incident cannot be changed."))
             configuration = (
                 plant.current_configuration if row.ends_at is None else row.declared_configuration
             )
             if configuration is None:
-                raise ValidationError("A plant configuration is required.")
+                raise ValidationError(gettext("A plant configuration is required."))
             row.declared_configuration = configuration
             row.revision += 1
             row.updated_by = actor
@@ -240,7 +249,7 @@ def save_incident(
         from django.db.models import Q
 
         if overlap.filter(Q(ends_at__isnull=True) | Q(ends_at__gt=values["starts_at"])).exists():
-            raise ValidationError("Incident periods must not overlap.")
+            raise ValidationError(gettext("Incident periods must not overlap."))
         for name, value in values.items():
             setattr(row, name, value)
         row.save()
@@ -265,7 +274,7 @@ def finish_incident(
         if row.revision != expected_revision:
             raise RevisionConflict
         if row.cancelled_at is not None or (not cancel and row.ends_at is not None):
-            raise ValidationError("The incident is already closed.")
+            raise ValidationError(gettext("The incident is already closed."))
         now = timezone.now()
         if cancel:
             row.cancelled_at = now
@@ -275,7 +284,7 @@ def finish_incident(
             or ends_at <= row.starts_at
             or ends_at > now
         ):
-            raise ValidationError("End must be aware, after start and no later than now.")
+            raise ValidationError(gettext("End must be aware, after start and no later than now."))
         else:
             row.ends_at = ends_at
         row.revision += 1

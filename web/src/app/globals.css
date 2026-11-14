@@ -185,6 +185,59 @@ textarea:focus-visible,
     width: 18px;
     font-size: 17px;
 }
+.language-control {
+    min-width: 0;
+}
+.sidebar .language-control {
+    margin-top: 20px;
+}
+.sidebar .language-select select {
+    color: #f4f7ee;
+    background: #20483c;
+    border-color: #ffffff29;
+}
+.language-select {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 13px;
+}
+.language-select select {
+    width: auto;
+    min-height: 44px;
+    max-width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font: inherit;
+}
+.language-control > p,
+.language-control > span {
+    font-size: 12px;
+}
+.auth-form-panel > .language-control {
+    margin-bottom: 20px;
+}
+.loading-indicator {
+    width: 32px;
+    height: 32px;
+    margin-top: 24px;
+    border: 3px solid var(--line);
+    border-top-color: currentColor;
+    border-radius: 50%;
+    animation: loading 1s linear infinite;
+}
+@keyframes loading {
+    to {
+        transform: rotate(360deg);
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .loading-indicator {
+        animation: none;
+    }
+}
 .user-box {
     display: flex;
     gap: 9px;
@@ -1518,6 +1571,33 @@ pre,
     }
 }
 @media (max-width: 900px) {
+    .sidebar .language-control {
+        grid-column: 2;
+        grid-row: 1;
+        justify-self: end;
+        margin: 0;
+    }
+    .sidebar .language-select {
+        gap: 6px;
+    }
+    .sidebar .language-select label {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+    }
+    .sidebar .language-select select {
+        padding-inline: 8px;
+        font-size: 12px;
+    }
+    .sidebar .tenant-select {
+        grid-column: 1/-1;
+        grid-row: 3;
+    }
+    .sidebar .tenant-select:has(option:only-child) {
+        display: none;
+    }
     .sidebar {
         position: sticky;
         inset: 0 0 auto;
@@ -1800,7 +1880,7 @@ pre,
         margin: 0;
     }
     .sidebar {
-        grid-template-columns: minmax(0, 1fr) 44px;
+        grid-template-columns: minmax(0, 1fr) auto 44px;
         padding: 12px 16px 10px;
     }
     .tenant-select {
@@ -1812,10 +1892,10 @@ pre,
         font-size: 14px;
     }
     .sidebar nav {
-        grid-row: 3;
+        grid-row: 2;
     }
     .user-box {
-        grid-column: 2;
+        grid-column: 3;
     }
     .sidebar .brand {
         font-size: 25px;

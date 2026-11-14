@@ -9,6 +9,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
+from django.utils.translation import gettext
 
 from pyracast.accounts.operations import require_member
 from pyracast.connections.models import SiteBinding
@@ -59,12 +60,12 @@ def configuration_is_current(configuration: PlantConfiguration) -> bool:
 
 def _binding(region: Region) -> SiteBinding:
     if region.approved_binding_id is None:
-        raise ValidationError("An approved current provider binding is required.")
+        raise ValidationError(gettext("An approved current provider binding is required."))
     binding = SiteBinding.objects.select_related("provider_account").get(
         pk=region.approved_binding_id, region=region
     )
     if not binding_is_current(binding):
-        raise ValidationError("An approved current provider binding is required.")
+        raise ValidationError(gettext("An approved current provider binding is required."))
     return binding
 
 
@@ -75,7 +76,7 @@ def _configuration(plant: Plant) -> PlantConfiguration:
         pk=plant.current_configuration_id, plant=plant
     )
     if not configuration_is_current(configuration):
-        raise ValidationError("The plant configuration is no longer current.")
+        raise ValidationError(gettext("The plant configuration is no longer current."))
     return configuration
 
 
@@ -90,14 +91,14 @@ def _validate_configuration(
     surface_azimuth: float | None,
 ) -> None:
     if not name.strip() or len(name.strip()) > 200:
-        raise ValidationError("A plant name of at most 200 characters is required.")
+        raise ValidationError(gettext("A plant name of at most 200 characters is required."))
     for value in (dc_capacity_mw, inverter_capacity_mw, export_limit_mw):
         if value is not None and (isinstance(value, bool) or not isfinite(value) or value <= 0):
-            raise ValidationError("Capacities must be finite and positive.")
+            raise ValidationError(gettext("Capacities must be finite and positive."))
     if measurement_basis not in {"net_export", "ac_generation"}:
-        raise ValidationError("Unsupported meter basis.")
+        raise ValidationError(gettext("Unsupported meter basis."))
     if mounting_type not in {"unknown", "fixed", "tracking"}:
-        raise ValidationError("Unsupported mounting type.")
+        raise ValidationError(gettext("Unsupported mounting type."))
     for angle, bound, exclusive in ((surface_tilt, 90, False), (surface_azimuth, 360, True)):
         if angle is not None and (
             isinstance(angle, bool)
@@ -106,9 +107,11 @@ def _validate_configuration(
             or angle > bound
             or (exclusive and angle == bound)
         ):
-            raise ValidationError("Surface angles must be finite and inside the allowed bounds.")
+            raise ValidationError(
+                gettext("Surface angles must be finite and inside the allowed bounds.")
+            )
     if mounting_type != "fixed" and (surface_tilt is not None or surface_azimuth is not None):
-        raise ValidationError("Only fixed mounting permits surface angles.")
+        raise ValidationError(gettext("Only fixed mounting permits surface angles."))
 
 
 def _save_configuration(
@@ -350,25 +353,27 @@ def _observation(
 ) -> tuple[datetime, datetime, float, str, str]:
     start, end = observation.starts_at, observation.ends_at
     if start.utcoffset() is None or end.utcoffset() is None:
-        raise ValidationError("Observation timestamps must be timezone-aware.")
+        raise ValidationError(gettext("Observation timestamps must be timezone-aware."))
     start, end = start.astimezone(UTC), end.astimezone(UTC)
     if end - start not in {timedelta(minutes=30), timedelta(minutes=60)} or end > now:
-        raise ValidationError("Completed 30 or 60 minute observations are required.")
+        raise ValidationError(gettext("Completed 30 or 60 minute observations are required."))
     local = start.astimezone(zone)
     for stamp in (local, end.astimezone(zone)):
         if stamp.minute not in (0, 30) or stamp.second or stamp.microsecond:
-            raise ValidationError("Observations must align to local half-hour boundaries.")
+            raise ValidationError(gettext("Observations must align to local half-hour boundaries."))
     midnight = datetime.combine(local.date() + timedelta(days=1), datetime.min.time(), zone)
     if end > midnight.astimezone(UTC):
-        raise ValidationError("Observations must not cross local midnight.")
+        raise ValidationError(gettext("Observations must not cross local midnight."))
     value = observation.energy
     if isinstance(value, bool) or not isfinite(value) or value < 0:
-        raise ValidationError("Observed energy must be finite and nonnegative.")
+        raise ValidationError(gettext("Observed energy must be finite and nonnegative."))
     if observation.quality not in {"valid", "outage", "curtailed", "invalid"}:
-        raise ValidationError("Unsupported observation quality.")
+        raise ValidationError(gettext("Unsupported observation quality."))
     source = observation.source.strip()
     if not source or len(source) > 200:
-        raise ValidationError("An observation source of at most 200 characters is required.")
+        raise ValidationError(
+            gettext("An observation source of at most 200 characters is required.")
+        )
     return start, end, value / 1000 if unit == "kWh" else value, observation.quality, source
 
 
@@ -384,7 +389,7 @@ def import_observations(
 ) -> ObservationImportResult:
     require_member(actor, tenant_id)
     if unit not in {"MWh", "kWh"} or not 1 <= len(observations) <= 2000:
-        raise ValidationError("Use MWh or kWh and a batch of 1 to 2000 observations.")
+        raise ValidationError(gettext("Use MWh or kWh and a batch of 1 to 2000 observations."))
     with transaction.atomic():
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
@@ -413,12 +418,12 @@ def import_observations(
                     or overlap.quality != quality
                     or overlap.source != source
                 ):
-                    raise ValidationError("Conflicting or overlapping observation.")
+                    raise ValidationError(gettext("Conflicting or overlapping observation."))
                 ids.append(overlap.pk)
                 continue
             if not configuration_is_current(configuration):
                 raise ValidationError(
-                    "Production entry requires the current approved configuration."
+                    gettext("Production entry requires the current approved configuration.")
                 )
             day = start.astimezone(zone).date()
             if day not in references:
@@ -469,12 +474,12 @@ def request_calibration(
         configuration = _configuration(plant)
         now = timezone.now()
         if configuration_id != configuration.pk:
-            raise ValidationError("Calibration requires the current configuration.")
+            raise ValidationError(gettext("Calibration requires the current configuration."))
         if (
             not 7 <= (end_date - start_date).days + 1 <= 90
             or end_date >= now.astimezone(ZoneInfo(configuration.binding.timezone)).date()
         ):
-            raise ValidationError("Use 7 to 90 completed local days.")
+            raise ValidationError(gettext("Use 7 to 90 completed local days."))
         pending = CalibrationRun.objects.filter(
             plant=plant, status__in=("pending", "running")
         ).first()
@@ -485,7 +490,7 @@ def request_calibration(
                 end_date,
             ):
                 return pending
-            raise ValidationError("A calibration is already pending.")
+            raise ValidationError(gettext("A calibration is already pending."))
         comparison = (
             CalibrationActivation.objects.filter(plant=plant, configuration=configuration)
             .order_by("-created_at", "-pk")
@@ -575,9 +580,9 @@ def _validate_activation(
     from pyracast.plants.measurements import production_identity_current
 
     if not production_identity_current(run):
-        raise ValidationError("The production source changed; request a new calibration.")
+        raise ValidationError(gettext("The production source changed; request a new calibration."))
     if not incidents_unchanged(run, now):
-        raise ValidationError("The outage history changed; request a new calibration.")
+        raise ValidationError(gettext("The outage history changed; request a new calibration."))
     current = (
         CalibrationActivation.objects.filter(plant=plant, configuration=configuration)
         .order_by("-created_at", "-pk")
@@ -586,7 +591,7 @@ def _validate_activation(
     if current is not None and current.calibration_id == run.pk:
         return
     if (current.pk if current else None) != run.comparison_activation_id:
-        raise ValidationError("The active calibration changed; request a new comparison.")
+        raise ValidationError(gettext("The active calibration changed; request a new comparison."))
     if (
         run.binding_id != configuration.binding_id
         or run.status != "ready"
@@ -605,7 +610,9 @@ def _validate_activation(
         or run.dataset_manifest.get("selection_policy") != HISTORY_SELECTION_POLICY
         or run.dataset_manifest.get("source_kind") != "estimated_actuals"
     ):
-        raise ValidationError("Only a completed, held-out evaluated calibration can be activated.")
+        raise ValidationError(
+            gettext("Only a completed, held-out evaluated calibration can be activated.")
+        )
 
 
 def activate_calibration(

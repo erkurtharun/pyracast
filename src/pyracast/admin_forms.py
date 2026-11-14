@@ -4,6 +4,8 @@ from django import forms
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy
 from django.views.decorators.debug import sensitive_variables
 
 from pyracast.api.serializers import BindingInput
@@ -14,14 +16,14 @@ from pyracast.regions.operations import configure_binding
 
 
 class EpiasConnectionForm(forms.Form):
-    provider_plant_id = forms.IntegerField(min_value=1, label="EPİAŞ plant ID")
+    provider_plant_id = forms.IntegerField(min_value=1, label=gettext_lazy("EPİAŞ plant ID"))
     expected_eic = forms.RegexField(
         r"^[A-Za-z0-9-]{16}$",
         min_length=16,
         max_length=16,
         label="EIC",
-        help_text="Enter the plant's 16-character EIC to confirm its identity.",
-        error_messages={"invalid": "Use exactly 16 letters, digits or hyphens."},
+        help_text=gettext_lazy("Enter the plant's 16-character EIC to confirm its identity."),
+        error_messages={"invalid": gettext_lazy("Use exactly 16 letters, digits or hyphens.")},
     )
 
 
@@ -29,60 +31,79 @@ class ProviderSetupForm(forms.Form):
     expected_revision = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
     expected_binding_id = forms.IntegerField(min_value=1, required=False, widget=forms.HiddenInput)
     account_mode = forms.ChoiceField(
-        label="Solcast account for this plant",
+        label=gettext_lazy("Solcast account for this plant"),
         choices=(
-            ("existing", "Use an existing account (shared key and quota)"),
-            ("new", "Add this plant's Solcast account"),
+            ("existing", gettext_lazy("Use an existing account (shared key and quota)")),
+            ("new", gettext_lazy("Add this plant's Solcast account")),
         ),
     )
-    existing_account = forms.ChoiceField(required=False, label="Existing Solcast account")
+    existing_account = forms.ChoiceField(
+        required=False, label=gettext_lazy("Existing Solcast account")
+    )
     external_account_id = forms.CharField(
-        required=False, max_length=200, label="New Solcast account identity"
+        required=False, max_length=200, label=gettext_lazy("New Solcast account identity")
     )
     api_key = forms.CharField(
         required=False,
         max_length=1024,
         strip=False,
         widget=forms.PasswordInput(render_value=False, attrs={"autocomplete": "new-password"}),
-        label="Solcast API key",
-        help_text="Write only. Required for a new account; leave blank to keep an existing key.",
+        label=gettext_lazy("Solcast API key"),
+        help_text=gettext_lazy(
+            "Write only. Required for a new account; leave blank to keep an existing key."
+        ),
     )
     confirm_key_rotation = forms.BooleanField(
         required=False,
-        label="Confirm replacement of the selected account's key",
-        help_text="A replacement affects every plant using the selected account.",
+        label=gettext_lazy("Confirm replacement of the selected account's key"),
+        help_text=gettext_lazy("A replacement affects every plant using the selected account."),
     )
     authorization_reference = forms.CharField(
         required=False,
         max_length=500,
-        label="New account service authorization reference",
-        help_text="Record the authorization permitting this account to be used by this service.",
+        label=gettext_lazy("New account service authorization reference"),
+        help_text=gettext_lazy(
+            "Record the authorization permitting this account to be used by this service."
+        ),
     )
     daily_quota = forms.IntegerField(
         required=False,
         min_value=1,
         max_value=10,
         initial=10,
-        label="New account daily request limit",
-        help_text="Existing accounts retain their shared limit.",
+        label=gettext_lazy("New account daily request limit"),
+        help_text=gettext_lazy("Existing accounts retain their shared limit."),
     )
-    site_id = forms.CharField(max_length=200, label="Solcast resource ID")
-    capacity_kw = forms.FloatField(min_value=0, label="Reference capacity (kW)")
+    site_id = forms.CharField(max_length=200, label=gettext_lazy("Solcast resource ID"))
+    capacity_kw = forms.FloatField(min_value=0, label=gettext_lazy("Reference capacity (kW)"))
     dc_capacity_kw = forms.FloatField(
-        min_value=0, required=False, label="Reference DC capacity (kW, optional)"
+        min_value=0, required=False, label=gettext_lazy("Reference DC capacity (kW, optional)")
     )
     power_basis = forms.ChoiceField(
-        choices=(("ac", "AC"), ("dc", "DC")), label="Reference power and capacity basis"
+        choices=(("ac", "AC"), ("dc", "DC")),
+        label=gettext_lazy("Reference power and capacity basis"),
     )
-    installation_date = forms.DateField(widget=forms.DateInput(attrs={"type": "date"}))
-    azimuth_degrees = forms.FloatField(min_value=0, max_value=359.999999, initial=0)
-    losses_percent = forms.FloatField(min_value=0, max_value=99.999999, initial=0)
+    installation_date = forms.DateField(
+        label=gettext_lazy("Installation date"),
+        widget=forms.DateInput(format="%Y-%m-%d", attrs={"type": "date"}),
+    )
+    azimuth_degrees = forms.FloatField(
+        label=gettext_lazy("Azimuth (degrees)"), min_value=0, max_value=359.999999, initial=0
+    )
+    losses_percent = forms.FloatField(
+        label=gettext_lazy("Losses (%)"), min_value=0, max_value=99.999999, initial=0
+    )
     settings_verification_reference = forms.CharField(
+        label=gettext_lazy("Settings verification reference"),
         max_length=500,
-        help_text="Record where the provider site's installation and model settings were checked.",
+        help_text=gettext_lazy(
+            "Record where the provider site's installation and model settings were checked."
+        ),
     )
     capacity_semantics_verified = forms.BooleanField(
-        label="I verified a horizontal reference and matching power and capacity units/basis",
+        label=gettext_lazy(
+            "I verified a horizontal reference and matching power and capacity units/basis"
+        ),
     )
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -91,12 +112,16 @@ class ProviderSetupForm(forms.Form):
             "provider", "external_account_id"
         )
         cast(forms.ChoiceField, self.fields["existing_account"]).choices = [
-            ("", "Select an account"),
+            ("", _("Select an account")),
             *[
                 (
                     f"{account.pk}:{account.credential_revision}",
-                    f"{account.provider} · {account.external_account_id}"
-                    f" · key revision {account.credential_revision}",
+                    _("%(provider)s · %(identity)s · key revision %(revision)s")
+                    % {
+                        "provider": account.provider,
+                        "identity": account.external_account_id,
+                        "revision": account.credential_revision,
+                    },
                 )
                 for account in accounts
             ],
@@ -107,17 +132,17 @@ class ProviderSetupForm(forms.Form):
         if data.get("account_mode") == "new":
             for name in ("external_account_id", "authorization_reference", "daily_quota"):
                 if not data.get(name) and name not in self.errors:
-                    self.add_error(name, "This is required for a new account.")
+                    self.add_error(name, _("This is required for a new account."))
             if not data.get("api_key"):
-                self.add_error("api_key", "Enter an API key for the new account.")
+                self.add_error("api_key", _("Enter an API key for the new account."))
         elif data.get("account_mode") == "existing" and not data.get("existing_account"):
-            self.add_error("existing_account", "Select an authorized provider account.")
+            self.add_error("existing_account", _("Select an authorized provider account."))
         if (
             data.get("account_mode") == "existing"
             and data.get("api_key")
             and not data.get("confirm_key_rotation")
         ):
-            self.add_error("confirm_key_rotation", "Confirm replacing the shared account key.")
+            self.add_error("confirm_key_rotation", _("Confirm replacing the shared account key."))
         return data
 
     @sensitive_variables()
@@ -126,7 +151,7 @@ class ProviderSetupForm(forms.Form):
         with transaction.atomic():
             current = Region.objects.select_for_update().get(pk=region.pk, deleted_at__isnull=True)
             if current.revision != data["expected_revision"]:
-                raise ValidationError("The plant changed. Reload this page before saving.")
+                raise ValidationError(_("The plant changed. Reload this page before saving."))
             current_binding_id = (
                 SiteBinding.objects.filter(region=current, region_revision=current.revision)
                 .order_by("-created_at", "-pk")
@@ -134,7 +159,9 @@ class ProviderSetupForm(forms.Form):
                 .first()
             )
             if current_binding_id != data["expected_binding_id"]:
-                raise ValidationError("The provider setup changed. Reload this page before saving.")
+                raise ValidationError(
+                    _("The provider setup changed. Reload this page before saving.")
+                )
             if data["account_mode"] == "new":
                 account = create_account(
                     actor,
@@ -151,7 +178,7 @@ class ProviderSetupForm(forms.Form):
                     pk=account_id, provider="solcast", enabled=True
                 )
                 if account.credential_revision != int(revision):
-                    raise ValidationError("The account changed. Reload this page before saving.")
+                    raise ValidationError(_("The account changed. Reload this page before saving."))
                 if data["api_key"]:
                     rotate_secret(actor, account.pk, data["api_key"])
             serializer = BindingInput(
@@ -179,7 +206,7 @@ class BindingActionForm(forms.Form):
     expected_cooldown_until = forms.DateTimeField(required=False, widget=forms.HiddenInput)
     provider_recovered = forms.BooleanField(
         required=False,
-        label="The provider has confirmed that this account can make requests again.",
+        label=gettext_lazy("The provider has confirmed that this account can make requests again."),
     )
 
     def current_binding(self, region: Region) -> SiteBinding:
@@ -191,5 +218,5 @@ class BindingActionForm(forms.Form):
             region.revision != data["expected_revision"]
             or binding.provider_account.credential_revision != data["credential_revision"]
         ):
-            raise ValidationError("The setup changed. Reload this page before continuing.")
+            raise ValidationError(_("The setup changed. Reload this page before continuing."))
         return binding

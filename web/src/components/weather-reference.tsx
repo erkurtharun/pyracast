@@ -1,3 +1,5 @@
+"use client";
+import { useTranslations } from "next-intl";
 import { Stat } from "./ui";
 
 type WeatherReference = {
@@ -13,38 +15,38 @@ export function WeatherReferenceCard({
 }: {
     reference: WeatherReference;
 }) {
+    const t = useTranslations("WeatherReference");
+
     return (
         <section className="panel" aria-labelledby="weather-reference-title">
-            <h3 id="weather-reference-title">Independent weather model</h3>
+            <h3 id="weather-reference-title">
+                {t("independent_weather_model")}
+            </h3>
             <p className="fine">
-                An independent solar irradiation forecast, separate from the
-                plant energy estimate.
+                {t("an_independent_solar_irradiation_forecast_separate_from")}
             </p>
             {reference.status === "unavailable" ? (
-                <p>Weather model data is currently unavailable.</p>
+                <p>{t("weather_model_data_is_currently_unavailable")}</p>
             ) : (
                 <>
                     {reference.status === "partial" && (
-                        <p>
-                            The daily total is unavailable; the partial value
-                            includes covered hours only.
-                        </p>
+                        <p>{t("the_daily_total_is_unavailable_the_partial")}</p>
                     )}
                     <div className="stats">
                         <Stat
-                            label="Daily solar irradiation"
+                            label={t("daily_solar_irradiation")}
                             value={reference.energy_kwh_m2}
                             unit="kWh/m²"
                         />
                         {reference.status === "partial" && (
                             <Stat
-                                label="Partial irradiation"
+                                label={t("partial_irradiation")}
                                 value={reference.partial_energy_kwh_m2}
                                 unit="kWh/m²"
                             />
                         )}
                         <Stat
-                            label="Coverage"
+                            label={t("coverage")}
                             value={
                                 typeof reference.coverage_fraction === "number"
                                     ? reference.coverage_fraction * 100
@@ -56,12 +58,16 @@ export function WeatherReferenceCard({
                 </>
             )}
             <p className="fine">
-                Weather data by{" "}
+                {t("weather_attribution")}{" "}
                 <a href="https://open-meteo.com/">Open-Meteo.com</a> ·{" "}
                 <a href="https://creativecommons.org/licenses/by/4.0/">
                     CC BY 4.0
                 </a>
-                . {reference.attribution?.changes}
+                .{" "}
+                {reference.attribution?.changes ===
+                "Intervals normalized; daily energy calculated by Pyracast."
+                    ? t("normalized_attribution")
+                    : reference.attribution?.changes}
             </p>
         </section>
     );

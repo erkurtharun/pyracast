@@ -1,4 +1,5 @@
 "use client";
+import { useTranslations, useLocale } from "next-intl";
 import { useState } from "react";
 import { request } from "@/lib/api";
 import type { components } from "@/lib/schema";
@@ -19,6 +20,8 @@ export function MoveToRecycleBin({
     token: string;
     onDeleted: () => void;
 }) {
+    const t = useTranslations("RecycleBin");
+
     const [confirming, setConfirming] = useState(false);
     const [working, setWorking] = useState(false);
     const [error, setError] = useState("");
@@ -28,16 +31,13 @@ export function MoveToRecycleBin({
                 className="button secondary"
                 onClick={() => setConfirming(true)}
             >
-                Delete plant
+                {t("deletePlant")}
             </button>
         );
     return (
-        <section className="notice" aria-label="Delete plant confirmation">
-            <h2>Move {name} to the recycle bin?</h2>
-            <p>
-                Collection will stop. You can restore this plant and its saved
-                data for 30 days. After that, they are permanently deleted.
-            </p>
+        <section className="notice" aria-label={t("deletePlantConfirmation")}>
+            <h2>{t("confirmMove", { name })}</h2>
+            <p>{t("deletionHelp")}</p>
             {error && <Notice error>{error}</Notice>}
             <div className="button-group">
                 <button
@@ -48,7 +48,7 @@ export function MoveToRecycleBin({
                         setError("");
                     }}
                 >
-                    Cancel
+                    {t("cancel")}
                 </button>
                 <button
                     className="button"
@@ -65,7 +65,7 @@ export function MoveToRecycleBin({
                         }
                     }}
                 >
-                    {working ? "Moving…" : "Move plant to recycle bin"}
+                    {working ? t("moving") : t("movePlantToRecycleBin")}
                 </button>
             </div>
         </section>
@@ -79,6 +79,9 @@ export function RecycleBin({
     tenant: number;
     token: string;
 }) {
+    const t = useTranslations("RecycleBin");
+    const locale = useLocale();
+
     const [version, setVersion] = useState(0);
     const [working, setWorking] = useState("");
     const [error, setError] = useState("");
@@ -91,7 +94,7 @@ export function RecycleBin({
     );
     const plants = useCollection<DeletedPlant>(`${base}trash/plants/`, version);
     const date = (value: string) =>
-        new Date(value).toLocaleString("en", {
+        new Date(value).toLocaleString(locale, {
             year: "numeric",
             month: "short",
             day: "numeric",
@@ -115,7 +118,7 @@ export function RecycleBin({
             await request(url, "POST", {}, token);
             setRestored((current) => [...current, key]);
             setVersion((current) => current + 1);
-            setMessage(`${row.name} restored. Find it in Plants.`);
+            setMessage(t("restored", { name: row.name }));
         } catch (failure) {
             setError((failure as Error).message);
         } finally {
@@ -126,8 +129,8 @@ export function RecycleBin({
         <>
             <div className="page-heading">
                 <div>
-                    <h1>Recycle bin</h1>
-                    <p>Deleted plants and their data are kept for 30 days.</p>
+                    <h1>{t("recycleBin")}</h1>
+                    <p>{t("retentionHelp")}</p>
                 </div>
             </div>
             {error && <Notice error>{error}</Notice>}
@@ -151,11 +154,11 @@ export function RecycleBin({
                     <section className="panel" key={kind}>
                         <h2>
                             {kind === "region"
-                                ? "Deleted plants"
-                                : "Earlier plant records"}
+                                ? t("deletedPlants")
+                                : t("earlierPlantRecords")}
                         </h2>
                         {resource.loading ? (
-                            <p role="status">Loading deleted plants…</p>
+                            <p role="status">{t("loadingDeletedPlants")}</p>
                         ) : resource.error ? (
                             <Notice error>{resource.error}</Notice>
                         ) : resource.data?.results.filter(
@@ -165,8 +168,8 @@ export function RecycleBin({
                                 className="trash-list"
                                 aria-label={
                                     kind === "region"
-                                        ? "Deleted plants"
-                                        : "Earlier plant records"
+                                        ? t("deletedPlants")
+                                        : t("earlierPlantRecords")
                                 }
                             >
                                 {resource.data.results
@@ -189,17 +192,18 @@ export function RecycleBin({
                                                     <strong>{row.name}</strong>
                                                     {kind === "plant" && (
                                                         <p className="fine">
-                                                            Location:{" "}
-                                                            {
-                                                                (
+                                                            {t("locationName", {
+                                                                name: (
                                                                     row as DeletedPlant
-                                                                ).region_name
-                                                            }
+                                                                ).region_name,
+                                                            })}
                                                         </p>
                                                     )}
                                                     <dl className="trash-meta">
                                                         <div>
-                                                            <dt>Deleted</dt>
+                                                            <dt>
+                                                                {t("deleted")}
+                                                            </dt>
                                                             <dd>
                                                                 <time
                                                                     dateTime={
@@ -214,8 +218,9 @@ export function RecycleBin({
                                                         </div>
                                                         <div>
                                                             <dt>
-                                                                Permanent
-                                                                deletion
+                                                                {t(
+                                                                    "permanentDeletion",
+                                                                )}
                                                             </dt>
                                                             <dd>
                                                                 <time
@@ -248,18 +253,22 @@ export function RecycleBin({
                                                     >
                                                         {working ===
                                                         `${kind}-${row.id}`
-                                                            ? "Restoring…"
-                                                            : `Restore ${row.name}`}
+                                                            ? t("restoring")
+                                                            : t("restore", {
+                                                                  name: row.name,
+                                                              })}
                                                     </button>
                                                     {parentDeleted ? (
                                                         <p className="fine">
-                                                            Restore its location
-                                                            first.
+                                                            {t(
+                                                                "restoreItsLocationFirst",
+                                                            )}
                                                         </p>
                                                     ) : !row.can_restore ? (
                                                         <p className="fine">
-                                                            The 30-day restore
-                                                            period has ended.
+                                                            {t(
+                                                                "restoreExpired",
+                                                            )}
                                                         </p>
                                                     ) : null}
                                                 </div>
@@ -268,8 +277,8 @@ export function RecycleBin({
                                     })}
                             </ul>
                         ) : (
-                            <Empty title="No deleted plants">
-                                Nothing to restore.
+                            <Empty title={t("noDeletedPlants")}>
+                                {t("nothingToRestore")}
                             </Empty>
                         )}
                     </section>

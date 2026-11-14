@@ -1,57 +1,58 @@
 {% extends "admin/workspace/base.html" %}
+{% load i18n %}
 {% load l10n %}
-{% block title %}{% firstof plant_summary.plant_name region.name %} · Plant review{% endblock %}
-{% block backlink %}<a class="back-link" href="{% url 'admin:workspace_plants' %}">Back to plants</a>{% endblock %}
+{% block title %}{% firstof plant_summary.plant_name region.name %} {% translate "· Plant review" %}{% endblock %}
+{% block backlink %}<a class="back-link" href="{% url 'admin:workspace_plants' %}">{% translate "Back to plants" %}</a>{% endblock %}
 {% block heading %}{% firstof plant_summary.plant_name region.name %}{% endblock %}
 {% block lead %}
   <p class="lead">{{ region.tenant.name }}{% if plant_summary.plant_name and plant_summary.plant_name != region.name %} · {{ region.name }}{% endif %}</p>
   <dl class="state-strip">
-    <div><dt>Review</dt><dd><span class="badge badge--{{ region.status|slugify }}">{% if region.status == "pending" %}Awaiting approval{% else %}{{ region.status|capfirst }}{% endif %}</span></dd></div>
-    <div><dt>Connection</dt><dd>{% if plant_summary %}<span class="badge badge--{{ plant_summary.connection|slugify }}">{{ plant_summary.connection }}</span>{% elif binding %}<span class="badge">{{ binding.health|capfirst }}</span>{% else %}<span class="badge badge--not-configured">Not configured</span>{% endif %}</dd></div>
-    <div><dt>Last saved forecast</dt><dd>{% if last_collected_at %}<time datetime="{{ last_collected_at|date:'c' }}">{{ last_collected_at|date:"j M Y, H:i T" }}</time>{% else %}<span class="muted">None saved yet</span>{% endif %}</dd></div>
+    <div><dt>{% translate "Review" %}</dt><dd><span class="badge badge--{{ region.status|slugify }}">{% if region.status == "pending" %}{% translate "Awaiting approval" %}{% else %}{% translate region.status|capfirst %}{% endif %}</span></dd></div>
+    <div><dt>{% translate "Connection" %}</dt><dd>{% if plant_summary %}<span class="badge badge--{{ plant_summary.connection|slugify }}">{% translate plant_summary.connection %}</span>{% elif binding %}<span class="badge">{% translate binding.health|capfirst %}</span>{% else %}<span class="badge badge--not-configured">{% translate "Not configured" %}</span>{% endif %}</dd></div>
+    <div><dt>{% translate "Last saved forecast" %}</dt><dd>{% if last_collected_at %}<time datetime="{{ last_collected_at|date:'c' }}">{{ last_collected_at|date:"j M Y, H:i T" }}</time>{% else %}<span class="muted">{% translate "None saved yet" %}</span>{% endif %}</dd></div>
   </dl>
 {% endblock %}
 {% block content %}
   {% if setup_form.errors or action_form.errors or review_form.errors or epias_form.errors %}
     <section class="notice notice--error" role="alert" tabindex="-1" data-error-summary aria-labelledby="errors-title">
-      <h2 id="errors-title">Review the changes</h2>
-      {% if setup_form.errors %}<p><a href="#provider-title">Check the connection fields and messages below.</a></p>{% endif %}
-      {% if action_form.errors %}<p><a href="#approval-title">Review the validation or approval message.</a></p>{% endif %}
-      {% if epias_form.errors %}<p><a href="#epias-title">Check the EPİAŞ identifiers and message below.</a></p>{% endif %}
+      <h2 id="errors-title">{% translate "Review the changes" %}</h2>
+      {% if setup_form.errors %}<p><a href="#provider-title">{% translate "Check the connection fields and messages below." %}</a></p>{% endif %}
+      {% if action_form.errors %}<p><a href="#approval-title">{% translate "Review the validation or approval message." %}</a></p>{% endif %}
+      {% if epias_form.errors %}<p><a href="#epias-title">{% translate "Check the EPİAŞ identifiers and message below." %}</a></p>{% endif %}
       {% if review_form.errors %}{{ review_form.errors }}{% endif %}
     </section>
   {% endif %}
   {% if region.status == "suspended" %}
-    <p class="callout callout--warn"><strong>Suspended.</strong> This plant is not approved. This is a review decision and says nothing about the connection, which is reported separately above.</p>
+    <p class="callout callout--warn"><strong>{% translate "Suspended." %}</strong> {% translate "This plant is not approved. This is a review decision and says nothing about the connection, which is reported separately above." %}</p>
   {% elif region.status == "rejected" %}
-    <p class="callout callout--danger"><strong>Rejected.</strong> This plant is not approved. This is a review decision and says nothing about the connection, which is reported separately above.</p>
+    <p class="callout callout--danger"><strong>{% translate "Rejected." %}</strong> {% translate "This plant is not approved. This is a review decision and says nothing about the connection, which is reported separately above." %}</p>
   {% endif %}
 
   <section class="panel" aria-labelledby="progress-title">
-    <div class="panel-head"><h2 id="progress-title">Review progress</h2></div>
+    <div class="panel-head"><h2 id="progress-title">{% translate "Review progress" %}</h2></div>
     <ol class="steps">
-      <li class="step{% if plants %} step--done{% endif %}"><span class="step-state">{% if plants %}Done{% else %}To do{% endif %}</span><span class="step-name">Plant submitted</span></li>
-      <li class="step{% if binding %} step--done{% endif %}"><span class="step-state">{% if binding %}Done{% else %}To do{% endif %}</span><span class="step-name">Private connection saved</span></li>
-      <li class="step{% if can_approve or plant_summary.connection == "Healthy" %} step--done{% endif %}"><span class="step-state">{% if can_approve or plant_summary.connection == "Healthy" %}Done{% else %}To do{% endif %}</span><span class="step-name">Connection validated</span></li>
-      <li class="step{% if region.status == "approved" %} step--done{% endif %}"><span class="step-state">{% if region.status == "approved" %}Done{% elif region.status == "pending" %}To do{% else %}{{ region.status|capfirst }}{% endif %}</span><span class="step-name">Plant approved</span></li>
+      <li class="step{% if plants %} step--done{% endif %}"><span class="step-state">{% if plants %}{% translate "Done" %}{% else %}{% translate "To do" %}{% endif %}</span><span class="step-name">{% translate "Plant submitted" %}</span></li>
+      <li class="step{% if binding %} step--done{% endif %}"><span class="step-state">{% if binding %}{% translate "Done" %}{% else %}{% translate "To do" %}{% endif %}</span><span class="step-name">{% translate "Private connection saved" %}</span></li>
+      <li class="step{% if can_approve or plant_summary.connection == "Healthy" %} step--done{% endif %}"><span class="step-state">{% if can_approve or plant_summary.connection == "Healthy" %}{% translate "Done" %}{% else %}{% translate "To do" %}{% endif %}</span><span class="step-name">{% translate "Connection validated" %}</span></li>
+      <li class="step{% if region.status == "approved" %} step--done{% endif %}"><span class="step-state">{% if region.status == "approved" %}{% translate "Done" %}{% elif region.status == "pending" %}{% translate "To do" %}{% else %}{% translate region.status|capfirst %}{% endif %}</span><span class="step-name">{% translate "Plant approved" %}</span></li>
     </ol>
   </section>
 
   {% if location_changes %}
     <section class="panel" aria-labelledby="location-title">
-      <div class="panel-head"><h2 id="location-title">Location change requests</h2></div>
-      <p class="row-meta">Current location: {{ region.latitude }}°, {{ region.longitude }}° · {{ region.timezone }} · revision {{ region.revision }}</p>
+      <div class="panel-head"><h2 id="location-title">{% translate "Location change requests" %}</h2></div>
+      <p class="row-meta">{% translate "Current location:" %} {{ region.latitude }}°, {{ region.longitude }}° · {{ region.timezone }} {% translate "· revision" %} {{ region.revision }}</p>
       <ul class="rows">
         {% for change in location_changes %}
           <li class="row row--block">
             <dl class="facts">
-              <div><dt>Requested location</dt><dd>{{ change.latitude }}°, {{ change.longitude }}°</dd></div>
-              <div><dt>Requested timezone</dt><dd>{{ change.timezone }}</dd></div>
-              <div><dt>Requested by</dt><dd>{{ change.requested_by|default:"Unknown" }} · <time datetime="{{ change.created_at|date:'c' }}">{{ change.created_at|date:"j M Y, H:i T" }}</time></dd></div>
-              <div><dt>Based on revision</dt><dd>{{ change.base_revision }}</dd></div>
-              <div class="facts-wide"><dt>Reason</dt><dd>{{ change.reason|default:"No reason given" }}</dd></div>
+              <div><dt>{% translate "Requested location" %}</dt><dd>{{ change.latitude }}°, {{ change.longitude }}°</dd></div>
+              <div><dt>{% translate "Requested timezone" %}</dt><dd>{{ change.timezone }}</dd></div>
+              <div><dt>{% translate "Requested by" %}</dt><dd>{{ change.requested_by|default:_("Unknown") }} · <time datetime="{{ change.created_at|date:'c' }}">{{ change.created_at|date:"j M Y, H:i T" }}</time></dd></div>
+              <div><dt>{% translate "Based on revision" %}</dt><dd>{{ change.base_revision }}</dd></div>
+              <div class="facts-wide"><dt>{% translate "Reason" %}</dt><dd>{{ change.reason|default:_("No reason given") }}</dd></div>
             </dl>
-            <p class="callout callout--warn">Accepting the new location removes approval. Set up, validate and approve a replacement connection before collection resumes.</p>
+            <p class="callout callout--warn">{% translate "Accepting the new location removes approval. Set up, validate and approve a replacement connection before collection resumes." %}</p>
             <div class="form-actions">
               <form method="post" action="{% url 'admin:workspace_decision' region.pk %}">
                 {% csrf_token %}
@@ -59,7 +60,7 @@
                 <input type="hidden" name="{{ review_form.expected_status.html_name }}" value="{{ review_form.expected_status.value }}">
                 <input type="hidden" name="{{ review_form.location_change_id.html_name }}" value="{{ change.id|unlocalize }}">
                 <input type="hidden" name="{{ review_form.action.html_name }}" value="approve_location">
-                <button type="submit" class="btn btn--primary">Approve location change</button>
+                <button type="submit" class="btn btn--primary">{% translate "Approve location change" %}</button>
               </form>
               <form method="post" action="{% url 'admin:workspace_decision' region.pk %}">
                 {% csrf_token %}
@@ -67,7 +68,7 @@
                 <input type="hidden" name="{{ review_form.expected_status.html_name }}" value="{{ review_form.expected_status.value }}">
                 <input type="hidden" name="{{ review_form.location_change_id.html_name }}" value="{{ change.id|unlocalize }}">
                 <input type="hidden" name="{{ review_form.action.html_name }}" value="reject_location">
-                <button type="submit" class="btn btn--quiet">Reject location change</button>
+                <button type="submit" class="btn btn--quiet">{% translate "Reject location change" %}</button>
               </form>
             </div>
           </li>
@@ -77,23 +78,23 @@
   {% endif %}
 
   <section class="panel" aria-labelledby="customer-title">
-    <div class="panel-head"><h2 id="customer-title">Customer declaration</h2></div>
+    <div class="panel-head"><h2 id="customer-title">{% translate "Customer declaration" %}</h2></div>
     <dl class="facts">
-      <div><dt>Company</dt><dd>{{ region.tenant.name }}</dd></div>
-      <div><dt>Plant location</dt><dd>{{ region.name }} · {{ region.latitude }}°, {{ region.longitude }}°</dd></div>
-      <div><dt>Local timezone</dt><dd>{{ region.timezone }}</dd></div>
-      <div><dt>Location revision</dt><dd>{{ region.revision }}</dd></div>
+      <div><dt>{% translate "Company" %}</dt><dd>{{ region.tenant.name }}</dd></div>
+      <div><dt>{% translate "Plant location" %}</dt><dd>{{ region.name }} · {{ region.latitude }}°, {{ region.longitude }}°</dd></div>
+      <div><dt>{% translate "Local timezone" %}</dt><dd>{{ region.timezone }}</dd></div>
+      <div><dt>{% translate "Location revision" %}</dt><dd>{{ region.revision }}</dd></div>
     </dl>
     {% for submission in submissions %}
       <h3>{{ submission.plant.name }}</h3>
       <dl class="facts">
-        <div><dt>DC nameplate</dt><dd>{{ submission.dc_capacity_mw }} MW</dd></div>
-        <div><dt>Inverter AC capacity</dt><dd>{{ submission.inverter_capacity_mw|default_if_none:"Unknown" }}{% if submission.inverter_capacity_mw != None %} MW{% endif %}</dd></div>
-        <div><dt>Grid export limit</dt><dd>{{ submission.export_limit_mw|default_if_none:"Unknown" }}{% if submission.export_limit_mw != None %} MW{% endif %}</dd></div>
-        <div><dt>Measurement point</dt><dd>{{ submission.get_measurement_basis_display }}</dd></div>
-        <div><dt>Mounting</dt><dd>{{ submission.get_mounting_type_display }}</dd></div>
-        <div><dt>Fixed-array tilt / azimuth</dt><dd>{{ submission.surface_tilt|default_if_none:"Unknown" }}{% if submission.surface_tilt != None %}°{% endif %} / {{ submission.surface_azimuth|default_if_none:"Unknown" }}{% if submission.surface_azimuth != None %}°{% endif %}</dd></div>
-        <div><dt>Submitted by</dt><dd>{{ submission.submitted_by.username }} · <time datetime="{{ submission.created_at|date:'c' }}">{{ submission.created_at|date:"j M Y, H:i T" }}</time></dd></div>
+        <div><dt>{% translate "DC nameplate" %}</dt><dd>{{ submission.dc_capacity_mw }} MW</dd></div>
+        <div><dt>{% translate "Inverter AC capacity" %}</dt><dd>{{ submission.inverter_capacity_mw|default_if_none:_("Unknown") }}{% if submission.inverter_capacity_mw != None %} MW{% endif %}</dd></div>
+        <div><dt>{% translate "Grid export limit" %}</dt><dd>{{ submission.export_limit_mw|default_if_none:_("Unknown") }}{% if submission.export_limit_mw != None %} MW{% endif %}</dd></div>
+        <div><dt>{% translate "Measurement point" %}</dt><dd>{% translate submission.get_measurement_basis_display %}</dd></div>
+        <div><dt>{% translate "Mounting" %}</dt><dd>{% translate submission.get_mounting_type_display %}</dd></div>
+        <div><dt>{% translate "Fixed-array tilt / azimuth" %}</dt><dd>{{ submission.surface_tilt|default_if_none:_("Unknown") }}{% if submission.surface_tilt != None %}°{% endif %} / {{ submission.surface_azimuth|default_if_none:_("Unknown") }}{% if submission.surface_azimuth != None %}°{% endif %}</dd></div>
+        <div><dt>{% translate "Submitted by" %}</dt><dd>{{ submission.submitted_by.username }} · <time datetime="{{ submission.created_at|date:'c' }}">{{ submission.created_at|date:"j M Y, H:i T" }}</time></dd></div>
       </dl>
     {% empty %}
       {% for plant in plants %}
@@ -101,39 +102,39 @@
         {% with configuration=plant.current_configuration %}
           {% if configuration %}
             <dl class="facts">
-              <div><dt>DC nameplate</dt><dd>{{ configuration.dc_capacity_mw }} MW</dd></div>
-              <div><dt>Inverter AC capacity</dt><dd>{{ configuration.inverter_capacity_mw|default_if_none:"Unknown" }}{% if configuration.inverter_capacity_mw != None %} MW{% endif %}</dd></div>
-              <div><dt>Grid export limit</dt><dd>{{ configuration.export_limit_mw|default_if_none:"Unknown" }}{% if configuration.export_limit_mw != None %} MW{% endif %}</dd></div>
-              <div><dt>Measurement point</dt><dd>{{ configuration.get_measurement_basis_display }}</dd></div>
-              <div><dt>Mounting</dt><dd>{{ configuration.get_mounting_type_display }}</dd></div>
-              <div><dt>Fixed-array tilt / azimuth</dt><dd>{{ configuration.surface_tilt|default_if_none:"Unknown" }}{% if configuration.surface_tilt != None %}°{% endif %} / {{ configuration.surface_azimuth|default_if_none:"Unknown" }}{% if configuration.surface_azimuth != None %}°{% endif %}</dd></div>
-              <div><dt>Configuration revision</dt><dd>{{ configuration.revision }}</dd></div>
-              <div><dt>Saved</dt><dd><time datetime="{{ configuration.created_at|date:'c' }}">{{ configuration.created_at|date:"j M Y, H:i T" }}</time></dd></div>
+              <div><dt>{% translate "DC nameplate" %}</dt><dd>{{ configuration.dc_capacity_mw }} MW</dd></div>
+              <div><dt>{% translate "Inverter AC capacity" %}</dt><dd>{{ configuration.inverter_capacity_mw|default_if_none:_("Unknown") }}{% if configuration.inverter_capacity_mw != None %} MW{% endif %}</dd></div>
+              <div><dt>{% translate "Grid export limit" %}</dt><dd>{{ configuration.export_limit_mw|default_if_none:_("Unknown") }}{% if configuration.export_limit_mw != None %} MW{% endif %}</dd></div>
+              <div><dt>{% translate "Measurement point" %}</dt><dd>{% translate configuration.get_measurement_basis_display %}</dd></div>
+              <div><dt>{% translate "Mounting" %}</dt><dd>{% translate configuration.get_mounting_type_display %}</dd></div>
+              <div><dt>{% translate "Fixed-array tilt / azimuth" %}</dt><dd>{{ configuration.surface_tilt|default_if_none:_("Unknown") }}{% if configuration.surface_tilt != None %}°{% endif %} / {{ configuration.surface_azimuth|default_if_none:_("Unknown") }}{% if configuration.surface_azimuth != None %}°{% endif %}</dd></div>
+              <div><dt>{% translate "Configuration revision" %}</dt><dd>{{ configuration.revision }}</dd></div>
+              <div><dt>{% translate "Saved" %}</dt><dd><time datetime="{{ configuration.created_at|date:'c' }}">{{ configuration.created_at|date:"j M Y, H:i T" }}</time></dd></div>
             </dl>
           {% else %}
-            <p class="empty">No saved technical configuration or customer submission.</p>
+            <p class="empty">{% translate "No saved technical configuration or customer submission." %}</p>
           {% endif %}
         {% endwith %}
       {% empty %}
-        <p class="empty">No plant has been submitted for this location.</p>
+        <p class="empty">{% translate "No plant has been submitted for this location." %}</p>
       {% endfor %}
     {% endfor %}
   </section>
 
   <section class="panel" aria-labelledby="provider-title">
-    <div class="panel-head"><h2 id="provider-title">Solcast setup for this plant</h2><p class="row-meta">Private connection</p></div>
+    <div class="panel-head"><h2 id="provider-title">{% translate "Solcast setup for this plant" %}</h2><p class="row-meta">{% translate "Private connection" %}</p></div>
     {% if binding %}
-      <h3>Saved connection</h3>
+      <h3>{% translate "Saved connection" %}</h3>
       <dl class="facts facts--tinted">
-        <div><dt>Account</dt><dd>{{ binding.provider_account.provider }} · {{ binding.provider_account.external_account_id }}</dd></div>
-        <div><dt>Resource ID</dt><dd>{{ binding.site_id }}</dd></div>
-        <div><dt>Connection</dt><dd>{{ plant_summary.connection }} · key revision {{ binding.provider_account.credential_revision }}</dd></div>
-        <div><dt>Last validation</dt><dd>{% if binding.validated_at %}<time datetime="{{ binding.validated_at|date:'c' }}">{{ binding.validated_at|date:"j M Y, H:i T" }}</time>{% else %}Not validated{% endif %}</dd></div>
+        <div><dt>{% translate "Account" %}</dt><dd>{{ binding.provider_account.provider }} · {{ binding.provider_account.external_account_id }}</dd></div>
+        <div><dt>{% translate "Resource ID" %}</dt><dd>{{ binding.site_id }}</dd></div>
+        <div><dt>{% translate "Connection" %}</dt><dd>{% translate plant_summary.connection %} {% translate "· key revision" %} {{ binding.provider_account.credential_revision }}</dd></div>
+        <div><dt>{% translate "Last validation" %}</dt><dd>{% if binding.validated_at %}<time datetime="{{ binding.validated_at|date:'c' }}">{{ binding.validated_at|date:"j M Y, H:i T" }}</time>{% else %}{% translate "Not validated" %}{% endif %}</dd></div>
       </dl>
       {% if active_provider_delay %}
         <div class="callout callout--warn">
-          <h3>Provider request delay</h3>
-          <p>Requests wait until <time datetime="{{ binding.provider_account.request_blocked_until|date:'c' }}">{{ binding.provider_account.request_blocked_until|date:"j M Y, H:i T" }}</time>. Clear this delay only after confirming recovery with the provider. The daily request budget is preserved.</p>
+          <h3>{% translate "Provider request delay" %}</h3>
+          <p>{% translate "Requests wait until" %} <time datetime="{{ binding.provider_account.request_blocked_until|date:'c' }}">{{ binding.provider_account.request_blocked_until|date:"j M Y, H:i T" }}</time>{% translate ". Clear this delay only after confirming recovery with the provider. The daily request budget is preserved." %}</p>
           <form method="post" class="form">
             {% csrf_token %}
             {% for field in action_form.hidden_fields %}{{ field }}{% endfor %}
@@ -141,34 +142,34 @@
               {{ action_form.provider_recovered.as_field_group }}
             </div>
             <div class="form-actions">
-              <button type="submit" name="action" value="clear_cooldown" class="btn btn--quiet">Clear confirmed provider delay</button>
+              <button type="submit" name="action" value="clear_cooldown" class="btn btn--quiet">{% translate "Clear confirmed provider delay" %}</button>
             </div>
           </form>
         </div>
       {% endif %}
     {% endif %}
 
-    {% if binding %}<details class="disclosure"{% if setup_form.is_bound %} open{% endif %}><summary>Replace connection</summary>{% endif %}
+    {% if binding %}<details class="disclosure"{% if setup_form.is_bound %} open{% endif %}><summary>{% translate "Replace connection" %}</summary>{% endif %}
     <form method="post" class="form" data-setup-form data-account-mode-name="{{ setup_form.account_mode.html_name }}" data-api-key-name="{{ setup_form.api_key.html_name }}">
       {% csrf_token %}
       <input type="hidden" name="action" value="configure">
       {% for field in setup_form.hidden_fields %}{{ field }}{{ field.errors }}{% endfor %}
       {{ setup_form.non_field_errors }}
-      <p class="callout">Saving always creates a new pending revision that must be validated and approved again.{% if binding %} The selected account's key and daily quota are shared by every plant using that account.{% endif %}</p>
+      <p class="callout">{% translate "Saving always creates a new pending revision that must be validated and approved again." %}{% if binding %} {% translate "The selected account's key and daily quota are shared by every plant using that account." %}{% endif %}</p>
 
       <fieldset class="group">
-        <legend>Solcast account</legend>
+        <legend>{% translate "Solcast account" %}</legend>
         <div class="field{% if setup_form.account_mode.errors %} field--error{% endif %}">
           {{ setup_form.account_mode.as_field_group }}
         </div>
         <div class="subgroup" data-account-group="existing">
-          <p class="subgroup-title">Existing account</p>
+          <p class="subgroup-title">{% translate "Existing account" %}</p>
           <div class="field{% if setup_form.existing_account.errors %} field--error{% endif %}">
             {{ setup_form.existing_account.as_field_group }}
           </div>
         </div>
         <div class="subgroup" data-account-group="new">
-          <p class="subgroup-title">New account</p>
+          <p class="subgroup-title">{% translate "New account" %}</p>
           <div class="field-grid">
             <div class="field{% if setup_form.external_account_id.errors %} field--error{% endif %}" data-new-account-required>
               {{ setup_form.external_account_id.as_field_group }}
@@ -185,8 +186,8 @@
           {{ setup_form.api_key.as_field_group }}
         </div>
         <div class="subgroup" data-account-group="existing">
-          <p class="subgroup-title">Key replacement for an existing account</p>
-          <p class="callout callout--warn">Entering a key above replaces the selected account's key for every plant that shares it. Leave the key blank to keep the current one.</p>
+          <p class="subgroup-title">{% translate "Key replacement for an existing account" %}</p>
+          <p class="callout callout--warn">{% translate "Entering a key above replaces the selected account's key for every plant that shares it. Leave the key blank to keep the current one." %}</p>
           <div class="field field--check{% if setup_form.confirm_key_rotation.errors %} field--error{% endif %}">
             {{ setup_form.confirm_key_rotation.as_field_group }}
           </div>
@@ -194,7 +195,7 @@
       </fieldset>
 
       <fieldset class="group">
-        <legend>Reference site</legend>
+        <legend>{% translate "Reference site" %}</legend>
         <div class="field-grid">
           <div class="field{% if setup_form.site_id.errors %} field--error{% endif %}">
             {{ setup_form.site_id.as_field_group }}
@@ -210,7 +211,7 @@
           </div>
         </div>
         <details class="disclosure"{% if setup_form.dc_capacity_kw.errors or setup_form.azimuth_degrees.errors or setup_form.losses_percent.errors %} open{% endif %}>
-          <summary>Advanced reference settings</summary>
+          <summary>{% translate "Advanced reference settings" %}</summary>
           <div class="field-grid">
             <div class="field{% if setup_form.dc_capacity_kw.errors %} field--error{% endif %}">
               {{ setup_form.dc_capacity_kw.as_field_group }}
@@ -226,7 +227,7 @@
       </fieldset>
 
       <fieldset class="group">
-        <legend>Verification</legend>
+        <legend>{% translate "Verification" %}</legend>
         <div class="field{% if setup_form.settings_verification_reference.errors %} field--error{% endif %}">
           {{ setup_form.settings_verification_reference.as_field_group }}
         </div>
@@ -236,46 +237,46 @@
       </fieldset>
 
       <div class="form-actions">
-        <button type="submit" class="btn btn--primary">Save private setup</button>
+        <button type="submit" class="btn btn--primary">{% translate "Save private setup" %}</button>
       </div>
     </form>
     {% if binding %}</details>{% endif %}
   </section>
 
   <section class="panel" aria-labelledby="approval-title">
-    <div class="panel-head"><h2 id="approval-title">Validate and approve</h2></div>
+    <div class="panel-head"><h2 id="approval-title">{% translate "Validate and approve" %}</h2></div>
     <ul class="plain-list">
-      <li><strong>Validate</strong> sends a real Solcast request and uses the selected account's daily quota.</li>
-      <li><strong>Approve</strong> queues the first forecast. Customers see data only after it has been saved.</li>
+      <li><strong>{% translate "Validate" %}</strong> {% translate "sends a real Solcast request and uses the selected account's daily quota." %}</li>
+      <li><strong>{% translate "Approve" %}</strong> {% translate "queues the first forecast. Customers see data only after it has been saved." %}</li>
     </ul>
     {{ action_form.errors }}
     {% if binding %}
       <form method="post" class="form-actions">
         {% csrf_token %}
         {% for field in action_form.hidden_fields %}{{ field }}{% endfor %}
-        <button type="submit" name="action" value="validate" class="btn btn--quiet">Validate connection</button>
-        {% if region.status != "approved" %}<button type="submit" name="action" value="approve" class="btn btn--primary"{% if not can_approve %} disabled aria-describedby="approve-hint"{% endif %}>Approve plant</button>{% endif %}
+        <button type="submit" name="action" value="validate" class="btn btn--quiet">{% translate "Validate connection" %}</button>
+        {% if region.status != "approved" %}<button type="submit" name="action" value="approve" class="btn btn--primary"{% if not can_approve %} disabled aria-describedby="approve-hint"{% endif %}>{% translate "Approve plant" %}</button>{% endif %}
       </form>
-      {% if region.status == "approved" %}<p class="row-meta">This plant is approved. Connection health and saved forecast availability are shown above.</p>{% elif not can_approve %}<p class="row-meta" id="approve-hint">Validate the current setup and key revision to enable approval.</p>{% endif %}
+      {% if region.status == "approved" %}<p class="row-meta">{% translate "This plant is approved. Connection health and saved forecast availability are shown above." %}</p>{% elif not can_approve %}<p class="row-meta" id="approve-hint">{% translate "Validate the current setup and key revision to enable approval." %}</p>{% endif %}
     {% else %}
-      <p class="empty">Save the private connection to continue.</p>
+      <p class="empty">{% translate "Save the private connection to continue." %}</p>
     {% endif %}
   </section>
 
   <section class="panel" aria-labelledby="epias-title">
-    <div class="panel-head"><h2 id="epias-title">EPİAŞ production connection</h2><p class="row-meta">Reported production</p></div>
+    <div class="panel-head"><h2 id="epias-title">{% translate "EPİAŞ production connection" %}</h2><p class="row-meta">{% translate "Reported production" %}</p></div>
     {% if epias_connection %}
       <dl class="facts facts--tinted">
-        <div><dt>Status</dt><dd>{% if epias_connection.enabled %}Connected{% else %}Disconnected{% endif %}</dd></div>
-        <div><dt>EPİAŞ plant</dt><dd>{{ epias_connection.name }} · {{ epias_connection.provider_plant_id|unlocalize }}</dd></div>
+        <div><dt>{% translate "Status" %}</dt><dd>{% if epias_connection.enabled %}{% translate "Connected" %}{% else %}{% translate "Disconnected" %}{% endif %}</dd></div>
+        <div><dt>{% translate "EPİAŞ plant" %}</dt><dd>{{ epias_connection.name }} · {{ epias_connection.provider_plant_id|unlocalize }}</dd></div>
         <div><dt>EIC</dt><dd>{{ epias_connection.eic }}</dd></div>
       </dl>
     {% else %}
-      <p class="empty">Not connected to EPİAŞ.</p>
+      <p class="empty">{% translate "Not connected to EPİAŞ." %}</p>
     {% endif %}
-    {% if epias_connection.enabled %}<details class="disclosure"{% if epias_form.errors %} open{% endif %}><summary>Change EPİAŞ connection</summary>{% endif %}
-    <p class="row-meta">Connecting verifies the identifiers with EPİAŞ and queues initial production collection.</p>
-    {% if not can_connect_epias %}<p class="callout" id="epias-configuration-hint">Approve the plant's current technical configuration before connecting.</p>{% endif %}
+    {% if epias_connection.enabled %}<details class="disclosure"{% if epias_form.errors %} open{% endif %}><summary>{% translate "Change EPİAŞ connection" %}</summary>{% endif %}
+    <p class="row-meta">{% translate "Connecting verifies the identifiers with EPİAŞ and queues initial production collection." %}</p>
+    {% if not can_connect_epias %}<p class="callout" id="epias-configuration-hint">{% translate "Approve the plant's current technical configuration before connecting." %}</p>{% endif %}
     <form method="post" class="form">
       {% csrf_token %}
       <input type="hidden" name="action" value="epias_connect">
@@ -285,47 +286,47 @@
           <div class="field{% if field.errors %} field--error{% endif %}">{{ field.as_field_group }}</div>
         {% endfor %}
       </div>
-      <div class="form-actions"><button type="submit" class="btn btn--primary"{% if not can_connect_epias %} disabled aria-describedby="epias-configuration-hint"{% endif %}>Save EPİAŞ connection</button></div>
+      <div class="form-actions"><button type="submit" class="btn btn--primary"{% if not can_connect_epias %} disabled aria-describedby="epias-configuration-hint"{% endif %}>{% translate "Save EPİAŞ connection" %}</button></div>
     </form>
     {% if epias_connection.enabled %}</details>{% endif %}
     {% if epias_connection.enabled %}
       <form method="post" class="form-actions">
         {% csrf_token %}
         <input type="hidden" name="action" value="epias_disconnect">
-        <button type="submit" class="btn btn--quiet">Disconnect EPİAŞ</button>
+        <button type="submit" class="btn btn--quiet">{% translate "Disconnect EPİAŞ" %}</button>
       </form>
     {% endif %}
   </section>
 
   <section class="panel" aria-labelledby="outcomes-title">
-    <div class="panel-head"><h2 id="outcomes-title">Recent outcomes</h2><a class="text-link" href="{% url 'admin:workspace_operations' %}">All operations</a></div>
+    <div class="panel-head"><h2 id="outcomes-title">{% translate "Recent outcomes" %}</h2><a class="text-link" href="{% url 'admin:workspace_operations' %}">{% translate "All operations" %}</a></div>
     <div class="outcome-columns">
       <div>
-        <h3>Data collection</h3>
+        <h3>{% translate "Data collection" %}</h3>
         {% if recent_collections %}<ul class="rows rows--tight">
           {% for job in recent_collections %}<li class="row row--block">
-            <p><span class="badge badge--{{ job.status|slugify }}">{{ job.status_label }}</span> <time class="row-meta" datetime="{{ job.scheduled_for|date:'c' }}">{{ job.scheduled_for|date:"j M Y, H:i T" }}</time></p>
+            <p><span class="badge badge--{{ job.status|slugify }}">{% translate job.status_label %}</span> <time class="row-meta" datetime="{{ job.scheduled_for|date:'c' }}">{{ job.scheduled_for|date:"j M Y, H:i T" }}</time></p>
             <p class="row-meta">{{ job.kind }} · {{ job.target_date|date:"j M Y" }}</p>
-            {% if job.error_label %}<p class="row-meta">{{ job.error_label }}</p>{% endif %}
+            {% if job.error_label %}<p class="row-meta">{% translate job.error_label %}</p>{% endif %}
           </li>{% endfor %}
-        </ul>{% else %}<p class="empty">No collection jobs yet.</p>{% endif %}
+        </ul>{% else %}<p class="empty">{% translate "No collection jobs yet." %}</p>{% endif %}
       </div>
       <div>
-        <h3>Email delivery</h3>
+        <h3>{% translate "Email delivery" %}</h3>
         {% if recent_deliveries %}<ul class="rows rows--tight">
           {% for delivery in recent_deliveries %}<li class="row row--block">
-            <p><span class="badge badge--{{ delivery.status|slugify }}">{{ delivery.status_label }}</span> <time class="row-meta" datetime="{{ delivery.scheduled_for|date:'c' }}">{{ delivery.scheduled_for|date:"j M Y, H:i T" }}</time></p>
+            <p><span class="badge badge--{{ delivery.status|slugify }}">{% translate delivery.status_label %}</span> <time class="row-meta" datetime="{{ delivery.scheduled_for|date:'c' }}">{{ delivery.scheduled_for|date:"j M Y, H:i T" }}</time></p>
             <p class="row-meta">{{ delivery.recipient }}</p>
-            {% if delivery.status == "uncertain" %}<p class="row-meta">The mail server's acceptance is unknown. Confirm with the mail provider before a manual resend.</p>{% elif delivery.error_label %}<p class="row-meta">{{ delivery.error_label }}</p>{% endif %}
+            {% if delivery.status == "uncertain" %}<p class="row-meta">{% translate "The mail server's acceptance is unknown. Confirm with the mail provider before a manual resend." %}</p>{% elif delivery.error_label %}<p class="row-meta">{% translate delivery.error_label %}</p>{% endif %}
           </li>{% endfor %}
-        </ul>{% else %}<p class="empty">No email deliveries yet.</p>{% endif %}
+        </ul>{% else %}<p class="empty">{% translate "No email deliveries yet." %}</p>{% endif %}
       </div>
     </div>
     {% if recent_activity %}<details class="disclosure">
-      <summary>Recent activity</summary>
+      <summary>{% translate "Recent activity" %}</summary>
       <ul class="rows rows--tight">
         {% for event in recent_activity %}<li class="row row--block">
-          <p class="row-title-plain">{{ event.action_label }}</p>
+          <p class="row-title-plain">{% translate event.action_label %}</p>
           <p class="row-meta">{% if event.actor__username %}{{ event.actor__username }} · {% endif %}<time datetime="{{ event.created_at|date:'c' }}">{{ event.created_at|date:"j M Y, H:i T" }}</time></p>
         </li>{% endfor %}
       </ul>
@@ -335,29 +336,29 @@
   {% if review_form %}
     {% if region.status == "pending" or region.status == "approved" %}
       <section class="panel" aria-labelledby="decision-title">
-        <div class="panel-head"><h2 id="decision-title">Other decisions</h2></div>
+        <div class="panel-head"><h2 id="decision-title">{% translate "Other decisions" %}</h2></div>
         {% if region.status == "pending" %}
           <details class="disclosure">
-            <summary>Reject this plant</summary>
-            <p>Rejecting closes this review without approval. The saved connection is not changed.</p>
+            <summary>{% translate "Reject this plant" %}</summary>
+            <p>{% translate "Rejecting closes this review without approval. The saved connection is not changed." %}</p>
             <form method="post" action="{% url 'admin:workspace_decision' region.pk %}" class="form-actions">
               {% csrf_token %}
               <input type="hidden" name="{{ review_form.expected_revision.html_name }}" value="{{ review_form.expected_revision.value|unlocalize }}">
               <input type="hidden" name="{{ review_form.expected_status.html_name }}" value="{{ review_form.expected_status.value }}">
               <input type="hidden" name="{{ review_form.action.html_name }}" value="reject">
-              <button type="submit" class="btn btn--danger">Reject plant</button>
+              <button type="submit" class="btn btn--danger">{% translate "Reject plant" %}</button>
             </form>
           </details>
         {% else %}
           <details class="disclosure">
-            <summary>Suspend this plant</summary>
-            <p>Suspending withdraws approval. The saved connection is not changed.</p>
+            <summary>{% translate "Suspend this plant" %}</summary>
+            <p>{% translate "Suspending withdraws approval. The saved connection is not changed." %}</p>
             <form method="post" action="{% url 'admin:workspace_decision' region.pk %}" class="form-actions">
               {% csrf_token %}
               <input type="hidden" name="{{ review_form.expected_revision.html_name }}" value="{{ review_form.expected_revision.value|unlocalize }}">
               <input type="hidden" name="{{ review_form.expected_status.html_name }}" value="{{ review_form.expected_status.value }}">
               <input type="hidden" name="{{ review_form.action.html_name }}" value="suspend">
-              <button type="submit" class="btn btn--danger">Suspend plant</button>
+              <button type="submit" class="btn btn--danger">{% translate "Suspend plant" %}</button>
             </form>
           </details>
         {% endif %}

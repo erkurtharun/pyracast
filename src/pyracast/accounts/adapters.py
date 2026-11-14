@@ -1,4 +1,3 @@
-from functools import partial
 from typing import Any, cast
 
 from allauth.account.adapter import DefaultAccountAdapter
@@ -10,7 +9,9 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
 from django.http import HttpRequest
+from django.utils import translation
 
+from pyracast.accounts.language import user_language
 from pyracast.accounts.security import normalize_client_ip
 from pyracast.notifications.operations import recipient_limit
 
@@ -42,4 +43,12 @@ class AccountAdapter(DefaultAccountAdapter):
         return True
 
     def send_mail(self, template_prefix: str, email: str, context: dict[str, Any]) -> None:
-        transaction.on_commit(partial(super().send_mail, template_prefix, email, context))
+        user = context.get("user")
+        preference = user_language(user) if isinstance(user, User) else None
+        language = preference or translation.get_language()
+
+        def send() -> None:
+            with translation.override(language):
+                super(AccountAdapter, self).send_mail(template_prefix, email, context)
+
+        transaction.on_commit(send)

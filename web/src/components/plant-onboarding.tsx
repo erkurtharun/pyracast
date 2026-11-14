@@ -1,4 +1,5 @@
 "use client";
+import { useTranslations, useFormatter } from "next-intl";
 
 import { useRef, useState } from "react";
 import { request, type Region, type Plant } from "@/lib/api";
@@ -24,6 +25,13 @@ export function PlantOnboarding({
     onCreated: (site: PlantSite) => void;
     onCancel: () => void;
 }) {
+    const t = useTranslations("PlantOnboarding");
+    const format = useFormatter();
+    const reviewNumber = (value: unknown) =>
+        value == null || value === ""
+            ? ""
+            : format.number(Number(value), { maximumFractionDigits: 6 });
+
     const [step, setStep] = useState(existing ? 1 : 0);
     const [review, setReview] = useState<Record<string, FormDataEntryValue>>(
         {},
@@ -44,20 +52,20 @@ export function PlantOnboarding({
                 <div>
                     <h2 ref={title} tabIndex={-1}>
                         {existing
-                            ? "Complete plant setup"
-                            : "Add a solar plant"}
+                            ? t("completePlantSetup")
+                            : t("addASolarPlant")}
                     </h2>
-                    <p>
-                        Enter your site and equipment details. An administrator
-                        connects the data source and approves collection.
-                    </p>
+                    <p>{t("description")}</p>
                 </div>
                 <button className="button secondary" onClick={onCancel}>
-                    Cancel
+                    {t("cancel")}
                 </button>
             </div>
-            <ol className="onboarding-steps" aria-label="Plant setup progress">
-                {["Location", "Technical details", "Review"].map(
+            <ol
+                className="onboarding-steps"
+                aria-label={t("plantSetupProgress")}
+            >
+                {[t("location"), t("technicalDetails"), t("review")].map(
                     (label, index) => (
                         <li
                             key={label}
@@ -120,7 +128,7 @@ export function PlantOnboarding({
                             message:
                                 error instanceof Error
                                     ? error.message
-                                    : "Unable to save this plant.",
+                                    : t("unableToSaveThisPlant"),
                         });
                     }
                 }}
@@ -130,13 +138,13 @@ export function PlantOnboarding({
                         <div className="form-grid">
                             {!existing && (
                                 <Field
-                                    label="Plant name"
+                                    label={t("plantName")}
                                     name="name"
-                                    placeholder="e.g. Antalya solar park"
+                                    placeholder={t("examplePlantName")}
                                 />
                             )}
                             <Field
-                                label="IANA timezone"
+                                label={t("ianaTimezone")}
                                 name="timezone"
                                 defaultValue={
                                     existing?.timezone ??
@@ -146,7 +154,7 @@ export function PlantOnboarding({
                                 placeholder="Europe/Istanbul"
                             />
                             <Field
-                                label="Latitude (°)"
+                                label={t("latitude")}
                                 name="latitude"
                                 type="number"
                                 min={-90}
@@ -155,7 +163,7 @@ export function PlantOnboarding({
                                 defaultValue={existing?.latitude}
                             />
                             <Field
-                                label="Longitude (°)"
+                                label={t("longitude")}
                                 name="longitude"
                                 type="number"
                                 min={-180}
@@ -164,10 +172,7 @@ export function PlantOnboarding({
                                 defaultValue={existing?.longitude}
                             />
                         </div>
-                        <p className="fine">
-                            Use the plant's coordinates and local timezone for
-                            daily forecasts.
-                        </p>
+                        <p className="fine">{t("locationHelp")}</p>
                     </div>
                     <div data-step="1" hidden={step !== 1}>
                         <PlantConfigurationFields
@@ -176,10 +181,10 @@ export function PlantOnboarding({
                         />
                     </div>
                     <div data-step="2" hidden={step !== 2}>
-                        <h3>Check your plant details</h3>
+                        <h3>{t("checkYourPlantDetails")}</h3>
                         <dl className="review-grid">
                             <div>
-                                <dt>Plant</dt>
+                                <dt>{t("plant")}</dt>
                                 <dd>
                                     {String(
                                         review.name ?? existing?.name ?? "",
@@ -187,24 +192,22 @@ export function PlantOnboarding({
                                 </dd>
                             </div>
                             <div>
-                                <dt>Location</dt>
+                                <dt>{t("location")}</dt>
                                 <dd>
-                                    {String(
-                                        review.latitude ??
-                                            existing?.latitude ??
-                                            "",
-                                    )}
-                                    °,{" "}
-                                    {String(
-                                        review.longitude ??
-                                            existing?.longitude ??
-                                            "",
-                                    )}
-                                    °
+                                    {t("coordinates", {
+                                        latitude: reviewNumber(
+                                            review.latitude ??
+                                                existing?.latitude,
+                                        ),
+                                        longitude: reviewNumber(
+                                            review.longitude ??
+                                                existing?.longitude,
+                                        ),
+                                    })}
                                 </dd>
                             </div>
                             <div>
-                                <dt>Timezone</dt>
+                                <dt>{t("timezone")}</dt>
                                 <dd>
                                     {String(
                                         review.timezone ??
@@ -214,51 +217,72 @@ export function PlantOnboarding({
                                 </dd>
                             </div>
                             <div>
-                                <dt>DC nameplate</dt>
+                                <dt>{t("dcNameplate")}</dt>
                                 <dd>
-                                    {String(review.dc_capacity_mw ?? "")} MW
+                                    {t("power", {
+                                        value: reviewNumber(
+                                            review.dc_capacity_mw,
+                                        ),
+                                    })}
                                 </dd>
                             </div>
                             <div>
-                                <dt>Inverter AC capacity</dt>
+                                <dt>{t("inverterACCapacity")}</dt>
                                 <dd>
                                     {review.inverter_capacity_mw
-                                        ? `${review.inverter_capacity_mw} MW`
-                                        : "Unknown"}
+                                        ? t("power", {
+                                              value: reviewNumber(
+                                                  review.inverter_capacity_mw,
+                                              ),
+                                          })
+                                        : t("unknown")}
                                 </dd>
                             </div>
                             <div>
-                                <dt>Grid export limit</dt>
+                                <dt>{t("gridExportLimit")}</dt>
                                 <dd>
                                     {review.export_limit_mw
-                                        ? `${review.export_limit_mw} MW`
-                                        : "Unknown"}
+                                        ? t("power", {
+                                              value: reviewNumber(
+                                                  review.export_limit_mw,
+                                              ),
+                                          })
+                                        : t("unknown")}
                                 </dd>
                             </div>
                             <div>
-                                <dt>Measurement point</dt>
+                                <dt>{t("measurementPoint")}</dt>
                                 <dd>
                                     {review.measurement_basis ===
                                     "ac_generation"
-                                        ? "AC generation"
-                                        : "Net export"}
+                                        ? t("acGeneration")
+                                        : t("netExport")}
                                 </dd>
                             </div>
                             <div>
-                                <dt>Mounting</dt>
+                                <dt>{t("mounting")}</dt>
                                 <dd>
-                                    {String(review.mounting_type ?? "Unknown")}
                                     {review.mounting_type === "fixed"
-                                        ? ` · tilt ${review.surface_tilt || "unknown"}° · azimuth ${review.surface_azimuth || "unknown"}°`
+                                        ? t("mountingFixed")
+                                        : review.mounting_type === "tracking"
+                                          ? t("mountingTracking")
+                                          : t("mountingUnknown")}
+                                    {review.mounting_type === "fixed"
+                                        ? t("geometry", {
+                                              tilt:
+                                                  reviewNumber(
+                                                      review.surface_tilt,
+                                                  ) || t("unknownGeometry"),
+                                              azimuth:
+                                                  reviewNumber(
+                                                      review.surface_azimuth,
+                                                  ) || t("unknownGeometry"),
+                                          })
                                         : ""}
                                 </dd>
                             </div>
                         </dl>
-                        <Notice>
-                            Your plant will wait for administrator approval.
-                            Approval and forecast availability are shown
-                            separately.
-                        </Notice>
+                        <Notice>{t("approvalNotice")}</Notice>
                     </div>
                     <div className="form-footer onboarding-actions">
                         {step > (existing ? 1 : 0) && (
@@ -267,15 +291,15 @@ export function PlantOnboarding({
                                 type="button"
                                 onClick={() => move(step - 1)}
                             >
-                                Back
+                                {t("back")}
                             </button>
                         )}
                         <button className="button" type="submit">
                             {status.kind === "saving"
-                                ? "Submitting…"
+                                ? t("submitting")
                                 : step === 2
-                                  ? "Submit plant for approval"
-                                  : "Continue"}
+                                  ? t("submitPlantForApproval")
+                                  : t("continue")}
                         </button>
                     </div>
                 </fieldset>

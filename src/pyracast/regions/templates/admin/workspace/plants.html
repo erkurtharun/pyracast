@@ -1,92 +1,93 @@
 {% extends "admin/workspace/base.html" %}
-{% block title %}Plants{% endblock %}
-{% block heading %}Plants{% endblock %}
-{% block lead %}<p class="lead">Find a plant, then open it to review, connect or approve.</p>{% endblock %}
+{% load i18n %}
+{% block title %}{% translate "Plants" %}{% endblock %}
+{% block heading %}{% translate "Plants" %}{% endblock %}
+{% block lead %}<p class="lead">{% translate "Find a plant, then open it to review, connect or approve." %}</p>{% endblock %}
 {% block content %}
-  <form method="get" class="panel filters" role="search" aria-label="Filter plants">
+  <form method="get" class="panel filters" role="search" aria-label="{% translate "Filter plants" %}">
     <div class="field">
-      <label for="plants-q">Plant, location or company</label>
+      <label for="plants-q">{% translate "Plant, location or company" %}</label>
       <input type="search" id="plants-q" name="q" value="{{ q }}" maxlength="200" autocomplete="off">
     </div>
     <div class="field">
-      <label for="plants-status">Review status</label>
+      <label for="plants-status">{% translate "Review status" %}</label>
       <select id="plants-status" name="status">
-        <option value="">Any status</option>
+        <option value="">{% translate "Any status" %}</option>
         {% for value, label in status_choices %}
           <option value="{{ value }}"{% if value == status %} selected{% endif %}>{{ label }}</option>
         {% endfor %}
       </select>
     </div>
     <div class="filters-actions">
-      <button type="submit" class="btn btn--primary">Search</button>
-      {% if q or status %}<a class="btn btn--quiet" href="{% url 'admin:workspace_plants' %}">Clear</a>{% endif %}
+      <button type="submit" class="btn btn--primary">{% translate "Search" %}</button>
+      {% if q or status %}<a class="btn btn--quiet" href="{% url 'admin:workspace_plants' %}">{% translate "Clear" %}</a>{% endif %}
     </div>
   </form>
 
   <section class="panel" aria-labelledby="plants-title">
     <div class="panel-head">
-      <h2 id="plants-title">{{ page_obj.paginator.count }} plant{{ page_obj.paginator.count|pluralize }}</h2>
+      <h2 id="plants-title">{{ page_obj.paginator.count }} {% translate "plant" %}{{ page_obj.paginator.count|pluralize }}</h2>
     </div>
     {% if plants %}
       <div class="table-wrap" role="region" aria-labelledby="plants-title" tabindex="0">
         <table class="table table--stack">
           <thead>
             <tr>
-              <th scope="col">Plant</th>
-              <th scope="col">Review</th>
-              <th scope="col">Connection</th>
-              <th scope="col">Last saved forecast</th>
-              <th scope="col">Location</th>
-              <th scope="col"><span class="visually-hidden">Open</span></th>
+              <th scope="col">{% translate "Plant" %}</th>
+              <th scope="col">{% translate "Review" %}</th>
+              <th scope="col">{% translate "Connection" %}</th>
+              <th scope="col">{% translate "Last saved forecast" %}</th>
+              <th scope="col">{% translate "Location" %}</th>
+              <th scope="col"><span class="visually-hidden">{% translate "Open" %}</span></th>
             </tr>
           </thead>
           <tbody>
             {% for plant in plants %}
               <tr>
-                <th scope="row" data-label="Plant">
+                <th scope="row" data-label="{% translate "Plant" %}">
                   <span class="cell">
                     <a class="row-title" href="{{ plant.review_url }}">{{ plant.plant_name }}</a>
                     <span class="row-meta">{{ plant.company }}{% if plant.name != plant.plant_name %} · {{ plant.name }}{% endif %}</span>
                   </span>
                 </th>
-                <td data-label="Review">
+                <td data-label="{% translate "Review" %}">
                   <span class="cell">
-                    <span class="badge badge--{{ plant.status|slugify }}">{% if plant.status == "pending" %}Awaiting approval{% else %}{{ plant.status|capfirst }}{% endif %}</span>
-                    <span class="row-meta">Revision {{ plant.revision }}</span>
+                    <span class="badge badge--{{ plant.status|slugify }}">{% if plant.status == "pending" %}{% translate "Awaiting approval" %}{% else %}{{ plant.status|capfirst }}{% endif %}</span>
+                    <span class="row-meta">{% translate "Revision" %} {{ plant.revision }}</span>
                   </span>
                 </td>
-                <td data-label="Connection"><span class="badge badge--{{ plant.connection|slugify }}">{{ plant.connection }}</span></td>
-                <td data-label="Last saved forecast">
+                <td data-label="{% translate "Connection" %}"><span class="badge badge--{{ plant.connection|slugify }}">{% translate plant.connection %}</span></td>
+                <td data-label="{% translate "Last saved forecast" %}">
                   {% if plant.last_collected_at %}
                     <time datetime="{{ plant.last_collected_at|date:'c' }}">{{ plant.last_collected_at|date:"j M Y, H:i T" }}</time>
                   {% else %}
-                    <span class="muted">None saved yet</span>
+                    <span class="muted">{% translate "None saved yet" %}</span>
                   {% endif %}
                 </td>
-                <td data-label="Location">
+                <td data-label="{% translate "Location" %}">
                   <span class="cell">
                     <span>{{ plant.latitude }}°, {{ plant.longitude }}°</span>
                     <span class="row-meta">{{ plant.timezone }}</span>
                   </span>
                 </td>
-                <td class="cell-action"><a class="btn btn--quiet" href="{{ plant.review_url }}">Open<span class="visually-hidden"> {{ plant.plant_name }}</span></a></td>
+                <td class="cell-action"><a class="btn btn--quiet" href="{{ plant.review_url }}">{% translate "Open" %}<span class="visually-hidden"> {{ plant.plant_name }}</span></a></td>
               </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
     {% else %}
-      <p class="empty">No plants match{% if q or status %} these filters{% endif %}.</p>
+      <p class="empty">{% translate "No plants match" %}{% if q or status %} {% translate "these filters" %}{% endif %}.</p>
     {% endif %}
 
     {% if page_obj.has_other_pages %}
-      <nav class="pagination" aria-label="Plant pages">
+      <nav class="pagination" aria-label="{% translate "Plant pages" %}">
         {% if page_obj.has_previous %}
-          <a class="btn btn--quiet" rel="prev" href="?{{ pagination_query }}&amp;page={{ page_obj.previous_page_number }}">Previous</a>
+          <a class="btn btn--quiet" rel="prev" href="?{{ pagination_query }}&amp;page={{ page_obj.previous_page_number }}">{% translate "Previous" %}</a>
         {% endif %}
-        <span class="pagination-status">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        <span class="pagination-status">{% translate "Page" %} {{ page_obj.number }} {% translate "of" %} {{ page_obj.paginator.num_pages }}</span>
         {% if page_obj.has_next %}
-          <a class="btn btn--quiet" rel="next" href="?{{ pagination_query }}&amp;page={{ page_obj.next_page_number }}">Next</a>
+          <a class="btn btn--quiet" rel="next" href="?{{ pagination_query }}&amp;page={{ page_obj.next_page_number }}">{% translate "Next" %}</a>
         {% endif %}
       </nav>
     {% endif %}

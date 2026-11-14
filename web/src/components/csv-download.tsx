@@ -1,18 +1,20 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { csvDocument } from "@/lib/csv";
 
 export function CsvDownload({
     filename,
     records,
     metadata = {},
-    label = "Download CSV",
+    label,
 }: {
     filename: string;
     records: Record<string, unknown>[];
     metadata?: Record<string, unknown>;
     label?: string;
 }) {
+    const t = useTranslations("CsvDownload");
     return (
         <button
             type="button"
@@ -32,7 +34,7 @@ export function CsvDownload({
                 setTimeout(() => URL.revokeObjectURL(url), 1000);
             }}
         >
-            {label}
+            {label ?? t("download_csv")}
         </button>
     );
 }

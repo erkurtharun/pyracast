@@ -15,6 +15,8 @@ from django.db.models import Count, OuterRef, Q, QuerySet, Subquery
 from django.db.models.functions import Coalesce
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy
 
 from pyracast.accounts.models import Tenant
 from pyracast.accounts.operations import require_admin
@@ -31,10 +33,10 @@ if TYPE_CHECKING:
     from django_stubs_ext import WithAnnotations
 
 STATUS_CHOICES = (
-    ("pending", "Awaiting approval"),
-    ("approved", "Approved"),
-    ("suspended", "Suspended"),
-    ("rejected", "Rejected"),
+    ("pending", gettext_lazy("Awaiting approval")),
+    ("approved", gettext_lazy("Approved")),
+    ("suspended", gettext_lazy("Suspended")),
+    ("rejected", gettext_lazy("Rejected")),
 )
 
 
@@ -216,13 +218,13 @@ def recent_activity_context(
     if region_id is not None:
         events = events.filter(region_id=region_id)
     labels = {
-        "approved": "Plant approved",
-        "rejected": "Plant rejected",
-        "suspended": "Plant suspended",
-        "binding_configured": "Provider connection configured",
-        "binding_validated": "Provider connection validated",
-        "location_change_approved": "Location change approved",
-        "location_change_rejected": "Location change rejected",
+        "approved": _("Plant approved"),
+        "rejected": _("Plant rejected"),
+        "suspended": _("Plant suspended"),
+        "binding_configured": _("Provider connection configured"),
+        "binding_validated": _("Provider connection validated"),
+        "location_change_approved": _("Location change approved"),
+        "location_change_rejected": _("Location change rejected"),
     }
     return [
         {
@@ -273,7 +275,7 @@ def recent_work_context(region_id: int | None = None, limit: int = 20) -> dict[s
             "plant_name": row.display_plant_name,
             "company": row.binding.region.tenant.name,
             "status": row.status,
-            "kind": "Forecast" if row.endpoint == "forecasts" else "Past estimates",
+            "kind": _("Forecast") if row.endpoint == "forecasts" else _("Past estimates"),
             "target_date": row.target_date,
             "status_label": row.status.replace("_", " ").capitalize(),
             "scheduled_for": row.scheduled_slot,
@@ -294,8 +296,8 @@ def recent_work_context(region_id: int | None = None, limit: int = 20) -> dict[s
             "recipient": row.recipient,
             "status": row.status,
             "status_label": {
-                "sent": "Accepted by email service",
-                "uncertain": "Acceptance unknown",
+                "sent": _("Accepted by email service"),
+                "uncertain": _("Acceptance unknown"),
             }.get(row.status, row.status.replace("_", " ").capitalize()),
             "scheduled_for": row.scheduled_for,
             "sent_at": row.sent_at,
@@ -316,89 +318,93 @@ def operations_context() -> dict[str, Any]:
     checks = (
         (
             "invalid_reminder_recipients",
-            "Invalid email recipients",
-            "Ask the member to correct the saved recipient addresses.",
+            _("Invalid email recipients"),
+            _("Ask the member to correct the saved recipient addresses."),
         ),
         (
             "unvalidated_provider_credentials",
-            "Provider keys awaiting validation",
-            "Validate the current private key before collections resume.",
+            _("Provider keys awaiting validation"),
+            _("Validate the current private key before collections resume."),
         ),
         (
             "interrupted_notifications",
-            "Interrupted emails",
-            "Review the outcome; uncertain transmission must not be resent automatically.",
+            _("Interrupted emails"),
+            _("Review the outcome; uncertain transmission must not be resent automatically."),
         ),
         (
             "missed_notifications",
-            "Missed email times",
-            "Check notification worker availability and the delivery deadline.",
+            _("Missed email times"),
+            _("Check notification worker availability and the delivery deadline."),
         ),
         (
             "overdue_metering",
-            "Delayed production collection",
-            "Check the production dispatcher and worker.",
+            _("Delayed production collection"),
+            _("Check the production dispatcher and worker."),
         ),
         (
             "interrupted_metering",
-            "Interrupted production collection",
-            "The durable dispatcher recovers expired leases.",
+            _("Interrupted production collection"),
+            _("The durable dispatcher recovers expired leases."),
         ),
         (
             "unavailable_forecasts",
-            "Emails without saved forecasts",
-            "Review the plant collection history and approved connection.",
+            _("Emails without saved forecasts"),
+            _("Review the plant collection history and approved connection."),
         ),
         (
             "partial_forecasts",
-            "Emails with partial forecasts",
-            "Review saved forecast coverage; missing intervals are not zero.",
+            _("Emails with partial forecasts"),
+            _("Review saved forecast coverage; missing intervals are not zero."),
         ),
         (
             "overdue_collections",
-            "Delayed collections",
-            "Check the collection dispatcher and worker.",
+            _("Delayed collections"),
+            _("Check the collection dispatcher and worker."),
         ),
         (
             "interrupted_collections",
-            "Interrupted collections",
-            "The durable dispatcher recovers expired leases.",
+            _("Interrupted collections"),
+            _("The durable dispatcher recovers expired leases."),
         ),
         (
             "failed_collections",
-            "Failed collections",
-            "Review the plant connection and recorded error.",
+            _("Failed collections"),
+            _("Review the plant connection and recorded error."),
         ),
         (
             "regions_without_recent_forecasts",
-            "Plants without recent forecasts",
-            "Review saved acquisition times and collection settings.",
+            _("Plants without recent forecasts"),
+            _("Review saved acquisition times and collection settings."),
         ),
         (
             "blocked_provider_credentials",
-            "Provider keys needing attention",
-            "Replace the private key, then validate the connection.",
+            _("Provider keys needing attention"),
+            _("Replace the private key, then validate the connection."),
         ),
         (
             "provider_cooldowns",
-            "Provider request delays",
-            "Wait for provider recovery; preserve the shared daily quota.",
+            _("Provider request delays"),
+            _("Wait for provider recovery; preserve the shared daily quota."),
         ),
         (
             "failed_notifications",
-            "Email needing attention",
-            "Uncertain transmission must be reconciled before any manual resend.",
+            _("Email needing attention"),
+            _("Uncertain transmission must be reconciled before any manual resend."),
         ),
-        ("overdue_notifications", "Delayed emails", "Check the dedicated notification worker."),
+        (
+            "overdue_notifications",
+            _("Delayed emails"),
+            _("Check the dedicated notification worker."),
+        ),
         (
             "mail_authentication_failures",
-            "Email authentication failures",
-            "Check deployment mail credentials.",
+            _("Email authentication failures"),
+            _("Check deployment mail credentials."),
         ),
         (
             "failed_metering",
-            "Failed production collection",
-            "Review the reported-production connection.",
+            _("Failed production collection"),
+            _("Review the reported-production connection."),
         ),
     )
     phases = {row.phase: row for row in DispatcherStatus.objects.all()}
@@ -416,7 +422,7 @@ def operations_context() -> dict[str, Any]:
                 "succeeded_at": phases[name].succeeded_at if name in phases else None,
                 "last_error": phases[name].last_error if name in phases else "",
                 "unhealthy": name in unhealthy_phases,
-                "state_label": "Needs attention" if name in unhealthy_phases else "Current",
+                "state_label": _("Needs attention") if name in unhealthy_phases else _("Current"),
             }
             for name, label in DispatcherStatus.Phase.choices
         ],
@@ -425,15 +431,19 @@ def operations_context() -> dict[str, Any]:
 
 
 class WorkspaceSettingsForm(forms.Form):
-    max_recipients = forms.IntegerField(min_value=1, max_value=32767, label="Recipients per plant")
+    max_recipients = forms.IntegerField(
+        min_value=1, max_value=32767, label=gettext_lazy("Recipients per plant")
+    )
     expected_max_recipients = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
 
     def apply(self, actor: User) -> None:
         require_admin(actor)
         with transaction.atomic():
-            settings, _ = NotificationSettings.objects.select_for_update().get_or_create(pk=1)
+            settings, _created = NotificationSettings.objects.select_for_update().get_or_create(
+                pk=1
+            )
             if settings.max_recipients != self.cleaned_data["expected_max_recipients"]:
-                raise ValidationError("Settings changed. Reload before saving.")
+                raise ValidationError(_("Settings changed. Reload before saving."))
             value = self.cleaned_data["max_recipients"]
             if value == settings.max_recipients:
                 return
@@ -476,12 +486,12 @@ class ReviewDecisionForm(forms.Form):
                 region.revision != data["expected_revision"]
                 or region.status != data["expected_status"]
             ):
-                raise ValidationError("The plant changed. Reload before reviewing it.")
+                raise ValidationError(_("The plant changed. Reload before reviewing it."))
             if data["action"] in {"reject", "suspend"}:
                 required_status = "pending" if data["action"] == "reject" else "approved"
                 if region.status != required_status:
                     raise ValidationError(
-                        "This decision is unavailable for the current review status."
+                        _("This decision is unavailable for the current review status.")
                     )
                 transition_region(
                     actor, region.pk, "rejected" if data["action"] == "reject" else "suspended"

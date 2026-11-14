@@ -1,4 +1,5 @@
 "use client";
+import { useTranslations, useLocale, useFormatter } from "next-intl";
 
 import { useState } from "react";
 import { request } from "@/lib/api";
@@ -16,16 +17,18 @@ function localInput(value: string): string {
         .slice(0, 16);
 }
 
-function timestamp(data: FormData, key: string): string | null {
+function timestamp(
+    data: FormData,
+    key: string,
+    t: ReturnType<typeof useTranslations<"Outages">>,
+): string | null {
     const value = String(data.get(key) ?? "");
     if (!value) return null;
     const date = new Date(value);
     if (!Number.isFinite(date.getTime()) || date.getTime() > Date.now())
-        throw new Error("Choose a valid time that is not in the future.");
+        throw new Error(t("invalidTime"));
     if (localInput(date.toISOString()) !== value)
-        throw new Error(
-            "This local time does not exist in your device timezone. Choose another time.",
-        );
+        throw new Error(t("nonexistentTime"));
     return date.toISOString();
 }
 
@@ -42,13 +45,24 @@ export function Outages({
     onChanged: () => void;
     currentConfigurationId?: number;
 }) {
+    const t = useTranslations("Outages");
+    const locale = useLocale();
+    const formatNumber = useFormatter();
+    const kinds: Record<string, string> = {
+        inverter: t("inverter"),
+        panels: t("panels"),
+        grid: t("grid"),
+        other: t("other"),
+        multiple: t("multipleFaults"),
+    };
+
     const [revision, setRevision] = useState(0);
     const [editor, setEditor] = useState<Outage | "new" | null>(null);
     const [resolving, setResolving] = useState<number | null>(null);
     const resource = useCollection<Outage>(`${base}outages/`, revision);
     const deviceTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const format = (value: string) =>
-        new Date(value).toLocaleString("en", { timeZone: deviceTimezone });
+        new Date(value).toLocaleString(locale, { timeZone: deviceTimezone });
     const changed = () => {
         setRevision((value) => value + 1);
         onChanged();
@@ -57,40 +71,31 @@ export function Outages({
         <section className="panel">
             <div className="section-heading">
                 <div>
-                    <h2>Plant outages</h2>
+                    <h2>{t("plantOutages")}</h2>
                 </div>
                 <button className="button" onClick={() => setEditor("new")}>
-                    Report outage
+                    {t("reportOutage")}
                 </button>
             </div>
             <p className="fine">
-                Entry and display times use your device timezone:{" "}
-                {deviceTimezone}.
+                {t("deviceTimezone", { timezone: deviceTimezone })}
                 {deviceTimezone !== timezone
-                    ? ` Plant timezone: ${timezone}.`
+                    ? t("plantTimezone", { timezone })
                     : ""}
             </p>
             <details>
-                <summary>How to report an outage</summary>
-                <p>
-                    Keep simultaneous faults in one incident and enter the total
-                    remaining plant capacity. Unknown impact stays unknown; it
-                    is never treated as zero.
-                </p>
-                <p className="fine">
-                    Edit corrects an existing report. If available capacity
-                    changes during an outage, close this period and report the
-                    new operating state.
-                </p>
+                <summary>{t("howToReportAnOutage")}</summary>
+                <p>{t("reportingHelp")}</p>
+                <p className="fine">{t("editingHelp")}</p>
             </details>
             {editor && (
                 <section
                     aria-label={
-                        editor === "new" ? "Report outage" : "Edit outage"
+                        editor === "new" ? t("reportOutage") : t("editOutage")
                     }
                 >
                     <h3>
-                        {editor === "new" ? "Report outage" : "Edit outage"}
+                        {editor === "new" ? t("reportOutage") : t("editOutage")}
                     </h3>
                     <OutageForm
                         key={
@@ -131,26 +136,26 @@ export function Outages({
                                 changed();
                             }}
                         >
-                            Reload outages
+                            {t("reloadOutages")}
                         </button>
                         <button
                             className="button secondary"
                             onClick={() => setEditor(null)}
                         >
-                            Close editor
+                            {t("closeEditor")}
                         </button>
                     </div>
                 </section>
             )}
             {resource.loading ? (
-                <p role="status">Loading outages…</p>
+                <p role="status">{t("loadingOutages")}</p>
             ) : resource.error ? (
                 <Notice error>{resource.error}</Notice>
             ) : (
                 <>
                     <div className="toolbar">
                         <CsvDownload
-                            label="Download outages CSV"
+                            label={t("downloadOutagesCSV")}
                             filename="plant-outages"
                             records={resource.data?.results ?? []}
                             metadata={{
@@ -160,7 +165,7 @@ export function Outages({
                         />
                     </div>
                     {!resource.data?.results.length && (
-                        <p>No outages recorded.</p>
+                        <p>{t("noOutagesRecorded")}</p>
                     )}
                     {resource.data?.results.map((outage) => (
                         <article key={outage.id} className="provenance">
@@ -169,37 +174,62 @@ export function Outages({
                                 <Tag>{outage.status}</Tag>
                             </div>
                             <p>
-                                {outage.kind.replaceAll("_", " ")} · Started{" "}
-                                {format(outage.starts_at)}
+                                {t("started", {
+                                    kind: kinds[outage.kind] ?? t("other"),
+                                    time: format(outage.starts_at),
+                                })}
                                 {outage.status === "cancelled"
-                                    ? " · Cancelled entry"
+                                    ? t("cancelledEntry")
                                     : outage.ends_at
-                                      ? ` · Resolved ${format(outage.ends_at)}`
-                                      : " · Ongoing"}
+                                      ? t("resolved", {
+                                            time: format(outage.ends_at),
+                                        })
+                                      : t("ongoing")}
                             </p>
                             <dl className="stats">
                                 <div>
-                                    <dt>Available panels</dt>
+                                    <dt>{t("availablePanels")}</dt>
                                     <dd>
                                         {outage.available_dc_mw == null
-                                            ? "Unknown"
-                                            : `${outage.available_dc_mw} MW`}
+                                            ? t("unknown")
+                                            : t("power", {
+                                                  value: formatNumber.number(
+                                                      outage.available_dc_mw,
+                                                      {
+                                                          maximumFractionDigits: 6,
+                                                      },
+                                                  ),
+                                              })}
                                     </dd>
                                 </div>
                                 <div>
-                                    <dt>Available inverter</dt>
+                                    <dt>{t("availableInverter")}</dt>
                                     <dd>
                                         {outage.available_inverter_mw == null
-                                            ? "Unknown"
-                                            : `${outage.available_inverter_mw} MW`}
+                                            ? t("unknown")
+                                            : t("power", {
+                                                  value: formatNumber.number(
+                                                      outage.available_inverter_mw,
+                                                      {
+                                                          maximumFractionDigits: 6,
+                                                      },
+                                                  ),
+                                              })}
                                     </dd>
                                 </div>
                                 <div>
-                                    <dt>Available export</dt>
+                                    <dt>{t("availableExport")}</dt>
                                     <dd>
                                         {outage.available_export_mw == null
-                                            ? "Unknown"
-                                            : `${outage.available_export_mw} MW`}
+                                            ? t("unknown")
+                                            : t("power", {
+                                                  value: formatNumber.number(
+                                                      outage.available_export_mw,
+                                                      {
+                                                          maximumFractionDigits: 6,
+                                                      },
+                                                  ),
+                                              })}
                                     </dd>
                                 </div>
                             </dl>
@@ -208,11 +238,7 @@ export function Outages({
                                 currentConfigurationId &&
                                 outage.declared_configuration_id !==
                                     currentConfigurationId && (
-                                    <Notice>
-                                        Configuration changed. Edit this report
-                                        to confirm remaining capacities. Outage
-                                        impact is unknown until confirmed.
-                                    </Notice>
+                                    <Notice>{t("configurationChanged")}</Notice>
                                 )}
                             {outage.status !== "cancelled" && (
                                 <div className="button-group">
@@ -220,7 +246,7 @@ export function Outages({
                                         className="button secondary"
                                         onClick={() => setEditor(outage)}
                                     >
-                                        Edit report
+                                        {t("editReport")}
                                     </button>
                                     {outage.status === "active" && (
                                         <button
@@ -229,23 +255,27 @@ export function Outages({
                                                 setResolving(outage.id)
                                             }
                                         >
-                                            Resolve outage
+                                            {t("resolveOutage")}
                                         </button>
                                     )}
                                 </div>
                             )}
                             {resolving === outage.id && (
                                 <ActionForm
-                                    submit="Save resolution"
+                                    submit={t("saveResolution")}
                                     onSubmit={async (data) => {
-                                        const ends = timestamp(data, "ends_at");
+                                        const ends = timestamp(
+                                            data,
+                                            "ends_at",
+                                            t,
+                                        );
                                         if (
                                             !ends ||
                                             new Date(ends) <=
                                                 new Date(outage.starts_at)
                                         )
                                             throw new Error(
-                                                "Resolution must be after the outage start.",
+                                                t("resolutionAfterStart"),
                                             );
                                         await request(
                                             `${base}outages/${outage.id}/resolve/`,
@@ -262,7 +292,7 @@ export function Outages({
                                     }}
                                 >
                                     <Field
-                                        label="Resolved at (device time)"
+                                        label={t("resolvedAtDeviceTime")}
                                         name="ends_at"
                                         type="datetime-local"
                                         defaultValue={localInput(
@@ -273,9 +303,11 @@ export function Outages({
                             )}
                             {outage.status !== "cancelled" && (
                                 <details>
-                                    <summary>Cancel an incorrect entry</summary>
+                                    <summary>
+                                        {t("cancelAnIncorrectEntry")}
+                                    </summary>
                                     <ActionForm
-                                        submit="Cancel outage"
+                                        submit={t("cancelOutage")}
                                         onSubmit={async () => {
                                             await request(
                                                 `${base}outages/${outage.id}/cancel/`,
@@ -295,8 +327,7 @@ export function Outages({
                                                     type="checkbox"
                                                     required
                                                 />{" "}
-                                                I confirm this incident was
-                                                recorded incorrectly.
+                                                {t("confirmationIncorrect")}
                                             </span>
                                         </label>
                                     </ActionForm>
@@ -317,6 +348,8 @@ function OutageForm({
     outage?: Outage;
     onSave: (data: OutageInput) => Promise<void>;
 }) {
+    const t = useTranslations("Outages");
+
     const capacities = [
         outage?.available_dc_mw,
         outage?.available_inverter_mw,
@@ -333,15 +366,13 @@ function OutageForm({
     );
     return (
         <ActionForm
-            submit={outage ? "Save outage changes" : "Save outage"}
+            submit={outage ? t("saveOutageChanges") : t("saveOutage")}
             onSubmit={async (data) => {
-                const starts = timestamp(data, "starts_at");
-                const ends = timestamp(data, "ends_at");
-                if (!starts) throw new Error("Enter the outage start.");
+                const starts = timestamp(data, "starts_at", t);
+                const ends = timestamp(data, "ends_at", t);
+                if (!starts) throw new Error(t("enterTheOutageStart"));
                 if (ends && new Date(ends) <= new Date(starts))
-                    throw new Error(
-                        "Resolution must be after the outage start.",
-                    );
+                    throw new Error(t("resolutionAfterStart"));
                 const capacity = (key: string) =>
                     impact === "total"
                         ? 0
@@ -352,7 +383,7 @@ function OutageForm({
                 const kind = (
                     ["inverter", "panels", "grid", "other", "multiple"] as const
                 ).find((value) => value === data.get("kind"));
-                if (!kind) throw new Error("Choose a valid outage type.");
+                if (!kind) throw new Error(t("chooseAValidOutageType"));
                 await onSave({
                     kind,
                     title: String(data.get("title") ?? ""),
@@ -367,23 +398,23 @@ function OutageForm({
         >
             <div className="form-grid">
                 <Select
-                    label="Outage type"
+                    label={t("outageType")}
                     name="kind"
                     defaultValue={outage?.kind ?? "inverter"}
                 >
-                    <option value="inverter">Inverter</option>
-                    <option value="panels">Panels</option>
-                    <option value="grid">Grid</option>
-                    <option value="other">Other</option>
-                    <option value="multiple">Multiple faults</option>
+                    <option value="inverter">{t("inverter")}</option>
+                    <option value="panels">{t("panels")}</option>
+                    <option value="grid">{t("grid")}</option>
+                    <option value="other">{t("other")}</option>
+                    <option value="multiple">{t("multipleFaults")}</option>
                 </Select>
                 <Field
-                    label="Incident title"
+                    label={t("incidentTitle")}
                     name="title"
                     defaultValue={outage?.title}
                 />
                 <Field
-                    label="Started at (device time)"
+                    label={t("startedAtDeviceTime")}
                     name="starts_at"
                     type="datetime-local"
                     defaultValue={localInput(
@@ -391,7 +422,7 @@ function OutageForm({
                     )}
                 />
                 <Field
-                    label="Resolved at (device time, optional)"
+                    label={t("resolvedAtDeviceTimeOptional")}
                     name="ends_at"
                     type="datetime-local"
                     required={false}
@@ -401,24 +432,22 @@ function OutageForm({
                 />
             </div>
             <label className="field">
-                Capacity impact
+                {t("capacityImpact")}
                 <select
                     value={impact}
                     onChange={(event) => setImpact(event.target.value)}
                 >
-                    <option value="total">Total outage</option>
-                    <option value="reduced">Reduced capacity</option>
-                    <option value="unknown">Unknown impact</option>
+                    <option value="total">{t("totalOutage")}</option>
+                    <option value="reduced">{t("reducedCapacity")}</option>
+                    <option value="unknown">{t("unknownImpact")}</option>
                 </select>
             </label>
             {impact === "reduced" && (
                 <>
-                    <p className="fine">
-                        Enter remaining MW. Blank means unknown.
-                    </p>
+                    <p className="fine">{t("remainingCapacityHelp")}</p>
                     <div className="form-grid">
                         <Field
-                            label="Available panel DC capacity (MW)"
+                            label={t("availablePanelDCCapacityMW")}
                             name="available_dc_mw"
                             type="number"
                             min={0}
@@ -427,7 +456,7 @@ function OutageForm({
                             defaultValue={outage?.available_dc_mw ?? ""}
                         />
                         <Field
-                            label="Available inverter AC capacity (MW)"
+                            label={t("availableInverterACCapacityMW")}
                             name="available_inverter_mw"
                             type="number"
                             min={0}
@@ -436,7 +465,7 @@ function OutageForm({
                             defaultValue={outage?.available_inverter_mw ?? ""}
                         />
                         <Field
-                            label="Available grid export capacity (MW)"
+                            label={t("availableGridExportCapacityMW")}
                             name="available_export_mw"
                             type="number"
                             min={0}
@@ -446,17 +475,13 @@ function OutageForm({
                         />
                     </div>
                     <details>
-                        <summary>Capacity entry help</summary>
-                        <p className="fine">
-                            Enter available capacity, not lost capacity.
-                            Disconnected panels reduce DC capacity. Do not infer
-                            a loss percentage from an inverter fault.
-                        </p>
+                        <summary>{t("capacityEntryHelp")}</summary>
+                        <p className="fine">{t("capacityHelp")}</p>
                     </details>
                 </>
             )}
             <label className="field">
-                Notes (optional)
+                {t("notesOptional")}
                 <textarea name="notes" defaultValue={outage?.notes} />
             </label>
         </ActionForm>

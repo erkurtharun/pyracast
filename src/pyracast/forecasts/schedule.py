@@ -7,6 +7,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count
+from django.utils.translation import gettext
 
 from pyracast.accounts.operations import require_member
 from pyracast.collection_window import HISTORY_CLOCK, HISTORY_END_CLOCK, NIGHT_RETRY_DELAY
@@ -50,12 +51,18 @@ def configure_schedule(
         limit = forecast_time_limit(binding.provider_account.daily_quota if binding else 10)
         if len(times) != len(set(times)) or len(times) > limit:
             raise ValidationError(
-                f"Provide at most {limit} distinct local times; history uses one daily request."
+                gettext(
+                    "Provide at most %(limit)s distinct local times; "
+                    "history uses one daily request."
+                ),
+                params={"limit": limit},
             )
         if any(re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", clock) is None for clock in times):
-            raise ValidationError("Collection times must use HH:MM.")
+            raise ValidationError(gettext("Collection times must use HH:MM."))
         if enabled and (not times or binding is None or not binding_is_current(binding)):
-            raise ValidationError("An approved current region and at least one time are required.")
+            raise ValidationError(
+                gettext("An approved current region and at least one time are required.")
+            )
         times = sorted(times)
         existing = CollectionSchedule.objects.filter(region=region).first()
         if existing is not None and existing.enabled == enabled and existing.times == times:

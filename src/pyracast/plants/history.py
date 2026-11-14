@@ -6,6 +6,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
+from django.utils.translation import gettext
 
 from pyracast.accounts.operations import require_member
 from pyracast.forecasts.history import historical_irradiance, select_actual_snapshot
@@ -108,7 +109,7 @@ def _plant_outlook(
     now = timezone.now()
     today = now.astimezone(ZoneInfo(region.timezone)).date()
     if source not in {"auto", "forecast", "estimated_actuals", "archived_forecast"}:
-        raise ValidationError("Unsupported data source.")
+        raise ValidationError(gettext("Unsupported data source."))
     if source == "archived_forecast":
         return archived_forecast(plant, target_date, resolution_minutes, now, as_of=as_of)
     if source == "forecast" or (source == "auto" and target_date >= today):
@@ -126,13 +127,13 @@ def _plant_outlook(
             projection_at=now if as_of is None else None,
         )
     if isinstance(resolution_minutes, bool) or resolution_minutes not in (30, 60):
-        raise ValidationError("Resolution must be 30 or 60 minutes.")
+        raise ValidationError(gettext("Resolution must be 30 or 60 minutes."))
     if not today - timedelta(days=366) <= target_date < today:
         raise ValidationError(
-            "Estimated actuals require a completed local day within the past year."
+            gettext("Estimated actuals require a completed local day within the past year.")
         )
     if as_of is not None and (as_of.utcoffset() is None or as_of > now):
-        raise ValidationError("as_of must be aware and no later than now.")
+        raise ValidationError(gettext("as_of must be aware and no later than now."))
     cutoff = (as_of or now).astimezone(UTC)
     configurations = PlantConfiguration.objects.select_related("binding__provider_account").filter(
         plant=plant, created_at__lte=cutoff

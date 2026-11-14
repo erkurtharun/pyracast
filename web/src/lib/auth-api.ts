@@ -1,4 +1,5 @@
 import { ApiError } from "./api";
+import { browserErrors } from "@/i18n/browser";
 
 export type AuthResult = {
     status: number;
@@ -16,6 +17,7 @@ export async function authRequest(
     token: string,
     body?: unknown,
 ): Promise<AuthResult> {
+    const t = browserErrors();
     const response = await fetch(`/api/auth/browser/v1/${path}`, {
         method,
         credentials: "same-origin",
@@ -32,8 +34,8 @@ export async function authRequest(
     if (!data || typeof data !== "object" || Array.isArray(data))
         throw new ApiError(
             response.ok
-                ? "The server returned an invalid response. Please try again."
-                : `Request failed (${response.status}). Please try again.`,
+                ? t("invalidResponse")
+                : t("request", { status: response.status }),
         );
     const result = data as AuthResult;
     if (
@@ -44,7 +46,7 @@ export async function authRequest(
         const errors = result.errors ?? [];
         throw new ApiError(
             errors.map((error) => error.message).join(" ") ||
-                `Request failed (${response.status}). Please try again.`,
+                t("request", { status: response.status }),
             Object.fromEntries(
                 errors
                     .filter((error) => error.param)

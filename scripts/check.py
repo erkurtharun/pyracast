@@ -44,6 +44,7 @@ def main(argv: list[str] | None = None) -> int:
         [sys.executable, "-m", "ruff", "format", "--check", "."],
         [sys.executable, "-m", "ruff", "check", "--output-format", "concise", "."],
         [sys.executable, "-m", "mypy"],
+        [sys.executable, "scripts/translations.py", "--check"],
         [
             sys.executable,
             "-m",

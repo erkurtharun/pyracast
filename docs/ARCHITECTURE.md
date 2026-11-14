@@ -95,6 +95,21 @@ independently declared bases, and archived source manifests retain their fields.
 
 Forecast snapshots pin their job's binding under a composite foreign key, supporting source lookup and a database-enforced normalization target. Normalization retains its unique source/target binding key for idempotency.
 
+## Language
+
+English and Turkish share the same URLs. Language selection uses the account's
+explicit preference, then its browser cookie, supported `Accept-Language` ranges,
+trusted Cloudflare country information and finally English. Automatic detection
+never becomes an account preference. Language changes require CSRF; authenticated
+choices belong to the current user and survive new sessions and devices.
+
+The customer shell stays neutral until the session supplies its language.
+`next-intl` catalogs localize the interface and display formats; Django gettext
+covers administration, validation and email. Plant timezones, units, ISO timestamps
+and CSV values remain independent of language. CI checks catalog completeness and
+interpolation contracts; `uv run python scripts/translations.py` rebuilds the
+committed gettext binaries after editing their source catalogs.
+
 ## Approval flow
 
 Company registration creates a non-staff user, a new tenant and its initial membership
@@ -504,8 +519,10 @@ Select the newest eligible saved output with complete valid coverage of tomorrow
 under the pinned binding. If none exists, use the newest usable partial tomorrow
 output with a null complete total and explicit coverage. If neither exists, send an
 unavailable notice. Today's coverage never disqualifies a valid tomorrow forecast.
-Freeze the selected source and rendered text, HTML and CSV for the whole plant slot
-before sending; retries and other recipients use that same content. Source age,
+Freeze one selected source for the whole plant slot and render text and HTML in
+each reminder owner's saved language, defaulting to English. Pin that language
+when scheduling; freeze each language's content before sending. Retries preserve
+the frozen message, and all languages share the same source and CSV values. Source age,
 fallback kind, collection time, units and completeness remain visible. Age over
 24 hours is stale; a stale source is usable only for dates it actually covers.
 These messages describe incident irradiance energy in kWh/m², separately from plant
@@ -556,6 +573,7 @@ notification worker's threads do not share mail connections or OAuth token state
 
 ## Primary references
 
+- [W3C language preferences](https://www.w3.org/International/questions/qa-accept-lang-locales), [Microsoft message formatting](https://learn.microsoft.com/en-us/globalization/internationalization/message-formatting), [next-intl App Router](https://next-intl.dev/docs/getting-started/app-router), [Django translation](https://docs.djangoproject.com/en/6.1/topics/i18n/translation/).
 - [Django custom administration views](https://docs.djangoproject.com/en/6.1/ref/contrib/admin/), [Cloudscape resource views](https://cloudscape.design/patterns/resource-management/view/), [GOV.UK check answers](https://design-system.service.gov.uk/patterns/check-answers/), [USWDS responsive tables](https://designsystem.digital.gov/components/table/).
 - [The Twelve-Factor App](https://12factor.net/), [Django design philosophies](https://docs.djangoproject.com/en/6.1/misc/design-philosophies/), [PEP 8](https://peps.python.org/pep-0008/).
 - [Python 3.15.2](https://www.python.org/downloads/release/python-3152/), [Django 6.1.3](https://docs.djangoproject.com/en/6.1/releases/6.1.3/), [DRF releases](https://www.django-rest-framework.org/community/release-notes/).

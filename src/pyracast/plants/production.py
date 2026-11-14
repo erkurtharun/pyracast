@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
 from django.utils import timezone
+from django.utils.translation import gettext
 
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.availability import (
@@ -36,7 +37,7 @@ def production_history(
     now = timezone.now()
     first, last = available_date_bounds(configuration, now) if configuration else (None, None)
     if (start_date is None) != (end_date is None):
-        raise ValidationError("Both start_date and end_date are required.")
+        raise ValidationError(gettext("Both start_date and end_date are required."))
     if start_date is None or end_date is None:
         end_date = last or now.astimezone(ZoneInfo(zone)).date() - timedelta(days=1)
         start_date = (
@@ -45,7 +46,9 @@ def production_history(
             else max(first or end_date - timedelta(days=6), end_date - timedelta(days=6))
         )
     if resolution_minutes not in {30, 60} or not 1 <= (end_date - start_date).days + 1 <= 31:
-        raise ValidationError("Use a range of 1 to 31 days and 30 or 60 minute resolution.")
+        raise ValidationError(
+            gettext("Use a range of 1 to 31 days and 30 or 60 minute resolution.")
+        )
     range_start, _ = local_day_bounds(start_date, zone)
     _, range_end = local_day_bounds(end_date, zone)
     observations = list(

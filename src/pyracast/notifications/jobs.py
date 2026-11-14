@@ -4,6 +4,7 @@ import time
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta
+from typing import cast
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
@@ -153,6 +154,16 @@ def process_notification(
             delivery.save()
             return False
         delivery.recipient = recipient
+        slot_deliveries = NotificationDelivery.objects.filter(
+            preference__region_id=delivery.preference.region_id,
+            binding_id=delivery.binding_id,
+            scheduled_for=delivery.scheduled_for,
+        )
+        frozen = list(
+            slot_deliveries.filter(prepared_message__isnull=False)
+            .order_by("language", "pk")
+            .distinct("language")
+        )
         try:
             if not prepare_delivery(delivery, now):
                 return False
@@ -165,16 +176,36 @@ def process_notification(
                 delivery.pk,
                 type(error).__name__,
             )
-            message, delivery.prepared_message = build_unavailable_message(delivery, now)
+            prepared_at = now
             delivery.snapshot = None
-            NotificationDelivery.objects.filter(
-                preference__region_id=delivery.preference.region_id,
-                binding_id=delivery.binding_id,
-                scheduled_for=delivery.scheduled_for,
+            if frozen:
+                delivery.snapshot = frozen[0].snapshot
+                existing = cast(dict[str, object], frozen[0].prepared_message)
+                prepared_at = datetime.fromisoformat(
+                    cast(str, existing.get("prepared_at", delivery.scheduled_for.isoformat()))
+                )
+            message, delivery.prepared_message = build_unavailable_message(delivery, prepared_at)
+            unprepared = slot_deliveries.filter(
                 attempts=0,
                 status__in=("pending", "retry"),
                 prepared_message__isnull=True,
-            ).update(snapshot=None, prepared_message=delivery.prepared_message)
+            )
+            payloads = {
+                record.language: cast(dict[str, object], record.prepared_message)
+                for record in frozen
+            }
+            payloads.setdefault(
+                delivery.language, cast(dict[str, object], delivery.prepared_message)
+            )
+            for record in unprepared:
+                if record.language not in payloads:
+                    payloads[record.language] = dict(
+                        build_unavailable_message(record, prepared_at)[1]
+                    )
+            for language, payload in payloads.items():
+                unprepared.filter(language=language).update(
+                    snapshot=delivery.snapshot, prepared_message=payload
+                )
         token = uuid.uuid4()
         delivery.status, delivery.lease_token = "sending", token
         delivery.lease_expires_at = now + LEASE_DURATION

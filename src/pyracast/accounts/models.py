@@ -23,3 +23,15 @@ class AuthenticationCacheEntry(models.Model):
 
     class Meta:
         db_table = "pyracast_authentication_cache"
+
+
+class UserLanguagePreference(models.Model):
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    language = models.CharField(max_length=2, choices=(("en", "English"), ("tr", "Türkçe")))
+
+    class Meta:
+        constraints = (
+            models.CheckConstraint(
+                condition=models.Q(language__in=("en", "tr")), name="supported_user_language"
+            ),
+        )

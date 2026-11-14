@@ -1,0 +1,195 @@
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Pyracast\n"
+"Language: tr\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+#, python-format
+msgid "%(days)d day, %(time)s"
+msgid_plural "%(days)d days, %(time)s"
+msgstr[0] "%(days)d gün, %(time)s"
+msgstr[1] "%(days)d gün, %(time)s"
+
+msgid "Available partial energy"
+msgstr "Mevcut kısmi enerji"
+
+#, python-format
+msgid "Available partial energy: %(energy)s kWh/m²"
+msgstr "Mevcut kısmi enerji: %(energy)s kWh/m²"
+
+#, python-format
+msgid "Collected: %(collected)s"
+msgstr "Toplanma: %(collected)s"
+
+msgid "Collected: unavailable"
+msgstr "Toplanma: mevcut değil"
+
+msgid "Complete coverage"
+msgstr "Tam kapsam"
+
+#, python-format
+msgid "Complete: %(complete)s; coverage fraction: %(coverage)s"
+msgstr "Tam: %(complete)s; kapsam oranı: %(coverage)s"
+
+msgid "Coverage fraction"
+msgstr "Kapsam oranı"
+
+msgid "Daily energy"
+msgstr "Günlük enerji"
+
+#, python-format
+msgid "Daily energy: %(energy)s"
+msgstr "Günlük enerji: %(energy)s"
+
+msgid "Daily energy: Unavailable (no usable saved coverage)"
+msgstr "Günlük enerji: Mevcut değil (kullanılabilir kayıtlı veri kapsamı yok)"
+
+msgid "Daily irradiance summary"
+msgstr "Günlük ışınım özeti"
+
+msgid "Dataset kind: forecast"
+msgstr "Veri kümesi türü: tahmin"
+
+#, python-format
+msgid "Date: %(date)s (%(timezone)s)"
+msgstr "Tarih: %(date)s (%(timezone)s)"
+
+msgid "False"
+msgstr "Hayır"
+
+#, python-format
+msgid "Forecast for %(plant)s"
+msgstr "%(plant)s için tahmin"
+
+msgid ""
+"Interval mean irradiance (W/m²) and quality flags are in the attached CSV."
+msgstr ""
+"Aralık ortalama ışınımı (W/m²) ve kalite kodları ekteki CSV dosyasındadır."
+
+msgid "Interval values and quality flags are attached as CSV."
+msgstr "Aralık değerleri ve kalite kodları CSV dosyası olarak eklendi."
+
+#, python-format
+msgid "Model: %(model)s; quality: %(quality)s"
+msgstr "Model: %(model)s; kalite: %(quality)s"
+
+msgid "No daily energy total is available."
+msgstr "Günlük enerji toplamı mevcut değil."
+
+msgid ""
+"No usable saved forecast is available. Tomorrow's forecast is unavailable."
+msgstr "Kullanılabilir kayıtlı tahmin yok. Yarının tahmini mevcut değil."
+
+msgid ""
+"Previously saved forecast fallback; freshness is reduced. Check the "
+"collection timestamp."
+msgstr ""
+"Önceden kaydedilmiş yedek tahmin kullanıldı; güncellik azaldı. Toplanma "
+"zamanını kontrol edin."
+
+#, python-format
+msgid "Provider issue: %(issued)s"
+msgstr "Sağlayıcı yayımlama zamanı: %(issued)s"
+
+msgid "Pyracast forecast unavailable"
+msgstr "Pyracast tahmini mevcut değil"
+
+#, python-format
+msgid "Pyracast forecast — %(date)s"
+msgstr "Pyracast tahmini — %(date)s"
+
+#, python-format
+msgid "Saved forecast age at preparation: %(age)s"
+msgstr "Hazırlama anında kayıtlı tahminin yaşı: %(age)s"
+
+msgid "Saved forecast is at most 24 hours old."
+msgstr "Kayıtlı tahmin en fazla 24 saatlik."
+
+msgid ""
+"Saved forecast selected within the reminder preparation deadline. No new "
+"provider request was made."
+msgstr ""
+"Kayıtlı tahmin, hatırlatma hazırlama süresi içinde seçildi. Sağlayıcıya yeni"
+" bir istek yapılmadı."
+
+msgid "Scheduled collection forecast."
+msgstr "Planlı veri toplama işleminden alınan tahmin."
+
+#, python-format
+msgid "Scheduled: %(scheduled)s (%(timezone)s)"
+msgstr "Planlanan: %(scheduled)s (%(timezone)s)"
+
+msgid "Source freshness: missing."
+msgstr "Kaynak güncelliği: veri eksik."
+
+msgid "Stale saved forecast (older than 24 hours)."
+msgstr "Kayıtlı tahmin güncel değil (24 saatten eski)."
+
+#, python-format
+msgid ""
+"Tomorrow's saved forecast could not be prepared. No forecast energy total is available.\n"
+"Scheduled reminder: %(scheduled)s\n"
+"Please check the plant page for collection status."
+msgstr ""
+"Yarının kayıtlı tahmini hazırlanamadı. Tahmini enerji toplamı mevcut değil.\n"
+"Planlanan hatırlatma: %(scheduled)s\n"
+"Veri toplama durumunu santral sayfasından kontrol edin."
+
+msgid "True"
+msgstr "Evet"
+
+msgid "Unavailable (incomplete coverage)"
+msgstr "Mevcut değil (veri kapsamı eksik)"
+
+msgid ""
+"Unvalidated irradiance proxy. This is incident solar energy, not plant "
+"electricity."
+msgstr ""
+"Doğrulanmamış ışınım modeli. Bu, gelen güneş enerjisidir; santralin elektrik"
+" üretimi değildir."
+
+msgid "ambiguous_zero_power"
+msgstr "sıfır güçten ışınım belirlenemiyor"
+
+msgid "incomplete_day"
+msgstr "eksik gün"
+
+msgid "missing_power"
+msgstr "güç verisi eksik"
+
+msgid "negative_power"
+msgstr "negatif güç"
+
+msgid "night_power_conflict"
+msgstr "gece güç verisi çelişkisi"
+
+msgid "nonfinite_irradiance"
+msgstr "ışınım değeri sonlu değil"
+
+msgid "nonfinite_power"
+msgstr "güç değeri sonlu değil"
+
+msgid "partial_sunlight"
+msgstr "kısmi gün ışığı"
+
+msgid "prorated_interval_mean"
+msgstr "orantılanmış aralık ortalaması"
+
+msgid "sunlight_unknown"
+msgstr "gün ışığı bilinmiyor"
+
+msgid "synthetic_fixture"
+msgstr "sentetik örnek veri"
+
+msgid "unavailable"
+msgstr "mevcut değil"
+
+msgid "uniform_mean_proration"
+msgstr "sabit ortalama ile orantılama"
+
+msgid "unvalidated"
+msgstr "doğrulanmamış"

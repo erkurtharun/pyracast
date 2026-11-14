@@ -53,11 +53,12 @@ MIDDLEWARE = [
     "pyracast.api.middleware.PrivateAPIResponses",
     "pyracast.accounts.session_lock.SessionRequestSerialization",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "pyracast.accounts.middleware.SessionLifetime",
+    "pyracast.accounts.language.RequestLanguage",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
-    "django.contrib.auth.middleware.AuthenticationMiddleware",
     "pyracast.accounts.middleware.PrivilegedAuthenticatorEnrollment",
-    "pyracast.accounts.middleware.SessionLifetime",
     "allauth.account.middleware.AccountMiddleware",
     "allauth.usersessions.middleware.UserSessionsMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
@@ -187,7 +188,9 @@ SPECTACULAR_SETTINGS = {
         "ForecastSourceKindEnum": ["forecast", "estimated_actuals"],
     },
 }
-LANGUAGE_CODE = "en-us"
+LANGUAGE_CODE = "en"
+LANGUAGES = (("en", "English"), ("tr", "Türkçe"))
+USE_I18N = True
 TIME_ZONE = "UTC"
 USE_TZ = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

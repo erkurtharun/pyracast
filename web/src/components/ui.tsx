@@ -1,4 +1,5 @@
 "use client";
+import { useLocale, useTranslations } from "next-intl";
 import {
     createContext,
     useContext,
@@ -11,6 +12,7 @@ import {
 import { ApiError, request, type Page } from "@/lib/api";
 const FormErrors = createContext<Record<string, string>>({});
 export function useCollection<T>(url: string, refresh = 0, pollMs = 0) {
+    const t = useTranslations("Common");
     const [state, setState] = useState<{
         url: string;
         data?: Page<T>;
@@ -29,9 +31,7 @@ export function useCollection<T>(url: string, refresh = 0, pollMs = 0) {
                 const target = new URL(next, window.location.origin);
                 const path = target.pathname + target.search;
                 if (visited.has(path) || !target.pathname.startsWith("/api/"))
-                    throw new Error(
-                        "The server returned an invalid next page.",
-                    );
+                    throw new Error(t("invalidPage"));
                 visited.add(path);
                 const page = await request<Page<T>>(path);
                 rows.push(...page.results);
@@ -62,12 +62,13 @@ export function useCollection<T>(url: string, refresh = 0, pollMs = 0) {
             current = false;
             if (timer) clearInterval(timer);
         };
-    }, [url, refresh, pollMs]);
+    }, [url, refresh, pollMs, t]);
     return state.url === url
         ? state
         : { url, data: undefined, error: undefined, loading: true };
 }
 export function useResource<T>(url: string, refresh = 0, pollMs = 0) {
+    const locale = useLocale();
     const [state, setState] = useState<{
         data?: T;
         error?: string;
@@ -94,7 +95,7 @@ export function useResource<T>(url: string, refresh = 0, pollMs = 0) {
             current = false;
             if (timer) clearInterval(timer);
         };
-    }, [url, refresh, pollMs]);
+    }, [url, refresh, pollMs, locale]);
     return state;
 }
 export function Notice({
@@ -206,6 +207,7 @@ export function ActionForm({
     submit: string;
     onSubmit: (data: FormData) => Promise<void>;
 }) {
+    const t = useTranslations("Common");
     const [state, setState] = useState<
         | { status: "idle" | "pending" | "success" }
         | { status: "error"; message: string; fields: Record<string, string> }
@@ -232,7 +234,7 @@ export function ActionForm({
                         message:
                             error instanceof Error
                                 ? error.message
-                                : "Something went wrong.",
+                                : t("unexpected"),
                         fields: error instanceof ApiError ? error.fields : {},
                     });
                 }
@@ -245,7 +247,7 @@ export function ActionForm({
                     tabIndex={-1}
                     ref={errorRef}
                 >
-                    <strong>We couldn’t save your changes</strong>
+                    <strong>{t("saveFailed")}</strong>
                     {Object.keys(state.fields).length ? (
                         <ul>
                             {Object.entries(state.fields).map(
@@ -281,10 +283,10 @@ export function ActionForm({
                     {children}
                     <div className="form-footer">
                         <button className="button" type="submit">
-                            {state.status === "pending" ? "Saving…" : submit}
+                            {state.status === "pending" ? t("saving") : submit}
                         </button>
                         {state.status === "success" && (
-                            <span role="status">Saved successfully.</span>
+                            <span role="status">{t("saved")}</span>
                         )}
                     </div>
                 </fieldset>
@@ -303,12 +305,13 @@ export function Stat({
     unit?: string;
     note?: string;
 }) {
+    const locale = useLocale();
     return (
         <div className="stat">
             <span>{label}</span>
             <strong>
                 {typeof value === "number"
-                    ? new Intl.NumberFormat("en", {
+                    ? new Intl.NumberFormat(locale, {
                           maximumFractionDigits: 3,
                       }).format(value)
                     : value == null
@@ -327,6 +330,7 @@ export function Tag({
     children: ReactNode;
     tone?: "neutral" | "success" | "warning" | "danger";
 }) {
+    const t = useTranslations("Common");
     const value = typeof children === "string" ? children.toLowerCase() : "";
     const color =
         tone ??
@@ -337,18 +341,23 @@ export function Tag({
               : ["failed", "rejected"].includes(value)
                 ? "danger"
                 : "neutral");
-    return <span className={`tag tag-${color}`}>{children}</span>;
+    return (
+        <span className={`tag tag-${color}`}>
+            {t.has(`statuses.${value}`) ? t(`statuses.${value}`) : children}
+        </span>
+    );
 }
 export function JsonDetails({
     data,
-    label = "Technical details",
+    label,
 }: {
     data: unknown;
     label?: string;
 }) {
+    const t = useTranslations("Common");
     return (
         <details>
-            <summary>{label}</summary>
+            <summary>{label ?? t("technicalDetails")}</summary>
             <pre>{JSON.stringify(data, null, 2)}</pre>
         </details>
     );

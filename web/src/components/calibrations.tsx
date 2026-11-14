@@ -1,3 +1,5 @@
+"use client";
+import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { request, type Calibration } from "@/lib/api";
 import { CalibrationAutomationPanel } from "./calibration-automation";
@@ -24,6 +26,17 @@ export function Calibrations({
     productionRevision: number;
     currentConfigurationId: number | null;
 }) {
+    const t = useTranslations("Calibrations");
+    const locale = useLocale();
+    const enumLabel = (value: string) =>
+        value === ""
+            ? ""
+            : t.has(`values.${value}`)
+              ? t(`values.${value}`)
+              : t("unknown_value", {
+                    value: locale === "en" ? value.replaceAll("_", " ") : value,
+                });
+
     const [version, setVersion] = useState(0),
         [automationPending, setAutomationPending] = useState(false),
         [detail, setDetail] = useState<DetailState>({ status: "idle" }),
@@ -84,10 +97,9 @@ export function Calibrations({
             <section className="panel">
                 <div className="section-heading">
                     <div>
-                        <h2>Calibration history</h2>
+                        <h2>{t("calibration_history")}</h2>
                         <p className="fine">
-                            Future forecasts only. Reset also turns off
-                            automatic calibration.
+                            {t("future_forecasts_only_reset_also_turns_off")}
                         </p>
                     </div>
                     <div className="button-group">
@@ -95,7 +107,7 @@ export function Calibrations({
                             !resource.loading &&
                             !resource.error && (
                                 <CsvDownload
-                                    label="Download calibration CSV"
+                                    label={t("download_calibration_csv")}
                                     filename="calibrations"
                                     records={resource.data.results}
                                 />
@@ -104,7 +116,7 @@ export function Calibrations({
                             className="button secondary"
                             onClick={() => setVersion((current) => current + 1)}
                         >
-                            Refresh
+                            {t("refresh")}
                         </button>
                         <button
                             className="button secondary"
@@ -114,7 +126,7 @@ export function Calibrations({
                             }
                             onClick={() => action(`${base}calibration/reset/`)}
                         >
-                            Reset to baseline
+                            {t("reset_to_baseline")}
                         </button>
                     </div>
                 </div>
@@ -123,28 +135,29 @@ export function Calibrations({
                 )}
                 {actionState.status === "success" && (
                     <Notice>
-                        Calibration selection updated. Refresh the forecast to
-                        see the current result.
+                        {t(
+                            "calibration_selection_updated_refresh_the_forecast_to",
+                        )}
                     </Notice>
                 )}
                 {resource.loading ? (
-                    <p role="status">Loading calibration runs…</p>
+                    <p role="status">{t("loading_calibration_runs")}</p>
                 ) : resource.error ? (
                     <Notice error>{resource.error}</Notice>
                 ) : resource.data?.results.length ? (
-                    <ScrollRegion label="Calibration runs">
+                    <ScrollRegion label={t("calibration_runs")}>
                         <table>
                             <caption className="sr-only">
-                                Calibration runs
+                                {t("calibration_runs")}
                             </caption>
                             <thead>
                                 <tr>
-                                    <th>Run</th>
-                                    <th>Window</th>
-                                    <th>Status</th>
-                                    <th>Assessment</th>
-                                    <th>Factor</th>
-                                    <th>Actions</th>
+                                    <th>{t("run")}</th>
+                                    <th>{t("window")}</th>
+                                    <th>{t("status")}</th>
+                                    <th>{t("assessment")}</th>
+                                    <th>{t("factor")}</th>
+                                    <th>{t("actions")}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -160,12 +173,14 @@ export function Calibrations({
                                             {run.configuration_id !==
                                                 currentConfigurationId && (
                                                 <Tag>
-                                                    Previous configuration
+                                                    {t(
+                                                        "previous_configuration",
+                                                    )}
                                                 </Tag>
                                             )}
                                         </td>
                                         <td>
-                                            {run.assessment}{" "}
+                                            {enumLabel(run.assessment)}{" "}
                                             {(
                                                 run.result as Record<
                                                     string,
@@ -174,11 +189,22 @@ export function Calibrations({
                                             )?.provisional_production ===
                                                 true && (
                                                 <Tag tone="warning">
-                                                    Provisional production
+                                                    {t(
+                                                        "provisional_production",
+                                                    )}
                                                 </Tag>
                                             )}
                                         </td>
-                                        <td>{run.factor ?? "—"}</td>
+                                        <td>
+                                            {run.factor === null
+                                                ? "—"
+                                                : new Intl.NumberFormat(
+                                                      locale,
+                                                      {
+                                                          maximumFractionDigits: 4,
+                                                      },
+                                                  ).format(run.factor)}
+                                        </td>
                                         <td>
                                             <button
                                                 className="text-button"
@@ -186,15 +212,15 @@ export function Calibrations({
                                                     loadDetails(run.id)
                                                 }
                                             >
-                                                View details
+                                                {t("view_details")}
                                             </button>
                                             {run.status === "ready" &&
                                                 run.configuration_id !==
                                                     currentConfigurationId && (
                                                     <span>
-                                                        Only the current
-                                                        configuration can be
-                                                        activated.
+                                                        {t(
+                                                            "only_the_current_configuration_can_be_activated",
+                                                        )}
                                                     </span>
                                                 )}
                                             {run.status === "ready" &&
@@ -213,7 +239,7 @@ export function Calibrations({
                                                             )
                                                         }
                                                     >
-                                                        Activate
+                                                        {t("activate")}
                                                     </button>
                                                 )}
                                         </td>
@@ -223,21 +249,20 @@ export function Calibrations({
                         </table>
                     </ScrollRegion>
                 ) : (
-                    <Empty title="No calibration runs">
-                        Save complete paired days in the production journal to
-                        prepare a candidate automatically.
+                    <Empty title={t("no_calibration_runs")}>
+                        {t("save_complete_paired_days_in_the_production")}
                     </Empty>
                 )}
                 {detail.status === "error" && (
                     <Notice error>{detail.error}</Notice>
                 )}
                 {detail.status === "loading" && (
-                    <p role="status">Loading calibration details…</p>
+                    <p role="status">{t("loading_calibration_details")}</p>
                 )}
                 {selected && (
                     <div className="calibration-detail">
                         <div className="section-heading">
-                            <h3>Calibration #{selected.id}</h3>
+                            <h3>{t("calibration_id", { id: selected.id })}</h3>
                             <div className="tags">
                                 <Tag>{selected.status}</Tag>
                                 {(
@@ -247,26 +272,36 @@ export function Calibrations({
                                     > | null
                                 )?.provisional_production === true && (
                                     <Tag tone="warning">
-                                        Provisional production
+                                        {t("provisional_production")}
                                     </Tag>
                                 )}
                             </div>
                         </div>
                         <p>
-                            Assessment: {selected.assessment}. Factor:{" "}
-                            {selected.factor ?? "unavailable"}.
+                            {t("assessment_factor", {
+                                assessment: enumLabel(selected.assessment),
+                                factor:
+                                    selected.factor === null
+                                        ? t("unavailable")
+                                        : new Intl.NumberFormat(locale, {
+                                              maximumFractionDigits: 4,
+                                          }).format(selected.factor),
+                            })}
                         </p>
                         <CalibrationAssessment run={selected} />
                         <CsvDownload
-                            label="Download calibration details CSV"
+                            label={t("download_calibration_details_csv")}
                             filename={`calibration-${selected.id}`}
                             records={[selected]}
                         />
                         <JsonDetails
                             data={selected.result}
-                            label="Evaluation metrics & exclusions"
+                            label={t("evaluation_metrics_exclusions")}
                         />
-                        <JsonDetails data={selected} label="Run provenance" />
+                        <JsonDetails
+                            data={selected}
+                            label={t("run_provenance")}
+                        />
                     </div>
                 )}
             </section>
@@ -275,6 +310,17 @@ export function Calibrations({
 }
 
 function CalibrationAssessment({ run }: { run: Calibration }) {
+    const t = useTranslations("Calibrations");
+    const locale = useLocale();
+    const enumLabel = (value: string) =>
+        value === ""
+            ? ""
+            : t.has(`values.${value}`)
+              ? t(`values.${value}`)
+              : t("unknown_value", {
+                    value: locale === "en" ? value.replaceAll("_", " ") : value,
+                });
+
     const asRecord = (value: unknown): Record<string, unknown> =>
         value && typeof value === "object" && !Array.isArray(value)
             ? (value as Record<string, unknown>)
@@ -288,35 +334,40 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
         daylightMetrics = result.metric_scope === "daylight_intervals";
     const format = (value: unknown) =>
         typeof value === "number"
-            ? new Intl.NumberFormat("en", { maximumFractionDigits: 4 }).format(
-                  value,
-              )
+            ? new Intl.NumberFormat(locale, {
+                  maximumFractionDigits: 4,
+              }).format(value)
             : "—";
     const messages: Record<string, string> = {
-        pending: "Waiting for the calibration worker.",
-        running: "The worker is fitting and evaluating this calibration.",
-        ready: "This fit passed the held-out comparison and is ready for explicit activation.",
-        rejected:
-            "This fit did not pass the improvement criteria. The current selection remains in use.",
-        insufficient:
-            "There are not enough eligible complete days to evaluate a fit.",
+        pending: t("waiting_for_the_calibration_worker"),
+        running: t("the_worker_is_fitting_and_evaluating_this"),
+        ready: t("this_fit_passed_the_heldout_comparison_and"),
+        rejected: t("this_fit_did_not_pass_the_improvement"),
+        insufficient: t("there_are_not_enough_eligible_complete_days"),
     };
     const reasonMessages: Record<string, string> = {
-        insufficient_complete_days:
-            "Not enough complete paired days are available.",
-        insufficient_training_support:
-            "The training days do not contain enough informative production.",
-        zero_production_holdout:
-            "Zero production in the comparison period prevents a calibration change.",
-        baseline_improvement_below_margin:
-            "The candidate did not improve enough over the baseline.",
-        factor_at_bound: "The fitted factor reached its allowed boundary.",
-        incumbent_mae_regression:
-            "The candidate increased error compared with the selection at training.",
-        baseline_bias_regression:
-            "The candidate increased bias compared with the baseline.",
-        incumbent_bias_regression:
-            "The candidate increased bias compared with the selection at training.",
+        insufficient_complete_days: t(
+            "not_enough_complete_paired_days_are_available",
+        ),
+        insufficient_training_support: t(
+            "the_training_days_do_not_contain_enough",
+        ),
+        zero_production_holdout: t(
+            "zero_production_in_the_comparison_period_prevents",
+        ),
+        baseline_improvement_below_margin: t(
+            "the_candidate_did_not_improve_enough_over",
+        ),
+        factor_at_bound: t("the_fitted_factor_reached_its_allowed_boundary"),
+        incumbent_mae_regression: t(
+            "the_candidate_increased_error_compared_with_the",
+        ),
+        baseline_bias_regression: t(
+            "the_candidate_increased_bias_compared_with_the",
+        ),
+        incumbent_bias_regression: t(
+            "the_candidate_increased_bias_compared_with_the_2",
+        ),
     };
     const reasons = Array.isArray(result.reasons)
         ? result.reasons.filter(
@@ -326,53 +377,62 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
     return (
         <>
             <Notice>
-                {messages[run.status] ?? `Calibration status: ${run.status}.`}
+                {messages[run.status] ??
+                    t("calibration_status", { status: enumLabel(run.status) })}
                 {run.assessment === "provisional"
-                    ? " This is a provisional assessment based on fewer than 30 valid days."
+                    ? t("_this_is_a_provisional_assessment_based")
                     : ""}
             </Notice>
             {reasons.length > 0 && (
                 <ul>
                     {reasons.map((reason) => (
                         <li key={reason}>
-                            {reasonMessages[reason] ??
-                                reason.replaceAll("_", " ")}
+                            {reasonMessages[reason] ?? enumLabel(reason)}
                         </li>
                     ))}
                 </ul>
             )}
             <div className="stats">
-                <Stat label="Valid days" value={result.valid_days} />
-                <Stat label="Training days" value={result.training_days} />
-                <Stat label="Held-out days" value={result.holdout_days} />
+                <Stat label={t("valid_days")} value={result.valid_days} />
+                <Stat label={t("training_days")} value={result.training_days} />
+                <Stat label={t("heldout_days")} value={result.holdout_days} />
                 {Object.keys(support).length > 0 && (
                     <Stat
-                        label="Informative training days"
-                        value={`${format(support.informative_days)} / ${format(support.minimum_days)} required`}
+                        label={t("informative_training_days")}
+                        value={t("support_required", {
+                            days: format(support.informative_days),
+                            minimum: format(support.minimum_days),
+                        })}
                     />
                 )}
             </div>
             {daylightMetrics && (
                 <p className="fine">
-                    Metrics use whole meter intervals intersecting daylight, not
-                    24-hour totals.
+                    {t(
+                        "metrics_use_whole_meter_intervals_intersecting_daylight",
+                    )}
                 </p>
             )}
             {Object.keys(candidate).length > 0 && (
-                <ScrollRegion label="Held-out accuracy comparison">
+                <ScrollRegion label={t("heldout_accuracy_comparison")}>
                     <table>
                         <caption>
-                            Held-out accuracy comparison — lower error is better
+                            {t(
+                                "heldout_accuracy_comparison_lower_error_is_better",
+                            )}
                         </caption>
                         <thead>
                             <tr>
-                                <th>Metric</th>
-                                <th>Baseline</th>
-                                <th>Candidate</th>
+                                <th>{t("metric")}</th>
+                                <th>{t("baseline")}</th>
+                                <th>{t("candidate")}</th>
                                 {Object.keys(incumbent).length > 0 && (
                                     <th>
-                                        Selection at training (factor{" "}
-                                        {format(result.incumbent_factor)})
+                                        {t("training_selection", {
+                                            factor: format(
+                                                result.incumbent_factor,
+                                            ),
+                                        })}
                                     </th>
                                 )}
                             </tr>
@@ -381,20 +441,20 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
                             {[
                                 [
                                     "interval_mae_mw",
-                                    "Interval mean absolute error (MW)",
+                                    t("interval_mean_absolute_error_mw"),
                                 ],
-                                ["bias_mw", "Interval bias (MW)"],
+                                ["bias_mw", t("interval_bias_mw")],
                                 [
                                     "daily_mae_mwh",
                                     daylightMetrics
-                                        ? "Daylight energy MAE (MWh)"
-                                        : "Daily mean absolute error (MWh)",
+                                        ? t("daylight_energy_mae_mwh")
+                                        : t("daily_mean_absolute_error_mwh"),
                                 ],
                                 [
                                     "daily_bias_mwh",
                                     daylightMetrics
-                                        ? "Daylight energy bias (MWh)"
-                                        : "Daily bias (MWh)",
+                                        ? t("daylight_energy_bias_mwh")
+                                        : t("daily_bias_mwh"),
                                 ],
                             ].map(([key, label]) => (
                                 <tr key={key}>
@@ -414,7 +474,7 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
                 ([, value]) => typeof value === "number" && value > 0,
             ) && (
                 <div className="provenance">
-                    <strong>Excluded observations</strong>
+                    <strong>{t("excluded_observations")}</strong>
                     <ul>
                         {Object.entries(exclusions)
                             .filter(
@@ -423,7 +483,12 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
                             )
                             .map(([key, value]) => (
                                 <li key={key}>
-                                    {key.replaceAll("_", " ")}: {String(value)}
+                                    {enumLabel(key)}:{" "}
+                                    {typeof value === "number"
+                                        ? new Intl.NumberFormat(locale).format(
+                                              value,
+                                          )
+                                        : String(value)}
                                 </li>
                             ))}
                     </ul>

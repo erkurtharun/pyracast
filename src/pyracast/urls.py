@@ -10,7 +10,7 @@ from pyracast.accounts import headless
 from pyracast.accounts.mfa_views import ManageRecoveryCodesView
 from pyracast.accounts.signup import CompanySignupView
 from pyracast.admin import site
-from pyracast.api.session import SessionView
+from pyracast.api.session import SessionLanguageView, SessionView
 from pyracast.api.trash import RestoreRegionView, TrashedPlantsView, TrashedRegionsView
 from pyracast.api.views import (
     AccountView,
@@ -64,6 +64,7 @@ urlpatterns = [
     path("api/auth/", include("allauth.headless.urls")),
     path("api/schema/", SpectacularAPIView.as_view(permission_classes=[IsAuthenticated])),
     path("api/session/", SessionView.as_view()),
+    path("api/session/language/", SessionLanguageView.as_view()),
     path("api/", include("pyracast.notifications.urls")),
     path("api/tenants/", TenantsView.as_view()),
     path("api/tenants/<int:tenant_id>/sites/", SitesView.as_view()),

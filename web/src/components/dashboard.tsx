@@ -1,4 +1,5 @@
 "use client";
+import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { request, type Session, type Tenant } from "@/lib/api";
@@ -19,13 +20,39 @@ import { authRequest } from "@/lib/auth-api";
 import { AccountSecurity } from "./account-security";
 import { PlantIcon } from "./plant-icon";
 import { RecycleBin } from "./recycle-bin";
+import { SessionLanguage } from "./session-language";
+import { LanguageSelect } from "./language-select";
 
 export function Dashboard() {
-    const searchParams = useSearchParams();
     const [version, setVersion] = useState(0),
         [session, setSession] = useState<Session>();
     const initial = useResource<Session>("/api/session/", version);
     const current = session ?? initial.data;
+    return (
+        <SessionLanguage language={current?.language}>
+            <DashboardView
+                current={current}
+                error={initial.error}
+                retry={() => setVersion(version + 1)}
+                onSession={setSession}
+            />
+        </SessionLanguage>
+    );
+}
+
+function DashboardView({
+    current,
+    error,
+    retry,
+    onSession,
+}: {
+    current?: Session;
+    error?: string;
+    retry: () => void;
+    onSession: (session: Session) => void;
+}) {
+    const t = useTranslations("Dashboard");
+    const searchParams = useSearchParams();
     const enterAdministration =
         current?.user?.can_admin &&
         searchParams.get("workspace") !== "customer" &&
@@ -38,7 +65,7 @@ export function Dashboard() {
         const refresh = () => {
             if (document.visibilityState === "visible")
                 request<Session>("/api/session/")
-                    .then(setSession)
+                    .then(onSession)
                     .catch(() => {});
         };
         window.addEventListener("focus", refresh);
@@ -47,41 +74,41 @@ export function Dashboard() {
             window.removeEventListener("focus", refresh);
             document.removeEventListener("visibilitychange", refresh);
         };
-    }, [current]);
+    }, [current, onSession]);
     if (!current)
         return (
             <main className="auth-page">
                 <div className="auth-card">
                     <Brand />
-                    <h1>Your workspace</h1>
-                    {initial.error ? (
+                    {error ? (
                         <>
-                            <Notice error>{initial.error}</Notice>
-                            <button
-                                className="button"
-                                onClick={() => setVersion(version + 1)}
-                            >
-                                Try again
+                            <Notice error>{error}</Notice>
+                            <button className="button" onClick={retry}>
+                                {t("retry")}
                             </button>
                         </>
                     ) : (
-                        <p role="status">Connecting to your workspace…</p>
+                        <div
+                            className="loading-indicator"
+                            role="progressbar"
+                            aria-label="Pyracast"
+                        />
                     )}
                 </div>
             </main>
         );
-    if (!current.user) return <Auth session={current} onSession={setSession} />;
+    if (!current.user) return <Auth session={current} onSession={onSession} />;
     if (enterAdministration)
         return (
             <main className="auth-page">
-                <p role="status">Opening administration…</p>
+                <p role="status">{t("openingAdmin")}</p>
             </main>
         );
     return (
         <Workspace
             key={current.user.id}
             session={current}
-            onSession={setSession}
+            onSession={onSession}
         />
     );
 }
@@ -117,6 +144,7 @@ function Workspace({
     session: Session;
     onSession: (value: Session) => void;
 }) {
+    const t = useTranslations("Dashboard");
     const searchParams = useSearchParams();
     const tenants = useCollection<Tenant>("/api/tenants/");
     const [selected, setSelected] = useState<number>(),
@@ -137,20 +165,22 @@ function Workspace({
                     document.getElementById("main")?.focus();
                 }}
             >
-                Skip to content
+                {t("skipContent")}
             </a>
             <aside className="sidebar">
                 <Brand />
-                <div className="workspace-label">Workspace</div>
+                <div className="workspace-label">{t("workspace")}</div>
                 <label className="tenant-select">
-                    <span className="sr-only">Workspace</span>
+                    <span className="sr-only">{t("workspace")}</span>
                     <select
                         value={tenant?.id ?? ""}
                         onChange={(event) =>
                             setSelected(Number(event.target.value))
                         }
                     >
-                        {!tenant && <option value="">No workspaces</option>}
+                        {!tenant && (
+                            <option value="">{t("noWorkspaces")}</option>
+                        )}
                         {tenants.data?.results.map((row) => (
                             <option key={row.id} value={row.id}>
                                 {row.name}
@@ -158,32 +188,33 @@ function Workspace({
                         ))}
                     </select>
                 </label>
-                <nav aria-label="Main navigation">
+                <nav aria-label={t("navigation")}>
                     {session.user?.can_admin && (
-                        <a href="/admin/">Administration</a>
+                        <a href="/admin/">{t("administration")}</a>
                     )}
                     <button
                         className={view === "regions" ? "active" : ""}
                         aria-current={view === "regions" ? "page" : undefined}
                         onClick={() => setView("regions")}
                     >
-                        <span aria-hidden="true">▦</span> Overview
+                        <span aria-hidden="true">▦</span> {t("overview")}
                     </button>
                     <button
                         className={view === "trash" ? "active" : ""}
                         aria-current={view === "trash" ? "page" : undefined}
                         onClick={() => setView("trash")}
                     >
-                        Recycle bin
+                        {t("recycleBin")}
                     </button>
                     <button
                         className={view === "profile" ? "active" : ""}
                         aria-current={view === "profile" ? "page" : undefined}
                         onClick={() => setView("profile")}
                     >
-                        <span aria-hidden="true">⚙</span> Account settings
+                        <span aria-hidden="true">⚙</span> {t("accountSettings")}
                     </button>
                 </nav>
+                <LanguageSelect session={session} onSession={onSession} />
                 <div className="user-box">
                     <div className="avatar">
                         {session.user?.username.slice(0, 1).toUpperCase()}
@@ -192,8 +223,8 @@ function Workspace({
                         <strong>{session.user?.username}</strong>
                     </div>
                     <button
-                        title="Sign out"
-                        aria-label="Sign out"
+                        title={t("signOut")}
+                        aria-label={t("signOut")}
                         onClick={async () => {
                             try {
                                 await authRequest(
@@ -216,13 +247,13 @@ function Workspace({
             <div className="main-wrap">
                 <header className="topbar">
                     <span>
-                        Workspace <span className="separator">/</span>{" "}
+                        {t("workspace")} <span className="separator">/</span>{" "}
                         <strong>
                             {view === "regions"
-                                ? "Overview"
+                                ? t("overview")
                                 : view === "trash"
-                                  ? "Recycle bin"
-                                  : "Account settings"}
+                                  ? t("recycleBin")
+                                  : t("accountSettings")}
                         </strong>
                     </span>
                     <span className="topbar-label">{tenant?.name}</span>
@@ -234,17 +265,18 @@ function Workspace({
                         <>
                             <div className="page-heading">
                                 <div>
-                                    <h1>Account settings</h1>
+                                    <h1>{t("accountSettings")}</h1>
                                 </div>
                             </div>
                             <section className="panel narrow">
-                                <h2>Email address</h2>
+                                <h2>{t("emailAddress")}</h2>
                                 <p>
-                                    Current address: {session.user?.email}. A
-                                    new address replaces it after verification.
+                                    {t("currentEmail", {
+                                        email: session.user?.email ?? "",
+                                    })}
                                 </p>
                                 <ActionForm
-                                    submit="Send verification code"
+                                    submit={t("sendVerification")}
                                     onSubmit={async (data) => {
                                         const result = await authRequest(
                                             "account/email",
@@ -262,23 +294,23 @@ function Workspace({
                                                 ),
                                             );
                                             throw new Error(
-                                                "Your session has expired. Please sign in again.",
+                                                t("sessionExpired"),
                                             );
                                         }
                                         if (result.status === 401)
                                             throw new Error(
-                                                "Please confirm your identity and try again.",
+                                                t("confirmIdentity"),
                                             );
                                     }}
                                 >
                                     <Field
-                                        label="New email address"
+                                        label={t("newEmail")}
                                         name="email"
                                         type="email"
                                     />
                                 </ActionForm>
                                 <ActionForm
-                                    submit="Verify new email"
+                                    submit={t("verifyEmail")}
                                     onSubmit={async (data) => {
                                         const result = await authRequest(
                                             "auth/email/verify",
@@ -295,8 +327,8 @@ function Workspace({
                                                 );
                                             throw new Error(
                                                 result.meta?.is_authenticated
-                                                    ? "Please confirm your identity and try again."
-                                                    : "Your session has expired. Please sign in again.",
+                                                    ? t("confirmIdentity")
+                                                    : t("sessionExpired"),
                                             );
                                         }
                                         onSession(
@@ -307,7 +339,7 @@ function Workspace({
                                     }}
                                 >
                                     <Field
-                                        label="Email verification code"
+                                        label={t("emailCode")}
                                         name="key"
                                         autoComplete="one-time-code"
                                     />
@@ -331,10 +363,10 @@ function Workspace({
                             token={session.csrf_token}
                         />
                     ) : tenants.loading ? (
-                        <p role="status">Loading your workspaces…</p>
+                        <p role="status">{t("loadingWorkspaces")}</p>
                     ) : (
-                        <Empty title="No workspace yet">
-                            Contact your administrator for access.
+                        <Empty title={t("noWorkspace")}>
+                            {t("contactAdmin")}
                         </Empty>
                     )}
                 </main>
@@ -343,6 +375,8 @@ function Workspace({
     );
 }
 function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
+    const t = useTranslations("Dashboard");
+    const locale = useLocale();
     const [version, setVersion] = useState(0);
     const [selectedId, setSelectedId] = useState<number>();
     const [created, setCreated] = useState<PlantSite>();
@@ -385,8 +419,7 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
             <>
                 {sites.error && (
                     <Notice error>
-                        Unable to refresh plants. Showing saved details.{" "}
-                        {sites.error}
+                        {t("refreshFailed")} {sites.error}
                     </Notice>
                 )}
                 <RegionWorkspace
@@ -411,26 +444,26 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
         (site) =>
             (status === "all" || site.status === status) &&
             `${site.name} ${site.plant?.name ?? ""} ${site.timezone}`
-                .toLowerCase()
-                .includes(search.toLowerCase()),
+                .toLocaleLowerCase(locale)
+                .includes(search.toLocaleLowerCase(locale)),
     );
     return (
         <>
             <div className="page-heading">
                 <div>
                     <p className="eyebrow">{tenant.name}</p>
-                    <h1>Your solar portfolio</h1>
+                    <h1>{t("portfolio")}</h1>
                 </div>
                 <button
                     className="button"
                     onClick={() => setCreating(!creating)}
                 >
-                    {creating ? "Close form" : "+ Add a plant"}
+                    {creating ? t("closeForm") : t("addPlant")}
                 </button>
             </div>
             <div className="stats">
                 <Stat
-                    label="Plants"
+                    label={t("plants")}
                     value={
                         sites.data
                             ? rows.filter((site) => site.plant).length
@@ -438,7 +471,7 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
                     }
                 />
                 <Stat
-                    label="Approved"
+                    label={t("approved")}
                     value={
                         sites.data
                             ? rows.filter(
@@ -449,7 +482,7 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
                     }
                 />
                 <Stat
-                    label="Awaiting approval"
+                    label={t("awaitingApproval")}
                     value={
                         sites.data
                             ? rows.filter(
@@ -476,7 +509,7 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
             <section className="panel">
                 <div className="section-heading">
                     <h2>
-                        Plants{" "}
+                        {t("plants")}{" "}
                         <span className="count" aria-hidden="true">
                             {rows.length}
                         </span>
@@ -485,37 +518,43 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
                 {rows.length > 0 && (
                     <div className="portfolio-toolbar">
                         <label className="field">
-                            Search plants
+                            {t("searchPlants")}
                             <input
                                 type="search"
                                 value={search}
                                 onChange={(event) =>
                                     setSearch(event.target.value)
                                 }
-                                placeholder="Plant name or timezone"
+                                placeholder={t("searchPlaceholder")}
                             />
                         </label>
                         <label className="field">
-                            Approval status
+                            {t("approvalStatus")}
                             <select
                                 value={status}
                                 onChange={(event) =>
                                     setStatus(event.target.value)
                                 }
                             >
-                                <option value="all">All statuses</option>
+                                <option value="all">{t("allStatuses")}</option>
                                 <option value="pending">
-                                    Awaiting approval
+                                    {t("awaitingApproval")}
                                 </option>
-                                <option value="approved">Approved</option>
-                                <option value="rejected">Rejected</option>
-                                <option value="suspended">Suspended</option>
+                                <option value="approved">
+                                    {t("approved")}
+                                </option>
+                                <option value="rejected">
+                                    {t("rejected")}
+                                </option>
+                                <option value="suspended">
+                                    {t("suspended")}
+                                </option>
                             </select>
                         </label>
                     </div>
                 )}
                 {sites.loading ? (
-                    <p role="status">Loading plants...</p>
+                    <p role="status">{t("loadingPlants")}</p>
                 ) : sites.error ? (
                     <>
                         <Notice error>{sites.error}</Notice>
@@ -523,7 +562,7 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
                             className="button secondary"
                             onClick={() => setVersion((value) => value + 1)}
                         >
-                            Try again
+                            {t("retry")}
                         </button>
                     </>
                 ) : filtered.length ? (
@@ -550,16 +589,16 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
                                     <h3>{site.plant?.name ?? site.name}</h3>
                                     <p>
                                         {metadata
-                                            ? `${metadata.dc_capacity_mw} MW DC`
-                                            : "Complete setup"}{" "}
+                                            ? `${metadata.dc_capacity_mw.toLocaleString(locale, { maximumFractionDigits: 6 })} MW DC`
+                                            : t("completeSetup")}{" "}
                                         {" · "}
                                         {site.timezone}
                                     </p>
                                     <div className="region-card-bottom">
                                         <span>
                                             {site.plant
-                                                ? "Open plant"
-                                                : "Complete setup"}
+                                                ? t("openPlant")
+                                                : t("completeSetup")}
                                         </span>
                                         <PlantIcon arrow />
                                     </div>
@@ -569,15 +608,9 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
                     </div>
                 ) : (
                     <Empty
-                        title={
-                            rows.length
-                                ? "No matching plants"
-                                : "Start with your first plant"
-                        }
+                        title={rows.length ? t("noMatches") : t("firstPlant")}
                     >
-                        {rows.length
-                            ? "Try a different name or approval status."
-                            : "Add its location and technical details in one request."}
+                        {rows.length ? t("differentSearch") : t("addDetails")}
                     </Empty>
                 )}
             </section>

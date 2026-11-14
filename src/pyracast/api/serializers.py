@@ -1,5 +1,6 @@
 from typing import Any, cast
 
+from django.utils.translation import gettext
 from rest_framework import serializers
 
 from pyracast.accounts.models import Tenant
@@ -10,7 +11,7 @@ class InputSerializer(serializers.Serializer[dict[str, Any]]):
     def to_internal_value(self, data: Any) -> dict[str, Any]:
         if isinstance(data, dict) and data.keys() - self.fields.keys():
             raise serializers.ValidationError(
-                {"non_field_errors": ["Unknown fields are not accepted."]}
+                {"non_field_errors": [gettext("Unknown fields are not accepted.")]}
             )
         return cast(dict[str, Any], super().to_internal_value(data))
 

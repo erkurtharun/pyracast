@@ -6,6 +6,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import models, transaction
+from django.utils.translation import gettext
 
 from pyracast.accounts.models import Membership
 from pyracast.accounts.operations import require_member
@@ -23,7 +24,8 @@ RECIPIENT_MAX_LENGTH = cast(int, NotificationDelivery._meta.get_field("recipient
 def validate_recipient(address: str) -> None:
     if len(address) > RECIPIENT_MAX_LENGTH:
         raise ValidationError(
-            f"Recipient addresses cannot exceed {RECIPIENT_MAX_LENGTH} characters."
+            gettext("Recipient addresses cannot exceed %(limit)s characters."),
+            params={"limit": RECIPIENT_MAX_LENGTH},
         )
     validate_email(address)
 
@@ -65,7 +67,7 @@ def normalize_recipients(recipients: list[str]) -> list[str]:
     for address in normalized:
         validate_recipient(address)
     if len({address.casefold() for address in normalized}) != len(normalized):
-        raise ValidationError("Recipient addresses must be distinct (case-insensitive).")
+        raise ValidationError(gettext("Recipient addresses must be distinct (case-insensitive)."))
     return normalized
 
 
@@ -132,21 +134,27 @@ def configure_reminders(
             proposed_count < current_count or disabling_unchanged
         ):
             raise ValidationError(
-                f"This plant allows at most {address_limit} distinct recipient addresses in total."
+                gettext(
+                    "This plant allows at most %(limit)s distinct recipient addresses in total."
+                ),
+                params={"limit": address_limit},
             )
         binding = region.approved_binding
         limit = binding.provider_account.daily_quota if binding is not None else 10
         if len(times) != len(set(times)) or len(times) > limit:
-            raise ValidationError(f"Provide at most {limit} distinct local HH:MM times.")
+            raise ValidationError(
+                gettext("Provide at most %(limit)s distinct local HH:MM times."),
+                params={"limit": limit},
+            )
         for clock in times:
             if re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", clock) is None:
-                raise ValidationError("Reminder times must use HH:MM.")
+                raise ValidationError(gettext("Reminder times must use HH:MM."))
         if enabled:
             if not addresses:
                 validate_recipient(actor.email)
             if not times or binding is None or not binding_can_notify(binding):
                 raise ValidationError(
-                    "An approved current region and at least one time are required."
+                    gettext("An approved current region and at least one time are required.")
                 )
         preference.enabled = enabled
         preference.recipients = addresses

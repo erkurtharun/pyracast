@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
+import createNextIntlPlugin from "next-intl/plugin";
 
 const config = (phase: string): NextConfig => ({
     output: "standalone",
@@ -49,4 +50,5 @@ const config = (phase: string): NextConfig => ({
         ];
     },
 });
-export default config;
+const withNextIntl = createNextIntlPlugin();
+export default (phase: string) => withNextIntl(config(phase));

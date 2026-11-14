@@ -1,4 +1,5 @@
 "use client";
+import { useTranslations } from "next-intl";
 
 import { useState } from "react";
 import type { components } from "@/lib/schema";
@@ -43,6 +44,8 @@ export function PlantConfigurationFields({
     configuration?: Configuration;
     includeName?: boolean;
 }) {
+    const t = useTranslations("PlantConfiguration");
+
     const [mounting, setMounting] = useState<string>(
         configuration?.mounting_type ?? "unknown",
     );
@@ -50,10 +53,14 @@ export function PlantConfigurationFields({
         <>
             <div className="form-grid">
                 {includeName && (
-                    <Field label="Plant name" name="name" defaultValue={name} />
+                    <Field
+                        label={t("plantName")}
+                        name="name"
+                        defaultValue={name}
+                    />
                 )}
                 <Field
-                    label="DC nameplate capacity (MW)"
+                    label={t("dcCapacityLabel")}
                     name="dc_capacity_mw"
                     type="number"
                     step="any"
@@ -61,7 +68,7 @@ export function PlantConfigurationFields({
                     defaultValue={configuration?.dc_capacity_mw}
                 />
                 <Field
-                    label="Inverter AC capacity (MW, optional)"
+                    label={t("inverterCapacityLabel")}
                     name="inverter_capacity_mw"
                     type="number"
                     step="any"
@@ -72,7 +79,7 @@ export function PlantConfigurationFields({
                     }
                 />
                 <Field
-                    label="Grid export limit (MW, optional)"
+                    label={t("exportLimitLabel")}
                     name="export_limit_mw"
                     type="number"
                     step="any"
@@ -81,29 +88,29 @@ export function PlantConfigurationFields({
                     defaultValue={configuration?.export_limit_mw ?? undefined}
                 />
                 <Select
-                    label="Measurement point"
+                    label={t("measurementPoint")}
                     name="measurement_basis"
                     defaultValue={configuration?.measurement_basis}
                 >
-                    <option value="net_export">Net export</option>
-                    <option value="ac_generation">AC generation</option>
+                    <option value="net_export">{t("netExport")}</option>
+                    <option value="ac_generation">{t("acGeneration")}</option>
                 </Select>
                 <label className="field">
-                    Mounting type
+                    {t("mountingType")}
                     <select
                         name="mounting_type"
                         value={mounting}
                         onChange={(event) => setMounting(event.target.value)}
                     >
-                        <option value="unknown">Unknown</option>
-                        <option value="fixed">Fixed</option>
-                        <option value="tracking">Tracking</option>
+                        <option value="unknown">{t("unknown")}</option>
+                        <option value="fixed">{t("fixed")}</option>
+                        <option value="tracking">{t("tracking")}</option>
                     </select>
                 </label>
                 {mounting === "fixed" && (
                     <>
                         <Field
-                            label="Surface tilt (degrees, optional)"
+                            label={t("surfaceTiltDegreesOptional")}
                             name="surface_tilt"
                             type="number"
                             step="any"
@@ -115,7 +122,7 @@ export function PlantConfigurationFields({
                             }
                         />
                         <label className="field">
-                            Surface azimuth (degrees, optional)
+                            {t("surfaceAzimuthDegreesOptional")}
                             <input
                                 name="surface_azimuth"
                                 type="number"
@@ -130,7 +137,9 @@ export function PlantConfigurationFields({
                                         event.currentTarget.value !== "" &&
                                             event.currentTarget.valueAsNumber >=
                                                 360
-                                            ? "Azimuth must be less than 360 degrees."
+                                            ? t(
+                                                  "azimuthMustBeLessThan360Degrees",
+                                              )
                                             : "",
                                     )
                                 }
@@ -140,20 +149,9 @@ export function PlantConfigurationFields({
                 )}
             </div>
             <details>
-                <summary>Capacity and mounting guide</summary>
-                <p className="fine">
-                    DC nameplate is the panel rating. Inverter AC capacity is
-                    the inverter rating; grid export limit is the permitted grid
-                    cap. The measurement point identifies AC generation or net
-                    export.
-                </p>
-                <p className="fine">
-                    For fixed mounting, tilt is 0–90 degrees; azimuth is
-                    clockwise from true north, from 0 up to but excluding 360
-                    degrees. Tracking details are not captured. The current
-                    estimate uses a proxy that does not use these geometry
-                    fields.
-                </p>
+                <summary>{t("capacityAndMountingGuide")}</summary>
+                <p className="fine">{t("capacityGuide")}</p>
+                <p className="fine">{t("geometryGuide")}</p>
             </details>
         </>
     );

@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 from django.core.exceptions import ValidationError
 from django.db.models import Q
 from django.utils import timezone
+from django.utils.translation import gettext
 
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY, select_actual_snapshot
 from pyracast.forecasts.models import ForecastSnapshot
@@ -39,7 +40,7 @@ def _selection_cutoff(day: date, zone: str, issuance_cutoff: time | None) -> dat
         cutoff.astimezone(ZoneInfo(zone)).replace(tzinfo=None) != local.replace(tzinfo=None)
         or local.replace(fold=0).utcoffset() != local.replace(fold=1).utcoffset()
     ):
-        raise ValidationError("The local issuance cutoff is ambiguous or does not exist.")
+        raise ValidationError(gettext("The local issuance cutoff is ambiguous or does not exist."))
     return cutoff
 
 
@@ -232,12 +233,14 @@ def forecast_performance(
     issuance_cutoff: time | None = None,
 ) -> dict[str, Any]:
     if comparison not in ("archived_forecast", "historical_model"):
-        raise ValidationError("Unknown comparison mode.")
+        raise ValidationError(gettext("Unknown comparison mode."))
     if issuance_cutoff is not None:
         if issuance_cutoff.tzinfo is not None:
-            raise ValidationError("Use a local issuance cutoff without a UTC offset.")
+            raise ValidationError(gettext("Use a local issuance cutoff without a UTC offset."))
         if comparison != "archived_forecast":
-            raise ValidationError("An issuance cutoff requires archived_forecast comparison.")
+            raise ValidationError(
+                gettext("An issuance cutoff requires archived_forecast comparison.")
+            )
     configuration = (
         PlantConfiguration.objects.select_related("binding").get(
             pk=plant.current_configuration_id, plant=plant
@@ -249,7 +252,7 @@ def forecast_performance(
     now = timezone.now()
     today = now.astimezone(ZoneInfo(zone)).date()
     if (start_date is None) != (end_date is None):
-        raise ValidationError("Both start_date and end_date are required.")
+        raise ValidationError(gettext("Both start_date and end_date are required."))
     if start_date is None or end_date is None:
         end_date = today - timedelta(days=1)
         start_date = end_date - timedelta(days=29)
@@ -258,7 +261,7 @@ def forecast_performance(
         or start_date < today - timedelta(days=366)
         or end_date >= today
     ):
-        raise ValidationError("Use 1 to 90 completed local days within the past year.")
+        raise ValidationError(gettext("Use 1 to 90 completed local days within the past year."))
     start, _ = local_day_bounds(start_date, zone)
     _, end = local_day_bounds(end_date, zone)
     measurement_policy = (

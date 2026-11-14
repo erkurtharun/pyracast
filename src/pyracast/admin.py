@@ -12,11 +12,15 @@ from django.urls import URLPattern, URLResolver, path, reverse
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.utils.html import format_html
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.safestring import SafeString
+from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy
 from django.views.decorators.debug import sensitive_post_parameters, sensitive_variables
 from django.views.generic import RedirectView
 from rest_framework.exceptions import ValidationError as APIValidationError
 
+from pyracast.accounts.language import explicit_language, save_user_language, set_language_cookie
 from pyracast.accounts.models import Tenant
 from pyracast.accounts.security import has_verified_mfa
 from pyracast.admin_forms import BindingActionForm, EpiasConnectionForm, ProviderSetupForm
@@ -81,6 +85,7 @@ class PlatformAdminSite(admin.AdminSite):
         return [
             path("plants/", self.admin_view(self.plants), name="workspace_plants"),
             path("logout/", self.admin_view(self.workspace_logout), name="logout"),
+            path("language/", self.admin_view(self.language), name="workspace_language"),
             path("plants/<int:object_id>/", self.admin_view(self.plant), name="workspace_plant"),
             path(
                 "plants/<int:object_id>/decision/",
@@ -126,7 +131,7 @@ class PlatformAdminSite(admin.AdminSite):
         self, request: HttpRequest, extra_context: dict[str, Any] | None = None
     ) -> TemplateResponse:
         return self.workspace_response(
-            request, "overview", "Overview", {**overview_context(), **(extra_context or {})}
+            request, "overview", _("Overview"), {**overview_context(), **(extra_context or {})}
         )
 
     def plants(self, request: HttpRequest) -> HttpResponse:
@@ -138,13 +143,13 @@ class PlatformAdminSite(admin.AdminSite):
         query = request.GET.copy()
         query.pop("page", None)
         context["pagination_query"] = query.urlencode()
-        return self.workspace_response(request, "plants", "Plants", context)
+        return self.workspace_response(request, "plants", _("Plants"), context)
 
     def plant(self, request: HttpRequest, object_id: int) -> HttpResponse:
         return cast(RegionAdmin, self._registry[Region]).setup(request, object_id)
 
     def operations(self, request: HttpRequest) -> HttpResponse:
-        return self.workspace_response(request, "operations", "Operations", operations_context())
+        return self.workspace_response(request, "operations", _("Operations"), operations_context())
 
     def settings(self, request: HttpRequest) -> HttpResponse:
         if request.method not in {"GET", "POST"}:
@@ -155,14 +160,14 @@ class PlatformAdminSite(admin.AdminSite):
             try:
                 form.apply(cast(User, request.user))
             except ValidationError:
-                form.add_error(None, "The settings changed. Reload this page before saving.")
+                form.add_error(None, _("The settings changed. Reload this page before saving."))
             else:
-                messages.success(request, "Email reminder settings saved.")
+                messages.success(request, _("Email reminder settings saved."))
                 return redirect("admin:workspace_settings")
         return self.workspace_response(
             request,
             "settings",
-            "Settings",
+            _("Settings"),
             context,
             status=400 if request.method == "POST" else 200,
         )
@@ -177,13 +182,14 @@ class PlatformAdminSite(admin.AdminSite):
                 form.apply(cast(User, request.user), object_id)
             except ObjectDoesNotExist, ValidationError:
                 messages.error(
-                    request, "The review could not be applied. Reload and review the current plant."
+                    request,
+                    _("The review could not be applied. Reload and review the current plant."),
                 )
             else:
-                messages.success(request, "Plant review saved.")
+                messages.success(request, _("Plant review saved."))
         else:
             messages.error(
-                request, "Choose a review action and reload the current plant before continuing."
+                request, _("Choose a review action and reload the current plant before continuing.")
             )
         return redirect("admin:workspace_plant", object_id=object_id)
 
@@ -193,9 +199,26 @@ class PlatformAdminSite(admin.AdminSite):
         logout(request)
         return redirect("/")
 
+    def language(self, request: HttpRequest) -> HttpResponse:
+        if request.method != "POST":
+            return HttpResponseNotAllowed(("POST",))
+        language = explicit_language(request.POST.get("language"))
+        if language is None:
+            return HttpResponse(status=400)
+        save_user_language(cast(User, request.user), language)
+        request.LANGUAGE_CODE = language
+        destination = request.POST.get("next", "/admin/")
+        if not url_has_allowed_host_and_scheme(
+            destination, {request.get_host()}, require_https=request.is_secure()
+        ):
+            destination = "/admin/"
+        response = redirect(destination)
+        set_language_cookie(response, language)
+        return response
+
 
 site = PlatformAdminSite(name="admin")
-site.site_header = "Pyracast operations"
+site.site_header = gettext_lazy("Pyracast operations")
 
 
 if TYPE_CHECKING:
@@ -279,11 +302,12 @@ class RegionAdmin(ReadOnlyAdmin):
             *super().get_urls(),
         ]
 
-    @admin.display(description="Onboarding")
+    @admin.display(description=gettext_lazy("Onboarding"))
     def review_link(self, obj: Region) -> SafeString:
         return format_html(
-            '<a href="{}">Review and set up</a>',
+            '<a href="{}">{}</a>',
             reverse("admin:regions_region_setup", args=(obj.pk,)),
+            _("Review and set up"),
         )
 
     @method_decorator(sensitive_post_parameters("api_key"))
@@ -324,25 +348,29 @@ class RegionAdmin(ReadOnlyAdmin):
                 actor = cast(User, request.user)
                 if action == "epias_disconnect":
                     disconnect_epias(plant.pk, actor=actor)
-                    message = "EPİAŞ connection disconnected. Saved production remains available."
+                    message = _(
+                        "EPİAŞ connection disconnected. Saved production remains available."
+                    )
                 else:
                     connect_epias(plant.pk, actor=actor, **epias_form.cleaned_data)
-                    message = "EPİAŞ connection saved. Initial production collection is queued."
+                    message = _("EPİAŞ connection saved. Initial production collection is queued.")
             except EpiasError as error:
                 epias_form.add_error(
                     None,
-                    "EPİAŞ service credentials are unavailable. Contact the deployment operator."
+                    _("EPİAŞ service credentials are unavailable. Contact the deployment operator.")
                     if str(error) == "credentials_unavailable"
-                    else "EPİAŞ is currently unavailable. Try connecting again later.",
+                    else _("EPİAŞ is currently unavailable. Try connecting again later."),
                 )
             except (ObjectDoesNotExist, ValidationError) as error:
                 epias_form.add_error(
                     None,
-                    "The EPİAŞ plant ID and EIC did not match. Check both identifiers."
+                    _("The EPİAŞ plant ID and EIC did not match. Check both identifiers.")
                     if isinstance(error, ValidationError)
                     and "epias_plant_identity_mismatch" in error.messages
-                    else "The plant configuration is unavailable or changed. "
-                    "Approve its current setup and reload before connecting.",
+                    else _(
+                        "The plant configuration is unavailable or changed. "
+                        "Approve its current setup and reload before connecting."
+                    ),
                 )
             else:
                 self.message_user(request, message)
@@ -397,7 +425,7 @@ class RegionAdmin(ReadOnlyAdmin):
                     actor = cast(User, request.user)
                     if action == "configure":
                         setup_form.configure(actor, region)
-                        message = (
+                        message = _(
                             "Private provider setup saved. Validate the connection before approval."
                         )
                     elif action in {"validate", "approve", "clear_cooldown"}:
@@ -406,7 +434,7 @@ class RegionAdmin(ReadOnlyAdmin):
                             validate_binding(
                                 actor, current.pk, adapter_for(current), timezone.now()
                             )
-                            message = (
+                            message = _(
                                 "The current provider connection is validated. "
                                 "The plant can now be approved."
                             )
@@ -419,37 +447,44 @@ class RegionAdmin(ReadOnlyAdmin):
                                     "expected_cooldown_until"
                                 ],
                             )
-                            message = (
+                            message = _(
                                 "Provider wait cleared. Queued collection can resume "
                                 "within the remaining quota."
                             )
                         else:
                             approve_region(actor, region.pk, current.pk, timezone.now())
-                            message = "Plant approved. The first saved forecast is being prepared."
+                            message = _(
+                                "Plant approved. The first saved forecast is being prepared."
+                            )
                     else:
-                        raise ValidationError("Choose a setup action.")
+                        raise ValidationError(_("Choose a setup action."))
                 except RequestDeferredError as error:
                     form.add_error(
                         None,
-                        "Update the private API key before validating this connection again."
+                        _("Update the private API key before validating this connection again.")
                         if error.available_at is None
-                        else "The provider is limiting requests. Wait before validating again.",
+                        else _("The provider is limiting requests. Wait before validating again."),
                     )
                 except QuotaExceededError:
                     form.add_error(
-                        None, "The provider's request budget is unavailable. Try validation later."
+                        None,
+                        _("The provider's request budget is unavailable. Try validation later."),
                     )
                 except ProviderError:
                     form.add_error(
                         None,
-                        "Connection validation failed. Check the private credentials "
-                        "and site settings.",
+                        _(
+                            "Connection validation failed. Check the private credentials "
+                            "and site settings."
+                        ),
                     )
                 except ObjectDoesNotExist, ValidationError, APIValidationError:
                     form.add_error(
                         None,
-                        "The setup could not be applied. Check the values or reload "
-                        "if the plant or account changed.",
+                        _(
+                            "The setup could not be applied. Check the values or reload "
+                            "if the plant or account changed."
+                        ),
                     )
                 else:
                     self.message_user(request, message)
@@ -464,7 +499,7 @@ class RegionAdmin(ReadOnlyAdmin):
                 **self.admin_site.each_context(request),
                 **review_context(region.pk),
                 "workspace_section": "plants",
-                "title": f"Review and set up {region.name}",
+                "title": _("Review and set up %(name)s") % {"name": region.name},
                 "opts": self.opts,
                 "region": region,
                 "plants": plants,
@@ -500,7 +535,9 @@ class RegionAdmin(ReadOnlyAdmin):
             status=400 if request.method == "POST" else 200,
         )
 
-    @admin.action(description="Approve validated reference binding", permissions=["view"])
+    @admin.action(
+        description=gettext_lazy("Approve validated reference binding"), permissions=["view"]
+    )
     def approve(self, request: HttpRequest, queryset: QuerySet[Region]) -> None:
         for region in queryset.filter(deleted_at__isnull=True):
             try:
@@ -510,15 +547,15 @@ class RegionAdmin(ReadOnlyAdmin):
                 approve_region(cast(User, request.user), region.pk, binding.pk, timezone.now())
             except ObjectDoesNotExist, ValidationError:
                 self.message_user(
-                    request, "Validate the current binding before approval.", level="ERROR"
+                    request, _("Validate the current binding before approval."), level="ERROR"
                 )
 
-    @admin.action(description="Reject region", permissions=["view"])
+    @admin.action(description=gettext_lazy("Reject region"), permissions=["view"])
     def reject(self, request: HttpRequest, queryset: QuerySet[Region]) -> None:
         for region in queryset.filter(deleted_at__isnull=True):
             transition_region(cast(User, request.user), region.pk, "rejected")
 
-    @admin.action(description="Suspend region", permissions=["view"])
+    @admin.action(description=gettext_lazy("Suspend region"), permissions=["view"])
     def suspend(self, request: HttpRequest, queryset: QuerySet[Region]) -> None:
         for region in queryset.filter(deleted_at__isnull=True):
             transition_region(cast(User, request.user), region.pk, "suspended")
@@ -543,12 +580,14 @@ class RegionLocationChangeRequestAdmin(ReadOnlyAdmin):
             except ObjectDoesNotExist, ValidationError:
                 self.message_user(
                     request,
-                    "The request is stale or already reviewed; review the current region.",
+                    _("The request is stale or already reviewed; review the current region."),
                     level="ERROR",
                 )
 
     @admin.action(
-        description="Approve location change (new binding validation and approval required)",
+        description=gettext_lazy(
+            "Approve location change (new binding validation and approval required)"
+        ),
         permissions=["view"],
     )
     def approve(
@@ -556,7 +595,7 @@ class RegionLocationChangeRequestAdmin(ReadOnlyAdmin):
     ) -> None:
         self.review(request, queryset, approve=True)
 
-    @admin.action(description="Reject location change", permissions=["view"])
+    @admin.action(description=gettext_lazy("Reject location change"), permissions=["view"])
     def reject(self, request: HttpRequest, queryset: QuerySet[RegionLocationChangeRequest]) -> None:
         self.review(request, queryset, approve=False)
 

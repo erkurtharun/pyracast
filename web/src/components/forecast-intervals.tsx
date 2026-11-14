@@ -1,3 +1,5 @@
+"use client";
+import { useLocale, useTranslations } from "next-intl";
 import { ScrollRegion } from "./scroll-region";
 
 export type ForecastInterval = {
@@ -13,10 +15,6 @@ export type ForecastInterval = {
     affected_quality_flags?: string[];
 };
 
-const numberFormatter = new Intl.NumberFormat("en", {
-    maximumFractionDigits: 3,
-});
-
 function IntervalValue({
     value,
     power,
@@ -26,19 +24,27 @@ function IntervalValue({
     power?: number | null;
     electrical: boolean;
 }) {
+    const t = useTranslations("ForecastIntervals");
+    const locale = useLocale();
+    const numberFormatter = new Intl.NumberFormat(locale, {
+        maximumFractionDigits: 3,
+    });
+
     return (
         <>
             <span className="interval-value">
                 {value == null ? "—" : numberFormatter.format(value)}
             </span>
             {value == null && (
-                <span className="sr-only"> Data unavailable.</span>
+                <span className="sr-only">{t("data_unavailable")}</span>
             )}
             {electrical && (
                 <span className="sr-only">
                     {power == null
-                        ? " Average power unavailable."
-                        : ` Average power: ${numberFormatter.format(power)} MW.`}
+                        ? t("_average_power_unavailable")
+                        : t("average_power", {
+                              power: numberFormatter.format(power),
+                          })}
                 </span>
             )}
         </>
@@ -60,6 +66,16 @@ export function ForecastIntervals({
     timezone: string;
     formatTime: (value: string) => string;
 }) {
+    const t = useTranslations("ForecastIntervals");
+    const locale = useLocale();
+    const quality = useTranslations("Forecast.qualityFlags");
+    const flagLabel = (flag: string) =>
+        quality.has(flag)
+            ? quality(flag)
+            : quality("unknown", {
+                  value: locale === "en" ? flag.replaceAll("_", " ") : flag,
+              });
+
     const valueField = electrical ? "energy_mwh" : "ghi_wm2";
     const notes = rows.filter(
         (row) =>
@@ -80,7 +96,7 @@ export function ForecastIntervals({
     );
     return (
         <details className="interval-details">
-            <summary>View interval data ({rows.length} intervals)</summary>
+            <summary>{t("view_intervals", { count: rows.length })}</summary>
             <ScrollRegion label={label}>
                 <table className="forecast-interval-table">
                     <caption className="sr-only">
@@ -88,13 +104,13 @@ export function ForecastIntervals({
                     </caption>
                     <thead>
                         <tr>
-                            <th scope="col">Time interval</th>
+                            <th scope="col">{t("time_interval")}</th>
                             <th scope="col">
                                 {electrical
                                     ? scenarioLabel
-                                        ? "Normal capacity"
-                                        : "Energy"
-                                    : "Irradiance"}{" "}
+                                        ? t("normal_capacity")
+                                        : t("energy")
+                                    : t("irradiance")}{" "}
                                 <span className="interval-unit">
                                     ({electrical ? "MWh" : "W/m²"})
                                 </span>
@@ -132,10 +148,14 @@ export function ForecastIntervals({
                     </tbody>
                 </table>
             </ScrollRegion>
-            {missing && <p className="fine">— Data unavailable; not zero.</p>}
+            {missing && (
+                <p className="fine">{t("_data_unavailable_not_zero")}</p>
+            )}
             {notes.length > 0 && (
                 <details className="interval-notes">
-                    <summary>Interval notes ({notes.length})</summary>
+                    <summary>
+                        {t("interval_notes", { count: notes.length })}
+                    </summary>
                     <ul>
                         {notes.map((row) => (
                             <li key={row.start}>
@@ -143,28 +163,27 @@ export function ForecastIntervals({
                                 <div>
                                     {!!row.quality_flags?.length && (
                                         <p>
-                                            {scenarioLabel &&
-                                                "Normal capacity: "}
-                                            {row.quality_flags
-                                                .map((flag) =>
-                                                    flag.replaceAll("_", " "),
-                                                )
-                                                .join(", ")}
+                                            {scenarioLabel
+                                                ? t("normal_capacity_notes", {
+                                                      flags: row.quality_flags
+                                                          .map(flagLabel)
+                                                          .join(", "),
+                                                  })
+                                                : row.quality_flags
+                                                      .map(flagLabel)
+                                                      .join(", ")}
                                         </p>
                                     )}
                                     {scenarioLabel &&
                                         !!row.affected_quality_flags
                                             ?.length && (
                                             <p>
-                                                {scenarioLabel}:{" "}
-                                                {row.affected_quality_flags
-                                                    .map((flag) =>
-                                                        flag.replaceAll(
-                                                            "_",
-                                                            " ",
-                                                        ),
-                                                    )
-                                                    .join(", ")}
+                                                {t("scenario_notes", {
+                                                    scenario: scenarioLabel,
+                                                    flags: row.affected_quality_flags
+                                                        .map(flagLabel)
+                                                        .join(", "),
+                                                })}
                                             </p>
                                         )}
                                 </div>

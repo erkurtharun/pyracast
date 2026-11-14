@@ -1,4 +1,5 @@
 import type { components } from "./schema";
+import { browserErrors } from "@/i18n/browser";
 export type Session = components["schemas"]["SessionOutput"];
 export type Tenant = components["schemas"]["TenantOutput"];
 export type Region = components["schemas"]["RegionOutput"];
@@ -79,30 +80,42 @@ async function send<T>(
     if (!response.ok)
         throw new ApiError(
             errorMessage(data) ||
-                `Request failed (${response.status}). Please try again.`,
+                browserErrors()("request", { status: response.status }),
             validationFields(data),
         );
     return data as T;
 }
 function errorMessage(data: unknown): string {
+    const t = browserErrors();
     if (typeof data === "string") {
         const messages: Record<string, string> = {
-            location_already_exists:
-                "This location is already in your company’s portfolio. Open the existing plant.",
-            location_already_has_plant:
-                "This location already has an active plant.",
+            location_already_exists: t("duplicateLocation"),
+            location_already_has_plant: t("activePlant"),
         };
-        return messages[data] ?? data;
+        if (messages[data]) return messages[data];
+        const key = `codes.${data}` as Parameters<typeof t>[0];
+        if (t.has(key)) return t(key);
+        return /^[a-z][a-z0-9_]*$/.test(data) ? "" : data;
     }
-    if (Array.isArray(data)) return data.map(errorMessage).join(" ");
-    if (data && typeof data === "object")
-        return Object.entries(data)
+    if (Array.isArray(data))
+        return data.map(errorMessage).filter(Boolean).join(" ");
+    if (data && typeof data === "object") {
+        const detail = Object.entries(data)
             .filter(([key]) => key !== "code")
-            .map(
-                ([key, value]) =>
-                    `${key === "detail" ? "" : `${key}: `}${errorMessage(value)}`,
-            )
+            .map(([key, value]) => {
+                const message = errorMessage(value);
+                return message
+                    ? `${["detail", "non_field_errors"].includes(key) ? "" : `${key}: `}${message}`
+                    : "";
+            })
+            .filter(Boolean)
             .join(" ");
+        if (detail) return detail;
+        if ("code" in data && typeof data.code === "string") {
+            const key = `codes.${data.code}` as Parameters<typeof t>[0];
+            return t.has(key) ? t(key) : "";
+        }
+    }
     return "";
 }
 

@@ -2,12 +2,12 @@ from datetime import datetime, timedelta
 from typing import cast
 from zoneinfo import ZoneInfo
 
-from django.db.models import Q
+from django.db.models import Q, QuerySet
 
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule, ForecastSnapshot
 from pyracast.forecasts.projections import saved_day_payload
 from pyracast.forecasts.timing import effective_forecast_schedule, latest_forecast_slot
-from pyracast.notifications.mail import build_message, message_payload
+from pyracast.notifications.mail import build_message, build_unavailable_message, message_payload
 from pyracast.notifications.models import NotificationDelivery
 
 
@@ -22,13 +22,29 @@ def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
         binding=binding,
         scheduled_for=delivery.scheduled_for,
     )
-    prepared = slot_deliveries.filter(prepared_message__isnull=False).first()
+    prepared = slot_deliveries.filter(
+        prepared_message__isnull=False, language=delivery.language
+    ).first()
     if prepared is not None:
         delivery.snapshot = prepared.snapshot
         delivery.prepared_message = prepared.prepared_message
-        slot_deliveries.filter(prepared_message__isnull=True, attempts=0).update(
-            snapshot=delivery.snapshot, prepared_message=delivery.prepared_message
+        slot_deliveries.filter(
+            prepared_message__isnull=True, attempts=0, language=delivery.language
+        ).update(snapshot=delivery.snapshot, prepared_message=delivery.prepared_message)
+        return True
+    frozen = slot_deliveries.filter(prepared_message__isnull=False).first()
+    if frozen is not None:
+        delivery.snapshot = frozen.snapshot
+        existing = cast(dict[str, object], frozen.prepared_message)
+        prepared_at = datetime.fromisoformat(
+            cast(str, existing.get("prepared_at", delivery.scheduled_for.isoformat()))
         )
+        metadata: dict[str, object] = {
+            key: existing[key]
+            for key in ("prepared_at", "tomorrow_complete", "kind", "format")
+            if key in existing
+        }
+        _freeze_slot(delivery, slot_deliveries, _saved_results(delivery), prepared_at, metadata)
         return True
     job = CollectionJob.objects.filter(
         binding=binding,
@@ -103,17 +119,8 @@ def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
         if partial is None and cast(float, result["valid_coverage_seconds"]) > 0:
             partial = candidate
     delivery.snapshot = snapshot or partial
-    results: list[dict[str, object] | None] = (
-        [saved_day_payload(delivery.snapshot, day) for day in (today, tomorrow)]
-        if delivery.snapshot is not None
-        else [None, None]
-    )
-    payload: dict[str, object] = dict(
-        message_payload(build_message(delivery, results, prepared_at=now))
-    )
-    payload["prepared_at"] = now.isoformat()
-    payload["tomorrow_complete"] = results[1] is not None and results[1]["complete"] is True
-    payload["kind"] = (
+    results = _saved_results(delivery)
+    kind = (
         "current"
         if snapshot and snapshot.job_id == getattr(job, "pk", None)
         else "saved_complete"
@@ -122,8 +129,60 @@ def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
         if partial
         else "unavailable"
     )
-    slot_deliveries.filter(prepared_message__isnull=True, attempts=0).update(
-        snapshot=delivery.snapshot, prepared_message=payload
+    _freeze_slot(
+        delivery,
+        slot_deliveries,
+        results,
+        now,
+        {
+            "prepared_at": now.isoformat(),
+            "tomorrow_complete": results[1] is not None and results[1]["complete"] is True,
+            "kind": kind,
+        },
     )
-    delivery.prepared_message = payload
     return True
+
+
+def _saved_results(delivery: NotificationDelivery) -> list[dict[str, object] | None]:
+    binding = delivery.binding
+    assert binding is not None  # noqa: S101 -- The slot's binding was authorized under lock.
+    today = delivery.scheduled_for.astimezone(ZoneInfo(binding.timezone)).date()
+    return [
+        saved_day_payload(delivery.snapshot, today + timedelta(days=offset))
+        if delivery.snapshot is not None
+        else None
+        for offset in (0, 1)
+    ]
+
+
+def _freeze_slot(
+    delivery: NotificationDelivery,
+    slot_deliveries: QuerySet[NotificationDelivery],
+    results: list[dict[str, object] | None],
+    prepared_at: datetime,
+    metadata: dict[str, object],
+) -> None:
+    payloads = {
+        language: cast(dict[str, object], payload)
+        for language, payload in slot_deliveries.filter(prepared_message__isnull=False)
+        .order_by("language", "pk")
+        .distinct("language")
+        .values_list("language", "prepared_message")
+    }
+    unprepared = slot_deliveries.filter(prepared_message__isnull=True, attempts=0)
+    for record in (delivery, *unprepared.select_related("preference__region", "binding")):
+        if record.language in payloads:
+            continue
+        record.snapshot = delivery.snapshot
+        payload: dict[str, object] = dict(
+            build_unavailable_message(record, prepared_at)[1]
+            if metadata.get("format") == "plain"
+            else message_payload(build_message(record, results, prepared_at=prepared_at))
+        )
+        payload.update(metadata)
+        payloads[record.language] = payload
+    for language, payload in payloads.items():
+        unprepared.filter(language=language).update(
+            snapshot=delivery.snapshot, prepared_message=payload
+        )
+    delivery.prepared_message = payloads[delivery.language]

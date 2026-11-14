@@ -1,6 +1,7 @@
 from typing import Any
 
 from django.utils.dateparse import parse_datetime
+from django.utils.translation import gettext
 from rest_framework import serializers
 
 from pyracast.api.serializers import InputSerializer
@@ -32,7 +33,9 @@ class AwareDateTime(serializers.DateTimeField):
         except ValueError:
             parsed = None
         if parsed is None or parsed.utcoffset() is None:
-            raise serializers.ValidationError("A timezone-aware ISO 8601 timestamp is required.")
+            raise serializers.ValidationError(
+                gettext("A timezone-aware ISO 8601 timestamp is required.")
+            )
         return super().to_internal_value(value)
 
 

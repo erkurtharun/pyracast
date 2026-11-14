@@ -20,6 +20,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/session/language/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["session_language_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tenants/": {
         parameters: {
             query?: never;
@@ -858,6 +874,15 @@ export interface components {
          * @enum {string}
          */
         KindEnum: "inverter" | "panels" | "grid" | "other" | "multiple";
+        /**
+         * @description * `en` - en
+         *     * `tr` - tr
+         * @enum {string}
+         */
+        LanguageEnum: "en" | "tr";
+        LanguageInput: {
+            language: components["schemas"]["LanguageEnum"];
+        };
         LocationChangeInput: {
             expected_revision: number;
             /** Format: double */
@@ -1383,12 +1408,14 @@ export interface components {
         SessionOutput: {
             user: components["schemas"]["SessionUserOutput"] | null;
             csrf_token: string;
+            language: components["schemas"]["LanguageEnum"];
         };
         SessionUserOutput: {
             id: number;
             username: string;
             email: string;
             readonly can_admin: boolean;
+            readonly language_preference: string | null;
         };
         SiteInput: {
             name: string;
@@ -1488,6 +1515,31 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionOutput"];
+                };
+            };
+        };
+    };
+    session_language_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LanguageInput"];
+                "application/x-www-form-urlencoded": components["schemas"]["LanguageInput"];
+                "multipart/form-data": components["schemas"]["LanguageInput"];
+            };
+        };
         responses: {
             200: {
                 headers: {

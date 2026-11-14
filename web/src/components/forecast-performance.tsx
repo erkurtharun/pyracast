@@ -1,4 +1,5 @@
 "use client";
+import { useLocale, useTranslations } from "next-intl";
 import { ScrollRegion } from "./scroll-region";
 
 import { useState, type FormEvent } from "react";
@@ -9,23 +10,6 @@ import { CsvDownload } from "./csv-download";
 
 type Performance = components["schemas"]["PerformanceOutput"];
 
-const reasons: Record<string, string> = {
-    estimated_actuals_not_available:
-        "Historical weather estimates are not available",
-    configuration_not_available:
-        "Configuration was not available before this day",
-    forecast_not_available: "Day-ahead forecast was not available",
-    incomplete_or_invalid_day:
-        "Production or reference coverage is incomplete or invalid",
-    invalid_forecast_data: "Saved reference data is invalid",
-};
-const format = (value: number | null) =>
-    value === null
-        ? "—"
-        : new Intl.NumberFormat("en", { maximumFractionDigits: 3 }).format(
-              value,
-          );
-
 export function ForecastPerformance({
     base,
     timezone,
@@ -33,6 +17,8 @@ export function ForecastPerformance({
     base: string;
     timezone: string;
 }) {
+    const t = useTranslations("ForecastPerformance");
+
     const [start, setStart] = useState(() => localDay(timezone, -30));
     const [end, setEnd] = useState(() => localDay(timezone, -1));
     const [comparison, setComparison] = useState("historical_model");
@@ -56,52 +42,40 @@ export function ForecastPerformance({
         <section className="panel">
             <div className="section-heading">
                 <div>
-                    <h2>Production comparison</h2>
+                    <h2>{t("production_comparison")}</h2>
                     <p className="fine">
-                        Historical model or archived forecast vs daylight
-                        production · {timezone}
+                        {t("comparison_description", { timezone })}
                     </p>
                 </div>
             </div>
             <details>
-                <summary>How comparison is measured</summary>
+                <summary>{t("how_comparison_is_measured")}</summary>
+                <p>{t("historical_model_uses_saved_weather_estimates_and")}</p>
                 <p>
-                    Historical model uses saved weather estimates and the
-                    current configuration. Calibration applies from its training
-                    period onward. This retrospective comparison can include
-                    provisional production. It does not measure forecast
-                    accuracy.
+                    {t(
+                        "archived_performance_replays_the_forecast_configuration_and",
+                    )}
                 </p>
-                <p>
-                    Archived performance replays the forecast, configuration and
-                    calibration available at the previous-day cutoff. A blank
-                    cutoff uses the end of the previous local day. This does not
-                    establish publication at the time.
-                </p>
-                <p>
-                    Whole intervals overlapping daylight retain their energy.
-                    Complete daylight coverage is required. Select up to 90
-                    completed local days in {timezone}.
-                </p>
+                <p>{t("daylight_rules", { timezone })}</p>
             </details>
             <form className="forecast-controls" onSubmit={load}>
                 <label className="field">
-                    Comparison
+                    {t("comparison")}
                     <select
                         value={comparison}
                         onChange={(event) => setComparison(event.target.value)}
                     >
                         <option value="historical_model">
-                            Historical model
+                            {t("historical_model")}
                         </option>
                         <option value="archived_forecast">
-                            Archived forecast performance
+                            {t("archived_forecast_performance")}
                         </option>
                     </select>
                 </label>
                 {comparison === "archived_forecast" && (
                     <label className="field">
-                        Previous-day cutoff
+                        {t("previousday_cutoff")}
                         <input
                             type="time"
                             value={issuanceCutoff}
@@ -112,7 +86,7 @@ export function ForecastPerformance({
                     </label>
                 )}
                 <label className="field">
-                    Start date
+                    {t("start_date")}
                     <input
                         type="date"
                         required
@@ -122,7 +96,7 @@ export function ForecastPerformance({
                     />
                 </label>
                 <label className="field">
-                    End date
+                    {t("end_date")}
                     <input
                         type="date"
                         required
@@ -132,7 +106,7 @@ export function ForecastPerformance({
                     />
                 </label>
                 <button className="button secondary" type="submit">
-                    Load performance
+                    {t("load_performance")}
                 </button>
             </form>
             <PerformanceResults key={url} url={url} timezone={timezone} />
@@ -147,6 +121,28 @@ function PerformanceResults({
     url: string;
     timezone: string;
 }) {
+    const t = useTranslations("ForecastPerformance");
+    const locale = useLocale();
+    const format = (value: number | null) =>
+        value === null
+            ? "—"
+            : new Intl.NumberFormat(locale, {
+                  maximumFractionDigits: 3,
+              }).format(value);
+    const reasons: Record<string, string> = {
+        estimated_actuals_not_available: t(
+            "historical_weather_estimates_are_not_available",
+        ),
+        configuration_not_available: t(
+            "configuration_was_not_available_before_this_day",
+        ),
+        forecast_not_available: t("dayahead_forecast_was_not_available"),
+        incomplete_or_invalid_day: t(
+            "production_or_reference_coverage_is_incomplete_or",
+        ),
+        invalid_forecast_data: t("saved_reference_data_is_invalid"),
+    };
+
     const resource = useResource<Performance>(url);
     const matched =
         resource.data?.days.filter((day) => day.status === "matched") ?? [];
@@ -156,13 +152,13 @@ function PerformanceResults({
         if (day.status === "matched") continue;
         const reason =
             (day.reason && reasons[day.reason]) ||
-            "Production or reference data is unavailable";
+            t("production_or_reference_data_is_unavailable");
         missingReasons.set(reason, (missingReasons.get(reason) ?? 0) + 1);
     }
     return (
         <>
             {resource.loading ? (
-                <p role="status">Loading performance…</p>
+                <p role="status">{t("loading_performance")}</p>
             ) : resource.error ? (
                 <Notice error>{resource.error}</Notice>
             ) : (
@@ -183,11 +179,11 @@ function PerformanceResults({
                             <>
                                 <div className="stats">
                                     <Stat
-                                        label="Matched days"
+                                        label={t("matched_days")}
                                         value={resource.data.matched_days}
                                     />
                                     <Stat
-                                        label="Missing days"
+                                        label={t("missing_days")}
                                         value={
                                             resource.data.missing_days ??
                                             resource.data.requested_days -
@@ -196,19 +192,19 @@ function PerformanceResults({
                                     />
                                     {(resource.data.excluded_days ?? 0) > 0 && (
                                         <Stat
-                                            label="Excluded days"
+                                            label={t("excluded_days")}
                                             value={resource.data.excluded_days}
                                         />
                                     )}
                                     <Stat
-                                        label="Daylight energy error"
+                                        label={t("daylight_energy_error")}
                                         value={
                                             resource.data.metrics?.daily_mae_mwh
                                         }
                                         unit="MWh"
                                     />
                                     <Stat
-                                        label="Daylight energy bias"
+                                        label={t("daylight_energy_bias")}
                                         value={
                                             resource.data.metrics
                                                 ?.daily_bias_mwh
@@ -218,11 +214,13 @@ function PerformanceResults({
                                 </div>
                                 <details>
                                     <summary>
-                                        Additional metrics & interpretation
+                                        {t("additional_metrics_interpretation")}
                                     </summary>
                                     <div className="stats">
                                         <Stat
-                                            label="Baseline daylight energy error"
+                                            label={t(
+                                                "baseline_daylight_energy_error",
+                                            )}
                                             value={
                                                 resource.data.baseline_metrics
                                                     ?.daily_mae_mwh
@@ -230,7 +228,9 @@ function PerformanceResults({
                                             unit="MWh"
                                         />
                                         <Stat
-                                            label="Generating-interval error"
+                                            label={t(
+                                                "generatinginterval_error",
+                                            )}
                                             value={
                                                 resource.data.metrics
                                                     ?.source_positive_mae_mw
@@ -240,71 +240,80 @@ function PerformanceResults({
                                     </div>
                                     {resource.data.scored_intervals != null && (
                                         <p className="fine">
-                                            Scored:{" "}
-                                            {resource.data.scored_intervals}{" "}
-                                            intervals /{" "}
-                                            {format(resource.data.scored_hours)}{" "}
-                                            hours.
+                                            {t("scored_coverage", {
+                                                count: resource.data
+                                                    .scored_intervals,
+                                                hours: format(
+                                                    resource.data.scored_hours,
+                                                ),
+                                            })}
                                         </p>
                                     )}
                                     <p className="fine">
-                                        Bias is predicted minus measured. Daily
-                                        energy error is mean absolute error.
-                                        Generating-interval error is mean
-                                        absolute error in intervals with
-                                        positive reference input. Uncertainty is
-                                        not estimated.
+                                        {t(
+                                            "bias_is_predicted_minus_measured_daily_energy",
+                                        )}
                                     </p>
                                 </details>
                             </>
                         )}
                         {historical && matched.length > 0 && (
                             <p className="fine">
-                                Current configuration · calibration from its
-                                training period onward · retrospective model
-                                comparison.
+                                {t(
+                                    "current_configuration_calibration_from_its_training_period",
+                                )}
                                 {matched.some(
                                     (day) => day.provisional_production,
                                 ) &&
-                                    " Includes provisional reported production; meter boundary is unverified."}
+                                    t(
+                                        "_includes_provisional_reported_production_meter_boundary",
+                                    )}
                             </p>
                         )}
                         {!resource.data.metrics && (
                             <Notice>
-                                No complete production and reference pairs are
-                                available for this range. Select another range
-                                or check saved production data.
+                                {t(
+                                    "no_complete_production_and_reference_pairs_are",
+                                )}
                             </Notice>
                         )}
                         {matched.length > 0 && (
                             <details open>
                                 <summary>
-                                    Daily comparison ({matched.length} days)
+                                    {t("daily_comparison", {
+                                        count: matched.length,
+                                    })}
                                 </summary>
-                                <ScrollRegion label="Daily forecast comparison">
+                                <ScrollRegion
+                                    label={t("daily_forecast_comparison")}
+                                >
                                     <table>
                                         <caption>
                                             {historical
-                                                ? "Historical daylight model"
-                                                : "Daylight replay"}
-                                            : {resource.data.start_date} to{" "}
-                                            {resource.data.end_date}
+                                                ? t("historical_daylight_model")
+                                                : t("daylight_replay")}{" "}
+                                            {t("date_range", {
+                                                start: resource.data.start_date,
+                                                end: resource.data.end_date,
+                                            })}
                                         </caption>
                                         <thead>
                                             <tr>
-                                                <th>Date</th>
-                                                <th>Status</th>
+                                                <th>{t("date")}</th>
+                                                <th>{t("status")}</th>
                                                 <th>
                                                     {historical
-                                                        ? "Measured / reported (MWh)"
-                                                        : "Measured (MWh)"}
+                                                        ? t(
+                                                              "measured_reported_mwh",
+                                                          )
+                                                        : t("measured_mwh")}
                                                 </th>
                                                 <th>
                                                     {historical
-                                                        ? "Model (MWh)"
-                                                        : "Predicted (MWh)"}
+                                                        ? t("model_mwh")
+                                                        : t("predicted_mwh")}
                                                 </th>
-                                                <th>Error (MWh)</th>
+                                                <th>{t("error_mwh")}</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -313,8 +322,10 @@ function PerformanceResults({
                                                     <td>{day.date}</td>
                                                     <td>
                                                         {day.provisional_production
-                                                            ? "Provisional production"
-                                                            : "Matched"}
+                                                            ? t(
+                                                                  "provisional_production",
+                                                              )
+                                                            : t("matched")}
                                                     </td>
                                                     <td>
                                                         {format(
@@ -339,17 +350,20 @@ function PerformanceResults({
                         {missingReasons.size > 0 && (
                             <details>
                                 <summary>
-                                    Unavailable dates (
-                                    {resource.data.requested_days -
-                                        resource.data.matched_days}
-                                    )
+                                    {t("unavailable_dates", {
+                                        count:
+                                            resource.data.requested_days -
+                                            resource.data.matched_days,
+                                    })}
                                 </summary>
                                 <ul>
                                     {[...missingReasons].map(
                                         ([reason, count]) => (
                                             <li key={reason}>
-                                                {reason}: {count}{" "}
-                                                {count === 1 ? "day" : "days"}
+                                                {t("reason_count", {
+                                                    reason,
+                                                    count,
+                                                })}
                                             </li>
                                         ),
                                     )}

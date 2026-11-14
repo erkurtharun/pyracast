@@ -1,4 +1,5 @@
 "use client";
+import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { type Region, type Plant } from "@/lib/api";
 import { Notice, useCollection } from "./ui";
@@ -20,6 +21,8 @@ export function RegionWorkspace({
     onDeleted: () => void;
     initialPlant?: Plant;
 }) {
+    const t = useTranslations("RegionWorkspace");
+
     const base = `/api/tenants/${tenant}/regions/${region.id}/`;
     const plants = useCollection<Plant>(`${base}plants/`, 0, 30_000);
     const [created, setCreated] = useState<Plant>();
@@ -29,8 +32,7 @@ export function RegionWorkspace({
             <>
                 {plants.error && (
                     <Notice error>
-                        Unable to refresh this plant. Showing saved details.{" "}
-                        {plants.error}
+                        {t("refreshFailed", { error: plants.error })}
                     </Notice>
                 )}
                 <PlantWorkspace
@@ -49,10 +51,10 @@ export function RegionWorkspace({
     return (
         <>
             <button className="back-button" onClick={onBack}>
-                All plants
+                {t("allPlants")}
             </button>
             {plants.loading ? (
-                <p role="status">Loading plant...</p>
+                <p role="status">{t("loadingPlant")}</p>
             ) : plants.error ? (
                 <Notice error>{plants.error}</Notice>
             ) : (

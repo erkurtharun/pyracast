@@ -239,6 +239,33 @@ test("an MFA administrator reviews plants and operations on desktop and mobile u
     await page.setViewportSize({ width: 375, height: 812 });
     await checkPage(page, testInfo, "admin-settings-mobile");
 
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.goto("/admin/");
+    await page
+        .getByRole("combobox", { name: "Language", exact: true })
+        .selectOption("tr");
+    await page
+        .getByRole("button", { name: "Apply language", exact: true })
+        .click();
+    try {
+        await expect(page.locator("html")).toHaveAttribute("lang", "tr");
+        await expect(
+            page.getByRole("heading", { name: "Genel bakış", exact: true }),
+        ).toBeVisible();
+        await checkPage(page, testInfo, "admin-turkish-desktop");
+        await page.setViewportSize({ width: 375, height: 812 });
+        await checkPage(page, testInfo, "admin-turkish-mobile");
+    } finally {
+        await page.setViewportSize({ width: 1440, height: 1000 });
+        await page
+            .getByRole("combobox", { name: "Dil", exact: true })
+            .selectOption("en");
+        await page
+            .getByRole("button", { name: "Dili uygula", exact: true })
+            .click();
+        await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    }
+    await page.setViewportSize({ width: 375, height: 812 });
     await page.goto("/?workspace=customer");
     await expect(
         page.getByRole("link", { name: "Administration" }),

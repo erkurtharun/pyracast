@@ -23,6 +23,44 @@
                 }
             }
         },
+        "/api/session/language/": {
+            "post": {
+                "operationId": "session_language_create",
+                "tags": ["session"],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/LanguageInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/LanguageInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/LanguageInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SessionOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
         "/api/tenants/": {
             "get": {
                 "operationId": "tenants_list",
@@ -3731,6 +3769,20 @@
                 "type": "string",
                 "description": "* `inverter` - inverter\n* `panels` - panels\n* `grid` - grid\n* `other` - other\n* `multiple` - multiple"
             },
+            "LanguageEnum": {
+                "enum": ["en", "tr"],
+                "type": "string",
+                "description": "* `en` - en\n* `tr` - tr"
+            },
+            "LanguageInput": {
+                "type": "object",
+                "properties": {
+                    "language": {
+                        "$ref": "#/components/schemas/LanguageEnum"
+                    }
+                },
+                "required": ["language"]
+            },
             "LocationChangeInput": {
                 "type": "object",
                 "properties": {
@@ -5264,9 +5316,12 @@
                     },
                     "csrf_token": {
                         "type": "string"
+                    },
+                    "language": {
+                        "$ref": "#/components/schemas/LanguageEnum"
                     }
                 },
-                "required": ["csrf_token", "user"]
+                "required": ["csrf_token", "language", "user"]
             },
             "SessionUserOutput": {
                 "type": "object",
@@ -5292,9 +5347,20 @@
                     "can_admin": {
                         "type": "boolean",
                         "readOnly": true
+                    },
+                    "language_preference": {
+                        "type": "string",
+                        "nullable": true,
+                        "readOnly": true
                     }
                 },
-                "required": ["can_admin", "email", "id", "username"]
+                "required": [
+                    "can_admin",
+                    "email",
+                    "id",
+                    "language_preference",
+                    "username"
+                ]
             },
             "SiteInput": {
                 "type": "object",

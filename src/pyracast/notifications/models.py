@@ -55,6 +55,9 @@ class NotificationDelivery(models.Model):
     lease_token = models.UUIDField(null=True)
     lease_expires_at = models.DateTimeField(null=True)
     recipient = models.EmailField(blank=True, default="")
+    language = models.CharField(
+        max_length=2, choices=(("en", "English"), ("tr", "Türkçe")), default="en"
+    )
     snapshot = models.ForeignKey(ForecastSnapshot, on_delete=models.PROTECT, null=True)
     binding = models.ForeignKey(SiteBinding, on_delete=models.PROTECT, null=True)
     preparation_deadline = models.DateTimeField(null=True)
@@ -68,6 +71,10 @@ class NotificationDelivery(models.Model):
             models.UniqueConstraint(
                 fields=("preference", "scheduled_for", "recipient"),
                 name="unique_reminder_recipient_slot",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(language__in=("en", "tr")),
+                name="notification_delivery_language_valid",
             ),
             models.CheckConstraint(
                 condition=models.Q(

@@ -1,3 +1,5 @@
+"use client";
+import { useLocale, useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { request } from "@/lib/api";
 import { parseProduction, type Observation } from "@/lib/production";
@@ -19,6 +21,9 @@ export function ProductionImport({
     configuration: number;
     token: string;
 }) {
+    const t = useTranslations("ProductionImport");
+    const locale = useLocale();
+
     const fileReadSequence = useRef(0);
     const [selection, setSelection] = useState<CsvSelection>({
         status: "empty",
@@ -35,7 +40,7 @@ export function ProductionImport({
         if (file.size > 2 * 1024 * 1024) {
             setSelection({
                 status: "invalid",
-                error: "Choose a CSV no larger than 2 MiB.",
+                error: t("choose_a_csv_no_larger_than_2"),
             });
             return;
         }
@@ -45,7 +50,7 @@ export function ProductionImport({
             setSelection({
                 status: "ready",
                 fileName: file.name,
-                observations: parseProduction(text),
+                observations: parseProduction(text, locale),
             });
         } catch (error) {
             if (sequence !== fileReadSequence.current) return;
@@ -54,7 +59,7 @@ export function ProductionImport({
                 error:
                     error instanceof Error
                         ? error.message
-                        : "Could not read the production CSV.",
+                        : t("could_not_read_the_production_csv"),
             });
         }
     }
@@ -62,17 +67,12 @@ export function ProductionImport({
         <section className="panel">
             <div className="section-heading">
                 <div>
-                    <h2>Import production CSV</h2>
+                    <h2>{t("import_production_csv")}</h2>
                 </div>
             </div>
             <details>
-                <summary>CSV format and import rules</summary>
-                <p>
-                    Use a CSV with the exact header below. Timestamps need an
-                    explicit timezone, energy must be non-negative, and
-                    intervals cannot overlap. Each batch accepts up to 2,000
-                    rows.
-                </p>
+                <summary>{t("csv_format_and_import_rules")}</summary>
+                <p>{t("use_a_csv_with_the_exact_header")}</p>
                 <div className="csv-example">
                     <code>
                         starts_at,ends_at,energy,quality,source
@@ -81,18 +81,15 @@ export function ProductionImport({
                     </code>
                 </div>
                 <p className="fine">
-                    Quality: valid, outage, curtailed, or invalid. Quoted CSV
-                    fields may contain commas and line breaks. Units apply to
-                    the whole batch. Exact replays are safe; conflicting records
-                    reject the whole batch.
+                    {t("quality_valid_outage_curtailed_or_invalid_quoted")}
                 </p>
             </details>
             <ActionForm
-                submit={`Import ${observationCount || ""} observations`}
+                submit={t("import_observations", { count: observationCount })}
                 onSubmit={async (data) => {
                     if (selection.status !== "ready" || !observationCount)
                         throw new Error(
-                            "Choose and validate a CSV before importing.",
+                            t("choose_and_validate_a_csv_before_importing"),
                         );
                     const response = await request<ImportResult>(
                         `${base}observations/`,
@@ -109,7 +106,7 @@ export function ProductionImport({
             >
                 <div className="form-grid">
                     <label className="field">
-                        Production CSV
+                        {t("production_csv")}
                         <input
                             type="file"
                             accept=".csv,text/csv"
@@ -119,9 +116,9 @@ export function ProductionImport({
                             }
                         />
                     </label>
-                    <Select label="Energy unit" name="unit">
-                        <option value="kWh">kWh — kilowatt-hours</option>
-                        <option value="MWh">MWh — megawatt-hours</option>
+                    <Select label={t("energy_unit")} name="unit">
+                        <option value="kWh">{t("kwh_kilowatthours")}</option>
+                        <option value="MWh">{t("mwh_megawatthours")}</option>
                     </Select>
                 </div>
                 {selection.status === "invalid" && (
@@ -129,16 +126,21 @@ export function ProductionImport({
                 )}
                 {selection.status === "ready" && observationCount > 0 && (
                     <Notice>
-                        {selection.fileName}: {observationCount} valid
-                        observations ready. First interval:{" "}
-                        {selection.observations[0].starts_at}.
+                        {t("validated_file", {
+                            file: selection.fileName,
+                            count: observationCount,
+                            start: selection.observations[0].starts_at,
+                        })}
                     </Notice>
                 )}
             </ActionForm>
             {result && (
                 <Notice>
-                    Import complete: {result.created} created, {result.existing}{" "}
-                    already present, {result.count} total.
+                    {t("import_complete", {
+                        created: result.created,
+                        existing: result.existing,
+                        total: result.count,
+                    })}
                 </Notice>
             )}
         </section>
