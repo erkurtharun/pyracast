@@ -7,13 +7,12 @@ from allauth.headless.internal.restkit.response import ErrorResponse
 from allauth.mfa.models import Authenticator
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.http import HttpRequest
 from django.utils import translation
 
 from pyracast.accounts.language import user_language
 from pyracast.accounts.security import normalize_client_ip
-from pyracast.notifications.operations import recipient_limit
 
 
 class AccountAdapter(DefaultAccountAdapter):
@@ -35,8 +34,18 @@ class AccountAdapter(DefaultAccountAdapter):
 
     @transaction.atomic
     def confirm_email(self, request: HttpRequest, email_address: EmailAddress) -> bool:
-        recipient_limit(lock=True)
-        if not super().confirm_email(request, email_address):
+        User.objects.select_for_update().get(pk=email_address.user_id)
+        try:
+            with transaction.atomic():
+                confirmed = super().confirm_email(request, email_address)
+        except IntegrityError as error:
+            if (
+                getattr(getattr(error.__cause__, "diag", None), "constraint_name", None)
+                != "unique_verified_email"
+            ):
+                raise
+            confirmed = False
+        if not confirmed:
             raise ImmediateHttpResponse(
                 ErrorResponse(request, exception=self.validation_error("email_taken"))
             )

@@ -18,8 +18,6 @@ from django.core import mail
 from django.db import close_old_connections, connections
 from django.test import Client, override_settings
 
-from pyracast.notifications.operations import recipient_limit
-
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 AUTH = "/api/auth/browser/v1/"
 PASSWORD = "test-only-" + "falcon-cloud-79!"
@@ -382,7 +380,6 @@ def test_verified_address_takes_precedence_over_another_pending_identity() -> No
 def test_concurrent_email_confirmations_admit_only_one_owner(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    recipient_limit()
     pending: list[tuple[Client, str]] = []
     for index in range(2):
         user = User.objects.create_user(
@@ -406,8 +403,8 @@ def test_concurrent_email_confirmations_admit_only_one_owner(
 
     def synchronized_validation(address: EmailAddress) -> bool:
         result = original(address)
-        if not getattr(thread, "validated", False):
-            thread.validated = True
+        thread.checks = getattr(thread, "checks", 0) + 1
+        if thread.checks == 2:
             barrier.wait(timeout=10)
         return result
 
