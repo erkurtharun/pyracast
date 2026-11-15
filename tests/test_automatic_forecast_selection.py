@@ -11,19 +11,26 @@ from pyracast.incidents.operations import save_incident
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import ForecastIssuance, Plant, PlantConfiguration, PlantForecast
-from pyracast.plants.operations import revise_plant
+from pyracast.plants.operations import activate_calibration, revise_plant
 from pyracast.regions.models import Region
 from tests.test_domain import System
-from tests.test_plant_operations import make_plant, publish_snapshot, snapshot_for
+from tests.test_plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 11)
 
 
 def reference_transition(
-    monkeypatch: pytest.MonkeyPatch, *, archive_periods: int = 48, with_latest: bool = True
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    archive_periods: int = 48,
+    with_latest: bool = True,
+    calibrated: bool = False,
 ) -> tuple[System, Plant, int]:
     system, plant = make_plant(monkeypatch)
+    if calibrated:
+        run = ready_run(system, plant)
+        activate_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk, run.pk)
     start, _ = local_day_bounds(DAY, system.binding.timezone)
     old = snapshot_for(system, DAY, power_kw=0.1)
     old.normalized_intervals = old.normalized_intervals[:archive_periods]
@@ -329,3 +336,47 @@ def test_reference_transition_selects_archive_for_the_previous_binding(
     payload = cast(dict[str, Any], outlook["result"])
     assert payload["provenance"]["snapshot_id"] == original_snapshot_id
     assert "reference_transition_fallback" in payload["quality_flags"]
+
+
+def test_reference_fallback_drops_invalidated_calibration_without_changing_archive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant, source_id = reference_transition(monkeypatch, calibrated=True)
+    scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
+    archived = plant_outlook(
+        *scope, target_date=DAY, resolution_minutes=60, source="archived_forecast"
+    )
+    original = cast(dict[str, Any], archived["result"])
+    assert archived["calibration_id"] is not None
+    assert original["factor"] == 0.5
+    assert original["energy_mwh"] == pytest.approx(156)
+    issuance = ForecastIssuance.objects.get(snapshot_id=source_id)
+    payloads_before = issuance.payloads
+    training_start, _ = local_day_bounds(date(2026, 11, 4), system.binding.timezone)
+    save_incident(
+        *scope,
+        kind="panels",
+        title="Late reported training outage",
+        notes="",
+        starts_at=training_start + timedelta(hours=9),
+        ends_at=training_start + timedelta(hours=10),
+        available_dc_mw=65,
+        available_inverter_mw=None,
+        available_export_mw=None,
+    )
+    live = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, source="auto")
+    normal = cast(dict[str, Any], live["result"])
+    assert live["configuration_id"] == archived["configuration_id"]
+    assert live["calibration_id"] is None
+    assert live["outage_scenario"] is None
+    assert normal["factor"] == 1
+    assert normal["energy_mwh"] == pytest.approx(312)
+    assert normal["provenance"]["snapshot_id"] == source_id
+    assert "source_segments" not in normal["provenance"]
+    assert "calibration_invalidated_by_outage_history" in normal["quality_flags"]
+    replay = plant_outlook(
+        *scope, target_date=DAY, resolution_minutes=60, source="archived_forecast"
+    )
+    assert replay == archived
+    issuance.refresh_from_db()
+    assert issuance.payloads == payloads_before
