@@ -12,7 +12,7 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_archive import (
     ARCHIVE_SELECTION_POLICY,
     issuance_power_intervals,
-    select_forecast_issuance,
+    select_forecast_issuances,
 )
 from pyracast.plants.forecasting import (
     calibration_for_day,
@@ -309,23 +309,24 @@ def forecast_performance(
             for offset in range((end_date - start_date).days + 1)
         }
     if configuration is not None:
-        for offset in range((end_date - start_date).days + 1):
-            target = start_date + timedelta(days=offset)
-            selection_cutoff = (
+        cutoffs = {
+            target: (
                 _selection_cutoff(target, zone, issuance_cutoff)
                 if issuance_cutoff is not None
                 else None
             )
-            issuance = (
-                select_forecast_issuance(
-                    plant,
-                    target,
-                    as_of=selection_cutoff,
-                    native_only=True,
-                )
-                if comparison == "archived_forecast"
-                else None
+            for target in (
+                start_date + timedelta(days=offset)
+                for offset in range((end_date - start_date).days + 1)
             )
+        }
+        issuances = (
+            select_forecast_issuances(plant, cutoffs, native_only=True)
+            if comparison == "archived_forecast"
+            else {}
+        )
+        for target, selection_cutoff in cutoffs.items():
+            issuance = issuances.get(target)
             selected_configuration = issuance.configuration if issuance else configuration
             comparable = (
                 selected_configuration.measurement_basis == configuration.measurement_basis

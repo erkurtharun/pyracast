@@ -18,11 +18,9 @@ from pyracast.plants.availability import (
 )
 from pyracast.plants.measurements import (
     Measurement,
-    select_measurements,
-    select_provider_measurements,
+    select_production_measurements,
 )
 from pyracast.plants.models import Plant, PlantConfiguration, ProductionObservation
-from pyracast.plants.observations import observation_heads
 from pyracast.plants.operations import configuration_is_current
 from pyracast.plants.serializers import ObservationOutput
 from pyracast.solar import DAYLIGHT_POLICY, daylight_window
@@ -159,27 +157,17 @@ def production_history(
         )
     range_start, _ = local_day_bounds(start_date, zone)
     _, range_end = local_day_bounds(end_date, zone)
-    heads = list(
-        observation_heads(cutoff=now)
-        .filter(plant=plant, starts_at__lt=range_end, ends_at__gt=range_start)
-        .order_by("starts_at", "id")
-    )
+    selected = select_production_measurements(plant, configuration, range_start, range_end, now)
+    heads = selected.heads
     observations = [row for row in heads if not row.is_reverted]
-    encoded = {row.pk: ObservationOutput(row).data for row in observations}
+    encoded = {row["id"]: row for row in ObservationOutput(observations, many=True).data}
     revisions = ProductionObservation.objects.filter(
         plant=plant,
         starts_at__lt=range_end,
         ends_at__gt=range_start,
         recorded_at__lte=now,
     ).order_by("starts_at", "id")
-    effective = (
-        select_measurements(configuration, range_start, range_end, now)[0] if configuration else []
-    )
-    providers = (
-        select_provider_measurements(configuration, range_start, range_end, now)[0]
-        if configuration
-        else []
-    )
+    providers, effective = selected.selection.providers, selected.selection.effective
     current = configuration is not None and configuration_is_current(configuration)
     may_edit = (
         actor is None

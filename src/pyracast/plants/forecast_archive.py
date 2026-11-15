@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -248,27 +249,52 @@ def select_forecast_issuance(
     binding_id: int | None = None,
     native_only: bool = False,
 ) -> ForecastIssuance | None:
+    return select_forecast_issuances(
+        plant, {day: as_of}, binding_id=binding_id, native_only=native_only
+    ).get(day)
+
+
+def select_forecast_issuances(
+    plant: Plant,
+    cutoffs: Mapping[date, datetime | None],
+    *,
+    binding_id: int | None = None,
+    native_only: bool = False,
+) -> dict[date, ForecastIssuance]:
     issuances = (
         ForecastIssuance.objects.select_related(
             "configuration__binding", "snapshot__job", "calibration"
         )
         .defer("snapshot__raw_payload", "snapshot__weather_payload")
-        .filter(plant=plant, target_date=day)
+        .filter(plant=plant, target_date__in=tuple(cutoffs))
     )
     if native_only:
         issuances = issuances.defer(
-            "payloads", "outage_scenarios", "snapshot__normalized_intervals"
+            "payloads",
+            "outage_scenarios",
+            "snapshot__normalized_intervals",
+            "calibration__dataset_manifest",
+            "calibration__result",
         )
-    if as_of is not None:
-        if as_of.utcoffset() is None:
-            raise ValueError("The selection cutoff must be timezone-aware.")
-        issuances = issuances.filter(published_at__lte=as_of, snapshot__collected_at__lte=as_of)
-        issuances = issuances.filter(
-            Q(snapshot__issued_at__isnull=True) | Q(snapshot__issued_at__lte=as_of)
-        )
+    if any(cutoff is not None for cutoff in cutoffs.values()):
+        available = Q(pk__in=[])
+        for day, cutoff in cutoffs.items():
+            eligible = Q(target_date=day)
+            if cutoff is not None:
+                if cutoff.utcoffset() is None:
+                    raise ValueError("The selection cutoff must be timezone-aware.")
+                eligible &= Q(published_at__lte=cutoff, snapshot__collected_at__lte=cutoff)
+                eligible &= Q(snapshot__issued_at__isnull=True) | Q(snapshot__issued_at__lte=cutoff)
+            available |= eligible
+        issuances = issuances.filter(available)
     if binding_id is not None:
         issuances = issuances.filter(snapshot__binding_id=binding_id)
-    return issuances.order_by("-snapshot__collected_at", "-pk").first()
+    return {
+        issuance.target_date: issuance
+        for issuance in issuances.order_by(
+            "target_date", "-snapshot__collected_at", "-pk"
+        ).distinct("target_date")
+    }
 
 
 def issuance_power_intervals(

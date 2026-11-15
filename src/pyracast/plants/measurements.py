@@ -24,8 +24,10 @@ from pyracast.plants.measurement_policy import (
 )
 from pyracast.plants.models import (
     CalibrationRun,
+    Plant,
     PlantConfiguration,
     PlantEvent,
+    ProductionObservation,
 )
 from pyracast.plants.observations import observation_heads
 
@@ -48,6 +50,19 @@ class Measurement:
     pk: int | None
     recorded_at: datetime
     snapshot: EpiasSnapshot | None = None
+
+
+@dataclass(frozen=True)
+class MeasurementSelection:
+    effective: list[Measurement]
+    providers: list[Measurement]
+    snapshot_ids: list[int]
+
+
+@dataclass(frozen=True)
+class ProductionMeasurements:
+    heads: list[ProductionObservation]
+    selection: MeasurementSelection
 
 
 def _current_production(
@@ -155,9 +170,58 @@ def select_measurements(
         starts_at__lt=end,
         ends_at__gt=start,
         is_reverted=False,
+        ends_at__lte=cutoff,
     )
-    manual = manual.filter(ends_at__lte=cutoff)
-    overlapping_manual = list(manual)
+    selection = _select_measurement_sources(
+        configuration,
+        start,
+        end,
+        cutoff,
+        list(manual),
+        production_snapshot_ids=production_snapshot_ids,
+        incident_revision_ids=incident_revision_ids,
+        policy=policy,
+    )
+    return selection.effective, selection.snapshot_ids
+
+
+def select_production_measurements(
+    plant: Plant,
+    configuration: PlantConfiguration | None,
+    start: datetime,
+    end: datetime,
+    cutoff: datetime,
+) -> ProductionMeasurements:
+    heads = list(
+        observation_heads(cutoff=cutoff)
+        .filter(plant=plant, starts_at__lt=end, ends_at__gt=start)
+        .order_by("starts_at", "id")
+    )
+    if configuration is None:
+        return ProductionMeasurements(heads, MeasurementSelection([], [], []))
+    manual = [
+        row
+        for row in heads
+        if row.configuration_id == configuration.pk
+        and not row.is_reverted
+        and row.ends_at <= cutoff
+    ]
+    return ProductionMeasurements(
+        heads, _select_measurement_sources(configuration, start, end, cutoff, manual)
+    )
+
+
+def _select_measurement_sources(
+    configuration: PlantConfiguration,
+    start: datetime,
+    end: datetime,
+    cutoff: datetime,
+    overlapping_manual: list[ProductionObservation],
+    *,
+    production_snapshot_ids: list[int] | None = None,
+    incident_revision_ids: list[int] | None = None,
+    policy: str = MEASUREMENT_POLICY,
+) -> MeasurementSelection:
     rows = [
         Measurement(r.starts_at, r.ends_at, r.energy_mwh, r.quality, r.source, r.pk, r.recorded_at)
         for r in overlapping_manual
@@ -196,9 +260,11 @@ def select_measurements(
         for row in rows
     ]
     used = {row.snapshot.pk for row in rows if row.snapshot is not None}
-    return sorted(rows, key=lambda r: (r.starts_at, r.pk or 0)), [
-        pk for pk in selected_ids if pk in used
-    ]
+    return MeasurementSelection(
+        sorted(rows, key=lambda r: (r.starts_at, r.pk or 0)),
+        providers,
+        [pk for pk in selected_ids if pk in used],
+    )
 
 
 def select_provider_measurements(
@@ -230,7 +296,8 @@ def select_provider_measurements(
         .distinct("target_day", "source_kind")
     )
     selected = sorted(
-        snapshots.select_related("job"), key=lambda item: kinds.index(item.source_kind)
+        snapshots.select_related("job").defer("raw_payload"),
+        key=lambda item: kinds.index(item.source_kind),
     )
     provider_rows: dict[datetime, Measurement] = {}
     for snapshot in selected:
