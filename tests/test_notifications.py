@@ -164,11 +164,10 @@ def test_saved_delivery_pins_vintage_recipient_and_never_fetches() -> None:
     assert "11 Nov 2026" in message.body
     assert "Partial:" in message.body
     sheet = attached_sheet(message)
-    assert sheet["A5"].value == datetime(2026, 11, 10)
-    assert sheet["A6"].value == datetime(2026, 11, 11)
-    assert isinstance(sheet["B5"].value, float)
-    assert isinstance(sheet["B6"].value, float)
-    assert sheet["D5"].value == sheet["D6"].value == "Partial estimate"
+    for day in (10, 11):
+        row = next(cell.row for cell in sheet["A"] if cell.value == datetime(2026, 11, day))
+        assert isinstance(sheet.cell(row, 3).value, float)
+        assert "Partial estimate" in str(sheet.cell(row + 1, 1).value)
     assert len(message.alternatives) == len(message.attachments) == 1
     assert RequestAttempt.objects.count() == requests
     assert CollectionJob.objects.count() == jobs + 1
@@ -470,7 +469,9 @@ def test_full_summary_preserves_units_and_escapes_html() -> None:
     assert "kWh/m²" in message.body
     assert isinstance(message, EmailMultiAlternatives)
     summary = ForecastResult.objects.get(snapshot=snapshot).daily_payloads["2026-11-11"]["daylight"]
-    assert attached_sheet(message)["B6"].value == pytest.approx(summary["energy_kwh_m2"])
+    sheet = attached_sheet(message)
+    row = next(cell.row for cell in sheet["A"] if cell.value == datetime(2026, 11, 11))
+    assert sheet.cell(row, 3).value == pytest.approx(summary["energy_kwh_m2"])
     html = message.alternatives[0][0]
     assert isinstance(html, str)
     assert "<script>" not in html

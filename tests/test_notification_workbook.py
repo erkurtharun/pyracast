@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from django.utils import translation
 from openpyxl import load_workbook
+from openpyxl.cell.cell import Cell
 from openpyxl.worksheet.worksheet import Worksheet
 
 from pyracast.notifications.presentation import ForecastReport, ReportDay, ReportInterval
@@ -56,86 +57,79 @@ def _sheet(report: ForecastReport) -> Worksheet:
     return cast(Worksheet, workbook.active)
 
 
+def _date_rows(sheet: Worksheet, day: date) -> list[int]:
+    return [
+        cell.row for cell in sheet["A"] if cell.value == datetime.combine(day, datetime.min.time())
+    ]
+
+
+def _rows_with(sheet: Worksheet, text: str) -> list[int]:
+    return [
+        cell.row
+        for row in sheet
+        for cell in row
+        if isinstance(cell, Cell) and text in str(cell.value or "")
+    ]
+
+
 def test_workbook_contains_typed_values_and_safe_text() -> None:
     sheet = _sheet(_report())
     assert sheet["A1"].value == "=unsafe"
     assert sheet["A1"].data_type == "s"
-    assert isinstance(sheet["B2"].value, datetime)
-    assert isinstance(sheet["A5"].value, datetime)
-    assert sheet["D8"].value == 0
-    assert sheet["D8"].data_type == "n"
-    assert sheet["D7"].value == "Forecast (MWh)"
-    assert sheet.max_column == 4
-    assert sheet.freeze_panes == "A8"
-    assert sheet.auto_filter.ref == "A7:D8"
-    assert sheet.page_setup.fitToWidth == 1
+    assert "A1:C1" in sheet.merged_cells
+    assert "A2:C2" in sheet.merged_cells
+    assert isinstance(sheet["A2"].value, datetime)
+    assert "Europe/Berlin" in sheet["A2"].number_format
+    summary, banner = _date_rows(sheet, date(2026, 10, 25))
+    assert f"A{summary}:B{summary}" in sheet.merged_cells
+    assert f"A{banner}:C{banner}" in sheet.merged_cells
+    assert sheet.cell(summary, 3).value == 0
+    assert sheet.cell(summary, 3).data_type == "n"
+    header = _rows_with(sheet, "From")[0]
+    assert [sheet.cell(header, column).value for column in (1, 2, 3)] == [
+        "From",
+        "To",
+        "Forecast (MWh)",
+    ]
+    interval = header + 1
+    assert all(isinstance(sheet.cell(interval, col).value, datetime) for col in (1, 2))
+    assert sheet.cell(interval, 3).value == 0
+    assert sheet.max_column == 3
+    assert sheet.freeze_panes is None
+    assert sheet.auto_filter.ref is None
+    assert not sheet.tables
     assert sheet.sheet_view.showGridLines is False
-    assert sheet.column_dimensions["A"].width == 16
-    assert sheet["B8"].number_format == "hh:mm"
-    assert sheet["D7"].alignment.wrap_text
-    assert sheet.row_dimensions[7].height == 32
-    assert "$A$1:$D$9" in str(sheet.print_area)
+    assert sheet.sheet_view.showRowColHeaders is False
+    assert sheet.page_setup.fitToWidth == 1
+    for row in (header, interval):
+        for column in range(1, 4):
+            assert sheet.cell(row, column).alignment.horizontal == "center"
 
 
 def test_workbook_preserves_gaps_and_conditional_outage() -> None:
     sheet = _sheet(_report(outage=True, incomplete=True))
-    assert sheet["B5"].value == 0
-    assert sheet["F5"].value == "Partial estimate"
-    assert sheet["D7"].value == "Normal operation (MWh)"
-    assert sheet["E7"].value == "With reported outage (MWh)"
-    assert sheet["D8"].value is None
-    assert sheet["E8"].value == 0
-    assert sheet["F8"].value == "Partial estimate; Outage partial"
+    summary, _ = _date_rows(sheet, date(2026, 10, 25))
+    assert sheet.max_column == 4
+    assert sheet.cell(summary, 3).value == 0
+    assert sheet.cell(summary, 4).value == 0
+    assert "Partial estimate" in str(sheet.cell(summary + 1, 1).value)
+    header = _rows_with(sheet, "From")[0]
+    assert sheet.cell(header, 3).value == "Normal operation (MWh)"
+    assert sheet.cell(header, 4).value == "With reported outage (MWh)"
+    assert sheet.cell(header + 1, 3).value is None
+    assert sheet.cell(header + 1, 4).value == 0
+    assert "Partial estimate" in str(sheet.cell(header + 2, 1).value)
+    assert "Outage partial" in str(sheet.cell(header + 2, 1).value)
+    assert f"A{header + 2}:D{header + 2}" in sheet.merged_cells
 
 
 def test_workbook_disambiguates_clock_change() -> None:
     sheet = _sheet(_report(dst=True))
-    assert sheet["B8"].value == sheet["C8"].value
-    assert sheet["D8"].value == "UTC+02:00"
-    assert sheet["E8"].value == "UTC+01:00"
-
-
-@pytest.mark.parametrize("language", ["en", "tr"])
-def test_workbook_separates_days_without_interrupting_filtered_data(language: str) -> None:
-    report = _report(incomplete=True)
-    first = report.days[0]
-    second = replace(
-        first,
-        day=first.day + timedelta(days=1),
-        intervals=tuple(
-            replace(item, start=item.start + timedelta(days=1), end=item.end + timedelta(days=1))
-            for item in first.intervals
-        ),
-    )
-    first = replace(first, intervals=first.intervals * 2)
-    with translation.override(language):
-        workbook = load_workbook(BytesIO(build_workbook(replace(report, days=(first, second)))))
-    sheet = cast(Worksheet, workbook.active)
-    assert sheet.auto_filter.ref == "A8:E11"
-    for column in range(1, 6):
-        assert sheet.cell(9, column).fill.patternType == "solid"
-        assert sheet.cell(9, column).fill.fgColor.rgb == sheet.cell(10, column).fill.fgColor.rgb
-        assert sheet.cell(9, column).fill.fgColor.rgb != sheet.cell(11, column).fill.fgColor.rgb
-        assert sheet.cell(9, column).border.top.style == "medium"
-        assert sheet.cell(10, column).border.top.style is None
-        assert sheet.cell(11, column).border.top.style == "medium"
-    assert sheet["A9"].font.bold
-    assert sheet["A11"].font.bold
-    assert sheet["A11"].value == datetime(2026, 10, 26)
-    assert sheet["D11"].value is None
-
-
-def test_workbook_aligns_headers_with_typed_data_and_status() -> None:
-    sheet = _sheet(_report(outage=True, incomplete=True, dst=True))
-    for column in range(1, 7):
-        expected = "left" if column in (1, 6) else "right"
-        assert sheet.cell(4, column).alignment.horizontal == expected
-        assert sheet.cell(5, column).alignment.horizontal == expected
-    for column in range(1, 9):
-        expected = "left" if column in (1, 8) else "center" if column <= 5 else "right"
-        assert sheet.cell(7, column).alignment.horizontal == expected
-        assert sheet.cell(8, column).alignment.horizontal == expected
-    assert sheet["H8"].alignment.wrap_text
+    row = _rows_with(sheet, "From")[0] + 1
+    assert sheet.cell(row, 1).value == sheet.cell(row, 2).value
+    assert "UTC+02:00" in sheet.cell(row, 1).number_format
+    assert "UTC+01:00" in sheet.cell(row, 2).number_format
+    assert "\n" in sheet.cell(row, 1).number_format
 
 
 def test_workbook_distinguishes_outage_gap_and_midnight() -> None:
@@ -151,13 +145,14 @@ def test_workbook_distinguishes_outage_gap_and_midnight() -> None:
     )
     day = replace(day, outage_total=None, outage_coverage=0.5, intervals=(interval,))
     sheet = _sheet(replace(report, days=(day,)))
-    assert sheet["F5"].value == "Outage partial"
-    assert sheet["F8"].value == "Outage partial"
-    assert sheet["C8"].number_format == "dd mmm hh:mm"
+    row = _rows_with(sheet, "From")[0] + 1
+    assert sheet.cell(row, 2).value == datetime(2026, 10, 26)
+    assert "dd" in sheet.cell(row, 2).number_format
+    assert "Outage partial" in str(sheet.cell(row + 1, 1).value)
 
 
 @pytest.mark.parametrize("unknown", [True, False])
-def test_workbook_does_not_confuse_no_outage_with_unavailable_outage(unknown: bool) -> None:
+def test_workbook_distinguishes_no_outage_from_unavailable(unknown: bool) -> None:
     report = _report(outage=True, incomplete=True)
     unavailable = replace(
         report.days[0],
@@ -169,86 +164,66 @@ def test_workbook_does_not_confuse_no_outage_with_unavailable_outage(unknown: bo
     )
     unaffected = replace(_report().days[0], day=date(2026, 10, 26))
     sheet = _sheet(replace(report, collected_at=None, days=(unavailable, unaffected)))
-    assert sheet["B2"].value == "Unavailable"
-    assert sheet["B5"].value is None
-    assert sheet["D5"].value is None
-    assert sheet["F5"].value == (
-        "Estimate unavailable; Outage impact unknown"
-        if unknown
-        else "Estimate unavailable; Outage unavailable"
-    )
-    assert sheet["B6"].value == 0
-    assert sheet["D6"].value is None
-    assert sheet["F6"].value is None
-    assert sheet.row_dimensions[5].height == 30
+    assert "Unavailable" in str(sheet["A2"].value)
+    row = _date_rows(sheet, unavailable.day)[0]
+    assert sheet.cell(row, 3).value is None
+    assert sheet.cell(row, 4).value is None
+    note = str(sheet.cell(row + 1, 1).value)
+    assert "Estimate unavailable" in note
+    assert ("Outage impact unknown" if unknown else "Outage unavailable") in note
+    row = _date_rows(sheet, unaffected.day)[0]
+    assert sheet.cell(row, 3).value == 0
+    assert sheet.cell(row, 4).value is None
 
 
 @pytest.mark.parametrize("language", ["en", "tr"])
-def test_actuals_workbook_keeps_daily_totals_and_sources_aligned_across_days(language: str) -> None:
+def test_workbook_keeps_days_and_source_transitions(language: str) -> None:
     report = _report()
-    first = replace(
-        report.days[0],
-        source_kind="estimated_actuals",
-        intervals=tuple(
-            replace(row, source_kind="estimated_actuals") for row in report.days[0].intervals
-        ),
-    )
+    first = report.days[0]
+    estimated = replace(first.intervals[0], source_kind="estimated_actuals")
+    first = replace(first, source_kind="mixed", intervals=(estimated, first.intervals[0]))
     second = replace(
-        report.days[0],
-        day=date(2026, 10, 26),
-        intervals=tuple(
-            replace(row, start=row.start + timedelta(days=1), end=row.end + timedelta(days=1))
-            for row in report.days[0].intervals
+        first,
+        day=first.day + timedelta(days=1),
+        source_kind="forecast",
+        intervals=(
+            replace(
+                first.intervals[0],
+                start=first.intervals[0].start + timedelta(days=1),
+                end=first.intervals[0].end + timedelta(days=1),
+                source_kind="forecast",
+            ),
         ),
     )
     with translation.override(language):
-        workbook = load_workbook(BytesIO(build_workbook(replace(report, days=(first, second)))))
-    sheet = cast(Worksheet, workbook.active)
-    date_label, estimate, coverage, source, beginning, end = (
-        ("Date", "Estimate (MWh)", "Coverage", "Source", "From", "To")
-        if language == "en"
-        else ("Tarih", "Tahmin (MWh)", "Kapsam", "Kaynak", "Başlang\u0131ç", "Bitiş")
+        sheet = cast(
+            Worksheet,
+            load_workbook(BytesIO(build_workbook(replace(report, days=(first, second))))).active,
+        )
+    for day in (first.day, second.day):
+        summary, banner = _date_rows(sheet, day)
+        assert summary < banner
+        assert sheet.cell(summary, 3).value == 0
+        assert f"A{banner}:C{banner}" in sheet.merged_cells
+    forecast_summary = _date_rows(sheet, second.day)[0]
+    assert ("Forecast" if language == "en" else "Tahmin") in str(
+        sheet.cell(forecast_summary + 1, 1).value
     )
-    assert [sheet.cell(4, column).value for column in range(1, 5)] == [
-        date_label,
-        estimate,
-        coverage,
-        source,
+    source_rows = [
+        row
+        for row in _rows_with(sheet, "Source:" if language == "en" else "Kaynak:")
+        if row > _date_rows(sheet, first.day)[1]
     ]
-    assert [sheet.cell(8, column).value for column in range(1, 6)] == [
-        date_label,
-        beginning,
-        end,
-        estimate,
-        source,
-    ]
-    assert sheet["B5"].value == sheet["B6"].value == 0
-    assert (
-        sheet["D5"].value
-        == sheet["E9"].value
-        == ("Estimated actuals" if language == "en" else "Gerçekleşen tahmini")
-    )
-    assert sheet["D6"].value == sheet["E10"].value == ("Forecast" if language == "en" else "Tahmin")
-    assert sheet["A5"].value == sheet["A9"].value == datetime(2026, 10, 25)
-    assert sheet["A6"].value == sheet["A10"].value == datetime(2026, 10, 26)
-    assert sheet["D9"].data_type == "n"
-    assert sheet["E9"].data_type == "s"
-    assert sheet["D4"].alignment.horizontal == sheet["D5"].alignment.horizontal == "left"
-    assert sheet["D8"].alignment.horizontal == sheet["D9"].alignment.horizontal == "right"
-    assert sheet["E8"].alignment.horizontal == sheet["E9"].alignment.horizontal == "left"
-    assert sheet["E9"].fill.fgColor.rgb != sheet["E10"].fill.fgColor.rgb
-    assert sheet["E9"].border.top.style == sheet["E10"].border.top.style == "medium"
-    assert sheet.auto_filter.ref == "A8:E10"
-    assert sheet.freeze_panes == "A9"
+    assert len(source_rows) == 3
+    assert all(f"A{row}:C{row}" in sheet.merged_cells for row in source_rows)
+    assert sheet.cell(source_rows[0], 1).value != sheet.cell(source_rows[1], 1).value
+    assert sheet.cell(source_rows[1], 1).value == sheet.cell(source_rows[2], 1).value
 
 
-def test_mixed_workbook_preserves_partial_energy_unknown_outage_and_dst_sources() -> None:
+def test_workbook_preserves_warning_long_title_and_mixed_source() -> None:
     report = _report(outage=True, incomplete=True, dst=True)
     interval = replace(
-        report.days[0].intervals[0],
-        energy=1.25,
-        outage_energy=None,
-        source_kind="mixed",
+        report.days[0].intervals[0], energy=1.25, outage_energy=None, source_kind="mixed"
     )
     day = replace(
         report.days[0],
@@ -259,20 +234,58 @@ def test_mixed_workbook_preserves_partial_energy_unknown_outage_and_dst_sources(
         source_kind="mixed",
         intervals=(interval,),
     )
+    title = "A long plant title " * 10
+    sheet = _sheet(
+        replace(report, plant_name=title, warnings=("Warning: check data",), days=(day,))
+    )
+    assert sheet.max_column == 4
+    assert sheet.auto_filter.ref is None
+    assert not sheet.tables
+    assert sheet.column_dimensions["C"].width >= 12
+    assert sheet.column_dimensions["D"].width >= 12
+    assert all(
+        cell.alignment.horizontal == "center"
+        for row in sheet
+        for cell in row
+        if cell.value is not None
+    )
+    assert sheet["A1"].value == title
+    assert sheet["A1"].alignment.wrap_text
+    assert _rows_with(sheet, "Warning: check data")
+    summary = _date_rows(sheet, day.day)[0]
+    assert sheet.cell(summary, 3).value == 1.25
+    assert sheet.cell(summary, 4).value is None
+    assert "Outage impact unknown" in str(sheet.cell(summary + 1, 1).value)
+    assert _rows_with(sheet, "Estimated + forecast")
+    row = _rows_with(sheet, "From")[0] + 1
+    while not isinstance(sheet.cell(row, 1).value, datetime):
+        row += 1
+    assert sheet.cell(row, 3).value == 1.25
+    assert sheet.cell(row, 4).value is None
+
+
+def test_workbook_keeps_large_energy_numeric_in_narrow_columns() -> None:
+    report = _report(outage=True)
+    interval = replace(report.days[0].intervals[0], energy=1_234_567.0, outage_energy=-1_234_567.0)
+    day = replace(
+        report.days[0], total=1_234_567.0, outage_total=-1_234_567.0, intervals=(interval,)
+    )
     sheet = _sheet(replace(report, days=(day,)))
-    assert sheet["B5"].value == sheet["F8"].value == 1.25
-    assert sheet["D5"].value is None
-    assert sheet["G8"].value is None
-    assert sheet["F5"].value == "Partial estimate; Outage impact unknown"
-    assert sheet["G4"].value == sheet["I7"].value == "Source"
-    assert sheet["G5"].value == sheet["I8"].value == "Estimated + forecast"
-    assert sheet["F7"].value == "Normal operation (MWh)"
-    assert sheet["G7"].value == "With reported outage (MWh)"
-    assert sheet["D8"].value == "UTC+02:00"
-    assert sheet["E8"].value == "UTC+01:00"
-    for column in range(1, 10):
-        expected = "left" if column in (1, 8, 9) else "center" if column <= 5 else "right"
-        assert sheet.cell(7, column).alignment.horizontal == expected
-        assert sheet.cell(8, column).alignment.horizontal == expected
-    assert sheet["I8"].alignment.wrap_text
-    assert sheet.auto_filter.ref == "A7:I8"
+    summary = _date_rows(sheet, day.day)[0]
+    interval_row = _rows_with(sheet, "From")[0] + 1
+    for row in (summary, interval_row):
+        for column, value in ((3, 1_234_567.0), (4, -1_234_567.0)):
+            cell = sheet.cell(row, column)
+            assert cell.value == value
+            assert cell.data_type == "n"
+            assert cell.number_format == "0.000E+00"
+    assert max(sheet.column_dimensions[column].width for column in "ABCD") <= 12
+
+
+def test_workbook_allocates_height_for_long_wide_title() -> None:
+    report = _report()
+    narrow = _sheet(replace(report, plant_name="i" * 100))
+    long = _sheet(replace(report, plant_name="W" * 100))
+    assert long["A1"].value == "W" * 100
+    assert long["A1"].alignment.wrap_text
+    assert long.row_dimensions[1].height > narrow.row_dimensions[1].height
