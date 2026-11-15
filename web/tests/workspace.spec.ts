@@ -1099,7 +1099,7 @@ test("performance hides stale CSV while a selected range is loading", async ({
     });
 });
 
-test("forecast performance shows replay metrics, missing days and selected range", async ({
+test("forecast performance shows archived metrics, missing days and selected range", async ({
     page,
 }) => {
     await page.clock.setFixedTime(new Date("2026-11-10T12:00:00Z"));
@@ -1153,11 +1153,16 @@ test("forecast performance shows replay metrics, missing days and selected range
     await page.getByText("Additional metrics & interpretation").click();
     await page.getByText("Unavailable dates (1)", { exact: true }).click();
     await expect(
-        page.getByText("Day-ahead forecast was not available: 1 day"),
+        page.getByText("No forecast was archived for this day: 1 day"),
     ).toBeVisible();
     await page.getByText("How comparison is measured", { exact: true }).click();
     await expect(
-        page.getByText("This does not establish", { exact: false }),
+        page.getByText(
+            "Compares the last forecast saved before daylight began",
+            {
+                exact: false,
+            },
+        ),
     ).toBeVisible();
     await expect(
         page.getByText("Baseline daylight energy error"),

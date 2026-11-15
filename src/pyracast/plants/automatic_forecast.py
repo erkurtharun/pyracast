@@ -2,8 +2,6 @@ from datetime import date, datetime
 from typing import cast
 from zoneinfo import ZoneInfo
 
-from django.core.exceptions import ValidationError
-
 from pyracast.forecasts.coverage import history_day_complete
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
@@ -91,12 +89,9 @@ def reference_transition_forecast(
         )
     ):
         return latest
-    try:
-        archived = archived_forecast(
-            plant, target_date, resolution_minutes, now, binding_id=previous.binding_id
-        )
-    except ValidationError:
-        return latest
+    archived = archived_forecast(
+        plant, target_date, resolution_minutes, now, binding_id=previous.binding_id
+    )
     archived_payload = cast(dict[str, object] | None, archived["result"])
     if (
         archived["configuration_id"] != previous.pk

@@ -221,7 +221,7 @@ select actuals alone. Missing nights remain missing. Explicit actuals expose the
 available current-day history without forecast filling.
 
 Today's automatic reference-transition fallback selects one complete original
-day-ahead forecast under the compatibility rules in `ARCHITECTURE.md`. Preserve
+pre-daylight issuance under the compatibility rules in `ARCHITECTURE.md`. Preserve
 that source binding's normalization capacity and label the selection explicitly.
 Past-day automatic views select Solcast estimated actuals and preserve missing
 history as unavailable rather than substituting forecast power.

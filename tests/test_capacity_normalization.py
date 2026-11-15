@@ -106,6 +106,10 @@ def test_forecast_copy_recalculates_results_and_never_backdates_publication(
 ) -> None:
     system, target = scaled_system(monkeypatch)
     original = publish_snapshot(snapshot_for(system, date(2026, 11, 9), power_kw=0.6))
+    original_result = original.forecastresult
+    original_payload = deepcopy(original_result.payload)
+    original_daily_payloads = deepcopy(original_result.daily_payloads)
+    original_published_at = original_result.published_at
     if missing_availability:
         original.available_at = None
         original.save()
@@ -113,9 +117,22 @@ def test_forecast_copy_recalculates_results_and_never_backdates_publication(
     assert len(ids) == 1
     copied = ForecastSnapshot.objects.get(pk=ids[0])
     assert copied.normalized_intervals[0]["power_kw"] == 600
+    assert copied.available_at == NOW
+    assert copied.collected_at == original.collected_at
     assert copied.forecastresult.published_at == NOW
+    assert copied.forecastresult.published_at > original_published_at
     assert copied.forecastresult.payload["partial_energy_kwh_m2"] == pytest.approx(14.4)
-    assert original.forecastresult.payload == {}
+    assert copied.forecastresult.payload["vintage"]["binding_revision"] == (
+        f"{target.pk}:{target.region_revision}"
+    )
+    assert (
+        original_payload["vintage"]["binding_revision"]
+        != (copied.forecastresult.payload["vintage"]["binding_revision"])
+    )
+    original_result.refresh_from_db()
+    assert original_result.payload == original_payload
+    assert original_result.daily_payloads == original_daily_payloads
+    assert original_result.published_at == original_published_at
 
 
 def test_regional_forecast_selects_the_normalized_copy_of_the_same_vintage(

@@ -450,3 +450,81 @@ def test_archived_configuration_owns_measurements_without_mixing_meter_basis(
         assert result["missing_days"] == 1
         assert result["matched_days"] == 0
         assert result["metrics"] is None
+
+
+def test_invalid_archived_interval_timestamps_are_excluded_without_raw_source_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    configuration = plant.current_configuration
+    assert configuration is not None
+    source = snapshot_for(system, DAY)
+    prepared = prepare_forecast_issuances(source)[0]
+    issuance = ForecastIssuance.objects.create(
+        plant=plant,
+        configuration=configuration,
+        snapshot=source,
+        calibration_id=prepared.calibration_id,
+        target_date=DAY,
+        published_at=source.collected_at,
+        cutoff_at=prepared.cutoff_at,
+        model_version=prepared.model_version,
+        factor=prepared.factor,
+        payloads=prepared.payloads,
+        outage_scenarios=prepared.outage_scenarios,
+        native_intervals=[{**prepared.native_intervals[0], "start": "invalid"}],
+    )
+    measurements(system, configuration, 52)
+    result = forecast_performance(plant, start_date=DAY, end_date=DAY)
+    assert result["days"][0]["issuance_id"] == issuance.pk
+    assert result["days"][0]["reason"] == "invalid_forecast_data"
+    assert result["excluded_days"] == 1
+    assert result["matched_days"] == result["missing_days"] == 0
+    assert result["scored_intervals"] == result["scored_hours"] == 0
+    assert result["metrics"] is result["baseline_metrics"] is None
+    assert (
+        ForecastIssuance.objects.get(pk=issuance.pk).native_intervals == issuance.native_intervals
+    )
+
+
+def test_archived_daylight_comparison_uses_the_original_configuration_location(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    configuration = plant.current_configuration
+    assert configuration is not None
+    publish(snapshot_for(system, DAY))
+    measurements(system, configuration, 52)
+    original_windows = daylight_window(
+        DAY, system.binding.timezone, system.binding.latitude, system.binding.longitude
+    ).windows
+    for row in ProductionObservation.objects.filter(plant=plant):
+        if not any(row.starts_at < end and row.ends_at > start for start, end in original_windows):
+            row.delete()
+    hours = ProductionObservation.objects.filter(plant=plant).count()
+    relocated = SiteBinding.objects.get(pk=system.binding.pk)
+    relocated.pk = None
+    relocated.region_revision += 1
+    relocated.latitude = 40.7128
+    relocated.longitude = -74.0060
+    relocated.save()
+    later = PlantConfiguration.objects.create(
+        region_id=plant.region_id,
+        plant=plant,
+        binding=relocated,
+        revision=2,
+        dc_capacity_mw=130,
+        export_limit_mw=100,
+        measurement_basis=configuration.measurement_basis,
+        created_by=system.member,
+    )
+    plant.current_configuration = later
+    plant.save()
+    result = forecast_performance(plant, start_date=DAY, end_date=DAY, daylight_only=True)
+    assert result["days"][0]["configuration_id"] == configuration.pk
+    assert result["matched_days"] == 1
+    assert result["missing_days"] == result["excluded_days"] == 0
+    assert result["days"][0]["predicted_energy_mwh"] == pytest.approx(hours * 52)
+    assert result["days"][0]["measured_energy_mwh"] == hours * 52
+    assert result["scored_hours"] == hours
+    assert result["metrics"]["daily_mae_mwh"] == pytest.approx(0)
