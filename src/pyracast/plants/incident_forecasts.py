@@ -82,61 +82,66 @@ def incident_scenario(
         pk=outlook["configuration_id"], plant_id=outlook["plant_id"]
     )
     start, end = local_day_bounds(target_date, configuration.binding.timezone)
+    invalidated = False
+    if outlook["calibration_id"] is not None:
+        calibration = CalibrationRun.objects.get(
+            pk=outlook["calibration_id"], configuration=configuration
+        )
+        invalidated = not incidents_unchanged(calibration, known_at)
+    incidents = select_incidents(configuration.plant_id, start, end, known_at)
+    scenario_needed = bool(incidents) and (
+        known_at >= end
+        or any(
+            row.starts_at <= known_at and (row.ends_at is None or row.ends_at > known_at)
+            for row in incidents
+        )
+    )
+    if not invalidated and not scenario_needed:
+        return None
     snapshot = ForecastSnapshot.objects.defer("raw_payload", "weather_payload").get(
         pk=normal["provenance"]["snapshot_id"], job__binding_id=configuration.binding_id
     )
     selected_sources = replay_composition(normal["provenance"], configuration, start, end)
     source_intervals = selected_sources[0].intervals if selected_sources is not None else None
-    if outlook["calibration_id"] is not None:
-        calibration = CalibrationRun.objects.get(
-            pk=outlook["calibration_id"], configuration=configuration
+    if invalidated:
+        provenance = normal["provenance"]
+        normal = cast(
+            dict[str, Any],
+            forecast_payload(
+                configuration,
+                snapshot,
+                None,
+                target_date,
+                resolution_minutes,
+                source_intervals=source_intervals,
+            ),
         )
-        if not incidents_unchanged(calibration, known_at):
-            provenance = normal["provenance"]
-            normal = cast(
-                dict[str, Any],
-                forecast_payload(
-                    configuration,
-                    snapshot,
-                    None,
-                    target_date,
-                    resolution_minutes,
-                    source_intervals=source_intervals,
-                ),
-            )
-            if selected_sources is not None:
-                if provenance.get("selection_policy") in (
-                    INTRADAY_POLICY,
-                    "native-estimated-actuals-coverage-v1",
-                ):
-                    apply_intraday_source(
-                        normal,
-                        PreparedIntradaySource(
-                            snapshot,
-                            selected_sources[1],
-                            selected_sources[0],
-                            provenance["source_kind"],
-                            datetime.fromisoformat(provenance["actuals_cutoff_at"]),
-                            datetime.fromisoformat(provenance["elapsed_cutoff_at"]),
-                            datetime.fromisoformat(provenance["actuals_grace_until"])
-                            if "actuals_grace_until" in provenance
-                            else None,
-                        ),
-                    )
-                    normal["provenance"]["selection_policy"] = provenance["selection_policy"]
-                else:
-                    apply_composition(normal, selected_sources[1], selected_sources[0])
-            normal["quality_flags"].append("calibration_invalidated_by_outage_history")
-            outlook["result"] = normal
-            outlook["calibration_id"] = None
-    incidents = select_incidents(configuration.plant_id, start, end, known_at)
-    if not incidents or (
-        known_at < end
-        and not any(
-            row.starts_at <= known_at and (row.ends_at is None or row.ends_at > known_at)
-            for row in incidents
-        )
-    ):
+        if selected_sources is not None:
+            if provenance.get("selection_policy") in (
+                INTRADAY_POLICY,
+                "native-estimated-actuals-coverage-v1",
+            ):
+                apply_intraday_source(
+                    normal,
+                    PreparedIntradaySource(
+                        snapshot,
+                        selected_sources[1],
+                        selected_sources[0],
+                        provenance["source_kind"],
+                        datetime.fromisoformat(provenance["actuals_cutoff_at"]),
+                        datetime.fromisoformat(provenance["elapsed_cutoff_at"]),
+                        datetime.fromisoformat(provenance["actuals_grace_until"])
+                        if "actuals_grace_until" in provenance
+                        else None,
+                    ),
+                )
+                normal["provenance"]["selection_policy"] = provenance["selection_policy"]
+            else:
+                apply_composition(normal, selected_sources[1], selected_sources[0])
+        normal["quality_flags"].append("calibration_invalidated_by_outage_history")
+        outlook["result"] = normal
+        outlook["calibration_id"] = None
+    if not scenario_needed:
         return None
     limits = tuple(
         OperatingLimit(

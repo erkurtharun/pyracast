@@ -1,7 +1,8 @@
 from datetime import datetime
 from typing import cast
 
-from django.db.models import Q
+from django.core.exceptions import ValidationError
+from django.db.models import Q, QuerySet
 
 from pyracast.connections.contracts import ProviderData
 from pyracast.forecasts.models import ForecastSnapshot
@@ -24,7 +25,7 @@ def mark_forecast_fallback(payload: dict[str, object], cutoff: datetime) -> None
 def current_forecast_snapshots(
     *, binding_id: int, start: datetime, end: datetime, as_of: datetime
 ) -> list[ForecastSnapshot]:
-    return list(
+    return covering_snapshots(
         ForecastSnapshot.objects.select_related("job")
         .filter(
             binding_id=binding_id,
@@ -37,8 +38,36 @@ def current_forecast_snapshots(
             forecastresult__published_at__lte=as_of,
         )
         .filter(Q(issued_at__isnull=True) | Q(issued_at__lte=as_of))
-        .order_by("-collected_at", "-available_at", "-pk")
+        .order_by("-collected_at", "-available_at", "-pk"),
+        start,
+        end,
     )
+
+
+def covering_snapshots(
+    snapshots: QuerySet[ForecastSnapshot], start: datetime, end: datetime
+) -> list[ForecastSnapshot]:
+    remaining = [(start, end)]
+    identifiers = []
+    for identifier, coverage_start, coverage_end in snapshots.values_list(
+        "pk", "coverage_start", "coverage_end"
+    ):
+        left, right = cast(datetime, coverage_start), cast(datetime, coverage_end)
+        if not any(left < stop and right > begin for begin, stop in remaining):
+            continue
+        identifiers.append(identifier)
+        remaining = [
+            piece
+            for begin, stop in remaining
+            for piece in ((begin, min(stop, left)), (max(begin, right), stop))
+            if piece[0] < piece[1]
+        ]
+        if not remaining:
+            break
+    selected = list(snapshots.filter(pk__in=identifiers))
+    if {snapshot.pk for snapshot in selected} != set(identifiers):
+        raise ValidationError("forecast_sources_changed")
+    return selected
 
 
 def snapshot_data(

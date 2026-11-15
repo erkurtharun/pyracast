@@ -8,7 +8,7 @@ from django.db.models import Q
 
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import ForecastSnapshot
-from pyracast.forecasts.sources import snapshot_data
+from pyracast.forecasts.sources import covering_snapshots, snapshot_data
 from pyracast.irradiance import local_day_bounds
 from pyracast.irradiance.weather_reference import summarize_weather, unavailable_weather
 from pyracast.plants.forecast_composition import (
@@ -131,7 +131,7 @@ def native_actual_snapshots(
         eligible |= Q(job__scheduled_slot=knowledge_cutoff) & _actuals_available_by(
             actuals_grace_until
         )
-    return list(
+    return covering_snapshots(
         ForecastSnapshot.objects.select_related("job", "binding")
         .filter(
             binding=binding,
@@ -144,7 +144,9 @@ def native_actual_snapshots(
         )
         .filter(eligible)
         .defer("raw_payload", "weather_payload")
-        .order_by("-collected_at", "-available_at", "-pk")
+        .order_by("-collected_at", "-available_at", "-pk"),
+        start,
+        end,
     )
 
 
