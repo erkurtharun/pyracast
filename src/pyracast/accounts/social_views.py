@@ -33,6 +33,7 @@ from django.http import (
     HttpResponseRedirect,
 )
 from django.utils.translation import gettext as _
+from django.views.decorators.http import require_GET, require_http_methods
 
 from pyracast.accounts.social import locked_social_user
 
@@ -134,10 +135,12 @@ class ManageProvidersView(AllauthManageProvidersView):
             return super().dispatch(request, *args, **kwargs)
 
 
+@require_http_methods(["GET", "POST"])
 def disabled_provider_token(request: HttpRequest) -> HttpResponseNotFound:
     return HttpResponseNotFound()
 
 
+@require_GET
 def provider_callback(request: HttpRequest, provider: str) -> HttpResponseBase:
     if provider not in settings.SOCIALACCOUNT_PROVIDERS:
         return HttpResponseRedirect(

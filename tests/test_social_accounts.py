@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from threading import Barrier, Event
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import pytest
 import requests
@@ -367,6 +367,30 @@ def test_native_token_and_browser_login_entrypoints_are_unavailable() -> None:
         assert client.post(path, {}).status_code == 404
     assert client.get(AUTH + "account/providers").status_code == 401
     assert client.get(AUTH + "auth/provider/signup").status_code == 409
+
+
+@pytest.mark.parametrize("provider", ["google", "microsoft"])
+def test_provider_callbacks_reject_unsupported_methods_without_consuming_state(
+    oauth_profile: dict[str, Any], provider: str
+) -> None:
+    client = Client()
+    state = begin(client, provider)
+    query = urlencode({"state": state, "code": "provider-code"})
+    callback = f"/api/accounts/{provider}/login/callback/?{query}"
+    for method in ("POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"):
+        response = client.generic(method, callback)
+        assert response.status_code == 405
+        assert response["Allow"] == "GET"
+    assert not User.objects.exists()
+    assert complete(client, state, provider)["Location"] == CALLBACK
+
+
+def test_disabled_provider_token_rejects_unsupported_methods() -> None:
+    client = Client()
+    for method in ("PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"):
+        response = client.generic(method, AUTH + "auth/provider/token")
+        assert response.status_code == 405
+        assert response["Allow"] == "GET, POST"
 
 
 @pytest.mark.parametrize(
