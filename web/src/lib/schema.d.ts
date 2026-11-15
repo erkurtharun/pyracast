@@ -468,6 +468,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/changes/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["tenants_regions_plants_production_changes_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/preview/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["tenants_regions_plants_production_preview_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/reported-production/": {
         parameters: {
             query?: never;
@@ -600,6 +632,12 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * @description * `set` - set
+         *     * `revert` - revert
+         * @enum {string}
+         */
+        ActionEnum: "set" | "revert";
         ActivationOutput: {
             readonly id: number;
             configuration_id: number;
@@ -1055,21 +1093,14 @@ export interface components {
             readonly ends_at: string;
             /** Format: double */
             readonly energy_mwh: number;
-            readonly quality: components["schemas"]["ObservationOutputQualityEnum"];
+            readonly quality: components["schemas"]["ProductionQualityEnum"];
             readonly source: string;
             recorded_by_id: number;
             /** Format: date-time */
             readonly recorded_at: string;
+            supersedes_id: number | null;
+            readonly is_reverted: boolean;
         };
-        /**
-         * @description * `valid` - Valid
-         *     * `outage` - Outage
-         *     * `curtailed` - Curtailed
-         *     * `invalid` - Invalid
-         * @enum {string}
-         */
-        ObservationOutputQualityEnum:
-            "valid" | "outage" | "curtailed" | "invalid";
         ObservationRow: {
             /** Format: date-time */
             starts_at: string;
@@ -1078,17 +1109,9 @@ export interface components {
             /** Format: double */
             energy: number;
             /** @default valid */
-            quality: components["schemas"]["ObservationRowQualityEnum"];
+            quality: components["schemas"]["ProductionQualityEnum"];
             source: string;
         };
-        /**
-         * @description * `valid` - valid
-         *     * `outage` - outage
-         *     * `curtailed` - curtailed
-         *     * `invalid` - invalid
-         * @enum {string}
-         */
-        ObservationRowQualityEnum: "valid" | "outage" | "curtailed" | "invalid";
         PaginatedCalibrationSummaryOutputList: {
             /** @example 123 */
             count: number;
@@ -1393,6 +1416,25 @@ export interface components {
             /** Format: date-time */
             readonly created_at: string;
         };
+        ProductionChangeRow: {
+            /** Format: date-time */
+            starts_at: string;
+            /** Format: date-time */
+            ends_at: string;
+            expected_revision_id: number | null;
+            action: components["schemas"]["ActionEnum"];
+            /** Format: double */
+            energy?: number;
+            /** @default valid */
+            quality: components["schemas"]["ProductionQualityEnum"];
+            /** @default operator */
+            source: string;
+        };
+        ProductionChangesInput: {
+            configuration_id: number;
+            unit: components["schemas"]["UnitEnum"];
+            changes: components["schemas"]["ProductionChangeRow"][];
+        };
         ProductionDayOutput: {
             /** Format: date */
             date: string;
@@ -1405,6 +1447,9 @@ export interface components {
             sunset: string | null;
             daylight_status: components["schemas"]["DaylightStatusEnum"];
             daylight_windows: components["schemas"]["DaylightWindowOutput"][];
+            /** Format: double */
+            total_mwh: number | null;
+            complete: boolean;
         };
         ProductionHistoryOutput: {
             plant_id: number;
@@ -1419,11 +1464,13 @@ export interface components {
             /** Format: date */
             end_date: string;
             resolution_minutes: components["schemas"]["ResolutionMinutesEnum"];
+            native_intervals: boolean;
             slot_scope: components["schemas"]["SlotScopeEnum"];
             daylight_policy: string;
             days: components["schemas"]["ProductionDayOutput"][];
             intervals: components["schemas"]["ProductionIntervalOutput"][];
             observations: components["schemas"]["ObservationOutput"][];
+            revisions: components["schemas"]["ObservationOutput"][];
         };
         ProductionIntervalOutput: {
             /** Format: date-time */
@@ -1434,6 +1481,70 @@ export interface components {
             observation: components["schemas"]["ObservationOutput"] | null;
             can_enter: boolean;
             unavailable_reason: string | null;
+            revision_id: number | null;
+            effective: components["schemas"]["ProductionValueOutput"] | null;
+            provider_original:
+                components["schemas"]["ProductionProviderOutput"] | null;
+            provider_originals: components["schemas"]["ProductionProviderOutput"][];
+            can_edit: boolean;
+            can_revert: boolean;
+            edit_unavailable_reason: string | null;
+        };
+        ProductionPreviewOutput: {
+            changes: components["schemas"]["ProductionChangeRow"][];
+            preview: components["schemas"]["ProductionPreviewRowOutput"][];
+            warnings: components["schemas"]["ProductionPreviewWarningOutput"][];
+        };
+        ProductionPreviewRowOutput: {
+            /** Format: date-time */
+            starts_at: string;
+            /** Format: date-time */
+            ends_at: string;
+            /** Format: double */
+            current_energy_mwh: number | null;
+            /** Format: double */
+            new_energy_mwh: number;
+            corrected: boolean;
+        };
+        ProductionPreviewWarningOutput: {
+            code: string;
+            /** Format: date-time */
+            starts_at: string;
+            /** Format: date-time */
+            ends_at: string;
+        };
+        ProductionProviderOutput: {
+            /** Format: date-time */
+            starts_at: string;
+            /** Format: date-time */
+            ends_at: string;
+            /** Format: double */
+            energy_mwh: number;
+            source_kind: string;
+            snapshot_id: number;
+            /** Format: date-time */
+            collected_at: string;
+            /** Format: date-time */
+            available_at: string;
+            content_sha256: string;
+            provisional: boolean;
+        };
+        /**
+         * @description * `valid` - Valid
+         *     * `outage` - Outage
+         *     * `curtailed` - Curtailed
+         *     * `invalid` - Invalid
+         * @enum {string}
+         */
+        ProductionQualityEnum: "valid" | "outage" | "curtailed" | "invalid";
+        ProductionValueOutput: {
+            /** Format: double */
+            energy_mwh: number;
+            quality: string;
+            source: string;
+            source_kind: string;
+            provisional: boolean;
+            aggregated: boolean;
         };
         RegionInput: {
             name: string;
@@ -2705,6 +2816,7 @@ export interface operations {
             query?: {
                 daylight_only?: boolean;
                 end_date?: string;
+                native_intervals?: boolean;
                 /**
                  * @description * `30` - 30
                  *     * `60` - 60
@@ -2803,6 +2915,64 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    tenants_regions_plants_production_changes_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plant_id: number;
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductionChangesInput"];
+                "application/x-www-form-urlencoded": components["schemas"]["ProductionChangesInput"];
+                "multipart/form-data": components["schemas"]["ProductionChangesInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ObservationImportOutput"];
+                };
+            };
+        };
+    };
+    tenants_regions_plants_production_preview_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plant_id: number;
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ObservationImport"];
+                "application/x-www-form-urlencoded": components["schemas"]["ObservationImport"];
+                "multipart/form-data": components["schemas"]["ObservationImport"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductionPreviewOutput"];
+                };
             };
         };
     };

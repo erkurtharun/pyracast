@@ -23,8 +23,8 @@ from pyracast.plants.models import (
     CalibrationRun,
     PlantConfiguration,
     PlantEvent,
-    ProductionObservation,
 )
+from pyracast.plants.observations import observation_heads
 
 
 def _source_kinds(policy: str) -> list[str]:
@@ -84,11 +84,11 @@ def latest_measurement_day(
 ) -> date | None:
     zone = ZoneInfo(configuration.binding.timezone)
     last_manual = (
-        ProductionObservation.objects.filter(
+        observation_heads(cutoff=cutoff, observation_id_cutoff=observation_id_cutoff)
+        .filter(
             configuration=configuration,
-            recorded_at__lte=cutoff,
             ends_at__lte=completed_before,
-            pk__lte=observation_id_cutoff,
+            is_reverted=False,
         )
         .order_by("-ends_at")
         .values_list("ends_at", flat=True)
@@ -147,22 +147,67 @@ def select_measurements(
     incident_revision_ids: list[int] | None = None,
     policy: str = MEASUREMENT_POLICY,
 ) -> tuple[list[Measurement], list[int]]:
-    kinds = _source_kinds(policy)
-    manual = ProductionObservation.objects.filter(
+    manual = observation_heads(cutoff=cutoff, observation_id_cutoff=observation_id_cutoff).filter(
         configuration=configuration,
         starts_at__lt=end,
         ends_at__gt=start,
-        recorded_at__lte=cutoff,
+        is_reverted=False,
     )
     manual = manual.filter(ends_at__lte=cutoff)
-    if observation_id_cutoff is not None:
-        manual = manual.filter(pk__lte=observation_id_cutoff)
     overlapping_manual = list(manual)
     rows = [
         Measurement(r.starts_at, r.ends_at, r.energy_mwh, r.quality, r.source, r.pk, r.recorded_at)
         for r in overlapping_manual
         if r.starts_at >= start and r.ends_at <= end
     ]
+    providers, selected_ids = select_provider_measurements(
+        configuration,
+        start,
+        end,
+        cutoff,
+        production_snapshot_ids=production_snapshot_ids,
+        policy=policy,
+    )
+    rows.extend(
+        row
+        for row in providers
+        if not any(
+            manual.starts_at < row.ends_at and manual.ends_at > row.starts_at
+            for manual in overlapping_manual
+        )
+    )
+    incidents = (
+        select_incidents(configuration.plant_id, start, end, cutoff)
+        if incident_revision_ids is None
+        else pinned_incidents(configuration.plant_id, incident_revision_ids)
+    )
+    rows = [
+        replace(row, quality="outage")
+        if row.quality == "valid"
+        and any(
+            incident.starts_at < row.ends_at
+            and (incident.ends_at is None or incident.ends_at > row.starts_at)
+            for incident in incidents
+        )
+        else row
+        for row in rows
+    ]
+    used = {row.snapshot.pk for row in rows if row.snapshot is not None}
+    return sorted(rows, key=lambda r: (r.starts_at, r.pk or 0)), [
+        pk for pk in selected_ids if pk in used
+    ]
+
+
+def select_provider_measurements(
+    configuration: PlantConfiguration,
+    start: datetime,
+    end: datetime,
+    cutoff: datetime,
+    *,
+    production_snapshot_ids: list[int] | None = None,
+    policy: str = MEASUREMENT_POLICY,
+) -> tuple[list[Measurement], list[int]]:
+    kinds = _source_kinds(policy)
     if production_snapshot_ids is None:
         snapshots = _current_production(configuration, cutoff, policy)
     else:
@@ -193,31 +238,11 @@ def select_measurements(
         ):
             continue
         for row in _provider_measurements(snapshot, start, end, cutoff):
-            if row.starts_at in provider_rows or any(
-                manual.starts_at < row.ends_at and manual.ends_at > row.starts_at
-                for manual in overlapping_manual
-            ):
+            if row.starts_at in provider_rows:
                 continue
             provider_rows[row.starts_at] = row
-    rows.extend(provider_rows.values())
-    incidents = (
-        select_incidents(configuration.plant_id, start, end, cutoff)
-        if incident_revision_ids is None
-        else pinned_incidents(configuration.plant_id, incident_revision_ids)
-    )
-    rows = [
-        replace(row, quality="outage")
-        if row.quality == "valid"
-        and any(
-            incident.starts_at < row.ends_at
-            and (incident.ends_at is None or incident.ends_at > row.starts_at)
-            for incident in incidents
-        )
-        else row
-        for row in rows
-    ]
-    used = {row.snapshot.pk for row in rows if row.snapshot is not None}
-    return sorted(rows, key=lambda r: (r.starts_at, r.pk or 0)), [
+    used = {row.snapshot.pk for row in provider_rows.values() if row.snapshot is not None}
+    return sorted(provider_rows.values(), key=lambda r: r.starts_at), [
         snapshot.pk
         for snapshot in sorted(selected, key=lambda s: (s.target_day, s.pk))
         if snapshot.pk in used

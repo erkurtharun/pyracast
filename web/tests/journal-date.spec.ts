@@ -1,45 +1,28 @@
 import { expect, test } from "./support/test";
+import { mockApi, paged, region } from "./support/workspace";
+import { nativeProductionHistory } from "./support/native-production";
 
 for (const role of ["admin", "viewer"] as const) {
-    test(`journal date controls wait for the initial range before selecting a day (${role})`, async ({
+    test(`production dates use the plant day and retain selection after a late response (${role})`, async ({
         page,
-    }, testInfo) => {
-        const paged = (results: unknown[]) => ({
-            results,
-            count: results.length,
-            next: null,
-            previous: null,
-        });
-        const region = {
-            id: 11,
-            name: "Date test region",
-            latitude: 36.9,
-            longitude: 30.7,
-            timezone: "Europe/Istanbul",
-            revision: 1,
-            status: "approved",
-        };
-        const configuration = {
-            id: 31,
-            revision: 1,
-            binding_id: 1,
-            created_at: "2026-01-01T00:00:00Z",
-            dc_capacity_mw: 5,
-            inverter_capacity_mw: 4,
-            export_limit_mw: null,
-            measurement_basis: "net_export",
-        };
-        const plant = {
-            id: 21,
-            name: "Date test plant",
-            region_id: 11,
-            created_at: "2026-01-01T00:00:00Z",
-            current_configuration: configuration,
-        };
+    }) => {
+        await page.clock.setFixedTime(new Date("2026-01-08T21:30:00Z"));
+        await mockApi(page);
+        await page.route("**/api/tenants/", (route) =>
+            route.fulfill({
+                json: paged([{ id: 1, name: "Sunfield Energy", role }]),
+            }),
+        );
         let release!: () => void;
-        const initialResponse = new Promise<void>((resolve) => {
+        let started!: () => void;
+        const pending = new Promise<void>((resolve) => {
             release = resolve;
         });
+        const initialStarted = new Promise<void>((resolve) => {
+            started = resolve;
+        });
+        let first = true;
+        const dates: string[] = [];
         const writes: string[] = [];
         page.on("request", (request) => {
             if (
@@ -48,178 +31,113 @@ for (const role of ["admin", "viewer"] as const) {
             )
                 writes.push(request.url());
         });
-        await page.route("**/api/**", async (route) => {
-            const url = new URL(route.request().url()),
-                path = url.pathname;
-            let data: unknown;
-            if (path === "/api/session/")
-                data = {
-                    user: {
-                        id: 1,
-                        username: "date.user",
-                        email: "date@test.test",
+        await page.route("**/plants/21/production/?**", async (route) => {
+            const query = new URL(route.request().url()).searchParams;
+            expect(query.get("native_intervals")).toBe("true");
+            const date = query.get("start_date")!;
+            expect(query.get("end_date")).toBe(date);
+            dates.push(date);
+            if (first) {
+                first = false;
+                expect(date).toBe("2026-01-08");
+                started();
+                await pending;
+            }
+            const hour = date === "2026-01-08" ? "08" : "09";
+            await route.fulfill({
+                json: nativeProductionHistory(date, region.timezone, [
+                    {
+                        starts_at: `${date}T${hour}:00:00Z`,
+                        ends_at: `${date}T${String(Number(hour) + 1).padStart(2, "0")}:00:00Z`,
                     },
-                    csrf_token: "date-token",
-                };
-            else if (path === "/api/tenants/")
-                data = paged([{ id: 1, name: "Date test tenant", role }]);
-            else if (path.endsWith("/sites/")) data = paged([region]);
-            else if (path.endsWith("/plants/")) data = paged([plant]);
-            else if (path.endsWith("/calibration/automation/"))
-                data = {
-                    enabled: false,
-                    authorized: false,
-                    configuration_id: null,
-                    next_check_at: null,
-                    last_attempt: null,
-                };
-            else if (path.endsWith("/calibrations/")) data = paged([]);
-            else if (path.endsWith("/performance/"))
-                data = {
-                    start_date: "2026-01-01",
-                    end_date: "2026-01-01",
-                    matched_days: 0,
-                    requested_days: 1,
-                    metrics: null,
-                    baseline_metrics: null,
-                    days: [],
-                };
-            else if (path.endsWith("/forecast/"))
-                data = {
-                    timezone: region.timezone,
-                    freshness: "missing",
-                    result: null,
-                };
-            else if (path.endsWith("/production/")) {
-                expect(url.searchParams.get("daylight_only")).toBe("true");
-                if (url.searchParams.has("start_date"))
-                    expect(url.searchParams.get("end_date")).toBe(
-                        url.searchParams.get("start_date"),
-                    );
-                const start =
-                        url.searchParams.get("start_date") ?? "2026-01-01",
-                    end = url.searchParams.get("end_date") ?? "2026-01-07";
-                if (!url.searchParams.has("start_date")) await initialResponse;
-                data = {
-                    timezone: region.timezone,
-                    start_date: start,
-                    end_date: end,
-                    available_start_date: "2026-01-01",
-                    available_end_date: "2026-01-07",
-                    days: [
-                        {
-                            date: start,
-                            available_count: 1,
-                            recorded_count: 0,
-                            missing_count: 1,
-                            sunrise:
-                                start === "2026-01-06"
-                                    ? `${start}T03:00:00+03:00`
-                                    : `${start}T06:15:00Z`,
-                            sunset:
-                                start === "2026-01-06"
-                                    ? `${start}T01:00:00+03:00`
-                                    : `${start}T16:45:00Z`,
-                            daylight_status: "normal",
-                            daylight_windows:
-                                start === "2026-01-06"
-                                    ? [
-                                          {
-                                              starts_at: `${start}T00:00:00+03:00`,
-                                              ends_at: `${start}T01:00:00+03:00`,
-                                          },
-                                          {
-                                              starts_at: `${start}T03:00:00+03:00`,
-                                              ends_at:
-                                                  "2026-01-07T00:00:00+03:00",
-                                          },
-                                      ]
-                                    : [
-                                          {
-                                              starts_at: `${start}T06:15:00Z`,
-                                              ends_at: `${start}T16:45:00Z`,
-                                          },
-                                      ],
-                        },
-                    ],
-                    intervals: [
-                        {
-                            starts_at: `${start}T09:00:00Z`,
-                            ends_at: `${start}T10:00:00Z`,
-                            can_enter: true,
-                            reference_available: true,
-                            observation: null,
-                            unavailable_reason: null,
-                        },
-                    ],
-                    observations: [],
-                };
-            } else throw new Error(`Unmocked API: ${path}`);
-            await route.fulfill({ json: data });
+                ]),
+            });
         });
         await page.goto("/");
-        await page.getByRole("button", { name: /Date test region/ }).click();
+        await page
+            .getByRole("button", { name: /East array|Antalya solar park/ })
+            .click();
         await page
             .getByRole("button", { name: "Production", exact: true })
             .click();
-        await expect(page.getByLabel("Day", { exact: true })).toBeDisabled();
-        release();
-        await expect(page.getByLabel("Day", { exact: true })).toBeEnabled();
-        await page.getByLabel("Day", { exact: true }).fill("2026-01-07");
-        const entry = page.getByLabel("Production 2026-01-07T09:00:00Z");
-        if (role === "admin") await expect(entry).toBeEnabled();
-        else await expect(entry).toBeDisabled();
-        await expect(
-            page.getByLabel("Production 2026-01-01T09:00:00Z"),
-        ).toHaveCount(0);
-        await expect(page.getByText(/09:15/)).toBeVisible();
-        if (role === "admin") {
-            await entry.fill("0");
+        await initialStarted;
+        const day = page.getByLabel("Day", { exact: true });
+        await expect(day).toHaveValue("2026-01-08");
+        await expect(day).toHaveAttribute("max", "2026-01-08");
+        await expect(day).toBeEnabled();
+        const table = page.getByRole("table", {
+            name: "Production intervals · Europe/Istanbul",
+        });
+        try {
+            await day.fill("2026-01-07");
             await expect(
-                page.getByRole("button", { name: "Save meter readings" }),
-            ).toBeEnabled();
-        } else {
+                table.getByRole("rowheader", {
+                    name: "12:00–13:00",
+                    exact: true,
+                }),
+            ).toBeVisible();
+            const initialResponse = page.waitForResponse(
+                (response) =>
+                    response.url().includes("/production/?") &&
+                    new URL(response.url()).searchParams.get("start_date") ===
+                        "2026-01-08",
+            );
+            release();
+            await (await initialResponse).finished();
+            await expect(day).toHaveValue("2026-01-07");
             await expect(
-                page.getByRole("button", { name: "Save meter readings" }),
+                table.getByRole("rowheader", {
+                    name: "12:00–13:00",
+                    exact: true,
+                }),
+            ).toBeVisible();
+            await expect(
+                table.getByRole("rowheader", {
+                    name: "11:00–12:00",
+                    exact: true,
+                }),
             ).toHaveCount(0);
-        }
-        await page.getByLabel("Day", { exact: true }).fill("2026-01-06");
-        await expect(
-            page.getByLabel("Production 2026-01-06T09:00:00Z"),
-        ).toHaveValue("");
-        await expect(page.getByText("00:00–01:00, 03:00–00:00")).toBeVisible();
-        if (role === "admin")
-            await expect(
-                page.getByRole("button", { name: "Save meter readings" }),
-            ).toBeDisabled();
-        else
-            await expect(
-                page.getByLabel("Production 2026-01-06T09:00:00Z"),
-            ).toBeDisabled();
-        await page.getByLabel("Day", { exact: true }).fill("2026-01-07");
-        await expect(entry).toHaveValue(role === "admin" ? "0" : "");
-        if (role === "viewer") {
+            if (role === "admin") {
+                await table
+                    .getByRole("button", {
+                        name: "Edit 12:00–13:00",
+                        exact: true,
+                    })
+                    .click();
+                const editor = page.locator(".production-row-editor");
+                await editor.getByRole("textbox").fill("0");
+                await expect(
+                    editor.getByRole("button", { name: "Save", exact: true }),
+                ).toBeEnabled();
+                await editor
+                    .getByRole("button", { name: "Cancel", exact: true })
+                    .click();
+            } else {
+                await expect(
+                    table.getByRole("button", { name: /^Edit / }),
+                ).toHaveCount(0);
+            }
             await page
                 .getByRole("button", { name: "Previous day", exact: true })
                 .click();
-            await expect(page.getByLabel("Day", { exact: true })).toHaveValue(
-                "2026-01-06",
-            );
-            await expect(
-                page.getByLabel("Production 2026-01-06T09:00:00Z"),
-            ).toBeDisabled();
+            await expect(day).toHaveValue("2026-01-06");
             await page
                 .getByRole("button", { name: "Next day", exact: true })
                 .click();
-            await expect(page.getByLabel("Day", { exact: true })).toHaveValue(
-                "2026-01-07",
-            );
+            await expect(day).toHaveValue("2026-01-07");
+            await page
+                .getByRole("button", { name: "Next day", exact: true })
+                .click();
+            await expect(day).toHaveValue("2026-01-08");
+            await expect(
+                page.getByRole("button", { name: "Next day", exact: true }),
+            ).toBeDisabled();
+            await day.fill("2026-01-09");
+            await expect(day).toHaveValue("2026-01-08");
+            expect(dates).not.toContain("2026-01-09");
             expect(writes).toEqual([]);
+        } finally {
+            release();
         }
-        await page.setViewportSize({ width: 390, height: 844 });
-        await page.screenshot({
-            path: testInfo.outputPath("production-journal-mobile.png"),
-            fullPage: true,
-        });
     });
 }

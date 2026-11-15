@@ -19,14 +19,14 @@ test("account language survives sign-in from another browser without a preferenc
         .click();
     await expect(
         page.getByRole("heading", {
-            name: "Your solar portfolio",
+            name: "Plants",
             exact: true,
         }),
     ).toBeVisible();
     await page.getByLabel("Language", { exact: true }).selectOption("tr");
     await expect(
         page.getByRole("heading", {
-            name: "Güneş enerjisi portföyünüz",
+            name: "Santraller",
             exact: true,
         }),
     ).toBeVisible();
@@ -53,7 +53,7 @@ test("account language survives sign-in from another browser without a preferenc
             .click();
         await expect(
             fresh.getByRole("heading", {
-                name: "Güneş enerjisi portföyünüz",
+                name: "Santraller",
                 exact: true,
             }),
         ).toBeVisible();
@@ -72,7 +72,7 @@ test("account language survives sign-in from another browser without a preferenc
         await page.getByLabel("Dil", { exact: true }).selectOption("en");
         await expect(
             page.getByRole("heading", {
-                name: "Your solar portfolio",
+                name: "Plants",
                 exact: true,
             }),
         ).toBeVisible();

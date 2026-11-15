@@ -8,7 +8,6 @@ import {
     Empty,
     Field,
     Notice,
-    Stat,
     Tag,
     useResource,
     useCollection,
@@ -222,28 +221,29 @@ function Workspace({
                     </select>
                 </label>
                 {tenant?.role === "viewer" && (
-                    <p className="workspace-label">{t("readOnly")}</p>
+                    <p className="workspace-label workspace-readonly">
+                        {t("readOnly")}
+                    </p>
                 )}
                 <nav aria-label={t("navigation")}>
                     {session.user?.can_admin && (
                         <a href="/admin/">{t("administration")}</a>
                     )}
                     <button
-                        className={view === "regions" ? "active" : ""}
-                        aria-current={view === "regions" ? "page" : undefined}
+                        className={
+                            view === "regions" || view === "trash"
+                                ? "active"
+                                : ""
+                        }
+                        aria-current={
+                            view === "regions" || view === "trash"
+                                ? "page"
+                                : undefined
+                        }
                         onClick={() => setView("regions")}
                     >
                         <span aria-hidden="true">▦</span> {t("overview")}
                     </button>
-                    {canManage && (
-                        <button
-                            className={view === "trash" ? "active" : ""}
-                            aria-current={view === "trash" ? "page" : undefined}
-                            onClick={() => setView("trash")}
-                        >
-                            {t("recycleBin")}
-                        </button>
-                    )}
                     {canManage && (
                         <button
                             className={view === "members" ? "active" : ""}
@@ -260,7 +260,7 @@ function Workspace({
                         aria-current={view === "profile" ? "page" : undefined}
                         onClick={() => setView("profile")}
                     >
-                        <span aria-hidden="true">⚙</span> {t("accountSettings")}
+                        <span aria-hidden="true">⚙</span> {t("account")}
                     </button>
                 </nav>
                 <LanguageSelect session={session} onSession={onSession} />
@@ -328,84 +328,106 @@ function Workspace({
                                 </div>
                                 <section className="panel narrow">
                                     <h2>{t("emailAddress")}</h2>
-                                    <p>
-                                        {t("currentEmail", {
-                                            email: session.user?.email ?? "",
-                                        })}
+                                    <p className="account-email">
+                                        {session.user?.email}
                                     </p>
-                                    <ActionForm
-                                        submit={t("sendVerification")}
-                                        onSubmit={async (data) => {
-                                            const result = await authRequest(
-                                                "account/email",
-                                                "POST",
-                                                session.csrf_token,
-                                                { email: data.get("email") },
-                                            );
-                                            if (
-                                                result.status === 401 &&
-                                                !result.meta?.is_authenticated
-                                            ) {
-                                                onSession(
-                                                    await request<Session>(
-                                                        "/api/session/",
-                                                    ),
-                                                );
-                                                throw new Error(
-                                                    t("sessionExpired"),
-                                                );
-                                            }
-                                            if (result.status === 401)
-                                                throw new Error(
-                                                    t("confirmIdentity"),
-                                                );
-                                        }}
-                                    >
-                                        <Field
-                                            label={t("newEmail")}
-                                            name="email"
-                                            type="email"
-                                        />
-                                    </ActionForm>
-                                    <ActionForm
-                                        submit={t("verifyEmail")}
-                                        onSubmit={async (data) => {
-                                            const result = await authRequest(
-                                                "auth/email/verify",
-                                                "POST",
-                                                session.csrf_token,
-                                                { key: data.get("key") },
-                                            );
-                                            if (result.status === 401) {
+                                    <details className="account-disclosure">
+                                        <summary>{t("changeEmail")}</summary>
+                                        <p className="fine">
+                                            {t("currentEmail", {
+                                                email:
+                                                    session.user?.email ?? "",
+                                            })}
+                                        </p>
+                                        <ActionForm
+                                            submit={t("sendVerification")}
+                                            onSubmit={async (data) => {
+                                                const result =
+                                                    await authRequest(
+                                                        "account/email",
+                                                        "POST",
+                                                        session.csrf_token,
+                                                        {
+                                                            email: data.get(
+                                                                "email",
+                                                            ),
+                                                        },
+                                                    );
                                                 if (
+                                                    result.status === 401 &&
                                                     !result.meta
                                                         ?.is_authenticated
-                                                )
+                                                ) {
                                                     onSession(
                                                         await request<Session>(
                                                             "/api/session/",
                                                         ),
                                                     );
-                                                throw new Error(
-                                                    result.meta
-                                                        ?.is_authenticated
-                                                        ? t("confirmIdentity")
-                                                        : t("sessionExpired"),
+                                                    throw new Error(
+                                                        t("sessionExpired"),
+                                                    );
+                                                }
+                                                if (result.status === 401)
+                                                    throw new Error(
+                                                        t("confirmIdentity"),
+                                                    );
+                                            }}
+                                        >
+                                            <Field
+                                                label={t("newEmail")}
+                                                name="email"
+                                                type="email"
+                                            />
+                                        </ActionForm>
+                                        <ActionForm
+                                            submit={t("verifyEmail")}
+                                            onSubmit={async (data) => {
+                                                const result =
+                                                    await authRequest(
+                                                        "auth/email/verify",
+                                                        "POST",
+                                                        session.csrf_token,
+                                                        {
+                                                            key: data.get(
+                                                                "key",
+                                                            ),
+                                                        },
+                                                    );
+                                                if (result.status === 401) {
+                                                    if (
+                                                        !result.meta
+                                                            ?.is_authenticated
+                                                    )
+                                                        onSession(
+                                                            await request<Session>(
+                                                                "/api/session/",
+                                                            ),
+                                                        );
+                                                    throw new Error(
+                                                        result.meta
+                                                            ?.is_authenticated
+                                                            ? t(
+                                                                  "confirmIdentity",
+                                                              )
+                                                            : t(
+                                                                  "sessionExpired",
+                                                              ),
+                                                    );
+                                                }
+                                                onSession(
+                                                    await request<Session>(
+                                                        "/api/session/",
+                                                    ),
                                                 );
-                                            }
-                                            onSession(
-                                                await request<Session>(
-                                                    "/api/session/",
-                                                ),
-                                            );
-                                        }}
-                                    >
-                                        <Field
-                                            label={t("emailCode")}
-                                            name="key"
-                                            autoComplete="one-time-code"
-                                        />
-                                    </ActionForm>
+                                            }}
+                                        >
+                                            <Field
+                                                label={t("emailCode")}
+                                                name="key"
+                                                autoComplete="one-time-code"
+                                            />
+                                        </ActionForm>
+                                    </details>
                                 </section>
                                 <AccountSecurity
                                     key={`${session.user!.id}:${session.user!.mfa_required}`}
@@ -425,16 +447,25 @@ function Workspace({
                                 }
                             />
                         ) : tenant && canManage && view === "trash" ? (
-                            <RecycleBin
-                                key={tenant.id}
-                                tenant={tenant.id}
-                                token={session.csrf_token}
-                            />
+                            <>
+                                <button
+                                    className="back-button"
+                                    onClick={() => setView("regions")}
+                                >
+                                    {t("overview")}
+                                </button>
+                                <RecycleBin
+                                    key={tenant.id}
+                                    tenant={tenant.id}
+                                    token={session.csrf_token}
+                                />
+                            </>
                         ) : tenant ? (
                             <Regions
                                 key={tenant.id}
                                 tenant={tenant}
                                 token={session.csrf_token}
+                                onTrash={() => setView("trash")}
                             />
                         ) : tenants.loading ? (
                             <p role="status">{t("loadingWorkspaces")}</p>
@@ -449,7 +480,15 @@ function Workspace({
         </div>
     );
 }
-function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
+function Regions({
+    tenant,
+    token,
+    onTrash,
+}: {
+    tenant: Tenant;
+    token: string;
+    onTrash: () => void;
+}) {
     const t = useTranslations("Dashboard");
     const locale = useLocale();
     const canManage = tenant.role === "admin";
@@ -528,7 +567,12 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
             <div className="page-heading">
                 <div>
                     <p className="eyebrow">{tenant.name}</p>
-                    <h1>{t("portfolio")}</h1>
+                    <h1>
+                        {t("plants")}{" "}
+                        <span className="count" aria-hidden="true">
+                            {rows.length}
+                        </span>
+                    </h1>
                 </div>
                 {canManage && (
                     <button
@@ -538,38 +582,6 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
                         {creating ? t("closeForm") : t("addPlant")}
                     </button>
                 )}
-            </div>
-            <div className="stats">
-                <Stat
-                    label={t("plants")}
-                    value={
-                        sites.data
-                            ? rows.filter((site) => site.plant).length
-                            : undefined
-                    }
-                />
-                <Stat
-                    label={t("approved")}
-                    value={
-                        sites.data
-                            ? rows.filter(
-                                  (site) =>
-                                      site.plant && site.status === "approved",
-                              ).length
-                            : undefined
-                    }
-                />
-                <Stat
-                    label={t("awaitingApproval")}
-                    value={
-                        sites.data
-                            ? rows.filter(
-                                  (site) =>
-                                      site.plant && site.status === "pending",
-                              ).length
-                            : undefined
-                    }
-                />
             </div>
             {canManage && creating && (
                 <PlantOnboarding
@@ -584,15 +596,7 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
                     }}
                 />
             )}
-            <section className="panel">
-                <div className="section-heading">
-                    <h2>
-                        {t("plants")}{" "}
-                        <span className="count" aria-hidden="true">
-                            {rows.length}
-                        </span>
-                    </h2>
-                </div>
+            <section className="panel" aria-label={t("plants")}>
                 {rows.length > 0 && (
                     <div className="portfolio-toolbar">
                         <label className="field">
@@ -664,10 +668,10 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
                                         </span>
                                         <Tag>{site.status}</Tag>
                                     </div>
-                                    <h3>{site.plant?.name ?? site.name}</h3>
+                                    <h2>{site.plant?.name ?? site.name}</h2>
                                     <p>
                                         {metadata
-                                            ? `${metadata.dc_capacity_mw.toLocaleString(locale, { maximumFractionDigits: 6 })} MW DC`
+                                            ? `${metadata.dc_capacity_mw.toLocaleString(locale, { maximumSignificantDigits: 4 })} MW DC`
                                             : t("completeSetup")}{" "}
                                         {" · "}
                                         {site.timezone}
@@ -690,6 +694,13 @@ function Regions({ tenant, token }: { tenant: Tenant; token: string }) {
                     >
                         {rows.length ? t("differentSearch") : t("addDetails")}
                     </Empty>
+                )}
+                {canManage && (
+                    <div className="portfolio-footer">
+                        <button className="text-button" onClick={onTrash}>
+                            {t("recycleBin")}
+                        </button>
+                    </div>
                 )}
             </section>
         </>

@@ -849,6 +849,24 @@ msgstr ""
 msgid "Production entry requires the current approved configuration."
 msgstr "Üretim girişi için güncel ve onaylı yapılandırma gereklidir."
 
+msgid "Production changed. Reload the latest values before saving."
+msgstr "Üretim verileri değişti. Kaydetmeden önce güncel değerleri yeniden yükleyin."
+
+msgid "A production batch must stay within 31 local days."
+msgstr "Bir üretim grubu en fazla 31 yerel günü kapsayabilir."
+
+msgid "Unknown production action."
+msgstr "Bilinmeyen üretim işlemi."
+
+msgid "Production belongs to a previous configuration."
+msgstr "Üretim önceki bir yapılandırmaya aittir."
+
+msgid "There is no manual production to revert."
+msgstr "Geri alınabilecek elle girilmiş bir üretim kaydı yok."
+
+msgid "This field is required."
+msgstr "Bu alan zorunludur."
+
 msgid "Provide at most %(limit)s distinct local HH:MM times."
 msgstr "SS:DD biçiminde en fazla %(limit)s farklı yerel saat girin."
 

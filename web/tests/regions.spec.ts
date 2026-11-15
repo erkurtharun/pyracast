@@ -29,6 +29,10 @@ test("renames a plant without changing its location", async ({ page }) => {
     await page.getByLabel("Plant name").fill("New name");
     await page.getByRole("button", { name: "Save configuration" }).click();
     await expect(page.getByRole("heading", { name: "New name" })).toBeVisible();
+    await page
+        .locator("details > summary")
+        .filter({ hasText: /^Location$/ })
+        .click();
     await expect(
         page.getByText("36.9\u00b0, 30.7\u00b0 \u00b7 Europe/Istanbul", {
             exact: true,

@@ -119,8 +119,10 @@
         "noWorkspaces": "Çalışma alanı yok",
         "navigation": "Ana menü",
         "administration": "Yönetim",
-        "overview": "Genel bakış",
+        "overview": "Santraller",
         "recycleBin": "Geri dönüşüm kutusu",
+        "account": "Hesap",
+        "changeEmail": "E-postayı değiştir",
         "accountSettings": "Hesap ayarları",
         "signOut": "Çıkış yap",
         "emailAddress": "E-posta adresi",
@@ -154,7 +156,7 @@
         "differentSearch": "Farklı bir ad veya onay durumu deneyin.",
         "addDetails": "Konumunu ve teknik bilgilerini tek seferde ekleyin.",
         "currentEmail": "Mevcut adres: {email}. Yeni adres doğrulandıktan sonra bunun yerini alır.",
-        "members": "Çalışma alanı üyeleri",
+        "members": "Üyeler",
         "readOnly": "Salt okunur erişim"
     },
     "Common": {

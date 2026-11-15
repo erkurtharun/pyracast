@@ -13,9 +13,7 @@ test("mock contract: signs in with CSRF, selects region, and signs out", async (
     await page.getByLabel("Email", { exact: true }).fill(user.email);
     await page.getByLabel("Password", { exact: true }).fill("fixture-password");
     await page.locator("form").getByRole("button", { name: "Sign in" }).click();
-    await expect(
-        page.getByRole("heading", { name: "Your solar portfolio" }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
@@ -165,7 +163,7 @@ test("plant configuration saves fixed angles and clears them when tracking", asy
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
     await page.getByRole("button", { name: "Production", exact: true }).click();
-    await page.getByRole("button", { name: "Production import" }).click();
+    await page.getByRole("button", { name: "Import CSV" }).click();
     await page.getByLabel("Production CSV").setInputFiles({
         name: "production.csv",
         mimeType: "text/csv",
@@ -246,7 +244,7 @@ test("mock contract: imports validated production with explicit energy units", a
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
     await page.getByRole("button", { name: "Production", exact: true }).click();
-    await page.getByRole("button", { name: "Production import" }).click();
+    await page.getByRole("button", { name: "Import CSV" }).click();
     await page.getByLabel("Production CSV").setInputFiles({
         name: "production.csv",
         mimeType: "text/csv",
@@ -255,7 +253,8 @@ test("mock contract: imports validated production with explicit energy units", a
         ),
     });
     await expect(page.getByText(/1 valid observations ready/)).toBeVisible();
-    await page.getByRole("button", { name: "Import 1 observations" }).click();
+    await page.getByRole("button", { name: "Preview import" }).click();
+    await page.getByRole("button", { name: "Confirm import (1)" }).click();
     await expect(
         page.getByText(
             "Import complete: 1 created, 0 already present, 1 total.",
@@ -272,7 +271,7 @@ test("CSV selection replaces validated rows and recovers after an invalid file",
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
     await page.getByRole("button", { name: "Production", exact: true }).click();
-    await page.getByRole("button", { name: "Production import" }).click();
+    await page.getByRole("button", { name: "Import CSV" }).click();
     const input = page.getByLabel("Production CSV");
     const select = (name: string, energy: string) =>
         input.setInputFiles({
@@ -294,7 +293,7 @@ test("CSV selection replaces validated rows and recovers after an invalid file",
         }),
     ).toBeVisible();
     await page
-        .getByRole("button", { name: "Import observations", exact: true })
+        .getByRole("button", { name: "Preview import", exact: true })
         .click();
     await expect(
         page.getByText("Choose and validate a CSV before importing."),
@@ -309,13 +308,14 @@ test("CSV selection replaces validated rows and recovers after an invalid file",
     const imported = page.waitForRequest(
         (request) =>
             request.method() === "POST" &&
-            request.url().includes("/observations/"),
+            request.url().includes("/production/changes/"),
     );
-    await page.getByRole("button", { name: "Import 1 observations" }).click();
+    await page.getByRole("button", { name: "Preview import" }).click();
+    await page.getByRole("button", { name: "Confirm import (1)" }).click();
     expect((await imported).postDataJSON()).toMatchObject({
         configuration_id: 31,
         unit: "kWh",
-        observations: [{ energy: 777, source: "meter" }],
+        changes: [{ energy: 777, source: "meter" }],
     });
 });
 
@@ -352,9 +352,7 @@ for (const staleRead of ["resolve", "reject"] as const) {
             await page
                 .getByRole("button", { name: "Production", exact: true })
                 .click();
-            await page
-                .getByRole("button", { name: "Production import" })
-                .click();
+            await page.getByRole("button", { name: "Import CSV" }).click();
             const csv = (energy: number, source: string) =>
                 Buffer.from(
                     `starts_at,ends_at,energy,quality,source\n2026-01-01T09:00:00+03:00,2026-01-01T09:30:00+03:00,${energy},valid,${source}`,
@@ -393,7 +391,7 @@ for (const staleRead of ["resolve", "reject"] as const) {
                 ).toHaveCount(0);
                 await expect(
                     page.getByRole("button", {
-                        name: "Import observations",
+                        name: "Preview import",
                         exact: true,
                     }),
                 ).toBeVisible();
@@ -402,13 +400,14 @@ for (const staleRead of ["resolve", "reject"] as const) {
             const imported = page.waitForRequest(
                 (request) =>
                     request.method() === "POST" &&
-                    request.url().includes("/observations/"),
+                    request.url().includes("/production/changes/"),
             );
+            await page.getByRole("button", { name: "Preview import" }).click();
             await page
-                .getByRole("button", { name: "Import 1 observations" })
+                .getByRole("button", { name: "Confirm import (1)" })
                 .click();
             expect((await imported).postDataJSON()).toMatchObject({
-                observations: [{ energy: 777, source: "new-meter" }],
+                changes: [{ energy: 777, source: "new-meter" }],
             });
         });
     }
@@ -702,9 +701,11 @@ test("regional and plant data sources identify estimated actuals and retain arch
     await page.getByLabel("Data source").selectOption("forecast");
     await expect.poll(() => sources.at(-1)).toBe("forecast");
     await page.getByRole("button", { name: "Production", exact: true }).click();
-    await page.getByText("Journal entry rules", { exact: true }).click();
+    await page
+        .getByText("Source and correction details", { exact: true })
+        .click();
     await expect(
-        page.getByText(/Archived estimated actuals unlock entry/i),
+        page.getByText(/Saved corrections take priority/i),
     ).toBeVisible();
 });
 
@@ -771,70 +772,6 @@ test("forecast crops edge zeros, retains gaps and downloads the full safe CSV", 
         "result.provenance.offset": "-2.5",
     });
     expect(csv).toContain(",-2.5,");
-});
-
-test("journal retains unmeasured reference slots and internal missing comparisons", async ({
-    page,
-}) => {
-    await mockApi(page);
-    await page.route("**/production/**", (route) =>
-        route.fulfill({
-            json: {
-                timezone: region.timezone,
-                plant_id: 21,
-                configuration_id: 31,
-                start_date: "2026-01-01",
-                end_date: "2026-01-01",
-                resolution_minutes: 60,
-                days: [],
-                observations: [],
-                intervals: [false, true, false, true, false].map(
-                    (reference_available, index) => ({
-                        starts_at: `2026-01-01T${String(index + 6).padStart(2, "0")}:00:00+03:00`,
-                        ends_at: `2026-01-01T${String(index + 7).padStart(2, "0")}:00:00+03:00`,
-                        reference_available,
-                        can_enter: reference_available,
-                        observation: null,
-                        unavailable_reason: reference_available
-                            ? null
-                            : "estimated_actuals_unavailable",
-                    }),
-                ),
-            },
-        }),
-    );
-    await page.goto("/");
-    await page
-        .getByRole("button", { name: /East array|Antalya solar park/ })
-        .click();
-    await page.getByRole("button", { name: "Production", exact: true }).click();
-    await expect(page.getByRole("table").getByRole("row")).toHaveCount(4);
-    const missing = page.getByRole("spinbutton", {
-        name: "Production 2026-01-01T08:00:00+03:00",
-        exact: true,
-    });
-    await expect(missing).toBeDisabled();
-    await page
-        .getByRole("spinbutton", {
-            name: "Production 2026-01-01T07:00:00+03:00",
-            exact: true,
-        })
-        .fill("0");
-    const download = page.waitForEvent("download");
-    await page
-        .getByRole("button", { name: "Download production journal CSV" })
-        .click();
-    const csv = await readFile((await (await download).path())!, "utf8");
-    const records = Papa.parse<Record<string, string>>(csv, {
-        header: true,
-        skipEmptyLines: true,
-    }).data;
-    expect(records).toHaveLength(5);
-    expect(records[1]).toMatchObject({
-        draft_energy: "0",
-        draft_unit: "kWh",
-        reference_available: "true",
-    });
 });
 
 test("all-zero forecasts remain visible as measured zero values", async ({
@@ -1070,7 +1007,7 @@ async function openJournal(page: Page) {
         .click();
     await page.getByRole("button", { name: "Production", exact: true }).click();
     await expect(
-        page.getByRole("heading", { name: "Production journal" }),
+        page.getByRole("heading", { name: "Actual production" }),
     ).toBeVisible();
 }
 
@@ -1332,381 +1269,6 @@ test("calibration detail explains support, rejection and incumbent comparison", 
     });
 });
 
-test("production journal saves missing readings, preserves dates and shows archived availability", async ({
-    page,
-}) => {
-    await mockApi(page);
-    type Saved = {
-        id: number;
-        configuration_id: number;
-        starts_at: string;
-        ends_at: string;
-        energy_mwh: number;
-        quality: string;
-        source: string;
-    };
-    const observations: Saved[] = [];
-    const previousRun = {
-        id: 40,
-        window_start: "2025-12-01",
-        window_end: "2025-12-07",
-        status: "ready",
-        assessment: "provisional",
-        factor: 1.1,
-        result: {},
-    };
-    await page.route("**/plants/21/calibrations/", async (route) => {
-        await route.fulfill({
-            json: paged(
-                observations.length
-                    ? [
-                          previousRun,
-                          {
-                              ...previousRun,
-                              id: 41,
-                              status: "pending",
-                              assessment: "pending",
-                              factor: null,
-                          },
-                      ]
-                    : [previousRun],
-            ),
-        });
-    });
-    await page.route("**/plants/21/calibrations/40/", async (route) => {
-        await route.fulfill({ json: previousRun });
-    });
-
-    await page.route("**/plants/21/observations/", async (route) => {
-        const body = route.request().postDataJSON();
-        expect(body).toMatchObject({ configuration_id: 31, unit: "MWh" });
-        for (const row of body.observations)
-            observations.push({
-                ...row,
-                energy_mwh: row.energy,
-                configuration_id: 31,
-                id: observations.length + 1,
-            });
-        await route.fulfill({
-            json: {
-                created: body.observations.length,
-                existing: 0,
-                count: body.observations.length,
-            },
-        });
-    });
-    await page.route("**/plants/21/production/**", async (route) => {
-        const url = new URL(route.request().url()),
-            date = url.searchParams.get("start_date") ?? "2026-01-07",
-            resolution = Number(url.searchParams.get("resolution_minutes"));
-        const starts_at = `${date}T09:00:00Z`,
-            ends_at = `${date}T${resolution === 30 ? "09:30" : "10:00"}:00Z`;
-        const observation =
-            observations.find(
-                (row) => row.starts_at === starts_at && row.ends_at === ends_at,
-            ) ?? null;
-        await route.fulfill({
-            json: {
-                timezone: region.timezone,
-                available_start_date: "2026-01-01",
-                available_end_date: "2026-01-07",
-                start_date: date,
-                end_date: date,
-                days: [
-                    {
-                        date,
-                        available_count: 1,
-                        recorded_count: observation ? 1 : 0,
-                        missing_count: observation ? 0 : 1,
-                    },
-                ],
-                intervals: [
-                    {
-                        starts_at,
-                        ends_at,
-                        observation,
-                        reference_available: true,
-                        can_enter: !observation,
-                        unavailable_reason: observation
-                            ? "already_recorded"
-                            : null,
-                    },
-                    {
-                        starts_at: `${date}T11:00:00Z`,
-                        ends_at: `${date}T12:00:00Z`,
-                        observation: null,
-                        can_enter: false,
-                        unavailable_reason: "estimated_actuals_unavailable",
-                    },
-                    {
-                        starts_at: `${date}T13:00:00Z`,
-                        ends_at: `${date}T14:00:00Z`,
-                        reference_available: true,
-                        observation: null,
-                        can_enter: true,
-                        unavailable_reason: null,
-                    },
-                ],
-                observations,
-            },
-        });
-    });
-    await openJournal(page);
-    await expect(
-        page.getByRole("button", { name: "Request calibration" }),
-    ).toHaveCount(0);
-    await expect(page.getByLabel("Day", { exact: true })).not.toHaveAttribute(
-        "min",
-    );
-    await expect(
-        page.getByLabel("Production 2026-01-07T11:00:00Z"),
-    ).toBeDisabled();
-    await expect(
-        page.getByText("No archived estimated actuals for this interval."),
-    ).toBeVisible();
-    await page.getByLabel("Production 2026-01-07T09:00:00Z").fill("250");
-    await page.getByRole("button", { name: "Save meter readings" }).click();
-    await expect(
-        page.getByRole("cell", { name: "0.25 MWh", exact: true }),
-    ).toBeVisible();
-    expect(observations).toHaveLength(1);
-    await page.getByLabel("Day", { exact: true }).fill("2026-01-06");
-    await expect(
-        page.getByLabel("Production 2026-01-06T09:00:00Z"),
-    ).toHaveValue("");
-    await page.getByLabel("Production 2026-01-06T09:00:00Z").fill("100");
-    await page.getByLabel("Meter interval").selectOption("30");
-    await expect(
-        page.getByText("Meter entries \u00b7 30 minutes", { exact: true }),
-    ).toBeVisible();
-    await expect(
-        page.getByLabel("Production 2026-01-06T09:00:00Z"),
-    ).toHaveValue("");
-    await page.getByLabel("Entry energy unit").selectOption("MWh");
-    await page.getByLabel("Production 2026-01-06T09:00:00Z").fill("0.5");
-    await page.getByRole("button", { name: "Save meter readings" }).click();
-    await expect(
-        page.getByRole("cell", { name: "0.5 MWh", exact: true }),
-    ).toBeVisible();
-    expect(observations[1]).toMatchObject({
-        energy_mwh: 0.5,
-        ends_at: "2026-01-06T09:30:00Z",
-    });
-    await page.getByLabel("Day", { exact: true }).fill("2026-01-07");
-    await page.getByLabel("Meter interval").selectOption("60");
-    await expect(
-        page.getByRole("cell", { name: "0.25 MWh", exact: true }),
-    ).toBeVisible();
-    await page
-        .getByRole("button", { name: "Calibration", exact: true })
-        .click();
-    await expect(
-        page.getByRole("cell", { name: "#41", exact: true }),
-    ).toBeVisible();
-    await page
-        .getByRole("row")
-        .filter({ has: page.getByRole("cell", { name: "#40", exact: true }) })
-        .getByRole("button", { name: "View details" })
-        .click();
-    await expect(
-        page.getByRole("heading", { name: "Calibration #40", exact: true }),
-    ).toBeVisible();
-});
-
-test("production journal ignores stale dates and preserves new drafts during a save", async ({
-    page,
-}) => {
-    await mockApi(page);
-    let releaseDate!: () => void;
-    const dateGate = new Promise<void>((resolve) => {
-        releaseDate = resolve;
-    });
-    let releaseSave!: () => void;
-    const saveGate = new Promise<void>((resolve) => {
-        releaseSave = resolve;
-    });
-    let dateRequested!: () => void;
-    const oldDateRequested = new Promise<void>((resolve) => {
-        dateRequested = resolve;
-    });
-    await page.route("**/plants/21/production/**", async (route) => {
-        const date =
-            new URL(route.request().url()).searchParams.get("start_date") ??
-            "2026-01-07";
-        if (date === "2026-01-06") {
-            dateRequested();
-            await dateGate;
-        }
-        await route.fulfill({
-            json: {
-                timezone: region.timezone,
-                available_start_date: "2026-01-01",
-                available_end_date: "2026-01-07",
-                start_date: date,
-                end_date: date,
-                days: [],
-                intervals: [
-                    {
-                        starts_at: `${date}T09:00:00Z`,
-                        ends_at: `${date}T10:00:00Z`,
-                        observation: null,
-                        can_enter: true,
-                        reference_available: true,
-                        unavailable_reason: null,
-                    },
-                ],
-                observations: [],
-            },
-        });
-    });
-    await page.route("**/plants/21/observations/", async (route) => {
-        expect(route.request().postDataJSON().observations).toEqual([
-            {
-                starts_at: "2026-01-07T09:00:00Z",
-                ends_at: "2026-01-07T10:00:00Z",
-                energy: 0.25,
-                quality: "valid",
-                source: "meter",
-            },
-        ]);
-        await saveGate;
-        await route.fulfill({ json: { created: 1, existing: 0, count: 1 } });
-    });
-    await openJournal(page);
-    const entry = page.getByLabel("Production 2026-01-07T09:00:00Z");
-    await entry.fill("250");
-    await page.getByRole("button", { name: "Save meter readings" }).click();
-    await expect(page.getByRole("button", { name: "Saving…" })).toBeDisabled();
-    await entry.fill("300");
-    releaseSave();
-    await expect(
-        page.getByText("1 meter reading saved.", { exact: true }),
-    ).toBeVisible();
-    await expect(entry).toHaveValue("300");
-    await page.getByLabel("Day", { exact: true }).fill("2026-01-06");
-    await oldDateRequested;
-    await page.getByLabel("Day", { exact: true }).fill("2026-01-05");
-    await expect(
-        page.getByLabel("Production 2026-01-05T09:00:00Z"),
-    ).toBeVisible();
-    releaseDate();
-    await expect(
-        page.getByLabel("Production 2026-01-06T09:00:00Z"),
-    ).toHaveCount(0);
-    await expect(page.getByLabel("Day", { exact: true })).toHaveValue(
-        "2026-01-05",
-    );
-});
-
-test("production journal stops loading after a failed history request", async ({
-    page,
-}) => {
-    await mockApi(page);
-    await page.route("**/plants/21/production/**", async (route) => {
-        await route.fulfill({
-            status: 503,
-            json: { detail: "Production history is temporarily unavailable." },
-        });
-    });
-    await openJournal(page);
-    await expect(
-        page.getByRole("alert").filter({
-            hasText: "Production history is temporarily unavailable.",
-        }),
-    ).toBeVisible();
-    await expect(
-        page.getByText("Loading production history?", { exact: true }),
-    ).toHaveCount(0);
-});
-
-for (const source of ["forecast", "estimated_actuals"] as const) {
-    test(`new plant explains later configuration when projecting ${source}`, async ({
-        page,
-    }) => {
-        await page.clock.setFixedTime(new Date("2026-11-10T12:00:00Z"));
-        await mockApi(page);
-        await page.route("**/plants/", async (route) => {
-            await route.fulfill({
-                json: paged([
-                    {
-                        ...plant,
-                        created_at: "2026-11-10T10:00:00Z",
-                        current_configuration: {
-                            ...plant.current_configuration,
-                            created_at: "2026-11-10T10:00:00Z",
-                        },
-                    },
-                ]),
-            });
-        });
-        await page.route("**/forecast/**", async (route) => {
-            const electrical = new URL(route.request().url()).pathname.includes(
-                "/plants/",
-            );
-            await route.fulfill({
-                json: {
-                    timezone: region.timezone,
-                    freshness: "fresh",
-                    source_kind: source,
-                    configuration_id: electrical ? 31 : undefined,
-                    calibration_id: null,
-                    result: {
-                        complete: true,
-                        coverage_fraction: 1,
-                        energy_kwh_m2: 4,
-                        energy_mwh: 5,
-                        intervals: [],
-                        quality_flags: electrical
-                            ? [
-                                  "historical_configuration_assumed",
-                                  "uncalibrated",
-                              ]
-                            : [],
-                    },
-                },
-            });
-        });
-        await page.goto("/");
-        await page
-            .getByRole("button", { name: /East array|Antalya solar park/ })
-            .click();
-        await page
-            .getByRole("button", { name: "Irradiance", exact: true })
-            .click();
-        await expect(
-            page.getByRole("heading", { name: "Irradiance" }),
-        ).toBeVisible();
-        await page
-            .getByRole("button", { name: "Generation", exact: true })
-            .click();
-        await page.getByLabel("Data source").selectOption(source);
-        await page
-            .getByLabel("Forecast date")
-            .fill(source === "forecast" ? "2026-11-10" : "2026-11-09");
-        await expect(
-            page.getByRole("heading", { name: "Electrical generation" }),
-        ).toBeVisible();
-        await expect(
-            page.getByText(
-                "Estimated using settings recorded after this date.",
-                { exact: true },
-            ),
-        ).toBeVisible();
-        await page.getByText("Source & quality", { exact: true }).click();
-        await expect(
-            page.getByText("historical configuration assumed", { exact: true }),
-        ).toBeVisible();
-        await expect(
-            page.getByText("uncalibrated", { exact: true }),
-        ).toBeVisible();
-        await expect(
-            page.getByRole("heading", {
-                name: "No configuration for this day",
-            }),
-        ).toHaveCount(0);
-    });
-}
-
 test("recycle bin confirms deletion and restores a plant site with associated data", async ({
     page,
 }) => {
@@ -1824,7 +1386,10 @@ test("recycle bin confirms deletion and restores a plant site with associated da
             exact: true,
         }),
     ).toHaveCount(0);
-    await page.getByRole("button", { name: "Overview", exact: true }).click();
+    await page
+        .getByRole("navigation", { name: "Main navigation" })
+        .getByRole("button", { name: "Plants", exact: true })
+        .click();
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();

@@ -93,7 +93,7 @@ async function mockTwoFactor(
 
 async function openSettings(page: Page) {
     await page.goto("/?workspace=customer");
-    await page.getByRole("button", { name: "Account settings" }).click();
+    await page.getByRole("button", { name: "Account" }).click();
 }
 
 function twoFactorPanel(page: Page) {
@@ -189,7 +189,7 @@ test("a viewer enrolls from a local scannable QR and preserves a leading-zero co
         .getByRole("button", { name: "I have saved my codes", exact: true })
         .click();
     await page.reload();
-    await page.getByRole("button", { name: "Account settings" }).click();
+    await page.getByRole("button", { name: "Account" }).click();
     await expect(
         page.getByRole("button", { name: "Set up authenticator" }),
     ).not.toBeVisible();
@@ -358,7 +358,7 @@ test("recovery codes clear after saved acknowledgement and replace only after co
     await expect(page.getByText("10000001", { exact: true })).not.toBeVisible();
     expect(state.recoveryRequests).toEqual(["GET", "GET", "POST"]);
     await page.reload();
-    await page.getByRole("button", { name: "Account settings" }).click();
+    await page.getByRole("button", { name: "Account" }).click();
     await expect(page.getByText("20000001", { exact: true })).not.toBeVisible();
     expect(
         await page.evaluate(() =>
@@ -721,6 +721,7 @@ test("refreshing a masked CSRF token preserves displayed recovery codes", async 
     await openSettings(page);
     await page.getByRole("button", { name: "Show recovery codes" }).click();
     await expect(page.getByText("10000001", { exact: true })).toBeVisible();
+    await page.getByText("Change email", { exact: true }).click();
     await page.getByLabel("Email verification code").fill("ABCD-EFGH");
     await page.getByRole("button", { name: "Verify new email" }).click();
     await expect(
@@ -808,15 +809,13 @@ for (const operation of ["remove", "replace"] as const) {
             .getByRole("button", { name: "Confirm authenticator" })
             .click();
         await authenticating;
-        await page
-            .getByRole("button", { name: "Overview", exact: true })
-            .click();
+        await page.getByRole("button", { name: "Plants", exact: true }).click();
         await expect(
             page.getByRole("heading", { name: "Plants", exact: true }),
         ).toBeVisible();
         release();
         await (await authenticated).finished();
-        await page.getByRole("button", { name: "Account settings" }).click();
+        await page.getByRole("button", { name: "Account" }).click();
         await expect(
             twoFactorPanel(page).getByRole("button", {
                 name: "Show recovery codes",

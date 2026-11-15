@@ -10,6 +10,12 @@ from pyracast.plants.measurement_policy import MEASUREMENT_POLICY
 
 MEASUREMENT_BASES = (("net_export", "Net export"), ("ac_generation", "AC generation"))
 MOUNTING_TYPES = (("unknown", "Unknown"), ("fixed", "Fixed"), ("tracking", "Tracking"))
+OBSERVATION_QUALITIES = (
+    ("valid", "Valid"),
+    ("outage", "Outage"),
+    ("curtailed", "Curtailed"),
+    ("invalid", "Invalid"),
+)
 
 
 class TsTzRange(models.Func):
@@ -187,22 +193,24 @@ class ProductionObservation(models.Model):
     energy_mwh = models.FloatField()
     quality = models.CharField(
         max_length=20,
-        choices=(
-            ("valid", "Valid"),
-            ("outage", "Outage"),
-            ("curtailed", "Curtailed"),
-            ("invalid", "Invalid"),
-        ),
+        choices=OBSERVATION_QUALITIES,
         default="valid",
     )
     source = models.CharField(max_length=200)
     recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     recorded_at = models.DateTimeField(auto_now_add=True)
+    supersedes = models.OneToOneField(
+        "self", null=True, on_delete=models.RESTRICT, related_name="replacement"
+    )
+    is_current = models.BooleanField(default=True)
+    is_reverted = models.BooleanField(default=False)
 
     class Meta:
         constraints = (
             models.UniqueConstraint(
-                fields=("plant", "starts_at", "ends_at"), name="plant_observation_unique"
+                fields=("plant", "starts_at", "ends_at"),
+                condition=Q(is_current=True),
+                name="plant_observation_unique",
             ),
             models.CheckConstraint(
                 condition=Q(ends_at=F("starts_at") + timedelta(minutes=30))
@@ -219,10 +227,15 @@ class ProductionObservation(models.Model):
             ),
             ExclusionConstraint(
                 name="plant_observation_no_overlap",
+                condition=Q(is_current=True, is_reverted=False),
                 expressions=(
                     ("plant", RangeOperators.EQUAL),
                     (TsTzRange("starts_at", "ends_at", RangeBoundary()), RangeOperators.OVERLAPS),
                 ),
+            ),
+            models.CheckConstraint(
+                condition=Q(is_reverted=False) | Q(supersedes__isnull=False),
+                name="plant_observation_revert_has_source",
             ),
         )
 

@@ -81,9 +81,6 @@
         "saveConfiguration": "Save configuration",
         "deletePlant": "Delete plant",
         "productionViews": "Production views",
-        "manualJournal": "Manual journal",
-        "automaticProduction": "Automatic production",
-        "productionImport": "Production import",
         "comparison": "Comparison",
         "locationSummary": "{latitude}°, {longitude}° · {timezone}",
         "approvalStatus": "Plant approval is {status}. Contact your administrator to resume collection.",
@@ -102,8 +99,8 @@
         "calibrationChangeNote": "Changes may replace pending calibration.",
         "approvalDetailsRequired": "Complete technical details to request approval.",
         "deletionHelp": "Move this plant, its location and associated history to the recycle bin for 30 days.",
-        "productionUnavailable": "Production entry becomes available after administrator approval and matching historical data collection.",
-        "calibrationUnavailable": "Calibration becomes available after administrator approval and matched production history."
+        "calibrationUnavailable": "Calibration becomes available after administrator approval and matched production history.",
+        "actuals": "Actuals"
     },
     "RegionSettings": {
         "plantLocation": "Plant location",
@@ -333,13 +330,13 @@
         "restoreExpired": "The 30-day restore period has ended."
     },
     "WorkspaceMembers": {
-        "title": "Workspace members",
+        "title": "Members",
         "invite": "Invite a member",
         "sendInvitation": "Send invitation",
         "email": "Email address",
         "members": "Members",
         "remove": "Remove from workspace",
-        "removeNamed": "Remove {email} from workspace",
+        "removeNamed": "Remove from workspace: {email}",
         "confirmRemoval": "Confirm member removal",
         "removeQuestion": "Remove {email} from this workspace?",
         "removeHelp": "They will lose access to this workspace. Their account and other workspaces will stay available.",

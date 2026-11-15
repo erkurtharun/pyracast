@@ -12,6 +12,8 @@ from pyracast.plants.api import (
     PerformanceView,
     PlantsView,
     PlantView,
+    ProductionChangesView,
+    ProductionPreviewView,
     ProductionView,
     ResetView,
 )
@@ -27,6 +29,8 @@ urlpatterns = [
     path("<int:plant_id>/outages/<int:incident_id>/cancel/", CancelView.as_view()),
     path("<int:plant_id>/observations/", ObservationsView.as_view()),
     path("<int:plant_id>/production/", ProductionView.as_view()),
+    path("<int:plant_id>/production/changes/", ProductionChangesView.as_view()),
+    path("<int:plant_id>/production/preview/", ProductionPreviewView.as_view()),
     path("<int:plant_id>/production-source/", EpiasConnectionView.as_view()),
     path("<int:plant_id>/reported-production/", EpiasHistoryView.as_view()),
     path("<int:plant_id>/performance/", PerformanceView.as_view()),

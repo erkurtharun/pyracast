@@ -7,5 +7,7 @@ src/lib/schema.d.ts
 next-env.d.ts
 playwright-report
 test-results
+test-results-*
+integration-results
 coverage
 .dev

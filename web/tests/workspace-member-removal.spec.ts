@@ -11,9 +11,7 @@ const self = { id: user.id, email: user.email, role: "viewer" };
 
 async function openMembers(page: Page) {
     await page.goto("/");
-    await page
-        .getByRole("button", { name: "Workspace members", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Members", exact: true }).click();
     await expect(page.getByText(viewer.email, { exact: true })).toBeVisible();
 }
 
@@ -58,11 +56,11 @@ for (const width of [320, 390]) {
         });
         await openMembers(page);
         const action = page.getByRole("button", {
-            name: `Remove ${viewer.email} from workspace`,
+            name: `Remove from workspace: ${viewer.email}`,
             exact: true,
         });
         await expect(
-            page.getByRole("button", { name: /^Remove .* from workspace$/ }),
+            page.getByRole("button", { name: /^Remove from workspace: / }),
         ).toHaveCount(1);
         await action.click();
         const confirmation = page.getByRole("region", {
@@ -133,7 +131,7 @@ test("failed removal refreshes current membership and permits a fresh confirmati
     await openMembers(page);
     const initialReads = reads;
     await page
-        .getByRole("button", { name: `Remove ${viewer.email} from workspace` })
+        .getByRole("button", { name: `Remove from workspace: ${viewer.email}` })
         .click();
     await page
         .getByRole("region", { name: "Confirm member removal" })
@@ -145,7 +143,7 @@ test("failed removal refreshes current membership and permits a fresh confirmati
     await expect.poll(() => reads).toBeGreaterThan(initialReads);
     await expect(page.getByText(viewer.email, { exact: true })).toBeVisible();
     await page
-        .getByRole("button", { name: `Remove ${viewer.email} from workspace` })
+        .getByRole("button", { name: `Remove from workspace: ${viewer.email}` })
         .click();
     await expect(
         page.getByRole("region", { name: "Confirm member removal" }),
@@ -171,7 +169,7 @@ test("lost administrator access refreshes workspace role and removes write contr
     });
     await openMembers(page);
     await page
-        .getByRole("button", { name: `Remove ${viewer.email} from workspace` })
+        .getByRole("button", { name: `Remove from workspace: ${viewer.email}` })
         .click();
     await page
         .getByRole("region", { name: "Confirm member removal" })
@@ -181,7 +179,7 @@ test("lost administrator access refreshes workspace role and removes write contr
         page.getByText("Read-only access", { exact: true }),
     ).toBeVisible();
     await expect(
-        page.getByRole("button", { name: "Workspace members", exact: true }),
+        page.getByRole("button", { name: "Members", exact: true }),
     ).toHaveCount(0);
     await expect(
         page.getByRole("button", {
@@ -213,7 +211,7 @@ test("switching workspace discards a pending confirmation and uses the new tenan
     });
     await openMembers(page);
     await page
-        .getByRole("button", { name: `Remove ${viewer.email} from workspace` })
+        .getByRole("button", { name: `Remove from workspace: ${viewer.email}` })
         .click();
     await page
         .getByRole("combobox", { name: "Workspace", exact: true })
@@ -223,7 +221,7 @@ test("switching workspace discards a pending confirmation and uses the new tenan
     ).toHaveCount(0);
     expect(requested).toBe("");
     await page
-        .getByRole("button", { name: `Remove ${viewer.email} from workspace` })
+        .getByRole("button", { name: `Remove from workspace: ${viewer.email}` })
         .click();
     await page
         .getByRole("region", { name: "Confirm member removal" })

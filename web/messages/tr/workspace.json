@@ -81,9 +81,6 @@
         "saveConfiguration": "Yapılandırmayı kaydet",
         "deletePlant": "Santrali sil",
         "productionViews": "Üretim görünümleri",
-        "manualJournal": "Manuel kayıtlar",
-        "automaticProduction": "Otomatik üretim",
-        "productionImport": "Üretim içe aktarımı",
         "comparison": "Karşılaştırma",
         "locationSummary": "{latitude}°, {longitude}° · {timezone}",
         "approvalStatus": "Santral onay durumu: {status}. Veri toplamayı sürdürmek için yöneticinizle iletişime geçin.",
@@ -102,8 +99,8 @@
         "calibrationChangeNote": "Değişiklikler bekleyen kalibrasyonun yerini alabilir.",
         "approvalDetailsRequired": "Onay istemek için teknik bilgileri tamamlayın.",
         "deletionHelp": "Bu santrali, konumunu ve ilişkili geçmişini 30 günlüğüne geri dönüşüm kutusuna taşıyın.",
-        "productionUnavailable": "Üretim girişi, yönetici onayı ve eşleşen geçmiş veriler toplandıktan sonra kullanılabilir.",
-        "calibrationUnavailable": "Kalibrasyon, yönetici onayı ve eşleşen üretim geçmişinden sonra kullanılabilir."
+        "calibrationUnavailable": "Kalibrasyon, yönetici onayı ve eşleşen üretim geçmişinden sonra kullanılabilir.",
+        "actuals": "Gerçekleşen"
     },
     "RegionSettings": {
         "plantLocation": "Santral konumu",
@@ -333,13 +330,13 @@
         "restoreExpired": "30 günlük geri yükleme süresi doldu."
     },
     "WorkspaceMembers": {
-        "title": "Çalışma alanı üyeleri",
+        "title": "Üyeler",
         "invite": "Üye davet et",
         "sendInvitation": "Davet gönder",
         "email": "E-posta adresi",
         "members": "Üyeler",
         "remove": "Çalışma alanından çıkar",
-        "removeNamed": "{email} adlı üyeyi çalışma alanından çıkar",
+        "removeNamed": "Çalışma alanından çıkar: {email}",
         "confirmRemoval": "Üye çıkarmayı onayla",
         "removeQuestion": "{email} bu çalışma alanından çıkarılsın mı?",
         "removeHelp": "Bu çalışma alanına erişimi kaldırılacak. Hesabı ve diğer çalışma alanları kullanılabilir kalacak.",

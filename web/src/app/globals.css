@@ -509,8 +509,11 @@ button.context-label:hover {
 .panel > :last-child {
     margin-bottom: 0;
 }
-.account-settings .panel > form + form {
+.account-settings .account-disclosure > form + form {
     margin-top: 24px;
+}
+.account-email {
+    overflow-wrap: anywhere;
 }
 .account-settings .panel > .button {
     margin-inline-end: 12px;
@@ -581,7 +584,7 @@ button.context-label:hover {
     color: var(--teal);
     font-size: 22px;
 }
-.region-card h3 {
+.region-card h2 {
     margin-bottom: 6px;
     font-size: 19px;
 }
@@ -1069,55 +1072,162 @@ pre,
     border-top: 1px solid var(--line);
     overflow-wrap: anywhere;
 }
-.journal-controls,
-.journal-date-nav,
-.journal-save {
+.production-table {
+    min-width: 0;
+}
+.production-workspace .production-table {
+    table-layout: fixed;
+}
+.production-workspace .production-table th,
+.production-workspace .production-table td {
+    padding: 12px 8px;
+    vertical-align: top;
+}
+.production-workspace .production-table th:first-child {
+    width: 28%;
+}
+.production-workspace .production-table th:last-child:not(:nth-child(2)) {
+    width: 88px;
+}
+.production-workspace .production-table td:last-child .button {
+    min-width: 68px;
+    padding-inline: 6px;
+    font-size: 13px;
+    overflow-wrap: normal;
+    word-break: normal;
+}
+.production-controls {
     display: flex;
     align-items: end;
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 8px;
+    margin-bottom: 16px;
 }
-.journal-controls {
-    margin: 16px 0 12px;
+.production-controls .archive-date-nav {
+    flex: 0 1 440px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    gap: 6px;
 }
-.journal-controls .field {
+.production-controls .archive-date-nav input {
+    width: 100%;
+    min-width: 0;
+}
+.production-controls .field {
     margin: 0;
 }
-.journal-controls > .field {
-    width: 150px;
+.production-refresh {
+    flex: 0 0 44px;
+    width: 44px;
+    min-width: 44px;
+    padding-inline: 0;
 }
-.journal-date-nav .field {
-    width: 160px;
-}
-.journal-date-nav .button {
-    min-width: 40px;
-    padding: 9px;
-}
-.journal-summary {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 12px 28px;
-    padding: 12px 14px;
-    margin: 14px 0;
-    background: #f5f8f6;
-    border-radius: 9px;
-    font-size: 12px;
-}
-.journal-summary strong,
-.journal-summary span {
-    display: block;
-}
-.journal-summary span {
-    color: var(--muted);
-    margin-top: 3px;
-}
-.journal-table {
+.production-import .production-preview-table {
+    width: 100%;
     min-width: 0;
     table-layout: fixed;
 }
-.production-table {
+.production-import .production-preview-table th,
+.production-import .production-preview-table td {
+    padding: 12px 6px;
+    text-align: right;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    vertical-align: top;
+}
+.production-import .production-preview-table th:first-child {
+    width: 44%;
+    text-align: left;
+}
+.production-import .production-preview-table td {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+.production-preview-date,
+.production-preview-time {
+    display: block;
+    white-space: nowrap;
+}
+.production-preview-time {
+    margin-top: 4px;
+    color: var(--muted);
+    font-size: 12px;
+}
+.production-value {
+    display: block;
+    font-variant-numeric: tabular-nums;
+}
+.production-original {
+    display: block;
+    margin-top: 5px;
+    color: var(--muted);
+    font-size: 12px;
+}
+.production-correction {
+    display: inline-block;
+    margin-top: 5px;
+    color: var(--teal);
+    font-size: 12px;
+    font-weight: 600;
+}
+.production-row-editor {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: end;
+    gap: 8px;
+}
+.production-row-editor .field {
+    flex: 1 1 100%;
     min-width: 0;
+    margin: 0;
+}
+.production-row-editor input {
+    width: 100%;
+    min-width: 0;
+}
+.production-summary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px;
+    align-items: center;
+    gap: 4px 8px;
+    margin: 12px 0;
+}
+.production-summary > strong {
+    grid-column: 1;
+    grid-row: 1;
+}
+.production-summary > span {
+    grid-column: 1 / -1;
+    grid-row: 2;
+}
+.production-summary > .production-refresh {
+    grid-column: 2;
+    grid-row: 1;
+}
+.production-source,
+.production-import {
+    margin: 20px 0;
+}
+.production-source > summary,
+.production-import > summary {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 10px 0;
+    color: var(--teal);
+    font-weight: 600;
+    cursor: pointer;
+}
+.production-source > summary::before,
+.production-import > summary::before {
+    content: "+";
+    width: 24px;
+    flex-shrink: 0;
+}
+.production-source[open] > summary::before,
+.production-import[open] > summary::before {
+    content: "−";
 }
 .forecast-interval-table {
     min-width: 0;
@@ -1169,18 +1279,6 @@ pre,
     white-space: normal;
     overflow-wrap: anywhere;
 }
-.journal-table th,
-.journal-table td {
-    padding: 8px 10px;
-    white-space: normal;
-    overflow-wrap: anywhere;
-}
-.journal-table th:first-child {
-    width: 35%;
-}
-.journal-table th:nth-child(2) {
-    width: 35%;
-}
 .meter-input {
     width: calc(100% - 32px);
     max-width: 130px;
@@ -1190,15 +1288,6 @@ pre,
 .meter-input:disabled {
     background: var(--cream);
     cursor: not-allowed;
-}
-.journal-save {
-    align-items: center;
-    justify-content: space-between;
-    padding: 14px 0;
-}
-.journal-save > span {
-    color: var(--muted);
-    font-size: 12px;
 }
 .trash-list {
     list-style: none;
@@ -1351,6 +1440,16 @@ pre,
 }
 .portfolio-toolbar .field:first-child {
     flex-grow: 2;
+}
+.portfolio-footer {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 16px;
+    border-top: 1px solid var(--line);
+    padding-top: 8px;
+}
+.portfolio-footer .text-button {
+    margin: 0;
 }
 .plant-identity p {
     display: flex;
@@ -1624,8 +1723,17 @@ pre,
     .sidebar .tenant-select:has(option:only-child) {
         display: none;
     }
+    .sidebar .workspace-readonly {
+        display: block;
+        grid-column: 1 / -1;
+        grid-row: 4;
+        margin: 0;
+        font-size: 12px;
+        letter-spacing: normal;
+        text-transform: none;
+    }
     .sidebar {
-        position: sticky;
+        position: static;
         inset: 0 0 auto;
         width: 100%;
         padding: 10px 14px 8px;
@@ -1669,7 +1777,7 @@ pre,
         justify-content: center;
         text-align: center;
         padding: 7px 5px;
-        font-size: 12px;
+        font-size: 14px;
         min-height: 44px;
     }
     .sidebar nav button span {
@@ -1806,57 +1914,10 @@ pre,
         font-size: 11px;
         gap: 8px;
     }
-    .journal-controls {
-        gap: 10px;
-    }
-    .journal-date-nav {
-        flex: 1 1 100%;
-        flex-wrap: nowrap;
-    }
-    .journal-date-nav .field {
-        flex: 1;
-        width: auto;
-    }
-    .journal-controls > .field {
-        flex: 1;
-        width: auto;
-    }
-    .journal-summary {
-        gap: 10px;
-        padding: 12px;
-    }
-    .journal-summary > div {
-        flex: 1 1 130px;
-    }
-    .journal-table {
-        font-size: 12px;
-    }
-    .journal-table th,
-    .journal-table td {
-        padding: 8px 6px;
-    }
-    .journal-table th:first-child {
-        width: 34%;
-    }
-    .journal-table th:nth-child(2) {
-        width: 38%;
-    }
-    .journal-table td:last-child {
-        font-size: 11px;
-    }
     .meter-input {
         min-height: 44px;
         font-size: 16px;
         padding: 6px;
-    }
-    .journal-save {
-        position: sticky;
-        bottom: 0;
-        background: var(--white);
-        border-top: 1px solid var(--line);
-    }
-    .journal-save .button {
-        flex: 1 1 100%;
     }
     .auth-page {
         padding: 24px 16px;
@@ -1908,10 +1969,6 @@ pre,
     .sidebar {
         grid-template-columns: minmax(0, 1fr) auto 44px;
         padding: 12px 16px 10px;
-    }
-    .tenant-select {
-        grid-column: 1 / -1;
-        grid-row: 2;
     }
     .tenant-select select {
         padding: 10px 12px;
@@ -2158,6 +2215,33 @@ pre,
 }
 .identity-details {
     margin: 0;
+}
+.password-disclosure {
+    margin: 0;
+    border: 0;
+}
+.account-disclosure > summary,
+.identity-details > summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+}
+.account-disclosure > summary::before,
+.identity-details > summary::before {
+    content: "›";
+    flex-shrink: 0;
+    font-size: 22px;
+    line-height: 1;
+}
+.account-disclosure[open] > summary::before,
+.identity-details[open] > summary::before {
+    transform: rotate(90deg);
+}
+.account-disclosure > summary h2 {
+    display: inline;
+    margin: 0;
+    color: var(--ink);
 }
 .mfa-manual-details > summary,
 .identity-details > summary {

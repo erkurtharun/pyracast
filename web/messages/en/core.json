@@ -119,8 +119,10 @@
         "noWorkspaces": "No workspaces",
         "navigation": "Main navigation",
         "administration": "Administration",
-        "overview": "Overview",
+        "overview": "Plants",
         "recycleBin": "Recycle bin",
+        "account": "Account",
+        "changeEmail": "Change email",
         "accountSettings": "Account settings",
         "signOut": "Sign out",
         "emailAddress": "Email address",
@@ -154,7 +156,7 @@
         "differentSearch": "Try a different name or approval status.",
         "addDetails": "Add its location and technical details in one request.",
         "currentEmail": "Current address: {email}. A new address replaces it after verification.",
-        "members": "Workspace members",
+        "members": "Members",
         "readOnly": "Read-only access"
     },
     "Common": {

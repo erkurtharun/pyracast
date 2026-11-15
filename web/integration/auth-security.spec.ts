@@ -45,7 +45,7 @@ test("verified email and a recovery code protect a real browser session", async 
     await expect(
         page.getByRole("heading", { name: "Plants", exact: true }),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Account settings" }).click();
+    await page.getByRole("button", { name: "Account" }).click();
     const identity = page.locator(".identity-details");
     await identity.locator("summary").click();
     await identity
@@ -108,7 +108,7 @@ test("verified email and a recovery code protect a real browser session", async 
     await expect(
         page.getByRole("heading", { name: "Plants", exact: true }),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Account settings" }).click();
+    await page.getByRole("button", { name: "Account" }).click();
     const newPassword = `${password}-new`;
     const passwordSettings = page.locator("section").filter({
         has: page.getByRole("heading", {
@@ -116,6 +116,7 @@ test("verified email and a recovery code protect a real browser session", async 
             exact: true,
         }),
     });
+    await passwordSettings.locator("summary").click();
     await passwordSettings
         .getByLabel("Current password", { exact: true })
         .fill(password);

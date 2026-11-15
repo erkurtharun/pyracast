@@ -28,41 +28,45 @@ export function AccountSecurity({
     return (
         <>
             <section className="panel narrow">
-                <h2>{t("changePassword")}</h2>
-                <ActionForm
-                    submit={t("changePassword")}
-                    onSubmit={async (data) => {
-                        const result = await authRequest(
-                            "account/password/change",
-                            "POST",
-                            token,
-                            Object.fromEntries(data),
-                        );
-                        if (result.status === 401) {
-                            if (!result.meta?.is_authenticated) {
-                                await refreshExpiredSession(
-                                    onSession,
-                                    t("sessionExpired"),
-                                );
+                <details className="account-disclosure password-disclosure">
+                    <summary>
+                        <h2>{t("changePassword")}</h2>
+                    </summary>
+                    <ActionForm
+                        submit={t("changePassword")}
+                        onSubmit={async (data) => {
+                            const result = await authRequest(
+                                "account/password/change",
+                                "POST",
+                                token,
+                                Object.fromEntries(data),
+                            );
+                            if (result.status === 401) {
+                                if (!result.meta?.is_authenticated) {
+                                    await refreshExpiredSession(
+                                        onSession,
+                                        t("sessionExpired"),
+                                    );
+                                }
+                                throw new ApiError(t("confirmIdentityFirst"));
                             }
-                            throw new ApiError(t("confirmIdentityFirst"));
-                        }
-                    }}
-                >
-                    <Field
-                        label={t("currentPassword")}
-                        name="current_password"
-                        type="password"
-                        autoComplete="current-password"
-                    />
-                    <Field
-                        label={t("newPassword")}
-                        name="new_password"
-                        type="password"
-                        autoComplete="new-password"
-                        minLength={12}
-                    />
-                </ActionForm>
+                        }}
+                    >
+                        <Field
+                            label={t("currentPassword")}
+                            name="current_password"
+                            type="password"
+                            autoComplete="current-password"
+                        />
+                        <Field
+                            label={t("newPassword")}
+                            name="new_password"
+                            type="password"
+                            autoComplete="new-password"
+                            minLength={12}
+                        />
+                    </ActionForm>
+                </details>
             </section>
             <TwoFactorSettings
                 token={token}

@@ -19,8 +19,15 @@ from pyracast.plants.models import (
     Plant,
     ProductionObservation,
 )
+from pyracast.plants.observations import observation_heads
 from pyracast.plants.performance import forecast_performance
 from pyracast.plants.production import production_history
+from pyracast.plants.production_changes import (
+    ProductionChange,
+    ProductionRevisionConflictError,
+    change_production,
+    preview_production,
+)
 from pyracast.plants.serializers import (
     ActivationOutput,
     CalibrationAutomationInput,
@@ -38,7 +45,9 @@ from pyracast.plants.serializers import (
     PlantForecastOutput,
     PlantInput,
     PlantOutput,
+    ProductionChangesInput,
     ProductionHistoryOutput,
+    ProductionPreviewOutput,
     ProductionQuery,
 )
 from pyracast.regions.models import Region
@@ -126,7 +135,13 @@ class ObservationsView(ScopedView[ProductionObservation]):
 
     @extend_schema(responses=ObservationOutput(many=True))
     def get(self, _request: Request, **_kwargs: Any) -> Response:
-        rows = ProductionObservation.objects.filter(plant=self.plant()).order_by("starts_at", "id")
+        from django.utils import timezone
+
+        rows = (
+            observation_heads(cutoff=timezone.now())
+            .filter(plant=self.plant(), is_reverted=False)
+            .order_by("starts_at", "id")
+        )
         page = self.paginate_queryset(rows)
         return self.get_paginated_response(ObservationOutput(page, many=True).data)
 
@@ -152,7 +167,46 @@ class ProductionView(ScopedView[Plant]):
         plant = self.plant()
         data = ProductionQuery(data=request.query_params)
         data.is_valid(raise_exception=True)
-        return Response(production_history(plant, **data.validated_data))
+        return Response(
+            production_history(plant, actor=cast(User, request.user), **data.validated_data)
+        )
+
+
+class ProductionChangesView(ScopedView[Plant]):
+    @extend_schema(request=ProductionChangesInput, responses=ObservationImportOutput)
+    def post(self, request: Request, **_kwargs: Any) -> Response:
+        scope = self.scope()
+        data = ProductionChangesInput(data=request.data)
+        data.is_valid(raise_exception=True)
+        values = data.validated_data
+        try:
+            result = change_production(
+                *scope,
+                configuration_id=values["configuration_id"],
+                unit=values["unit"],
+                changes=[ProductionChange(**row) for row in values["changes"]],
+            )
+        except ProductionRevisionConflictError as error:
+            return Response(
+                {"code": "production_revision_conflict", "detail": str(error)}, status=409
+            )
+        return Response(result)
+
+
+class ProductionPreviewView(ScopedView[Plant]):
+    @extend_schema(request=ObservationImport, responses=ProductionPreviewOutput)
+    def post(self, request: Request, **_kwargs: Any) -> Response:
+        scope = self.scope()
+        data = ObservationImport(data=request.data)
+        data.is_valid(raise_exception=True)
+        values = data.validated_data
+        result = preview_production(
+            *scope,
+            configuration_id=values["configuration_id"],
+            unit=values["unit"],
+            observations=[operations.ObservationInput(**row) for row in values["observations"]],
+        )
+        return Response(result)
 
 
 class PerformanceView(ScopedView[Plant]):

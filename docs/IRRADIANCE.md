@@ -461,7 +461,7 @@ history remains readable. Activation applies only after its recorded time, so
 archived forecasts retain the factor available then. Holdout improvement against
 estimated actuals does not establish improvement in future forecast accuracy.
 
-Meter entry requires matching archived estimated actuals for the entire interval.
+Production entry is independent of archived weather availability. Calibration requires matching archived estimated actuals for the entire interval.
 Saving at least one day with complete valid matched daylight coverage automatically
 schedules analysis; one to six days produce diagnostics with an insufficient fit.
 Fitting still requires seven complete days and sufficient informative training
@@ -589,7 +589,13 @@ missing values from an older acquisition of the same source. A valid UEVM zero
 overrides positive provisional production. This target includes settlement
 adjustments; it does not assert raw connection-meter equivalence. Any overlapping
 manual observation, including invalid/outage/curtailed readings, suppresses the
-entire provider hour. Missing or invalid provider values remain missing, and the
+entire provider hour. Corrections append immutable observation revisions; explicit
+revert withdraws the manual value and restores the latest eligible provider hour,
+or missing data. Select the latest revision available at both the request's time
+cutoff and observation ID watermark; a later replacement or revert never changes a
+pinned fit. Current-head index metadata does not determine historical selection.
+Corrections are absolute MWh values and retain precedence after provider refreshes;
+the displayed provider original can change with its own immutable acquisition. Missing or invalid provider values remain missing, and the
 existing daylight-coverage rules decide which days qualify. Do not split hourly
 energy into invented half-hour measurements.
 

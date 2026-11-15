@@ -407,7 +407,7 @@ def import_observations(
         for item in observations:
             start, end, value, quality, source = _observation(item, unit, zone, now)
             overlap = ProductionObservation.objects.filter(
-                plant=plant, starts_at__lt=end, ends_at__gt=start
+                plant=plant, starts_at__lt=end, ends_at__gt=start, is_current=True
             ).first()
             if overlap is not None:
                 if (
@@ -417,6 +417,7 @@ def import_observations(
                     or overlap.energy_mwh != value
                     or overlap.quality != quality
                     or overlap.source != source
+                    or overlap.is_reverted
                 ):
                     raise ValidationError(gettext("Conflicting or overlapping observation."))
                 ids.append(overlap.pk)

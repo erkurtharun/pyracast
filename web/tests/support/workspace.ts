@@ -123,7 +123,43 @@ export async function mockApi(
                 );
         } else if (path.endsWith("/plants/"))
             data = method === "POST" ? plant : paged([submittedPlant ?? plant]);
-        else if (path.endsWith("/observations/")) {
+        else if (path.endsWith("/production-source/"))
+            data = {
+                connected: false,
+                name: "",
+                archived_days: 0,
+                last_error: "",
+            };
+        else if (path.endsWith("/production/preview/")) {
+            const body = route.request().postDataJSON();
+            data = {
+                warnings: [],
+                changes: body.observations.map(
+                    (row: Record<string, unknown>) => ({
+                        ...row,
+                        action: "set",
+                        expected_revision_id: null,
+                    }),
+                ),
+                preview: body.observations.map(
+                    (row: {
+                        starts_at: string;
+                        ends_at: string;
+                        energy: number;
+                    }) => ({
+                        starts_at: row.starts_at,
+                        ends_at: row.ends_at,
+                        current_energy_mwh: null,
+                        new_energy_mwh:
+                            row.energy / (body.unit === "kWh" ? 1000 : 1),
+                        corrected: false,
+                    }),
+                ),
+            };
+        } else if (
+            path.endsWith("/production/changes/") ||
+            path.endsWith("/observations/")
+        ) {
             expect(route.request().postDataJSON()).toMatchObject({
                 configuration_id: 31,
                 unit: "kWh",

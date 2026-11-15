@@ -214,7 +214,12 @@ def test_browser_against_live_django(
     assert plant.deleted_at is None
     system.region.refresh_from_db()
     assert system.region.deleted_at is None
-    observation = ProductionObservation.objects.get(plant=plant)
+    revisions = list(ProductionObservation.objects.filter(plant=plant).order_by("id"))
+    assert [row.energy_mwh for row in revisions] == [1.25, 2.5, 2.5, 1.25]
+    assert [row.is_reverted for row in revisions] == [False, False, True, False]
+    assert [row.is_current for row in revisions] == [False, False, False, True]
+    assert [row.supersedes_id for row in revisions] == [None, *(row.pk for row in revisions[:-1])]
+    observation = revisions[-1]
     assert observation.energy_mwh == 1.25
     assert observation.configuration_id != plant.current_configuration_id
     assert observation.configuration.revision == 1

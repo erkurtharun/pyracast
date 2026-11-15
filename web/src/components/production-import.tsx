@@ -1,41 +1,60 @@
 "use client";
 import { useLocale, useTranslations } from "next-intl";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { request } from "@/lib/api";
+import type { components } from "@/lib/schema";
+import { intervalTimeFormatter } from "@/lib/intervals";
 import { parseProduction, type Observation } from "@/lib/production";
-import { ActionForm, Notice, Select } from "./ui";
+import { ActionForm, Notice } from "./ui";
+import { ScrollRegion } from "./scroll-region";
 
-type CsvSelection =
+type Preview = components["schemas"]["ProductionPreviewOutput"];
+type Selection =
     | { status: "empty" }
     | { status: "invalid"; error: string }
-    | { status: "ready"; fileName: string; observations: Observation[] };
-
-type ImportResult = { created: number; existing: number; count: number };
+    | { status: "ready"; fileName: string; observations: Observation[] }
+    | {
+          status: "preview";
+          fileName: string;
+          observations: Observation[];
+          preview: Preview;
+      };
+type ImportResult = components["schemas"]["ObservationImportOutput"];
 
 export function ProductionImport({
     base,
     configuration,
+    timezone,
     token,
+    onSaved,
 }: {
     base: string;
     configuration: number;
+    timezone: string;
     token: string;
+    onSaved: () => void;
 }) {
     const t = useTranslations("ProductionImport");
     const locale = useLocale();
-
-    const fileReadSequence = useRef(0);
-    const [selection, setSelection] = useState<CsvSelection>({
-        status: "empty",
-    });
+    const sequence = useRef(0);
+    const [selection, setSelection] = useState<Selection>({ status: "empty" });
+    const [unit, setUnit] = useState("kWh");
     const [result, setResult] = useState<ImportResult>();
-    const observationCount =
-        selection.status === "ready" ? selection.observations.length : 0;
-
+    const [confirming, setConfirming] = useState(false);
+    const [previewRequest, setPreviewRequest] = useState<
+        { status: "idle" | "pending" } | { status: "failed"; error: string }
+    >({ status: "idle" });
+    const previewError = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        if (previewRequest.status === "failed") previewError.current?.focus();
+    }, [previewRequest]);
+    const ready =
+        selection.status === "ready" || selection.status === "preview";
     async function selectFile(file?: File) {
-        const sequence = ++fileReadSequence.current;
+        const current = ++sequence.current;
         setSelection({ status: "empty" });
         setResult(undefined);
+        setPreviewRequest({ status: "idle" });
         if (!file) return;
         if (file.size > 2 * 1024 * 1024) {
             setSelection({
@@ -45,31 +64,48 @@ export function ProductionImport({
             return;
         }
         try {
-            const text = await file.text();
-            if (sequence !== fileReadSequence.current) return;
-            setSelection({
-                status: "ready",
-                fileName: file.name,
-                observations: parseProduction(text, locale),
-            });
+            const observations = parseProduction(await file.text(), locale);
+            if (current === sequence.current)
+                setSelection({
+                    status: "ready",
+                    fileName: file.name,
+                    observations,
+                });
         } catch (error) {
-            if (sequence !== fileReadSequence.current) return;
-            setSelection({
-                status: "invalid",
-                error:
-                    error instanceof Error
-                        ? error.message
-                        : t("could_not_read_the_production_csv"),
-            });
+            if (current === sequence.current)
+                setSelection({
+                    status: "invalid",
+                    error:
+                        error instanceof Error
+                            ? error.message
+                            : t("could_not_read_the_production_csv"),
+                });
         }
     }
+    const number = (value: number) =>
+        new Intl.NumberFormat(locale, { maximumFractionDigits: 3 }).format(
+            value,
+        );
+    const date = (value: string) =>
+        new Intl.DateTimeFormat(locale, {
+            timeZone: timezone,
+            year: "numeric",
+            month: "short",
+            day: "2-digit",
+        }).format(new Date(value));
+    const timeFormatter = intervalTimeFormatter(
+        locale,
+        timezone,
+        selection.status === "preview"
+            ? [
+                  ...selection.preview.preview,
+                  ...(selection.preview.warnings ?? []),
+              ].flatMap((row) => [row.starts_at, row.ends_at])
+            : [],
+    );
+    const time = (value: string) => timeFormatter.format(new Date(value));
     return (
-        <section className="panel">
-            <div className="section-heading">
-                <div>
-                    <h2>{t("import_production_csv")}</h2>
-                </div>
-            </div>
+        <section>
             <details>
                 <summary>{t("csv_format_and_import_rules")}</summary>
                 <p>{t("use_a_csv_with_the_exact_header")}</p>
@@ -77,63 +113,237 @@ export function ProductionImport({
                     <code>
                         starts_at,ends_at,energy,quality,source
                         <br />
-                        2026-01-01T09:00:00+03:00,2026-01-01T09:30:00+03:00,250,valid,meter
+                        2026-01-01T09:00:00+03:00,2026-01-01T10:00:00+03:00,250,valid,meter
                     </code>
                 </div>
                 <p className="fine">
                     {t("quality_valid_outage_curtailed_or_invalid_quoted")}
                 </p>
             </details>
-            <ActionForm
-                submit={t("import_observations", { count: observationCount })}
-                onSubmit={async (data) => {
-                    if (selection.status !== "ready" || !observationCount)
-                        throw new Error(
-                            t("choose_and_validate_a_csv_before_importing"),
+            <form
+                onSubmit={async (event) => {
+                    event.preventDefault();
+                    if (confirming || previewRequest.status === "pending")
+                        return;
+                    if (!ready) {
+                        setPreviewRequest({
+                            status: "failed",
+                            error: t(
+                                "choose_and_validate_a_csv_before_importing",
+                            ),
+                        });
+                        return;
+                    }
+                    const current = ++sequence.current;
+                    setPreviewRequest({ status: "pending" });
+                    try {
+                        const preview = await request<Preview>(
+                            `${base}production/preview/`,
+                            "POST",
+                            {
+                                configuration_id: configuration,
+                                unit,
+                                observations: selection.observations,
+                            },
+                            token,
                         );
-                    const response = await request<ImportResult>(
-                        `${base}observations/`,
-                        "POST",
-                        {
-                            configuration_id: configuration,
-                            unit: data.get("unit"),
-                            observations: selection.observations,
-                        },
-                        token,
-                    );
-                    setResult(response);
+                        if (current === sequence.current) {
+                            setSelection({
+                                ...selection,
+                                status: "preview",
+                                preview,
+                            });
+                            setPreviewRequest({ status: "idle" });
+                        }
+                    } catch (error) {
+                        if (current === sequence.current)
+                            setPreviewRequest({
+                                status: "failed",
+                                error: (error as Error).message,
+                            });
+                    }
                 }}
             >
-                <div className="form-grid">
-                    <label className="field">
-                        {t("production_csv")}
-                        <input
-                            type="file"
-                            accept=".csv,text/csv"
-                            required
-                            onChange={(event) =>
-                                selectFile(event.target.files?.[0])
-                            }
-                        />
-                    </label>
-                    <Select label={t("energy_unit")} name="unit">
-                        <option value="kWh">{t("kwh_kilowatthours")}</option>
-                        <option value="MWh">{t("mwh_megawatthours")}</option>
-                    </Select>
-                </div>
-                {selection.status === "invalid" && (
-                    <Notice error>{selection.error}</Notice>
+                <fieldset
+                    disabled={confirming || previewRequest.status === "pending"}
+                >
+                    {previewRequest.status === "failed" && (
+                        <div
+                            className="notice error"
+                            role="alert"
+                            tabIndex={-1}
+                            ref={previewError}
+                        >
+                            {previewRequest.error}
+                        </div>
+                    )}
+                    <div className="form-grid">
+                        <label className="field">
+                            {t("production_csv")}
+                            <input
+                                type="file"
+                                accept=".csv,text/csv"
+                                required
+                                disabled={confirming}
+                                onChange={(event) =>
+                                    void selectFile(event.target.files?.[0])
+                                }
+                            />
+                        </label>
+                        <label className="field">
+                            {t("energy_unit")}
+                            <select
+                                value={unit}
+                                disabled={confirming}
+                                onChange={(event) => {
+                                    ++sequence.current;
+                                    setUnit(event.target.value);
+                                    setResult(undefined);
+                                    setPreviewRequest({ status: "idle" });
+                                    if (selection.status === "preview")
+                                        setSelection({
+                                            status: "ready",
+                                            fileName: selection.fileName,
+                                            observations:
+                                                selection.observations,
+                                        });
+                                }}
+                            >
+                                <option value="kWh">
+                                    {t("kwh_kilowatthours")}
+                                </option>
+                                <option value="MWh">
+                                    {t("mwh_megawatthours")}
+                                </option>
+                            </select>
+                        </label>
+                    </div>
+                    {selection.status === "invalid" && (
+                        <Notice error>{selection.error}</Notice>
+                    )}
+                    {ready && (
+                        <Notice>
+                            {t("validated_file", {
+                                file: selection.fileName,
+                                count: selection.observations.length,
+                            })}
+                        </Notice>
+                    )}
+                    <div className="form-footer">
+                        <button className="button" type="submit">
+                            {previewRequest.status === "pending"
+                                ? t("previewing")
+                                : t("preview_import")}
+                        </button>
+                    </div>
+                </fieldset>
+            </form>
+            {selection.status === "preview" &&
+                previewRequest.status === "idle" && (
+                    <>
+                        {(selection.preview.warnings ?? []).map((warning) => (
+                            <Notice
+                                key={`${warning.code}/${warning.starts_at}`}
+                            >
+                                {t("provider_hour_incomplete", {
+                                    start: new Date(
+                                        warning.starts_at,
+                                    ).toLocaleString(locale, {
+                                        timeZone: timezone,
+                                    }),
+                                    end: new Date(
+                                        warning.ends_at,
+                                    ).toLocaleString(locale, {
+                                        timeZone: timezone,
+                                    }),
+                                })}
+                            </Notice>
+                        ))}
+                        <ScrollRegion label={t("import_preview")}>
+                            <table className="production-preview-table">
+                                <caption>{t("import_preview")}</caption>
+                                <thead>
+                                    <tr>
+                                        <th>{t("interval")}</th>
+                                        <th>{t("current_mwh")}</th>
+                                        <th>{t("new_mwh")}</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {selection.preview.preview.map((row) => (
+                                        <tr
+                                            key={`${row.starts_at}/${row.ends_at}`}
+                                        >
+                                            <th scope="row">
+                                                <span className="production-preview-date">
+                                                    {date(row.starts_at)}
+                                                </span>
+                                                <span className="production-preview-time">
+                                                    {time(row.starts_at)}–
+                                                    {time(row.ends_at)}
+                                                </span>
+                                                <span className="sr-only">
+                                                    {t("exact_interval", {
+                                                        start: row.starts_at,
+                                                        end: row.ends_at,
+                                                    })}
+                                                </span>
+                                            </th>
+                                            <td>
+                                                {row.current_energy_mwh === null
+                                                    ? t("missing")
+                                                    : number(
+                                                          row.current_energy_mwh,
+                                                      )}
+                                            </td>
+                                            <td>
+                                                {number(row.new_energy_mwh)}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </ScrollRegion>
+                        <ActionForm
+                            submit={t("confirm_import", {
+                                count: selection.preview.changes.length,
+                            })}
+                            onSubmit={async () => {
+                                if (confirming) return;
+                                const current = ++sequence.current;
+                                setConfirming(true);
+                                try {
+                                    const response =
+                                        await request<ImportResult>(
+                                            `${base}production/changes/`,
+                                            "POST",
+                                            {
+                                                configuration_id: configuration,
+                                                unit,
+                                                changes:
+                                                    selection.preview.changes,
+                                            },
+                                            token,
+                                        );
+                                    if (current === sequence.current) {
+                                        setResult(response);
+                                        setSelection({
+                                            status: "ready",
+                                            fileName: selection.fileName,
+                                            observations:
+                                                selection.observations,
+                                        });
+                                        onSaved();
+                                    }
+                                } finally {
+                                    setConfirming(false);
+                                }
+                            }}
+                        >
+                            {null}
+                        </ActionForm>
+                    </>
                 )}
-                {selection.status === "ready" && observationCount > 0 && (
-                    <Notice>
-                        {t("validated_file", {
-                            file: selection.fileName,
-                            count: observationCount,
-                            start: selection.observations[0].starts_at,
-                        })}
-                    </Notice>
-                )}
-            </ActionForm>
             {result && (
                 <Notice>
                     {t("import_complete", {

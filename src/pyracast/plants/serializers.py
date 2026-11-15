@@ -8,6 +8,7 @@ from pyracast.api.serializers import InputSerializer
 from pyracast.plants.models import (
     MEASUREMENT_BASES,
     MOUNTING_TYPES,
+    OBSERVATION_QUALITIES,
     CalibrationActivation,
     CalibrationRun,
     Plant,
@@ -105,9 +106,7 @@ class ObservationRow(InputSerializer):
     starts_at = AwareDateTime()
     ends_at = AwareDateTime()
     energy = FiniteFloat(min_value=0)
-    quality = serializers.ChoiceField(
-        choices=("valid", "outage", "curtailed", "invalid"), default="valid"
-    )
+    quality = serializers.ChoiceField(choices=OBSERVATION_QUALITIES, default="valid")
     source = serializers.CharField(max_length=200)  # type: ignore[assignment]
 
 
@@ -126,9 +125,53 @@ class ObservationImportOutput(serializers.Serializer[dict[str, Any]]):
     ids = serializers.ListField(child=serializers.IntegerField())
 
 
+class ProductionChangeRow(InputSerializer):
+    starts_at = AwareDateTime()
+    ends_at = AwareDateTime()
+    expected_revision_id = serializers.IntegerField(min_value=1, allow_null=True)
+    action = serializers.ChoiceField(choices=("set", "revert"))
+    energy = FiniteFloat(min_value=0, required=False)
+    quality = serializers.ChoiceField(choices=OBSERVATION_QUALITIES, default="valid")
+    source = serializers.CharField(max_length=200, default="operator")  # type: ignore[assignment]
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        if attrs["action"] == "set" and "energy" not in attrs:
+            raise serializers.ValidationError({"energy": gettext("This field is required.")})
+        return attrs
+
+
+class ProductionChangesInput(InputSerializer):
+    configuration_id = serializers.IntegerField(min_value=1)
+    unit = serializers.ChoiceField(choices=("MWh", "kWh"))
+    changes: Any = serializers.ListSerializer(
+        child=ProductionChangeRow(), allow_empty=False, max_length=2000
+    )
+
+
+class ProductionPreviewRowOutput(serializers.Serializer[dict[str, Any]]):
+    starts_at = serializers.DateTimeField()
+    ends_at = serializers.DateTimeField()
+    current_energy_mwh = serializers.FloatField(allow_null=True)
+    new_energy_mwh = serializers.FloatField()
+    corrected = serializers.BooleanField()
+
+
+class ProductionPreviewWarningOutput(serializers.Serializer[dict[str, Any]]):
+    code = serializers.CharField()
+    starts_at = serializers.DateTimeField()
+    ends_at = serializers.DateTimeField()
+
+
+class ProductionPreviewOutput(serializers.Serializer[dict[str, Any]]):
+    changes = ProductionChangeRow(many=True)
+    preview = ProductionPreviewRowOutput(many=True)
+    warnings = ProductionPreviewWarningOutput(many=True)
+
+
 class ObservationOutput(serializers.ModelSerializer[ProductionObservation]):
     configuration_id = serializers.IntegerField()
     recorded_by_id = serializers.IntegerField()
+    supersedes_id = serializers.IntegerField(allow_null=True)
 
     class Meta:
         model = ProductionObservation
@@ -142,6 +185,8 @@ class ObservationOutput(serializers.ModelSerializer[ProductionObservation]):
             "source",
             "recorded_by_id",
             "recorded_at",
+            "supersedes_id",
+            "is_reverted",
         )
         read_only_fields = fields
 
@@ -157,6 +202,7 @@ class ProductionQuery(InputSerializer):
     end_date = serializers.DateField(required=False)
     resolution_minutes = serializers.ChoiceField(choices=(30, 60), default=60)
     daylight_only = serializers.BooleanField(default=False)
+    native_intervals = serializers.BooleanField(default=False)
 
 
 class PerformanceQuery(InputSerializer):
@@ -243,6 +289,29 @@ class ProductionDayOutput(serializers.Serializer[dict[str, Any]]):
     sunset = serializers.DateTimeField(allow_null=True)
     daylight_status = serializers.ChoiceField(choices=("normal", "polar_day", "polar_night"))
     daylight_windows = DaylightWindowOutput(many=True)
+    total_mwh = serializers.FloatField(allow_null=True)
+    complete = serializers.BooleanField()
+
+
+class ProductionValueOutput(serializers.Serializer[dict[str, Any]]):
+    energy_mwh = serializers.FloatField()
+    quality = serializers.CharField()
+    source = serializers.CharField()  # type: ignore[assignment]
+    source_kind = serializers.CharField()
+    provisional = serializers.BooleanField()
+    aggregated = serializers.BooleanField()
+
+
+class ProductionProviderOutput(serializers.Serializer[dict[str, Any]]):
+    starts_at = serializers.DateTimeField()
+    ends_at = serializers.DateTimeField()
+    energy_mwh = serializers.FloatField()
+    source_kind = serializers.CharField()
+    snapshot_id = serializers.IntegerField()
+    collected_at = serializers.DateTimeField()
+    available_at = serializers.DateTimeField()
+    content_sha256 = serializers.CharField()
+    provisional = serializers.BooleanField()
 
 
 class ProductionIntervalOutput(serializers.Serializer[dict[str, Any]]):
@@ -252,6 +321,13 @@ class ProductionIntervalOutput(serializers.Serializer[dict[str, Any]]):
     observation = ObservationOutput(allow_null=True)
     can_enter = serializers.BooleanField()
     unavailable_reason = serializers.CharField(allow_null=True)
+    revision_id = serializers.IntegerField(allow_null=True)
+    effective = ProductionValueOutput(allow_null=True)
+    provider_original = ProductionProviderOutput(allow_null=True)
+    provider_originals = ProductionProviderOutput(many=True)
+    can_edit = serializers.BooleanField()
+    can_revert = serializers.BooleanField()
+    edit_unavailable_reason = serializers.CharField(allow_null=True)
 
 
 class ProductionHistoryOutput(serializers.Serializer[dict[str, Any]]):
@@ -263,11 +339,13 @@ class ProductionHistoryOutput(serializers.Serializer[dict[str, Any]]):
     start_date = serializers.DateField()
     end_date = serializers.DateField()
     resolution_minutes = serializers.ChoiceField(choices=(30, 60))
+    native_intervals = serializers.BooleanField()
     slot_scope = serializers.ChoiceField(choices=("daylight", "full_day"))
     daylight_policy = serializers.CharField()
     days = ProductionDayOutput(many=True)
     intervals = ProductionIntervalOutput(many=True)
     observations = ObservationOutput(many=True)
+    revisions = ObservationOutput(many=True)
 
 
 class CalibrationOutput(serializers.ModelSerializer[CalibrationRun]):

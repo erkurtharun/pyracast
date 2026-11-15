@@ -7,14 +7,12 @@ import { CollectionSchedule } from "./collection-schedule";
 import { RegionSettings } from "./region-settings";
 import { CsvDownload } from "./csv-download";
 import { request, type Plant, type Forecast, type Region } from "@/lib/api";
-import { ProductionImport } from "./production-import";
 import { Calibrations } from "./calibrations";
 import { ActionForm, Notice, Tag, useResource } from "./ui";
 import { ProductionHistory } from "./production-history";
 import { MoveToRecycleBin } from "./recycle-bin";
 import { ForecastPanel } from "./forecast-panel";
 import { ForecastPerformance } from "./forecast-performance";
-import { EpiasProduction } from "./epias-production";
 import { Outages } from "./outages";
 import {
     PlantConfigurationFields,
@@ -46,7 +44,7 @@ export function PlantWorkspace({
 
     const [tab, setTab] = useState("forecast"),
         [forecastView, setForecastView] = useState("generation"),
-        [productionView, setProductionView] = useState("journal"),
+        [productionView, setProductionView] = useState("production"),
         [settingsView, setSettingsView] = useState("configuration"),
         [date, setDate] = useState(() => localDay(timezone, 1)),
         [resolution, setResolution] = useState("60"),
@@ -84,26 +82,9 @@ export function PlantWorkspace({
                 <div>
                     <p className="eyebrow">{t("solarPlant")}</p>
                     <h1>{currentPlant.name}</h1>
-                    <p>
-                        {t("locationSummary", {
-                            latitude: format.number(region.latitude, {
-                                maximumFractionDigits: 6,
-                            }),
-                            longitude: format.number(region.longitude, {
-                                maximumFractionDigits: 6,
-                            }),
-                            timezone,
-                        })}
-                    </p>
                 </div>
                 <div className="button-group">
                     <Tag>{region.status}</Tag>
-                    <CsvDownload
-                        label={t("downloadPlantCSV")}
-                        filename={`plant-${currentPlant.id}`}
-                        records={[currentPlant]}
-                        metadata={{ timezone }}
-                    />
                 </div>
             </div>
             {region.status !== "approved" && (
@@ -246,6 +227,26 @@ export function PlantWorkspace({
                 />
             ) : tab === "settings" ? (
                 <>
+                    <details>
+                        <summary>{t("location")}</summary>
+                        <p>
+                            {t("locationSummary", {
+                                latitude: format.number(region.latitude, {
+                                    maximumFractionDigits: 6,
+                                }),
+                                longitude: format.number(region.longitude, {
+                                    maximumFractionDigits: 6,
+                                }),
+                                timezone,
+                            })}
+                        </p>
+                        <CsvDownload
+                            label={t("downloadPlantCSV")}
+                            filename={`plant-${currentPlant.id}`}
+                            records={[currentPlant]}
+                            metadata={{ timezone }}
+                        />
+                    </details>
                     <nav className="subnav" aria-label={t("plantSettings")}>
                         {[
                             ["configuration", t("technicalDetails")],
@@ -333,51 +334,35 @@ export function PlantWorkspace({
                 <>
                     <nav className="subnav" aria-label={t("productionViews")}>
                         {[
-                            ["journal", t("manualJournal")],
-                            ["automatic", t("automaticProduction")],
-                            ["import", t("productionImport")],
+                            ["production", t("actuals")],
                             ["comparison", t("comparison")],
-                        ]
-                            .filter(([key]) => canManage || key !== "import")
-                            .map(([key, label]) => (
-                                <button
-                                    key={key}
-                                    className={
-                                        productionView === key ? "active" : ""
-                                    }
-                                    aria-current={
-                                        productionView === key
-                                            ? "page"
-                                            : undefined
-                                    }
-                                    onClick={() => setProductionView(key)}
-                                >
-                                    {label}
-                                </button>
-                            ))}
+                        ].map(([key, label]) => (
+                            <button
+                                key={key}
+                                className={
+                                    productionView === key ? "active" : ""
+                                }
+                                aria-current={
+                                    productionView === key ? "page" : undefined
+                                }
+                                onClick={() => setProductionView(key)}
+                            >
+                                {label}
+                            </button>
+                        ))}
                     </nav>
-                    {productionView === "automatic" ? (
-                        <EpiasProduction base={base} />
-                    ) : productionView === "comparison" ? (
+                    {productionView === "comparison" ? (
                         <ForecastPerformance
                             key={configuration?.id}
                             base={base}
                             timezone={timezone}
                         />
-                    ) : !configuration ? (
-                        <Notice>{t("productionUnavailable")}</Notice>
-                    ) : productionView === "import" && canManage ? (
-                        <ProductionImport
-                            key={configuration.id}
-                            base={base}
-                            configuration={configuration.id}
-                            token={token}
-                        />
                     ) : (
                         <ProductionHistory
-                            key={`history-${configuration.id}`}
+                            key={`history-${configuration?.id}`}
                             base={base}
-                            configuration={configuration.id}
+                            configuration={configuration?.id}
+                            timezone={timezone}
                             token={token}
                             onSaved={() =>
                                 setProductionRevision((current) => current + 1)

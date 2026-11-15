@@ -29,13 +29,12 @@ test("Turkish workspace roles and invitation labels preserve readable characters
         route.fulfill({ json: { invitations: [] } }),
     );
     await page.goto("/");
-    await page
-        .getByRole("button", { name: "Çalışma alanı üyeleri", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Üyeler", exact: true }).click();
     await expect(
         page.getByRole("heading", {
-            name: "Çalışma alanı üyeleri",
+            name: "Üyeler",
             exact: true,
+            level: 1,
         }),
     ).toBeVisible();
     await expect(
@@ -54,7 +53,7 @@ test("Turkish workspace roles and invitation labels preserve readable characters
     ).toBeVisible();
     await expect(
         page.getByRole("button", {
-            name: "Çalışma alanı üyeleri",
+            name: "Üyeler",
             exact: true,
         }),
     ).toHaveCount(0);
@@ -81,15 +80,11 @@ test("viewer reads shared settings without write controls or requests", async ({
             writes.push(request.url());
     });
     await page.goto("/");
-    await expect(
-        page.getByRole("heading", { name: "Your solar portfolio" }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Add plant", exact: true }),
     ).toHaveCount(0);
-    await expect(
-        page.getByRole("button", { name: "Workspace members" }),
-    ).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Members" })).toHaveCount(0);
     await expect(
         page.getByRole("button", { name: "Recycle bin", exact: true }),
     ).toHaveCount(0);
@@ -125,9 +120,8 @@ test("viewer reads shared settings without write controls or requests", async ({
     await expect(
         page.getByRole("checkbox", { name: "Automatic calibration enabled" }),
     ).toBeDisabled();
-    await page
-        .getByRole("button", { name: "Account settings", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Account", exact: true }).click();
+    await page.getByText("Change email", { exact: true }).click();
     await expect(
         page.getByRole("button", { name: "Send verification" }),
     ).toBeVisible();
@@ -180,9 +174,7 @@ test("workspace administrator invites a viewer and sees invitation errors", asyn
         await route.fulfill({ status: 204 });
     });
     await page.goto("/");
-    await page
-        .getByRole("button", { name: "Workspace members", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Members", exact: true }).click();
     await expect(page.getByText("owner@example.test")).toBeVisible();
     await page
         .getByLabel("Email address", { exact: true })
@@ -334,9 +326,7 @@ test("signed in member explicitly accepts invitation and sees actionable errors"
             sessionStorage.getItem("pyracast.workspaceInvitation"),
         ),
     ).toBeNull();
-    await expect(
-        page.getByRole("heading", { name: "Your solar portfolio" }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
 });
 
 for (const detail of [
@@ -366,7 +356,7 @@ for (const detail of [
         await page.getByRole("button", { name: "Cancel", exact: true }).click();
         await expect(page).toHaveURL("/?workspace=customer");
         await expect(
-            page.getByRole("heading", { name: "Your solar portfolio" }),
+            page.getByRole("heading", { name: "Plants" }),
         ).toBeVisible();
         expect(
             await page.evaluate(() =>
@@ -375,7 +365,7 @@ for (const detail of [
         ).toBeNull();
         await page.reload();
         await expect(
-            page.getByRole("heading", { name: "Your solar portfolio" }),
+            page.getByRole("heading", { name: "Plants" }),
         ).toBeVisible();
     });
 }

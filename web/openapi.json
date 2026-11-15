@@ -2231,6 +2231,14 @@
                         }
                     },
                     {
+                        "in": "query",
+                        "name": "native_intervals",
+                        "schema": {
+                            "type": "boolean",
+                            "default": false
+                        }
+                    },
+                    {
                         "in": "path",
                         "name": "plant_id",
                         "schema": {
@@ -2445,6 +2453,144 @@
                 "responses": {
                     "204": {
                         "description": "No response body"
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/changes/": {
+            "post": {
+                "operationId": "tenants_regions_plants_production_changes_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": ["tenants"],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ProductionChangesInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ProductionChangesInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ProductionChangesInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ObservationImportOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/preview/": {
+            "post": {
+                "operationId": "tenants_regions_plants_production_preview_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": ["tenants"],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ObservationImport"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ObservationImport"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ObservationImport"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ProductionPreviewOutput"
+                                }
+                            }
+                        },
+                        "description": ""
                     }
                 }
             }
@@ -2932,6 +3078,11 @@
     },
     "components": {
         "schemas": {
+            "ActionEnum": {
+                "enum": ["set", "revert"],
+                "type": "string",
+                "description": "* `set` - set\n* `revert` - revert"
+            },
             "ActivationOutput": {
                 "type": "object",
                 "properties": {
@@ -4255,7 +4406,7 @@
                     "quality": {
                         "allOf": [
                             {
-                                "$ref": "#/components/schemas/ObservationOutputQualityEnum"
+                                "$ref": "#/components/schemas/ProductionQualityEnum"
                             }
                         ],
                         "readOnly": true
@@ -4271,6 +4422,14 @@
                         "type": "string",
                         "format": "date-time",
                         "readOnly": true
+                    },
+                    "supersedes_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "is_reverted": {
+                        "type": "boolean",
+                        "readOnly": true
                     }
                 },
                 "required": [
@@ -4278,17 +4437,14 @@
                     "ends_at",
                     "energy_mwh",
                     "id",
+                    "is_reverted",
                     "quality",
                     "recorded_at",
                     "recorded_by_id",
                     "source",
-                    "starts_at"
+                    "starts_at",
+                    "supersedes_id"
                 ]
-            },
-            "ObservationOutputQualityEnum": {
-                "enum": ["valid", "outage", "curtailed", "invalid"],
-                "type": "string",
-                "description": "* `valid` - Valid\n* `outage` - Outage\n* `curtailed` - Curtailed\n* `invalid` - Invalid"
             },
             "ObservationRow": {
                 "type": "object",
@@ -4309,7 +4465,7 @@
                     "quality": {
                         "allOf": [
                             {
-                                "$ref": "#/components/schemas/ObservationRowQualityEnum"
+                                "$ref": "#/components/schemas/ProductionQualityEnum"
                             }
                         ],
                         "default": "valid"
@@ -4320,11 +4476,6 @@
                     }
                 },
                 "required": ["ends_at", "energy", "source", "starts_at"]
-            },
-            "ObservationRowQualityEnum": {
-                "enum": ["valid", "outage", "curtailed", "invalid"],
-                "type": "string",
-                "description": "* `valid` - valid\n* `outage` - outage\n* `curtailed` - curtailed\n* `invalid` - invalid"
             },
             "PaginatedCalibrationSummaryOutputList": {
                 "type": "object",
@@ -5145,6 +5296,70 @@
                     "surface_tilt"
                 ]
             },
+            "ProductionChangeRow": {
+                "type": "object",
+                "properties": {
+                    "starts_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "ends_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "expected_revision_id": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "nullable": true
+                    },
+                    "action": {
+                        "$ref": "#/components/schemas/ActionEnum"
+                    },
+                    "energy": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0
+                    },
+                    "quality": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ProductionQualityEnum"
+                            }
+                        ],
+                        "default": "valid"
+                    },
+                    "source": {
+                        "type": "string",
+                        "default": "operator",
+                        "maxLength": 200
+                    }
+                },
+                "required": [
+                    "action",
+                    "ends_at",
+                    "expected_revision_id",
+                    "starts_at"
+                ]
+            },
+            "ProductionChangesInput": {
+                "type": "object",
+                "properties": {
+                    "configuration_id": {
+                        "type": "integer",
+                        "minimum": 1
+                    },
+                    "unit": {
+                        "$ref": "#/components/schemas/UnitEnum"
+                    },
+                    "changes": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ProductionChangeRow"
+                        }
+                    }
+                },
+                "required": ["changes", "configuration_id", "unit"]
+            },
             "ProductionDayOutput": {
                 "type": "object",
                 "properties": {
@@ -5179,17 +5394,27 @@
                         "items": {
                             "$ref": "#/components/schemas/DaylightWindowOutput"
                         }
+                    },
+                    "total_mwh": {
+                        "type": "number",
+                        "format": "double",
+                        "nullable": true
+                    },
+                    "complete": {
+                        "type": "boolean"
                     }
                 },
                 "required": [
                     "available_count",
+                    "complete",
                     "date",
                     "daylight_status",
                     "daylight_windows",
                     "missing_count",
                     "recorded_count",
                     "sunrise",
-                    "sunset"
+                    "sunset",
+                    "total_mwh"
                 ]
             },
             "ProductionHistoryOutput": {
@@ -5226,6 +5451,9 @@
                     "resolution_minutes": {
                         "$ref": "#/components/schemas/ResolutionMinutesEnum"
                     },
+                    "native_intervals": {
+                        "type": "boolean"
+                    },
                     "slot_scope": {
                         "$ref": "#/components/schemas/SlotScopeEnum"
                     },
@@ -5249,6 +5477,12 @@
                         "items": {
                             "$ref": "#/components/schemas/ObservationOutput"
                         }
+                    },
+                    "revisions": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ObservationOutput"
+                        }
                     }
                 },
                 "required": [
@@ -5259,9 +5493,11 @@
                     "days",
                     "end_date",
                     "intervals",
+                    "native_intervals",
                     "observations",
                     "plant_id",
                     "resolution_minutes",
+                    "revisions",
                     "slot_scope",
                     "start_date",
                     "timezone"
@@ -5295,15 +5531,216 @@
                     "unavailable_reason": {
                         "type": "string",
                         "nullable": true
+                    },
+                    "revision_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "effective": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ProductionValueOutput"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "provider_original": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ProductionProviderOutput"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "provider_originals": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ProductionProviderOutput"
+                        }
+                    },
+                    "can_edit": {
+                        "type": "boolean"
+                    },
+                    "can_revert": {
+                        "type": "boolean"
+                    },
+                    "edit_unavailable_reason": {
+                        "type": "string",
+                        "nullable": true
                     }
                 },
                 "required": [
+                    "can_edit",
                     "can_enter",
+                    "can_revert",
+                    "edit_unavailable_reason",
+                    "effective",
                     "ends_at",
                     "observation",
+                    "provider_original",
+                    "provider_originals",
                     "reference_available",
+                    "revision_id",
                     "starts_at",
                     "unavailable_reason"
+                ]
+            },
+            "ProductionPreviewOutput": {
+                "type": "object",
+                "properties": {
+                    "changes": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ProductionChangeRow"
+                        }
+                    },
+                    "preview": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ProductionPreviewRowOutput"
+                        }
+                    },
+                    "warnings": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ProductionPreviewWarningOutput"
+                        }
+                    }
+                },
+                "required": ["changes", "preview", "warnings"]
+            },
+            "ProductionPreviewRowOutput": {
+                "type": "object",
+                "properties": {
+                    "starts_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "ends_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "current_energy_mwh": {
+                        "type": "number",
+                        "format": "double",
+                        "nullable": true
+                    },
+                    "new_energy_mwh": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "corrected": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "corrected",
+                    "current_energy_mwh",
+                    "ends_at",
+                    "new_energy_mwh",
+                    "starts_at"
+                ]
+            },
+            "ProductionPreviewWarningOutput": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string"
+                    },
+                    "starts_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "ends_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                },
+                "required": ["code", "ends_at", "starts_at"]
+            },
+            "ProductionProviderOutput": {
+                "type": "object",
+                "properties": {
+                    "starts_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "ends_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "energy_mwh": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "source_kind": {
+                        "type": "string"
+                    },
+                    "snapshot_id": {
+                        "type": "integer"
+                    },
+                    "collected_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "available_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "content_sha256": {
+                        "type": "string"
+                    },
+                    "provisional": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "available_at",
+                    "collected_at",
+                    "content_sha256",
+                    "ends_at",
+                    "energy_mwh",
+                    "provisional",
+                    "snapshot_id",
+                    "source_kind",
+                    "starts_at"
+                ]
+            },
+            "ProductionQualityEnum": {
+                "enum": ["valid", "outage", "curtailed", "invalid"],
+                "type": "string",
+                "description": "* `valid` - Valid\n* `outage` - Outage\n* `curtailed` - Curtailed\n* `invalid` - Invalid"
+            },
+            "ProductionValueOutput": {
+                "type": "object",
+                "properties": {
+                    "energy_mwh": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "quality": {
+                        "type": "string"
+                    },
+                    "source": {
+                        "type": "string"
+                    },
+                    "source_kind": {
+                        "type": "string"
+                    },
+                    "provisional": {
+                        "type": "boolean"
+                    },
+                    "aggregated": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "aggregated",
+                    "energy_mwh",
+                    "provisional",
+                    "quality",
+                    "source",
+                    "source_kind"
                 ]
             },
             "RegionInput": {

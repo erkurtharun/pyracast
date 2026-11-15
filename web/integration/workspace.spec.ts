@@ -21,9 +21,7 @@ test("a customer manages one plant site through the real API", async ({
         .locator("form")
         .getByRole("button", { name: /sign in/i })
         .click();
-    await expect(
-        page.getByRole("heading", { name: "Your solar portfolio" }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
 
     const forbidden = await page.evaluate(
         async ({ tenant, region }) => {
@@ -313,109 +311,90 @@ test("a customer manages one plant site through the real API", async ({
     ).toBeVisible();
 
     await page.getByRole("button", { name: "Production", exact: true }).click();
-    await page.getByRole("button", { name: "Automatic production" }).click();
     await expect(page.getByLabel("EPİAŞ plant ID")).toHaveCount(0);
-    await expect(
-        page.getByText("Contact your administrator to connect EPİAŞ."),
-    ).toBeVisible();
     await expect(
         page.getByRole("button", {
             name: /Connect EPİAŞ|Edit connection|Disconnect collection/,
         }),
     ).toHaveCount(0);
-    await expect(page.getByLabel(/Measurement point/)).toHaveCount(0);
-    await page
-        .getByLabel("Archive date")
-        .fill(process.env.BROWSER_HISTORY_DATE!);
-    await expect(
-        page.getByText("No EPİAŞ data has been archived for this day."),
-    ).toBeVisible();
-    await page
-        .getByText("Sources and calibration eligibility", { exact: true })
-        .click();
-    await expect(
-        page.getByText(
-            "Reported production can support provisional calibration; UEVM matching net export is preferred.",
-            {
-                exact: false,
-            },
-        ),
-    ).toBeVisible();
-
-    await page.getByRole("button", { name: "Production", exact: true }).click();
-    await page
-        .getByRole("button", { name: "Manual journal", exact: true })
-        .click();
-    await expect(
-        page.getByRole("heading", { name: "Production journal" }),
-    ).toBeVisible();
-    await expect(
-        page.getByRole("button", { name: "Request calibration" }),
-    ).toHaveCount(0);
     await page
         .getByLabel("Day", { exact: true })
         .fill(process.env.BROWSER_HISTORY_DATE!);
-    const meterEntries = page.getByRole("table", { name: "Meter entries" });
-    await expect(meterEntries.getByRole("spinbutton").first()).toBeEnabled();
-    await meterEntries.getByRole("spinbutton").first().fill("1250");
-    await page.getByRole("button", { name: "Save meter readings" }).click();
-    await expect(page.getByText("1 meter reading saved.")).toBeVisible();
-    await expect(
-        meterEntries.getByText("1.25 MWh", { exact: true }),
-    ).toBeVisible();
-    const historyDate = new Date(
-        `${process.env.BROWSER_HISTORY_DATE!}T12:00:00Z`,
+    const productionTable = page.getByRole("table", {
+        name: "Production intervals · Europe/Istanbul",
+    });
+    const firstHour = productionTable.getByRole("row").filter({
+        has: page.getByRole("rowheader", {
+            name: "00:00–01:00",
+            exact: true,
+        }),
+    });
+    async function saveProduction(value: string) {
+        await firstHour
+            .getByRole("button", { name: "Edit 00:00–01:00", exact: true })
+            .click();
+        await page
+            .getByLabel("Production for 00:00–01:00 (MWh)", { exact: true })
+            .fill(value);
+        const saved = page.waitForResponse(
+            (response) =>
+                response.request().method() === "POST" &&
+                response.url().endsWith("/production/changes/"),
+        );
+        await page.getByRole("button", { name: "Save", exact: true }).click();
+        expect((await saved).status()).toBe(200);
+        await expect(
+            page.getByLabel("Production for 00:00–01:00 (MWh)", {
+                exact: true,
+            }),
+        ).toHaveCount(0);
+    }
+    await saveProduction("1.25");
+    await expect(firstHour).toContainText("1.25");
+    await saveProduction("2.5");
+    await expect(firstHour).toContainText("2.5");
+    await firstHour
+        .getByRole("button", { name: "Edit 00:00–01:00", exact: true })
+        .click();
+    const reverted = page.waitForResponse(
+        (response) =>
+            response.request().method() === "POST" &&
+            response.url().endsWith("/production/changes/"),
     );
-    historyDate.setUTCDate(historyDate.getUTCDate() - 10);
-    const missingDate = historyDate.toISOString().slice(0, 10);
-    await page.getByLabel("Day", { exact: true }).fill(missingDate);
-    await expect(
-        page.getByText(
-            "No comparison data or saved meter intervals are available for this day.",
-        ),
-    ).toBeVisible();
-    await expect(meterEntries.getByRole("spinbutton")).toHaveCount(0);
-    await expect(
-        page.getByRole("button", { name: "Save meter readings" }),
-    ).toBeDisabled();
     await page
-        .getByLabel("Day", { exact: true })
-        .fill(process.env.BROWSER_HISTORY_DATE!);
-    await expect(
-        meterEntries.getByText("1.25 MWh", { exact: true }),
-    ).toBeVisible();
+        .getByRole("button", {
+            name: "Use provider value for 00:00–01:00",
+            exact: true,
+        })
+        .click();
+    expect((await reverted).status()).toBe(200);
+    await expect(firstHour).not.toContainText("2.5");
+    await saveProduction("1.25");
     await page.screenshot({
-        path: testInfo.outputPath("production-journal-desktop.png"),
+        path: testInfo.outputPath("production-desktop.png"),
         fullPage: true,
     });
     await page.setViewportSize({ width: 390, height: 844 });
+    await expect(firstHour).toContainText("1.25");
     expect(
-        await page
-            .locator(".journal")
-            .evaluate((element) => element.scrollWidth <= element.clientWidth),
+        await page.evaluate(
+            () => document.documentElement.scrollWidth <= window.innerWidth,
+        ),
     ).toBe(true);
-    await page.locator(".journal").screenshot({
-        path: testInfo.outputPath("production-journal-mobile.png"),
-    });
-    await page.setViewportSize({ width: 1440, height: 1100 });
-    const journalA11y = await new AxeBuilder({ page })
+    await page
+        .locator(".production-workspace")
+        .screenshot({ path: testInfo.outputPath("production-mobile.png") });
+    const productionA11y = await new AxeBuilder({ page })
         .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
         .analyze();
-    expect(
-        journalA11y.violations.filter(
-            (item) => item.impact === "critical" || item.impact === "serious",
-        ),
-    ).toEqual([]);
+    expect(productionA11y.violations).toEqual([]);
+    await page.setViewportSize({ width: 1440, height: 1100 });
     await page.reload();
     await page.getByRole("button", { name: "Production", exact: true }).click();
     await page
-        .getByRole("button", { name: "Manual journal", exact: true })
-        .click();
-    await expect(
-        page
-            .getByRole("table", { name: "Meter entries" })
-            .getByText("1.25 MWh", { exact: true }),
-    ).toBeVisible();
+        .getByLabel("Day", { exact: true })
+        .fill(process.env.BROWSER_HISTORY_DATE!);
+    await expect(firstHour).toContainText("1.25");
 
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page
@@ -518,7 +497,10 @@ test("a customer manages one plant site through the real API", async ({
     await expect(
         page.getByText("Browser plant restored. Find it in Plants."),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Overview", exact: true }).click();
+    await page
+        .getByRole("navigation", { name: "Main navigation" })
+        .getByRole("button", { name: "Plants", exact: true })
+        .click();
     await page.getByRole("button", { name: /Browser plant/ }).click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page
@@ -534,9 +516,7 @@ test("a customer manages one plant site through the real API", async ({
         .getByRole("button", { name: "Move plant to recycle bin" })
         .click();
     expect((await siteDeleted).status()).toBe(204);
-    await expect(
-        page.getByRole("heading", { name: "Your solar portfolio" }),
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
     await expect(
         page.getByRole("button", { name: /Browser plant/ }),
     ).toHaveCount(0);
@@ -554,17 +534,16 @@ test("a customer manages one plant site through the real API", async ({
     await expect(
         page.getByText("Site restored. Find it in Plants."),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Overview", exact: true }).click();
+    await page
+        .getByRole("navigation", { name: "Main navigation" })
+        .getByRole("button", { name: "Plants", exact: true })
+        .click();
     await page.getByRole("button", { name: /Browser plant/ }).click();
     await page.getByRole("button", { name: "Production", exact: true }).click();
     await page
-        .getByRole("button", { name: "Manual journal", exact: true })
-        .click();
-    await expect(
-        page
-            .getByRole("table", { name: "Meter entries" })
-            .getByText("1.25 MWh", { exact: true }),
-    ).toBeVisible();
+        .getByLabel("Day", { exact: true })
+        .fill(process.env.BROWSER_HISTORY_DATE!);
+    await expect(firstHour).toContainText("1.25");
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByLabel("Mounting type").selectOption("fixed");
     await page.getByLabel("Surface tilt (degrees, optional)").fill("33");

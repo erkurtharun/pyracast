@@ -58,17 +58,15 @@ test("a resolved account language overrides the browser and stale cookie without
     });
     await page.goto("/");
     await expect(
-        page.getByRole("heading", { name: "Güneş enerjisi portföyünüz" }),
+        page.getByRole("heading", { name: "Santraller" }),
     ).toBeVisible();
     await expect(page.locator("html")).toHaveAttribute("lang", "tr");
     await expect(page.getByLabel("Dil", { exact: true })).toHaveValue("tr");
     const headings = await page.evaluate(
         () => (window as unknown as { seenHeadings: string[] }).seenHeadings,
     );
-    expect(headings).not.toContain("Your solar portfolio");
-    await page
-        .getByRole("button", { name: "Hesap ayarları", exact: true })
-        .click();
+    expect(headings).not.toContain("Plants");
+    await page.getByRole("button", { name: "Hesap", exact: true }).click();
     await expect(
         page.getByRole("heading", { name: "İki adımlı doğrulama" }),
     ).toBeVisible();
@@ -131,7 +129,7 @@ test("Turkish mobile navigation remains accessible without horizontal overflow",
     await mockLanguage(page, "tr");
     await page.goto("/");
     await expect(
-        page.getByRole("heading", { name: "Güneş enerjisi portföyünüz" }),
+        page.getByRole("heading", { name: "Santraller" }),
     ).toBeVisible();
     await expect(page.getByLabel("Dil", { exact: true })).toBeVisible();
     const selector = await page
@@ -255,9 +253,7 @@ test("Turkish plant search and capacity formatting follow the selected language"
     await page.goto("/");
     await page.getByRole("searchbox", { name: "Santral ara" }).fill("ışık");
     await expect(page.getByRole("heading", { name: "IŞIK GES" })).toBeVisible();
-    await expect(
-        page.getByText("1.234,5 MW DC", { exact: false }),
-    ).toBeVisible();
+    await expect(page.getByText("1.235 MW DC", { exact: false })).toBeVisible();
 });
 
 test("coded forecast errors are explained in the selected language", async ({
