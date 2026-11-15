@@ -448,6 +448,12 @@ for (const width of [320, 390, 768, 1440]) {
                 const table = page.getByRole("table", {
                     name: "Production intervals · Europe/Istanbul",
                 });
+                const fullDay = page.getByRole("checkbox", {
+                    name: "Show full day",
+                });
+                await expect(fullDay).not.toBeChecked();
+                await expect(table.locator("tbody tr")).toHaveCount(12);
+                await fullDay.check();
                 await expect(table.locator("tbody tr")).toHaveCount(24);
                 if (width === 320) {
                     const dayBounds = await page

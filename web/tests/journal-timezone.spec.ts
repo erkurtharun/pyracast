@@ -107,6 +107,9 @@ for (const role of ["admin", "viewer"] as const) {
         const table = page.getByRole("table", {
             name: "Production intervals · Europe/Berlin",
         });
+        const fullDay = page.getByRole("checkbox", { name: "Show full day" });
+        await expect(fullDay).not.toBeChecked();
+        await fullDay.check();
         const labels = ["02:00 GMT+2–02:00 GMT+1", "02:00 GMT+1–03:00 GMT+1"];
         for (const label of labels)
             await expect(
