@@ -4,7 +4,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from django.core.management import CommandError, call_command
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
+from django.test.utils import CaptureQueriesContext
 
 from pyracast.connections.operations import rotate_secret, validate_binding
 from pyracast.forecasts.models import (
@@ -22,6 +23,35 @@ from tests.test_domain import FakeAdapter, System, make_system
 from tests.test_metering import connected
 
 NOW = datetime(2026, 11, 12, 13, tzinfo=UTC)
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize("delivery_count", [0, 4])
+def test_health_report_keeps_a_bounded_query_budget(delivery_count: int) -> None:
+    system = make_system(approved=True)
+    recent_forecast(system)
+    for phase in DispatcherStatus.Phase.values:
+        record_dispatch_phase(phase, NOW)
+    schedule = ReminderSchedule.objects.create(
+        region=system.region,
+        enabled=True,
+        effective_from=NOW,
+        recipients=["recipient@example.test"],
+    )
+    for index in range(delivery_count):
+        NotificationDelivery.objects.create(
+            schedule=schedule,
+            recipient="recipient@example.test",
+            scheduled_for=NOW - timedelta(minutes=index),
+            available_at=NOW,
+            status="sent",
+            prepared_message={"kind": "saved_complete", "tomorrow_complete": True},
+        )
+    with CaptureQueriesContext(connection) as queries:
+        report = delivery_health(NOW, timedelta(minutes=5))
+    assert report["healthy"] is True
+    assert report["saved_forecast_notifications"] == delivery_count
+    assert len(queries) <= 8
 
 
 def recent_forecast(system: System) -> ForecastSnapshot:
