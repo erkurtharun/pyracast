@@ -1,0 +1,12 @@
+{% load i18n %}{% get_current_language as language %}<!doctype html>
+<html lang="{{ language }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="0; url={{ provider_url }}">
+  <title>{% translate "Continue to sign in" %}</title>
+</head>
+<body>
+  <p><a href="{{ provider_url }}" rel="noreferrer">{% translate "Continue to sign in" %}</a></p>
+</body>
+</html>

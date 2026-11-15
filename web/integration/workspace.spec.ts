@@ -19,7 +19,7 @@ test("a customer manages one plant site through the real API", async ({
     await page.getByLabel("Password").fill(process.env.BROWSER_PASSWORD!);
     await page
         .locator("form")
-        .getByRole("button", { name: /sign in/i })
+        .getByRole("button", { name: "Sign in", exact: true })
         .click();
     await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
 

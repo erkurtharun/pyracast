@@ -5,6 +5,9 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Plural-Forms: nplurals=2; plural=(n > 1);\n"
 
+msgid "Continue to sign in"
+msgstr "Oturum açmaya devam et"
+
 msgid "Workspace administrator required."
 msgstr "Çalışma alanı yöneticisi yetkisi gereklidir."
 

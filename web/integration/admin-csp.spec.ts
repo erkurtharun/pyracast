@@ -51,7 +51,10 @@ test("an MFA administrator reviews plants and operations on desktop and mobile u
     await page
         .getByLabel("Password", { exact: true })
         .fill(process.env.BROWSER_ADMIN_PASSWORD!);
-    await page.locator("form").getByRole("button", { name: "Sign in" }).click();
+    await page
+        .locator("form")
+        .getByRole("button", { name: "Sign in", exact: true })
+        .click();
     await expect(
         page.getByRole("heading", { name: "Two-factor authentication" }),
     ).toBeVisible();

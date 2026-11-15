@@ -106,7 +106,10 @@ test("verified email and a recovery code protect a real browser session", async 
     await page.getByRole("button", { name: "Sign out" }).click();
     await page.getByLabel("Email", { exact: true }).fill(email);
     await page.getByLabel("Password", { exact: true }).fill(password);
-    await page.locator("form").getByRole("button", { name: "Sign in" }).click();
+    await page
+        .locator("form")
+        .getByRole("button", { name: "Sign in", exact: true })
+        .click();
     await expect(
         page.getByRole("heading", { name: "Two-factor authentication" }),
     ).toBeVisible();
@@ -134,10 +137,16 @@ test("verified email and a recovery code protect a real browser session", async 
     ).toBeVisible();
     await page.getByLabel("Email", { exact: true }).fill(email);
     await page.getByLabel("Password", { exact: true }).fill(password);
-    await page.locator("form").getByRole("button", { name: "Sign in" }).click();
+    await page
+        .locator("form")
+        .getByRole("button", { name: "Sign in", exact: true })
+        .click();
     await expect(page.locator("form").getByRole("alert")).toBeVisible();
     await page.getByLabel("Password", { exact: true }).fill(newPassword);
-    await page.locator("form").getByRole("button", { name: "Sign in" }).click();
+    await page
+        .locator("form")
+        .getByRole("button", { name: "Sign in", exact: true })
+        .click();
     await expect(
         page.getByRole("heading", { name: "Two-factor authentication" }),
     ).toBeVisible();
@@ -185,7 +194,10 @@ test("verified email and a recovery code protect a real browser session", async 
     ).toBeVisible();
     await page.getByLabel("Email", { exact: true }).fill(email);
     await page.getByLabel("Password", { exact: true }).fill(resetPassword);
-    await page.locator("form").getByRole("button", { name: "Sign in" }).click();
+    await page
+        .locator("form")
+        .getByRole("button", { name: "Sign in", exact: true })
+        .click();
     await expect(
         page.getByRole("heading", { name: "Two-factor authentication" }),
     ).toBeVisible();

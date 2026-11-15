@@ -124,7 +124,9 @@ Mutations enforce CSRF before authentication. Allauth's account and IP rate limi
 share an atomic PostgreSQL JSON/TTL cache; ingress limits additionally protect capacity.
 
 Google and Microsoft sign-in use backend authorization-code exchanges with PKCE
-and session-bound state. Provider credentials stay in the runtime secret; access
+and session-bound state. A same-origin continuation page starts provider navigation
+without widening the browser's form submission policy for federated sign-in.
+Provider credentials stay in the runtime secret; access
 and refresh tokens are not retained. New users complete the same workspace or
 invitation signup as password users. Provider identities never grant workspace
 access by email or domain, and matching email addresses never merge accounts.

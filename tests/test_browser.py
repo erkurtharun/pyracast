@@ -190,6 +190,15 @@ def test_browser_against_live_django(
         SESSION_COOKIE_NAME="sessionid",
         CSRF_COOKIE_NAME="csrftoken",
         PYRACAST_PUBLIC_ORIGIN="http://127.0.0.1:3101",
+        SOCIALACCOUNT_PROVIDERS={
+            provider: {
+                "APP": {"client_id": f"browser-{provider}", "secret": "browser-secret"},
+                "SCOPE": ["openid", "email"] if provider == "google" else ["User.Read"],
+                "OAUTH_PKCE_ENABLED": True,
+                "VERIFIED_EMAIL": False,
+            }
+            for provider in ("google", "microsoft")
+        },
         MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}},
         SECURE_SSL_REDIRECT=False,
     ):

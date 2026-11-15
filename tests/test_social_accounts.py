@@ -4,6 +4,7 @@ import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from html.parser import HTMLParser
 from pathlib import Path
 from threading import Barrier, Event
 from typing import Any
@@ -19,11 +20,12 @@ from allauth.mfa.totp.internal.auth import generate_totp_secret
 from allauth.socialaccount.adapter import get_adapter
 from allauth.socialaccount.internal.flows.connect import do_connect
 from allauth.socialaccount.models import SocialAccount, SocialApp, SocialLogin, SocialToken
+from allauth.socialaccount.providers.google.provider import GoogleProvider
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ImproperlyConfigured, PermissionDenied
 from django.db import IntegrityError, close_old_connections, connections, transaction
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse, HttpResponseBase, HttpResponseRedirect
 from django.test import Client, override_settings
 
 from pyracast.accounts import social, social_views
@@ -95,6 +97,37 @@ def oauth_profile(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     return profile
 
 
+class ProviderRedirectParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.elements: list[tuple[str, dict[str, str | None]]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.elements.append((tag, dict(attrs)))
+
+
+def provider_destination(response: HttpResponseBase) -> str:
+    assert isinstance(response, HttpResponse)
+    assert response.status_code == 200
+    assert response["Content-Type"] == "text/html; charset=utf-8"
+    assert "no-store" in response["Cache-Control"].split(", ")
+    assert response["Referrer-Policy"] == "no-referrer"
+    assert not response.has_header("Location")
+    parser = ProviderRedirectParser()
+    parser.feed(response.content.decode())
+    refresh = [
+        attrs["content"]
+        for tag, attrs in parser.elements
+        if tag == "meta" and attrs.get("http-equiv") == "refresh"
+    ]
+    assert len(refresh) == 1
+    assert refresh[0] is not None
+    assert refresh[0].startswith("0; url=")
+    destination = refresh[0].removeprefix("0; url=")
+    assert [attrs["href"] for tag, attrs in parser.elements if tag == "a"] == [destination]
+    return destination
+
+
 def begin(client: Client, provider: str = "google", process: str = "login") -> str:
     token = client.get("/api/session/").json()["csrf_token"]
     response = client.post(
@@ -102,8 +135,8 @@ def begin(client: Client, provider: str = "google", process: str = "login") -> s
         {"provider": provider, "process": process, "callback_url": CALLBACK},
         HTTP_X_CSRFTOKEN=token,
     )
-    assert response.status_code == 302
-    query = parse_qs(urlsplit(response["Location"]).query)
+    destination = provider_destination(response)
+    query = parse_qs(urlsplit(destination).query)
     assert query["code_challenge_method"] == ["S256"]
     assert query["response_type"] == ["code"]
     assert query["redirect_uri"] == [f"http://testserver/api/accounts/{provider}/login/callback/"]
@@ -112,8 +145,74 @@ def begin(client: Client, provider: str = "google", process: str = "login") -> s
         {"openid", "email"} if provider == "google" else {"User.Read"}
     )
     if provider == "microsoft":
-        assert urlsplit(response["Location"]).path == "/common/oauth2/v2.0/authorize"
+        assert urlsplit(destination).path == "/common/oauth2/v2.0/authorize"
     return query["state"][0]
+
+
+@pytest.mark.parametrize("provider", ["google", "microsoft"])
+def test_provider_authorization_uses_html_continuation(provider: str) -> None:
+    client = Client(enforce_csrf_checks=True)
+    assert client.get(AUTH + "auth/provider/redirect").status_code == 405
+    begin(client, provider)
+
+
+def test_provider_continuation_escapes_framework_destination_and_preserves_cookies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    destination = 'https://accounts.google.com/authorize?state=a&value="<script>alert(1)</script>'
+    provider_response = HttpResponseRedirect(destination)
+    provider_response["Location"] = destination
+    provider_response.set_cookie("provider-contract", "retained", httponly=True, secure=True)
+    provider_response["X-Provider-Contract"] = "retained"
+
+    def redirect(self: object, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        return provider_response
+
+    monkeypatch.setattr(GoogleProvider, "redirect", redirect)
+    response = Client().post(
+        AUTH + "auth/provider/redirect",
+        {
+            "provider": "google",
+            "process": "login",
+            "callback_url": CALLBACK,
+            "next": "https://evil.example/",
+        },
+    )
+    assert provider_destination(response) == provider_response.url
+    assert response.cookies["provider-contract"] == provider_response.cookies["provider-contract"]
+    assert response["X-Provider-Contract"] == "retained"
+    assert b"&amp;" in response.content
+    assert b"&quot;&lt;script&gt;" in response.content
+    assert b"<script>" not in response.content
+
+
+@pytest.mark.parametrize("destination", ["/error/", CALLBACK, "http://testserver/error/"])
+def test_provider_local_redirects_are_preserved(
+    monkeypatch: pytest.MonkeyPatch, destination: str
+) -> None:
+    def redirect(self: object, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        return HttpResponseRedirect(destination)
+
+    monkeypatch.setattr(GoogleProvider, "redirect", redirect)
+    response = Client().post(
+        AUTH + "auth/provider/redirect",
+        {"provider": "google", "process": "login", "callback_url": CALLBACK},
+    )
+    assert response.status_code == 302
+    assert response["Location"] == destination
+
+
+def test_provider_nonredirect_response_is_preserved(monkeypatch: pytest.MonkeyPatch) -> None:
+    def redirect(self: object, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        return HttpResponse("Provider unavailable", status=503)
+
+    monkeypatch.setattr(GoogleProvider, "redirect", redirect)
+    response = Client().post(
+        AUTH + "auth/provider/redirect",
+        {"provider": "google", "process": "login", "callback_url": CALLBACK},
+    )
+    assert response.status_code == 503
+    assert response.content == b"Provider unavailable"
 
 
 def complete(client: Client, state: str, provider: str = "google") -> Any:

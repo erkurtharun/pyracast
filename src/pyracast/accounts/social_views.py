@@ -1,4 +1,5 @@
 from typing import Any, cast
+from urllib.parse import urlsplit
 
 from allauth.account.internal.flows import reauthentication
 from allauth.core import ratelimit
@@ -32,6 +33,7 @@ from django.http import (
     HttpResponseNotFound,
     HttpResponseRedirect,
 )
+from django.template.loader import render_to_string
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_GET, require_http_methods
 
@@ -89,7 +91,7 @@ class RedirectToProviderView(AllauthRedirectToProviderView):
         form = RedirectToProviderForm(request.POST)
         if not form.is_valid():
             return super().post(request, *args, **kwargs)
-        return cast(
+        response = cast(
             HttpResponse,
             form.cleaned_data["provider"].redirect(
                 request,
@@ -99,6 +101,26 @@ class RedirectToProviderView(AllauthRedirectToProviderView):
                 headless=True,
             ),
         )
+        if not isinstance(response, HttpResponseRedirect) or urlsplit(response.url).netloc in {
+            "",
+            request.get_host(),
+            urlsplit(settings.PYRACAST_PUBLIC_ORIGIN).netloc,
+        }:
+            return response
+        continuation = HttpResponse(
+            render_to_string(
+                "accounts/provider_redirect.html", {"provider_url": response.url}, request
+            ),
+            headers={
+                key: value
+                for key, value in response.items()
+                if key.lower() not in {"location", "content-type"}
+            },
+        )
+        continuation.cookies = response.cookies
+        continuation["Cache-Control"] = "no-store"
+        continuation["Referrer-Policy"] = "no-referrer"
+        return continuation
 
 
 class ManageProvidersView(AllauthManageProvidersView):
