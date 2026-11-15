@@ -40,7 +40,7 @@ test("account language survives sign-in from another browser without a preferenc
     const second = await browser.newContext({ baseURL, locale: "en-US" });
     try {
         const fresh = await second.newPage();
-        await fresh.goto("/");
+        await fresh.goto("/app/");
         await fresh
             .getByLabel("Email", { exact: true })
             .fill(process.env.BROWSER_EMAIL!);
