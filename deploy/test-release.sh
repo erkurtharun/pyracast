@@ -56,6 +56,16 @@ cat >/mock-bin/systemctl <<'SH'
 #!/bin/bash
 printf 'systemctl %s\n' "$*" >>/calls
 SH
+cat >/mock-bin/flock <<'SH'
+#!/bin/bash
+if [[ $MODE == lock-* ]]; then
+  printf 'attempt\n' >/lock-attempt
+  if [[ $MODE == lock-timeout ]]; then
+    exec /usr/bin/flock --timeout 0.2 9
+  fi
+fi
+exec /usr/bin/flock "$@"
+SH
 cat >/mock-bin/docker <<'SH'
 #!/bin/bash
 printf 'docker %s\n' "$*" >>/calls
@@ -89,7 +99,59 @@ revision=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 image=us-docker.pkg.dev/project/repo/backend@sha256:0000000000000000000000000000000000000000000000000000000000000000
 postgres_image=us-docker.pkg.dev/project/repo/postgres@sha256:1111111111111111111111111111111111111111111111111111111111111111
 
-for MODE in preflight drain backup support-postgres support-rabbit migration health tls response success first-success first-backup killed-backup killed; do
+run_release() {
+  if [[ $MODE != lock-* ]]; then
+    bash /source/install-release.sh "$revision" "$image" "$image" "$image" "$postgres_image" /fixture /migration.json
+    return
+  fi
+  /usr/local/bin/python3 - "$MODE" /source/install-release.sh "$revision" "$image" "$image" "$image" "$postgres_image" /fixture /migration.json <<'PY'
+import os
+import select
+import subprocess
+import sys
+
+os.mkfifo('/lock-attempt')
+attempt = os.open('/lock-attempt', os.O_RDWR | os.O_NONBLOCK)
+holder = subprocess.Popen(
+    ['/usr/bin/flock', '/run/lock/pyracast-release.lock', 'bash', '-c',
+     "printf 'locked\\n'; read -r release"],
+    stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+)
+installer = None
+try:
+    assert holder.stdout is not None and holder.stdin is not None
+    assert select.select([holder.stdout], [], [], 10)[0], 'Lock holder did not start'
+    assert holder.stdout.readline() == 'locked\n'
+    installer = subprocess.Popen(['bash', *sys.argv[2:]])
+    assert select.select([attempt], [], [], 10)[0], 'Installer did not attempt the lock'
+    assert os.read(attempt, 100) == b'attempt\n'
+    if sys.argv[1] == 'lock-wait':
+        try:
+            status = installer.wait(timeout=0.5)
+        except subprocess.TimeoutExpired:
+            pass
+        else:
+            raise AssertionError(f'Installer exited while the shared lock was held: {status}')
+        holder.stdin.write('release\n')
+        holder.stdin.flush()
+        assert holder.wait(timeout=5) == 0
+    status = installer.wait(timeout=30)
+finally:
+    os.close(attempt)
+    os.unlink('/lock-attempt')
+    if installer is not None and installer.poll() is None:
+        installer.kill()
+        installer.wait(timeout=5)
+    if holder.poll() is None:
+        assert holder.stdin is not None
+        holder.stdin.write('release\n')
+        holder.stdin.flush()
+        holder.wait(timeout=5)
+raise SystemExit(status)
+PY
+}
+
+for MODE in preflight drain backup support-postgres support-rabbit migration health tls response success first-success first-backup killed-backup killed lock-wait lock-timeout; do
   export MODE
   rm -rf /opt/pyracast/current /opt/pyracast/current.next /opt/pyracast/releases/* /run/pyracast
   rm -f /var/lib/pyracast/release-blocked /migration-entered /backup-entered /backup-complete /support-changed /database-initialized
@@ -99,12 +161,19 @@ for MODE in preflight drain backup support-postgres support-rabbit migration hea
   printf 'RABBITMQ_DEFAULT_PASS=old-password\n' >/run/pyracast/broker.env
   printf '{"PGUSER":"owner","PGPASSWORD":"password"}\n' >/migration.json
   : >/calls
-  if bash /source/install-release.sh "$revision" "$image" "$image" "$image" "$postgres_image" /fixture /migration.json >/result 2>&1; then
+  if run_release >/result 2>&1; then
     result=0
   else
     result=$?
   fi
-  if [[ $MODE == killed || $MODE == killed-backup ]]; then
+  if [[ $MODE == lock-timeout ]]; then
+    test "$result" == 1
+    grep -Fxq 'Timed out waiting for another release, backup or watchdog operation.' /result
+    test ! -e /var/lib/pyracast/release-blocked
+    test -f /migration.json
+    test ! -s /calls
+    test "$(readlink /opt/pyracast/current)" == /opt/pyracast/releases/old
+  elif [[ $MODE == killed || $MODE == killed-backup ]]; then
     test "$result" == 137
     if [[ $MODE == killed ]]; then
       test -f /migration-entered
@@ -154,7 +223,7 @@ for MODE in preflight drain backup support-postgres support-rabbit migration hea
           test ! -e /support-changed
         fi
         ;;
-      success|first-success)
+      success|first-success|lock-wait)
         test "$result" == 0
         test "$(readlink /opt/pyracast/current)" == "/opt/pyracast/releases/$revision"
         test ! -e /var/lib/pyracast/release-blocked

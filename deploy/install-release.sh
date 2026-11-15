@@ -21,7 +21,7 @@ migration=$(realpath "$7")
 [[ -f "$bundle/deploy/compose.yaml" && -f "$migration" ]]
 exec 9>/run/lock/pyracast-release.lock
 # systemd stop takes the same lock; releases must drain containers directly.
-flock -n 9 || { echo 'Another release is running.' >&2; exit 1; }
+flock --timeout 300 9 || { echo 'Timed out waiting for another release, backup or watchdog operation.' >&2; exit 1; }
 mkdir -p /run/pyracast
 chmod 700 /run/pyracast
 session=$(mktemp -d /run/pyracast/release.XXXXXX)
