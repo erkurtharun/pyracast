@@ -8,7 +8,7 @@ from allauth.account.models import EmailAddress
 from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.mfa.models import Authenticator
 from allauth.socialaccount import signals
-from allauth.socialaccount.adapter import DefaultSocialAccountAdapter, _build_apps_from_settings
+from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from allauth.socialaccount.internal.flows.connect import do_connect
 from allauth.socialaccount.models import SocialAccount, SocialApp, SocialLogin
 from allauth.socialaccount.providers.base.provider import Provider
@@ -59,8 +59,18 @@ class SocialAccountAdapter(DefaultSocialAccountAdapter):
         self, request: HttpRequest | None, provider: str | None = None, client_id: str | None = None
     ) -> list[SocialApp]:
         # Deployment credentials are the only authority for enabling a provider.
-        apps = _build_apps_from_settings(provider=provider, client_id=client_id)
-        return [app for provider_apps in apps.values() for app in provider_apps]
+        apps = []
+        for name, configuration in settings.SOCIALACCOUNT_PROVIDERS.items():
+            if provider and name != provider:
+                continue
+            credentials = configuration.get("APP")
+            if not isinstance(credentials, dict):
+                continue
+            identifier, secret = credentials.get("client_id"), credentials.get("secret")
+            if not identifier or not secret or (client_id and identifier != client_id):
+                continue
+            apps.append(SocialApp(provider=name, client_id=identifier, secret=secret))
+        return apps
 
     def pre_social_login(self, request: HttpRequest, sociallogin: SocialLogin) -> None:
         provider = sociallogin.account.provider

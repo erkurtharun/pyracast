@@ -25,7 +25,6 @@ from allauth.socialaccount.providers.microsoft.provider import MicrosoftGraphPro
 from allauth.socialaccount.providers.microsoft.views import oauth2_callback as microsoft_callback
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.db import IntegrityError, transaction
 from django.http import (
     HttpRequest,
     HttpResponse,
@@ -34,26 +33,16 @@ from django.http import (
     HttpResponseRedirect,
 )
 from django.template.loader import render_to_string
-from django.utils.translation import gettext as _
 from django.views.decorators.http import require_GET, require_http_methods
 
+from pyracast.accounts.signup import workspace_signup_transaction
 from pyracast.accounts.social import locked_social_user
 
 
 class CompanySocialSignupInput(SignupInput):
-    @transaction.atomic
     def save(self, request: HttpRequest) -> User:
-        try:
-            with transaction.atomic():
-                return cast(User, super().save(request))
-        except IntegrityError as error:
-            if (
-                getattr(getattr(error.__cause__, "diag", None), "constraint_name", None)
-                != "unique_workspace_name"
-            ):
-                raise
-            self.add_error("company_name", _("This workspace name is already in use."))
-            raise ImmediateHttpResponse(ErrorResponse(request, input=self)) from error
+        with workspace_signup_transaction(request, self):
+            return cast(User, super().save(request))
 
 
 class ProviderSignupView(AllauthProviderSignupView):
@@ -158,7 +147,7 @@ class ManageProvidersView(AllauthManageProvidersView):
 
 
 @require_http_methods(["GET", "POST"])
-def disabled_provider_token(request: HttpRequest) -> HttpResponseNotFound:
+def disabled_provider_token(_request: HttpRequest) -> HttpResponseNotFound:
     return HttpResponseNotFound()
 
 
