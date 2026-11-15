@@ -3,7 +3,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { request } from "@/lib/api";
 import type { components } from "@/lib/schema";
-import { intervalTimeFormatter } from "@/lib/intervals";
+import { dataIntervalRange, intervalTimeFormatter } from "@/lib/intervals";
 import { CsvDownload } from "./csv-download";
 import { localDay } from "./data-source";
 import { ProductionImport } from "./production-import";
@@ -165,6 +165,7 @@ export function ProductionHistory({
     const canManage = useCanManageWorkspace();
     const yesterday = localDay(timezone, -1);
     const [date, setDate] = useState(yesterday);
+    const [showFullDay, setShowFullDay] = useState(false);
     const [revision, setRevision] = useState(0);
     const [loaded, setLoaded] = useState<Loaded>({ status: "loading" });
     const [editor, setEditor] = useState<Editor>({ status: "closed" });
@@ -261,6 +262,12 @@ export function ProductionHistory({
         else summaryRef.current?.focus();
     }, [editor.status, history]);
     const rows = history?.intervals ?? [];
+    const generationRows = dataIntervalRange(
+        rows,
+        (row) => row.effective != null && row.effective.energy_mwh > 0,
+    );
+    const visibleRows =
+        showFullDay || !generationRows.length ? rows : generationRows;
     const day = history?.days.find((day) => day.date === date);
     const hasValues = rows.some((row) => row.effective != null);
     const number = (value: number) =>
@@ -463,6 +470,19 @@ export function ProductionHistory({
                         →
                     </button>
                 </div>
+                <label className="field">
+                    <span>
+                        <input
+                            type="checkbox"
+                            checked={showFullDay}
+                            disabled={editor.status !== "closed"}
+                            onChange={(event) =>
+                                setShowFullDay(event.target.checked)
+                            }
+                        />{" "}
+                        {t("show_full_day")}
+                    </span>
+                </label>
                 {!history && refreshButton}
             </div>
             {message && <Notice>{message}</Notice>}
@@ -546,7 +566,7 @@ export function ProductionHistory({
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {rows.map((row) => {
+                                        {visibleRows.map((row) => {
                                             const editing =
                                                 editor.status !== "closed" &&
                                                 editor.status !== "orphaned" &&

@@ -154,7 +154,7 @@ async function productionApi(page: Page, viewer = false) {
             return;
         }
         for (const change of body.changes) {
-            const hour = new Date(change.starts_at).getUTCHours() + 3;
+            const hour = (new Date(change.starts_at).getUTCHours() + 3) % 24;
             expect(change.expected_revision_id).toBe(heads.get(hour) ?? null);
             heads.set(hour, ++id);
             if (change.action === "revert") saved.delete(hour);
@@ -225,11 +225,12 @@ function oneInterval(energy: number) {
     };
 }
 
-test("actual production defaults to saved values and readonly members see every zero and missing hour", async ({
+test("actual production defaults to generation hours and full day restores every zero and missing hour", async ({
     page,
 }) => {
     const state = await productionApi(page, true);
     state.provider[8] = null;
+    state.provider[10] = 0;
     state.connected = false;
     await openProduction(page);
     await expect(
@@ -238,6 +239,19 @@ test("actual production defaults to saved values and readonly members see every 
     await expect(
         page.getByRole("button", { name: "Comparison", exact: true }),
     ).toBeVisible();
+    const fullDay = page.getByRole("checkbox", { name: "Show full day" });
+    await expect(fullDay).not.toBeChecked();
+    await expect(table(page).getByRole("row")).toHaveCount(13);
+    await expect(row(page, "00:00–01:00")).toHaveCount(0);
+    await expect(row(page, "07:00–08:00")).toBeVisible();
+    await expect(row(page, "18:00–19:00")).toBeVisible();
+    await expect(row(page, "10:00–11:00").getByRole("cell").first()).toHaveText(
+        "0 Settlement",
+    );
+    await expect(
+        row(page, "08:00–09:00").getByText("—", { exact: true }),
+    ).toBeVisible();
+    await fullDay.check();
     await expect(table(page).getByRole("row")).toHaveCount(25);
     await expect(row(page, "00:00–01:00").getByRole("cell").first()).toHaveText(
         "0 Settlement",
@@ -251,6 +265,8 @@ test("actual production defaults to saved values and readonly members see every 
         0,
     );
     await expect(page.getByText(/^Provider:/)).toHaveCount(0);
+    await fullDay.uncheck();
+    await expect(table(page).getByRole("row")).toHaveCount(13);
     await page
         .getByText("Source and correction details", { exact: true })
         .click();
@@ -271,6 +287,29 @@ test("actual production defaults to saved values and readonly members see every 
         unit: "MWh",
         timezone: region.timezone,
     });
+});
+
+test("full day exposes night corrections and keeps the filter fixed until the draft closes", async ({
+    page,
+}) => {
+    const state = await productionApi(page);
+    await openProduction(page);
+    const fullDay = page.getByRole("checkbox", { name: "Show full day" });
+    await fullDay.check();
+    await page
+        .getByRole("button", { name: "Edit 00:00–01:00", exact: true })
+        .click();
+    await expect(fullDay).toBeDisabled();
+    await page.getByLabel("Production for 00:00–01:00 (MWh)").fill("0.5");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(row(page, "00:00–01:00")).toContainText("0.5");
+    await expect(fullDay).toBeEnabled();
+    expect(state.writes[0]).toMatchObject({
+        changes: [{ energy: 0.5 }],
+    });
+    await fullDay.uncheck();
+    await expect(row(page, "00:00–01:00")).toContainText("Corrected");
+    await expect(row(page, "19:00–20:00")).toHaveCount(0);
 });
 
 test("edits survive provider refresh and revert explicitly restores the latest provider value", async ({
@@ -326,6 +365,50 @@ test("edits survive provider refresh and revert explicitly restores the latest p
     ).toBeFocused();
 });
 
+test("generation filtering preserves native intervals and repeated local hours across daylight saving", async ({
+    page,
+}) => {
+    await productionApi(page, true);
+    const intervals = [
+        ["00:00:00+02:00", "01:30:00+02:00", 0],
+        ["01:30:00+02:00", "02:00:00+02:00", 1],
+        ["02:00:00+02:00", "02:00:00+01:00", 0],
+        ["02:00:00+01:00", "02:30:00+01:00", null],
+        ["02:30:00+01:00", "03:00:00+01:00", 1],
+        ["03:00:00+01:00", "23:00:00+01:00", 0],
+    ].map(([start, end, energy]) => ({
+        ...oneInterval(1).intervals[0],
+        starts_at: `2026-10-25T${start}`,
+        ends_at: `2026-10-25T${end}`,
+        effective:
+            energy === null
+                ? null
+                : {
+                      ...oneInterval(1).intervals[0].effective,
+                      energy_mwh: energy,
+                  },
+    }));
+    await page.route("**/production/?*", (route) =>
+        route.fulfill({
+            json: {
+                ...oneInterval(1),
+                timezone: "Europe/Berlin",
+                start_date: "2026-10-25",
+                end_date: "2026-10-25",
+                intervals,
+            },
+        }),
+    );
+    await openProduction(page);
+    await expect(table(page).getByRole("row")).toHaveCount(5);
+    await expect(row(page, "02:00 GMT+2–02:00 GMT+1")).toContainText(
+        "0 Settlement",
+    );
+    await expect(row(page, "02:00 GMT+1–02:30 GMT+1")).toContainText("—");
+    await page.getByRole("checkbox", { name: "Show full day" }).check();
+    await expect(table(page).getByRole("row")).toHaveCount(7);
+});
+
 test("conflicting edits preserve attempted energy and require current values to be reviewed", async ({
     page,
 }) => {
@@ -365,6 +448,7 @@ test("manual-only days distinguish absent production from a measured all-zero da
     state.connected = false;
     await openProduction(page);
     await expect(page.getByText("No production data")).toBeVisible();
+    await expect(table(page).getByRole("row")).toHaveCount(25);
     await expect(page.getByText("Total: 0 MWh", { exact: true })).toHaveCount(
         0,
     );
@@ -377,6 +461,7 @@ test("manual-only days distinguish absent production from a measured all-zero da
     state.provider.fill(0);
     await page.getByRole("button", { name: "Refresh", exact: true }).click();
     await expect(page.getByText("Total: 0 MWh", { exact: true })).toBeVisible();
+    await expect(table(page).getByRole("row")).toHaveCount(25);
 });
 
 test("reloading a conflict preserves the draft when the native interval disappeared", async ({
@@ -1088,6 +1173,10 @@ test("Turkish production at 320px keeps native corrections, decimal commas and i
     await expect(
         page.getByRole("heading", { name: "Gerçekleşen üretim" }),
     ).toBeVisible();
+    const fullDay = page.getByRole("checkbox", { name: "Tüm günü göster" });
+    await expect(fullDay).not.toBeChecked();
+    await fullDay.check();
+    await fullDay.uncheck();
     await expect(
         page.getByText("Sağlayıcı 13:00–14:00: 1 MWh", { exact: true }),
     ).toBeVisible();

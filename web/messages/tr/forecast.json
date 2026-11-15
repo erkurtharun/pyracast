@@ -307,6 +307,7 @@
     },
     "ProductionHistory": {
         "actuals": "Gerçekleşen üretim",
+        "show_full_day": "Tüm günü göster",
         "import_csv": "CSV aktar",
         "day": "Gün",
         "previous_day": "Önceki gün",

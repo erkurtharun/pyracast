@@ -307,6 +307,7 @@
     },
     "ProductionHistory": {
         "actuals": "Actual production",
+        "show_full_day": "Show full day",
         "import_csv": "Import CSV",
         "day": "Day",
         "previous_day": "Previous day",
