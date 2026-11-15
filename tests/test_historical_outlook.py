@@ -464,7 +464,7 @@ def test_missing_history_falls_back_only_when_automatic(monkeypatch: pytest.Monk
         {"source": "unknown"},
         {"resolution_minutes": True},
         {"resolution_minutes": 15},
-        {"target_date": NOW.date()},
+        {"target_date": NOW.date() + timedelta(days=1)},
         {"target_date": NOW.date() - timedelta(days=367)},
         {"as_of": NOW.replace(tzinfo=None)},
         {"as_of": NOW + timedelta(seconds=1)},
@@ -481,6 +481,58 @@ def test_history_rejects_incomplete_dates_and_invalid_arguments(
     } | values
     with pytest.raises(ValidationError):
         plant_outlook(system.member, system.tenant.pk, system.region.pk, plant.pk, **arguments)
+
+
+@pytest.mark.parametrize("scope", ["plant", "region"])
+@pytest.mark.parametrize("complete", [False, True])
+def test_polar_night_automatic_history_requires_complete_composed_actual_input(
+    monkeypatch: pytest.MonkeyPatch, scope: str, complete: bool
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    day = date(2026, 11, 14)
+    SiteBinding.objects.filter(pk=system.binding.pk).update(latitude=80, longitude=20)
+    Region.objects.filter(pk=system.region.pk).update(latitude=80, longitude=20)
+    system.binding.refresh_from_db()
+    start, end = local_day_bounds(day, system.binding.timezone)
+    forecast = publish_snapshot(
+        snapshot_for(system, day, power_kw=0.1, collected_at=start + timedelta(hours=3))
+    )
+    sources = []
+    for first, last in ((0, 12), (12, 24)):
+        source = snapshot_for(
+            system,
+            day,
+            power_kw=0,
+            source_kind="estimated_actuals",
+            collected_at=start + timedelta(hours=last),
+        )
+        source.normalized_intervals = source.normalized_intervals[first * 2 : last * 2]
+        if last == 24 and not complete:
+            source.normalized_intervals[-1]["power_kw"] = None
+        source.job.endpoint = "estimated_actuals"
+        source.job.save(update_fields=("endpoint",))
+        sources.append(publish_snapshot(source))
+    monkeypatch.setattr("pyracast.plants.history.timezone.now", lambda: end + timedelta(hours=1))
+    client = Client()
+    client.force_login(system.member)
+    prefix = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}"
+    path = f"{prefix}/plants/{plant.pk}/forecast/" if scope == "plant" else f"{prefix}/forecast/"
+    response = client.get(path, {"date": day.isoformat(), "data_source": "auto"})
+    assert response.status_code == 200, response.content
+    payload = response.json()
+    assert payload["result"]["daylight"]["status"] == "polar_night"
+    if complete:
+        assert payload["source_kind"] == "estimated_actuals"
+        provenance = payload["result"]["provenance"]
+        irradiance = payload["regional_irradiance"] if scope == "plant" else payload["result"]
+        assert irradiance["provenance"]["input_day_complete"] is True
+        if scope == "plant":
+            assert payload["result"]["complete"] is True
+            assert payload["result"]["energy_mwh"] == 0
+        assert set(provenance["source_snapshot_ids"]) == {source.pk for source in sources}
+    else:
+        assert payload["source_kind"] == "forecast"
+        assert payload["result"]["provenance"]["source_snapshot_ids"] == [forecast.pk]
 
 
 def test_corrupt_history_cannot_return_a_fabricated_estimate(

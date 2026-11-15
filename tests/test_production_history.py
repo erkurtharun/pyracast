@@ -9,8 +9,8 @@ from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.irradiance import local_day_bounds
-from pyracast.plants import availability
 from pyracast.plants.availability import (
+    actual_power_intervals,
     available_date_bounds,
     interval_is_covered,
     reference_intervals,
@@ -252,8 +252,12 @@ def test_invalid_source_intervals_remain_missing(
         source.normalized_intervals[0]["end"] = "2026-11-07T21:30:00"
     else:
         source.normalized_intervals[0]["end"] = source.normalized_intervals[0]["start"]
-    monkeypatch.setattr(availability, "select_actual_snapshot", lambda *args: source)
-    assert len(reference_intervals(configuration, DAY, NOW)) == 47
+    intervals = actual_power_intervals(source, configuration)
+    assert len(intervals) == 47
+    assert all(
+        row.start != datetime.fromisoformat(source.normalized_intervals[0]["start"])
+        for row in intervals
+    )
 
 
 def test_current_incomplete_day_does_not_become_available(monkeypatch: pytest.MonkeyPatch) -> None:

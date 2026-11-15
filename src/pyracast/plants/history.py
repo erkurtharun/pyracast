@@ -209,6 +209,7 @@ def _plant_outlook(
     result = None
     if snapshot is not None and configuration is not None:
         try:
+            assert actual_source is not None  # noqa: S101 -- Snapshot selection pins its source.
             result = forecast_payload(
                 configuration,
                 snapshot,
@@ -216,11 +217,10 @@ def _plant_outlook(
                 target_date,
                 resolution_minutes,
                 source_intervals=actual_source.composition.intervals
-                if actual_source is not None and actual_source.composition is not None
+                if actual_source.composition is not None
                 else None,
             )
-            if actual_source is not None:
-                apply_archived_actual_source(result, actual_source)
+            apply_archived_actual_source(result, actual_source)
         except (ValueError, ArithmeticError) as exc:
             raise ValidationError("calculation_out_of_range") from exc
         if calibration is not None:
