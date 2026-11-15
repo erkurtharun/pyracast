@@ -24,7 +24,7 @@ const descriptions = {
         terms: {
             title: "Terms of use",
             description:
-                "Using Pyracast responsibly: workspace access, authorized data connections, forecast limitations and account security.",
+                "Pyracast terms: responsible use, workspace access, forecast limitations and account security.",
         },
     },
     tr: {
@@ -41,7 +41,7 @@ const descriptions = {
         terms: {
             title: "Kullanım koşulları",
             description:
-                "Pyracast kullanım koşulları: çalışma alanı erişimi, yetkili veri bağlantıları, tahminlerin sınırları ve hesap güvenliği.",
+                "Pyracast kullanım koşulları: sorumlu kullanım, çalışma alanı erişimi, tahminlerin sınırları ve hesap güvenliği.",
         },
     },
 };
@@ -49,6 +49,12 @@ const descriptions = {
 export function publicMetadata(language: Language, page: PublicPage): Metadata {
     const { title, description } = descriptions[language][page];
     const canonical = publicPath(language, page);
+    const image =
+        language === "tr" ? "/tr/opengraph-image" : "/opengraph-image";
+    const imageAlt =
+        language === "tr"
+            ? "Pyracast — güneş enerjisi üretim tahmini"
+            : "Pyracast — solar production forecasts";
     return {
         title: { absolute: `${title} | Pyracast` },
         description,
@@ -69,13 +75,13 @@ export function publicMetadata(language: Language, page: PublicPage): Metadata {
             type: "website",
             locale: language === "tr" ? "tr_TR" : "en_US",
             alternateLocale: language === "tr" ? "en_US" : "tr_TR",
-            images: [{ url: "/opengraph-image", width: 1200, height: 630 }],
+            images: [{ url: image, width: 1200, height: 630, alt: imageAlt }],
         },
         twitter: {
             card: "summary_large_image",
             title: `${title} | Pyracast`,
             description,
-            images: ["/opengraph-image"],
+            images: [{ url: image, alt: imageAlt }],
         },
     };
 }

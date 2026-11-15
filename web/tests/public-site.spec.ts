@@ -82,6 +82,26 @@ for (const entry of pages) {
             );
             await expect(page.locator("h1")).toHaveCount(1);
             await expect(page.locator("h1")).toBeVisible();
+            expect(await response!.text()).not.toMatch(
+                /solcast|ep[iİı]a[şs]|open[\s-]?meteo/i,
+            );
+            const missingTargets = await page.evaluate(() =>
+                [...document.querySelectorAll<HTMLAnchorElement>("a[href]")]
+                    .filter(
+                        (link) =>
+                            link.origin === window.location.origin &&
+                            link.pathname === window.location.pathname &&
+                            link.hash,
+                    )
+                    .filter(
+                        (link) =>
+                            !document.getElementById(
+                                decodeURIComponent(link.hash.slice(1)),
+                            ),
+                    )
+                    .map((link) => link.hash),
+            );
+            expect(missingTargets).toEqual([]);
             if (entry.path === "/" || entry.path === "/tr/") {
                 const schema = await page
                     .locator('script[type="application/ld+json"]')
@@ -111,6 +131,19 @@ for (const entry of pages) {
                 "content",
                 entry.language === "en" ? "en_US" : "tr_TR",
             );
+            const imagePath =
+                entry.language === "tr"
+                    ? "/tr/opengraph-image"
+                    : "/opengraph-image";
+            for (const selector of [
+                'meta[property="og:image"]',
+                'meta[name="twitter:image"]',
+            ]) {
+                const imageUrl = await page
+                    .locator(selector)
+                    .getAttribute("content");
+                expect(new URL(imageUrl!).pathname).toBe(imagePath);
+            }
             await expect(page.locator('meta[name="robots"]')).toHaveAttribute(
                 "content",
                 "index, follow",
@@ -153,6 +186,36 @@ test("public pages meet accessibility checks at mobile and desktop sizes", async
     }
 });
 
+test("public home pages remain usable with enlarged text and keyboard navigation", async ({
+    page,
+}) => {
+    await page.setViewportSize({ width: 640, height: 900 });
+    for (const path of ["/", "/tr/"]) {
+        await page.goto(path);
+        await page.evaluate(() => {
+            document.documentElement.style.fontSize = "200%";
+        });
+        await page.keyboard.press("Tab");
+        await expect(page.locator('a[href="#main-content"]')).toBeFocused();
+        await page.keyboard.press("Enter");
+        await expect(page).toHaveURL(`${path}#main-content`);
+        await expect(page.locator("main")).toBeFocused();
+        expect(
+            await page.evaluate(
+                () => document.documentElement.scrollWidth <= window.innerWidth,
+            ),
+        ).toBe(true);
+        const signupLinks = page.locator('a[href*="signup=1"]');
+        await expect(signupLinks.first()).toBeVisible();
+        for (const link of await signupLinks.all()) {
+            await expect(link).toBeVisible();
+            const box = await link.boundingBox();
+            expect(box!.width).toBeLessThanOrEqual(640);
+            expect(box!.height).toBeGreaterThanOrEqual(44);
+        }
+    }
+});
+
 test("search discovery contains only public canonical pages", async ({
     request,
 }) => {
@@ -174,12 +237,14 @@ test("search discovery contains only public canonical pages", async ({
     expect(await app.text()).toMatch(
         /name="robots" content="noindex, nofollow"/,
     );
-    const image = await request.get("/opengraph-image");
-    expect(image.status()).toBe(200);
-    expect(image.headers()["content-type"]).toContain("image/png");
-    const data = await image.body();
-    expect(data.readUInt32BE(16)).toBe(1200);
-    expect(data.readUInt32BE(20)).toBe(630);
+    for (const path of ["/opengraph-image", "/tr/opengraph-image"]) {
+        const image = await request.get(path);
+        expect(image.status()).toBe(200);
+        expect(image.headers()["content-type"]).toContain("image/png");
+        const data = await image.body();
+        expect(data.readUInt32BE(16)).toBe(1200);
+        expect(data.readUInt32BE(20)).toBe(630);
+    }
 });
 
 test("previous account links retain their parameters on the private route", async ({

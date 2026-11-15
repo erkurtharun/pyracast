@@ -59,8 +59,7 @@ export function SiteShell({
                         }
                     >
                         <a href={`${home}#product`}>{copy.nav}</a>
-                        <a href={`${home}#how-it-works`}>{copy.stepsNav}</a>
-                        <a href={`${home}#questions`}>{copy.faqNav}</a>
+                        <a href={`${home}#getting-started`}>{copy.startNav}</a>
                     </nav>
                     <div className={styles.headerActions}>
                         <a

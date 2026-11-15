@@ -4,161 +4,146 @@ import styles from "./public-site.module.css";
 
 export function HomePage({ language }: { language: PublicLanguage }) {
     const copy = homeCopy[language];
+    const signupHref = `/app/?signup=1&language=${language}`;
     return (
         <SiteShell language={language}>
-            <main id="main-content">
+            <main id="main-content" tabIndex={-1}>
                 <section className={styles.hero} aria-labelledby="home-title">
                     <div className={styles.heroInner}>
                         <div className={styles.heroCopy}>
-                            <p className={styles.eyebrow}>
-                                <span
-                                    className={styles.sunDot}
-                                    aria-hidden="true"
-                                />
-                                {copy.eyebrow}
-                            </p>
+                            <p className={styles.eyebrow}>{copy.eyebrow}</p>
                             <h1 id="home-title">{copy.title}</h1>
                             <p className={styles.heroIntro}>{copy.intro}</p>
                             <div className={styles.heroActions}>
                                 <a
                                     className={styles.primaryButton}
-                                    href={`/app/?signup=1&language=${language}`}
+                                    href={signupHref}
                                 >
                                     {copy.signup}
-                                    <span aria-hidden="true"> ↗</span>
+                                    <span aria-hidden="true">↗</span>
                                 </a>
-                                <a
-                                    className={styles.textLink}
-                                    href="#how-it-works"
-                                >
+                                <a className={styles.textLink} href="#product">
                                     {copy.secondary}
-                                    <span aria-hidden="true"> ↓</span>
+                                    <span aria-hidden="true">↓</span>
                                 </a>
                             </div>
-                            <p className={styles.approval}>{copy.approval}</p>
                         </div>
-                        <figure
-                            className={styles.preview}
-                            aria-labelledby="preview-caption"
-                        >
-                            <div className={styles.previewTop}>
-                                <span
-                                    className={styles.previewDot}
-                                    aria-hidden="true"
-                                />
-                                {copy.illustration}
-                                <span
-                                    className={styles.previewMark}
+                        <figure className={styles.forecastPanel}>
+                            <div className={styles.forecastHeading}>
+                                <h2>{copy.chartTitle}</h2>
+                                <svg
+                                    width="28"
+                                    height="28"
+                                    viewBox="0 0 28 28"
+                                    fill="none"
                                     aria-hidden="true"
                                 >
-                                    ☀
+                                    <path
+                                        d="M3 21h22M6 17a8 8 0 0 1 16 0M14 3v3M4 7l2 2m18-2-2 2"
+                                        stroke="currentColor"
+                                        strokeWidth="1.5"
+                                        strokeLinecap="round"
+                                    />
+                                </svg>
+                            </div>
+                            <div className={styles.chart}>
+                                <span className={styles.chartAxis}>
+                                    {copy.chartAxis}
+                                </span>
+                                <svg
+                                    viewBox="0 0 480 240"
+                                    role="img"
+                                    aria-labelledby="forecast-chart-title"
+                                >
+                                    <title id="forecast-chart-title">
+                                        {copy.chartDescription}
+                                    </title>
+                                    <defs>
+                                        <linearGradient
+                                            id="public-forecast-fill"
+                                            x1="0"
+                                            y1="0"
+                                            x2="0"
+                                            y2="1"
+                                        >
+                                            <stop
+                                                offset="0%"
+                                                stopColor="#28664e"
+                                                stopOpacity="0.17"
+                                            />
+                                            <stop
+                                                offset="100%"
+                                                stopColor="#28664e"
+                                                stopOpacity="0"
+                                            />
+                                        </linearGradient>
+                                    </defs>
+                                    <g
+                                        stroke="#dedfd3"
+                                        strokeWidth="1"
+                                        strokeDasharray="3 5"
+                                    >
+                                        <path d="M4 32H476M4 88H476M4 144H476" />
+                                    </g>
+                                    <path
+                                        d="M4 210H476"
+                                        stroke="#c4ccbd"
+                                        strokeWidth="1"
+                                    />
+                                    <path
+                                        d="M4 210C52 210 66 201 94 173S137 99 177 66S222 35 252 57S289 105 321 127S369 171 399 192S442 210 476 210V210H4Z"
+                                        fill="url(#public-forecast-fill)"
+                                    />
+                                    <path
+                                        d="M4 210C52 210 66 201 94 173S137 99 177 66S222 35 252 57S289 105 321 127S369 171 399 192S442 210 476 210"
+                                        fill="none"
+                                        stroke="#28664e"
+                                        strokeWidth="3"
+                                        strokeLinecap="round"
+                                    />
+                                    <path
+                                        d="M4 210C52 210 70 201 96 180S138 111 177 81S222 56 252 75"
+                                        fill="none"
+                                        stroke="#a17537"
+                                        strokeWidth="3"
+                                        strokeDasharray="5 7"
+                                        strokeLinecap="round"
+                                    />
+                                    <circle
+                                        cx="252"
+                                        cy="75"
+                                        r="5"
+                                        fill="#a17537"
+                                        stroke="#fbfbf5"
+                                        strokeWidth="3"
+                                    />
+                                </svg>
+                                <div
+                                    className={styles.chartTimes}
+                                    aria-hidden="true"
+                                >
+                                    <span>06:00</span>
+                                    <span>12:00</span>
+                                    <span>18:00</span>
+                                </div>
+                            </div>
+                            <div className={styles.legend}>
+                                <span>
+                                    <i
+                                        className={styles.forecastLine}
+                                        aria-hidden="true"
+                                    />
+                                    {copy.forecast}
+                                </span>
+                                <span>
+                                    <i
+                                        className={styles.actualLine}
+                                        aria-hidden="true"
+                                    />
+                                    {copy.actual}
                                 </span>
                             </div>
-                            <div className={styles.previewContent}>
-                                <p className={styles.previewEyebrow}>
-                                    {copy.previewLabel}
-                                </p>
-                                <h2>{copy.chartTitle}</h2>
-                                <p className={styles.previewSubtitle}>
-                                    {copy.chartSubtitle}
-                                </p>
-                                <div className={styles.chart}>
-                                    <span className={styles.chartAxis}>
-                                        {copy.chartAxis}
-                                    </span>
-                                    <svg
-                                        viewBox="0 0 480 230"
-                                        role="img"
-                                        aria-label={copy.chartSubtitle}
-                                    >
-                                        <defs>
-                                            <linearGradient
-                                                id="public-forecast-fill"
-                                                x1="0"
-                                                y1="0"
-                                                x2="0"
-                                                y2="1"
-                                            >
-                                                <stop
-                                                    offset="0%"
-                                                    stopColor="#176b56"
-                                                    stopOpacity="0.18"
-                                                />
-                                                <stop
-                                                    offset="100%"
-                                                    stopColor="#176b56"
-                                                    stopOpacity="0.01"
-                                                />
-                                            </linearGradient>
-                                        </defs>
-                                        <g stroke="#dfe6df" strokeWidth="1">
-                                            <path d="M10 30H470M10 85H470M10 140H470M10 195H470" />
-                                        </g>
-                                        <path
-                                            d="M10 195C60 195 75 188 100 160S140 85 180 60S225 30 255 53S290 105 320 115S370 155 395 177S440 194 470 195V195H10Z"
-                                            fill="url(#public-forecast-fill)"
-                                        />
-                                        <path
-                                            d="M10 195C60 195 75 188 100 160S140 85 180 60S225 30 255 53S290 105 320 115S370 155 395 177S440 194 470 195"
-                                            fill="none"
-                                            stroke="#176b56"
-                                            strokeWidth="3"
-                                            strokeLinecap="round"
-                                        />
-                                        <path
-                                            d="M10 195C60 195 78 184 102 166S142 94 181 73S221 50 251 67"
-                                            fill="none"
-                                            stroke="#a56a12"
-                                            strokeWidth="3"
-                                            strokeDasharray="5 6"
-                                            strokeLinecap="round"
-                                        />
-                                        <circle
-                                            cx="251"
-                                            cy="67"
-                                            r="5"
-                                            fill="#a56a12"
-                                            stroke="#fff"
-                                            strokeWidth="3"
-                                        />
-                                        <g
-                                            fill="#5c6d65"
-                                            fontSize="12"
-                                            fontFamily="inherit"
-                                        >
-                                            <text x="10" y="222">
-                                                06:00
-                                            </text>
-                                            <text x="120" y="222">
-                                                09:00
-                                            </text>
-                                            <text x="230" y="222">
-                                                12:00
-                                            </text>
-                                            <text x="340" y="222">
-                                                15:00
-                                            </text>
-                                            <text x="438" y="222">
-                                                18:00
-                                            </text>
-                                        </g>
-                                    </svg>
-                                </div>
-                                <div className={styles.legend}>
-                                    <span>
-                                        <i className={styles.forecastLine} />
-                                        {copy.forecast}
-                                    </span>
-                                    <span>
-                                        <i className={styles.actualLine} />
-                                        {copy.actual}
-                                    </span>
-                                </div>
-                            </div>
-                            <figcaption
-                                id="preview-caption"
-                                className={styles.previewCaption}
-                            >
+                            <figcaption className={styles.forecastCaption}>
                                 {copy.chartNote}
                             </figcaption>
                         </figure>
@@ -166,128 +151,56 @@ export function HomePage({ language }: { language: PublicLanguage }) {
                 </section>
                 <section
                     id="product"
-                    className={styles.benefits}
-                    aria-labelledby="benefits-title"
+                    className={styles.product}
+                    aria-labelledby="product-title"
                 >
-                    <div className={styles.sectionHeading}>
-                        <p className={styles.eyebrow}>{copy.benefitsEyebrow}</p>
-                        <h2 id="benefits-title">{copy.benefitsTitle}</h2>
+                    <div className={styles.productHeading}>
+                        <p className={styles.eyebrow}>{copy.productEyebrow}</p>
+                        <h2 id="product-title">{copy.productTitle}</h2>
                     </div>
-                    <div className={styles.benefitGrid}>
-                        {copy.benefits.map((benefit, index) => (
+                    <div className={styles.featureList}>
+                        {copy.features.map((feature, index) => (
                             <article
-                                className={styles.benefit}
-                                key={benefit.title}
+                                className={styles.feature}
+                                key={feature.title}
                             >
                                 <span
-                                    className={styles.benefitIcon}
+                                    className={styles.featureNumber}
                                     aria-hidden="true"
                                 >
-                                    {index === 0 ? (
-                                        <svg viewBox="0 0 24 24" fill="none">
-                                            <path
-                                                d="M4 18V6m0 12h16M7 14l4-6 4 3 5-6"
-                                                stroke="currentColor"
-                                                strokeWidth="1.7"
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                            />
-                                        </svg>
-                                    ) : index === 1 ? (
-                                        <svg viewBox="0 0 24 24" fill="none">
-                                            <path
-                                                d="M5 7h14M5 12h9M5 17h6m5-1 2 2 4-5"
-                                                stroke="currentColor"
-                                                strokeWidth="1.7"
-                                                strokeLinecap="round"
-                                                strokeLinejoin="round"
-                                            />
-                                        </svg>
-                                    ) : (
-                                        <svg viewBox="0 0 24 24" fill="none">
-                                            <circle
-                                                cx="9"
-                                                cy="8"
-                                                r="3"
-                                                stroke="currentColor"
-                                                strokeWidth="1.7"
-                                            />
-                                            <path
-                                                d="M3 20v-2a6 6 0 0 1 12 0v2m1-15a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 4v2"
-                                                stroke="currentColor"
-                                                strokeWidth="1.7"
-                                                strokeLinecap="round"
-                                            />
-                                        </svg>
-                                    )}
+                                    0{index + 1}
                                 </span>
-                                <h3>{benefit.title}</h3>
-                                <p>{benefit.text}</p>
+                                <div>
+                                    <h3>{feature.title}</h3>
+                                    <p>{feature.text}</p>
+                                </div>
                             </article>
                         ))}
                     </div>
                 </section>
                 <section
-                    id="how-it-works"
-                    className={styles.stepsSection}
-                    aria-labelledby="steps-title"
+                    id="getting-started"
+                    className={styles.start}
+                    aria-labelledby="start-title"
                 >
-                    <div className={styles.stepsInner}>
-                        <div className={styles.stepsHeading}>
+                    <div className={styles.startInner}>
+                        <div className={styles.startHeading}>
                             <p className={styles.eyebrow}>
-                                {copy.stepsEyebrow}
+                                {copy.startEyebrow}
                             </p>
-                            <h2 id="steps-title">{copy.stepsTitle}</h2>
+                            <h2 id="start-title">{copy.startTitle}</h2>
                         </div>
-                        <ol className={styles.steps}>
-                            {copy.steps.map((step, index) => (
-                                <li key={step.title}>
-                                    <span
-                                        className={styles.stepNumber}
-                                        aria-hidden="true"
-                                    >
-                                        0{index + 1}
-                                    </span>
-                                    <div>
-                                        <h3>{step.title}</h3>
-                                        <p>{step.text}</p>
-                                    </div>
-                                </li>
-                            ))}
-                        </ol>
+                        <div className={styles.startAction}>
+                            <p>{copy.startText}</p>
+                            <a
+                                className={styles.primaryButton}
+                                href={signupHref}
+                            >
+                                {copy.signup}
+                                <span aria-hidden="true">↗</span>
+                            </a>
+                        </div>
                     </div>
-                </section>
-                <section
-                    id="questions"
-                    className={styles.faq}
-                    aria-labelledby="faq-title"
-                >
-                    <h2 id="faq-title">{copy.faqTitle}</h2>
-                    <div className={styles.questions}>
-                        {copy.faq.map((item) => (
-                            <details key={item.question}>
-                                <summary>
-                                    {item.question}
-                                    <span aria-hidden="true">+</span>
-                                </summary>
-                                <p>{item.answer}</p>
-                            </details>
-                        ))}
-                    </div>
-                </section>
-                <section className={styles.cta} aria-labelledby="cta-title">
-                    <div>
-                        <p className={styles.eyebrow}>Pyracast</p>
-                        <h2 id="cta-title">{copy.ctaTitle}</h2>
-                        <p>{copy.ctaText}</p>
-                    </div>
-                    <a
-                        className={styles.lightButton}
-                        href={`/app/?signup=1&language=${language}`}
-                    >
-                        {copy.signup}
-                        <span aria-hidden="true"> ↗</span>
-                    </a>
                 </section>
             </main>
         </SiteShell>

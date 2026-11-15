@@ -15,7 +15,7 @@ export function LegalPage({
     const copy = homeCopy[language];
     return (
         <SiteShell language={language} page={kind}>
-            <main id="main-content" className={styles.legalMain}>
+            <main id="main-content" className={styles.legalMain} tabIndex={-1}>
                 <a
                     className={styles.backLink}
                     href={publicPath(language, "home")}
