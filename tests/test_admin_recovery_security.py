@@ -2,12 +2,14 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from queue import Queue
 from threading import Event
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from allauth.account.internal.flows.login import get_authentication_records, record_authentication
 from allauth.mfa.models import Authenticator
 from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
+from allauth.mfa.totp.internal import auth as totp_auth
 from allauth.mfa.totp.internal.auth import TOTP, format_hotp_value, generate_totp_secret, hotp_value
 from django.contrib.auth.models import AnonymousUser, User
 from django.db import connections
@@ -79,6 +81,7 @@ def test_fresh_mfa_reauthentication_allows_recovery_code_rotation(
     recovery = RecoveryCodes.activate(user)
     original = recovery.generate_codes()
     now = time.time()
+    monkeypatch.setattr(totp_auth, "time", SimpleNamespace(time=lambda: now))
     code = (
         format_hotp_value(hotp_value(secret, int(now) // 30)) if factor == "totp" else original[0]
     )
@@ -157,11 +160,15 @@ def test_password_reauthentication_cannot_remove_customer_totp() -> None:
 @override_settings(
     MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
 )
-def test_mfa_reauthentication_allows_only_customers_to_remove_totp(privileged: bool) -> None:
+def test_mfa_reauthentication_allows_only_customers_to_remove_totp(
+    privileged: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
     client, user, secret = authenticated_account(privileged=privileged)
     other = User.objects.create_user(username="other")
     other_factor = Authenticator.objects.create(user=other, type="totp", data={})
-    code = format_hotp_value(hotp_value(secret, int(time.time()) // 30))
+    now = time.time()
+    monkeypatch.setattr(totp_auth, "time", SimpleNamespace(time=lambda: now))
+    code = format_hotp_value(hotp_value(secret, int(now) // 30))
     assert submit(client, AUTH + "auth/2fa/reauthenticate", {"code": code}).status_code == 200
     assert client.delete(AUTH + "account/authenticators/totp").status_code == 403
     token = client.get("/api/session/").json()["csrf_token"]
