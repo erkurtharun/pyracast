@@ -1,11 +1,13 @@
 from datetime import date, datetime, timedelta
-from typing import TypedDict, cast
+from typing import Any, TypedDict, cast
 from zoneinfo import ZoneInfo
 
+from pyracast.forecasts.intraday import PreparedIntradaySource, apply_intraday_source
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.incidents.operations import pinned_incidents
 from pyracast.irradiance import local_day_bounds
 from pyracast.notifications.models import NotificationDelivery
+from pyracast.notifications.sources import composed_report_source
 from pyracast.plants.forecasting import (
     calibration_at,
     forecast_daylight,
@@ -15,7 +17,7 @@ from pyracast.plants.forecasting import (
 )
 from pyracast.plants.incident_forecasts import incident_scenario
 from pyracast.plants.measurements import production_identity_at
-from pyracast.plants.models import Plant, PlantConfiguration
+from pyracast.plants.models import CalibrationRun, Plant, PlantConfiguration
 from pyracast.plants.numerics import PowerInterval, forecast
 from pyracast.plants.operating_limits import OperatingLimit, affected_power
 
@@ -43,8 +45,13 @@ def _report_intervals(
     day: date,
     normal: dict[str, object],
     revision_ids: list[int],
+    source_intervals: tuple[dict[str, Any], ...] | None = None,
 ) -> list[dict[str, object]]:
-    daylight, windows = forecast_daylight(configuration, day, snapshot.normalized_intervals)
+    daylight, windows = forecast_daylight(
+        configuration,
+        day,
+        snapshot.normalized_intervals if source_intervals is None else source_intervals,
+    )
     start, end = local_day_bounds(day, configuration.binding.timezone)
     limits = tuple(
         OperatingLimit(
@@ -59,7 +66,12 @@ def _report_intervals(
         for row in pinned_incidents(configuration.plant_id, revision_ids)
     )
     intervals = affected_power(
-        power_intervals(snapshot, configuration, model_version=cast(str, normal["model_version"])),
+        power_intervals(
+            snapshot,
+            configuration,
+            source_intervals=source_intervals,
+            model_version=cast(str, normal["model_version"]),
+        ),
         limits,
         dc_capacity_mw=configuration.dc_capacity_mw,
         normal_limit_mw=power_limit(configuration),
@@ -94,8 +106,55 @@ def _report_intervals(
     return result
 
 
+def _electrical_day(
+    configuration: PlantConfiguration,
+    snapshot: ForecastSnapshot,
+    calibration: CalibrationRun | None,
+    day: date,
+    known_at: datetime,
+    source: PreparedIntradaySource | None,
+) -> ReportDay:
+    intervals = source.composition.intervals if source is not None else None
+    normal = forecast_payload(
+        configuration, snapshot, calibration, day, 60, source_intervals=intervals
+    )
+    if source is not None:
+        apply_intraday_source(normal, source)
+    outlook: dict[str, object] = {
+        "plant_id": configuration.plant_id,
+        "configuration_id": configuration.pk,
+        "calibration_id": calibration.pk if calibration else None,
+        "result": normal,
+    }
+    scenario = incident_scenario(outlook, day, 60, known_at)
+    normal = cast(dict[str, object], outlook["result"])
+    normal["report_intervals"] = _report_intervals(
+        configuration, snapshot, day, normal, [], intervals
+    )
+    row = ReportDay(
+        date=day.isoformat(),
+        normal=normal,
+        outage=None,
+        outage_status=None,
+        incident_revision_ids=[],
+    )
+    if scenario is not None:
+        outage = cast(dict[str, object], scenario["result"])
+        revision_ids = cast(list[int], scenario["incident_revision_ids"])
+        outage["report_intervals"] = _report_intervals(
+            configuration, snapshot, day, normal, revision_ids, intervals
+        )
+        row["outage"] = outage
+        row["outage_status"] = cast(str, scenario["status"])
+        row["incident_revision_ids"] = revision_ids
+    return row
+
+
 def saved_report_context(
-    delivery: NotificationDelivery, *, known_at: datetime | None = None
+    delivery: NotificationDelivery,
+    *,
+    known_at: datetime | None = None,
+    available_at: datetime | None = None,
 ) -> dict[str, object]:
     binding = delivery.binding
     assert binding is not None  # noqa: S101 -- Preparation requires an authorized binding.
@@ -139,35 +198,23 @@ def saved_report_context(
             outage_status=None,
             incident_revision_ids=[],
         )
-        if (
-            configuration is not None
-            and snapshot is not None
-            and snapshot.binding_id == binding.pk
-            and snapshot.source_kind == "forecast"
-        ):
+        if configuration is not None:
             try:
-                normal = forecast_payload(configuration, snapshot, calibration, day, 60)
-                outlook: dict[str, object] = {
-                    "plant_id": configuration.plant_id,
-                    "configuration_id": configuration.pk,
-                    "calibration_id": calibration.pk if calibration else None,
-                    "result": normal,
-                }
-                scenario = incident_scenario(outlook, day, 60, cutoff)
-                normal = cast(dict[str, object], outlook["result"])
-                normal["report_intervals"] = _report_intervals(
-                    configuration, snapshot, day, normal, []
+                source = (
+                    composed_report_source(delivery, day, available_at or cutoff)
+                    if offset == 0
+                    else None
                 )
-                if scenario is not None:
-                    outage = cast(dict[str, object], scenario["result"])
-                    revision_ids = cast(list[int], scenario["incident_revision_ids"])
-                    outage["report_intervals"] = _report_intervals(
-                        configuration, snapshot, day, normal, revision_ids
-                    )
-                    row["outage"] = outage
-                    row["outage_status"] = cast(str, scenario["status"])
-                    row["incident_revision_ids"] = revision_ids
-                row["normal"] = normal
+                day_snapshot = source.snapshot if source is not None else snapshot
+                if (
+                    day_snapshot is None
+                    or day_snapshot.binding_id != binding.pk
+                    or day_snapshot.source_kind not in {"forecast", "estimated_actuals"}
+                    or (offset == 1 and day_snapshot.source_kind != "forecast")
+                ):
+                    context["days"].append(row)
+                    continue
+                row = _electrical_day(configuration, day_snapshot, calibration, day, cutoff, source)
             except ValueError, ArithmeticError, KeyError, TypeError:
                 # A damaged acquisition cannot become a plausible electrical estimate.
                 pass

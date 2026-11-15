@@ -271,7 +271,14 @@ def forecast_payload(
     )
     if snapshot.source_kind == "estimated_actuals":
         flags.append("estimated_actuals_not_metered")
-        if configuration.created_at > start:
+        selected = snapshot.normalized_intervals if source_intervals is None else source_intervals
+        if configuration.created_at > start and any(
+            row.get("source_kind", snapshot.source_kind) == "estimated_actuals"
+            and datetime.fromisoformat(row.get("original_start", row["start"]))
+            < min(configuration.created_at, end)
+            and datetime.fromisoformat(row.get("original_end", row["end"])) > start
+            for row in selected
+        ):
             flags.append("historical_configuration_assumed")
     if calibration is None:
         flags.append("uncalibrated")

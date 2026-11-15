@@ -87,6 +87,18 @@ def test_older_envelope_fills_both_edges_and_preserves_native_means_and_metadata
     assert _energy(result.intervals) == 28
 
 
+def test_provider_clipped_native_mean_retains_proration_without_another_split() -> None:
+    row = {
+        **_row(0, 0.25, 8),
+        "original_start": _at(0).isoformat(),
+        "original_end": _at(0.5).isoformat(),
+    }
+    result = compose_forecasts((_vintage(1, 0, 0.25, row),), _at(0), _at(0.25))
+    assert result.prorated is True
+    assert result.intervals == ({**row, "source_snapshot_id": 1},)
+    assert _energy(result.intervals) == 2
+
+
 def test_newer_null_internal_gap_and_zero_remain_authoritative() -> None:
     result = compose_forecasts(
         (

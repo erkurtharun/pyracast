@@ -70,17 +70,13 @@ def test_saved_projection_survives_calculator_failure_after_acquisition(
         "2026-11-09",
         "2026-11-10",
         "2026-11-11",
-        "2026-11-12",
     }
     result = saved_day_payload(snapshot, date(2026, 11, 11))
     assert result is not None
     assert result["energy_kwh_m2"] == 12
     assert result["valid_coverage_seconds"] == 86400
     assert result["complete"] is True
-    partial = saved_day_payload(snapshot, date(2026, 11, 12))
-    assert partial is not None
-    assert partial["energy_kwh_m2"] is None
-    assert partial["partial_energy_kwh_m2"] == 8
+    assert saved_day_payload(snapshot, date(2026, 11, 12)) is None
     assert saved_day_payload(snapshot, date(2026, 11, 13)) is None
 
 
@@ -112,7 +108,7 @@ def test_supplemental_failure_preserves_other_days_and_bounds_the_horizon() -> N
         project,
         snapshot.forecastresult.payload,
     )
-    assert set(results) == {"2026-11-09", "2026-11-10", "2026-11-12"}
+    assert set(results) == {"2026-11-09", "2026-11-10"}
     assert results["2026-11-10"]["energy_kwh_m2"] == 12
     assert prepare_daily_payloads(
         snapshot.binding, date(2026, 11, 10), ProviderData({}, []), project, {}
@@ -207,7 +203,7 @@ def test_missing_irradiance_retains_a_valid_partial_result() -> None:
 
 def test_partial_coverage_fraction_must_match_saved_intervals() -> None:
     snapshot = saved_snapshot()
-    day = date(2026, 11, 12)
+    day = date(2026, 11, 9)
     snapshot.forecastresult.daily_payloads[day.isoformat()]["coverage_fraction"] = 0.1
     assert saved_day_payload(snapshot, day) is None
 
@@ -220,7 +216,7 @@ def test_a_full_day_cannot_be_mislabeled_as_partial() -> None:
     assert saved_day_payload(snapshot, day) is None
 
 
-@pytest.mark.parametrize("day", [date(2026, 11, 11), date(2026, 11, 12)])
+@pytest.mark.parametrize("day", [date(2026, 11, 11), date(2026, 11, 9)])
 def test_saved_summary_must_match_the_energy_in_its_interval_csv(day: date) -> None:
     snapshot = saved_snapshot()
     payload = snapshot.forecastresult.daily_payloads[day.isoformat()]
@@ -310,7 +306,7 @@ def test_nonround_calculated_intervals_survive_saved_json_validation(
     assert "prorated_interval_mean" in cast(list[str], result["quality_flags"])
 
 
-def test_spring_clock_change_can_put_a_72_hour_horizon_in_five_local_dates() -> None:
+def test_spring_clock_change_still_prepares_only_three_local_dates() -> None:
     snapshot = saved_snapshot()
     snapshot.binding.timezone = "Europe/London"
     start = datetime(2026, 3, 27, 23, 30, tzinfo=UTC)
@@ -324,7 +320,7 @@ def test_spring_clock_change_can_put_a_72_hour_horizon_in_five_local_dates() -> 
         return {"local_date": day.isoformat()}
 
     results = prepare_daily_payloads(snapshot.binding, date(2026, 3, 28), data, project, {})
-    assert set(results) == {"2026-03-27", "2026-03-28", "2026-03-29", "2026-03-30", "2026-03-31"}
+    assert set(results) == {"2026-03-27", "2026-03-28", "2026-03-29"}
 
 
 @pytest.mark.django_db(transaction=True)

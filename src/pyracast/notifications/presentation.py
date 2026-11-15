@@ -14,6 +14,7 @@ class ReportInterval:
     outage_energy: float | None
     complete: bool
     outage_complete: bool
+    source_kind: str = "forecast"
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,7 @@ class ReportDay:
     has_outage: bool
     intervals: tuple[ReportInterval, ...]
     outage_status: str | None = None
+    source_kind: str = "forecast"
 
 
 @dataclass(frozen=True)
@@ -108,9 +110,35 @@ def _intervals(
                 outage_energy=_energy(other, "mwh"),
                 complete=row.get("complete") is True if electrical else energy is not None,
                 outage_complete=other.get("complete") is True,
+                source_kind=_interval_source(row, normal, begin, end),
             )
         )
     return tuple(rows)
+
+
+def _interval_source(
+    row: dict[str, object], normal: dict[str, object], begin: datetime, end: datetime
+) -> str:
+    provenance = cast(dict[str, object], normal.get("provenance", {}))
+    kinds = set(cast(list[str], row.get("source_kinds", [])))
+    if not kinds:
+        kinds = {
+            cast(str, segment.get("source_kind", "forecast"))
+            for segment in cast(list[dict[str, object]], provenance.get("source_segments", []))
+            if begin < datetime.fromisoformat(cast(str, segment["end"]))
+            and end > datetime.fromisoformat(cast(str, segment["start"]))
+        }
+    if len(kinds) > 1:
+        return "mixed"
+    return next(iter(kinds), cast(str, provenance.get("source_kind", "forecast")))
+
+
+def source_label(source_kind: str) -> str:
+    return {
+        "forecast": _("Forecast"),
+        "estimated_actuals": _("Estimated actuals"),
+        "mixed": _("Estimated + forecast"),
+    }[source_kind]
 
 
 def _day(
@@ -123,6 +151,7 @@ def _day(
 ) -> ReportDay:
     unit = "mwh" if electrical else "kwh_m2"
     summary, alternative = report_summary(normal), report_summary(outage)
+    provenance = cast(dict[str, object], normal.get("provenance", {})) if normal else {}
     return ReportDay(
         day=day,
         total=cast(float | None, summary.get(f"energy_{unit}")),
@@ -134,6 +163,7 @@ def _day(
         has_outage=outage is not None,
         intervals=_intervals(normal, outage, electrical=electrical),
         outage_status=outage_status,
+        source_kind=cast(str, provenance.get("source_kind", "forecast")),
     )
 
 
@@ -146,24 +176,34 @@ def present_report(
 ) -> ForecastReport:
     electrical = context["plant_id"] is not None
     days = []
+    collected = context["collected_at"]
+    source_times = [datetime.fromisoformat(cast(str, collected))] if collected else []
     for row, irradiance in zip(
         cast(list[dict[str, object]], context["days"]), results, strict=True
     ):
+        normal = cast(dict[str, object] | None, row["normal"]) if electrical else irradiance
+        provenance = cast(dict[str, object], normal.get("provenance", {})) if normal else {}
+        for field in ("collected_at", "oldest_collected_at"):
+            if timestamp := provenance.get(field):
+                source_times.append(datetime.fromisoformat(cast(str, timestamp)))
+        source_times.extend(
+            datetime.fromisoformat(cast(str, source["collected_at"]))
+            for source in cast(list[dict[str, object]], provenance.get("source_snapshots", []))
+        )
         days.append(
             _day(
                 date.fromisoformat(cast(str, row["date"])),
-                cast(dict[str, object] | None, row["normal"]) if electrical else irradiance,
+                normal,
                 cast(dict[str, object] | None, row["outage"]) if electrical else None,
                 electrical=electrical,
                 outage_status=cast(str | None, row.get("outage_status")),
             )
         )
-    collected = context["collected_at"]
-    collected_at = datetime.fromisoformat(cast(str, collected)) if collected else None
+    collected_at = max(source_times) if source_times else None
     warnings = []
     if not electrical:
         warnings.append(_("Irradiance estimate, not plant electricity."))
-    if collected_at and prepared_at - collected_at > timedelta(hours=24):
+    if source_times and prepared_at - min(source_times) > timedelta(hours=24):
         warnings.append(_("Forecast data is over 24 hours old."))
     if collected_at and fallback:
         warnings.append(_("Using the last saved forecast."))

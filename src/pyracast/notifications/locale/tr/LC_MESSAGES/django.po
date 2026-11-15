@@ -121,13 +121,13 @@ msgstr "Normal çalışma"
 msgid "With reported outage"
 msgstr "Kayıtlı kesintiyle"
 
-msgid "Forecast partial"
+msgid "Partial estimate"
 msgstr "Tahmin kısmi"
 
 msgid "Outage partial"
 msgstr "Kesinti senaryosu kısmi"
 
-msgid "Forecast unavailable"
+msgid "Estimate unavailable"
 msgstr "Tahmin yok"
 
 msgid "Irradiance estimate, not plant electricity."
@@ -175,3 +175,15 @@ msgstr ""
 
 msgid "Outage unavailable"
 msgstr "Kesinti tahmini yok"
+
+msgid "Estimated actuals"
+msgstr "Gerçekleşen tahmini"
+
+msgid "Estimated + forecast"
+msgstr "Gerçekleşen tahmini + öngörü"
+
+msgid "Estimate (%(unit)s)"
+msgstr "Tahmin (%(unit)s)"
+
+msgid "Source"
+msgstr "Kaynak"

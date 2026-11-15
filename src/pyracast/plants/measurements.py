@@ -9,10 +9,13 @@ from zoneinfo import ZoneInfo
 from django.db.models import F, Q, QuerySet
 
 from pyracast.epias import TIMEZONE
-from pyracast.forecasts.history import HISTORY_SELECTION_POLICY, select_actual_snapshot
+from pyracast.forecasts.actuals import ACTUAL_COMPOSITION_POLICY, select_archived_actual_source
+from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
+from pyracast.forecasts.intraday import completed_actual_intervals
 from pyracast.incidents.operations import pinned_incidents, select_incidents
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
+from pyracast.plants.forecast_sources import compose_snapshots
 from pyracast.plants.measurement_policy import (
     LEGACY_MEASUREMENT_POLICY as LEGACY_MEASUREMENT_POLICY,
 )
@@ -302,14 +305,15 @@ def selection_fingerprint(
     incident_revision_ids: list[int] | None = None,
     *,
     policy: str = MEASUREMENT_POLICY,
-) -> tuple[str, dict[str, int | None]]:
+) -> tuple[str, dict[str, object]]:
     zone = ZoneInfo(configuration.binding.timezone)
     days = sorted({r.starts_at.astimezone(zone).date() for r in rows})
-    references: dict[str, int | None] = {}
+    references: dict[str, object] = {}
     reference_content: dict[str, Any] = {}
     for day in days:
-        snapshot = select_actual_snapshot(configuration.binding, day, cutoff)
-        references[day.isoformat()] = snapshot.pk if snapshot else None
+        source = select_archived_actual_source(configuration.binding, day, cutoff)
+        snapshot = source.snapshot if source is not None else None
+        references[day.isoformat()] = source.pin if source is not None else None
         reference_content[day.isoformat()] = (
             {
                 "intervals": snapshot.normalized_intervals,
@@ -319,6 +323,27 @@ def selection_fingerprint(
             if snapshot
             else None
         )
+        if (
+            source is not None
+            and snapshot is not None
+            and snapshot.job.endpoint == "estimated_actuals"
+            and snapshot.job.reference_import_id is None
+        ):
+            start, end = local_day_bounds(day, configuration.binding.timezone)
+            composition = source.composition or compose_snapshots([snapshot], start, end)
+            reference_content[day.isoformat()] = {
+                "intervals": [
+                    {
+                        key: value
+                        for key, value in row.items()
+                        if key not in {"source_snapshot_id", "source_kind"}
+                    }
+                    for row in completed_actual_intervals(composition.intervals, cutoff)
+                ],
+                "endpoint": "estimated_actuals",
+                "historical_import": False,
+                "selection_policy": ACTUAL_COMPOSITION_POLICY,
+            }
     values = [
         {
             "start": r.starts_at.isoformat(),
@@ -334,6 +359,7 @@ def selection_fingerprint(
     payload = {
         "policy": policy,
         "reference_selection_policy": HISTORY_SELECTION_POLICY,
+        "native_composition_policy": ACTUAL_COMPOSITION_POLICY,
         "configuration": configuration.pk,
         "rows": values,
         "reference": reference_content,

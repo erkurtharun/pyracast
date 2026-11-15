@@ -202,16 +202,16 @@ def test_daily_history_keeps_completed_seven_day_window_and_preserves_raw() -> N
     assert snapshot.job.binding_id == system.binding.pk
 
 
-@pytest.mark.parametrize("days", [1, 7])
-def test_solcast_actuals_explicitly_requests_seven_day_window(days: int) -> None:
+@pytest.mark.parametrize(("days", "hours"), [(1, "13"), (7, "157")])
+def test_solcast_actuals_requests_only_required_bounded_lookback(days: int, hours: str) -> None:
 
     def handle(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/rooftop_sites/site-1/estimated_actuals"
-        assert dict(request.url.params) == {"format": "json", "hours": "168"}
+        assert dict(request.url.params) == {"format": "json", "hours": hours}
         assert request.headers["Authorization"] == "Bearer test-credential"
         return httpx.Response(200, json={"estimated_actuals": []})
 
-    data = SolcastProvider(httpx.MockTransport(handle)).fetch_history(
+    data = SolcastProvider(httpx.MockTransport(handle), clock=lambda: NOW).fetch_history(
         binding_for(), NOW.date(), days
     )
     assert data.source_kind == "estimated_actuals"
@@ -241,12 +241,12 @@ def test_schedule_configuration_quota_and_effective_boundary() -> None:
     assert get_schedule(system.member, system.tenant.pk, system.region.pk, NOW).pk == configured.pk
     assert enqueue_due(NOW) == []
     ids = enqueue_due(NOW + timedelta(hours=2))
-    assert len(ids) == 1
+    assert len(ids) == 2
     assert CollectionJob.objects.get(pk=ids[0]).endpoint == "forecasts"
-    assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 0
+    assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 1
     tomorrow = enqueue_due(NOW + timedelta(days=1))
     assert len(tomorrow) == 1
-    assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 0
+    assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 1
     configure_schedule(
         system.member, system.tenant.pk, system.region.pk, enabled=False, times=[], now=NOW
     )
@@ -284,11 +284,11 @@ def test_saving_unchanged_schedule_preserves_due_jobs_and_effective_boundary(sta
     assert saved.pk == schedule.pk
     assert saved.effective_from == NOW
     assert AuditEvent.objects.filter(action="collection_schedule_updated").count() == audit_count
-    assert CollectionJob.objects.filter(pk__in=job_ids, status=status, attempts=1).count() == 1
+    assert CollectionJob.objects.filter(pk__in=job_ids, status=status, attempts=1).count() == 2
     assert all(claim(job_id, later) is not None for job_id in job_ids)
 
 
-def test_three_daily_slots_create_distinct_forecasts_and_one_history_acquisition() -> None:
+def test_three_daily_slots_create_forecasts_and_paired_history_jobs() -> None:
     system = make_system(approved=True)
     configure_schedule(
         system.member,
@@ -311,7 +311,7 @@ def test_three_daily_slots_create_distinct_forecasts_and_one_history_acquisition
         assert collect(forecast.pk, HistoricalFixture(slot), calculate, slot)
     assert ForecastResult.objects.count() == 3
     assert ForecastSnapshot.objects.filter(source_kind="forecast").count() == 3
-    assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 1
+    assert CollectionJob.objects.filter(endpoint="estimated_actuals").count() == 4
     assert RequestAttempt.objects.filter(purpose="forecast").count() == 3
     assert RequestAttempt.objects.filter(purpose="estimated_actuals").count() == 1
 
@@ -494,7 +494,7 @@ def test_schedule_api_reads_updates_and_scopes_tenant() -> None:
     assert response.json()["times"] == ["16:00"]
     response = client.put(url, {"enabled": True, "times": ["09:00", "16:00"]}, format="json")
     assert response.status_code == 200
-    assert response.json()["history_requests_per_day"] == 1
+    assert response.json()["history_requests_reserved_per_day"] == 1
     assert client.put(url, {"enabled": True, "times": ["25:00"]}, format="json").status_code == 400
     outsider = User.objects.create(username="outsider")
     client.force_authenticate(outsider)

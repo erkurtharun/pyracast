@@ -1,5 +1,8 @@
 {
     "Forecast": {
+        "updated_estimates_and_forecast": "Gerçekleşen tahmini + öngörü",
+        "updated_estimates_and_forecast_explanation": "Tamamlanan aralıklarda uydu/model tahminleri, kalanında öngörü. Sayaç ölçümü değildir.",
+        "estimate_update": "Gerçekleşen tahmini {id}: alınma {date}",
         "no_estimated_actuals_for_this_day": "Bu güne ait gerçekleşen üretim tahmini yok",
         "estimated_actuals_are_not_available_for_this": "Bu güne ait gerçekleşen üretim tahminleri henüz mevcut değil. Arşivlenmiş bir tahmini veya başka bir tarihi deneyin.",
         "no_configuration_for_this_day": "Bu güne ait yapılandırma yok",
@@ -121,6 +124,10 @@
         }
     },
     "ForecastIntervals": {
+        "source": "Kaynak",
+        "updated_estimate": "Gerçekleşen tahmini",
+        "forecast": "Öngörü",
+        "estimate_and_forecast": "Gerçekleşen tahmini + öngörü",
         "data_unavailable": "Veri mevcut değil.",
         "_average_power_unavailable": " Ortalama güç mevcut değil.",
         "time_interval": "Zaman aralığı",
@@ -405,7 +412,7 @@
         "archived_forecast": "Arşivlenmiş tahmin",
         "archived_dayahead_forecast": "Arşivlenmiş gün öncesi tahmini",
         "estimated_actuals": "Gerçekleşen üretim tahminleri",
-        "completed_local_days_only_model_estimates_not": "Yalnızca tamamlanmış yerel günler · model tahminleridir, sayaç ölçümü değildir.",
+        "elapsed_intervals_model_estimates_not_meter_readings": "Bugünün ve geçmiş günlerin tamamlanan aralıkları · model tahminidir, sayaç ölçümü değildir.",
         "saved_priorday_forecast_under_its_original_configuration": "Özgün yapılandırmasıyla kaydedilmiş önceki gün tahmini."
     },
     "CsvDownload": {

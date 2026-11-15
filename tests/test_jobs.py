@@ -308,12 +308,12 @@ def test_missing_running_lease_is_recoverable_and_naive_now_rejected() -> None:
 def test_scheduler_deduplicates_local_cutoff_and_recovers_missed_slot() -> None:
     make_system(approved=True)
     jobs = enqueue_due(NOW)
-    assert len(jobs) == 1
-    assert jobs == enqueue_due(NOW + timedelta(hours=1))
+    assert len(jobs) == 2
+    assert jobs[:1] == enqueue_due(NOW + timedelta(hours=1))
     scheduled = CollectionJob.objects.get(pk=jobs[0])
     assert scheduled.scheduled_slot == NOW
     assert scheduled.target_date.isoformat() == "2026-11-10"
-    assert enqueue_due(NOW + timedelta(hours=20)) == jobs
+    assert enqueue_due(NOW + timedelta(hours=20)) == jobs[:1]
     next_day = enqueue_due(NOW + timedelta(days=1))
     assert next_day != jobs
     assert CollectionJob.objects.get(pk=next_day[0]).target_date.isoformat() == "2026-11-11"

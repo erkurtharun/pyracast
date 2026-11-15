@@ -172,7 +172,13 @@ export function ForecastPanel({
         Array.isArray(result.quality_flags) &&
         result.quality_flags.includes("mixed_forecast_vintages");
     const provenance = result.provenance as
-        | { source_snapshots?: { snapshot_id: number; collected_at: string }[] }
+        | {
+              source_snapshots?: {
+                  snapshot_id: number;
+                  collected_at: string;
+                  source_kind?: string;
+              }[];
+          }
         | undefined;
     const affectedRows = (
         scenario && Array.isArray(scenario.result.intervals)
@@ -208,6 +214,7 @@ export function ForecastPanel({
               normal_quality_flags: row.quality_flags,
               affected_quality_flags: row.affected_quality_flags,
               source_snapshot_ids: row.source_snapshot_ids,
+              ...(row.source_kinds ? { source_kinds: row.source_kinds } : {}),
           }))
         : allRows;
     const metric = electrical ? "mean_power_mw" : "ghi_wm2",
@@ -252,6 +259,11 @@ export function ForecastPanel({
                             {t("satellitemodel_estimates_not_meter_readings")}
                         </p>
                     )}
+                    {forecast.source_kind === "mixed" && (
+                        <p className="fine">
+                            {t("updated_estimates_and_forecast_explanation")}
+                        </p>
+                    )}
                     {forecast.source_kind === "forecast" &&
                         Array.isArray(result.quality_flags) &&
                         result.quality_flags.includes("forecast_fallback") && (
@@ -290,6 +302,9 @@ export function ForecastPanel({
                         }}
                     />
                     <Tag>{forecast.freshness}</Tag>
+                    {forecast.source_kind === "mixed" && (
+                        <Tag>{t("updated_estimates_and_forecast")}</Tag>
+                    )}
                     {mixedVintages && <Tag>{t("mixed_forecast_updates")}</Tag>}
                     {Array.isArray(result.quality_flags) &&
                         result.quality_flags.includes("archived_forecast") && (
@@ -544,10 +559,13 @@ export function ForecastPanel({
                         rows={rows}
                         electrical={electrical}
                         scenarioLabel={scenario ? Affected : undefined}
+                        showSources={forecast.source_kind === "mixed"}
                         label={
-                            forecast.source_kind === "estimated_actuals"
-                                ? t("estimated_actual_intervals")
-                                : t("forecast_intervals")
+                            forecast.source_kind === "mixed"
+                                ? t("updated_estimates_and_forecast")
+                                : forecast.source_kind === "estimated_actuals"
+                                  ? t("estimated_actual_intervals")
+                                  : t("forecast_intervals")
                         }
                         timezone={forecast.timezone}
                         formatTime={time}
@@ -708,19 +726,25 @@ export function ForecastPanel({
                               : t("baseline_no_active_calibration")
                           : ""}
                 </p>
-                {mixedVintages &&
+                {(mixedVintages || forecast.source_kind === "mixed") &&
                     Array.isArray(provenance?.source_snapshots) && (
                         <ul>
                             {provenance.source_snapshots.map((source) => (
                                 <li key={source.snapshot_id}>
-                                    {t("forecast_update", {
-                                        id: source.snapshot_id,
-                                        date: new Date(
-                                            source.collected_at,
-                                        ).toLocaleString(locale, {
-                                            timeZone: forecast.timezone,
-                                        }),
-                                    })}
+                                    {t(
+                                        source.source_kind ===
+                                            "estimated_actuals"
+                                            ? "estimate_update"
+                                            : "forecast_update",
+                                        {
+                                            id: source.snapshot_id,
+                                            date: new Date(
+                                                source.collected_at,
+                                            ).toLocaleString(locale, {
+                                                timeZone: forecast.timezone,
+                                            }),
+                                        },
+                                    )}
                                 </li>
                             ))}
                         </ul>

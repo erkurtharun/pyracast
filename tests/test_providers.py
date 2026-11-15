@@ -165,7 +165,10 @@ def test_request_uses_fixed_https_origin_header_auth_and_bounded_timeout() -> No
         }
         return httpx.Response(200, json=payload_for())
 
-    provider = SolcastProvider(httpx.MockTransport(handle))
+    provider = SolcastProvider(
+        httpx.MockTransport(handle),
+        clock=lambda: datetime.combine(TARGET, datetime.min.time(), UTC),
+    )
     assert provider.fetch(binding, TARGET).issued_at is None
     provider.validate(binding)
 

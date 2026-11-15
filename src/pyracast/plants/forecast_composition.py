@@ -108,13 +108,18 @@ def compose_forecasts(
             if piece_start >= piece_end:
                 continue
             row = {**native.row, "source_snapshot_id": vintage.snapshot_id}
+            if (
+                native.row.get("original_start", native.row["start"]) != native.row["start"]
+                or native.row.get("original_end", native.row["end"]) != native.row["end"]
+            ):
+                prorated = True
             if piece_start != native.start or piece_end != native.end:
                 # Native means represent clipped durations; no subinterval profile is inferred.
                 row.update(
                     start=piece_start.isoformat(),
                     end=piece_end.isoformat(),
-                    original_start=native.row["start"],
-                    original_end=native.row["end"],
+                    original_start=native.row.get("original_start", native.row["start"]),
+                    original_end=native.row.get("original_end", native.row["end"]),
                 )
                 prorated = True
             intervals.append(row)

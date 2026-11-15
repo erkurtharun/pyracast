@@ -9,7 +9,13 @@ from django.utils import timezone
 from django.utils.translation import gettext
 
 from pyracast.accounts.operations import require_member
-from pyracast.forecasts.history import actuals_ready, historical_irradiance, select_actual_snapshot
+from pyracast.forecasts.actuals import (
+    ArchivedActualSource,
+    apply_archived_actual_source,
+    archived_actual_irradiance,
+    select_archived_actual_source,
+)
+from pyracast.forecasts.history import actuals_ready, historical_irradiance
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.automatic_forecast import automatic_forecast
@@ -77,7 +83,7 @@ def plant_outlook(
 
 def _current_actuals(
     plant: Plant, target_date: date, cutoff: datetime
-) -> tuple[PlantConfiguration, ForecastSnapshot, CalibrationRun | None] | None:
+) -> tuple[PlantConfiguration, ArchivedActualSource, CalibrationRun | None] | None:
     """Prefer the current declaration for a past day that its binding archived, with the
     calibration whose training period covers that day; both are flagged in the result."""
     if plant.current_configuration_id is None:
@@ -85,13 +91,13 @@ def _current_actuals(
     current = PlantConfiguration.objects.select_related("binding__provider_account").get(
         pk=plant.current_configuration_id, plant=plant
     )
-    snapshot = select_actual_snapshot(current.binding, target_date, cutoff)
-    if snapshot is None:
+    source = select_archived_actual_source(current.binding, target_date, cutoff)
+    if source is None:
         return None
     calibration = calibration_for_day(current, target_date, cutoff)
     if calibration is not None and not production_identity_current(calibration):
         calibration = None
-    return current, snapshot, calibration
+    return current, source, calibration
 
 
 def _plant_outlook(
@@ -112,6 +118,8 @@ def _plant_outlook(
         raise ValidationError(gettext("Unsupported data source."))
     if source == "archived_forecast":
         return archived_forecast(plant, target_date, resolution_minutes, now, as_of=as_of)
+    if source == "estimated_actuals" and target_date == today and as_of is None:
+        return current_forecast(plant, target_date, resolution_minutes, now, actuals_only=True)
     if source == "forecast" or (source == "auto" and target_date >= today):
         if as_of is None and target_date >= today:
             selection = automatic_forecast if source == "auto" else current_forecast
@@ -140,10 +148,12 @@ def _plant_outlook(
     )
     configuration: PlantConfiguration | None = None
     snapshot: ForecastSnapshot | None = None
+    actual_source: ArchivedActualSource | None = None
     calibration: CalibrationRun | None = None
     selected = _current_actuals(plant, target_date, cutoff) if as_of is None else None
     if selected is not None:
-        configuration, snapshot, calibration = selected
+        configuration, actual_source, calibration = selected
+        snapshot = actual_source.snapshot
     else:
         if as_of is None:
             day_start, day_end = local_day_bounds(target_date, region.timezone)
@@ -162,11 +172,19 @@ def _plant_outlook(
             ordering = ("created_at", "pk") if as_of is None else ("-created_at", "-pk")
             configuration = configurations.order_by(*ordering).first()
         if configuration is not None:
-            snapshot = select_actual_snapshot(configuration.binding, target_date, cutoff)
+            actual_source = select_archived_actual_source(
+                configuration.binding, target_date, cutoff
+            )
+            snapshot = actual_source.snapshot if actual_source is not None else None
     irradiance = None
     if snapshot is not None:
         try:
-            irradiance = historical_irradiance(snapshot, target_date)
+            assert actual_source is not None  # noqa: S101 -- A selected snapshot has its pinned source.
+            irradiance = (
+                archived_actual_irradiance(configuration.binding, target_date, actual_source)
+                if configuration is not None and actual_source.composition is not None
+                else historical_irradiance(snapshot, target_date)
+            )
         except (ValueError, ArithmeticError) as exc:
             raise ValidationError("calculation_out_of_range") from exc
     if (
@@ -192,8 +210,17 @@ def _plant_outlook(
     if snapshot is not None and configuration is not None:
         try:
             result = forecast_payload(
-                configuration, snapshot, calibration, target_date, resolution_minutes
+                configuration,
+                snapshot,
+                calibration,
+                target_date,
+                resolution_minutes,
+                source_intervals=actual_source.composition.intervals
+                if actual_source is not None and actual_source.composition is not None
+                else None,
             )
+            if actual_source is not None:
+                apply_archived_actual_source(result, actual_source)
         except (ValueError, ArithmeticError) as exc:
             raise ValidationError("calculation_out_of_range") from exc
         if calibration is not None:

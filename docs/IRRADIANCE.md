@@ -14,6 +14,22 @@ The reference for reconstruction is Solcast GHI from the same forecast issue, lo
 - Archive each acquired forecast vintage. Estimated actuals are not archived forecasts. Retain raw payload, collection time, provider issue time when available, interval bounds, units and configuration revision. Never invent an unavailable issue time.
 - Normalize source-specific units and timestamp conventions at the adapter boundary. Confirm central/quantile semantics rather than assuming the central value is P50 or an expectation.
 
+Live forecast collection requests the smallest whole-hour horizon reaching the
+midnight after today and the following two local dates. Normalize only that
+three-date window, retaining the full provider response. Local calendar boundaries
+determine the horizon across daylight-saving changes; a boundary interval keeps
+its native bounds when its mean is prorated.
+
+At each forecast slot and during nightly recovery, check completed native half-hours
+within the rolling 168-hour archive. Require local hours overlapping daylight,
+including whole sunrise/sunset boundary hours for meter comparisons; polar night
+requires none. Complete coverage consumes no request. Otherwise the established
+`hours` parameter requests the shortest whole-hour lookback reaching the oldest gap,
+capped at 168 hours. This contiguous response can repeat intervening archived data
+and nights; Hobby's public guide does not specify arbitrary `start`/`end` filtering.
+Future forecast requests retain their account-wide UTC quota reservations before
+history is admitted.
+
 ## Estimation
 
 Implement a replaceable estimator with typed inputs and outputs containing values, method/version and quality flags.
@@ -185,14 +201,24 @@ at the native source interval **before** hourly aggregation: native powers 80 an
 120 MW over two half-hours with a 100 MW limit produce 90 MWh for the hour.
 Interval means cannot recover clipping at finer time resolution.
 
-Current outlooks compose native forecast intervals under `latest-forecast-coverage-v2`.
+Explicit forecast outlooks compose native forecast intervals under `latest-forecast-coverage-v2`.
 The newest acquisition owns its coverage window, including internal missing values;
 older acquisitions can fill only the remaining windows. Split native intervals at
 ownership boundaries before calibration, clipping and aggregation. Retain their
 mean values and original bounds, and flag `uniform_mean_proration` when a split
 assumes a uniform mean over a shorter duration. Preserve every contributing source
 and apply the same pieces to normal and outage scenarios. This composition remains
-a forecast; it does not substitute estimated actuals or change day-ahead replays.
+a forecast and does not change day-ahead replays. Today's automatic outlook and
+email instead prefer saved native Solcast estimated actuals for completed native
+intervals, using `estimated-actuals-then-forecast-v1`. Actual acquisitions follow the
+same coverage ownership rule before valid pieces replace forecasts; nulls and gaps
+inside newer actual coverage cannot recover older actual values. The original
+native end must have elapsed, even when acquisition clipping shortened the saved
+row. Remaining time uses saved forecasts. Expose `mixed` source identity and every
+contributor; these actuals remain model estimates, not EPİAŞ production or meters.
+Once actuals cover astronomical daylight and its whole native boundary intervals,
+select actuals alone. Missing nights remain missing. Explicit actuals expose the
+available current-day history without forecast filling.
 
 Today's automatic reference-transition fallback selects one complete original
 day-ahead forecast under the compatibility rules in `ARCHITECTURE.md`. Preserve
@@ -436,26 +462,28 @@ Longer history and seasonal testing are supported by the
 and [IEA PVPS solar-resource handbook](https://iea-pvps.org/wp-content/uploads/2024/09/Best-Practices-Handbook-for-the-Collection-and-Use-of-Solar-Resource-Data-for-Solar-Energy-Applications-Fourth-Edition-.pdf);
 they do not remove the need for local chronological and source-specific validation.
 
-The initial seven-day provider window can contain fewer than seven complete local
-days. Wait for enough matched days rather than relaxing the minimum. The new
-selection policy is `native-first-complete-estimated-actuals-v3`: prefer the newest
-native Hobby acquisition with complete valid reference PV power coverage of the
-selected local day. If none is complete, use the newest complete historical/legacy
-acquisition. If every acquisition is partial, prefer native Hobby before other
-products, preserving newest-first order within each group. Never merge vintages.
-A later historical import cannot hide an already complete native Hobby day. Include
-the selection policy and source lineage in the preparation fingerprint, so a
-product change re-evaluates eligibility even when power values are identical;
-repeated identical native acquisitions still deduplicate. This
-prevents the oldest day of a rolling 168-hour window from hiding an earlier whole
-day. Completion requires finite nonnegative power and contiguous, non-overlapping
-elapsed-time coverage, including valid nighttime zeroes and 23/25-hour local days;
-it does not require reconstructed GHI to be identifiable. Night collection starts
-at 00:00 local time and retries incomplete or failed input at 30-minute intervals before
-09:00, within the account's available budget after scheduled forecasts. Old
-requests retain pinned acquisitions; already active factors remain historical
-selections, while old-policy ready candidates require a new request before
-activation. Old forecast-based
+The initial seven-day provider window can contain fewer than seven matched local
+days. Wait for sufficient support rather than relaxing the minimum. Archived
+native actuals use `native-estimated-actuals-coverage-v1`: compose eligible native
+acquisitions under one binding in newest-first coverage order, including windows
+acquired during the selected day. Older acquisitions fill only outside newer
+coverage; invalid or missing newer values remain missing. Do not mix native,
+capacity-normalized and imported products. Preserve a complete authorized whole
+source when native daylight coverage is insufficient. A complete native daylight
+archive takes precedence despite missing nights; numerical totals and calibration
+still require their whole native and meter boundary intervals. Preserve elapsed
+23/25-hour days, finite nonnegative power, and explicit missingness independently
+of whether reconstructed GHI is identifiable.
+
+Calibration pins `actual-composition-v1` source IDs, coverage segments and exact
+native pieces at its cutoff. Replay verifies that immutable acquisitions reproduce
+the pin; later acquisitions cannot enter a pending fit. Existing integer pins and
+completed fits retain their original selection. Preparation fingerprints compare
+effective selected-day values and product identity, so equivalent whole and split
+native acquisitions deduplicate while product changes remain significant. Night
+collection and bounded retries follow the saved-data collection policy above.
+Already active factors remain historical selections; ready candidates from
+unsupported older policies require a new request before activation. Old forecast-based
 candidates cannot be newly activated as this calibration. Existing activation
 history remains readable. Activation applies only after its recorded time, so
 archived forecasts retain the factor available then. Holdout improvement against

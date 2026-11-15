@@ -2,7 +2,7 @@ import { expect, test, type Page } from "./support/test";
 import AxeBuilder from "@axe-core/playwright";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
-import { mockApi, region } from "./support/workspace";
+import { mockApi, region, user } from "./support/workspace";
 
 const start = Date.parse("2026-11-14T09:00:00Z");
 function intervals(resolution = 60) {
@@ -22,10 +22,22 @@ async function openForecast(
         scenario?: "outage";
         missing?: boolean;
         flagged?: boolean;
+        mixed?: boolean;
+        language?: "en" | "tr";
     } = {},
 ) {
-    const { electrical = true, scenario, missing, flagged } = options;
+    const { electrical = true, scenario, missing, flagged, mixed } = options;
     await mockApi(page);
+    if (options.language === "tr")
+        await page.route("**/api/session/", (route) =>
+            route.fulfill({
+                json: {
+                    user: { ...user, language_preference: "tr" },
+                    csrf_token: "signed-token",
+                    language: "tr",
+                },
+            }),
+        );
     await page.route(
         electrical ? "**/plants/21/forecast/**" : "**/regions/11/forecast/**",
         (route) => {
@@ -45,6 +57,17 @@ async function openForecast(
                 ghi_wm2: missing ? (index === 0 ? 0 : null) : row.ghi_wm2,
                 quality_flags:
                     flagged && index === 0 ? ["normal_test_flag"] : [],
+                ...(mixed
+                    ? {
+                          source_kinds:
+                              index === 0
+                                  ? ["estimated_actuals"]
+                                  : index === 2
+                                    ? ["estimated_actuals", "forecast"]
+                                    : ["forecast"],
+                          source_snapshot_ids: [index + 1],
+                      }
+                    : {}),
             }));
             if (missing)
                 rows.push({
@@ -59,12 +82,31 @@ async function openForecast(
                 energy_mwh: missing ? null : 4,
                 partial_energy_mwh: missing ? 0 : 4,
                 intervals: rows,
+                ...(mixed
+                    ? {
+                          provenance: {
+                              source_snapshots: [
+                                  {
+                                      snapshot_id: 1,
+                                      collected_at: "2026-11-14T10:00:00Z",
+                                      source_kind: "estimated_actuals",
+                                  },
+                                  {
+                                      snapshot_id: 2,
+                                      collected_at: "2026-11-13T18:00:00Z",
+                                      source_kind: "forecast",
+                                  },
+                              ],
+                          },
+                      }
+                    : {}),
             };
             return route.fulfill({
                 json: {
                     date: "2026-11-14",
                     timezone: region.timezone,
                     freshness: "fresh",
+                    source_kind: mixed ? "mixed" : "forecast",
                     result,
                     ...(scenario
                         ? {
@@ -98,8 +140,97 @@ async function openForecast(
     await page.getByRole("button", { name: /East array/ }).click();
     if (!electrical)
         await page
-            .getByRole("button", { name: "Irradiance", exact: true })
+            .getByRole("button", {
+                name: options.language === "tr" ? "Işınım" : "Irradiance",
+                exact: true,
+            })
             .click();
+}
+
+test("Turkish mixed sources stay readable on mobile without empty quality columns", async ({
+    page,
+}, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openForecast(page, { mixed: true, language: "tr" });
+    await expect(
+        page.getByText("Gerçekleşen tahmini + öngörü", { exact: true }),
+    ).toBeVisible();
+    await page.locator(".interval-details > summary").click();
+    const table = page.getByRole("table");
+    await expect(table.getByRole("columnheader")).toHaveCount(3);
+    await expect(
+        table.getByRole("cell", { name: "Gerçekleşen tahmini", exact: true }),
+    ).toBeVisible();
+    await expect(
+        table.getByRole("cell", { name: "Öngörü", exact: true }),
+    ).toBeVisible();
+    expect(
+        await page.evaluate(
+            () => document.documentElement.scrollWidth <= innerWidth,
+        ),
+    ).toBe(true);
+    await page.screenshot({
+        path: testInfo.outputPath("mixed-sources-tr-mobile.png"),
+        fullPage: true,
+    });
+});
+
+for (const electrical of [true, false]) {
+    test(`${electrical ? "generation" : "irradiance"} discloses estimated and forecast interval sources in mixed views and CSV`, async ({
+        page,
+    }, testInfo) => {
+        await openForecast(page, { electrical, mixed: true });
+        await expect(
+            page.getByText("Estimated + forecast", { exact: true }),
+        ).toBeVisible();
+        await expect(
+            page.getByText(
+                /Satellite\/model estimates for completed intervals/,
+            ),
+        ).toBeVisible();
+        await page.getByText("View interval data (2 intervals)").click();
+        const table = page.getByRole("table");
+        await expect(
+            table.getByRole("columnheader", { name: "Source", exact: true }),
+        ).toBeVisible();
+        await expect(table.getByRole("row").nth(1)).toContainText(
+            "Estimated actuals",
+        );
+        await expect(table.getByRole("row").nth(2)).toContainText("Forecast");
+        await expect(page.locator(".interval-notes")).toHaveCount(0);
+        if (electrical) {
+            await page.getByLabel("Resolution").selectOption("30");
+            await page.getByText("View interval data (4 intervals)").click();
+            await expect(table.getByRole("row").nth(3)).toContainText(
+                "Estimated + forecast",
+            );
+        }
+        const download = page.waitForEvent("download");
+        await page
+            .getByRole("button", { name: "Download CSV", exact: true })
+            .click();
+        const records = Papa.parse<Record<string, string>>(
+            await readFile(await (await download).path(), "utf8"),
+            { header: true, skipEmptyLines: true },
+        );
+        expect(records.data[0].source_kinds).toContain("estimated_actuals");
+        expect(records.data[1].source_kinds).toContain("forecast");
+        if (electrical) {
+            expect(records.data[2].source_kinds).toContain("estimated_actuals");
+            expect(records.data[2].source_kinds).toContain("forecast");
+        }
+        await page.getByText("Source & quality", { exact: true }).click();
+        await expect(
+            page.getByText(/Estimate update 1: collected/),
+        ).toBeVisible();
+        await expect(
+            page.getByText(/Forecast update 2: collected/),
+        ).toBeVisible();
+        await page.screenshot({
+            path: testInfo.outputPath("mixed-sources.png"),
+            fullPage: true,
+        });
+    });
 }
 
 test("generation intervals show energy without redundant visible power columns", async ({

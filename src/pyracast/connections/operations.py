@@ -140,7 +140,6 @@ def reserve_account_request(
             raise QuotaExceededError
         if (
             job is not None
-            and job.retry_until is not None
             and purpose == "estimated_actuals"
             and used + 1 + remaining_forecast_requests(account, now) > account.daily_quota
         ):

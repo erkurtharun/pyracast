@@ -472,7 +472,7 @@ test("region collection schedule validates and saves distinct local times", asyn
         daily_request_limit: 10,
         used_today: 2,
         remaining_today: 8,
-        history_requests_per_day: 1,
+        history_requests_reserved_per_day: 1,
         history_local_time: "03:00",
         history_retry_until_local: "09:00",
         history_retry_minutes: 30,
@@ -662,12 +662,24 @@ test("regional and plant data sources identify estimated actuals and retain arch
     await expect.poll(() => sources.at(-1)).toBe("forecast");
     await page.getByLabel("Forecast date").fill("2026-03-28");
     await page.getByLabel("Data source").selectOption("estimated_actuals");
-    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-27");
+    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-28");
+    await expect(page.getByLabel("Forecast date")).toHaveAttribute(
+        "max",
+        "2026-03-28",
+    );
     await expect.poll(() => sources.at(-1)).toBe("estimated_actuals");
     await page.getByRole("button", { name: "Generation", exact: true }).click();
     await expect(page.getByLabel("Data source")).toHaveValue(
         "estimated_actuals",
     );
+    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-28");
+    await expect
+        .poll(() => plantRequests.at(-1)?.searchParams.get("date"))
+        .toBe("2026-03-28");
+    await page.getByLabel("Data source").selectOption("auto");
+    await page.getByLabel("Forecast date").fill("2026-03-29");
+    await page.getByLabel("Data source").selectOption("estimated_actuals");
+    await expect(page.getByLabel("Forecast date")).toHaveValue("2026-03-28");
     await page.getByLabel("Data source").selectOption("auto");
     await page.getByLabel("Forecast date").fill("2026-03-29");
     await expect(page.getByLabel("Resolution")).toHaveValue("60");

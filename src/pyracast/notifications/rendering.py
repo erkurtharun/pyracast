@@ -1,5 +1,5 @@
 from base64 import b64encode
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import cast
 from zoneinfo import ZoneInfo
 
@@ -7,10 +7,10 @@ from django.template.loader import render_to_string
 from django.utils.formats import date_format, number_format
 from django.utils.translation import gettext as _
 
-from pyracast.forecasts.projections import saved_day_payload
 from pyracast.notifications.models import NotificationDelivery
-from pyracast.notifications.presentation import present_report
+from pyracast.notifications.presentation import present_report, source_label
 from pyracast.notifications.report_data import saved_report_context
+from pyracast.notifications.sources import saved_report_results
 from pyracast.notifications.workbook import build_workbook
 
 
@@ -35,14 +35,8 @@ def render_forecast(
 ) -> dict[str, str]:
     context = report_context if report_context is not None else saved_report_context(delivery)
     zone = ZoneInfo(cast(str, context["timezone"]))
-    today = delivery.scheduled_for.astimezone(zone).date()
     if results is None:
-        results = [
-            saved_day_payload(delivery.snapshot, today + timedelta(days=offset))
-            if delivery.snapshot
-            else None
-            for offset in (0, 1)
-        ]
+        results = saved_report_results(delivery, delivery.scheduled_for)
     report = present_report(
         context,
         results,
@@ -58,6 +52,10 @@ def render_forecast(
     rows = [
         {
             "date": date_format(day.day, "j M Y"),
+            "label": source_label(day.source_kind) if not has_outage else normal_label,
+            "source": source_label(day.source_kind)
+            if has_outage and day.source_kind != "forecast"
+            else "",
             "normal": energy_text(day.total, day.partial, day.coverage, report.unit),
             "outage": energy_text(
                 day.outage_total, day.outage_partial, day.outage_coverage, report.unit

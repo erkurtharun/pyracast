@@ -75,12 +75,14 @@ def configure_schedule(
             binding__region=region, status__in=("pending", "retry")
         )
         if enabled:
-            unclaimed = unclaimed.filter(endpoint="forecasts")
             zone = ZoneInfo(region.timezone)
             retained = [
                 pk
-                for pk, slot in unclaimed.values_list("pk", "scheduled_slot")
-                if slot.astimezone(zone).strftime("%H:%M") in times
+                for pk, endpoint, slot, target in unclaimed.values_list(
+                    "pk", "endpoint", "scheduled_slot", "target_date"
+                )
+                if (endpoint != "forecasts" and target != slot.astimezone(zone).date())
+                or slot.astimezone(zone).strftime("%H:%M") in times
             ]
             unclaimed = unclaimed.exclude(pk__in=retained)
         unclaimed.update(status="stale", lease_token=None, lease_expires_at=None)
@@ -137,7 +139,7 @@ def schedule_payload(schedule: CollectionSchedule, now: datetime) -> dict[str, o
         "quota_utc_day": utc_day.isoformat(),
         "requests_by_outcome": outcomes,
         "recent_jobs": recent,
-        "history_requests_per_day": 1,
+        "history_requests_reserved_per_day": 1,
         "history_local_time": HISTORY_CLOCK,
         "history_retry_until_local": HISTORY_END_CLOCK,
         "history_retry_minutes": int(NIGHT_RETRY_DELAY.total_seconds() / 60),

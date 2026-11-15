@@ -1,10 +1,12 @@
+from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 from math import isfinite
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from django.db.models import Max, Min, Q
 
-from pyracast.forecasts.history import select_actual_snapshot
+from pyracast.forecasts.actuals import select_archived_actual_source
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.plants.models import PlantConfiguration
 from pyracast.plants.numerics import PowerInterval
@@ -14,17 +16,20 @@ from pyracast.plants.transfer import reference_power_mw
 def reference_intervals(
     configuration: PlantConfiguration, day: date, as_of: datetime
 ) -> tuple[PowerInterval, ...]:
-    snapshot = select_actual_snapshot(configuration.binding, day, as_of)
-    if snapshot is None:
+    source = select_archived_actual_source(configuration.binding, day, as_of)
+    if source is None:
         return ()
-    return actual_power_intervals(snapshot, configuration)
+    return actual_power_intervals(source.snapshot, configuration, source_intervals=source.intervals)
 
 
 def actual_power_intervals(
-    snapshot: ForecastSnapshot, configuration: PlantConfiguration
+    snapshot: ForecastSnapshot,
+    configuration: PlantConfiguration,
+    *,
+    source_intervals: Sequence[dict[str, Any]] | None = None,
 ) -> tuple[PowerInterval, ...]:
     result = []
-    for row in snapshot.normalized_intervals:
+    for row in snapshot.normalized_intervals if source_intervals is None else source_intervals:
         power = row.get("power_kw")
         if (
             isinstance(power, bool)

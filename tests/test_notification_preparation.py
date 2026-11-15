@@ -254,7 +254,7 @@ def test_partial_tomorrow_survives_missing_today_and_does_not_invent_daily_total
     assert sheet["B6"].value == pytest.approx(
         result.daily_payloads["2026-11-11"]["daylight"]["partial_energy_kwh_m2"]
     )
-    assert sheet["D6"].value == "Forecast partial"
+    assert sheet["D6"].value == "Partial estimate"
     assert delivery.prepared_message["tomorrow_complete"] is False
 
 

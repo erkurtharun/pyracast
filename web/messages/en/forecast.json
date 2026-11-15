@@ -1,5 +1,8 @@
 {
     "Forecast": {
+        "updated_estimates_and_forecast": "Estimated + forecast",
+        "updated_estimates_and_forecast_explanation": "Satellite/model estimates for completed intervals; forecasts for the rest. Not meter readings.",
+        "estimate_update": "Estimate update {id}: collected {date}",
         "no_estimated_actuals_for_this_day": "No estimated actuals for this day",
         "estimated_actuals_are_not_available_for_this": "Estimated actuals are not available for this day yet. Try an archived forecast or another date.",
         "no_configuration_for_this_day": "No configuration for this day",
@@ -121,6 +124,10 @@
         }
     },
     "ForecastIntervals": {
+        "source": "Source",
+        "updated_estimate": "Estimated actuals",
+        "forecast": "Forecast",
+        "estimate_and_forecast": "Estimated + forecast",
         "data_unavailable": "Data unavailable.",
         "_average_power_unavailable": " Average power unavailable.",
         "time_interval": "Time interval",
@@ -405,7 +412,7 @@
         "archived_forecast": "Archived forecast",
         "archived_dayahead_forecast": "Archived day-ahead forecast",
         "estimated_actuals": "Estimated actuals",
-        "completed_local_days_only_model_estimates_not": "Completed local days only · model estimates, not meter readings.",
+        "elapsed_intervals_model_estimates_not_meter_readings": "Completed intervals today and on past days · model estimates, not meter readings.",
         "saved_priorday_forecast_under_its_original_configuration": "Saved prior-day forecast under its original configuration."
     },
     "CsvDownload": {

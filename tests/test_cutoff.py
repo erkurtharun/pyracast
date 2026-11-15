@@ -33,13 +33,15 @@ def test_configured_minute_sets_local_slot_and_deduplicates() -> None:
     make_system(approved=True)
     assert enqueue_due(NOW + timedelta(minutes=29)) == []
     ids = enqueue_due(NOW + timedelta(minutes=30))
-    assert len(ids) == 1
+    assert len(ids) == 2
     job = CollectionJob.objects.get(pk=ids[0])
     assert job.endpoint == "forecasts"
-    assert not CollectionJob.objects.filter(endpoint="estimated_actuals").exists()
+    assert (
+        CollectionJob.objects.get(endpoint="estimated_actuals").scheduled_slot == job.scheduled_slot
+    )
     assert job.scheduled_slot == NOW + timedelta(minutes=30)
     assert job.target_date.isoformat() == "2026-11-10"
-    assert enqueue_due(NOW + timedelta(hours=1)) == ids
+    assert enqueue_due(NOW + timedelta(hours=1)) == ids[:1]
 
 
 @pytest.mark.django_db(transaction=True)

@@ -1,5 +1,5 @@
 import logging
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, datetime, timedelta
 from math import isclose, isfinite
 from typing import cast
 from zoneinfo import ZoneInfo
@@ -33,9 +33,7 @@ def prepare_daily_payloads(
         return payloads
     zone = ZoneInfo(binding.timezone)
     first = data.collected_at.astimezone(zone).date()
-    # Bound preparation by the provider's elapsed 72-hour retrieval horizon, including DST.
-    horizon = data.collected_at.astimezone(UTC) + timedelta(hours=72, microseconds=-1)
-    last = horizon.astimezone(zone).date()
+    last = first + timedelta(days=2)
     days: set[date] = set()
     for row in data.intervals:
         try:

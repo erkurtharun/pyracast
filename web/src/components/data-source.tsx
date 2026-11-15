@@ -52,7 +52,7 @@ export function DataSourceControl({
             </label>
             {value === "estimated_actuals" && (
                 <span className="fine">
-                    {t("completed_local_days_only_model_estimates_not")}
+                    {t("elapsed_intervals_model_estimates_not_meter_readings")}
                 </span>
             )}
             {value === "archived_forecast" && (

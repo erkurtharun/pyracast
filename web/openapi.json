@@ -3486,7 +3486,7 @@
                             "$ref": "#/components/schemas/CollectionJobOutput"
                         }
                     },
-                    "history_requests_per_day": {
+                    "history_requests_reserved_per_day": {
                         "type": "integer"
                     },
                     "history_local_time": {
@@ -3507,7 +3507,7 @@
                     "effective_from",
                     "enabled",
                     "history_local_time",
-                    "history_requests_per_day",
+                    "history_requests_reserved_per_day",
                     "history_retry_minutes",
                     "history_retry_until_local",
                     "max_forecast_times",
@@ -3963,9 +3963,9 @@
                 ]
             },
             "ForecastSourceKindEnum": {
-                "enum": ["forecast", "estimated_actuals"],
+                "enum": ["forecast", "estimated_actuals", "mixed"],
                 "type": "string",
-                "description": "* `forecast` - forecast\n* `estimated_actuals` - estimated_actuals"
+                "description": "* `forecast` - forecast\n* `estimated_actuals` - estimated_actuals\n* `mixed` - mixed"
             },
             "IncidentInput": {
                 "type": "object",
@@ -4792,6 +4792,13 @@
                         "type": "integer",
                         "nullable": true
                     },
+                    "source_snapshot_ids": {
+                        "type": "array",
+                        "items": {
+                            "type": "integer"
+                        }
+                    },
+                    "reference_provenance": {},
                     "collected_at": {
                         "type": "string",
                         "format": "date-time",

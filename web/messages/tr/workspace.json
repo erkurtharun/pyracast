@@ -94,7 +94,7 @@
         "awaitingApproval": "Yönetici onayı bekleniyor. Santral bilgileriniz kaydedildi; tahminler veri bağlantısı onaylandıktan ve veri toplama başarılı olduktan sonra kullanılabilir.",
         "minutes30": "30 dakika",
         "minutes60": "60 dakika",
-        "selectCompletedDay": "Geçmiş tahminleri için tamamlanmış bir yerel gün seçin.",
+        "selectTodayOrPastDay": "Gerçekleşen üretim tahminleri için bugünü veya geçmiş bir yerel günü seçin.",
         "selectArchivedDay": "Arşiv tahminleri için bugünü veya daha önceki bir günü seçin.",
         "calibrationChangeNote": "Değişiklikler bekleyen kalibrasyonun yerini alabilir.",
         "approvalDetailsRequired": "Onay istemek için teknik bilgileri tamamlayın.",

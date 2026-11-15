@@ -11,6 +11,7 @@ from pyracast.notifications.mail import build_message, build_unavailable_message
 from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.presentation import report_summary
 from pyracast.notifications.report_data import saved_report_context
+from pyracast.notifications.sources import eligible_saved_forecasts, saved_report_results
 
 
 def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
@@ -56,16 +57,19 @@ def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
         results = (
             cast(list[dict[str, object] | None], existing["results"])
             if "results" in existing
-            else _saved_results(delivery)
+            else saved_report_results(delivery, prepared_at)
         )
         _freeze_slot(delivery, slot_deliveries, results, prepared_at, metadata)
         return True
-    job = CollectionJob.objects.filter(
-        binding=binding,
-        endpoint="forecasts",
-        reference_import__isnull=True,
-        scheduled_slot=delivery.scheduled_for,
-    ).first()
+    jobs = list(
+        CollectionJob.objects.filter(
+            binding=binding,
+            endpoint__in=("forecasts", "estimated_actuals"),
+            reference_import__isnull=True,
+            scheduled_slot=delivery.scheduled_for,
+        )
+    )
+    job = next((candidate for candidate in jobs if candidate.endpoint == "forecasts"), None)
     schedule = CollectionSchedule.objects.filter(region_id=binding.region_id).first()
     first_slot = (
         CollectionJob.objects.filter(
@@ -86,10 +90,10 @@ def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
         == delivery.scheduled_for
     )
     if now < deadline and (
-        (
-            job is not None
-            and job.status in {"pending", "running", "retry"}
-            and (job.status != "retry" or job.available_at < deadline)
+        any(
+            candidate.status in {"pending", "running", "retry"}
+            and (candidate.status != "retry" or candidate.available_at < deadline)
+            for candidate in jobs
         )
         or (job is None and due)
     ):
@@ -102,27 +106,12 @@ def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
     partial: ForecastSnapshot | None = None
     snapshot: ForecastSnapshot | None = None
     for candidate in (
-        ForecastSnapshot.objects.filter(
-            binding=binding,
-            job__status="succeeded",
-            source_kind="forecast",
-            collected_at__lte=cutoff,
-            forecastresult__published_at__lte=cutoff,
-        )
+        eligible_saved_forecasts(delivery, cutoff)
         .filter(
             Q(forecastresult__daily_payloads__has_key=tomorrow.isoformat())
             | Q(forecastresult__payload__local_date=tomorrow.isoformat())
         )
-        .filter(
-            Q(
-                collected_at__lte=delivery.scheduled_for,
-                forecastresult__published_at__lte=delivery.scheduled_for,
-            )
-            | Q(job__scheduled_slot=delivery.scheduled_for, job__reference_import__isnull=True)
-        )
-        .select_related("forecastresult", "binding", "job")
         .defer("raw_payload", "normalized_intervals", "weather_payload")
-        .order_by("-collected_at", "-pk")
     ):
         result = saved_day_payload(candidate, tomorrow)
         if result is None:
@@ -133,7 +122,7 @@ def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
         if partial is None and cast(float, result["valid_coverage_seconds"]) > 0:
             partial = candidate
     delivery.snapshot = snapshot or partial
-    results = _saved_results(delivery)
+    results = saved_report_results(delivery, cutoff)
     kind = (
         "current"
         if snapshot and snapshot.job_id == getattr(job, "pk", None)
@@ -156,18 +145,6 @@ def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
     return True
 
 
-def _saved_results(delivery: NotificationDelivery) -> list[dict[str, object] | None]:
-    binding = delivery.binding
-    assert binding is not None  # noqa: S101 -- The slot's binding was authorized under lock.
-    today = delivery.scheduled_for.astimezone(ZoneInfo(binding.timezone)).date()
-    return [
-        saved_day_payload(delivery.snapshot, today + timedelta(days=offset))
-        if delivery.snapshot is not None
-        else None
-        for offset in (0, 1)
-    ]
-
-
 def _freeze_slot(
     delivery: NotificationDelivery,
     slot_deliveries: QuerySet[NotificationDelivery],
@@ -177,7 +154,7 @@ def _freeze_slot(
 ) -> None:
     metadata.setdefault("results", results)
     if metadata.get("format") != "plain" and "report_context" not in metadata:
-        metadata["report_context"] = saved_report_context(delivery)
+        metadata["report_context"] = saved_report_context(delivery, available_at=prepared_at)
     if metadata.get("format") == "plain":
         metadata["tomorrow_complete"] = False
     else:

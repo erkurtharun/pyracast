@@ -6,6 +6,11 @@ from django.core.exceptions import ValidationError
 
 from pyracast.calculation import calculate
 from pyracast.connections.models import ProviderAccount
+from pyracast.forecasts.intraday import (
+    apply_intraday_source,
+    prepare_intraday_source,
+    preserve_forecast_weather,
+)
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.forecasts.sources import (
     current_forecast_snapshots,
@@ -21,7 +26,13 @@ from pyracast.plants.operations import configuration_is_current
 
 
 def current_forecast(
-    plant: Plant, target_date: date, resolution_minutes: int, now: datetime
+    plant: Plant,
+    target_date: date,
+    resolution_minutes: int,
+    now: datetime,
+    *,
+    include_actuals: bool = False,
+    actuals_only: bool = False,
 ) -> dict[str, object]:
     today = now.astimezone(ZoneInfo(plant.region.timezone)).date()
     if isinstance(resolution_minutes, bool) or resolution_minutes not in (30, 60):
@@ -44,7 +55,16 @@ def current_forecast(
         configuration.binding.provider_account.refresh_from_db()
         if not configuration_is_current(configuration):
             configuration = None
-    return _composed_forecast(plant, target_date, resolution_minutes, now, now, configuration)
+    return _composed_forecast(
+        plant,
+        target_date,
+        resolution_minutes,
+        now,
+        now,
+        configuration,
+        include_actuals=include_actuals,
+        actuals_only=actuals_only,
+    )
 
 
 def saved_forecast(
@@ -86,17 +106,41 @@ def _composed_forecast(
     configuration: PlantConfiguration | None,
     *,
     historical: bool = False,
+    include_actuals: bool = False,
+    actuals_only: bool = False,
 ) -> dict[str, object]:
     snapshot = None
     calibration = None
     result = None
     irradiance = None
+    source_kind = "estimated_actuals" if actuals_only else "forecast"
     used_snapshots: list[ForecastSnapshot] = []
     if configuration is not None:
         start, end = local_day_bounds(target_date, configuration.binding.timezone)
         snapshots = current_forecast_snapshots(
             binding_id=configuration.binding_id, start=start, end=end, as_of=cutoff
         )
+        forecasts = snapshots
+        try:
+            source = (
+                prepare_intraday_source(
+                    configuration.binding,
+                    target_date,
+                    snapshots,
+                    knowledge_cutoff=cutoff,
+                    elapsed_cutoff=cutoff,
+                    actuals_only=actuals_only,
+                )
+                if include_actuals or actuals_only
+                else None
+            )
+        except (ValueError, ArithmeticError, KeyError, TypeError) as exc:
+            raise ValidationError("calculation_out_of_range") from exc
+        if source is not None:
+            snapshots = source.snapshots
+            source_kind = source.source_kind
+        elif actuals_only:
+            snapshots = []
         snapshot = snapshots[0] if snapshots else None
         calibration = calibration_at(configuration, cutoff)
         if calibration is not None and not (
@@ -107,7 +151,11 @@ def _composed_forecast(
             calibration = None
         if snapshot is not None:
             try:
-                composition = compose_snapshots(snapshots, start, end)
+                composition = (
+                    source.composition
+                    if source is not None
+                    else compose_snapshots(snapshots, start, end)
+                )
                 used_snapshots = [
                     source for source in snapshots if source.pk in composition.snapshot_ids
                 ]
@@ -119,7 +167,10 @@ def _composed_forecast(
                     resolution_minutes,
                     source_intervals=composition.intervals,
                 )
-                apply_composition(result, snapshots, composition)
+                if source is not None:
+                    apply_intraday_source(result, source)
+                else:
+                    apply_composition(result, snapshots, composition)
                 irradiance = calculate(
                     configuration.binding,
                     target_date,
@@ -128,13 +179,20 @@ def _composed_forecast(
                 irradiance["provenance"] = {
                     "snapshot_id": snapshot.pk,
                     "binding_id": configuration.binding_id,
-                    "source_kind": "forecast",
+                    "source_kind": source_kind,
                 }
                 cast(dict[str, object], irradiance["vintage"])["scope"] = "primary_forecast_source"
-                apply_composition(irradiance, snapshots, composition)
+                if source is not None:
+                    apply_intraday_source(irradiance, source)
+                    preserve_forecast_weather(
+                        irradiance, configuration.binding, target_date, forecasts
+                    )
+                else:
+                    apply_composition(irradiance, snapshots, composition)
             except (ValueError, ArithmeticError) as exc:
                 raise ValidationError("calculation_out_of_range") from exc
-            cast(dict[str, object], result["provenance"])["selection_policy"] = SELECTION_POLICY
+            if source is None:
+                cast(dict[str, object], result["provenance"])["selection_policy"] = SELECTION_POLICY
             configuration.binding.refresh_from_db()
             configuration.binding.provider_account.refresh_from_db()
             if historical and configuration.pk != plant.current_configuration_id:
@@ -152,7 +210,7 @@ def _composed_forecast(
         "as_of": cutoff.isoformat(),
         "configuration_id": configuration.pk if configuration else None,
         "calibration_id": calibration.pk if calibration else None,
-        "source_kind": "forecast",
+        "source_kind": source_kind,
         "freshness": "missing"
         if snapshot is None
         else "fresh"
@@ -160,6 +218,8 @@ def _composed_forecast(
         else "stale",
         "unavailable_reason": "configuration_unavailable"
         if configuration is None
+        else "estimated_actuals_unavailable"
+        if actuals_only and snapshot is None
         else "forecast_unavailable"
         if snapshot is None
         else None,

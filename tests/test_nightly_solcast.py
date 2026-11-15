@@ -31,7 +31,11 @@ NIGHT = (NOW + timedelta(days=1)).replace(hour=0)
 
 def history_job() -> CollectionJob:
     enqueue_due(NIGHT)
-    return CollectionJob.objects.get(endpoint="estimated_actuals")
+    return CollectionJob.objects.get(
+        endpoint="estimated_actuals",
+        target_date=NIGHT.date() - timedelta(days=1),
+        retry_until=NIGHT + timedelta(hours=6),
+    )
 
 
 @pytest.mark.parametrize(
@@ -71,7 +75,7 @@ def test_partial_history_is_immutable_available_and_retried_with_fresh_acquisiti
             data = super().fetch_history(binding, target_date, days)
             return ProviderData(
                 data.raw_payload,
-                data.intervals[:-1],
+                data.intervals[:-24] + data.intervals[-23:],
                 collected_at=NIGHT,
                 source_kind="estimated_actuals",
             )
@@ -260,7 +264,7 @@ def test_night_retry_budget_preserves_all_future_forecast_slots() -> None:
         available_at=NIGHT + timedelta(minutes=30),
         retry_until=NIGHT + timedelta(hours=6),
     )
-    assert not collect(
+    assert collect(
         extra.pk, HistoricalFixture(extra.available_at), no_calculation, extra.available_at
     )
     assert RequestAttempt.objects.filter(purpose="estimated_actuals").count() == 1

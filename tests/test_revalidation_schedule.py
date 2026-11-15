@@ -37,7 +37,7 @@ def test_revalidation_after_cutoff_recovers_tomorrows_job_without_duplicate_requ
 
     assert len(recovered) == 1
     if existing:
-        assert recovered == existing
+        assert recovered == existing[:1]
     job = CollectionJob.objects.get(pk=recovered[0])
     assert job.status == "pending"
     assert job.scheduled_slot == cutoff
@@ -110,6 +110,6 @@ def test_revalidation_does_not_reset_a_failed_jobs_retry_budget() -> None:
     rotate_secret(system.admin, system.account.pk, "test-only-revalidated-key")
     validate_binding(system.admin, system.binding.pk, FakeAdapter(), cutoff + timedelta(hours=1))
 
-    assert enqueue_due(cutoff + timedelta(hours=1)) == existing
+    assert enqueue_due(cutoff + timedelta(hours=1)) == existing[:1]
     job = CollectionJob.objects.get(pk=existing[0])
     assert (job.status, job.attempts, job.last_error) == ("failed", 3, "provider_failure")

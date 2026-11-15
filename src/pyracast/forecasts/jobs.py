@@ -18,6 +18,7 @@ from pyracast.connections.contracts import (
     ProviderAdapter,
     ProviderData,
     ProviderError,
+    WindowHistoryAdapter,
 )
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import (
@@ -28,7 +29,7 @@ from pyracast.connections.operations import (
     record_provider_failure,
     reserve_request,
 )
-from pyracast.forecasts.coverage import history_day_complete
+from pyracast.forecasts.acquisition import missing_actuals_window
 from pyracast.forecasts.models import (
     CollectionJob,
     CollectionSchedule,
@@ -78,6 +79,13 @@ def claim(job_id: int, now: datetime) -> Lease | None:
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
     with transaction.atomic():
+        region_id = (
+            CollectionJob.objects.filter(pk=job_id)
+            .values_list("binding__region_id", flat=True)
+            .first()
+        )
+        if region_id is not None:
+            Region.objects.select_for_update().get(pk=region_id)
         job = CollectionJob.objects.select_for_update().filter(pk=job_id).first()
         if job is None:
             return None
@@ -104,6 +112,18 @@ def claim(job_id: int, now: datetime) -> Lease | None:
             job.status == "running"
             and job.lease_expires_at is not None
             and (job.lease_expires_at > now)
+        ):
+            return None
+        if (
+            job.endpoint == "estimated_actuals"
+            and CollectionJob.objects.filter(
+                binding_id=job.binding_id,
+                endpoint="estimated_actuals",
+                status="running",
+                lease_expires_at__gt=now,
+            )
+            .exclude(pk=job.pk)
+            .exists()
         ):
             return None
         if job.retry_until is None and job.attempts >= 3:
@@ -151,14 +171,22 @@ def claim(job_id: int, now: datetime) -> Lease | None:
             and (
                 not schedule.enabled
                 or (
-                    job.endpoint == "forecasts"
+                    (
+                        job.endpoint == "forecasts"
+                        or (
+                            job.endpoint == "estimated_actuals"
+                            and job.target_date
+                            == job.scheduled_slot.astimezone(ZoneInfo(binding.timezone)).date()
+                        )
+                    )
                     and job.scheduled_slot.astimezone(ZoneInfo(binding.region.timezone)).strftime(
                         "%H:%M"
                     )
                     not in (timing.times if timing is not None else ())
                     # Approval creates one immediate acquisition outside existing clocks.
                     and (
-                        job.scheduled_slot < schedule.effective_from
+                        job.endpoint != "forecasts"
+                        or job.scheduled_slot < schedule.effective_from
                         or job.pk
                         != CollectionJob.objects.filter(binding=binding, endpoint="forecasts")
                         .order_by("scheduled_slot", "pk")
@@ -179,7 +207,11 @@ def claim(job_id: int, now: datetime) -> Lease | None:
         if cleared_cooldown:
             job.available_at = now
         if job.retry_until is not None:
-            job.available_at = now + NIGHT_RETRY_DELAY
+            job.available_at = now + (
+                LEASE_DURATION
+                if job.retry_until <= job.scheduled_slot + timedelta(minutes=15)
+                else NIGHT_RETRY_DELAY
+            )
         job.save(
             update_fields=("status", "lease_token", "lease_expires_at", "attempts", "available_at")
         )
@@ -207,11 +239,14 @@ def retry(
         if not retryable:
             job.status = "failed"
         elif job.retry_until is not None:
+            intraday = job.retry_until <= job.scheduled_slot + timedelta(minutes=15)
             job.available_at = next_retry_at(
                 now,
                 job.attempts,
                 retry_after_seconds,
-                minimum_seconds=int(NIGHT_RETRY_DELAY.total_seconds()),
+                minimum_seconds=120 * 2 ** min(job.attempts, 6)
+                if intraday and not quota
+                else int(NIGHT_RETRY_DELAY.total_seconds()),
             )
             if quota and code != "history_budget_reserved":
                 tomorrow = now.astimezone(UTC).date() + timedelta(days=1)
@@ -314,7 +349,7 @@ def publish(
             if (
                 job.endpoint == "estimated_actuals"
                 and job.retry_until is not None
-                and not history_day_complete(snapshot, job.target_date, binding.timezone)
+                and missing_actuals_window(binding, now, acquired=snapshot) is not None
             ):
                 job.last_error = "history_incomplete"
                 available = now + NIGHT_RETRY_DELAY
@@ -349,7 +384,15 @@ def publish(
         return job.status == "succeeded"
 
 
-def fetch_history(lease: Lease, adapter: ProviderAdapter) -> ProviderData:
+def fetch_history(
+    lease: Lease,
+    adapter: ProviderAdapter,
+    *,
+    window: tuple[datetime, datetime] | None = None,
+    now: datetime | None = None,
+) -> ProviderData:
+    if window is not None and now is not None and isinstance(adapter, WindowHistoryAdapter):
+        return adapter.fetch_history_window(lease.binding, *window, now)
     if not isinstance(adapter, HistoryAdapter):
         raise ProviderError("history_not_supported")
     data = adapter.fetch_history(lease.binding, lease.target_date, 7)
@@ -360,6 +403,8 @@ def fetch_history(lease: Lease, adapter: ProviderAdapter) -> ProviderData:
     end = datetime.combine(
         lease.target_date + timedelta(days=1), datetime.min.time(), zone
     ).astimezone(UTC)
+    if now is not None:
+        end = min(end, now)
     return ProviderData(
         data.raw_payload,
         [
@@ -427,6 +472,21 @@ def collect(
     weather_provider = weather_provider if lease.endpoint == "forecasts" else None
     snapshot = ForecastSnapshot.objects.filter(job_id=job_id).first()
     if snapshot is None:
+        history_window = (
+            missing_actuals_window(lease.binding, now)
+            if lease.endpoint == "estimated_actuals"
+            else None
+        )
+        if lease.endpoint == "estimated_actuals" and history_window is None:
+            CollectionJob.objects.filter(
+                pk=job_id, lease_token=lease.token, status="running"
+            ).update(
+                status="succeeded",
+                last_error="history_already_archived",
+                lease_token=None,
+                lease_expires_at=None,
+            )
+            return True
         try:
             job = CollectionJob.objects.get(pk=job_id)
             attempt = reserve_request(
@@ -471,7 +531,7 @@ def collect(
             return False
         try:
             data = (
-                fetch_history(lease, adapter)
+                fetch_history(lease, adapter, window=history_window, now=request_at)
                 if lease.endpoint == "estimated_actuals"
                 else adapter.fetch(lease.binding, lease.target_date)
             )

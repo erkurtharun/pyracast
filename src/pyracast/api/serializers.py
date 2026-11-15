@@ -131,7 +131,7 @@ class ForecastOutput(serializers.Serializer[dict[str, Any]]):
     timezone = serializers.CharField()
     status = serializers.CharField()
     freshness = serializers.CharField()
-    source_kind = serializers.ChoiceField(choices=("forecast", "estimated_actuals"))
+    source_kind = serializers.ChoiceField(choices=("forecast", "estimated_actuals", "mixed"))
     unavailable_reason = serializers.CharField(allow_null=True)
     result = serializers.JSONField(allow_null=True)
     collected_at = serializers.DateTimeField(allow_null=True)

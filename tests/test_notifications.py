@@ -168,7 +168,7 @@ def test_saved_delivery_pins_vintage_recipient_and_never_fetches() -> None:
     assert sheet["A6"].value == datetime(2026, 11, 11)
     assert isinstance(sheet["B5"].value, float)
     assert isinstance(sheet["B6"].value, float)
-    assert sheet["D5"].value == sheet["D6"].value == "Forecast partial"
+    assert sheet["D5"].value == sheet["D6"].value == "Partial estimate"
     assert len(message.alternatives) == len(message.attachments) == 1
     assert RequestAttempt.objects.count() == requests
     assert CollectionJob.objects.count() == jobs + 1

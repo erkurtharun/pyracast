@@ -15,7 +15,13 @@ from pyracast.plants.models import Plant, PlantConfiguration
 def automatic_forecast(
     plant: Plant, target_date: date, resolution_minutes: int, now: datetime
 ) -> dict[str, object]:
-    latest = current_forecast(plant, target_date, resolution_minutes, now)
+    latest = current_forecast(
+        plant,
+        target_date,
+        resolution_minutes,
+        now,
+        include_actuals=target_date == now.astimezone(ZoneInfo(plant.region.timezone)).date(),
+    )
     return reference_transition_forecast(plant, target_date, resolution_minutes, now, latest)
 
 
@@ -29,6 +35,7 @@ def reference_transition_forecast(
     payload = cast(dict[str, object] | None, latest["result"])
     if (
         target_date != now.astimezone(ZoneInfo(plant.region.timezone)).date()
+        or latest["source_kind"] != "forecast"
         or latest["configuration_id"] is None
         or (payload is not None and payload["complete"] is True)
     ):

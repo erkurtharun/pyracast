@@ -10,10 +10,12 @@ from django.utils import translation
 from django.utils.translation import gettext as _
 from openpyxl import Workbook
 from openpyxl.cell.cell import Cell, MergedCell
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.properties import PageSetupProperties
 from openpyxl.worksheet.worksheet import Worksheet
+
+from pyracast.notifications.presentation import source_label
 
 if TYPE_CHECKING:
     from pyracast.notifications.presentation import ForecastReport, ReportDay
@@ -39,7 +41,7 @@ def _offset(value: datetime, zone: ZoneInfo) -> str:
 def _status(forecast_complete: bool, outage_complete: bool, has_outage: bool) -> str:
     messages: list[str] = []
     if not forecast_complete:
-        messages.append(_("Forecast partial"))
+        messages.append(_("Partial estimate"))
     if has_outage and not outage_complete:
         messages.append(_("Outage partial"))
     return "; ".join(messages)
@@ -48,7 +50,7 @@ def _status(forecast_complete: bool, outage_complete: bool, has_outage: bool) ->
 def _summary_status(day: ReportDay) -> str:
     messages = []
     if day.total is None:
-        messages.append(_("Forecast partial") if day.coverage else _("Forecast unavailable"))
+        messages.append(_("Partial estimate") if day.coverage else _("Estimate unavailable"))
     if day.has_outage and day.outage_total is None:
         messages.append(
             _("Outage impact unknown")
@@ -80,11 +82,13 @@ def build_workbook(report: ForecastReport) -> bytes:
     _literal(sheet.cell(2, 1), _("Updated"))
     updated = sheet.cell(2, 2, _local(report.collected_at, zone) if report.collected_at else None)
     updated.number_format = datetime_format
+    updated.alignment = Alignment(horizontal="left", vertical="center")
     _literal(sheet.cell(2, 3), report.timezone)
     if report.collected_at is None:
         _literal(updated, _("Unavailable"))
 
     has_outage = any(day.has_outage for day in report.days)
+    show_source = any(day.source_kind != "forecast" for day in report.days)
     intervals = [interval for day in report.days for interval in day.intervals]
     offsets = {_offset(value, zone) for item in intervals for value in (item.start, item.end)}
     show_offsets = len(offsets) > 1
@@ -98,7 +102,11 @@ def build_workbook(report: ForecastReport) -> bytes:
     )
     unit_label = {"unit": report.unit}
     forecast_label = (
-        _("Normal operation (%(unit)s)") if has_outage else _("Forecast (%(unit)s)")
+        _("Normal operation (%(unit)s)")
+        if has_outage
+        else _("Estimate (%(unit)s)")
+        if show_source
+        else _("Forecast (%(unit)s)")
     ) % unit_label
     outage_label = _("With reported outage (%(unit)s)") % unit_label
 
@@ -107,6 +115,15 @@ def build_workbook(report: ForecastReport) -> bytes:
         summary_headers.extend([outage_label, _("Outage coverage")])
     if show_summary_status:
         summary_headers.append(_("Status"))
+    if show_source:
+        summary_headers.append(_("Source"))
+    summary_alignments = ["left", "right", "right"]
+    if has_outage:
+        summary_alignments.extend(["right", "right"])
+    if show_summary_status:
+        summary_alignments.append("left")
+    if show_source:
+        summary_alignments.append("left")
     for column, title in enumerate(summary_headers, 1):
         _literal(sheet.cell(4, column), title)
     for row, day in enumerate(report.days, 5):
@@ -131,9 +148,18 @@ def build_workbook(report: ForecastReport) -> bytes:
         if show_summary_status:
             status = _summary_status(day)
             _literal(sheet.cell(row, status_column), status)
-            sheet.cell(row, status_column).alignment = Alignment(wrap_text=True, vertical="center")
             if len(status) > 22:
                 sheet.row_dimensions[row].height = 30
+        if show_source:
+            _literal(sheet.cell(row, len(summary_headers)), source_label(day.source_kind))
+            sheet.row_dimensions[row].height = max(sheet.row_dimensions[row].height or 0, 30)
+        for column, horizontal in enumerate(summary_alignments, 1):
+            sheet.cell(row, column).alignment = Alignment(
+                horizontal=horizontal,
+                vertical="center",
+                wrap_text=True,
+                indent=1 if horizontal == "left" and column > 1 else 0,
+            )
 
     header_row = 6 + len(report.days)
     headers = [_("Date"), _("From"), _("To")]
@@ -144,11 +170,24 @@ def build_workbook(report: ForecastReport) -> bytes:
         headers.append(outage_label)
     if show_status:
         headers.append(_("Status"))
+    if show_source:
+        headers.append(_("Source"))
+    alignments = ["left", "center", "center"]
+    if show_offsets:
+        alignments.extend(["center", "center"])
+    alignments.append("right")
+    if has_outage:
+        alignments.append("right")
+    if show_status:
+        alignments.append("left")
+    if show_source:
+        alignments.append("left")
     for column, title in enumerate(headers, 1):
         _literal(sheet.cell(header_row, column), title)
     row = header_row
-    for day in report.days:
-        for item in day.intervals:
+    for day_index, day in enumerate(report.days):
+        day_fill = PatternFill("solid", fgColor="EAF1F8" if day_index % 2 == 0 else "FFFFFF")
+        for interval_index, item in enumerate(day.intervals):
             row += 1
             sheet.cell(row, 1, day.day).number_format = date_format
             start = _local(item.start, zone)
@@ -172,16 +211,39 @@ def build_workbook(report: ForecastReport) -> bytes:
             if show_status:
                 status = _status(item.complete, item.outage_complete, day.has_outage)
                 _literal(sheet.cell(row, column), status)
-                sheet.cell(row, column).alignment = Alignment(wrap_text=True, vertical="center")
                 if len(status) > 22:
                     sheet.row_dimensions[row].height = 30
+            if show_source:
+                _literal(sheet.cell(row, len(headers)), source_label(item.source_kind))
+                sheet.row_dimensions[row].height = max(sheet.row_dimensions[row].height or 0, 30)
+            for column, horizontal in enumerate(alignments, 1):
+                cell = sheet.cell(row, column)
+                cell.fill = day_fill
+                cell.alignment = Alignment(
+                    horizontal=horizontal,
+                    vertical="center",
+                    wrap_text=True,
+                    indent=1 if horizontal == "left" and column > 1 else 0,
+                )
+                if interval_index == 0:
+                    cell.border = Border(top=Side(style="medium", color="839DBB"))
+            if interval_index == 0:
+                sheet.cell(row, 1).font = Font(bold=True, color="17365D")
+                sheet.row_dimensions[row].height = max(sheet.row_dimensions[row].height or 0, 26)
 
-    for heading_row in (4, header_row):
+    for heading_row, heading_alignments in ((4, summary_alignments), (header_row, alignments)):
         sheet.row_dimensions[heading_row].height = 32
-        for cell in sheet[heading_row]:
+        for column, (cell, horizontal) in enumerate(
+            zip(sheet[heading_row], heading_alignments, strict=False), 1
+        ):
             cell.font = Font(bold=True, color="FFFFFF", size=10)
             cell.fill = PatternFill("solid", fgColor="17365D")
-            cell.alignment = Alignment(vertical="center", wrap_text=True)
+            cell.alignment = Alignment(
+                horizontal=horizontal,
+                vertical="center",
+                wrap_text=True,
+                indent=1 if horizontal == "left" and column > 1 else 0,
+            )
     sheet.freeze_panes = f"A{header_row + 1}"
     sheet.auto_filter.ref = f"A{header_row}:{get_column_letter(len(headers))}{max(row, header_row)}"
     row += 1

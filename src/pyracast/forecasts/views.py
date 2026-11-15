@@ -44,7 +44,7 @@ class CollectionScheduleOutput(CollectionScheduleInput):
     quota_utc_day = serializers.DateField()
     requests_by_outcome = serializers.DictField(child=serializers.IntegerField())
     recent_jobs = CollectionJobOutput(many=True)
-    history_requests_per_day = serializers.IntegerField()
+    history_requests_reserved_per_day = serializers.IntegerField()
     history_local_time = serializers.CharField()
     history_retry_until_local = serializers.CharField()
     history_retry_minutes = serializers.IntegerField()

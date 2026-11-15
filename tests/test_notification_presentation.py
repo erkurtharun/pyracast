@@ -4,8 +4,9 @@ from typing import cast
 import pytest
 from django.utils import translation
 
+from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.presentation import present_report
-from pyracast.notifications.rendering import energy_text
+from pyracast.notifications.rendering import energy_text, render_forecast
 
 START = datetime(2026, 11, 15, 8, tzinfo=UTC)
 
@@ -144,3 +145,112 @@ def test_unknown_outage_remains_distinct_from_partial_source_data() -> None:
     report = present_report(source, [None], prepared_at=START, fallback=False)
     assert report.days[0].outage_status == "unknown_impact"
     assert any("Outage impact is unknown" in warning for warning in report.warnings)
+
+
+@pytest.mark.parametrize("direct_sources", [False, True])
+def test_mixed_report_keeps_each_interval_source_including_missing_and_zero(
+    direct_sources: bool,
+) -> None:
+    data = payload(missing=True)
+    rows = cast(list[dict[str, object]], data["intervals"])
+    rows.append(interval(2, 0))
+    cast(dict[str, object], data["daylight"])["windows"] = [
+        {"start": START.isoformat(), "end": (START + timedelta(hours=3)).isoformat()}
+    ]
+    cast(dict[str, object], data["daylight"])["coverage_fraction"] = 2 / 3
+    kinds = [["estimated_actuals"], ["estimated_actuals", "forecast"], ["forecast"]]
+    data["provenance"] = {
+        "source_kind": "mixed",
+        "source_segments": [
+            {
+                "start": START.isoformat(),
+                "end": (START + timedelta(minutes=90)).isoformat(),
+                "source_kind": "estimated_actuals",
+            },
+            {
+                "start": (START + timedelta(minutes=90)).isoformat(),
+                "end": (START + timedelta(hours=3)).isoformat(),
+                "source_kind": "forecast",
+            },
+        ],
+    }
+    if direct_sources:
+        for row, sources in zip(rows, kinds, strict=True):
+            row["source_kinds"] = sources
+        cast(dict[str, object], data["provenance"])["source_segments"] = []
+    report = present_report(context(data), [None], prepared_at=START, fallback=False)
+    day = report.days[0]
+    assert day.source_kind == "mixed"
+    assert [row.source_kind for row in day.intervals] == ["estimated_actuals", "mixed", "forecast"]
+    assert [row.energy for row in day.intervals] == [2.5, None, 0]
+    assert [row.complete for row in day.intervals] == [True, False, True]
+    assert day.total is None
+    assert day.coverage == pytest.approx(2 / 3)
+
+
+def test_regional_mixed_report_shows_latest_update_and_warns_about_old_contributor() -> None:
+    source = context(None)
+    source["plant_id"] = None
+    source["collected_at"] = None
+    data = payload()
+    latest = START - timedelta(minutes=5)
+    oldest = START - timedelta(hours=25)
+    data["provenance"] = {
+        "source_kind": "mixed",
+        "source_snapshots": [
+            {
+                "snapshot_id": 2,
+                "source_kind": "estimated_actuals",
+                "collected_at": latest.isoformat(),
+            },
+            {"snapshot_id": 1, "source_kind": "forecast", "collected_at": oldest.isoformat()},
+        ],
+    }
+    report = present_report(source, [data], prepared_at=START, fallback=False)
+    assert report.collected_at == latest
+    assert report.days[0].source_kind == "mixed"
+    assert "Forecast data is over 24 hours old." in report.warnings
+    assert "Irradiance estimate, not plant electricity." in report.warnings
+
+
+@pytest.mark.parametrize("source_kind", ["estimated_actuals", "mixed"])
+@pytest.mark.parametrize("language", ["en", "tr"])
+def test_email_labels_actuals_and_mixed_partial_without_hiding_unknown_outage(
+    source_kind: str,
+    language: str,
+) -> None:
+    normal = payload(missing=source_kind == "mixed")
+    normal["provenance"] = {"source_kind": source_kind}
+    outage = payload(missing=True) if source_kind == "mixed" else None
+    source = context(normal, outage)
+    if outage is not None:
+        cast(dict[str, object], outage["daylight"]).update(
+            partial_energy_mwh=0, coverage_fraction=0
+        )
+        cast(list[dict[str, object]], source["days"])[0]["outage_status"] = "unknown_impact"
+    with translation.override(language):
+        rendered = render_forecast(
+            NotificationDelivery(scheduled_for=START),
+            [None],
+            prepared_at=START,
+            report_context=source,
+        )
+    labels = {
+        "en": {"estimated_actuals": "Estimated actuals", "mixed": "Estimated + forecast"},
+        "tr": {"estimated_actuals": "Gerçekleşen tahmini", "mixed": "Gerçekleşen tahmini + öngörü"},
+    }
+    label = labels[language][source_kind]
+    for field in ("body", "html"):
+        assert label in rendered[field]
+        if source_kind == "mixed":
+            assert (
+                "Partial: 2.500 MWh (50% coverage)"
+                if language == "en"
+                else "K\u0131smi: 2,500 MWh (50% kapsam)"
+            ) in rendered[field]
+            assert (
+                "Outage impact is unknown" if language == "en" else "Kesintinin etkisi belirsiz"
+            ) in rendered[field]
+            assert ("Unavailable" if language == "en" else "Veri yok") in rendered[field]
+        else:
+            assert ("2.500 MWh" if language == "en" else "2,500 MWh") in rendered[field]

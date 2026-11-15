@@ -771,7 +771,7 @@ export interface components {
                 [key: string]: number;
             };
             recent_jobs: components["schemas"]["CollectionJobOutput"][];
-            history_requests_per_day: number;
+            history_requests_reserved_per_day: number;
             history_local_time: string;
             history_retry_until_local: string;
             history_retry_minutes: number;
@@ -931,9 +931,10 @@ export interface components {
         /**
          * @description * `forecast` - forecast
          *     * `estimated_actuals` - estimated_actuals
+         *     * `mixed` - mixed
          * @enum {string}
          */
-        ForecastSourceKindEnum: "forecast" | "estimated_actuals";
+        ForecastSourceKindEnum: "forecast" | "estimated_actuals" | "mixed";
         IncidentInput: {
             kind: components["schemas"]["KindEnum"];
             title: string;
@@ -1274,6 +1275,8 @@ export interface components {
             status: components["schemas"]["PerformanceDayStatusEnum"];
             reason: string | null;
             snapshot_id: number | null;
+            source_snapshot_ids?: number[];
+            reference_provenance?: unknown;
             /** Format: date-time */
             collected_at: string | null;
             /** Format: date-time */

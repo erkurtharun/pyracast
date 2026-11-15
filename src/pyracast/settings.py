@@ -190,7 +190,7 @@ SPECTACULAR_SETTINGS = {
         "PowerBasisEnum": [("ac", "ac"), ("dc", "dc")],
         "CalibrationStatusEnum": "pyracast.plants.serializers.calibration_status_choices",
         "EpiasSourceKindEnum": "pyracast.metering.history.PRODUCTION_SOURCES",
-        "ForecastSourceKindEnum": ["forecast", "estimated_actuals"],
+        "ForecastSourceKindEnum": ["forecast", "estimated_actuals", "mixed"],
         "ProductionQualityEnum": "pyracast.plants.models.OBSERVATION_QUALITIES",
     },
 }

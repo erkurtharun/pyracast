@@ -7,7 +7,8 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext
 
-from pyracast.forecasts.history import HISTORY_SELECTION_POLICY, select_actual_snapshot
+from pyracast.forecasts.actuals import ACTUAL_COMPOSITION_POLICY, select_archived_actual_source
+from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecasting import (
@@ -138,8 +139,13 @@ def _day(
     if selection_cutoff is not None and configuration.created_at > selection_cutoff:
         result["reason"] = "configuration_not_available"
         return result, (), ()
+    actual_source = (
+        select_archived_actual_source(configuration.binding, day, cutoff)
+        if historical_model
+        else None
+    )
     snapshot = (
-        select_actual_snapshot(configuration.binding, day, cutoff)
+        (actual_source.snapshot if actual_source is not None else None)
         if historical_model
         else _snapshot(configuration, day, selection_cutoff or cutoff)
     )
@@ -163,6 +169,16 @@ def _day(
         source_kind=snapshot.source_kind,
         historical_configuration_assumed=historical_model and configuration.created_at >= start,
     )
+    if actual_source is not None and actual_source.composition is not None:
+        result["source_snapshot_ids"] = list(actual_source.composition.snapshot_ids)
+        result["reference_provenance"] = {
+            "selection_policy": ACTUAL_COMPOSITION_POLICY,
+            "source_snapshot_ids": list(actual_source.composition.snapshot_ids),
+            "source_segments": actual_source.composition.segments,
+            "oldest_collected_at": min(
+                row.collected_at for row in actual_source.snapshots
+            ).isoformat(),
+        }
     readings = [
         row
         for row in observations
@@ -177,7 +193,13 @@ def _day(
         )
     ]
     try:
-        intervals = power_intervals(snapshot, configuration)
+        intervals = power_intervals(
+            snapshot,
+            configuration,
+            source_intervals=actual_source.composition.intervals
+            if actual_source is not None and actual_source.composition is not None
+            else None,
+        )
         cap = power_limit(configuration)
         selected = _samples(readings, intervals, factor, cap)
         baseline = _samples(readings, intervals, 1.0, cap)
@@ -322,7 +344,9 @@ def forecast_performance(
         if comparison == "historical_model"
         else "historical_input_replay",
         "comparison": comparison,
-        "selection_policy": HISTORY_SELECTION_POLICY
+        "selection_policy": ACTUAL_COMPOSITION_POLICY
+        if any(day.get("reference_provenance") for day in days)
+        else HISTORY_SELECTION_POLICY
         if comparison == "historical_model"
         else SELECTION_POLICY,
         "measurement_policy": measurement_policy,

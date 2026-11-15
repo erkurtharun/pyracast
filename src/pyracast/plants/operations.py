@@ -13,6 +13,7 @@ from django.utils.translation import gettext
 
 from pyracast.accounts.operations import require_workspace_admin
 from pyracast.connections.models import SiteBinding
+from pyracast.forecasts.actuals import ACTUAL_COMPOSITION_POLICY
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.plants.availability import interval_is_covered, reference_intervals
@@ -608,7 +609,8 @@ def _validate_activation(
         or not run.result.get("baseline")
         or run.result.get("policy_version") != POLICY_VERSION
         or not calibration_matches_transfer(run, configuration)
-        or run.dataset_manifest.get("selection_policy") != HISTORY_SELECTION_POLICY
+        or run.dataset_manifest.get("selection_policy")
+        not in (HISTORY_SELECTION_POLICY, ACTUAL_COMPOSITION_POLICY)
         or run.dataset_manifest.get("source_kind") != "estimated_actuals"
     ):
         raise ValidationError(

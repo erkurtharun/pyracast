@@ -121,6 +121,18 @@ def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
             status="pending", available_at=now, lease_token=None, lease_expires_at=None
         )
         jobs.append(job.pk)
+        if now < slot + timedelta(minutes=15):
+            history, _ = CollectionJob.objects.get_or_create(
+                binding=binding,
+                endpoint="estimated_actuals",
+                scheduled_slot=slot,
+                defaults={
+                    "target_date": slot.astimezone(zone).date(),
+                    "available_at": now,
+                    "retry_until": slot + timedelta(minutes=15),
+                },
+            )
+            jobs.append(history.pk)
     return jobs
 
 

@@ -572,8 +572,15 @@ Select the newest eligible saved output with complete valid coverage of tomorrow
 under the pinned binding. If none exists, use the newest usable partial tomorrow
 output with a null complete total and explicit coverage. If neither exists, send an
 unavailable notice. Today's coverage never disqualifies a valid tomorrow forecast.
-Freeze one selected source for the schedule's slot and render text and HTML in
-its explicit email language. Pin that language
+Keep tomorrow's selected source. Today uses the same source composition as the screen:
+completed Solcast estimated-actual intervals take priority, with saved forecasts for
+the remaining hours. New acquisitions replace their coverage; older acquisitions
+retain hours outside it. Wait within the existing preparation deadline for collection
+jobs at the reminder's slot, without treating later intervals as completed. Pin every
+contributing source and use identical native intervals for daily totals, hourly rows
+and outage scenarios. Source age follows the oldest contributing acquisition.
+Freeze the report for the schedule's slot and render text and HTML in its explicit email
+language. Pin that language
 when scheduling; freeze each language's content before sending. Retries preserve
 the frozen message and attachment bytes. All languages share the same numeric report.
 Plant messages show electrical energy in MWh, with a separate scenario for reported
@@ -585,11 +592,11 @@ outage limits; boundary rows retain their actual duration. Collection time, stal
 and fallback warnings remain visible. Region-only records retain a clearly labeled
 irradiance report in kWh/m². Age over 24 hours is stale.
 
-Successful collection saves `ForecastResult.daily_payloads` for the local dates
-covered by its elapsed 72-hour acquisition horizon, including DST boundaries, in
+Successful collection saves `ForecastResult.daily_payloads` for the collection's local
+date and the following two dates, ending at the next local midnight, including DST boundaries, in
 the same publication transaction as the canonical target-day result. Failure to
 calculate a supplemental day omits only that day. Preparation calculates plant electricity
-locally from the pinned saved acquisition, using configuration, calibration and incident
+locally from the pinned saved forecast inputs, using configuration, calibration and incident
 revisions eligible at the reminder slot. It freezes these results before rendering any
 language; retries and later language variants never recalculate them. No provider request
 is made. Validate saved dates, binding identity, finite

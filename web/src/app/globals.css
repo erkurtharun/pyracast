@@ -1250,6 +1250,9 @@ pre,
     display: block;
     font-weight: 400;
 }
+.forecast-interval-table .interval-source {
+    text-align: left;
+}
 .forecast-interval-table .interval-value {
     white-space: nowrap;
 }

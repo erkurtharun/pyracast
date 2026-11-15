@@ -5,6 +5,11 @@ from zoneinfo import ZoneInfo
 
 from django.db.models import Q
 
+from pyracast.forecasts.actuals import (
+    ACTUAL_COMPOSITION_POLICY,
+    ArchivedActualSource,
+    replay_archived_actual_source,
+)
 from pyracast.forecasts.capacity_normalization import normalization_provenance
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY, select_actual_snapshot
 from pyracast.forecasts.models import ForecastSnapshot
@@ -122,6 +127,45 @@ def _reference_manifest(snapshot: ForecastSnapshot) -> dict[str, object]:
     }
 
 
+def _selected_reference_manifest(source: ArchivedActualSource) -> dict[str, object]:
+    manifest = _reference_manifest(source.snapshot)
+    if source.composition is not None:
+        manifest.update(
+            selection_policy=ACTUAL_COMPOSITION_POLICY,
+            source_snapshot_ids=list(source.composition.snapshot_ids),
+            source_snapshots=[_reference_manifest(row) for row in source.snapshots],
+            source_segments=source.composition.segments,
+            source_intervals=list(source.composition.intervals),
+        )
+    return manifest
+
+
+def _valid_native_composition(source: dict[str, object], binding_id: int) -> bool:
+    members, identifiers = source.get("source_snapshots"), source.get("source_snapshot_ids")
+    if not isinstance(members, list) or not isinstance(identifiers, list) or not members:
+        return False
+    if (
+        not identifiers
+        or any(type(identifier) is not int or identifier <= 0 for identifier in identifiers)
+        or len(set(identifiers)) != len(identifiers)
+        or type(source.get("snapshot_id")) is not int
+        or source["snapshot_id"] != identifiers[0]
+    ):
+        return False
+    return len(identifiers) == len(members) and all(
+        isinstance(member, dict)
+        and type(member.get("snapshot_id")) is int
+        and member.get("snapshot_id") == identifier
+        and type(member.get("binding_id")) is int
+        and member.get("binding_id") == binding_id
+        and member.get("source_kind") == "estimated_actuals"
+        and member.get("source_product") == "rooftop_pv_power"
+        and member.get("reference_import") is None
+        and member.get("capacity_normalization") is None
+        for member, identifier in zip(members, identifiers, strict=True)
+    )
+
+
 def _reported_dates(value: object) -> list[str] | None:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         return None
@@ -159,6 +203,10 @@ def current_source_validation(
                 and source.get("source_kind") == "estimated_actuals"
                 and "reference_import" in source
             ):
+                continue
+            if source.get(
+                "selection_policy"
+            ) == ACTUAL_COMPOSITION_POLICY and not _valid_native_composition(source, binding_id):
                 continue
             if (
                 source.get("source_product") == "rooftop_pv_power"
@@ -309,16 +357,26 @@ def build_calibration_dataset(
         key = day.isoformat()
         if key not in sources:
             if run.reference_snapshot_ids is not None:
-                snapshot = (
-                    ForecastSnapshot.objects.select_related("job__reference_import")
-                    .filter(pk=run.reference_snapshot_ids.get(key))
-                    .first()
+                reference = replay_archived_actual_source(
+                    configuration.binding,
+                    day,
+                    run.cutoff_at,
+                    run.reference_snapshot_ids.get(key),
                 )
             else:
                 snapshot = select_actual_snapshot(configuration.binding, day, run.cutoff_at)
-            sources[key] = None if snapshot is None else _reference_manifest(snapshot)
+                reference = (
+                    ArchivedActualSource(snapshot, [snapshot], None, run.cutoff_at)
+                    if snapshot is not None
+                    else None
+                )
+            sources[key] = None if reference is None else _selected_reference_manifest(reference)
             native_by_day[key] = (
-                () if snapshot is None else actual_power_intervals(snapshot, configuration)
+                ()
+                if reference is None
+                else actual_power_intervals(
+                    reference.snapshot, configuration, source_intervals=reference.intervals
+                )
             )
         pieces = tuple(
             PowerInterval(
@@ -370,7 +428,15 @@ def build_calibration_dataset(
         "observation_id_cutoff": run.observation_id_cutoff,
         "window_start": run.window_start.isoformat(),
         "window_end": run.window_end.isoformat(),
-        "selection_policy": run.dataset_manifest.get("selection_policy", HISTORY_SELECTION_POLICY),
+        "selection_policy": run.dataset_manifest.get(
+            "selection_policy",
+            ACTUAL_COMPOSITION_POLICY
+            if any(
+                row is not None and row.get("selection_policy") == ACTUAL_COMPOSITION_POLICY
+                for row in sources.values()
+            )
+            else HISTORY_SELECTION_POLICY,
+        ),
         "source_kind": "estimated_actuals",
         "reference_cohort": cohort,
         "sources": sources,

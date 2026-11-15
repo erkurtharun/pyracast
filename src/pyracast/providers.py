@@ -1,6 +1,8 @@
 import json
 import math
 import re
+from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from typing import Literal, cast
 from zoneinfo import ZoneInfo
@@ -15,7 +17,27 @@ from pyracast.connections.contracts import (
 )
 from pyracast.connections.models import SiteBinding
 from pyracast.connections.secrets import decrypt_api_key
+from pyracast.irradiance import local_day_bounds
 from pyracast.provider_retry import retry_after_seconds, retryable_status
+
+
+def clip_provider_data(data: ProviderData, start: datetime, end: datetime) -> ProviderData:
+    intervals: list[dict[str, object]] = []
+    for row in data.intervals:
+        left = datetime.fromisoformat(cast(str, row["start"]))
+        right = datetime.fromisoformat(cast(str, row["end"]))
+        if left >= end or right <= start:
+            continue
+        clipped = row.copy()
+        if left < start or right > end:
+            clipped.update(
+                original_start=row.get("original_start", row["start"]),
+                original_end=row.get("original_end", row["end"]),
+                start=max(left, start).isoformat(),
+                end=min(right, end).isoformat(),
+            )
+        intervals.append(clipped)
+    return replace(data, intervals=intervals)
 
 
 def normalize_payload(
@@ -126,21 +148,41 @@ class FixtureProvider(ProviderAdapter, HistoryAdapter):
 
 
 class SolcastProvider(ProviderAdapter, HistoryAdapter):
-    def __init__(self, transport: httpx.BaseTransport | None = None) -> None:
+    def __init__(
+        self,
+        transport: httpx.BaseTransport | None = None,
+        *,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ) -> None:
         self.transport = transport
+        self.clock = clock
 
     def validate(self, binding: SiteBinding) -> None:
         # Saved Toolkit settings require operator attestation; the response only validates access.
         self.fetch(binding, datetime.now(UTC).date())
 
     def fetch(self, binding: SiteBinding, target_date: date) -> ProviderData:
-        return self._request(binding, "forecasts")
+        now = self.clock()
+        today = now.astimezone(ZoneInfo(binding.timezone)).date()
+        start, _ = local_day_bounds(today, binding.timezone)
+        end, _ = local_day_bounds(today + timedelta(days=3), binding.timezone)
+        hours = max(1, math.ceil((end - now).total_seconds() / 3600))
+        return clip_provider_data(self._request(binding, "forecasts", hours), start, end)
 
     def fetch_history(self, binding: SiteBinding, target_date: date, days: int) -> ProviderData:
-        return self._request(binding, "estimated_actuals")
+        now = self.clock()
+        start, _ = local_day_bounds(target_date - timedelta(days=days - 1), binding.timezone)
+        _, end = local_day_bounds(target_date, binding.timezone)
+        return self.fetch_history_window(binding, start, min(end, now), now)
+
+    def fetch_history_window(
+        self, binding: SiteBinding, start: datetime, end: datetime, now: datetime
+    ) -> ProviderData:
+        hours = min(168, max(1, math.ceil((now - start).total_seconds() / 3600)))
+        return clip_provider_data(self._request(binding, "estimated_actuals", hours), start, end)
 
     def _request(
-        self, binding: SiteBinding, endpoint: Literal["forecasts", "estimated_actuals"]
+        self, binding: SiteBinding, endpoint: Literal["forecasts", "estimated_actuals"], hours: int
     ) -> ProviderData:
         secret = decrypt_api_key(binding.provider_account.encrypted_api_key)
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", binding.site_id):
@@ -154,7 +196,7 @@ class SolcastProvider(ProviderAdapter, HistoryAdapter):
                 response = client.get(
                     f"https://api.solcast.com.au/rooftop_sites/{binding.site_id}/{endpoint}",
                     headers={"Authorization": f"Bearer {secret}"},
-                    params={"format": "json", "hours": 72 if endpoint == "forecasts" else 168},
+                    params={"format": "json", "hours": hours},
                 )
                 if not response.is_success:
                     raise ProviderError(
@@ -172,7 +214,7 @@ class SolcastProvider(ProviderAdapter, HistoryAdapter):
             raise ProviderError("provider_request_failed") from None
         if contains_secret(payload, secret):
             raise ProviderError("unsafe_provider_response")
-        return normalize_payload(payload, endpoint)
+        return normalize_payload(payload, endpoint, collected_at=self.clock())
 
 
 def adapter_for(binding: SiteBinding) -> ProviderAdapter:

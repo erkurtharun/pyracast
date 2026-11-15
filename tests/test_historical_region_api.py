@@ -116,7 +116,7 @@ def test_region_history_preserves_application_validation_response(
     ("target_date", "source", "code"),
     [
         ("2025-01-01", "forecast", "date_out_of_range"),
-        ("2026-11-09", "estimated_actuals", "completed_day_required"),
+        ("2026-11-10", "estimated_actuals", "completed_day_required"),
     ],
 )
 def test_region_outlook_preserves_request_error_codes(
@@ -187,10 +187,10 @@ def test_region_history_preserves_missing_actuals_and_explicit_forecast_archive(
         client.get(path, {"date": "2026-11-10", "data_source": "estimated_actuals"}).status_code
         == 400
     )
-    assert (
-        client.get(path, {"date": "2026-11-09", "data_source": "estimated_actuals"}).status_code
-        == 400
-    )
+    today = client.get(path, {"date": "2026-11-09", "data_source": "estimated_actuals"})
+    assert today.status_code == 200
+    assert today.json()["source_kind"] == "estimated_actuals"
+    assert today.json()["result"] is None
 
 
 def test_region_history_respects_binding_status_and_tenant(monkeypatch: pytest.MonkeyPatch) -> None:

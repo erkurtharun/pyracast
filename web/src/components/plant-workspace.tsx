@@ -69,7 +69,6 @@ export function PlantWorkspace({
         setTab(next);
         window.history.pushState(null, "", `#plant-${region.id}/${next}`);
     };
-    const yesterday = localDay(timezone, -1);
     const today = localDay(timezone);
     const configuration = currentPlant.current_configuration;
     const metadata = configuration ?? currentPlant.submission;
@@ -154,7 +153,7 @@ export function PlantWorkspace({
                                 value={date}
                                 max={
                                     source === "estimated_actuals"
-                                        ? yesterday
+                                        ? today
                                         : source === "archived_forecast"
                                           ? today
                                           : undefined
@@ -173,9 +172,9 @@ export function PlantWorkspace({
                                 setSource(next);
                                 if (
                                     next === "estimated_actuals" &&
-                                    date > yesterday
+                                    date > today
                                 )
-                                    setDate(yesterday);
+                                    setDate(today);
                                 if (
                                     next === "archived_forecast" &&
                                     date > today
@@ -201,8 +200,8 @@ export function PlantWorkspace({
                             {t("localDates", { timezone })}
                         </span>
                     </div>
-                    {source === "estimated_actuals" && date > yesterday ? (
-                        <Notice>{t("selectCompletedDay")}</Notice>
+                    {source === "estimated_actuals" && date > today ? (
+                        <Notice>{t("selectTodayOrPastDay")}</Notice>
                     ) : source === "archived_forecast" && date > today ? (
                         <Notice>{t("selectArchivedDay")}</Notice>
                     ) : (

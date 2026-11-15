@@ -10,6 +10,7 @@ export type ForecastInterval = {
     energy_mwh?: number | null;
     quality_flags?: string[];
     source_snapshot_ids?: number[];
+    source_kinds?: ("forecast" | "estimated_actuals")[];
     affected_mean_power_mw?: number | null;
     affected_energy_mwh?: number | null;
     affected_quality_flags?: string[];
@@ -58,6 +59,7 @@ export function ForecastIntervals({
     label,
     timezone,
     formatTime,
+    showSources = false,
 }: {
     rows: ForecastInterval[];
     electrical: boolean;
@@ -65,6 +67,7 @@ export function ForecastIntervals({
     label: string;
     timezone: string;
     formatTime: (value: string) => string;
+    showSources?: boolean;
 }) {
     const t = useTranslations("ForecastIntervals");
     const locale = useLocale();
@@ -121,6 +124,11 @@ export function ForecastIntervals({
                                     <span className="interval-unit">(MWh)</span>
                                 </th>
                             )}
+                            {showSources && (
+                                <th scope="col" className="interval-source">
+                                    {t("source")}
+                                </th>
+                            )}
                         </tr>
                     </thead>
                     <tbody>
@@ -141,6 +149,18 @@ export function ForecastIntervals({
                                             power={row.affected_mean_power_mw}
                                             electrical
                                         />
+                                    </td>
+                                )}
+                                {showSources && (
+                                    <td className="interval-source">
+                                        {row.source_kinds?.length
+                                            ? row.source_kinds.length > 1
+                                                ? t("estimate_and_forecast")
+                                                : row.source_kinds[0] ===
+                                                    "estimated_actuals"
+                                                  ? t("updated_estimate")
+                                                  : t("forecast")
+                                            : "—"}
                                     </td>
                                 )}
                             </tr>

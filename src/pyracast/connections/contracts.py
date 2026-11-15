@@ -44,4 +44,11 @@ class HistoryAdapter(Protocol):
     def fetch_history(self, binding: SiteBinding, target_date: date, days: int) -> ProviderData: ...
 
 
+@runtime_checkable
+class WindowHistoryAdapter(Protocol):
+    def fetch_history_window(
+        self, binding: SiteBinding, start: datetime, end: datetime, now: datetime
+    ) -> ProviderData: ...
+
+
 Calculator = Callable[[SiteBinding, date, ProviderData], dict[str, object]]

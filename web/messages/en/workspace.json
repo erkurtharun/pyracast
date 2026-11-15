@@ -94,7 +94,7 @@
         "awaitingApproval": "Awaiting administrator approval. Your plant details are saved; forecasts become available after the data connection is approved and collection succeeds.",
         "minutes30": "30 minutes",
         "minutes60": "60 minutes",
-        "selectCompletedDay": "Choose a completed local day for estimated actuals.",
+        "selectTodayOrPastDay": "Choose today or a past local day for estimated actuals.",
         "selectArchivedDay": "Choose today or an earlier day for archived forecasts.",
         "calibrationChangeNote": "Changes may replace pending calibration.",
         "approvalDetailsRequired": "Complete technical details to request approval.",
