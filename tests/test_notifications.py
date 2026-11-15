@@ -1,6 +1,7 @@
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
+from io import BytesIO
 from threading import Barrier
 from zoneinfo import ZoneInfo
 
@@ -8,10 +9,12 @@ import pytest
 from django.contrib.auth.models import User
 from django.core import mail
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.core.mail import EmailMultiAlternatives
+from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.db import IntegrityError, close_old_connections, connection, connections, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.test import override_settings
+from openpyxl import load_workbook
+from openpyxl.worksheet.worksheet import Worksheet
 from rest_framework.test import APIClient
 
 from pyracast.accounts.models import Membership, Tenant
@@ -45,6 +48,18 @@ from tests.test_domain import NOW, System, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
 SLOT = NOW + timedelta(days=1) - timedelta(hours=6)
+
+
+def attached_sheet(message: EmailMessage) -> Worksheet:
+    assert len(message.attachments) == 1
+    filename, content, mimetype = message.attachments[0]
+    assert isinstance(filename, str)
+    assert filename.endswith(".xlsx")
+    assert mimetype == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    assert isinstance(content, bytes)
+    sheet = load_workbook(BytesIO(content), data_only=True).active
+    assert isinstance(sheet, Worksheet)
+    return sheet
 
 
 @pytest.fixture(autouse=True)
@@ -143,12 +158,17 @@ def test_saved_delivery_pins_vintage_recipient_and_never_fetches() -> None:
     message = mail.outbox[0]
     assert isinstance(message, EmailMultiAlternatives)
     assert message.to == ["default@example.com"]
-    assert "Unvalidated" in message.body
+    assert "Irradiance estimate, not plant electricity." in message.body
     assert "kWh/m²" in message.body
-    assert "2026-11-10" in message.body
-    assert "2026-11-11" in message.body
-    assert "Unavailable (incomplete coverage)" in message.body
-    assert "No new provider request" in message.body
+    assert "10 Nov 2026" in message.body
+    assert "11 Nov 2026" in message.body
+    assert "Partial:" in message.body
+    sheet = attached_sheet(message)
+    assert sheet["A5"].value == datetime(2026, 11, 10)
+    assert sheet["A6"].value == datetime(2026, 11, 11)
+    assert isinstance(sheet["B5"].value, float)
+    assert isinstance(sheet["B6"].value, float)
+    assert sheet["D5"].value == sheet["D6"].value == "Forecast partial"
     assert len(message.alternatives) == len(message.attachments) == 1
     assert RequestAttempt.objects.count() == requests
     assert CollectionJob.objects.count() == jobs + 1
@@ -447,8 +467,10 @@ def test_full_summary_preserves_units_and_escapes_html() -> None:
     delivery_id = enqueue_due(SLOT)[0]
     assert process_notification(delivery_id, SLOT)
     message = mail.outbox[0]
-    assert "7.200 kWh/m²" in message.body
+    assert "kWh/m²" in message.body
     assert isinstance(message, EmailMultiAlternatives)
+    summary = ForecastResult.objects.get(snapshot=snapshot).daily_payloads["2026-11-11"]["daylight"]
+    assert attached_sheet(message)["B6"].value == pytest.approx(summary["energy_kwh_m2"])
     html = message.alternatives[0][0]
     assert isinstance(html, str)
     assert "<script>" not in html
@@ -461,7 +483,7 @@ def test_stale_source_and_missed_schedule_are_visible() -> None:
     saved(system, NOW - timedelta(days=2))
     ids = enqueue_due(SLOT)
     assert process_notification(ids[0], SLOT)
-    assert "Stale saved forecast" in mail.outbox[0].body
+    assert "Forecast data is over 24 hours old." in mail.outbox[0].body
     next_slot = SLOT + timedelta(days=1)
     missed_ids = enqueue_due(next_slot + timedelta(hours=3))
     missed = NotificationDelivery.objects.get(pk=missed_ids[-1])

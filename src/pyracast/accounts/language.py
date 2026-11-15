@@ -72,7 +72,7 @@ def browser_language(header: str) -> tuple[Language | None, frozenset[str]]:
         elif base in LANGUAGES:
             ranked.append((weight, cast(Language, base)))
     if ranked:
-        return max(ranked, key=lambda item: item[0])[1], frozenset(rejected)
+        return max(ranked, key=lambda candidate: candidate[0])[1], frozenset(rejected)
     return None, frozenset(rejected)
 
 

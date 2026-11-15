@@ -1,0 +1,12 @@
+{% extends "account/email/base_message.txt" %}{% load i18n %}
+{% block content %}{% autoescape off %}{% translate "Verify your email" %}
+
+{% if code %}{% translate "Enter this code in the Pyracast window where you requested it." %}
+
+{{ code }}
+
+{% blocktranslate with minutes=code_timeout_minutes|floatformat:"-2" %}This code expires in {{ minutes }} minutes. Do not share it.{% endblocktranslate %}{% else %}{% translate "Confirm your email address to continue to Pyracast." %}
+
+{{ activate_url }}{% endif %}
+
+{% translate "If you did not request this, you can ignore this email." %}{% endautoescape %}{% endblock %}

@@ -1,6 +1,7 @@
 import os
 import re
 from datetime import time
+from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.csp import CSP
@@ -87,6 +88,7 @@ DATABASES["auth_cache"] = {
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [Path(__file__).resolve().parent / "accounts" / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [

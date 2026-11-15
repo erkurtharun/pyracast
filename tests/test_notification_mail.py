@@ -15,8 +15,33 @@ from pyracast.notifications.mail import (
     NotSentError,
     PermanentlyNotSentError,
     SendCancelledError,
+    build_message,
     send_message,
 )
+from pyracast.notifications.models import NotificationDelivery
+
+
+def test_pending_csv_delivery_preserves_its_frozen_content_after_the_xlsx_upgrade() -> None:
+    delivery = NotificationDelivery(
+        id=17,
+        recipient="recipient@example.com",
+        prepared_message={
+            "subject": "Saved forecast",
+            "body": "Frozen text",
+            "html": "<p>Frozen text</p>",
+            "csv_filename": "irradiance-2026-11-15.csv",
+            "csv": "start,ghi_wm2\n2026-11-15T10:00:00+03:00,250\n",
+        },
+    )
+    message = build_message(delivery)
+    assert message.subject == "Saved forecast"
+    assert message.body == "Frozen text"
+    assert message.attachments[0] == (
+        "irradiance-2026-11-15.csv",
+        "start,ghi_wm2\n2026-11-15T10:00:00+03:00,250\n",
+        "text/csv",
+    )
+    assert message.extra_headers["Message-ID"] == "<pyracast-reminder-17@notifications.pyracast>"
 
 
 def test_default_smtp_configuration_has_a_bounded_socket_timeout(

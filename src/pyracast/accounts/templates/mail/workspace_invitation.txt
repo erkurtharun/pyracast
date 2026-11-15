@@ -1,0 +1,9 @@
+{% load i18n %}{% autoescape off %}Pyracast
+
+{% blocktranslate %}You are invited to {{ workspace }}.{% endblocktranslate %}
+
+{% blocktranslate %}Sign in or create an account with {{ email }}, then verify your email to accept the invitation.{% endblocktranslate %}
+
+{{ action_url }}
+
+{% translate "This invitation expires in seven days and grants read-only workspace access." %}{% endautoescape %}

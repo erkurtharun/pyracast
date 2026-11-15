@@ -110,13 +110,18 @@ def _claim(run_id: int, now: datetime) -> _Lease | None:
         return None
 
 
+def _lock_calibration_records(lease: _Lease) -> tuple[Plant, CalibrationRun]:
+    Tenant.objects.select_for_update().get(pk=lease.configuration.plant.region.tenant_id)
+    Region.objects.select_for_update().get(pk=lease.configuration.binding.region_id)
+    plant = Plant.objects.select_for_update().get(pk=lease.run.plant_id)
+    run = CalibrationRun.objects.select_for_update().get(pk=lease.run.pk)
+    return plant, run
+
+
 def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now: datetime) -> bool:
     started = time.monotonic()
     with transaction.atomic():
-        Tenant.objects.select_for_update().get(pk=lease.configuration.plant.region.tenant_id)
-        Region.objects.select_for_update().get(pk=lease.configuration.binding.region_id)
-        plant = Plant.objects.select_for_update().get(pk=lease.run.plant_id)
-        run = CalibrationRun.objects.select_for_update().get(pk=lease.run.pk)
+        plant, run = _lock_calibration_records(lease)
         ProviderAccount.objects.select_for_update().get(
             pk=lease.configuration.binding.provider_account_id
         )
@@ -169,10 +174,7 @@ def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now:
 def _fail(lease: _Lease, now: datetime) -> None:
     started = time.monotonic()
     with transaction.atomic():
-        Tenant.objects.select_for_update().get(pk=lease.configuration.plant.region.tenant_id)
-        Region.objects.select_for_update().get(pk=lease.configuration.binding.region_id)
-        plant = Plant.objects.select_for_update().get(pk=lease.run.plant_id)
-        run = CalibrationRun.objects.select_for_update().get(pk=lease.run.pk)
+        plant, run = _lock_calibration_records(lease)
         now += timedelta(seconds=time.monotonic() - started)
         if (
             run.status != "running"

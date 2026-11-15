@@ -1,5 +1,7 @@
 from copy import deepcopy
+from io import BytesIO
 from typing import Any
+from zipfile import ZipFile
 
 import pytest
 from django.test import Client
@@ -14,7 +16,7 @@ from pyracast.forecasts.models import CollectionJob, ForecastResult, ForecastSna
 from pyracast.notifications.mail import build_message
 from pyracast.plants.models import CalibrationRun
 from tests.test_domain import NOW, make_system
-from tests.test_notifications import ready
+from tests.test_notifications import attached_sheet, ready
 from tests.test_plant_operations import make_plant
 
 
@@ -131,15 +133,20 @@ def test_saved_forecast_email_hides_weather_provider_in_all_alternatives() -> No
     message = build_message(delivery)
     assert "solcast" not in message.body.casefold()
     assert "private-account" not in message.body
-    assert "Dataset kind: forecast" in message.body
-    assert "Unvalidated irradiance proxy" in message.body
+    assert "Irradiance estimate, not plant electricity." in message.body
     for alternative in message.alternatives:
         assert isinstance(alternative[0], str)
         assert "solcast" not in alternative[0].casefold()
     for attachment in message.attachments:
         assert isinstance(attachment, tuple)
-        assert isinstance(attachment[1], str)
-        assert "solcast" not in attachment[1].casefold()
+        assert isinstance(attachment[1], bytes)
+        with ZipFile(BytesIO(attachment[1])) as archive:
+            for name in archive.namelist():
+                content = archive.read(name).decode("utf-8").casefold()
+                assert "solcast" not in content
+                assert "private-account" not in content
+                assert "test-only-solcast-key" not in content
+    assert attached_sheet(message)["B4"].value == "Forecast (kWh/m²)"
     account.refresh_from_db()
     assert account.provider == "solcast"
     assert account.external_account_id == "private-account"

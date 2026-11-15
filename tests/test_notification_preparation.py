@@ -23,7 +23,14 @@ from pyracast.notifications.scheduler import PREPARATION_GRACE, enqueue_due
 from pyracast.notifications.views import reminder_schedule_payload
 from pyracast.regions.models import Region
 from tests.test_domain import NOW, System
-from tests.test_notifications import SLOT, cache_saved_days, configured, memory_mail, saved
+from tests.test_notifications import (
+    SLOT,
+    attached_sheet,
+    cache_saved_days,
+    configured,
+    memory_mail,
+    saved,
+)
 
 pytestmark = pytest.mark.django_db(transaction=True)
 __all__ = ["memory_mail"]
@@ -88,8 +95,15 @@ def test_same_clock_collection_waits_without_spending_mail_attempts_then_uses_pu
     assert delivery.snapshot_id == fresh.pk != old.pk
     assert isinstance(delivery.prepared_message, dict)
     assert delivery.prepared_message["kind"] == "current"
-    assert "age at preparation: 0:01:" in mail.outbox[0].body
-    assert "2026-11-11" in mail.outbox[0].subject
+    assert (
+        when + timedelta(minutes=1)
+        <= datetime.fromisoformat(delivery.prepared_message["prepared_at"])
+        < when + timedelta(minutes=2)
+    )
+    assert attached_sheet(mail.outbox[0])["B2"].value == when.astimezone(
+        ZoneInfo(system.region.timezone)
+    ).replace(tzinfo=None)
+    assert "11 Nov 2026" in mail.outbox[0].subject
 
 
 @pytest.mark.parametrize("job_state", ["failed", "stale", "succeeded"])
@@ -111,7 +125,7 @@ def test_terminal_collection_prepares_immediately_using_older_complete_forecast(
     assert delivery.snapshot_id == old.pk
     assert isinstance(delivery.prepared_message, dict)
     assert delivery.prepared_message["kind"] == "saved_complete"
-    assert "freshness is reduced" in mail.outbox[0].body
+    assert "Using the last saved forecast." in mail.outbox[0].body
 
 
 def test_latest_partial_or_invalid_cache_cannot_hide_complete_saved_tomorrow(
@@ -136,7 +150,11 @@ def test_latest_partial_or_invalid_cache_cannot_hide_complete_saved_tomorrow(
     assert process_notification(delivery_id, SLOT)
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     assert delivery.snapshot_id == old.pk != partial.pk != bad.pk
-    assert "7.200 kWh/m²" in mail.outbox[0].body
+    assert attached_sheet(mail.outbox[0])["B6"].value == pytest.approx(
+        ForecastResult.objects.get(snapshot=old).daily_payloads["2026-11-11"]["daylight"][
+            "energy_kwh_m2"
+        ]
+    )
 
 
 def test_restart_respects_fixed_publication_cutoff_and_hard_send_deadline() -> None:
@@ -167,7 +185,7 @@ def test_missing_due_job_waits_only_to_fixed_deadline_then_sends_honest_unavaila
     assert isinstance(delivery.prepared_message, dict)
     assert delivery.prepared_message["kind"] == "unavailable"
     assert "Tomorrow's forecast is unavailable" in mail.outbox[0].body
-    assert "7.200" not in mail.outbox[0].body
+    assert attached_sheet(mail.outbox[0])["B6"].value is None
 
 
 def test_credentials_rotated_or_auth_failed_preserves_approved_archived_email() -> None:
@@ -229,9 +247,15 @@ def test_partial_tomorrow_survives_missing_today_and_does_not_invent_daily_total
     assert delivery.snapshot_id == newer.pk
     assert isinstance(delivery.prepared_message, dict)
     assert delivery.prepared_message["kind"] == "saved_partial"
-    assert "Unavailable (no usable saved coverage)" in mail.outbox[0].body
-    assert "Unavailable (incomplete coverage)" in mail.outbox[0].body
-    assert "Available partial energy: 0.15" in mail.outbox[0].body
+    assert "Unavailable" in mail.outbox[0].body
+    assert "Partial:" in mail.outbox[0].body
+    sheet = attached_sheet(mail.outbox[0])
+    assert sheet["B5"].value is None
+    assert sheet["B6"].value == pytest.approx(
+        result.daily_payloads["2026-11-11"]["daylight"]["partial_energy_kwh_m2"]
+    )
+    assert sheet["D6"].value == "Forecast partial"
+    assert delivery.prepared_message["tomorrow_complete"] is False
 
 
 def test_legacy_unprepared_recipient_reuses_existing_slot_content() -> None:
@@ -292,7 +316,7 @@ def test_ineligible_archived_sources_send_unavailable_without_exposing_their_val
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     assert delivery.snapshot_id is None
     assert "Tomorrow's forecast is unavailable" in mail.outbox[0].body
-    assert "7.200" not in mail.outbox[0].body
+    assert attached_sheet(mail.outbox[0])["B6"].value is None
 
 
 def test_same_slot_partial_forecast_exposes_incomplete_saved_data_status() -> None:
@@ -395,7 +419,7 @@ def test_candidate_loading_excludes_unrelated_history_and_defers_provider_json(
     monkeypatch.setattr(ForecastSnapshot, "from_db", classmethod(load))
     assert process_notification(delivery_id, SLOT)
     assert loaded == [usable.pk]
-    assert "Available partial energy" in mail.outbox[0].body
+    assert "Partial:" in mail.outbox[0].body
 
 
 def test_legacy_exact_day_payload_remains_eligible_without_daily_cache() -> None:
@@ -408,7 +432,9 @@ def test_legacy_exact_day_payload_remains_eligible_without_daily_cache() -> None
     delivery_id = enqueue_due(SLOT)[0]
     assert process_notification(delivery_id, SLOT)
     assert NotificationDelivery.objects.get(pk=delivery_id).snapshot_id == snapshot.pk
-    assert "7.200 kWh/m²" in mail.outbox[0].body
+    assert attached_sheet(mail.outbox[0])["B6"].value == pytest.approx(
+        result.payload["daylight"]["energy_kwh_m2"]
+    )
 
 
 def test_default_collection_clock_waits_without_an_explicit_schedule_row() -> None:
@@ -448,7 +474,7 @@ def test_collection_retry_after_preparation_deadline_does_not_delay_saved_mail()
     )
     delivery_id = enqueue_due(SLOT)[0]
     assert process_notification(delivery_id, SLOT)
-    assert "freshness is reduced" in mail.outbox[0].body
+    assert "Using the last saved forecast." in mail.outbox[0].body
 
 
 def test_notification_settings_remain_editable_after_provider_credentials_rotate() -> None:

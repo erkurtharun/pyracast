@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from django.contrib.auth.models import User
@@ -16,7 +17,7 @@ from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.models import Region
 from tests.test_domain import NOW, System
 from tests.test_notification_preparation import complete_saved
-from tests.test_notifications import SLOT, configured
+from tests.test_notifications import SLOT, attached_sheet, configured
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -112,9 +113,17 @@ def test_mixed_languages_share_one_frozen_source_and_retries_keep_original_conte
     assert turkish == repeated_turkish
     assert english["prepared_at"] == turkish["prepared_at"]
     assert english["kind"] == turkish["kind"] == "saved_complete"
-    assert english["csv"] == turkish["csv"]
-    assert "Daily energy: 7.200 kWh/m²" in english["body"]
-    assert "Günlük enerji: 7,200 kWh/m²" in turkish["body"]
+    assert english["report_context"] == turkish["report_context"]
+    assert english["results"] == turkish["results"]
+    sheets = [attached_sheet(build_message(record)) for record in deliveries]
+    numeric_values = [
+        [cell.value for row in sheet for cell in row if isinstance(cell.value, int | float)]
+        for sheet in sheets
+    ]
+    assert numeric_values[0]
+    assert numeric_values[0] == numeric_values[1] == numeric_values[2]
+    assert "3.299 kWh/m²" in english["body"]
+    assert "3,299 kWh/m²" in turkish["body"]
     assert '<html lang="en">' in english["html"]
     assert '<html lang="tr">' in turkish["html"]
     assert "other@example.com" not in turkish["body"]
@@ -165,7 +174,10 @@ def test_missing_saved_data_is_reported_in_the_pinned_language_without_inventing
     assert missing in messages[0].body
     assert "0.000 kWh/m²" not in messages[0].body
     assert "0,000 kWh/m²" not in messages[0].body
-    assert len(str(messages[0].attachments[0][1]).splitlines()) == 1
+    sheet = attached_sheet(messages[0])
+    assert sheet["B5"].value is None
+    assert sheet["B6"].value is None
+    assert not any(isinstance(cell.value, int | float) for row in sheet for cell in row)
     assert RequestAttempt.objects.count() == requests
 
 
@@ -361,7 +373,7 @@ def test_later_language_render_failure_preserves_frozen_slot_provenance_and_retr
     assert english.attempts == 1
 
 
-def test_mail_rendering_restores_the_caller_language_and_preserves_technical_csv() -> None:
+def test_mail_rendering_restores_the_caller_language_and_preserves_typed_workbook() -> None:
     system, _ = configured()
     complete_saved(system)
     (delivery_id,) = enqueue_due(SLOT)
@@ -370,10 +382,13 @@ def test_mail_rendering_restores_the_caller_language_and_preserves_technical_csv
     with translation.override("en"):
         message = build_message(delivery)
         assert translation.get_language() == "en"
-    assert "doğrulanmam\u0131ş" in message.body
-    assert "7,200 kWh/m²" in message.body
-    assert "local_date,start,end,ghi_wm2,quality_flags" in str(message.attachments[0][1])
-    assert "unvalidated" in str(message.attachments[0][1])
+    assert "Iş\u0131n\u0131m tahminidir" in message.body
+    assert "3,299 kWh/m²" in message.body
+    sheet = attached_sheet(message)
+    assert sheet.title == "Tahmin"
+    assert sheet["A5"].value == datetime(2026, 11, 10)
+    assert sheet["A5"].number_format == "dd.mm.yyyy"
+    assert isinstance(sheet["B5"].value, float)
 
 
 def test_delivery_language_is_database_constrained() -> None:
@@ -390,13 +405,18 @@ def test_delivery_language_is_database_constrained() -> None:
 
 
 @pytest.mark.parametrize("days", [1, 2])
-def test_saved_forecast_age_uses_translated_day_units(days: int) -> None:
+def test_saved_forecast_updated_date_and_stale_warning_are_localized(days: int) -> None:
     system, _ = configured()
-    complete_saved(system, NOW - timedelta(days=days))
+    snapshot = complete_saved(system, NOW - timedelta(days=days))
     (delivery_id,) = enqueue_due(SLOT)
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     delivery.language = "tr"
-    assert f"{days} gün, 18:00:00" in build_message(delivery).body
+    message = build_message(delivery)
+    assert "Tahmin verisi 24 saatten eski." in message.body
+    assert f"{9 - days} Kas 2026 16:00" in message.body
+    assert attached_sheet(message)["B2"].value == (
+        snapshot.collected_at.astimezone(ZoneInfo(system.region.timezone)).replace(tzinfo=None)
+    )
 
 
 def test_language_migration_preserves_prepared_content_and_does_not_resend() -> None:

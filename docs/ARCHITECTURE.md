@@ -575,18 +575,24 @@ unavailable notice. Today's coverage never disqualifies a valid tomorrow forecas
 Freeze one selected source for the schedule's slot and render text and HTML in
 its explicit email language. Pin that language
 when scheduling; freeze each language's content before sending. Retries preserve
-the frozen message, and all languages share the same source and CSV values. Source age,
-fallback kind, collection time, units and completeness remain visible. Age over
-24 hours is stale; a stale source is usable only for dates it actually covers.
-These messages describe incident irradiance energy in kWh/m², separately from plant
-electrical generation in MWh.
+the frozen message and attachment bytes. All languages share the same numeric report.
+Plant messages show electrical energy in MWh, with a separate scenario for reported
+outage times and capacities. Unknown outage impact remains unavailable. A compact
+XLSX contains daily summaries and interval energy; dates, times and numbers are typed,
+and UTC offsets disambiguate clock changes. Native intervals overlapping daylight are
+retained, including missing and zero values. Hourly aggregation follows clipping and
+outage limits; boundary rows retain their actual duration. Collection time, stale-source
+and fallback warnings remain visible. Region-only records retain a clearly labeled
+irradiance report in kWh/m². Age over 24 hours is stale.
 
 Successful collection saves `ForecastResult.daily_payloads` for the local dates
 covered by its elapsed 72-hour acquisition horizon, including DST boundaries, in
 the same publication transaction as the canonical target-day result. Failure to
-calculate a supplemental day omits only that day. Email rendering performs no
-model recomputation or provider request, so a later solver failure cannot destroy
-previously saved usable outputs. Validate saved dates, binding identity, finite
+calculate a supplemental day omits only that day. Preparation calculates plant electricity
+locally from the pinned saved acquisition, using configuration, calibration and incident
+revisions eligible at the reminder slot. It freezes these results before rendering any
+language; retries and later language variants never recalculate them. No provider request
+is made. Validate saved dates, binding identity, finite
 values, interval coverage, energy consistency and completeness before selection. Migration
 `forecasts.0017` copies only an existing result's matching original target day;
 additional historical days are not recalculated or backdated. The wider fallback

@@ -8,129 +8,15 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n > 1);\n"
 
-#, python-format
-msgid "%(days)d day, %(time)s"
-msgid_plural "%(days)d days, %(time)s"
-msgstr[0] "%(days)d gün, %(time)s"
-msgstr[1] "%(days)d gün, %(time)s"
-
 msgid "A supported reminder language is required."
 msgstr "Desteklenen bir hatırlatıcı dili seçilmelidir."
-
-msgid "Available partial energy"
-msgstr "Mevcut kısmi enerji"
-
-#, python-format
-msgid "Available partial energy: %(energy)s kWh/m²"
-msgstr "Mevcut kısmi enerji: %(energy)s kWh/m²"
-
-#, python-format
-msgid "Collected: %(collected)s"
-msgstr "Toplanma: %(collected)s"
-
-msgid "Collected: unavailable"
-msgstr "Toplanma: mevcut değil"
-
-msgid "Complete coverage"
-msgstr "Tam kapsam"
-
-#, python-format
-msgid "Complete: %(complete)s; coverage fraction: %(coverage)s"
-msgstr "Tam: %(complete)s; kapsam oranı: %(coverage)s"
-
-msgid "Coverage fraction"
-msgstr "Kapsam oranı"
-
-msgid "Daily energy"
-msgstr "Günlük enerji"
-
-#, python-format
-msgid "Daily energy: %(energy)s"
-msgstr "Günlük enerji: %(energy)s"
-
-msgid "Daily energy: Unavailable (no usable saved coverage)"
-msgstr "Günlük enerji: Mevcut değil (kullanılabilir kayıtlı veri kapsamı yok)"
-
-msgid "Daily irradiance summary"
-msgstr "Günlük ışınım özeti"
-
-msgid "Dataset kind: forecast"
-msgstr "Veri kümesi türü: tahmin"
-
-#, python-format
-msgid "Date: %(date)s (%(timezone)s)"
-msgstr "Tarih: %(date)s (%(timezone)s)"
-
-msgid "False"
-msgstr "Hayır"
 
 #, python-format
 msgid "Forecast for %(plant)s"
 msgstr "%(plant)s için tahmin"
 
-msgid ""
-"Interval mean irradiance (W/m²) and quality flags are in the attached CSV."
-msgstr ""
-"Aralık ortalama ışınımı (W/m²) ve kalite kodları ekteki CSV dosyasındadır."
-
-msgid "Interval values and quality flags are attached as CSV."
-msgstr "Aralık değerleri ve kalite kodları CSV dosyası olarak eklendi."
-
-#, python-format
-msgid "Model: %(model)s; quality: %(quality)s"
-msgstr "Model: %(model)s; kalite: %(quality)s"
-
-msgid "No daily energy total is available."
-msgstr "Günlük enerji toplamı mevcut değil."
-
-msgid ""
-"No usable saved forecast is available. Tomorrow's forecast is unavailable."
-msgstr "Kullanılabilir kayıtlı tahmin yok. Yarının tahmini mevcut değil."
-
-msgid ""
-"Previously saved forecast fallback; freshness is reduced. Check the "
-"collection timestamp."
-msgstr ""
-"Önceden kaydedilmiş yedek tahmin kullanıldı; güncellik azaldı. Toplanma "
-"zamanını kontrol edin."
-
-#, python-format
-msgid "Provider issue: %(issued)s"
-msgstr "Sağlayıcı yayımlama zamanı: %(issued)s"
-
 msgid "Pyracast forecast unavailable"
 msgstr "Pyracast tahmini mevcut değil"
-
-#, python-format
-msgid "Pyracast forecast — %(date)s"
-msgstr "Pyracast tahmini — %(date)s"
-
-#, python-format
-msgid "Saved forecast age at preparation: %(age)s"
-msgstr "Hazırlama anında kayıtlı tahminin yaşı: %(age)s"
-
-msgid "Saved forecast is at most 24 hours old."
-msgstr "Kayıtlı tahmin en fazla 24 saatlik."
-
-msgid ""
-"Saved forecast selected within the reminder preparation deadline. No new "
-"provider request was made."
-msgstr ""
-"Kayıtlı tahmin, hatırlatma hazırlama süresi içinde seçildi. Sağlayıcıya yeni"
-" bir istek yapılmadı."
-
-msgid "Scheduled collection forecast."
-msgstr "Planlı veri toplama işleminden alınan tahmin."
-
-#, python-format
-msgid "Scheduled: %(scheduled)s (%(timezone)s)"
-msgstr "Planlanan: %(scheduled)s (%(timezone)s)"
-
-msgid "Source freshness: missing."
-msgstr "Kaynak güncelliği: veri eksik."
-
-msgid "Stale saved forecast (older than 24 hours)."
-msgstr "Kayıtlı tahmin güncel değil (24 saatten eski)."
 
 #, python-format
 msgid ""
@@ -141,19 +27,6 @@ msgstr ""
 "Yarının kayıtlı tahmini hazırlanamadı. Tahmini enerji toplamı mevcut değil.\n"
 "Planlanan hatırlatma: %(scheduled)s\n"
 "Veri toplama durumunu santral sayfasından kontrol edin."
-
-msgid "True"
-msgstr "Evet"
-
-msgid "Unavailable (incomplete coverage)"
-msgstr "Mevcut değil (veri kapsamı eksik)"
-
-msgid ""
-"Unvalidated irradiance proxy. This is incident solar energy, not plant "
-"electricity."
-msgstr ""
-"Doğrulanmamış ışınım modeli. Bu, gelen güneş enerjisidir; santralin elektrik"
-" üretimi değildir."
 
 msgid "ambiguous_zero_power"
 msgstr "sıfır güçten ışınım belirlenemiyor"
@@ -196,3 +69,109 @@ msgstr "sabit ortalama ile orantılama"
 
 msgid "unvalidated"
 msgstr "doğrulanmamış"
+
+msgid "Forecast"
+msgstr "Tahmin"
+
+msgid "Updated"
+msgstr "Güncelleme"
+
+msgid "Unavailable"
+msgstr "Veri yok"
+
+msgid "Date"
+msgstr "Tarih"
+
+msgid "Coverage"
+msgstr "Kapsam"
+
+msgid "Outage coverage"
+msgstr "Kesinti senaryosu kapsamı"
+
+msgid "Status"
+msgstr "Durum"
+
+msgid "From"
+msgstr "Başlangıç"
+
+msgid "To"
+msgstr "Bitiş"
+
+msgid "From UTC offset"
+msgstr "Başlangıç UTC farkı"
+
+msgid "To UTC offset"
+msgstr "Bitiş UTC farkı"
+
+#, python-format
+msgid "Normal operation (%(unit)s)"
+msgstr "Normal çalışma (%(unit)s)"
+
+#, python-format
+msgid "Forecast (%(unit)s)"
+msgstr "Tahmin (%(unit)s)"
+
+#, python-format
+msgid "With reported outage (%(unit)s)"
+msgstr "Kayıtlı kesintiyle (%(unit)s)"
+
+msgid "Normal operation"
+msgstr "Normal çalışma"
+
+msgid "With reported outage"
+msgstr "Kayıtlı kesintiyle"
+
+msgid "Forecast partial"
+msgstr "Tahmin kısmi"
+
+msgid "Outage partial"
+msgstr "Kesinti senaryosu kısmi"
+
+msgid "Forecast unavailable"
+msgstr "Tahmin yok"
+
+msgid "Irradiance estimate, not plant electricity."
+msgstr "Işınım tahminidir; santral üretimi değildir."
+
+msgid "Forecast data is over 24 hours old."
+msgstr "Tahmin verisi 24 saatten eski."
+
+msgid "Using the last saved forecast."
+msgstr "Son kayıtlı tahmin kullanılıyor."
+
+msgid "The outage scenario follows the recorded outage times and limits."
+msgstr ""
+"Kesinti senaryosu, kayıtlı kesinti saatlerini ve kapasite sınırlarını esas "
+"alır."
+
+#, python-format
+msgid "Partial: %(energy)s %(unit)s (%(coverage)s%% coverage)"
+msgstr "Kısmi: %(energy)s %(unit)s (%(coverage)s%% kapsam)"
+
+#, python-format
+msgid "Updated: %(time)s (%(timezone)s)"
+msgstr "Güncelleme: %(time)s (%(timezone)s)"
+
+msgid "Tomorrow's forecast is unavailable."
+msgstr "Yarının tahmini mevcut değil."
+
+#, python-format
+msgid "%(plant)s — forecast for %(date)s"
+msgstr "%(plant)s — %(date)s tahmini"
+
+msgid "Interval forecasts are in the attached Excel file."
+msgstr "Aralık tahminleri ekteki Excel dosyasındadır."
+
+msgid "View forecasts"
+msgstr "Tahminleri aç"
+
+msgid "Outage impact unknown"
+msgstr "Kesintinin etkisi belirsiz"
+
+msgid ""
+"Outage impact is unknown. Update the outage capacity to get an estimate."
+msgstr ""
+"Kesintinin etkisi belirsiz. Tahmin için kesinti kapasitesini güncelleyin."
+
+msgid "Outage unavailable"
+msgstr "Kesinti tahmini yok"

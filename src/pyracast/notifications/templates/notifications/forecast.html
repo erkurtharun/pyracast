@@ -1,0 +1,17 @@
+{% extends "mail/base.html" %}{% load i18n %}
+{% block title %}{{ subject }}{% endblock %}
+{% block preheader %}{{ rows.0.date }} — {{ normal_label }}: {{ rows.0.normal }}{% endblock %}
+{% block content %}
+<h1 style="margin:0 0 20px;font-size:24px;line-height:1.3;">{{ title }}</h1>
+{% for row in rows %}
+<h2 style="margin:20px 0 8px;font-size:17px;">{{ row.date }}</h2>
+<p style="margin:4px 0;font-size:15px;color:#475569;">{{ normal_label }}</p>
+<p style="margin:0 0 8px;font-size:22px;font-weight:bold;line-height:1.4;">{{ row.normal }}</p>
+{% if row.outage %}<p style="margin:4px 0;font-size:15px;color:#475569;">{{ outage_label }}</p>
+<p style="margin:0 0 8px;font-size:20px;line-height:1.4;">{{ row.outage }}</p>{% endif %}
+{% endfor %}
+<p style="margin:20px 0 8px;font-size:13px;color:#475569;">{{ updated }}</p>
+{% for warning in warnings %}<p style="margin:8px 0;font-size:14px;">{{ warning }}</p>{% endfor %}
+<p style="margin:16px 0;font-size:14px;">{% translate "Interval forecasts are in the attached Excel file." %}</p>
+{% translate "View forecasts" as action_label %}{% include "mail/action_link.html" with action_url=url action_label=action_label %}
+{% endblock %}

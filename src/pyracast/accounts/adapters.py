@@ -5,10 +5,13 @@ from allauth.account.models import EmailAddress
 from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.headless.internal.restkit.response import ErrorResponse
 from allauth.mfa.models import Authenticator
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
+from django.core.mail import EmailMultiAlternatives
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest
+from django.template.loader import render_to_string
 from django.utils import translation
 
 from pyracast.accounts.language import user_language
@@ -16,6 +19,33 @@ from pyracast.accounts.security import normalize_client_ip
 
 
 class AccountAdapter(DefaultAccountAdapter):
+    def render_mail(
+        self,
+        template_prefix: str,
+        email: str | list[str],
+        context: dict[str, Any],
+        headers: dict[str, str] | None = None,
+    ) -> EmailMultiAlternatives:
+        timeout = (
+            settings.ACCOUNT_EMAIL_VERIFICATION_BY_CODE_TIMEOUT
+            if template_prefix.startswith("account/email/email_confirmation")
+            else settings.ACCOUNT_PASSWORD_RESET_BY_CODE_TIMEOUT
+        )
+        context = {**context, "code_timeout_minutes": timeout / 60}
+        message = cast(
+            EmailMultiAlternatives,
+            super().render_mail(template_prefix, email, context, headers=headers),
+        )
+        if not message.alternatives:
+            message.attach_alternative(
+                render_to_string(
+                    "mail/transactional.html",
+                    {"mail_title": message.subject, "mail_body": message.body},
+                ),
+                "text/html",
+            )
+        return message
+
     def authenticate(self, request: HttpRequest, **credentials: Any) -> User | None:
         user = cast(User | None, super().authenticate(request, **credentials))
         if (

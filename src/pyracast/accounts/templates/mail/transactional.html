@@ -1,0 +1,6 @@
+{% extends "mail/base.html" %}
+{% block preheader %}{{ mail_title }}{% endblock %}
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:22px;line-height:1.3;">{{ mail_title }}</h1>
+<div style="font-size:16px;line-height:1.5;">{{ mail_body|urlize|linebreaksbr }}</div>
+{% endblock %}

@@ -28,6 +28,7 @@ exclude:
       - src/pyracast/admin_forms.py
       - src/pyracast/api/public.py
       - src/pyracast/plants/incident_forecasts.py
+      - src/pyracast/accounts/language.py
   - name: PySimplifyBooleanCheckInspection
     paths:
       - src/pyracast/calculation.py
@@ -42,3 +43,20 @@ exclude:
   - name: PyPackageRequirementsInspection
     paths:
       - scripts/dev_dependencies.py
+  # Cell inherits the supported NumberFormatDescriptor from openpyxl's StyleableObject.
+  - name: PyDunderSlotsInspection
+    paths:
+      - src/pyracast/notifications/workbook.py
+  # Nullable Django descriptors and q=0 parsing have tested, reachable branches.
+  - name: PyUnreachableCodeInspection
+    paths:
+      - src/pyracast/accounts/invitations.py
+      - src/pyracast/accounts/language.py
+  # A backend can fail after accepting mail; retain the uncertain delivery outcome.
+  - name: PyBroadExceptionInspection
+    paths:
+      - src/pyracast/accounts/invitations.py
+  # SwappableTuple extends tuple and retains Django's migration setting metadata.
+  - name: PyClassVarInspection
+    paths:
+      - src/pyracast/accounts/migrations/0004_userlanguagepreference.py

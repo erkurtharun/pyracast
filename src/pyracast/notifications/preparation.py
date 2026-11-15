@@ -9,6 +9,8 @@ from pyracast.forecasts.projections import saved_day_payload
 from pyracast.forecasts.timing import effective_forecast_schedule, latest_forecast_slot
 from pyracast.notifications.mail import build_message, build_unavailable_message, message_payload
 from pyracast.notifications.models import NotificationDelivery
+from pyracast.notifications.presentation import report_summary
+from pyracast.notifications.report_data import saved_report_context
 
 
 def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
@@ -41,10 +43,22 @@ def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
         )
         metadata: dict[str, object] = {
             key: existing[key]
-            for key in ("prepared_at", "tomorrow_complete", "kind", "format")
+            for key in (
+                "prepared_at",
+                "tomorrow_complete",
+                "kind",
+                "format",
+                "report_context",
+                "results",
+            )
             if key in existing
         }
-        _freeze_slot(delivery, slot_deliveries, _saved_results(delivery), prepared_at, metadata)
+        results = (
+            cast(list[dict[str, object] | None], existing["results"])
+            if "results" in existing
+            else _saved_results(delivery)
+        )
+        _freeze_slot(delivery, slot_deliveries, results, prepared_at, metadata)
         return True
     job = CollectionJob.objects.filter(
         binding=binding,
@@ -136,7 +150,6 @@ def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
         now,
         {
             "prepared_at": now.isoformat(),
-            "tomorrow_complete": results[1] is not None and results[1]["complete"] is True,
             "kind": kind,
         },
     )
@@ -162,6 +175,18 @@ def _freeze_slot(
     prepared_at: datetime,
     metadata: dict[str, object],
 ) -> None:
+    metadata.setdefault("results", results)
+    if metadata.get("format") != "plain" and "report_context" not in metadata:
+        metadata["report_context"] = saved_report_context(delivery)
+    if metadata.get("format") == "plain":
+        metadata["tomorrow_complete"] = False
+    else:
+        context = cast(dict[str, object], metadata["report_context"])
+        electrical = context["plant_id"] is not None
+        tomorrow = cast(list[dict[str, object]], context["days"])[1]
+        result = cast(dict[str, object] | None, tomorrow["normal"]) if electrical else results[1]
+        unit = "mwh" if electrical else "kwh_m2"
+        metadata["tomorrow_complete"] = report_summary(result).get(f"energy_{unit}") is not None
     payloads = {
         language: cast(dict[str, object], payload)
         for language, payload in slot_deliveries.filter(prepared_message__isnull=False)
@@ -177,7 +202,14 @@ def _freeze_slot(
         payload: dict[str, object] = dict(
             build_unavailable_message(record, prepared_at)[1]
             if metadata.get("format") == "plain"
-            else message_payload(build_message(record, results, prepared_at=prepared_at))
+            else message_payload(
+                build_message(
+                    record,
+                    results,
+                    prepared_at=prepared_at,
+                    report_context=cast(dict[str, object] | None, metadata.get("report_context")),
+                )
+            )
         )
         payload.update(metadata)
         payloads[record.language] = payload

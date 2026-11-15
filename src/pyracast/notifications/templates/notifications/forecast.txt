@@ -1,0 +1,13 @@
+{% load i18n %}{% autoescape off %}{{ title }}
+{% for row in rows %}
+{{ row.date }}
+{{ normal_label }}: {{ row.normal }}{% if row.outage %}
+{{ outage_label }}: {{ row.outage }}{% endif %}
+{% endfor %}
+{{ updated }}
+{% for warning in warnings %}{{ warning }}
+{% endfor %}
+{% translate "Interval forecasts are in the attached Excel file." %}
+
+{% translate "View forecasts" %}: {{ url }}
+{% endautoescape %}

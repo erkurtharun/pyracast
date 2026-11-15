@@ -10,6 +10,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.mail import send_mail
 from django.core.validators import validate_email
 from django.db import transaction
+from django.template.loader import render_to_string
 from django.utils import timezone, translation
 from django.utils.translation import gettext as _
 
@@ -72,14 +73,12 @@ def invite_workspace_member(actor: User, tenant_id: int, email: str) -> Workspac
     def deliver() -> None:
         with translation.override(language):
             subject = _("Pyracast workspace invitation")
-            body = _(
-                "You have been invited to %(workspace)s.\n\n"
-                "Sign in or create an account with %(email)s, verify your email, and accept:\n"
-                "%(link)s\n\n"
-                "This invitation expires in seven days and grants read-only workspace access."
-            ) % {"workspace": tenant.name, "email": email, "link": link}
+            context = {"workspace": tenant.name, "email": email, "action_url": link}
+            body = render_to_string("mail/workspace_invitation.txt", context).strip()
+            html = render_to_string("mail/workspace_invitation.html", context)
         try:
-            sent = send_mail(subject, body, settings.DEFAULT_FROM_EMAIL, [email])
+            sent = send_mail(subject, body, settings.DEFAULT_FROM_EMAIL, [email], html_message=html)
+        # A mail backend can accept the message before raising an arbitrary exception.
         except Exception:
             logger.warning(
                 "Workspace invitation mail outcome is unknown; invitation_id=%s", invitation.pk
