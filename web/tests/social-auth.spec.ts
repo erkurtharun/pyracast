@@ -4,6 +4,7 @@ import { mockApi, user } from "./support/workspace";
 
 test("enabled providers submit a CSRF protected native redirect form on mobile", async ({
     page,
+    baseURL,
 }) => {
     await mockApi(page, { anonymous: true });
     await page.setViewportSize({ width: 390, height: 812 });
@@ -32,7 +33,7 @@ test("enabled providers submit a CSRF protected native redirect form on mobile",
                 provider: "google",
                 process: "login",
                 csrfmiddlewaretoken: "anonymous-token",
-                callback_url: "http://127.0.0.1:3100/?social_callback=1",
+                callback_url: new URL("/?social_callback=1", baseURL).href,
             });
             await route.fulfill({
                 contentType: "text/html",
@@ -369,12 +370,13 @@ test("expired initial-password sessions never report that the password was saved
 test("Turkish provider buttons fit a 320px screen", async ({
     page,
     context,
+    baseURL,
 }) => {
     await context.addCookies([
         {
             name: "pyracast_language",
             value: "tr",
-            url: "http://127.0.0.1:3100",
+            url: baseURL!,
         },
     ]);
     await mockApi(page, { anonymous: true });
