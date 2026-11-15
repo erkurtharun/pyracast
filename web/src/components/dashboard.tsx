@@ -60,8 +60,35 @@ function DashboardView({
         current?.user?.can_admin &&
         searchParams.get("workspace") !== "customer" &&
         searchParams.get("account") !== "security" &&
+        !searchParams.has("social_callback") &&
         invitation.ready &&
         !invitation.token;
+    useEffect(() => {
+        if (!current?.user || !searchParams.has("social_callback")) return;
+        try {
+            const url = new URL(window.location.href);
+            if (
+                window.sessionStorage.getItem("pyracast.socialConnect") ||
+                url.searchParams.has("error")
+            ) {
+                window.sessionStorage.removeItem("pyracast.socialConnect");
+                if (url.searchParams.get("account") !== "security") {
+                    url.searchParams.set("account", "security");
+                    window.location.replace(`${url.pathname}${url.search}`);
+                }
+            } else {
+                url.searchParams.delete("social_callback");
+                url.searchParams.delete("error_process");
+                window.history.replaceState(
+                    window.history.state,
+                    "",
+                    `${url.pathname}${url.search}${url.hash}`,
+                );
+            }
+        } catch {
+            // Browser privacy settings can disable session storage.
+        }
+    }, [current, searchParams]);
     useEffect(() => {
         if (enterAdministration) window.location.replace("/admin/");
     }, [enterAdministration]);
@@ -433,6 +460,10 @@ function Workspace({
                                     key={`${session.user!.id}:${session.user!.mfa_required}`}
                                     token={session.csrf_token}
                                     mfaRequired={session.user!.mfa_required}
+                                    hasPassword={
+                                        session.user!.has_usable_password
+                                    }
+                                    email={session.user!.email}
                                     onSession={onSession}
                                 />
                             </>

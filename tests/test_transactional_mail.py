@@ -13,7 +13,7 @@ from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference
 
 
 @pytest.mark.parametrize("language", ["en", "tr"])
-@pytest.mark.parametrize("kind", ["email_confirmation_signup", "password_reset_code"])
+@pytest.mark.parametrize("kind", ["email_confirmation_signup", "password_reset_code", "login_code"])
 @override_settings(ACCOUNT_EMAIL_SUBJECT_PREFIX="[Pyracast] ")
 def test_authentication_code_mail_has_accessible_html_and_matching_plain_text(
     language: str, kind: str
@@ -46,12 +46,14 @@ def test_authentication_code_mail_has_accessible_html_and_matching_plain_text(
 
 
 @pytest.mark.parametrize(
-    ("kind", "minutes"), [("email_confirmation", 30), ("password_reset_code", 20)]
+    ("kind", "minutes"),
+    [("email_confirmation", 30), ("password_reset_code", 20), ("login_code", 5)],
 )
 @override_settings(
     ACCOUNT_EMAIL_SUBJECT_PREFIX="[Pyracast] ",
     ACCOUNT_EMAIL_VERIFICATION_BY_CODE_TIMEOUT=1800,
     ACCOUNT_PASSWORD_RESET_BY_CODE_TIMEOUT=1200,
+    ACCOUNT_LOGIN_BY_CODE_TIMEOUT=300,
 )
 def test_code_mail_expiry_matches_the_configured_flow(kind: str, minutes: int) -> None:
     with translation.override("en"):

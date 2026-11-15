@@ -26,6 +26,7 @@ class SessionUserOutput(serializers.Serializer[Any]):
     id = serializers.IntegerField()
     username = serializers.CharField()
     email = serializers.EmailField(allow_blank=True)
+    has_usable_password = serializers.BooleanField(read_only=True)
     can_admin = serializers.SerializerMethodField()
     mfa_required = serializers.SerializerMethodField()
     language_preference = serializers.SerializerMethodField()

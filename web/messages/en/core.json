@@ -35,7 +35,8 @@
         "resendCode": "Resend verification code",
         "verificationExpired": "The verification session has expired. Please start again.",
         "codeRequested": "A new code was requested.",
-        "forgotPassword": "Forgot password?"
+        "forgotPassword": "Forgot password?",
+        "passwordChanged": "Password saved. Sign in with your new password."
     },
     "Security": {
         "sessionExpired": "Your session has expired. Please sign in again.",
@@ -109,7 +110,13 @@
         "reauthStillRequired": "Verification could not be completed. Please try again.",
         "setupUnavailable": "Setup details were not returned. Please try again.",
         "verifying": "Verifying…",
-        "working": "Working…"
+        "working": "Working…",
+        "emailReauthTitle": "Confirm with email",
+        "emailReauthDescription": "Send a verification code to your verified email address.",
+        "sendEmailCode": "Send verification code",
+        "emailReauthCode": "Email verification code",
+        "confirmEmailCode": "Confirm code",
+        "setPassword": "Set a password"
     },
     "Dashboard": {
         "retry": "Try again",
@@ -234,5 +241,26 @@
         "energy": "Row {row}: energy must be a non-negative number.",
         "quality": "Row {row}: include a valid quality and source (up to 200 characters).",
         "overlap": "The CSV contains overlapping intervals."
+    },
+    "SocialAuth": {
+        "continue": {
+            "google": "Continue with Google",
+            "microsoft": "Sign in with Microsoft"
+        },
+        "connect": {
+            "google": "Connect Google",
+            "microsoft": "Connect Microsoft"
+        },
+        "microsoftHint": "Use your Outlook, Microsoft 365, work or school account.",
+        "emailDivider": "or continue with email",
+        "completeSignup": "Complete your account",
+        "signupHint": "Confirm your email and company to finish. If you already have an account, sign in first and connect this provider in Account settings.",
+        "callbackError": "Sign-in was cancelled or could not be completed. Try again. If this email already has an account, sign in with your existing method and connect the provider in Account settings.",
+        "linkedAccounts": "Connected accounts",
+        "disconnect": "Disconnect",
+        "removed": "Account disconnected.",
+        "retry": "Try again",
+        "loadError": "Connected accounts could not be loaded.",
+        "connectAccount": "Connect an account"
     }
 }

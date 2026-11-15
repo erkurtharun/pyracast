@@ -123,6 +123,18 @@ screening, hashes new passwords with Argon2 and rotates session identifiers on l
 Mutations enforce CSRF before authentication. Allauth's account and IP rate limits
 share an atomic PostgreSQL JSON/TTL cache; ingress limits additionally protect capacity.
 
+Google and Microsoft sign-in use backend authorization-code exchanges with PKCE
+and session-bound state. Provider credentials stay in the runtime secret; access
+and refresh tokens are not retained. New users complete the same workspace or
+invitation signup as password users. Provider identities never grant workspace
+access by email or domain, and matching email addresses never merge accounts.
+Only Google-authoritative Gmail or verified Workspace addresses satisfy mailbox
+verification; other addresses use Pyracast's email verification.
+Connections require an authenticated session and recent reauthentication; users
+without a password can confirm a code sent to their verified email. Linking is
+bound to the initiating user, and disconnects lock the user record to preserve a
+working login method. Provider sign-in retains Pyracast's local MFA requirements.
+
 Each workspace has one administrator; other members have read-only access. Workspace
 administrators can invite members and change that workspace's customer settings, but
 gain no platform privileges. Both the API and application operations enforce these
@@ -645,6 +657,7 @@ notification worker's threads do not share mail connections or OAuth token state
 - [Python 3.15.2](https://www.python.org/downloads/release/python-3152/), [Django 6.1.3](https://docs.djangoproject.com/en/6.1/releases/6.1.3/), [DRF releases](https://www.django-rest-framework.org/community/release-notes/).
 - [pvlib](https://pvlib-python.readthedocs.io/en/stable/), [Dramatiq releases](https://pypi.org/project/dramatiq/) and [platform history](https://dramatiq.io/changelog.html).
 - [django-allauth headless](https://docs.allauth.org/en/latest/headless/), [NIST SP 800-63B-4](https://pages.nist.gov/800-63-4/sp800-63b.html), [OWASP authentication guidance](https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html).
+- [Google identity verification](https://developers.google.com/identity/gsi/web/guides/verify-google-id-token), [Microsoft identity claims](https://learn.microsoft.com/en-us/entra/identity-platform/id-token-claims-reference), [OAuth security best current practice](https://www.rfc-editor.org/rfc/rfc9700.html).
 - [AWS retries and jitter](https://builder.aws.com/content/3EumjoZascWd1oZiEgL8ORlv3qE/timeouts-retries-and-backoff-with-jitter), [Google retry strategy](https://docs.cloud.google.com/storage/docs/retry-strategy), [Microsoft transient fault handling](https://learn.microsoft.com/en-us/azure/architecture/best-practices/transient-faults).
 - [HTTPX transport retries](https://www.python-httpx.org/advanced/transports/), [HTTPX timeouts](https://www.python-httpx.org/advanced/timeouts/), [Dramatiq retries and time limits](https://dramatiq.io/guide.html), [Python SMTP acceptance](https://docs.python.org/3/library/smtplib.html), [Amazon SES delivery outcomes](https://docs.aws.amazon.com/ses/latest/dg/send-email-concepts-deliverability.html).
 - [Django mailer construction](https://github.com/django/django/blob/stable/6.1.x/django/core/mail/handler.py), [PostgreSQL connection limits](https://www.postgresql.org/docs/current/libpq-connect.html), [PostgreSQL constraint timing](https://www.postgresql.org/docs/current/sql-set-constraints.html).

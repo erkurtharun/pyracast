@@ -9,14 +9,19 @@ import {
     type AuthResult,
 } from "@/lib/auth-api";
 
-export type ReauthMode = "mfa" | "password";
+export type ReauthMode = "mfa" | "password" | "email";
 
-export function getReauthMode(result: AuthResult<unknown>): ReauthMode {
+export function getReauthMode(
+    result: AuthResult<unknown>,
+    hasPassword: boolean,
+): ReauthMode {
     return result.errors?.some(
         (error) => error.code === "mfa_reauthentication_required",
     )
         ? "mfa"
-        : "password";
+        : hasPassword
+          ? "password"
+          : "email";
 }
 
 export async function refreshExpiredSession(
@@ -29,6 +34,7 @@ export async function refreshExpiredSession(
 
 export function ReauthenticationForm({
     mode,
+    email,
     token,
     onSession,
     onVerified,
@@ -39,6 +45,7 @@ export function ReauthenticationForm({
     label,
 }: {
     mode: ReauthMode;
+    email?: string;
     token: string;
     onSession: (session: Session) => void;
     onVerified: () => Promise<void> | void;
@@ -50,7 +57,8 @@ export function ReauthenticationForm({
 }) {
     const t = useTranslations("Security");
     const inputId = useId();
-    const fieldName = mode === "mfa" ? "code" : "password";
+    const fieldName = mode === "password" ? "password" : "code";
+    const [codeSent, setCodeSent] = useState(false);
     const [value, setValue] = useState("");
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string>();
@@ -59,21 +67,26 @@ export function ReauthenticationForm({
     const pendingRef = useRef(false);
     const inputRef = useRef<HTMLInputElement>(null);
     const errorRef = useRef<HTMLDivElement>(null);
+    const submitRef = useRef<HTMLButtonElement>(null);
 
     useEffect(() => {
         mountedRef.current = true;
-        if (autoFocus) inputRef.current?.focus();
+        if (autoFocus) (inputRef.current ?? submitRef.current)?.focus();
         return () => {
             mountedRef.current = false;
             pendingRef.current = false;
         };
     }, [autoFocus]);
 
+    useEffect(() => {
+        if (codeSent) inputRef.current?.focus();
+    }, [codeSent]);
+
     async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault();
         if (disabled || pendingRef.current) return;
-        const payloadValue = mode === "mfa" ? value.trim() : value;
-        if (!payloadValue) {
+        const payloadValue = mode === "password" ? value : value.trim();
+        if (!payloadValue && !(mode === "email" && !codeSent)) {
             setFieldError(t("enterCode"));
             inputRef.current?.focus();
             return;
@@ -85,13 +98,29 @@ export function ReauthenticationForm({
         setFieldError(undefined);
 
         try {
+            if (mode === "email" && !codeSent) {
+                const sent = await authRequest(
+                    "auth/reauthenticate/code/request",
+                    "POST",
+                    token,
+                    { email },
+                );
+                if (sent.status === 401 && !sent.meta?.is_authenticated)
+                    await refreshExpiredSession(onSession, t("sessionExpired"));
+                if (sent.status !== 200)
+                    throw new ApiError(t("reauthStillRequired"));
+                if (mountedRef.current) setCodeSent(true);
+                return;
+            }
             const result = await authRequest(
                 mode === "mfa"
                     ? "auth/2fa/reauthenticate"
-                    : "auth/reauthenticate",
+                    : mode === "email"
+                      ? "auth/reauthenticate/code/confirm"
+                      : "auth/reauthenticate",
                 "POST",
                 token,
-                mode === "mfa"
+                mode !== "password"
                     ? { code: payloadValue }
                     : { password: payloadValue },
             );
@@ -131,9 +160,19 @@ export function ReauthenticationForm({
     }
 
     const defaultLabel =
-        mode === "mfa" ? t("authenticatorOrRecovery") : t("currentPassword");
+        mode === "mfa"
+            ? t("authenticatorOrRecovery")
+            : mode === "email"
+              ? t("emailReauthCode")
+              : t("currentPassword");
     const defaultSubmit =
-        mode === "mfa" ? t("confirmAuthenticator") : t("confirmPassword");
+        mode === "mfa"
+            ? t("confirmAuthenticator")
+            : mode === "email"
+              ? codeSent
+                  ? t("confirmEmailCode")
+                  : t("sendEmailCode")
+              : t("confirmPassword");
 
     return (
         <form onSubmit={handleSubmit}>
@@ -148,34 +187,41 @@ export function ReauthenticationForm({
                 </div>
             )}
             <fieldset disabled={disabled || submitting}>
-                <div className="field">
-                    <label htmlFor={inputId}>{label ?? defaultLabel}</label>
-                    <input
-                        ref={inputRef}
-                        id={inputId}
-                        name={fieldName}
-                        type={mode === "mfa" ? "text" : "password"}
-                        autoComplete={
-                            mode === "mfa"
-                                ? "one-time-code"
-                                : "current-password"
-                        }
-                        required
-                        value={value}
-                        onChange={(event) => setValue(event.target.value)}
-                        aria-invalid={fieldError ? true : undefined}
-                        aria-describedby={
-                            fieldError ? `${inputId}-error` : undefined
-                        }
-                    />
-                    {fieldError && (
-                        <span className="field-error" id={`${inputId}-error`}>
-                            {fieldError}
-                        </span>
-                    )}
-                </div>
+                {mode === "email" && !codeSent ? (
+                    <p>{t("emailReauthDescription")}</p>
+                ) : (
+                    <div className="field">
+                        <label htmlFor={inputId}>{label ?? defaultLabel}</label>
+                        <input
+                            ref={inputRef}
+                            id={inputId}
+                            name={fieldName}
+                            type={mode === "password" ? "password" : "text"}
+                            autoComplete={
+                                mode !== "password"
+                                    ? "one-time-code"
+                                    : "current-password"
+                            }
+                            required
+                            value={value}
+                            onChange={(event) => setValue(event.target.value)}
+                            aria-invalid={fieldError ? true : undefined}
+                            aria-describedby={
+                                fieldError ? `${inputId}-error` : undefined
+                            }
+                        />
+                        {fieldError && (
+                            <span
+                                className="field-error"
+                                id={`${inputId}-error`}
+                            >
+                                {fieldError}
+                            </span>
+                        )}
+                    </div>
+                )}
                 <div className="button-group">
-                    <button className="button" type="submit">
+                    <button ref={submitRef} className="button" type="submit">
                         {submitting
                             ? t("verifying")
                             : (submitLabel ?? defaultSubmit)}

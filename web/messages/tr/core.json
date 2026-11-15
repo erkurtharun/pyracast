@@ -35,7 +35,8 @@
         "resendCode": "Doğrulama kodunu tekrar gönder",
         "verificationExpired": "Doğrulama oturumunun süresi doldu. Tekrar başlayın.",
         "codeRequested": "Yeni bir kod istendi.",
-        "forgotPassword": "Şifrenizi mi unuttunuz?"
+        "forgotPassword": "Şifrenizi mi unuttunuz?",
+        "passwordChanged": "Parolanız kaydedildi. Yeni parolanızla giriş yapın."
     },
     "Security": {
         "sessionExpired": "Oturumunuzun süresi doldu. Tekrar giriş yapın.",
@@ -109,7 +110,13 @@
         "reauthStillRequired": "Doğrulama tamamlanamadı. Lütfen tekrar deneyin.",
         "setupUnavailable": "Kurulum bilgileri alınamadı. Lütfen tekrar deneyin.",
         "verifying": "Doğrulanıyor…",
-        "working": "İşleniyor…"
+        "working": "İşleniyor…",
+        "emailReauthTitle": "E-posta ile doğrulayın",
+        "emailReauthDescription": "Doğrulanmış e-posta adresinize bir doğrulama kodu gönderin.",
+        "sendEmailCode": "Doğrulama kodu gönder",
+        "emailReauthCode": "E-posta doğrulama kodu",
+        "confirmEmailCode": "Kodu doğrula",
+        "setPassword": "Parola belirle"
     },
     "Dashboard": {
         "retry": "Tekrar dene",
@@ -234,5 +241,26 @@
         "energy": "Satır {row}: enerji sıfır veya pozitif bir sayı olmalı.",
         "quality": "Satır {row}: geçerli bir veri niteliği ve kaynak (en fazla 200 karakter) girin.",
         "overlap": "CSV içinde çakışan zaman aralıkları var."
+    },
+    "SocialAuth": {
+        "continue": {
+            "google": "Google ile devam et",
+            "microsoft": "Microsoft ile oturum aç"
+        },
+        "connect": {
+            "google": "Google hesabı bağla",
+            "microsoft": "Microsoft hesabı bağla"
+        },
+        "microsoftHint": "Outlook, Microsoft 365, iş veya okul hesabınızı kullanın.",
+        "emailDivider": "veya e-posta ile devam edin",
+        "completeSignup": "Hesabınızı tamamlayın",
+        "signupHint": "Tamamlamak için e-posta ve şirket bilgilerinizi doğrulayın. Zaten hesabınız varsa önce giriş yapın ve Hesap ayarlarından bu hesabı bağlayın.",
+        "callbackError": "Oturum açma iptal edildi veya tamamlanamadı. Tekrar deneyin. Bu e-posta ile hesabınız varsa mevcut yönteminizle giriş yapın ve Hesap ayarlarından hesabı bağlayın.",
+        "linkedAccounts": "Bağlı hesaplar",
+        "disconnect": "Bağlantıyı kaldır",
+        "removed": "Hesap bağlantısı kaldırıldı.",
+        "retry": "Tekrar dene",
+        "loadError": "Bağlı hesaplar yüklenemedi.",
+        "connectAccount": "Hesap bağla"
     }
 }

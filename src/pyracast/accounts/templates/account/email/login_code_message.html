@@ -1,0 +1,10 @@
+{% extends "mail/base.html" %}{% load i18n %}
+{% block title %}{% translate "Confirm your identity" %}{% endblock %}
+{% block preheader %}{% translate "Enter this code in the Pyracast window where you requested it." %}{% endblock %}
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:22px;line-height:1.3;">{% translate "Confirm your identity" %}</h1>
+<p style="margin:0;">{% translate "Enter this code in the Pyracast window where you requested it." %}</p>
+{% include "mail/code.html" %}
+<p style="margin:0;color:#526370;font-size:14px;">{% blocktranslate with minutes=code_timeout_minutes|floatformat:"-2" %}This code expires in {{ minutes }} minutes. Do not share it.{% endblocktranslate %}</p>
+<p style="margin:20px 0 0;color:#526370;font-size:14px;">{% translate "If you did not request this, you can ignore this email." %}</p>
+{% endblock %}

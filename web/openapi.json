@@ -6093,6 +6093,10 @@
                             }
                         ]
                     },
+                    "has_usable_password": {
+                        "type": "boolean",
+                        "readOnly": true
+                    },
                     "can_admin": {
                         "type": "boolean",
                         "readOnly": true
@@ -6110,6 +6114,7 @@
                 "required": [
                     "can_admin",
                     "email",
+                    "has_usable_password",
                     "id",
                     "language_preference",
                     "mfa_required",

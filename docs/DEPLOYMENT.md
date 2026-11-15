@@ -256,6 +256,22 @@ restore rehearsal; do not use the fresh-database bootstrap as a migration plan.
 
 ### 3. Enable delivery
 
+Google and Microsoft sign-in are optional. Configure separate **Web** OAuth
+clients; the Gmail sender's Desktop client is not a sign-in client. Use these
+exact production redirect URIs:
+
+| Provider | Redirect URI | Application configuration |
+| --- | --- | --- |
+| Google | `https://pyracast.app/api/accounts/google/login/callback/` | External audience; identity scopes only (`openid`, `email`). Publish the audience for general access. |
+| Microsoft | `https://pyracast.app/api/accounts/microsoft/login/callback/` | Any organizational directory and personal Microsoft accounts; delegated `User.Read`; no implicit grant or public-client flow. |
+
+Add `PYRACAST_GOOGLE_CLIENT_ID`, `PYRACAST_GOOGLE_CLIENT_SECRET`,
+`PYRACAST_MICROSOFT_CLIENT_ID` and `PYRACAST_MICROSOFT_CLIENT_SECRET` to the runtime
+secret. Each provider appears only when both of its values are configured. Keep
+client secrets on the backend, rotate them before expiry, and use separate clients
+for local development. Login does not request mailbox access or retain provider
+tokens. Account connections are managed in **Account → Security**.
+
 In GitHub, create **Settings → Environments → production**. Restrict deployment
 branches to `main`; enable required reviewers if you want a human release gate.
 Protect `main` with pull requests and the existing Windows/Ubuntu CI checks.

@@ -33,6 +33,9 @@ INSTALLED_APPS = [
     "django.contrib.postgres",
     "allauth",
     "allauth.account",
+    "allauth.socialaccount",
+    "allauth.socialaccount.providers.google",
+    "allauth.socialaccount.providers.microsoft",
     "allauth.mfa",
     "allauth.headless",
     "allauth.usersessions",
@@ -131,6 +134,26 @@ ACCOUNT_PREVENT_ENUMERATION = True
 ACCOUNT_EMAIL_NOTIFICATIONS = True
 ACCOUNT_REAUTHENTICATION_REQUIRED = True
 ACCOUNT_REAUTHENTICATION_TIMEOUT = 300
+ACCOUNT_REAUTHENTICATION_METHODS = {"password", "code", "mfa"}
+SOCIALACCOUNT_ADAPTER = "pyracast.accounts.social.SocialAccountAdapter"
+SOCIALACCOUNT_AUTO_SIGNUP = False
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = False
+SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = False
+SOCIALACCOUNT_REAUTHENTICATION_REQUIRED = True
+SOCIALACCOUNT_STORE_TOKENS = False
+SOCIALACCOUNT_PROVIDERS: dict[str, dict[str, object]] = {}
+for _provider in ("google", "microsoft"):
+    _client_id = os.environ.get(f"PYRACAST_{_provider.upper()}_CLIENT_ID", "").strip()
+    _client_secret = os.environ.get(f"PYRACAST_{_provider.upper()}_CLIENT_SECRET", "").strip()
+    if bool(_client_id) != bool(_client_secret):
+        raise ImproperlyConfigured(f"Both {_provider} client ID and secret are required.")
+    if _client_id:
+        SOCIALACCOUNT_PROVIDERS[_provider] = {
+            "APP": {"client_id": _client_id, "secret": _client_secret},
+            "SCOPE": ["openid", "email"] if _provider == "google" else ["User.Read"],
+            "OAUTH_PKCE_ENABLED": True,
+            "VERIFIED_EMAIL": False,
+        }
 ACCOUNT_SESSION_REMEMBER = False
 ACCOUNT_LOGOUT_ON_PASSWORD_CHANGE = True
 ACCOUNT_LOGIN_ON_EMAIL_CONFIRMATION = False
@@ -147,6 +170,7 @@ HEADLESS_FRONTEND_URLS = {
     "account_reset_password": f"{PYRACAST_PUBLIC_ORIGIN}/",
     "account_reset_password_from_key": f"{PYRACAST_PUBLIC_ORIGIN}/",
     "account_signup": f"{PYRACAST_PUBLIC_ORIGIN}/",
+    "socialaccount_login_error": f"{PYRACAST_PUBLIC_ORIGIN}/?social_callback=1",
 }
 MFA_SUPPORTED_TYPES = ["totp", "recovery_codes"]
 MFA_ADAPTER = "pyracast.accounts.mfa.MFAAdapter"

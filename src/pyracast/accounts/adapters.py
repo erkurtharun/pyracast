@@ -1,5 +1,6 @@
 from typing import Any, cast
 
+from allauth.account import app_settings as account_settings
 from allauth.account.adapter import DefaultAccountAdapter
 from allauth.account.models import EmailAddress
 from allauth.core.exceptions import ImmediateHttpResponse
@@ -26,11 +27,12 @@ class AccountAdapter(DefaultAccountAdapter):
         context: dict[str, Any],
         headers: dict[str, str] | None = None,
     ) -> EmailMultiAlternatives:
-        timeout = (
-            settings.ACCOUNT_EMAIL_VERIFICATION_BY_CODE_TIMEOUT
-            if template_prefix.startswith("account/email/email_confirmation")
-            else settings.ACCOUNT_PASSWORD_RESET_BY_CODE_TIMEOUT
-        )
+        if template_prefix.startswith("account/email/email_confirmation"):
+            timeout = settings.ACCOUNT_EMAIL_VERIFICATION_BY_CODE_TIMEOUT
+        elif template_prefix == "account/email/login_code":
+            timeout = account_settings.LOGIN_BY_CODE_TIMEOUT
+        else:
+            timeout = settings.ACCOUNT_PASSWORD_RESET_BY_CODE_TIMEOUT
         context = {**context, "code_timeout_minutes": timeout / 60}
         message = cast(
             EmailMultiAlternatives,

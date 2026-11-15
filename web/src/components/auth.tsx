@@ -1,16 +1,30 @@
 "use client";
 import { useTranslations } from "next-intl";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ApiError, request, type Session } from "@/lib/api";
 import { authRequest, type AuthResult } from "@/lib/auth-api";
 import { ActionForm, Field } from "./ui";
+import { SocialProviderButtons } from "./social-provider-buttons";
 import { LanguageSelect } from "./language-select";
 import { clearWorkspaceInvitation } from "./workspace-invitation";
 
-type Mode = "login" | "register" | "verify" | "mfa" | "forgot" | "reset";
+type Mode =
+    | "login"
+    | "register"
+    | "verify"
+    | "mfa"
+    | "forgot"
+    | "reset"
+    | "socialSignup";
 type AuthMessage =
-    "" | "codeSent" | "resetSent" | "resetDone" | "verified" | "codeRequested";
+    | ""
+    | "codeSent"
+    | "resetSent"
+    | "resetDone"
+    | "verified"
+    | "codeRequested"
+    | "passwordChanged";
 
 export function Auth({
     session,
@@ -25,6 +39,10 @@ export function Auth({
     const invitationLabels = useTranslations("WorkspaceMembers");
     const [mode, setMode] = useState<Mode>("login");
     const [message, setMessage] = useState<AuthMessage>("");
+    const social = useTranslations("SocialAuth");
+    const callbackErrorRef = useRef<boolean | undefined>(undefined);
+    const [socialEmail, setSocialEmail] = useState("");
+    const [socialError, setSocialError] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
 
     async function finish(result: AuthResult) {
@@ -33,7 +51,10 @@ export function Auth({
             return;
         }
         const pending = result.data?.flows?.find((flow) => flow.is_pending)?.id;
-        if (pending === "verify_email") {
+        if (pending === "provider_signup") {
+            setMode("socialSignup");
+            setMessage("");
+        } else if (pending === "verify_email") {
             setMode("verify");
             setMessage("codeSent");
         } else if (pending === "mfa_authenticate") {
@@ -49,26 +70,73 @@ export function Auth({
 
     useEffect(() => {
         let active = true;
+        const callback = new URL(window.location.href);
+        const callbackError = (callbackErrorRef.current ??=
+            callback.searchParams.has("social_callback") &&
+            callback.searchParams.has("error"));
+        if (callback.searchParams.has("social_callback")) {
+            callback.searchParams.delete("social_callback");
+            callback.searchParams.delete("error");
+            callback.searchParams.delete("error_process");
+            window.history.replaceState(
+                window.history.state,
+                "",
+                `${callback.pathname}${callback.search}${callback.hash}`,
+            );
+        }
         authRequest("auth/session", "GET", session.csrf_token)
             .then((result) => {
                 if (!active) return;
+                setSocialError(callbackError);
+                try {
+                    if (
+                        window.sessionStorage.getItem(
+                            "pyracast.passwordChanged",
+                        )
+                    ) {
+                        window.sessionStorage.removeItem(
+                            "pyracast.passwordChanged",
+                        );
+                        setMessage("passwordChanged");
+                    }
+                } catch {
+                    // Browser privacy settings can disable session storage.
+                }
                 const pending = result.data?.flows?.find(
                     (flow) => flow.is_pending,
                 )?.id;
                 const next =
-                    pending === "verify_email"
-                        ? "verify"
-                        : pending === "mfa_authenticate"
-                          ? "mfa"
-                          : pending === "password_reset_by_code"
-                            ? "reset"
-                            : undefined;
+                    pending === "provider_signup"
+                        ? "socialSignup"
+                        : pending === "verify_email"
+                          ? "verify"
+                          : pending === "mfa_authenticate"
+                            ? "mfa"
+                            : pending === "password_reset_by_code"
+                              ? "reset"
+                              : undefined;
+                if (next === "socialSignup") {
+                    authRequest<{ email?: { email: string }[] }>(
+                        "auth/provider/signup",
+                        "GET",
+                        session.csrf_token,
+                    )
+                        .then((signup) => {
+                            if (active)
+                                setSocialEmail(
+                                    signup.data?.email?.[0]?.email ?? "",
+                                );
+                        })
+                        .catch(() => {});
+                }
                 if (next)
                     setMode((current) =>
                         current === "login" ? next : current,
                     );
             })
-            .catch(() => {});
+            .catch(() => {
+                if (active) setSocialError(callbackError);
+            });
         return () => {
             active = false;
         };
@@ -81,6 +149,7 @@ export function Auth({
         mfa: t("twoFactor"),
         forgot: t("forgotTitle"),
         reset: t("resetTitle"),
+        socialSignup: social("completeSignup"),
     };
     return (
         <main className="auth-page">
@@ -131,6 +200,15 @@ export function Auth({
                         </button>
                     </nav>
                     <h1 id="auth-title">{titles[mode]}</h1>
+                    {socialError && (
+                        <p className="notice error" role="alert">
+                            {social("callbackError")}
+                        </p>
+                    )}
+                    {mode === "socialSignup" && <p>{social("signupHint")}</p>}
+                    {(mode === "login" || mode === "register") && (
+                        <SocialProviderButtons token={session.csrf_token} />
+                    )}
                     {message && <p role="status">{t(message)}</p>}
                     <ActionForm
                         key={mode}
@@ -144,11 +222,16 @@ export function Auth({
                                 mfa: t("verifyCode"),
                                 forgot: t("sendReset"),
                                 reset: t("resetPassword"),
+                                socialSignup: social("completeSignup"),
                             }[mode]
                         }
                         onSubmit={async (data) => {
                             const payload = Object.fromEntries(data);
-                            if (mode === "register" && invitationToken)
+                            if (
+                                (mode === "register" ||
+                                    mode === "socialSignup") &&
+                                invitationToken
+                            )
                                 payload.invitation_token = invitationToken;
                             if (mode === "forgot") {
                                 await authRequest(
@@ -191,6 +274,7 @@ export function Auth({
                                 const path = {
                                     login: "auth/login",
                                     register: "auth/signup",
+                                    socialSignup: "auth/provider/signup",
                                     verify: "auth/email/verify",
                                     mfa: "auth/2fa/authenticate",
                                 }[mode];
@@ -218,14 +302,15 @@ export function Auth({
                             }
                         }}
                     >
-                        {mode === "register" && !invitationToken && (
-                            <Field
-                                label={t("company")}
-                                name="company_name"
-                                autoComplete="organization"
-                                maxLength={200}
-                            />
-                        )}
+                        {(mode === "register" || mode === "socialSignup") &&
+                            !invitationToken && (
+                                <Field
+                                    label={t("company")}
+                                    name="company_name"
+                                    autoComplete="organization"
+                                    maxLength={200}
+                                />
+                            )}
                         {(mode === "verify" || mode === "reset") && (
                             <Field
                                 label={t("emailCode")}
@@ -235,10 +320,21 @@ export function Auth({
                         )}
                         {(mode === "login" ||
                             mode === "register" ||
+                            mode === "socialSignup" ||
                             mode === "forgot") && (
                             <Field
                                 label={t("email")}
                                 name="email"
+                                defaultValue={
+                                    mode === "socialSignup"
+                                        ? socialEmail
+                                        : undefined
+                                }
+                                key={
+                                    mode === "socialSignup"
+                                        ? socialEmail
+                                        : "email"
+                                }
                                 type="email"
                                 autoComplete="email"
                                 maxLength={254}

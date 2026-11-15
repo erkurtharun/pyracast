@@ -103,10 +103,14 @@ function parseAuthenticators(records: AuthenticatorRecord[] | undefined): {
 export function TwoFactorSettings({
     token,
     mfaRequired,
+    hasPassword,
+    email,
     onSession,
 }: {
     token: string;
     mfaRequired: boolean;
+    hasPassword: boolean;
+    email: string;
     onSession: (session: Session) => void;
 }) {
     const t = useTranslations("Security");
@@ -253,7 +257,7 @@ export function TwoFactorSettings({
         }
         setView({
             kind: "reauth",
-            mode: getReauthMode(result),
+            mode: getReauthMode(result, hasPassword),
             operation,
             returnView,
             afterActivation,
@@ -968,7 +972,9 @@ export function TwoFactorSettings({
                     <h3 ref={stepHeadingRef} tabIndex={-1}>
                         {view.mode === "mfa"
                             ? t("reauthMfaTitle")
-                            : t("reauthPasswordTitle")}
+                            : view.mode === "email"
+                              ? t("emailReauthTitle")
+                              : t("reauthPasswordTitle")}
                     </h3>
                     {view.afterActivation ? (
                         <div className="notice" role="status">
@@ -978,12 +984,15 @@ export function TwoFactorSettings({
                         <p>
                             {view.mode === "mfa"
                                 ? t("reauthMfaDescription")
-                                : t("reauthPasswordDescription")}
+                                : view.mode === "email"
+                                  ? t("emailReauthDescription")
+                                  : t("reauthPasswordDescription")}
                         </p>
                     )}
                     <ReauthenticationForm
                         key={view.mode}
                         mode={view.mode}
+                        email={email}
                         token={token}
                         onSession={onSession}
                         autoFocus

@@ -58,6 +58,7 @@ def test_session_login_logout_and_csrf_rotation() -> None:
         "id": user.pk,
         "username": user.username,
         "email": user.email,
+        "has_usable_password": True,
         "can_admin": False,
         "mfa_required": False,
         "language_preference": None,
@@ -137,6 +138,7 @@ def test_password_change_requires_current_password_and_invalidates_all_sessions(
         {"current_password": PASSWORD, "new_password": PASSWORD + "new"},
     )
     assert response.status_code == 401
+    assert response.json()["meta"]["password_changed"] is True
     assert first.get("/api/session/").json()["user"] is None
     assert second.get("/api/session/").json()["user"] is None
     assert (
@@ -156,6 +158,31 @@ def test_session_schema_exposes_only_projection() -> None:
     session = response.json()["paths"]["/api/session/"]
     assert "get" in session
     assert "patch" not in session
+
+
+def test_session_exposes_password_availability_without_credentials() -> None:
+    user = member()
+    user.set_unusable_password()
+    user.save(update_fields=["password"])
+    client = Client()
+    client.force_login(user)
+    data = client.get("/api/session/").json()["user"]
+    assert data["has_usable_password"] is False
+    assert "password" not in data
+
+
+def test_expired_session_cannot_report_a_successful_password_change() -> None:
+    user = member()
+    client = Client(enforce_csrf_checks=True)
+    response = submit(
+        client,
+        "account/password/change",
+        {"new_password": PASSWORD + "new"},
+    )
+    assert response.status_code == 401
+    assert not response.json().get("meta", {}).get("password_changed")
+    user.refresh_from_db()
+    assert user.check_password(PASSWORD)
 
 
 def test_session_administration_access_tracks_live_role_and_mfa() -> None:

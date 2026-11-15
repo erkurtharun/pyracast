@@ -30,7 +30,12 @@ export type AuthenticatorRecord = {
 export type AuthResult<TData = AuthData> = {
     status: number;
     data?: TData;
-    meta?: { is_authenticated?: boolean; secret?: string; totp_url?: string };
+    meta?: {
+        is_authenticated?: boolean;
+        secret?: string;
+        totp_url?: string;
+        password_changed?: boolean;
+    };
     errors?: { message: string; param?: string; code?: string }[];
 };
 

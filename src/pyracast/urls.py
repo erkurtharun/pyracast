@@ -9,6 +9,13 @@ from pyracast import health
 from pyracast.accounts import headless
 from pyracast.accounts.mfa_views import ManageRecoveryCodesView, ManageTOTPView
 from pyracast.accounts.signup import CompanySignupView
+from pyracast.accounts.social_views import (
+    ManageProvidersView,
+    ProviderSignupView,
+    RedirectToProviderView,
+    disabled_provider_token,
+    provider_callback,
+)
 from pyracast.admin import site
 from pyracast.api.session import SessionLanguageView, SessionView
 from pyracast.api.trash import RestoreRegionView, TrashedPlantsView, TrashedRegionsView
@@ -40,6 +47,19 @@ urlpatterns = [
     path("health/ready/", health.ready),
     path("admin/", site.urls),
     path("api/auth/browser/v1/auth/login", headless.LoginView.as_api_view(client=Client.BROWSER)),
+    path(
+        "api/auth/browser/v1/auth/provider/redirect",
+        RedirectToProviderView.as_api_view(client=Client.BROWSER),
+    ),
+    path(
+        "api/auth/browser/v1/auth/provider/signup",
+        ProviderSignupView.as_api_view(client=Client.BROWSER),
+    ),
+    path("api/auth/browser/v1/auth/provider/token", disabled_provider_token),
+    path(
+        "api/auth/browser/v1/account/providers",
+        ManageProvidersView.as_api_view(client=Client.BROWSER),
+    ),
     path(
         "api/auth/browser/v1/auth/email/verify",
         require_POST(VerifyEmailView.as_api_view(client=Client.BROWSER)),
@@ -73,6 +93,18 @@ urlpatterns = [
         CompanySignupView.as_api_view(client=Client.BROWSER),
     ),
     path("api/auth/", include("allauth.headless.urls")),
+    path(
+        "api/accounts/google/login/callback/",
+        provider_callback,
+        {"provider": "google"},
+        name="google_callback",
+    ),
+    path(
+        "api/accounts/microsoft/login/callback/",
+        provider_callback,
+        {"provider": "microsoft"},
+        name="microsoft_callback",
+    ),
     path("api/schema/", SpectacularAPIView.as_view(permission_classes=[IsAuthenticated])),
     path("api/session/", SessionView.as_view()),
     path("api/session/language/", SessionLanguageView.as_view()),

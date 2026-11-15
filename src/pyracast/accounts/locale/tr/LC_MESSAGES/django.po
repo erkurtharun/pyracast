@@ -95,3 +95,6 @@ msgstr ""
 
 msgid "Reset password"
 msgstr "Parolayı sıfırla"
+
+msgid "Confirm your identity"
+msgstr "Kimliğinizi doğrulayın"

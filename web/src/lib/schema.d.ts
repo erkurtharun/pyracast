@@ -1642,6 +1642,7 @@ export interface components {
             id: number;
             username: string;
             email: string;
+            readonly has_usable_password: boolean;
             readonly can_admin: boolean;
             readonly mfa_required: boolean;
             readonly language_preference: string | null;
