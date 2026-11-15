@@ -16,7 +16,7 @@ for (const endpoint of ["sites", "plants"] as const) {
                 ? route.fulfill({ status: 503, json: { detail: message } })
                 : route.fallback(),
         );
-        await page.goto("/");
+        await page.goto("/app/");
         await page.getByRole("button", { name: /East array/ }).click();
         await page
             .getByRole("button", { name: "Settings", exact: true })
@@ -87,7 +87,7 @@ test("an older pending submission cannot replace a saved technical update", asyn
             },
         }),
     );
-    await page.goto("/");
+    await page.goto("/app/");
     await page.getByRole("button", { name: /East array/ }).click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByLabel("DC nameplate capacity (MW)").fill("6.25");
@@ -210,7 +210,7 @@ for (const section of ["Forecast", "Settings"] as const) {
                 },
             }),
         );
-        await page.goto("/");
+        await page.goto("/app/");
         await page.getByRole("button", { name: "Add a plant" }).click();
         await page.getByLabel("Plant name", { exact: true }).fill("New plant");
         await page.getByLabel("Latitude").fill("36.9");
@@ -293,7 +293,7 @@ test("plant submission errors preserve review and every field for retry", async 
             });
         return route.fallback();
     });
-    await page.goto("/");
+    await page.goto("/app/");
     await page.getByRole("button", { name: "Add a plant" }).click();
     await page.getByLabel("Plant name", { exact: true }).fill("West plant");
     await page.getByLabel("Latitude").fill("37");
@@ -341,7 +341,7 @@ test("an existing location without a plant offers complete setup", async ({
         }
         return route.fulfill({ json: paged([]) });
     });
-    await page.goto("/");
+    await page.goto("/app/");
     await page.getByRole("button", { name: /Complete setup/ }).click();
     await expect(
         page.getByRole("heading", { name: "Complete plant setup" }),
@@ -379,7 +379,7 @@ test("portfolio filters span all pages and a plant section survives refresh", as
             },
         });
     });
-    await page.goto("/");
+    await page.goto("/app/");
     await expect(page.locator(".region-card")).toHaveCount(2);
     await page.getByLabel("Approval status").selectOption("pending");
     await expect(page.locator(".region-card")).toHaveCount(1);

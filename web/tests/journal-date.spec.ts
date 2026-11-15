@@ -53,7 +53,7 @@ for (const role of ["admin", "viewer"] as const) {
                 ]),
             });
         });
-        await page.goto("/");
+        await page.goto("/app/");
         await page
             .getByRole("button", { name: /East array|Antalya solar park/ })
             .click();

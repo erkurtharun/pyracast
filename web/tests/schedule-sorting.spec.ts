@@ -5,7 +5,7 @@ test("reminder times are deduplicated and sent in clock order", async ({
     page,
 }) => {
     await mockApi(page);
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();

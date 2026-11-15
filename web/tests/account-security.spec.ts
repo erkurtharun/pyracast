@@ -26,7 +26,7 @@ test("an expired account session returns to sign in instead of asking for reauth
             });
         },
     );
-    await page.goto("/?workspace=customer");
+    await page.goto("/app/?workspace=customer");
     await page.getByRole("button", { name: "Account" }).click();
     await page.getByRole("button", { name: "Set up authenticator" }).click();
     await expect(
@@ -48,7 +48,7 @@ test("email confirmation requiring reauthentication does not report success", as
             },
         }),
     );
-    await page.goto("/");
+    await page.goto("/app/");
     await page.getByRole("button", { name: "Account" }).click();
     await page.getByText("Change email", { exact: true }).click();
     await page.getByLabel("Email verification code").fill("ABCD-EFGH");
@@ -83,7 +83,7 @@ test("administrator recovery codes request a fresh authenticator confirmation", 
                 },
             }),
     );
-    await page.goto("/?workspace=customer");
+    await page.goto("/app/?workspace=customer");
     await page.getByRole("button", { name: "Account" }).click();
     await page.getByRole("button", { name: "Show recovery codes" }).click();
     await expect(

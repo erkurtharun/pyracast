@@ -1,5 +1,5 @@
 "use client";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 import { useEffect, useRef, useState } from "react";
 import { ApiError, request, type Session } from "@/lib/api";
@@ -30,14 +30,18 @@ export function Auth({
     session,
     onSession,
     invitationToken,
+    initialMode,
 }: {
     session: Session;
     invitationToken?: string | null;
+    initialMode: "login" | "register";
     onSession: (session: Session) => void;
 }) {
     const t = useTranslations("Auth");
+    const locale = useLocale();
+    const publicPath = locale === "tr" ? "/tr/" : "/";
     const invitationLabels = useTranslations("WorkspaceMembers");
-    const [mode, setMode] = useState<Mode>("login");
+    const [mode, setMode] = useState<Mode>(initialMode);
     const [message, setMessage] = useState<AuthMessage>("");
     const social = useTranslations("SocialAuth");
     const callbackErrorRef = useRef<boolean | undefined>(undefined);
@@ -131,7 +135,9 @@ export function Auth({
                 }
                 if (next)
                     setMode((current) =>
-                        current === "login" ? next : current,
+                        current === "login" || current === "register"
+                            ? next
+                            : current,
                     );
             })
             .catch(() => {
@@ -406,7 +412,9 @@ export function Auth({
                             className="text-button"
                             onClick={() => {
                                 clearWorkspaceInvitation();
-                                window.location.replace("/?workspace=customer");
+                                window.location.replace(
+                                    "/app/?workspace=customer",
+                                );
                             }}
                         >
                             {invitationLabels("cancel")}
@@ -424,6 +432,14 @@ export function Auth({
                             {t("forgotPassword")}
                         </button>
                     )}
+                    <nav
+                        aria-label={t("publicLinks")}
+                        className="auth-public-links"
+                    >
+                        <a href={publicPath}>{t("homepage")}</a>{" "}
+                        <a href={`${publicPath}privacy/`}>{t("privacy")}</a>{" "}
+                        <a href={`${publicPath}terms/`}>{t("terms")}</a>
+                    </nav>
                 </section>
             </div>
         </main>

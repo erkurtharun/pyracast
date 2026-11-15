@@ -28,7 +28,7 @@ test("Turkish workspace roles and invitation labels preserve readable characters
     await page.route("**/api/tenants/1/invitations/", (route) =>
         route.fulfill({ json: { invitations: [] } }),
     );
-    await page.goto("/");
+    await page.goto("/app/");
     await page.getByRole("button", { name: "Üyeler", exact: true }).click();
     await expect(
         page.getByRole("heading", {
@@ -79,7 +79,7 @@ test("viewer reads shared settings without write controls or requests", async ({
         )
             writes.push(request.url());
     });
-    await page.goto("/");
+    await page.goto("/app/");
     await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Add plant", exact: true }),
@@ -173,7 +173,7 @@ test("workspace administrator invites a viewer and sees invitation errors", asyn
         email = "";
         await route.fulfill({ status: 204 });
     });
-    await page.goto("/");
+    await page.goto("/app/");
     await page.getByRole("button", { name: "Members", exact: true }).click();
     await expect(page.getByText("owner@example.test")).toBeVisible();
     await page
@@ -312,15 +312,15 @@ test("signed in member explicitly accepts invitation and sees actionable errors"
             json: { detail: "Sign in with the invited email address." },
         });
     });
-    await page.goto("/invitations/accept#token=invite-secret&section=members");
-    await expect(page).toHaveURL("/invitations/accept#section=members");
+    await page.goto("/app/#token=invite-secret&section=members");
+    await expect(page).toHaveURL("/app/#section=members");
     await page.getByRole("button", { name: "Accept invitation" }).click();
     await expect(page.locator(".form-errors")).toContainText(
         "Sign in with the invited email address.",
     );
     accepted = true;
     await page.getByRole("button", { name: "Accept invitation" }).click();
-    await expect(page).toHaveURL("/?workspace=customer");
+    await expect(page).toHaveURL("/app/?workspace=customer");
     expect(
         await page.evaluate(() =>
             sessionStorage.getItem("pyracast.workspaceInvitation"),
@@ -341,7 +341,7 @@ for (const detail of [
         await page.route("**/api/invitations/accept/", (route) =>
             route.fulfill({ status: 400, json: { detail } }),
         );
-        await page.goto("/invitations/accept?token=invite-secret");
+        await page.goto("/app/?token=invite-secret");
         await page.getByRole("button", { name: "Accept invitation" }).click();
         await expect(page.locator(".form-errors")).toContainText(detail);
         expect(
@@ -354,7 +354,7 @@ for (const detail of [
             fullPage: true,
         });
         await page.getByRole("button", { name: "Cancel", exact: true }).click();
-        await expect(page).toHaveURL("/?workspace=customer");
+        await expect(page).toHaveURL("/app/?workspace=customer");
         await expect(
             page.getByRole("heading", { name: "Plants" }),
         ).toBeVisible();
@@ -384,7 +384,7 @@ test("switching invited account signs out with CSRF and preserves invitation thr
         }
         return route.fallback();
     });
-    await page.goto("/invitations/accept?token=invite-secret");
+    await page.goto("/app/?token=invite-secret");
     await page
         .getByRole("button", { name: "Use another account", exact: true })
         .click();
@@ -411,7 +411,7 @@ test("switching invited account signs out with CSRF and preserves invitation thr
     await expect(
         page.getByRole("button", { name: "Accept invitation", exact: true }),
     ).toBeVisible();
-    await expect(page).toHaveURL("/invitations/accept");
+    await expect(page).toHaveURL("/app/");
     expect(
         await page.evaluate(() =>
             sessionStorage.getItem("pyracast.workspaceInvitation"),
@@ -432,7 +432,7 @@ test("anonymous expired invitation can be dismissed to restore company registrat
             },
         }),
     );
-    await page.goto("/invitations/accept?token=expired-secret");
+    await page.goto("/app/?token=expired-secret");
     await page
         .getByRole("button", { name: "Create account", exact: true })
         .click();
@@ -453,7 +453,7 @@ test("anonymous expired invitation can be dismissed to restore company registrat
     await page
         .getByRole("button", { name: "Cancel invitation", exact: true })
         .click();
-    await expect(page).toHaveURL("/?workspace=customer");
+    await expect(page).toHaveURL("/app/?workspace=customer");
     expect(
         await page.evaluate(() =>
             sessionStorage.getItem("pyracast.workspaceInvitation"),

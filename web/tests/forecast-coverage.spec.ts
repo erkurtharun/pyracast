@@ -54,7 +54,7 @@ for (const electrical of [true, false]) {
                     },
                 }),
         );
-        await page.goto("/");
+        await page.goto("/app/");
         await page
             .getByRole("button", { name: /East array|Antalya solar park/ })
             .click();
@@ -136,7 +136,7 @@ test("irradiance distinguishes available source hours from ambiguous zero power"
             },
         }),
     );
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
@@ -197,7 +197,7 @@ test("switching forecast views waits for data with the matching units", async ({
             },
         });
     });
-    await page.goto("/");
+    await page.goto("/app/");
     await page.getByRole("button", { name: /East array/ }).click();
     await expect(
         page.getByRole("heading", { name: "Electrical generation" }),
@@ -270,7 +270,7 @@ for (const width of [320, 390]) {
                 },
             }),
         );
-        await page.goto("/");
+        await page.goto("/app/");
         await page
             .getByRole("button", { name: /East array|Antalya solar park/ })
             .click();
@@ -333,7 +333,7 @@ test("outage comparison CSV retains normal forecast source IDs", async ({
             },
         }),
     );
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
@@ -427,7 +427,7 @@ for (const state of [
                 },
             }),
         );
-        await page.goto("/");
+        await page.goto("/app/");
         await page
             .getByRole("button", { name: /East array|Antalya solar park/ })
             .click();

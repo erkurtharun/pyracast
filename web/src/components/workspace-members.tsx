@@ -249,7 +249,7 @@ export function AcceptInvitation({
                             session.csrf_token,
                         );
                         clearWorkspaceInvitation();
-                        window.location.replace("/?workspace=customer");
+                        window.location.replace("/app/?workspace=customer");
                     }}
                 />
                 <ActionForm
@@ -261,7 +261,7 @@ export function AcceptInvitation({
                             "DELETE",
                             session.csrf_token,
                         );
-                        window.location.replace("/invitations/accept");
+                        window.location.replace("/app/");
                     }}
                 />
                 <button
@@ -269,7 +269,7 @@ export function AcceptInvitation({
                     className="text-button"
                     onClick={() => {
                         clearWorkspaceInvitation();
-                        window.location.replace("/?workspace=customer");
+                        window.location.replace("/app/?workspace=customer");
                     }}
                 >
                     {t("dismiss")}

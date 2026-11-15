@@ -113,7 +113,7 @@ def test_invitation_requires_admin_and_verified_matching_email_and_is_single_use
     invitation = invite_workspace_member(administrator, tenant.pk, " New@Example.COM ")
     token = invitation_token()
     assert invitation.email == "new@example.com"
-    assert f"/invitations/accept#token={token}" in str(mail.outbox[-1].body)
+    assert f"/app/#token={token}" in str(mail.outbox[-1].body)
     assert "?token=" not in str(mail.outbox[-1].body)
     assert invitation.token_hash == invitation_digest(token)
     assert token not in str(WorkspaceInvitation.objects.values().get())

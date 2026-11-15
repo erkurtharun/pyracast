@@ -13,7 +13,7 @@ const run = (id: number) => ({
 });
 
 async function openCalibration(page: Page) {
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();

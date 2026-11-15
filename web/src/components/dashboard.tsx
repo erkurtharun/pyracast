@@ -24,18 +24,73 @@ import { useWorkspaceInvitation } from "./workspace-invitation";
 import { WorkspaceAccess } from "./workspace-access";
 import { WorkspaceMembers, AcceptInvitation } from "./workspace-members";
 import { LanguageSelect } from "./language-select";
+import { isLanguage } from "@/i18n/language";
 
 export function Dashboard() {
+    const searchParams = useSearchParams();
+    const requestedLanguage = searchParams.get("language");
+    const languageLabels = useTranslations("Language");
+    const [entry, setEntry] = useState<{
+        status: "pending" | "failed" | "ready";
+    }>({
+        status: isLanguage(requestedLanguage) ? "pending" : "ready",
+    });
     const [version, setVersion] = useState(0),
         [session, setSession] = useState<Session>();
     const initial = useResource<Session>("/api/session/", version);
     const current = session ?? initial.data;
+    useEffect(() => {
+        if (
+            !current ||
+            !isLanguage(requestedLanguage) ||
+            entry.status !== "pending"
+        )
+            return;
+        let active = true;
+        const finish = (updated: Session) => {
+            if (!active) return;
+            const url = new URL(window.location.href);
+            url.searchParams.delete("language");
+            window.history.replaceState(
+                window.history.state,
+                "",
+                `${url.pathname}${url.search}${url.hash}`,
+            );
+            setSession(updated);
+            setEntry({ status: "ready" });
+        };
+        if (current.user || current.language === requestedLanguage) {
+            finish(current);
+        } else {
+            request<Session>(
+                "/api/session/language/",
+                "POST",
+                { language: requestedLanguage },
+                current.csrf_token,
+            )
+                .then(finish)
+                .catch(() => {
+                    if (active) setEntry({ status: "failed" });
+                });
+        }
+        return () => {
+            active = false;
+        };
+    }, [current, requestedLanguage, entry.status]);
     return (
         <SessionLanguage language={current?.language}>
             <DashboardView
-                current={current}
-                error={initial.error}
-                retry={() => setVersion(version + 1)}
+                current={entry.status === "ready" ? current : undefined}
+                error={
+                    entry.status === "failed"
+                        ? languageLabels("failed")
+                        : initial.error
+                }
+                retry={() => {
+                    if (entry.status === "failed")
+                        setEntry({ status: "pending" });
+                    else setVersion(version + 1);
+                }}
                 onSession={setSession}
             />
         </SessionLanguage>
@@ -142,6 +197,11 @@ function DashboardView({
                     session={current}
                     onSession={onSession}
                     invitationToken={invitation.token}
+                    initialMode={
+                        searchParams.get("signup") === "1"
+                            ? "register"
+                            : "login"
+                    }
                 />
             </WorkspaceAccess>
         );

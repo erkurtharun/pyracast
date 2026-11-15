@@ -44,7 +44,7 @@ test("an MFA administrator reviews plants and operations on desktop and mobile u
         });
     });
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByLabel("Email", { exact: true })
         .fill(process.env.BROWSER_ADMIN_EMAIL!);
@@ -279,7 +279,7 @@ test("an MFA administrator reviews plants and operations on desktop and mobile u
         await expect(page.locator("html")).toHaveAttribute("lang", "en");
     }
     await page.setViewportSize({ width: 375, height: 812 });
-    await page.goto("/?workspace=customer");
+    await page.goto("/app/?workspace=customer");
     await expect(
         page.getByRole("link", { name: "Administration" }),
     ).toBeVisible();

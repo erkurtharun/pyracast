@@ -1630,6 +1630,22 @@ pre,
     border-radius: 12px;
     background: var(--cream);
 }
+.auth-public-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    margin-top: 20px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+    font-size: 13px;
+}
+.auth-public-links a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    color: var(--muted);
+    text-underline-offset: 3px;
+}
 .auth-mode-nav button {
     flex: 1;
     min-height: 44px;

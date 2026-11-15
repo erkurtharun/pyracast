@@ -27,7 +27,7 @@ async function openForecast(page: Page, width: number) {
             },
         }),
     );
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();

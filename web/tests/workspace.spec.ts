@@ -9,7 +9,7 @@ test("mock contract: signs in with CSRF, selects region, and signs out", async (
     page,
 }) => {
     await mockApi(page, { anonymous: true });
-    await page.goto("/");
+    await page.goto("/app/");
     await page.getByLabel("Email", { exact: true }).fill(user.email);
     await page.getByLabel("Password", { exact: true }).fill("fixture-password");
     await page.locator("form").getByRole("button", { name: "Sign in" }).click();
@@ -45,7 +45,7 @@ test("initial session has one CSRF handshake during Strict Mode and focus events
         await barrier;
         await route.fulfill({ json: { user: null, csrf_token: "one-token" } });
     });
-    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.goto("/app/", { waitUntil: "domcontentloaded" });
     await observed;
     await page.evaluate(() => {
         window.dispatchEvent(new Event("focus"));
@@ -81,7 +81,7 @@ test("one plant request saves location and technical details before approval", a
         return route.fallback();
     });
     await page.clock.setFixedTime(new Date("2026-03-28T22:30:00Z"));
-    await page.goto("/");
+    await page.goto("/app/");
     await page.getByRole("button", { name: "Add a plant" }).click();
     await page.getByLabel("Plant name", { exact: true }).fill("New solar park");
     await page.getByLabel("Latitude").fill("36.5");
@@ -158,7 +158,7 @@ test("plant configuration saves fixed angles and clears them when tracking", asy
         };
         await route.fulfill({ json: updated });
     });
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
@@ -220,7 +220,7 @@ test("missing plant configuration explains the selected day", async ({
             },
         });
     });
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
@@ -239,7 +239,7 @@ test("mock contract: imports validated production with explicit energy units", a
     page,
 }) => {
     await mockApi(page);
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
@@ -266,7 +266,7 @@ test("CSV selection replaces validated rows and recovers after an invalid file",
     page,
 }) => {
     await mockApi(page);
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
@@ -345,7 +345,7 @@ for (const staleRead of ["resolve", "reject"] as const) {
                 { staleRead },
             );
             await mockApi(page);
-            await page.goto("/");
+            await page.goto("/app/");
             await page
                 .getByRole("button", { name: /East array|Antalya solar park/ })
                 .click();
@@ -430,7 +430,7 @@ test("open regional and plant forecasts refresh after new data arrives", async (
             },
         });
     });
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
@@ -521,7 +521,7 @@ test("region collection schedule validates and saves distinct local times", asyn
         }
         await route.fulfill({ json: schedule });
     });
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
@@ -648,7 +648,7 @@ test("regional and plant data sources identify estimated actuals and retain arch
             },
         });
     });
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
@@ -746,7 +746,7 @@ test("forecast crops edge zeros, retains gaps and downloads the full safe CSV", 
             },
         }),
     );
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
@@ -818,7 +818,7 @@ test("all-zero forecasts remain visible as measured zero values", async ({
             },
         }),
     );
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
@@ -834,7 +834,7 @@ test("mock contract: saves cached forecast reminders without provider queries", 
     page,
 }) => {
     await mockApi(page);
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
@@ -866,7 +866,7 @@ test("mock contract: visible API error, empty state and accessible mobile layout
 }) => {
     await mockApi(page, { failed: true });
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/");
+    await page.goto("/app/");
     await expect(
         page.getByRole("alert").filter({ hasText: "temporarily unavailable" }),
     ).toContainText("temporarily unavailable");
@@ -984,7 +984,7 @@ test("mock contract: follows tenant pagination and keeps missing intervals visib
             },
         }),
     );
-    await page.goto("/");
+    await page.goto("/app/");
     await expect(
         page.getByRole("option", { name: "Second workspace" }),
     ).toHaveCount(1);
@@ -1013,7 +1013,7 @@ test("mock contract: follows tenant pagination and keeps missing intervals visib
     expect(scan.violations).toEqual([]);
 });
 async function openJournal(page: Page) {
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
@@ -1053,7 +1053,7 @@ test("performance hides stale CSV while a selected range is loading", async ({
             },
         });
     });
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
@@ -1140,7 +1140,7 @@ test("forecast performance shows replay metrics, missing days and selected range
             },
         });
     });
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
@@ -1337,7 +1337,7 @@ test("recycle bin confirms deletion and restores a plant site with associated da
             });
         } else await route.fallback();
     });
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
@@ -1445,7 +1445,7 @@ test("recycle bin disables expired records and asks to restore a parent region f
             ]),
         }),
     );
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: "Recycle bin", exact: true })
         .click();
@@ -1533,7 +1533,7 @@ test("recycle bin ignores a prior workspace response and restores only in the se
         expect(route.request().headers()["x-csrftoken"]).toBe("signed-token");
         await route.fulfill({ json: { ...region, id: 102 } });
     });
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: "Recycle bin", exact: true })
         .click();

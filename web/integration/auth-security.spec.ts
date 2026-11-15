@@ -8,7 +8,7 @@ test("verified email and a recovery code protect a real browser session", async 
     test.setTimeout(120_000);
     const email = process.env.BROWSER_SECURITY_EMAIL!;
     const password = process.env.BROWSER_SECURITY_PASSWORD!;
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: "Create account", exact: true })
         .click();

@@ -1,5 +1,9 @@
 {
     "Auth": {
+        "publicLinks": "Pyracast information",
+        "homepage": "Homepage",
+        "privacy": "Privacy",
+        "terms": "Terms",
         "codeSent": "Enter the code sent to your email in this browser.",
         "unableSignIn": "Unable to sign in. Please check your details and try again.",
         "welcome": "Welcome back",

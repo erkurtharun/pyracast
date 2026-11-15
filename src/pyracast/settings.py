@@ -165,12 +165,12 @@ PYRACAST_PUBLIC_ORIGIN = os.environ.get("PYRACAST_PUBLIC_ORIGIN", "http://127.0.
     "/"
 )
 HEADLESS_FRONTEND_URLS = {
-    "account_login": f"{PYRACAST_PUBLIC_ORIGIN}/",
-    "account_confirm_email": f"{PYRACAST_PUBLIC_ORIGIN}/",
-    "account_reset_password": f"{PYRACAST_PUBLIC_ORIGIN}/",
-    "account_reset_password_from_key": f"{PYRACAST_PUBLIC_ORIGIN}/",
-    "account_signup": f"{PYRACAST_PUBLIC_ORIGIN}/",
-    "socialaccount_login_error": f"{PYRACAST_PUBLIC_ORIGIN}/?social_callback=1",
+    "account_login": f"{PYRACAST_PUBLIC_ORIGIN}/app/",
+    "account_confirm_email": f"{PYRACAST_PUBLIC_ORIGIN}/app/",
+    "account_reset_password": f"{PYRACAST_PUBLIC_ORIGIN}/app/",
+    "account_reset_password_from_key": f"{PYRACAST_PUBLIC_ORIGIN}/app/",
+    "account_signup": f"{PYRACAST_PUBLIC_ORIGIN}/app/?signup=1",
+    "socialaccount_login_error": f"{PYRACAST_PUBLIC_ORIGIN}/app/?social_callback=1",
 }
 MFA_SUPPORTED_TYPES = ["totp", "recovery_codes"]
 MFA_ADAPTER = "pyracast.accounts.mfa.MFAAdapter"
@@ -259,8 +259,8 @@ ALLAUTH_TRUSTED_CLIENT_IP_HEADER = "X-Real-IP" if PYRACAST_TRUST_PROXY else None
 SECURE_HSTS_SECONDS = 31536000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
-LOGIN_URL = "/"
-LOGIN_REDIRECT_URL = "/"
+LOGIN_URL = "/app/"
+LOGIN_REDIRECT_URL = "/app/"
 _email_backend = os.environ.get("PYRACAST_EMAIL_BACKEND", "smtp")
 if _email_backend not in {"smtp", "console", "gmail"}:
     raise ImproperlyConfigured("PYRACAST_EMAIL_BACKEND must be smtp, console or gmail.")

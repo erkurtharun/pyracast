@@ -39,7 +39,7 @@ from tests.test_workspaces import invitation_token
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 AUTH = "/api/auth/browser/v1/"
-CALLBACK = "https://testserver/?social_callback=1"
+CALLBACK = "https://testserver/app/?social_callback=1"
 PROVIDERS = {
     provider: {
         "APP": {"client_id": f"{provider}-client", "secret": "test-client-secret"},
@@ -443,6 +443,10 @@ def test_callback_state_is_session_bound_single_use_and_errors_are_safe(
         "https://evil.example/",
         "//evil.example/",
         "https://testserver/admin/",
+        "https://testserver/?social_callback=1",
+        "https://testserver/app/",
+        "https://testserver/app/?social_callback=0",
+        "https://testserver/app/?social_callback=1#other",
         CALLBACK + "&next=//evil.example",
     ],
 )

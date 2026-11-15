@@ -272,6 +272,16 @@ client secrets on the backend, rotate them before expiry, and use separate clien
 for local development. Login does not request mailbox access or retain provider
 tokens. Account connections are managed in **Account → Security**.
 
+For Google **Branding**, use app name **Pyracast**, support/developer contact
+**info@pyracast.app**, homepage `https://pyracast.app/`, privacy policy
+`https://pyracast.app/privacy/` and terms `https://pyracast.app/terms/`.
+Add `pyracast.app` as an authorized domain and verify its ownership in Search Console
+with a project owner/editor account. Keep the public operator/contact details accurate.
+Publish the External audience and complete any requested brand verification; changing
+branding can require verifying and publishing the new draft. JavaScript origins are
+not needed for this backend authorization-code flow. These settings belong to the
+sign-in project, not the internal Gmail sender project.
+
 In GitHub, create **Settings → Environments → production**. Restrict deployment
 branches to `main`; enable required reviewers if you want a human release gate.
 Protect `main` with pull requests and the existing Windows/Ubuntu CI checks.

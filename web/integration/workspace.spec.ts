@@ -7,7 +7,7 @@ test("a customer manages one plant site through the real API", async ({
     page,
 }, testInfo) => {
     test.setTimeout(60_000);
-    await page.goto("/");
+    await page.goto("/app/");
     await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
     await page.screenshot({
         path: testInfo.outputPath("login-desktop.png"),

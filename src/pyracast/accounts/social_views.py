@@ -77,7 +77,7 @@ class ProviderSignupView(AllauthProviderSignupView):
 
 class RedirectToProviderView(AllauthRedirectToProviderView):
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        callback = f"{settings.PYRACAST_PUBLIC_ORIGIN}/?social_callback=1"
+        callback = f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/?social_callback=1"
         if request.POST.get("callback_url") != callback:
             return ErrorResponse(request, status=400)
         if request.POST.get(
@@ -166,7 +166,7 @@ def disabled_provider_token(request: HttpRequest) -> HttpResponseNotFound:
 def provider_callback(request: HttpRequest, provider: str) -> HttpResponseBase:
     if provider not in settings.SOCIALACCOUNT_PROVIDERS:
         return HttpResponseRedirect(
-            f"{settings.PYRACAST_PUBLIC_ORIGIN}/?social_callback=1&error=provider_unavailable"
+            f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/?social_callback=1&error=provider_unavailable"
         )
     callback = google_callback if provider == "google" else microsoft_callback
     return cast(HttpResponseBase, callback(request))

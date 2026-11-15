@@ -428,7 +428,7 @@ def test_workspace_logout_returns_to_shared_sign_in_and_requires_csrf() -> None:
     assert csrf.post(url).status_code == 403
     response = client.post(url)
     assert response.status_code == 302
-    assert response.headers["Location"] == "/"
+    assert response.headers["Location"] == "/app/"
     assert client.get("/admin/").status_code == 302
 
 

@@ -58,6 +58,7 @@ def test_electricity_report_distinguishes_known_zero_and_missing_outage() -> Non
     report = present_report(context(normal, outage), [None], prepared_at=START, fallback=False)
     day = report.days[0]
     assert report.unit == "MWh"
+    assert report.url == "https://testserver/app/"
     assert day.day == date(2026, 11, 15)
     assert day.total == 2.5
     assert day.outage_total is None

@@ -80,7 +80,7 @@ class PlatformAdminSite(admin.AdminSite):
     ) -> HttpResponse:
         if self.has_permission(request):
             return redirect("admin:index")
-        return redirect("/?next=/admin/")
+        return redirect("/app/?next=/admin/")
 
     def get_urls(self) -> list[URLPattern | URLResolver]:
         return [
@@ -103,7 +103,7 @@ class PlatformAdminSite(admin.AdminSite):
             ),
             path(
                 "password_change/",
-                self.admin_view(RedirectView.as_view(url="/?account=security")),
+                self.admin_view(RedirectView.as_view(url="/app/?account=security")),
                 name="password_change",
             ),
             *[
@@ -253,7 +253,7 @@ class PlatformAdminSite(admin.AdminSite):
         if request.method != "POST":
             return HttpResponseNotAllowed(("POST",))
         logout(request)
-        return redirect("/")
+        return redirect("/app/")
 
     def language(self, request: HttpRequest) -> HttpResponse:
         if request.method != "POST":

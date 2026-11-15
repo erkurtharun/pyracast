@@ -10,7 +10,7 @@ const owner = { id: 3, email: "owner@example.test", role: "admin" };
 const self = { id: user.id, email: user.email, role: "viewer" };
 
 async function openMembers(page: Page) {
-    await page.goto("/");
+    await page.goto("/app/");
     await page.getByRole("button", { name: "Members", exact: true }).click();
     await expect(page.getByText(viewer.email, { exact: true })).toBeVisible();
 }

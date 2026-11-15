@@ -37,6 +37,151 @@ async function mockLanguage(page: Page, initial: Language, anonymous = false) {
     });
 }
 
+test("a Turkish public signup applies guest language before showing the form and keeps a later choice", async ({
+    page,
+}) => {
+    await page.context().addCookies([
+        {
+            name: "pyracast_language",
+            value: "en",
+            url: "http://127.0.0.1:3100",
+        },
+    ]);
+    await mockLanguage(page, "en", true);
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => {
+        release = resolve;
+    });
+    await page.route("**/api/session/language/", async (route) => {
+        await pending;
+        await route.fallback();
+    });
+    const requested = page.waitForRequest("**/api/session/language/");
+    await page.goto("/tr/");
+    await page
+        .getByRole("link", { name: "Çalışma alanı oluştur", exact: true })
+        .first()
+        .click();
+    await requested;
+    await expect(
+        page.getByRole("heading", { name: "Create your company account" }),
+    ).toHaveCount(0);
+    await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
+    release();
+    await expect(
+        page.getByRole("heading", { name: "Şirket hesabınızı oluşturun" }),
+    ).toBeVisible();
+    await expect(page).toHaveURL("/app/?signup=1");
+    await page.getByLabel("Dil", { exact: true }).selectOption("en");
+    await expect(
+        page.getByRole("heading", { name: "Create your company account" }),
+    ).toBeVisible();
+    await page.reload();
+    await expect(
+        page.getByRole("heading", { name: "Create your company account" }),
+    ).toBeVisible();
+});
+
+test("public language never replaces a signed in account preference", async ({
+    page,
+}) => {
+    await mockLanguage(page, "en");
+    let writes = 0;
+    await page.route("**/api/session/language/", async (route) => {
+        writes += 1;
+        await route.fallback();
+    });
+    await page.goto("/app/?language=tr");
+    await expect(
+        page.getByRole("heading", { name: "Plants", exact: true }),
+    ).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page).toHaveURL("/app/");
+    expect(writes).toBe(0);
+});
+
+test("matching guest language does not write another preference", async ({
+    page,
+}) => {
+    await mockLanguage(page, "tr", true);
+    let writes = 0;
+    await page.route("**/api/session/language/", async (route) => {
+        writes += 1;
+        await route.fallback();
+    });
+    await page.goto("/app/?language=tr");
+    await expect(
+        page.getByRole("heading", { name: "Tekrar hoş geldiniz" }),
+    ).toBeVisible();
+    await expect(page).toHaveURL("/app/");
+    expect(writes).toBe(0);
+});
+
+for (const outcome of ["success", "failure"] as const) {
+    test(`an obsolete public language ${outcome} cannot replace a newer selection`, async ({
+        page,
+    }) => {
+        await mockLanguage(page, "en", true);
+        let release!: () => void;
+        const pending = new Promise<void>((resolve) => {
+            release = resolve;
+        });
+        await page.route("**/api/session/language/", async (route) => {
+            await pending;
+            await route.fulfill(
+                outcome === "success"
+                    ? {
+                          json: {
+                              user: null,
+                              csrf_token: "anonymous-token",
+                              language: "tr",
+                          },
+                      }
+                    : { status: 503, body: "unavailable" },
+            );
+        });
+        const requested = page.waitForRequest("**/api/session/language/");
+        await page.goto("/app/?language=tr&signup=1");
+        await requested;
+        await page.evaluate(() =>
+            window.history.replaceState(null, "", "/app/?language=en&signup=1"),
+        );
+        await expect(
+            page.getByRole("heading", { name: "Create your company account" }),
+        ).toBeVisible();
+        const finished = page.waitForResponse("**/api/session/language/");
+        release();
+        await finished;
+        await expect(
+            page.getByRole("heading", { name: "Create your company account" }),
+        ).toBeVisible();
+        await expect(page.getByRole("main").getByRole("alert")).toHaveCount(0);
+        await expect(page).toHaveURL("/app/?signup=1");
+    });
+}
+
+test("failed public language selection offers a retry before exposing authentication", async ({
+    page,
+}) => {
+    await mockLanguage(page, "en", true);
+    let attempts = 0;
+    await page.route("**/api/session/language/", async (route) => {
+        if (++attempts === 1)
+            await route.fulfill({ status: 503, body: "unavailable" });
+        else await route.fallback();
+    });
+    await page.goto("/app/?language=tr&signup=1");
+    await expect(page.getByRole("main").getByRole("alert")).toHaveText(
+        "Language could not be saved. Please try again.",
+    );
+    await expect(page.getByLabel("Email", { exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect(
+        page.getByRole("heading", { name: "Şirket hesabınızı oluşturun" }),
+    ).toBeVisible();
+    expect(attempts).toBe(2);
+});
+
 test("a resolved account language overrides the browser and stale cookie without flashing another workspace", async ({
     page,
 }) => {
@@ -56,7 +201,7 @@ test("a resolved account language overrides the browser and stale cookie without
                 headings.push(heading.textContent ?? "");
         }).observe(document, { childList: true, subtree: true });
     });
-    await page.goto("/");
+    await page.goto("/app/");
     await expect(
         page.getByRole("heading", { name: "Santraller" }),
     ).toBeVisible();
@@ -76,7 +221,7 @@ test("guest selection persists on reload and preserves the form while switching"
     page,
 }) => {
     await mockLanguage(page, "en", true);
-    await page.goto("/");
+    await page.goto("/app/");
     await page.getByLabel("Email", { exact: true }).fill("owner@example.test");
     await page.getByLabel("Language", { exact: true }).selectOption("tr");
     await expect(
@@ -85,6 +230,15 @@ test("guest selection persists on reload and preserves the form while switching"
     await expect(page.getByLabel("E-posta", { exact: true })).toHaveValue(
         "owner@example.test",
     );
+    await expect(
+        page.getByRole("link", { name: "Ana sayfa", exact: true }),
+    ).toHaveAttribute("href", "/tr/");
+    await expect(
+        page.getByRole("link", { name: "Gizlilik", exact: true }),
+    ).toHaveAttribute("href", "/tr/privacy/");
+    await expect(
+        page.getByRole("link", { name: "Kullanım koşulları", exact: true }),
+    ).toHaveAttribute("href", "/tr/terms/");
     await page.reload();
     await expect(
         page.getByRole("heading", { name: "Tekrar hoş geldiniz" }),
@@ -101,6 +255,12 @@ test("guest selection persists on reload and preserves the form while switching"
     await expect(
         page.getByRole("heading", { name: "Welcome back" }),
     ).toBeVisible();
+    await expect(
+        page.getByRole("link", { name: "Homepage", exact: true }),
+    ).toHaveAttribute("href", "/");
+    await expect(
+        page.getByRole("link", { name: "Privacy", exact: true }),
+    ).toHaveAttribute("href", "/privacy/");
 });
 
 test("a failed save keeps the current language and offers an accessible error", async ({
@@ -110,7 +270,7 @@ test("a failed save keeps the current language and offers an accessible error", 
     await page.route("**/api/session/language/", (route) =>
         route.fulfill({ status: 503, body: "unavailable" }),
     );
-    await page.goto("/");
+    await page.goto("/app/");
     await page.getByLabel("Language", { exact: true }).selectOption("tr");
     await expect(page.getByRole("main").getByRole("alert")).toHaveText(
         "Language could not be saved. Please try again.",
@@ -127,7 +287,7 @@ test("Turkish mobile navigation remains accessible without horizontal overflow",
 }, testInfo) => {
     await page.setViewportSize({ width: 360, height: 800 });
     await mockLanguage(page, "tr");
-    await page.goto("/");
+    await page.goto("/app/");
     await expect(
         page.getByRole("heading", { name: "Santraller" }),
     ).toBeVisible();
@@ -250,7 +410,7 @@ test("Turkish plant search and capacity formatting follow the selected language"
             ]),
         }),
     );
-    await page.goto("/");
+    await page.goto("/app/");
     await page.getByRole("searchbox", { name: "Santral ara" }).fill("ışık");
     await expect(page.getByRole("heading", { name: "IŞIK GES" })).toBeVisible();
     await expect(page.getByText("1.235 MW DC", { exact: false })).toBeVisible();
@@ -266,7 +426,7 @@ test("coded forecast errors are explained in the selected language", async ({
             json: { code: "completed_day_required" },
         }),
     );
-    await page.goto("/");
+    await page.goto("/app/");
     await page.getByRole("button", { name: /East array/ }).click();
     await expect(page.getByRole("main").getByRole("alert")).toHaveText(
         "Geçmiş tahminleri için tamamlanmış bir yerel gün seçin.",

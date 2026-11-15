@@ -95,7 +95,7 @@ for (const role of ["admin", "viewer"] as const) {
                 json: { created: 1, existing: 0, count: 1, ids: [index + 1] },
             });
         });
-        await page.goto("/");
+        await page.goto("/app/");
         await page
             .getByRole("button", { name: /East array|Antalya solar park/ })
             .click();

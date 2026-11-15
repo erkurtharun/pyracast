@@ -16,22 +16,26 @@ test("a fresh CSP nonce permits the app and blocks injected scripts", async ({
             },
         }),
     );
-    const response = await page.goto("/");
+    const response = await page.goto("/app/");
     const policy = response?.headers()["content-security-policy"] ?? "";
     const nonce = policy.match(/'nonce-([^']+)'/)?.[1];
     expect(nonce).toBeTruthy();
     await expect(
         page.getByRole("heading", { name: "Welcome back" }),
     ).toBeVisible();
-    await page.route("/", async (route) => {
+    let injectedResponse = false;
+    await page.route("/app/", async (route) => {
         const response = await route.fetch();
         const body = (await response.text()).replace(
             "</head>",
             "<script>document.documentElement.dataset.injected = 'yes'</script><style>html { --injected: yes; }</style></head>",
         );
+        expect(body).toContain("document.documentElement.dataset.injected");
+        injectedResponse = true;
         await route.fulfill({ response, body });
     });
     const second = await page.reload();
+    expect(injectedResponse).toBe(true);
     await expect(page.locator("html")).not.toHaveAttribute("data-injected");
     if (process.env.PLAYWRIGHT_COVERAGE === "1") {
         expect(policy).not.toContain("'unsafe-eval'");

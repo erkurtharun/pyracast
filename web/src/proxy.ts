@@ -18,10 +18,26 @@ export function proxy(request: NextRequest) {
         "frame-ancestors 'none'",
     ].join("; ");
     const headers = new Headers(request.headers);
+    const publicPath = [
+        "/",
+        "/tr",
+        "/privacy",
+        "/terms",
+        "/tr/privacy",
+        "/tr/terms",
+    ].includes(request.nextUrl.pathname.replace(/\/$/, "") || "/");
+    headers.delete("x-pyracast-public-language");
+    if (publicPath)
+        headers.set(
+            "x-pyracast-public-language",
+            request.nextUrl.pathname.startsWith("/tr") ? "tr" : "en",
+        );
     headers.set("Content-Security-Policy", policy);
+    headers.set("x-nonce", nonce);
     const response = NextResponse.next({ request: { headers } });
     response.headers.set("Content-Security-Policy", policy);
     response.headers.set("Cache-Control", "private, no-store");
+    if (!publicPath) response.headers.set("X-Robots-Tag", "noindex, nofollow");
     return response;
 }
 

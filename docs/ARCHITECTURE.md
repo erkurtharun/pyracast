@@ -97,7 +97,7 @@ Forecast snapshots pin their job's binding under a composite foreign key, suppor
 
 ## Language
 
-English and Turkish share the same URLs. Language selection uses the account's
+The private application at `/app/` shares URLs across English and Turkish. Language selection uses the account's
 explicit preference, then its browser cookie, supported `Accept-Language` ranges,
 trusted Cloudflare country information and finally English. Automatic detection
 never becomes an account preference. Language changes require CSRF; authenticated
@@ -109,6 +109,16 @@ covers administration, validation and email. Plant timezones, units, ISO timesta
 and CSV values remain independent of language. CI checks catalog completeness and
 interpolation contracts; `uv run python scripts/translations.py` rebuilds the
 committed gettext binaries after editing their source catalogs.
+
+Public product, privacy and terms pages render on the server without an API session.
+English uses `/`, `/privacy/` and `/terms/`; Turkish uses the corresponding `/tr/`
+paths. Their URL fixes the language independently of account cookies, with reciprocal
+language links, canonical and hreflang metadata, and a public-only sitemap.
+Public sign-in links apply their language to anonymous visitors through the existing
+CSRF-protected preference endpoint; signed-in account preferences take priority.
+Private pages carry `noindex`; this is not an authorization control. All HTML retains
+the nonce-based CSP and private, no-store caching policy. Legal operator information
+has one source in `web/src/components/public-site/legal-copy.ts`.
 
 ## Approval flow
 

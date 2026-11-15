@@ -45,7 +45,7 @@ test("available historical model days appear without empty grid rows", async ({
             },
         });
     });
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
@@ -148,7 +148,7 @@ test("a completely unavailable comparison stays compact", async ({ page }) => {
             },
         });
     });
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();

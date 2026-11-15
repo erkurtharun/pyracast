@@ -67,7 +67,7 @@ def invite_workspace_member(actor: User, tenant_id: int, email: str) -> Workspac
         expires_at=now + timedelta(days=7),
     )
     tenant = Tenant.objects.get(pk=tenant_id)
-    link = f"{settings.PYRACAST_PUBLIC_ORIGIN}/invitations/accept#token={token}"
+    link = f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/#token={token}"
     language = user_language(actor) or "en"
 
     def deliver() -> None:

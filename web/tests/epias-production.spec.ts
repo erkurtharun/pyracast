@@ -178,7 +178,7 @@ async function productionApi(page: Page, viewer = false) {
     return state;
 }
 async function openProduction(page: Page) {
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();
@@ -1165,7 +1165,7 @@ test("Turkish production at 320px keeps native corrections, decimal commas and i
             },
         }),
     );
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();

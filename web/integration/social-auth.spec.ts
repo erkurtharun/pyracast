@@ -77,7 +77,7 @@ for (const provider of providers) {
                     },
                 });
             });
-            const document = await page.goto("/");
+            const document = await page.goto("/app/");
             expect(document?.headers()["content-security-policy"]).toMatch(
                 /(?:^|;\s*)form-action 'self'(?:;|$)/,
             );

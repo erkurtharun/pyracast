@@ -23,7 +23,7 @@ test("renames a plant without changing its location", async ({ page }) => {
             await route.fulfill({ json: current });
         },
     );
-    await page.goto("/");
+    await page.goto("/app/");
     await page.getByRole("button", { name: /East array/ }).click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByLabel("Plant name").fill("New name");
@@ -89,7 +89,7 @@ test("requests a location change and preserves the current location", async ({
                     : paged(pending ? [item] : []),
         });
     });
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();

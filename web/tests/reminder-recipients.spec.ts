@@ -82,7 +82,7 @@ test("shared reminder recipients and email language survive administrator transf
 });
 
 async function openReminders(page: Page) {
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();

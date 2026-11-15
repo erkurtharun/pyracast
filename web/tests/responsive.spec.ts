@@ -358,7 +358,7 @@ for (const width of [320, 390, 768, 1440]) {
         await page.setViewportSize({ width, height: 900 });
         await setup(page);
         const audit = width === 390;
-        await page.goto("/");
+        await page.goto("/app/");
         await page
             .getByRole("button", { name: /East array|Antalya solar park/ })
             .waitFor();
@@ -624,7 +624,7 @@ test("mobile sign in keeps visible controls and keyboard focus", async ({
 }) => {
     await page.setViewportSize({ width: 320, height: 640 });
     await mockApi(page, { anonymous: true });
-    await page.goto("/");
+    await page.goto("/app/");
     await page.getByLabel("Email", { exact: true }).waitFor();
     await page
         .getByRole("navigation", { name: "Account access" })
@@ -680,7 +680,7 @@ for (const width of [320, 390, 1440]) {
             await page.route("**/trash/**", (route) =>
                 route.fulfill({ json: paged([]) }),
             );
-            await page.goto("/");
+            await page.goto("/app/");
             const labels =
                 language === "tr"
                     ? {
@@ -813,7 +813,7 @@ test("mobile viewer retains the read-only indicator and no workspace management 
             json: paged([{ id: 1, name: "Sunfield Energy", role: "viewer" }]),
         }),
     );
-    await page.goto("/");
+    await page.goto("/app/");
     await expect(
         page.getByText("Read-only access", { exact: true }),
     ).toBeVisible();
@@ -831,7 +831,7 @@ test("mobile platform administrator can reach administration and customer naviga
 }) => {
     await page.setViewportSize({ width: 320, height: 740 });
     await mockApi(page, { admin: true });
-    await page.goto("/?workspace=customer");
+    await page.goto("/app/?workspace=customer");
     const navigation = page.getByRole("navigation", {
         name: "Main navigation",
     });

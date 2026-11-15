@@ -31,7 +31,7 @@ test("plant archive requests and displays the original forecast", async ({
             },
         });
     });
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: /East array|Antalya solar park/ })
         .click();

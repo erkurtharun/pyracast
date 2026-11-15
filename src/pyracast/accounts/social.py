@@ -115,7 +115,7 @@ class SocialAccountAdapter(DefaultSocialAccountAdapter):
         )
 
     def get_connect_redirect_url(self, request: HttpRequest, socialaccount: SocialAccount) -> str:
-        return f"{settings.PYRACAST_PUBLIC_ORIGIN}/?social_callback=1"
+        return f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/?social_callback=1"
 
     def validate_disconnect(
         self, account: SocialAccount, accounts: QuerySet[SocialAccount]

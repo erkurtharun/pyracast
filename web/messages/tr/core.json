@@ -1,5 +1,9 @@
 {
     "Auth": {
+        "publicLinks": "Pyracast bilgileri",
+        "homepage": "Ana sayfa",
+        "privacy": "Gizlilik",
+        "terms": "Kullanım koşulları",
         "codeSent": "Bu tarayıcıda e-postanıza gelen kodu girin.",
         "unableSignIn": "Giriş yapılamadı. Bilgilerinizi kontrol edip tekrar deneyin.",
         "welcome": "Tekrar hoş geldiniz",

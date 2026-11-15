@@ -80,7 +80,7 @@ export function SocialProviderButtons({
                         value={
                             typeof window === "undefined"
                                 ? ""
-                                : `${window.location.origin}/?social_callback=1`
+                                : `${window.location.origin}/app/?social_callback=1`
                         }
                     />
                     <button

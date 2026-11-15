@@ -33,7 +33,7 @@ test("enabled providers submit a CSRF protected native redirect form on mobile",
                 provider: "google",
                 process: "login",
                 csrfmiddlewaretoken: "anonymous-token",
-                callback_url: new URL("/?social_callback=1", baseURL).href,
+                callback_url: new URL("/app/?social_callback=1", baseURL).href,
             });
             await route.fulfill({
                 contentType: "text/html",
@@ -41,7 +41,7 @@ test("enabled providers submit a CSRF protected native redirect form on mobile",
             });
         },
     );
-    await page.goto("/");
+    await page.goto("/app/");
     const google = page.getByRole("button", { name: "Continue with Google" });
     await expect(google).toBeVisible();
     await expect(
@@ -66,7 +66,7 @@ test("enabled providers submit a CSRF protected native redirect form on mobile",
 
 test("unconfigured providers stay hidden", async ({ page }) => {
     await mockApi(page, { anonymous: true });
-    await page.goto("/");
+    await page.goto("/app/");
     await expect(
         page.getByRole("heading", { name: "Welcome back" }),
     ).toBeVisible();
@@ -116,7 +116,7 @@ test("social signup restores invitation and does not request a password", async 
             });
         },
     );
-    await page.goto("/?social_callback=1");
+    await page.goto("/app/?social_callback=1");
     await expect(
         page.getByRole("heading", { name: "Complete your account" }),
     ).toBeVisible();
@@ -198,7 +198,7 @@ test("social-only accounts confirm email before disconnecting the selected provi
             return route.fulfill({ json: { status: 200 } });
         },
     );
-    await page.goto("/?account=security");
+    await page.goto("/app/?account=security");
     await page
         .getByRole("button", { name: "Disconnect solar@example.test" })
         .click();
@@ -231,7 +231,9 @@ test("provider errors explain how to link an existing email safely", async ({
     page,
 }) => {
     await mockApi(page, { anonymous: true });
-    await page.goto("/?social_callback=1&error=unknown&error_process=login");
+    await page.goto(
+        "/app/?social_callback=1&error=unknown&error_process=login",
+    );
     await expect(page.locator(".notice.error")).toContainText(
         "sign in with your existing method",
     );
@@ -268,7 +270,7 @@ test("a social-only user can set the first password and follows the required sig
             });
         },
     );
-    await page.goto("/?account=security");
+    await page.goto("/app/?account=security");
     await page
         .getByRole("heading", { name: "Set a password", exact: true })
         .click();
@@ -309,7 +311,7 @@ test("social-only MFA setup requests email confirmation rather than an unavailab
                 json: { status: 401, meta: { is_authenticated: true } },
             }),
     );
-    await page.goto("/?account=security");
+    await page.goto("/app/?account=security");
     await page.getByRole("button", { name: "Set up authenticator" }).click();
     await expect(
         page.getByRole("heading", { name: "Confirm with email" }),
@@ -349,7 +351,7 @@ test("expired initial-password sessions never report that the password was saved
             });
         },
     );
-    await page.goto("/?account=security");
+    await page.goto("/app/?account=security");
     await page
         .getByRole("heading", { name: "Set a password", exact: true })
         .click();
@@ -398,7 +400,7 @@ test("Turkish provider buttons fit a 320px screen", async ({
         }),
     );
     await page.setViewportSize({ width: 320, height: 812 });
-    await page.goto("/");
+    await page.goto("/app/");
     await expect(
         page.getByRole("button", { name: "Google ile devam et" }),
     ).toBeVisible();
@@ -453,7 +455,7 @@ test("a rejected social signup email keeps an explicit sign-in and link path", a
                   },
               }),
     );
-    await page.goto("/?social_callback=1");
+    await page.goto("/app/?social_callback=1");
     await page.getByLabel("Company name").fill("Sunfield Energy");
     await page
         .getByRole("button", { name: "Complete your account", exact: true })
@@ -482,7 +484,7 @@ test("connecting returns to account settings and consumes an expired-confirmatio
             sessionStorage.setItem("pyracast.socialConnect", "1");
     });
     await page.goto(
-        "/?social_callback=1&error=reauthentication_required&error_process=connect",
+        "/app/?social_callback=1&error=reauthentication_required&error_process=connect",
     );
     await expect(
         page.getByRole("heading", { name: "Account settings", exact: true }),

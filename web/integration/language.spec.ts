@@ -6,7 +6,7 @@ test("account language survives sign-in from another browser without a preferenc
     baseURL,
 }) => {
     test.setTimeout(60_000);
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByLabel("Email", { exact: true })
         .fill(process.env.BROWSER_EMAIL!);

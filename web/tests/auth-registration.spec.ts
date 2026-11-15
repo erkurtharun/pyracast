@@ -2,6 +2,71 @@ import AxeBuilder from "@axe-core/playwright";
 import { test, expect } from "./support/test";
 import { mockApi, user } from "./support/workspace";
 
+test("signup entry opens registration with public information links", async ({
+    page,
+}) => {
+    await mockApi(page, { anonymous: true });
+    await page.goto("/app/?signup=1");
+    await expect(
+        page.getByRole("heading", { name: "Create your company account" }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("link", { name: "Homepage", exact: true }),
+    ).toHaveAttribute("href", "/");
+    await expect(
+        page.getByRole("link", { name: "Privacy", exact: true }),
+    ).toHaveAttribute("href", "/privacy/");
+    await expect(
+        page.getByRole("link", { name: "Terms", exact: true }),
+    ).toHaveAttribute("href", "/terms/");
+    await expect(page.getByRole("checkbox")).toHaveCount(0);
+    await page
+        .getByRole("button", { name: "Sign in", exact: true })
+        .first()
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "Welcome back" }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("link", { name: "Privacy", exact: true }),
+    ).toBeVisible();
+});
+
+for (const [flow, title] of [
+    ["verify_email", "Verify your email"],
+    ["mfa_authenticate", "Two-factor authentication"],
+    ["password_reset_by_code", "Choose a new password"],
+    ["provider_signup", "Complete your account"],
+] as const) {
+    test(`pending ${flow} takes precedence over signup entry`, async ({
+        page,
+    }) => {
+        await mockApi(page, { anonymous: true });
+        await page.route(
+            "**/api/auth/browser/v1/auth/provider/signup",
+            (route) =>
+                route.fulfill({ json: { status: 200, data: { email: [] } } }),
+        );
+        await page.route("**/api/auth/browser/v1/auth/session", (route) =>
+            route.fulfill({
+                status: 401,
+                json: {
+                    status: 401,
+                    data: { flows: [{ id: flow, is_pending: true }] },
+                    meta: { is_authenticated: false },
+                },
+            }),
+        );
+        await page.goto("/app/?signup=1");
+        await expect(
+            page.getByRole("heading", { name: title, exact: true }),
+        ).toBeVisible();
+        await expect(
+            page.getByRole("heading", { name: "Create your company account" }),
+        ).not.toBeVisible();
+    });
+}
+
 test("requires email verification after registration", async ({ page }) => {
     await mockApi(page);
     const signedIn = false;
@@ -31,7 +96,7 @@ test("requires email verification after registration", async ({ page }) => {
             },
         });
     });
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: "Create account", exact: true })
         .click();
@@ -83,7 +148,7 @@ test("registration errors identify the field and move keyboard focus to the summ
             },
         }),
     );
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: "Create account", exact: true })
         .click();
@@ -118,7 +183,7 @@ test("a non-JSON authentication failure shows a safe error", async ({
             body: "<html>private gateway details</html>",
         }),
     );
-    await page.goto("/");
+    await page.goto("/app/");
     await page.getByLabel("Email", { exact: true }).fill("owner@example.test");
     await page
         .getByLabel("Password", { exact: true })
@@ -167,7 +232,7 @@ test("pending verification requires the code before completing", async ({
             });
         },
     );
-    await page.goto("/");
+    await page.goto("/app/");
     await expect(
         page.getByRole("heading", { name: "Verify your email" }),
     ).toBeVisible();
@@ -215,7 +280,7 @@ test("requires the second factor before opening the workspace", async ({
             });
         },
     );
-    await page.goto("/");
+    await page.goto("/app/");
     await page.getByLabel("Email", { exact: true }).fill("owner@example.test");
     await page
         .getByLabel("Password", { exact: true })
@@ -244,7 +309,7 @@ test("sign in only follows the permitted admin return path", async ({
     await page.route("**/admin/", (route) =>
         route.fulfill({ contentType: "text/html", body: "<h1>Admin</h1>" }),
     );
-    await page.goto("/?next=%2Fadmin%2F");
+    await page.goto("/app/?next=%2Fadmin%2F");
     await page.getByLabel("Email", { exact: true }).fill("owner@example.test");
     await page
         .getByLabel("Password", { exact: true })
@@ -261,7 +326,7 @@ test("an administrator opens administration by default", async ({ page }) => {
             body: "<h1>Administration</h1>",
         }),
     );
-    await page.goto("/");
+    await page.goto("/app/");
     await expect(
         page.getByRole("heading", { name: "Administration" }),
     ).toBeVisible();
@@ -271,12 +336,12 @@ test("an administrator can choose the customer workspace and return", async ({
     page,
 }) => {
     await mockApi(page, { admin: true });
-    await page.goto("/?workspace=customer");
+    await page.goto("/app/?workspace=customer");
     await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
     await expect(
         page.getByRole("link", { name: "Administration" }),
     ).toHaveAttribute("href", "/admin/");
-    await page.goto("/?account=security");
+    await page.goto("/app/?account=security");
     await expect(
         page.getByRole("heading", { name: "Account settings", exact: true }),
     ).toBeVisible();
@@ -287,7 +352,7 @@ test("a customer cannot enter administration through a return parameter", async 
     page,
 }) => {
     await mockApi(page);
-    await page.goto("/?next=%2Fadmin%2F");
+    await page.goto("/app/?next=%2Fadmin%2F");
     await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
     await expect(
         page.getByRole("link", { name: "Administration" }),
@@ -296,7 +361,7 @@ test("a customer cannot enter administration through a return parameter", async 
 
 test("sign in ignores an external return path", async ({ page }) => {
     await mockApi(page, { anonymous: true });
-    await page.goto("/?next=https%3A%2F%2Fevil.example%2F");
+    await page.goto("/app/?next=https%3A%2F%2Fevil.example%2F");
     await page.getByLabel("Email", { exact: true }).fill("owner@example.test");
     await page
         .getByLabel("Password", { exact: true })
@@ -339,7 +404,7 @@ test("a completed password reset returns to sign in", async ({ page }) => {
             });
         },
     );
-    await page.goto("/");
+    await page.goto("/app/");
     await page.getByRole("button", { name: "Forgot password?" }).click();
     await page.getByLabel("Email", { exact: true }).fill("owner@example.test");
     await page.getByRole("button", { name: "Send reset code" }).click();
@@ -363,7 +428,7 @@ test("account access reflows on a narrow screen without accessibility violations
 }) => {
     await page.setViewportSize({ width: 320, height: 740 });
     await mockApi(page, { anonymous: true });
-    await page.goto("/");
+    await page.goto("/app/");
     await page
         .getByRole("button", { name: "Create account", exact: true })
         .click();

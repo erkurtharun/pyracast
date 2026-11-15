@@ -157,7 +157,7 @@ async function workspace(
         } else throw new Error(`Unmocked ${method} ${path}`);
         await route.fulfill({ json: data });
     });
-    await page.goto("/");
+    await page.goto("/app/");
     await page.getByRole("button", { name: /Outage region/ }).click();
     return {
         reads: () => outageReads,

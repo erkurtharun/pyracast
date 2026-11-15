@@ -92,7 +92,7 @@ async function mockTwoFactor(
 }
 
 async function openSettings(page: Page) {
-    await page.goto("/?workspace=customer");
+    await page.goto("/app/?workspace=customer");
     await page.getByRole("button", { name: "Account" }).click();
 }
 

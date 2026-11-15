@@ -401,12 +401,12 @@ def test_mfa_evidence_is_bound_to_current_user_and_live_authenticator() -> None:
 @pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
 def test_admin_has_no_independent_password_entry_point() -> None:
     client = Client()
-    assert client.get("/admin/login/").headers["Location"] == "/?next=/admin/"
+    assert client.get("/admin/login/").headers["Location"] == "/app/?next=/admin/"
     assert (
         client.post("/admin/login/", {"username": "operator", "password": "secret"}).headers[
             "Location"
         ]
-        == "/?next=/admin/"
+        == "/app/?next=/admin/"
     )
 
 

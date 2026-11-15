@@ -222,5 +222,5 @@ def present_report(
         unit="MWh" if electrical else "kWh/m²",
         electrical=electrical,
         warnings=tuple(warnings),
-        url=f"{settings.PYRACAST_PUBLIC_ORIGIN}/",
+        url=f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/",
     )
