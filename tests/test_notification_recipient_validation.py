@@ -19,7 +19,9 @@ def test_api_rejects_valid_email_addresses_that_do_not_fit_delivery_storage(leng
     address = recipient(length)
     assert len(address) == length
     validate_email(address)
-    serializer = ReminderInput(data={"enabled": True, "recipients": [address], "times": ["10:00"]})
+    serializer = ReminderInput(
+        data={"enabled": True, "recipients": [address], "times": ["10:00"], "language": "en"}
+    )
     assert not serializer.is_valid()
     assert "recipients" in serializer.errors
 
@@ -36,7 +38,9 @@ def test_application_rejects_valid_email_addresses_that_do_not_fit_delivery_stor
 
 def test_exact_delivery_storage_limit_is_accepted_at_both_boundaries() -> None:
     address = recipient(254)
-    serializer = ReminderInput(data={"enabled": True, "recipients": [address], "times": ["10:00"]})
+    serializer = ReminderInput(
+        data={"enabled": True, "recipients": [address], "times": ["10:00"], "language": "en"}
+    )
     assert serializer.is_valid(), serializer.errors
     assert normalize_recipients([" " + address + " "]) == [address]
 
@@ -44,7 +48,7 @@ def test_exact_delivery_storage_limit_is_accepted_at_both_boundaries() -> None:
 def test_pending_messages_are_dispatched_before_a_scheduling_failure_is_reported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    schedule = MagicMock(side_effect=NotificationSchedulingError("One preference failed."))
+    schedule = MagicMock(side_effect=NotificationSchedulingError("One schedule failed."))
     pending = MagicMock(return_value=[11, 12])
     close_connections = MagicMock()
     actor = MagicMock()
