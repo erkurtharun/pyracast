@@ -79,7 +79,10 @@ def test_workbook_contains_typed_values_and_safe_text() -> None:
     assert "A1:C1" in sheet.merged_cells
     assert "A2:C2" in sheet.merged_cells
     assert isinstance(sheet["A2"].value, datetime)
-    assert "Europe/Berlin" in sheet["A2"].number_format
+    assert sheet["A3"].value == "Europe/Berlin"
+    assert sheet["A3"].data_type == "s"
+    assert "A3:C3" in sheet.merged_cells
+    assert "\n" not in sheet["A2"].number_format
     summary, banner = _date_rows(sheet, date(2026, 10, 25))
     assert f"A{summary}:B{summary}" in sheet.merged_cells
     assert f"A{banner}:C{banner}" in sheet.merged_cells
@@ -100,6 +103,10 @@ def test_workbook_contains_typed_values_and_safe_text() -> None:
     assert not sheet.tables
     assert sheet.sheet_view.showGridLines is False
     assert sheet.sheet_view.showRowColHeaders is False
+    assert sheet.sheet_view.view == "normal"
+    assert sheet.sheet_view.zoomScale == sheet.sheet_view.zoomScaleNormal == 100
+    assert sheet.column_dimensions["C"].width == 24
+    assert sheet.cell(interval, 3).font.sz == 12
     assert sheet.page_setup.fitToWidth == 1
     for row in (header, interval):
         for column in range(1, 4):
@@ -165,6 +172,7 @@ def test_workbook_distinguishes_no_outage_from_unavailable(unknown: bool) -> Non
     unaffected = replace(_report().days[0], day=date(2026, 10, 26))
     sheet = _sheet(replace(report, collected_at=None, days=(unavailable, unaffected)))
     assert "Unavailable" in str(sheet["A2"].value)
+    assert sheet["A3"].value == report.timezone
     row = _date_rows(sheet, unavailable.day)[0]
     assert sheet.cell(row, 3).value is None
     assert sheet.cell(row, 4).value is None

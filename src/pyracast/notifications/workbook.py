@@ -69,7 +69,12 @@ def _style_row(
 ) -> None:
     for column in range(1, columns + 1):
         cell = sheet.cell(row, column)
-        cell.font = Font(name="Calibri", size=11, bold=heading, color="FFFFFF" if heading else _INK)
+        cell.font = Font(
+            name="Calibri",
+            size=11 if heading else 12,
+            bold=heading,
+            color="FFFFFF" if heading else _INK,
+        )
         cell.fill = PatternFill("solid", fgColor=fill)
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
     sheet.row_dimensions[row].height = 25
@@ -176,7 +181,6 @@ def _day_intervals(
                 include_date=local.date() != day.day,
                 show_offsets=show_offsets,
             )
-        # A date or offset occupies its own line without turning times into strings.
         lines = 1 + int(show_offsets) + int(start.date() != day.day or end.date() != day.day)
         sheet.row_dimensions[row].height = 15 * lines + 10
         _energy(sheet, row, 3, item.energy)
@@ -195,6 +199,9 @@ def build_workbook(report: ForecastReport) -> bytes:
     sheet.title = _("Forecast")
     sheet.sheet_view.showGridLines = False
     sheet.sheet_view.showRowColHeaders = False
+    sheet.sheet_view.view = "normal"
+    sheet.sheet_view.zoomScale = 100
+    sheet.sheet_view.zoomScaleNormal = 100
     sheet.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
     sheet.page_setup.fitToWidth = 1
     sheet.page_setup.fitToHeight = 0
@@ -204,7 +211,8 @@ def build_workbook(report: ForecastReport) -> bytes:
     )
     has_outage = any(day.has_outage for day in report.days)
     columns = 4 if has_outage else 3
-    for column, width in enumerate((9, 9, 12, 12)[:columns], 1):
+    widths = (9, 9, 12, 12) if has_outage else (9, 9, 24)
+    for column, width in enumerate(widths, 1):
         sheet.column_dimensions[get_column_letter(column)].width = width
     _note(sheet, 1, columns, report.plant_name, fill="EAF1F8")
     sheet.cell(1, 1).font = Font(name="Calibri", size=14, bold=True, color=_INK)
@@ -224,13 +232,11 @@ def build_workbook(report: ForecastReport) -> bytes:
     )
     _note(sheet, 2, columns, "")
     if report.collected_at is None:
-        _literal(sheet.cell(2, 1), f"{_('Updated')}: {_('Unavailable')}\n{report.timezone}")
+        _literal(sheet.cell(2, 1), f"{_('Updated')}: {_('Unavailable')}")
     else:
         updated = sheet.cell(2, 1, _local(report.collected_at, zone))
-        updated.number_format = (
-            _quoted(_("Updated") + ": ") + date_format + " hh:mm" + _quoted("\n" + report.timezone)
-        )
-    sheet.row_dimensions[2].height = 40
+        updated.number_format = _quoted(_("Updated") + ": ") + date_format + " hh:mm"
+    _note(sheet, 3, columns, report.timezone)
 
     show_source = any(
         day.source_kind != "forecast"
