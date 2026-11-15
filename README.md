@@ -253,16 +253,14 @@ pvlib calculation, not irradiance accuracy. Persistent installation of the
 Windows also needs an open `os.add_dll_directory` handle before importing h5py/pvlib.
 The default application does not require this extra.
 
-Regenerate API types after API changes with production cookie settings:
+Regenerate the API schema and types after API changes:
 
-```powershell
-$env:PYRACAST_DEBUG = "0"
-$env:PYRACAST_EMAIL_BACKEND = "smtp"
-uv run --locked pyracast spectacular --validate --fail-on-warn --format openapi-json --file web/openapi.json
+```text
 npm --prefix web run api:generate
 ```
 
-On Ubuntu, set those variables in the command's environment instead.
+This uses production defaults without reading local application settings or credentials.
+Commit both generated files; CI runs the same command and checks for differences.
 
 ### Dependency and static analysis
 

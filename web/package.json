@@ -14,7 +14,7 @@
         "format": "prettier --write .",
         "format:check": "prettier --check .",
         "test": "playwright test",
-        "api:generate": "openapi-typescript openapi.json -o src/lib/schema.d.ts && prettier --write --ignore-path ../.gitignore openapi.json src/lib/schema.d.ts",
+        "api:generate": "uv run --locked python ../scripts/generate_api_schema.py && openapi-typescript openapi.json -o src/lib/schema.d.ts && prettier --write --ignore-path ../.gitignore openapi.json src/lib/schema.d.ts",
         "check": "npm run check:static && npm test",
         "test:integration": "playwright test --config playwright.integration.config.ts",
         "test:coverage": "node testing/run-coverage.mjs",
