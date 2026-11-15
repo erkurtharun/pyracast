@@ -11,6 +11,7 @@ def test_workspace_migration_preserves_records_and_resolves_name_collisions() ->
     before = [("accounts", "0004_userlanguagepreference")]
     after = [("accounts", "0005_workspaceadminchange_workspaceinvitation_and_more")]
     executor = MigrationExecutor(connection)
+    latest = executor.loader.graph.leaf_nodes()
     executor.migrate(before)
     try:
         historical = executor.loader.project_state(before).apps
@@ -44,4 +45,4 @@ def test_workspace_migration_preserves_records_and_resolves_name_collisions() ->
         assert Membership.objects.get(tenant_id=original.pk, user_id=first.pk).role == "admin"
         assert Membership.objects.filter(role="admin").count() == 1
     finally:
-        MigrationExecutor(connection).migrate(after)
+        MigrationExecutor(connection).migrate(latest)

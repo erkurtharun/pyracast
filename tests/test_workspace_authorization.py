@@ -19,7 +19,7 @@ from pyracast.api.permissions import WorkspaceWritePermission
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule
 from pyracast.forecasts.schedule import configure_schedule
 from pyracast.incidents.operations import finish_incident, save_incident
-from pyracast.notifications.models import ReminderPreference
+from pyracast.notifications.models import ReminderSchedule
 from pyracast.notifications.operations import configure_reminders
 from pyracast.plants import operations
 from pyracast.plants.automation import set_calibration_automation
@@ -91,7 +91,7 @@ def test_viewer_cannot_mutate_any_workspace_endpoint(method: str, suffix: str) -
     assert system.region.deleted_at is None
     assert plant.deleted_at is None
     assert not CollectionSchedule.objects.exists()
-    assert not ReminderPreference.objects.exists()
+    assert not ReminderSchedule.objects.exists()
 
 
 def mutation_calls(system: System, actor: User, plant: Plant) -> list[Callable[[], object]]:
@@ -150,7 +150,14 @@ def mutation_calls(system: System, actor: User, plant: Plant) -> list[Callable[[
         ),
         lambda: configure_schedule(actor, tenant_id, region_id, enabled=False, times=[], now=NOW),
         lambda: configure_reminders(
-            actor, tenant_id, region_id, enabled=False, recipients=[], times=[], now=NOW
+            actor,
+            tenant_id,
+            region_id,
+            language="en",
+            enabled=False,
+            recipients=[],
+            times=[],
+            now=NOW,
         ),
         lambda: trash.trash_region(actor, tenant_id, region_id),
         lambda: trash.restore_region(actor, tenant_id, region_id),
@@ -182,7 +189,7 @@ def test_application_mutations_require_current_workspace_administrator(identity:
     assert (Region.objects.count(), Plant.objects.count(), AuditEvent.objects.count()) == before
     assert CollectionJob.objects.filter(status="pending").count() == 1
     assert not CollectionSchedule.objects.exists()
-    assert not ReminderPreference.objects.exists()
+    assert not ReminderSchedule.objects.exists()
     assert PlantEvent.objects.count() == 1
 
 

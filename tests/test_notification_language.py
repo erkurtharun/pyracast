@@ -7,11 +7,11 @@ from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.utils import translation
 
-from pyracast.accounts.models import Membership, UserLanguagePreference
-from pyracast.forecasts.models import RequestAttempt
+from pyracast.accounts.models import UserLanguagePreference
+from pyracast.forecasts.models import ForecastSnapshot, RequestAttempt
 from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.mail import NotSentError, build_message
-from pyracast.notifications.models import NotificationDelivery, ReminderPreference
+from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.models import Region
 from tests.test_domain import NOW, System
@@ -21,44 +21,45 @@ from tests.test_notifications import SLOT, configured
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
-def other_owner(system: System, language: str) -> ReminderPreference:
-    member = User.objects.create(username="other-reminder", email="other@example.com")
-    Membership.objects.create(user=member, tenant=system.tenant)
-    UserLanguagePreference.objects.create(user=member, language=language)
-    return ReminderPreference.objects.create(
-        user=member,
-        region=system.region,
-        enabled=True,
-        recipients=["other@example.com", "external@example.com"],
-        times=["10:00"],
-        effective_from=NOW,
+def pinned_deliveries(
+    system: System, schedule: ReminderSchedule, language: str, recipients: list[str]
+) -> list[NotificationDelivery]:
+    schedule.recipients = list(dict.fromkeys([*schedule.recipients, *recipients]))
+    schedule.save(update_fields=["recipients"])
+    snapshot = (
+        ForecastSnapshot.objects.filter(binding=system.binding)
+        .order_by("-collected_at", "-pk")
+        .first()
     )
-
-
-def late_english_owner(system: System) -> ReminderPreference:
-    member = User.objects.create(username="late-english", email="late-english@example.com")
-    Membership.objects.create(user=member, tenant=system.tenant)
-    return ReminderPreference.objects.create(
-        user=member,
-        region=system.region,
-        enabled=True,
-        recipients=[],
-        times=["10:00"],
-        effective_from=NOW,
-    )
+    return [
+        NotificationDelivery.objects.create(
+            schedule=schedule,
+            scheduled_for=SLOT,
+            available_at=SLOT,
+            binding=system.binding,
+            snapshot=snapshot,
+            preparation_deadline=SLOT + timedelta(minutes=15),
+            recipient=recipient,
+            language=language,
+        )
+        for recipient in recipients
+    ]
 
 
 @pytest.mark.parametrize("language", [None, "en", "tr"])
-def test_schedule_pins_owner_language_for_every_recipient_and_defaults_to_english(
+def test_schedule_pins_explicit_language_for_every_recipient_and_defaults_to_english(
     language: str | None,
 ) -> None:
-    system, preference = configured()
+    system, schedule = configured()
     recipient_user = User.objects.create(username="recipient", email="recipient@example.com")
     UserLanguagePreference.objects.create(user=recipient_user, language="tr")
-    preference.recipients = [recipient_user.email, "external@example.com"]
-    preference.save()
+    schedule.recipients = [recipient_user.email, "external@example.com"]
     if language is not None:
-        UserLanguagePreference.objects.create(user=system.member, language=language)
+        schedule.language = language
+    schedule.save()
+    UserLanguagePreference.objects.create(
+        user=system.member, language="tr" if language != "tr" else "en"
+    )
     with translation.override("tr" if language != "tr" else "en"):
         ids = enqueue_due(SLOT)
     assert len(ids) == 2
@@ -66,8 +67,10 @@ def test_schedule_pins_owner_language_for_every_recipient_and_defaults_to_englis
         language or "en"
     }
     UserLanguagePreference.objects.update_or_create(
-        user=system.member, defaults={"language": "tr" if language != "tr" else "en"}
+        user=system.member, defaults={"language": language or "en"}
     )
+    schedule.language = "tr" if language != "tr" else "en"
+    schedule.save(update_fields=["language"])
     assert sorted(enqueue_due(SLOT)) == sorted(ids)
     assert set(NotificationDelivery.objects.values_list("language", flat=True)) == {
         language or "en"
@@ -78,15 +81,13 @@ def test_schedule_pins_owner_language_for_every_recipient_and_defaults_to_englis
 def test_mixed_languages_share_one_frozen_source_and_retries_keep_original_content(
     first_language: str,
 ) -> None:
-    system, english_owner = configured()
+    system, schedule = configured()
     snapshot = complete_saved(system)
-    turkish_owner = other_owner(system, "tr")
     requests = RequestAttempt.objects.count()
     enqueue_due(SLOT)
-    first_owner = english_owner if first_language == "en" else turkish_owner
-    first = NotificationDelivery.objects.get(
-        preference=first_owner, recipient=first_owner.user.email
-    )
+    pinned_deliveries(system, schedule, "tr", ["other@example.com", "external@example.com"])
+    first = NotificationDelivery.objects.filter(language=first_language).first()
+    assert first is not None
     messages: list[EmailMultiAlternatives] = []
 
     def temporary_failure(message: EmailMultiAlternatives) -> None:
@@ -119,6 +120,8 @@ def test_mixed_languages_share_one_frozen_source_and_retries_keep_original_conte
     assert "other@example.com" not in turkish["body"]
     UserLanguagePreference.objects.update(language="en")
     UserLanguagePreference.objects.update_or_create(user=system.member, defaults={"language": "tr"})
+    schedule.language = "tr" if first_language == "en" else "en"
+    schedule.save(update_fields=["language"])
     Region.objects.filter(pk=system.region.pk).update(name="Renamed after preparation")
     newer = complete_saved(system, SLOT - timedelta(minutes=1))
     for delivery in deliveries:
@@ -152,8 +155,9 @@ def test_mixed_languages_share_one_frozen_source_and_retries_keep_original_conte
 def test_missing_saved_data_is_reported_in_the_pinned_language_without_inventing_zero(
     language: str, missing: str
 ) -> None:
-    system, _ = configured()
-    UserLanguagePreference.objects.create(user=system.member, language=language)
+    _system, schedule = configured()
+    schedule.language = language
+    schedule.save(update_fields=["language"])
     requests = RequestAttempt.objects.count()
     (delivery_id,) = enqueue_due(SLOT)
     messages: list[EmailMultiAlternatives] = []
@@ -169,12 +173,18 @@ def test_missing_saved_data_is_reported_in_the_pinned_language_without_inventing
 def test_render_failure_freezes_distinct_plain_fallbacks_and_preserves_them_on_retry(
     first_language: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    system, owner = configured()
-    UserLanguagePreference.objects.create(user=system.member, language=first_language)
-    other_owner(system, "tr" if first_language == "en" else "en")
+    system, schedule = configured()
+    schedule.language = first_language
+    schedule.save(update_fields=["language"])
     complete_saved(system)
     enqueue_due(SLOT)
-    first = NotificationDelivery.objects.get(preference=owner, recipient=system.member.email)
+    pinned_deliveries(
+        system,
+        schedule,
+        "tr" if first_language == "en" else "en",
+        ["other@example.com", "external@example.com"],
+    )
+    first = NotificationDelivery.objects.get(schedule=schedule, recipient=system.member.email)
 
     def broken(*args: object, **kwargs: object) -> EmailMultiAlternatives:
         raise RuntimeError("The normal renderer is unavailable.")
@@ -200,7 +210,8 @@ def test_render_failure_freezes_distinct_plain_fallbacks_and_preserves_them_on_r
             if delivery.language == "tr"
             else "Tomorrow's saved forecast could not be prepared."
         ) in body
-    UserLanguagePreference.objects.update(language="en" if first_language == "tr" else "tr")
+    schedule.language = "en" if first_language == "tr" else "tr"
+    schedule.save(update_fields=["language"])
     for delivery in deliveries:
         if delivery.pk == first.pk:
             continue
@@ -217,7 +228,7 @@ def test_render_failure_freezes_distinct_plain_fallbacks_and_preserves_them_on_r
 def test_later_language_uses_the_already_frozen_slot_source_and_preparation_time(
     plain: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    system, _ = configured()
+    system, schedule = configured()
     snapshot = complete_saved(system)
     (delivery_id,) = enqueue_due(SLOT)
     messages: list[EmailMultiAlternatives] = []
@@ -229,10 +240,12 @@ def test_later_language_uses_the_already_frozen_slot_source_and_preparation_time
         monkeypatch.setattr("pyracast.notifications.preparation.build_message", broken)
     assert process_notification(delivery_id, SLOT, sender=messages.append)
     original = NotificationDelivery.objects.get(pk=delivery_id)
-    later_owner = other_owner(system, "tr")
     complete_saved(system, SLOT - timedelta(minutes=1))
-    enqueue_due(SLOT)
-    later = list(NotificationDelivery.objects.filter(preference=later_owner))
+    schedule.recipients = [*schedule.recipients, "other@example.com", "external@example.com"]
+    schedule.language = "tr"
+    schedule.save(update_fields=["recipients", "language"])
+    assert enqueue_due(SLOT) == [delivery_id]
+    later = pinned_deliveries(system, schedule, "tr", ["other@example.com", "external@example.com"])
     assert {record.recipient for record in later} == {"other@example.com", "external@example.com"}
     for record in later:
         assert process_notification(record.pk, SLOT + timedelta(minutes=1), sender=messages.append)
@@ -250,7 +263,7 @@ def test_later_language_uses_the_already_frozen_slot_source_and_preparation_time
 
 
 def test_later_languages_reuse_frozen_english_payload_when_turkish_is_processed_first() -> None:
-    system, _ = configured()
+    system, schedule = configured()
     snapshot = complete_saved(system)
     (english_id,) = enqueue_due(SLOT)
     messages: list[EmailMultiAlternatives] = []
@@ -258,14 +271,12 @@ def test_later_languages_reuse_frozen_english_payload_when_turkish_is_processed_
     original = NotificationDelivery.objects.get(pk=english_id).prepared_message
     assert original is not None
     Region.objects.filter(pk=system.region.pk).update(name="Renamed after English was frozen")
-    english_owner = late_english_owner(system)
-    turkish_owner = other_owner(system, "tr")
-    enqueue_due(SLOT)
-    turkish = NotificationDelivery.objects.get(
-        preference=turkish_owner, recipient="other@example.com"
+    (english,) = pinned_deliveries(system, schedule, "en", ["late-english@example.com"])
+    turkish, _ = pinned_deliveries(
+        system, schedule, "tr", ["other@example.com", "external@example.com"]
     )
     assert process_notification(turkish.pk, SLOT + timedelta(minutes=1), sender=messages.append)
-    english = NotificationDelivery.objects.get(preference=english_owner)
+    english.refresh_from_db()
     assert english.prepared_message == original
     assert english.snapshot_id == snapshot.pk
     assert process_notification(english.pk, SLOT + timedelta(minutes=1), sender=messages.append)
@@ -278,7 +289,7 @@ def test_later_languages_reuse_frozen_english_payload_when_turkish_is_processed_
 def test_later_language_render_failure_preserves_frozen_slot_provenance_and_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    system, _ = configured()
+    system, schedule = configured()
     snapshot = complete_saved(system)
     (english_id,) = enqueue_due(SLOT)
     messages: list[EmailMultiAlternatives] = []
@@ -287,13 +298,10 @@ def test_later_language_render_failure_preserves_frozen_slot_provenance_and_retr
     original = english.prepared_message
     assert original is not None
     Region.objects.filter(pk=system.region.pk).update(name="Renamed after English was frozen")
-    english_owner = late_english_owner(system)
-    preference = other_owner(system, "tr")
     newer = complete_saved(system, SLOT - timedelta(minutes=1))
-    enqueue_due(SLOT)
-    turkish = NotificationDelivery.objects.get(preference=preference, recipient="other@example.com")
-    sibling = NotificationDelivery.objects.get(
-        preference=preference, recipient="external@example.com"
+    (late_english,) = pinned_deliveries(system, schedule, "en", ["late-english@example.com"])
+    turkish, sibling = pinned_deliveries(
+        system, schedule, "tr", ["other@example.com", "external@example.com"]
     )
     assert turkish.snapshot_id == newer.pk != snapshot.pk
     render = build_message
@@ -332,14 +340,15 @@ def test_later_language_render_failure_preserves_frozen_slot_provenance_and_retr
     assert sibling.snapshot_id == snapshot.pk
     assert sibling.prepared_message == fallback
     assert process_notification(sibling.pk, SLOT + timedelta(minutes=1), sender=messages.append)
-    late_english = NotificationDelivery.objects.get(preference=english_owner)
+    late_english.refresh_from_db()
     assert late_english.snapshot_id == snapshot.pk
     assert late_english.prepared_message == original
     assert process_notification(
         late_english.pk, SLOT + timedelta(minutes=1), sender=messages.append
     )
     assert messages[3].body == messages[0].body
-    UserLanguagePreference.objects.filter(user=preference.user).update(language="en")
+    schedule.language = "en"
+    schedule.save(update_fields=["language"])
     assert process_notification(turkish.pk, turkish.available_at, sender=messages.append)
     turkish.refresh_from_db()
     assert turkish.snapshot_id == snapshot.pk
@@ -368,10 +377,10 @@ def test_mail_rendering_restores_the_caller_language_and_preserves_technical_csv
 
 
 def test_delivery_language_is_database_constrained() -> None:
-    system, preference = configured()
+    system, schedule = configured()
     with pytest.raises(IntegrityError), transaction.atomic():
         NotificationDelivery.objects.create(
-            preference=preference,
+            schedule=schedule,
             binding=system.binding,
             language="de",
             scheduled_for=SLOT,

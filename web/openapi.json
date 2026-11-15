@@ -5433,6 +5433,9 @@
                     "enabled": {
                         "type": "boolean"
                     },
+                    "language": {
+                        "$ref": "#/components/schemas/LanguageEnum"
+                    },
                     "recipients": {
                         "type": "array",
                         "items": {
@@ -5450,13 +5453,16 @@
                         "maxItems": 1440
                     }
                 },
-                "required": ["enabled", "recipients", "times"]
+                "required": ["enabled", "language", "recipients", "times"]
             },
             "ReminderOutput": {
                 "type": "object",
                 "properties": {
                     "enabled": {
                         "type": "boolean"
+                    },
+                    "language": {
+                        "$ref": "#/components/schemas/LanguageEnum"
                     },
                     "times": {
                         "type": "array",
@@ -5511,6 +5517,7 @@
                     "deliveries",
                     "effective_recipients",
                     "enabled",
+                    "language",
                     "quota",
                     "recipient_count",
                     "recipient_limit",
@@ -5923,7 +5930,7 @@
             "cookieAuth": {
                 "type": "apiKey",
                 "in": "cookie",
-                "name": "sessionid"
+                "name": "__Host-pyracast-sessionid"
             }
         }
     }

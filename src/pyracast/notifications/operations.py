@@ -5,16 +5,15 @@ from typing import cast
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
-from django.db import models, transaction
+from django.db import transaction
 from django.utils.translation import gettext
 
-from pyracast.accounts.models import Membership
 from pyracast.accounts.operations import require_member, require_workspace_admin
 from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.models import (
     NotificationDelivery,
     NotificationSettings,
-    ReminderPreference,
+    ReminderSchedule,
 )
 from pyracast.regions.models import Region
 
@@ -32,19 +31,15 @@ def validate_recipient(address: str) -> None:
 
 def invalid_reminder_recipient_count() -> int:
     invalid = 0
-    members = Membership.objects.filter(
-        tenant_id=models.OuterRef("region__tenant_id"), user_id=models.OuterRef("user_id")
-    )
-    for preference in ReminderPreference.objects.filter(
-        models.Exists(members),
+    for schedule in ReminderSchedule.objects.filter(
         enabled=True,
-        user__is_active=True,
+        retired_at__isnull=True,
         region__deleted_at__isnull=True,
         region__status="approved",
         region__approved_binding__provider_account__enabled=True,
-    ).select_related("user"):
+    ):
         try:
-            for address in effective_recipients(preference):
+            for address in effective_recipients(schedule):
                 validate_recipient(address)
         except ValidationError, TypeError:
             invalid += 1
@@ -58,8 +53,8 @@ def recipient_limit(*, lock: bool = False) -> int:
     return NotificationSettings.objects.values_list("max_recipients", flat=True).first() or 5
 
 
-def effective_recipients(preference: ReminderPreference) -> list[str]:
-    return list(preference.recipients) or [preference.user.email]
+def effective_recipients(schedule: ReminderSchedule) -> list[str]:
+    return list(schedule.recipients)
 
 
 def normalize_recipients(recipients: list[str]) -> list[str]:
@@ -71,34 +66,19 @@ def normalize_recipients(recipients: list[str]) -> list[str]:
     return normalized
 
 
-def region_recipient_count(
-    region: Region, *, replacement: tuple[int, list[str]] | None = None
-) -> int:
-    members = Membership.objects.filter(tenant_id=region.tenant_id).values("user_id")
-    preferences = ReminderPreference.objects.filter(
-        region=region, user_id__in=members, user__is_active=True
-    ).select_related("user")
-    addresses: set[str] = set()
-    for preference in preferences:
-        if not preference.enabled and not preference.times and not preference.recipients:
-            continue
-        if replacement is None or preference.user_id != replacement[0]:
-            addresses.update(
-                address.casefold() for address in effective_recipients(preference) if address
-            )
-    if replacement is not None:
-        addresses.update(address.casefold() for address in replacement[1] if address)
-    return len(addresses)
+def region_recipient_count(region: Region) -> int:
+    schedule = ReminderSchedule.objects.filter(region=region, retired_at__isnull=True).first()
+    return len({address.casefold() for address in schedule.recipients}) if schedule else 0
 
 
-def get_preference(
+def get_reminder_schedule(
     actor: User, tenant_id: int, region_id: int, now: datetime
-) -> ReminderPreference:
+) -> ReminderSchedule:
     require_member(actor, tenant_id)
     region = Region.objects.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
-    return ReminderPreference.objects.filter(
-        user=actor, region=region
-    ).first() or ReminderPreference(user=actor, region=region, effective_from=now)
+    return ReminderSchedule.objects.filter(
+        region=region, retired_at__isnull=True
+    ).first() or ReminderSchedule(region=region, effective_from=now)
 
 
 def configure_reminders(
@@ -109,26 +89,28 @@ def configure_reminders(
     enabled: bool,
     recipients: list[str],
     times: list[str],
+    language: str,
     now: datetime,
-) -> ReminderPreference:
+) -> ReminderSchedule:
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
-    addresses = normalize_recipients(recipients)
+    if language not in {"en", "tr"}:
+        raise ValidationError(gettext("A supported reminder language is required."))
     with transaction.atomic():
         require_workspace_admin(actor, tenant_id)
         address_limit = recipient_limit(lock=True)
         actor.refresh_from_db(fields=["email"])
+        addresses = normalize_recipients(recipients or [actor.email])
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
-        preference, _ = ReminderPreference.objects.get_or_create(
-            user=actor, region=region, defaults={"effective_from": now}
+        schedule, _ = ReminderSchedule.objects.get_or_create(
+            region=region, retired_at__isnull=True, defaults={"effective_from": now}
         )
-        reserved = addresses or ([actor.email] if enabled or times else [])
-        current_count = region_recipient_count(region)
-        proposed_count = region_recipient_count(region, replacement=(actor.pk, reserved))
+        current_count = len(schedule.recipients)
+        proposed_count = len(addresses)
         disabling_unchanged = (
-            not enabled and addresses == preference.recipients and sorted(times) == preference.times
+            not enabled and addresses == schedule.recipients and sorted(times) == schedule.times
         )
         if proposed_count > address_limit and not (
             proposed_count < current_count or disabling_unchanged
@@ -149,16 +131,15 @@ def configure_reminders(
         for clock in times:
             if re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", clock) is None:
                 raise ValidationError(gettext("Reminder times must use HH:MM."))
-        if enabled:
-            if not addresses:
-                validate_recipient(actor.email)
-            if not times or binding is None or not binding_can_notify(binding):
-                raise ValidationError(
-                    gettext("An approved current region and at least one time are required.")
-                )
-        preference.enabled = enabled
-        preference.recipients = addresses
-        preference.times = sorted(times)
-        preference.effective_from = now
-        preference.save()
-        return preference
+        if enabled and (not times or binding is None or not binding_can_notify(binding)):
+            raise ValidationError(
+                gettext("An approved current region and at least one time are required.")
+            )
+        schedule.enabled = enabled
+        schedule.recipients = addresses
+        schedule.times = sorted(times)
+        schedule.language = language
+        schedule.configured_by = actor
+        schedule.effective_from = now
+        schedule.save()
+        return schedule

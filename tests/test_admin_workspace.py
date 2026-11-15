@@ -25,7 +25,7 @@ from pyracast.forecasts.models import DispatcherStatus, RequestAttempt
 from pyracast.notifications.models import (
     NotificationDelivery,
     NotificationSettings,
-    ReminderPreference,
+    ReminderSchedule,
 )
 from pyracast.plants.models import Plant
 from pyracast.regions.models import AuditEvent, Region
@@ -34,8 +34,20 @@ from tests.test_admin_setup import admin_system, setup_input, submitted_plant
 from tests.test_api import verified_admin
 from tests.test_delivery_health import recent_forecast
 from tests.test_domain import make_system
+from tests.test_notifications import ready
 
 pytestmark = pytest.mark.django_db(transaction=True)
+
+
+def test_delivery_admin_displays_shared_schedule_without_edit_permission() -> None:
+    delivery = ready()
+    client, _ = verified_admin()
+    response = client.get(
+        reverse("admin:notifications_notificationdelivery_change", args=(delivery.pk,))
+    )
+    assert response.status_code == 200
+    assert response.context["original"].schedule_id == delivery.schedule_id
+    assert response.context["has_change_permission"] is False
 
 
 def decision_input(region: Region, action: str, **changes: Any) -> dict[str, Any]:
@@ -340,11 +352,15 @@ def test_operations_show_safe_recent_records_and_recorded_dispatch_health() -> N
         succeeded_at=now - timedelta(minutes=1),
         last_error="",
     )
-    preference = ReminderPreference.objects.create(
-        user=system.member, region=system.region, enabled=True, times=["12:00"], effective_from=now
+    schedule = ReminderSchedule.objects.create(
+        configured_by=system.member,
+        region=system.region,
+        enabled=True,
+        times=["12:00"],
+        effective_from=now,
     )
     delivery = NotificationDelivery.objects.create(
-        preference=preference,
+        schedule=schedule,
         scheduled_for=now,
         available_at=now,
         recipient="customer@example.com",
@@ -389,10 +405,10 @@ def test_recent_work_uses_the_active_plant_name_with_a_legacy_location_fallback(
     now = timezone.now()
     Plant.objects.create(region=system.region, name="Archived plant", deleted_at=now)
     plant = Plant.objects.create(region=system.region, name="Named solar plant")
-    preference = ReminderPreference.objects.create(
-        user=system.member, region=system.region, effective_from=now
+    schedule = ReminderSchedule.objects.create(
+        configured_by=system.member, region=system.region, effective_from=now
     )
-    NotificationDelivery.objects.create(preference=preference, scheduled_for=now, available_at=now)
+    NotificationDelivery.objects.create(schedule=schedule, scheduled_for=now, available_at=now)
     for context in (recent_work_context(), recent_work_context(system.region.pk, limit=5)):
         assert context["collections"][0]["plant_name"] == "Named solar plant"
         assert context["deliveries"][0]["plant_name"] == "Named solar plant"

@@ -89,7 +89,7 @@ def test_renderer_failure_preserves_an_already_frozen_sibling(
 ) -> None:
     delivery = ready()
     sibling = NotificationDelivery.objects.create(
-        preference=delivery.preference,
+        schedule=delivery.schedule,
         binding=delivery.binding,
         recipient="frozen@example.com",
         scheduled_for=delivery.scheduled_for,

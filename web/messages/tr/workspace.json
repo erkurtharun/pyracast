@@ -145,6 +145,7 @@
         "remove": "Kaldır",
         "addTime": "Saat ekle",
         "emailRecipients": "E-posta alıcıları",
+        "emailLanguage": "E-posta dili",
         "addAddress": "Adres ekle",
         "loadingEmailReminders": "E-posta hatırlatıcıları yükleniyor…",
         "emailReminders": "E-posta hatırlatıcıları",

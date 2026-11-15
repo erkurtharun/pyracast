@@ -261,22 +261,22 @@ def recent_work_context(region_id: int | None = None, limit: int = 20) -> dict[s
         )
     )
     delivery_rows = NotificationDelivery.objects.filter(
-        preference__region__deleted_at__isnull=True
+        schedule__region__deleted_at__isnull=True
     ).annotate(
         display_plant_name=Coalesce(
             Subquery(
                 Plant.objects.filter(
-                    region_id=OuterRef("preference__region_id"), deleted_at__isnull=True
+                    region_id=OuterRef("schedule__region_id"), deleted_at__isnull=True
                 )
                 .order_by("pk")
                 .values("name")[:1]
             ),
-            "preference__region__name",
+            "schedule__region__name",
         )
     )
     if region_id is not None:
         collection_rows = collection_rows.filter(binding__region_id=region_id)
-        delivery_rows = delivery_rows.filter(preference__region_id=region_id)
+        delivery_rows = delivery_rows.filter(schedule__region_id=region_id)
     collections = [
         {
             "id": row.pk,
@@ -300,7 +300,7 @@ def recent_work_context(region_id: int | None = None, limit: int = 20) -> dict[s
         {
             "id": row.pk,
             "plant_name": row.display_plant_name,
-            "company": row.preference.region.tenant.name,
+            "company": row.schedule.region.tenant.name,
             "recipient": row.recipient,
             "status": row.status,
             "status_label": {
@@ -312,9 +312,9 @@ def recent_work_context(region_id: int | None = None, limit: int = 20) -> dict[s
             "last_error": row.last_error,
             "error_label": row.last_error.replace("_", " ").capitalize(),
             "attempts": row.attempts,
-            "review_url": reverse("admin:workspace_plant", args=(row.preference.region_id,)),
+            "review_url": reverse("admin:workspace_plant", args=(row.schedule.region_id,)),
         }
-        for row in delivery_rows.select_related("preference__region__tenant").order_by(
+        for row in delivery_rows.select_related("schedule__region__tenant").order_by(
             "-scheduled_for", "-pk"
         )[:limit]
     ]

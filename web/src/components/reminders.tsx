@@ -5,7 +5,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { components } from "@/lib/schema";
 import { request, type Region } from "@/lib/api";
 import { ActionForm, Empty, Notice, Tag, useResource } from "./ui";
-type Preference = components["schemas"]["ReminderOutput"];
+type ReminderSchedule = components["schemas"]["ReminderOutput"];
 function useRowFocus(rows: { id: number }[]) {
     const prefix = useId();
     const pending = useRef<number | null>(null);
@@ -26,7 +26,7 @@ function DeliveryTimes({
     data,
     timezone,
 }: {
-    data: Preference;
+    data: ReminderSchedule;
     timezone: string;
 }) {
     const t = useTranslations("Reminders");
@@ -116,14 +116,11 @@ function DeliveryTimes({
         </fieldset>
     );
 }
-function RecipientFields({ data }: { data: Preference }) {
+function RecipientFields({ data }: { data: ReminderSchedule }) {
     const t = useTranslations("Reminders");
 
     const [rows, setRows] = useState(() =>
-        (data.effective_recipients.length
-            ? data.effective_recipients
-            : [""]
-        ).map((value, id) => ({
+        (data.recipients.length ? data.recipients : [""]).map((value, id) => ({
             id,
             value,
         })),
@@ -235,6 +232,7 @@ function ReminderSettings({
     const t = useTranslations("Reminders");
     const locale = useLocale();
     const format = useFormatter();
+    const languageId = useId();
     const deliveryLabels: Record<string, string> = {
         pending: t("preparing"),
         retry: t("retryScheduled"),
@@ -263,11 +261,12 @@ function ReminderSettings({
         missed_schedule: t("missedSchedule"),
         mail_deadline_exceeded: t("deadlineExceeded"),
         preference_or_authority_changed: t("preferenceChanged"),
+        schedule_or_authority_changed: t("preferenceChanged"),
         missing_recipient: t("missingRecipient"),
         no_saved_forecast: t("noSavedForecast"),
     };
 
-    const resource = useResource<Preference>(`${base}reminders/`);
+    const resource = useResource<ReminderSchedule>(`${base}reminders/`);
     if (resource.loading)
         return <p role="status">{t("loadingEmailReminders")}</p>;
     if (resource.error) return <Notice error>{resource.error}</Notice>;
@@ -300,17 +299,10 @@ function ReminderSettings({
                             )
                         )
                             throw new Error(t("invalidDeliveryTime"));
-                        const enteredRecipients = form
+                        const recipients = form
                             .getAll("recipients")
                             .map((value) => String(value).trim())
                             .filter(Boolean);
-                        const recipients =
-                            !data.recipients.length &&
-                            enteredRecipients.length === 1 &&
-                            enteredRecipients[0] ===
-                                data.effective_recipients[0]
-                                ? []
-                                : enteredRecipients;
                         const enabled = form.get("enabled") === "on";
                         if (enabled && !times.length)
                             throw new Error(t("deliveryTimeRequired"));
@@ -339,6 +331,7 @@ function ReminderSettings({
                             {
                                 enabled,
                                 recipients,
+                                language: form.get("language"),
                                 times: [...new Set(times)].sort(
                                     (a, b) =>
                                         Number(a.replace(":", "")) -
@@ -364,6 +357,17 @@ function ReminderSettings({
                     )}
                     <DeliveryTimes data={data} timezone={region.timezone} />
                     <RecipientFields data={data} />
+                    <div className="field">
+                        <label htmlFor={languageId}>{t("emailLanguage")}</label>
+                        <select
+                            id={languageId}
+                            name="language"
+                            defaultValue={data.language}
+                        >
+                            <option value="en">English</option>
+                            <option value="tr">Türkçe</option>
+                        </select>
+                    </div>
                     <details>
                         <summary>{t("reminderDetails")}</summary>
                         <p className="fine">

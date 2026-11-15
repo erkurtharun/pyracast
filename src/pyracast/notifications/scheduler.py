@@ -5,11 +5,9 @@ from zoneinfo import ZoneInfo
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections, transaction
 
-from pyracast.accounts.language import user_language
-from pyracast.accounts.models import Membership
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.notifications.eligibility import binding_can_notify
-from pyracast.notifications.models import NotificationDelivery, ReminderPreference
+from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.notifications.operations import (
     effective_recipients,
     recipient_limit,
@@ -35,51 +33,44 @@ def enqueue_due(now: datetime) -> list[int]:
         raise ValidationError("An aware timestamp is required.")
     ids: list[int] = []
     failures = 0
-    for preference in ReminderPreference.objects.filter(
-        enabled=True, region__deleted_at__isnull=True
-    ).select_related("user", "region__approved_binding__provider_account"):
+    for schedule in ReminderSchedule.objects.filter(
+        enabled=True, retired_at__isnull=True, region__deleted_at__isnull=True
+    ).select_related("region__approved_binding__provider_account"):
         try:
-            ids.extend(_enqueue_preference(preference, now))
+            ids.extend(_enqueue_schedule(schedule, now))
         except Exception as error:
             failures += 1
             logger.error(
-                "notification_schedule_failed preference_id=%s error_type=%s",
-                preference.pk,
+                "notification_schedule_failed schedule_id=%s error_type=%s",
+                schedule.pk,
                 type(error).__name__,
             )
             close_old_connections()
     if failures:
         raise NotificationSchedulingError(
-            f"{failures} email reminder preference(s) could not be scheduled."
+            f"{failures} email reminder schedule(s) could not be scheduled."
         )
     return ids
 
 
-def _enqueue_preference(preference: ReminderPreference, now: datetime) -> list[int]:
+def _enqueue_schedule(schedule: ReminderSchedule, now: datetime) -> list[int]:
     ids: list[int] = []
-    region, binding = preference.region, preference.region.approved_binding
-    if (
-        not preference.user.is_active
-        or binding is None
-        or not binding_can_notify(binding)
-        or not Membership.objects.filter(user=preference.user, tenant_id=region.tenant_id).exists()
-    ):
+    region, binding = schedule.region, schedule.region.approved_binding
+    if schedule.retired_at is not None or binding is None or not binding_can_notify(binding):
         return []
     zone = ZoneInfo(region.timezone)
     today = now.astimezone(zone).date()
     for day in (today - timedelta(days=1), today):
-        for clock in preference.times[: binding.provider_account.daily_quota]:
+        for clock in schedule.times[: binding.provider_account.daily_quota]:
             slot = local_slot(day, clock, zone)
-            if slot is None or slot > now or slot < preference.effective_from:
+            if slot is None or slot > now or slot < schedule.effective_from:
                 continue
             with transaction.atomic():
                 limit = recipient_limit(lock=True)
                 locked_region = Region.objects.select_for_update().filter(pk=region.pk).first()
-                current = (
-                    ReminderPreference.objects.select_related("user")
-                    .filter(pk=preference.pk)
-                    .first()
-                )
+                current = ReminderSchedule.objects.filter(
+                    pk=schedule.pk, retired_at__isnull=True
+                ).first()
                 if (
                     locked_region is None
                     or current is None
@@ -95,7 +86,7 @@ def _enqueue_preference(preference: ReminderPreference, now: datetime) -> list[i
                 if region_recipient_count(locked_region) > limit:
                     continue
                 existing_ids = list(
-                    NotificationDelivery.objects.filter(preference=current, scheduled_for=slot)
+                    NotificationDelivery.objects.filter(schedule=current, scheduled_for=slot)
                     .order_by("pk")
                     .values_list("pk", flat=True)
                 )
@@ -113,14 +104,13 @@ def _enqueue_preference(preference: ReminderPreference, now: datetime) -> list[i
                     .order_by("-collected_at", "-pk")
                     .first()
                 )
-                language = user_language(current.user) or "en"
                 for recipient in recipients:
                     delivery, _ = NotificationDelivery.objects.get_or_create(
-                        preference=current,
+                        schedule=current,
                         scheduled_for=slot,
                         recipient=recipient,
                         defaults={
-                            "language": language,
+                            "language": current.language,
                             "snapshot": snapshot,
                             "binding": binding,
                             "preparation_deadline": slot + PREPARATION_GRACE,

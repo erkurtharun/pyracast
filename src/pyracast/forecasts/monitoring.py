@@ -30,7 +30,7 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
         or phase.last_error
     ]
     collections = CollectionJob.objects.filter(binding__region__deleted_at__isnull=True)
-    deliveries = NotificationDelivery.objects.filter(preference__region__deleted_at__isnull=True)
+    deliveries = NotificationDelivery.objects.filter(schedule__region__deleted_at__isnull=True)
     accounts = ProviderAccount.objects.filter(
         enabled=True,
         pk__in=Region.objects.filter(status="approved", deleted_at__isnull=True).values(

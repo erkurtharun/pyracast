@@ -16,7 +16,7 @@ from pyracast.connections.models import ProviderAccount
 from pyracast.connections.operations import validate_binding
 from pyracast.notifications import runtime
 from pyracast.notifications import scheduler as notification_scheduler
-from pyracast.notifications.models import NotificationDelivery, ReminderPreference
+from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.notifications.operations import configure_reminders, invalid_reminder_recipient_count
 from pyracast.notifications.scheduler import NotificationSchedulingError, enqueue_due
 from pyracast.regions.models import Region
@@ -28,7 +28,7 @@ from tests.test_notifications import SLOT, configured
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
-def another_tenant_preference(system: System) -> ReminderPreference:
+def another_tenant_schedule(system: System) -> ReminderSchedule:
     user = User.objects.create(username="healthy", email="healthy@example.com")
     tenant = Tenant.objects.create(name="Healthy tenant")
     Membership.objects.create(user=user, tenant=tenant, role=Membership.Role.ADMIN)
@@ -46,18 +46,26 @@ def another_tenant_preference(system: System) -> ReminderPreference:
     validate_binding(system.admin, binding.pk, FakeAdapter(), NOW - timedelta(hours=1))
     approve_region(system.admin, region.pk, binding.pk, NOW)
     return configure_reminders(
-        user, tenant.pk, region.pk, enabled=True, recipients=[], times=["10:00"], now=NOW
+        user,
+        tenant.pk,
+        region.pk,
+        language="en",
+        enabled=True,
+        recipients=[],
+        times=["10:00"],
+        now=NOW,
     )
 
 
-def test_request_and_application_reject_oversized_recipients_without_changing_preferences() -> None:
-    system, preference = configured()
+def test_request_and_application_reject_oversized_recipients_without_changing_schedule() -> None:
+    system, schedule = configured()
     address = recipient(255)
     with pytest.raises(ValidationError, match="254"):
         configure_reminders(
             system.member,
             system.tenant.pk,
             system.region.pk,
+            language="en",
             enabled=True,
             recipients=[address],
             times=["10:00"],
@@ -67,12 +75,12 @@ def test_request_and_application_reject_oversized_recipients_without_changing_pr
     client.force_authenticate(system.member)
     response = client.put(
         f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/reminders/",
-        {"enabled": True, "recipients": [address], "times": ["10:00"]},
+        {"enabled": True, "recipients": [address], "times": ["10:00"], "language": "en"},
         format="json",
     )
     assert response.status_code == 400
-    preference.refresh_from_db()
-    assert preference.recipients == []
+    schedule.refresh_from_db()
+    assert schedule.recipients == ["default@example.com"]
 
 
 def test_oversized_saved_recipient_does_not_block_another_tenant_or_pending_delivery(
@@ -80,9 +88,9 @@ def test_oversized_saved_recipient_does_not_block_another_tenant_or_pending_deli
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     system, broken = configured()
-    healthy = another_tenant_preference(system)
+    healthy = another_tenant_schedule(system)
     address = recipient(255)
-    ReminderPreference.objects.filter(pk=broken.pk).update(recipients=[address])
+    ReminderSchedule.objects.filter(pk=broken.pk).update(recipients=[address])
     actor = MagicMock()
     logger = logging.getLogger("test.notifications.scheduler")
     monkeypatch.setattr("pyracast.notifications.scheduler.logger", logger)
@@ -91,12 +99,12 @@ def test_oversized_saved_recipient_does_not_block_another_tenant_or_pending_deli
         pytest.raises(NotificationSchedulingError, match="1 email reminder"),
     ):
         runtime.dispatch_notifications(actor, SLOT)
-    deliveries = list(NotificationDelivery.objects.filter(preference=healthy))
+    deliveries = list(NotificationDelivery.objects.filter(schedule=healthy))
     assert len(deliveries) == 1
     assert deliveries[0].status == "pending"
     assert deliveries[0].recipient == "healthy@example.com"
     actor.send.assert_called_once_with(deliveries[0].pk)
-    assert not NotificationDelivery.objects.filter(preference=broken).exists()
+    assert not NotificationDelivery.objects.filter(schedule=broken).exists()
     broken.refresh_from_db()
     assert broken.recipients == [address]
     assert address not in caplog.text
@@ -112,12 +120,13 @@ def test_slot_database_failure_rolls_back_its_recipients_before_another_tenant_c
         system.member,
         system.tenant.pk,
         system.region.pk,
+        language="en",
         enabled=True,
         recipients=["first@example.com", "second@example.com"],
         times=["10:00"],
         now=NOW,
     )
-    healthy = another_tenant_preference(system)
+    healthy = another_tenant_schedule(system)
     original = QuerySet.get_or_create
 
     def create(queryset: QuerySet[Any], **kwargs: Any) -> tuple[Any, bool]:
@@ -132,46 +141,48 @@ def test_slot_database_failure_rolls_back_its_recipients_before_another_tenant_c
     monkeypatch.setattr(QuerySet, "get_or_create", create)
     with pytest.raises(NotificationSchedulingError):
         enqueue_due(SLOT)
-    assert not NotificationDelivery.objects.filter(preference=broken).exists()
-    assert NotificationDelivery.objects.filter(preference=healthy, status="pending").count() == 1
+    assert not NotificationDelivery.objects.filter(schedule=broken).exists()
+    assert NotificationDelivery.objects.filter(schedule=healthy, status="pending").count() == 1
     assert connection.get_autocommit()
 
 
-def test_invalid_recipient_health_count_only_includes_active_approved_member_preferences() -> None:
-    system, preference = configured()
+def test_invalid_recipient_health_count_only_includes_current_approved_schedules() -> None:
+    system, schedule = configured()
     assert invalid_reminder_recipient_count() == 0
-    ReminderPreference.objects.filter(pk=preference.pk).update(recipients=[recipient(255)])
+    ReminderSchedule.objects.filter(pk=schedule.pk).update(recipients=[recipient(255)])
     assert invalid_reminder_recipient_count() == 1
-    ReminderPreference.objects.filter(pk=preference.pk).update(enabled=False)
+    ReminderSchedule.objects.filter(pk=schedule.pk).update(enabled=False)
     assert invalid_reminder_recipient_count() == 0
-    ReminderPreference.objects.filter(pk=preference.pk).update(enabled=True)
+    ReminderSchedule.objects.filter(pk=schedule.pk).update(enabled=True)
     Region.objects.filter(pk=system.region.pk).update(status="suspended")
     assert invalid_reminder_recipient_count() == 0
     Region.objects.filter(pk=system.region.pk).update(status="approved", deleted_at=NOW)
     assert invalid_reminder_recipient_count() == 0
     Region.objects.filter(pk=system.region.pk).update(deleted_at=None)
     User.objects.filter(pk=system.member.pk).update(is_active=False)
-    assert invalid_reminder_recipient_count() == 0
+    assert invalid_reminder_recipient_count() == 1
     User.objects.filter(pk=system.member.pk).update(is_active=True)
     Membership.objects.filter(user=system.member, tenant=system.tenant).delete()
-    assert invalid_reminder_recipient_count() == 0
+    assert invalid_reminder_recipient_count() == 1
     Membership.objects.create(user=system.member, tenant=system.tenant, role=Membership.Role.ADMIN)
     ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=False)
     assert invalid_reminder_recipient_count() == 0
     ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=True)
-    ReminderPreference.objects.filter(pk=preference.pk).update(recipients=[None])
+    ReminderSchedule.objects.filter(pk=schedule.pk).update(recipients=[None])
     assert invalid_reminder_recipient_count() == 1
+    ReminderSchedule.objects.filter(pk=schedule.pk).update(retired_at=NOW)
+    assert invalid_reminder_recipient_count() == 0
 
 
 def test_a_terminated_connection_is_recovered_before_processing_another_tenant(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, broken = configured()
-    healthy = another_tenant_preference(system)
-    original = notification_scheduler._enqueue_preference
+    healthy = another_tenant_schedule(system)
+    original = notification_scheduler._enqueue_schedule
 
-    def interrupt(preference: ReminderPreference, now: datetime) -> list[int]:
-        if preference.pk == broken.pk:
+    def interrupt(schedule: ReminderSchedule, now: datetime) -> list[int]:
+        if schedule.pk == broken.pk:
             with connection.cursor() as cursor:
                 cursor.execute("SELECT pg_backend_pid()")
                 own_pid = cursor.fetchone()[0]
@@ -183,10 +194,10 @@ def test_a_terminated_connection_is_recovered_before_processing_another_tenant(
             ):
                 cursor.execute("SELECT pg_terminate_backend(%s)", (own_pid,))
                 assert cursor.fetchone() == (True,)
-        return original(preference, now)
+        return original(schedule, now)
 
-    monkeypatch.setattr(notification_scheduler, "_enqueue_preference", interrupt)
+    monkeypatch.setattr(notification_scheduler, "_enqueue_schedule", interrupt)
     with pytest.raises(NotificationSchedulingError, match="1 email reminder"):
         enqueue_due(SLOT)
-    assert not NotificationDelivery.objects.filter(preference=broken).exists()
-    assert NotificationDelivery.objects.filter(preference=healthy, status="pending").count() == 1
+    assert not NotificationDelivery.objects.filter(schedule=broken).exists()
+    assert NotificationDelivery.objects.filter(schedule=healthy, status="pending").count() == 1

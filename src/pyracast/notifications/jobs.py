@@ -14,7 +14,6 @@ from django.db import DatabaseError, transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from pyracast.accounts.models import Membership
 from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.mail import (
     NotSentError,
@@ -39,23 +38,18 @@ logger = logging.getLogger(__name__)
 
 
 def _eligible(delivery: NotificationDelivery, limit: int) -> bool:
-    preference = delivery.preference
-    recipients = effective_recipients(preference)
+    schedule = delivery.schedule
+    recipients = effective_recipients(schedule)
     return (
         delivery.binding is not None
-        and preference.enabled
-        and preference.user.is_active
+        and schedule.enabled
+        and schedule.retired_at is None
         and delivery.recipient in recipients
-        and region_recipient_count(preference.region) <= limit
-        and preference.effective_from <= delivery.scheduled_for
-        and preference.region_id == delivery.binding.region_id
-        and delivery.scheduled_for.astimezone(ZoneInfo(preference.region.timezone)).strftime(
-            "%H:%M"
-        )
-        in preference.times[: delivery.binding.provider_account.daily_quota]
-        and Membership.objects.filter(
-            user=preference.user, tenant_id=preference.region.tenant_id
-        ).exists()
+        and region_recipient_count(schedule.region) <= limit
+        and schedule.effective_from <= delivery.scheduled_for
+        and schedule.region_id == delivery.binding.region_id
+        and delivery.scheduled_for.astimezone(ZoneInfo(schedule.region.timezone)).strftime("%H:%M")
+        in schedule.times[: delivery.binding.provider_account.daily_quota]
         and binding_can_notify(delivery.binding)
     )
 
@@ -80,7 +74,7 @@ def _recover_interrupted(delivery: NotificationDelivery, now: datetime) -> None:
 def _locked_delivery(delivery_id: int) -> NotificationDelivery | None:
     region_id = (
         NotificationDelivery.objects.filter(pk=delivery_id)
-        .values_list("preference__region_id", flat=True)
+        .values_list("schedule__region_id", flat=True)
         .first()
     )
     if region_id is None:
@@ -105,7 +99,7 @@ def _mark_transmit(delivery_id: int, token: uuid.UUID, now: datetime) -> bool:
         if not eligible or now - delivery.scheduled_for > MAX_LATENESS:
             delivery.status = "skipped"
             delivery.last_error = (
-                "preference_or_authority_changed" if not eligible else "delivery_deadline_exceeded"
+                "schedule_or_authority_changed" if not eligible else "delivery_deadline_exceeded"
             )
             delivery.lease_token = None
             delivery.lease_expires_at = None
@@ -139,7 +133,7 @@ def process_notification(
         if delivery.status not in {"pending", "retry"} or delivery.available_at > now:
             return False
         if not _eligible(delivery, limit):
-            delivery.status, delivery.last_error = "skipped", "preference_or_authority_changed"
+            delivery.status, delivery.last_error = "skipped", "schedule_or_authority_changed"
             delivery.save()
             return False
         if now - delivery.scheduled_for > MAX_LATENESS:
@@ -155,7 +149,7 @@ def process_notification(
             return False
         delivery.recipient = recipient
         slot_deliveries = NotificationDelivery.objects.filter(
-            preference__region_id=delivery.preference.region_id,
+            schedule_id=delivery.schedule_id,
             binding_id=delivery.binding_id,
             scheduled_for=delivery.scheduled_for,
         )
@@ -269,7 +263,7 @@ def process_notification(
 def pending_notification_ids(now: datetime, limit: int = 100) -> list[int]:
     return list(
         NotificationDelivery.objects.filter(
-            available_at__lte=now, preference__region__deleted_at__isnull=True
+            available_at__lte=now, schedule__region__deleted_at__isnull=True
         )
         .filter(
             Q(status__in=("pending", "retry"))

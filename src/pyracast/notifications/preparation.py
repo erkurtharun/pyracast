@@ -18,7 +18,7 @@ def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
     assert binding is not None  # noqa: S101 -- Authority was checked under the region lock.
     deadline = delivery.preparation_deadline or delivery.scheduled_for
     slot_deliveries = NotificationDelivery.objects.filter(
-        preference__region_id=delivery.preference.region_id,
+        schedule_id=delivery.schedule_id,
         binding=binding,
         scheduled_for=delivery.scheduled_for,
     )
@@ -170,7 +170,7 @@ def _freeze_slot(
         .values_list("language", "prepared_message")
     }
     unprepared = slot_deliveries.filter(prepared_message__isnull=True, attempts=0)
-    for record in (delivery, *unprepared.select_related("preference__region", "binding")):
+    for record in (delivery, *unprepared.select_related("schedule__region", "binding")):
         if record.language in payloads:
             continue
         record.snapshot = delivery.snapshot

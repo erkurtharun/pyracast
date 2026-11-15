@@ -3,12 +3,10 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
-from django.contrib.auth.models import User
 from django.core import mail
 from django.core.mail import EmailMultiAlternatives
 from django.db.models.fetch_modes import FetchMode
 
-from pyracast.accounts.models import Membership
 from pyracast.connections.models import ProviderAccount
 from pyracast.forecasts.models import (
     CollectionJob,
@@ -19,10 +17,10 @@ from pyracast.forecasts.models import (
 from pyracast.irradiance import local_day_bounds
 from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.mail import NotSentError
-from pyracast.notifications.models import NotificationDelivery, ReminderPreference
+from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.scheduler import PREPARATION_GRACE, enqueue_due
-from pyracast.notifications.views import preference_payload
+from pyracast.notifications.views import reminder_schedule_payload
 from pyracast.regions.models import Region
 from tests.test_domain import NOW, System
 from tests.test_notifications import SLOT, cache_saved_days, configured, memory_mail, saved
@@ -183,18 +181,18 @@ def test_credentials_rotated_or_auth_failed_preserves_approved_archived_email() 
     assert NotificationDelivery.objects.get(pk=delivery_id).snapshot_id == snapshot.pk
 
 
-def test_all_members_recipients_and_retries_keep_the_same_prepared_content() -> None:
+def test_shared_recipients_and_retries_keep_the_same_prepared_content() -> None:
     system, _ = configured()
     old = complete_saved(system)
-    member = User.objects.create(username="second-reminder", email="second@example.com")
-    Membership.objects.create(user=member, tenant=system.tenant)
-    ReminderPreference.objects.create(
-        user=member,
-        region=system.region,
+    configure_reminders(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
         enabled=True,
-        recipients=[],
+        recipients=["default@example.com", "second@example.com"],
         times=["10:00"],
-        effective_from=NOW,
+        language="en",
+        now=NOW,
     )
     ids = enqueue_due(SLOT)
 
@@ -237,20 +235,20 @@ def test_partial_tomorrow_survives_missing_today_and_does_not_invent_daily_total
 
 
 def test_legacy_unprepared_recipient_reuses_existing_slot_content() -> None:
-    system, preference = configured()
+    system, schedule = configured()
     snapshot = complete_saved(system)
     delivery_id = enqueue_due(SLOT)[0]
     assert process_notification(delivery_id, SLOT)
     extra = NotificationDelivery.objects.create(
-        preference=preference,
+        schedule=schedule,
         binding=system.binding,
         snapshot=snapshot,
         scheduled_for=SLOT,
         recipient="legacy@example.com",
         available_at=SLOT,
     )
-    preference.recipients = ["legacy@example.com"]
-    preference.save()
+    schedule.recipients = ["legacy@example.com"]
+    schedule.save()
     assert process_notification(extra.pk, SLOT)
     original = NotificationDelivery.objects.get(pk=delivery_id)
     extra.refresh_from_db()
@@ -298,10 +296,10 @@ def test_ineligible_archived_sources_send_unavailable_without_exposing_their_val
 
 
 def test_same_slot_partial_forecast_exposes_incomplete_saved_data_status() -> None:
-    system, preference = configured()
+    system, schedule = configured()
     snapshot = saved(system, SLOT + timedelta(minutes=1))
     delivery_id = enqueue_due(SLOT)[0]
-    before = preference_payload(preference, SLOT)["deliveries"]
+    before = reminder_schedule_payload(schedule, SLOT)["deliveries"]
     assert isinstance(before, list)
     assert before[0]["forecast_status"] is None
     assert before[0]["forecast_complete"] is None
@@ -311,7 +309,7 @@ def test_same_slot_partial_forecast_exposes_incomplete_saved_data_status() -> No
     assert isinstance(delivery.prepared_message, dict)
     assert delivery.prepared_message["kind"] == "saved_partial"
     assert delivery.prepared_message["tomorrow_complete"] is False
-    after = preference_payload(preference, SLOT + timedelta(minutes=2))["deliveries"]
+    after = reminder_schedule_payload(schedule, SLOT + timedelta(minutes=2))["deliveries"]
     assert isinstance(after, list)
     assert after[0]["status"] == "sent"
     assert after[0]["forecast_status"] == "saved_partial"
@@ -320,12 +318,12 @@ def test_same_slot_partial_forecast_exposes_incomplete_saved_data_status() -> No
 
 @pytest.mark.parametrize("complete", [True, False])
 def test_delivery_api_separates_complete_and_unavailable_forecasts(complete: bool) -> None:
-    system, preference = configured()
+    system, schedule = configured()
     if complete:
         complete_saved(system)
     delivery_id = enqueue_due(SLOT)[0]
     assert process_notification(delivery_id, SLOT)
-    payload = preference_payload(preference, SLOT)["deliveries"]
+    payload = reminder_schedule_payload(schedule, SLOT)["deliveries"]
     assert isinstance(payload, list)
     assert payload[0]["forecast_status"] == ("saved_complete" if complete else "unavailable")
     assert payload[0]["forecast_complete"] is complete
@@ -420,6 +418,7 @@ def test_default_collection_clock_waits_without_an_explicit_schedule_row() -> No
         system.member,
         system.tenant.pk,
         system.region.pk,
+        language="en",
         enabled=True,
         recipients=[],
         times=["16:00"],
@@ -427,7 +426,7 @@ def test_default_collection_clock_waits_without_an_explicit_schedule_row() -> No
     )
     slot = SLOT + timedelta(hours=6)
     enqueue_due(slot)
-    delivery = NotificationDelivery.objects.get(preference__user=system.member, scheduled_for=slot)
+    delivery = NotificationDelivery.objects.get(schedule__region=system.region, scheduled_for=slot)
     assert not CollectionSchedule.objects.filter(region=system.region).exists()
     assert not CollectionJob.objects.filter(binding=system.binding, scheduled_slot=slot).exists()
     assert not process_notification(delivery.pk, slot)
@@ -457,30 +456,31 @@ def test_notification_settings_remain_editable_after_provider_credentials_rotate
     ProviderAccount.objects.filter(pk=system.account.pk).update(
         credential_revision=2, authentication_failed_revision=2
     )
-    preference = configure_reminders(
+    schedule = configure_reminders(
         system.member,
         system.tenant.pk,
         system.region.pk,
+        language="en",
         enabled=True,
         recipients=["updated@example.com"],
         times=["11:00"],
         now=NOW,
     )
-    assert preference.enabled
-    assert preference.recipients == ["updated@example.com"]
-    assert preference.times == ["11:00"]
+    assert schedule.enabled
+    assert schedule.recipients == ["updated@example.com"]
+    assert schedule.times == ["11:00"]
 
 
 def test_forecast_age_in_history_uses_preparation_time_instead_of_view_time() -> None:
-    system, preference = configured()
+    system, schedule = configured()
     complete_saved(system)
     delivery_id = enqueue_due(SLOT)[0]
     assert process_notification(delivery_id, SLOT)
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     assert isinstance(delivery.prepared_message, dict)
     prepared_at = datetime.fromisoformat(delivery.prepared_message["prepared_at"])
-    at_send = preference_payload(preference, SLOT)["deliveries"]
-    later = preference_payload(preference, SLOT + timedelta(days=7))["deliveries"]
+    at_send = reminder_schedule_payload(schedule, SLOT)["deliveries"]
+    later = reminder_schedule_payload(schedule, SLOT + timedelta(days=7))["deliveries"]
     assert isinstance(at_send, list)
     assert isinstance(later, list)
     assert (
@@ -495,13 +495,13 @@ def test_forecast_age_in_history_uses_preparation_time_instead_of_view_time() ->
 def test_legacy_history_with_invalid_preparation_metadata_uses_sent_time(
     prepared_at: object,
 ) -> None:
-    system, preference = configured()
+    system, schedule = configured()
     saved(system)
     delivery_id = enqueue_due(SLOT)[0]
     NotificationDelivery.objects.filter(pk=delivery_id).update(
         status="sent", sent_at=SLOT, prepared_message={"prepared_at": prepared_at}
     )
-    payload = preference_payload(preference, SLOT + timedelta(days=7))["deliveries"]
+    payload = reminder_schedule_payload(schedule, SLOT + timedelta(days=7))["deliveries"]
     assert isinstance(payload, list)
     assert payload[0]["source_age_seconds"] == (SLOT - NOW).total_seconds()
     assert payload[0]["stale"] is False

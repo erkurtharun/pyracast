@@ -21,7 +21,7 @@ from pyracast.forecasts.models import (
 )
 from pyracast.incidents.models import IncidentRevision, PlantIncident
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
-from pyracast.notifications.models import NotificationDelivery, ReminderPreference
+from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
@@ -64,7 +64,7 @@ def trash_region(actor: User, tenant_id: int, region_id: int) -> Region:
             binding__region=region, status__in=("pending", "retry", "running")
         ).update(status="stale", lease_token=None, lease_expires_at=None)
         _cancel_calibrations([plant.pk for plant in plants], now)
-        deliveries = NotificationDelivery.objects.filter(preference__region=region)
+        deliveries = NotificationDelivery.objects.filter(schedule__region=region)
         deliveries.filter(status__in=("pending", "retry")).update(
             status="cancelled",
             last_error="definition_trashed",
@@ -106,7 +106,9 @@ def restore_region(actor: User, tenant_id: int, region_id: int) -> Region:
             },
         )
         CollectionSchedule.objects.filter(region=region).update(effective_from=now)
-        ReminderPreference.objects.filter(region=region).update(effective_from=now)
+        ReminderSchedule.objects.filter(region=region, retired_at__isnull=True).update(
+            effective_from=now
+        )
         AuditEvent.objects.create(
             actor=actor, region=region, action="region_restored", revision=region.revision
         )
@@ -205,8 +207,8 @@ def _purge_region(region: Region, plants: list[Plant]) -> None:
     )
     for plant in plants:
         _purge_plant(plant)
-    NotificationDelivery.objects.filter(preference__region=region).delete()
-    ReminderPreference.objects.filter(region=region).delete()
+    NotificationDelivery.objects.filter(schedule__region=region).delete()
+    ReminderSchedule.objects.filter(region=region).delete()
     CollectionSchedule.objects.filter(region=region).delete()
     RequestAttempt.objects.filter(
         Q(binding__region=region) | Q(job__binding__region=region)

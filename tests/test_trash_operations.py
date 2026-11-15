@@ -25,7 +25,7 @@ from pyracast.forecasts.models import (
     RequestAttempt,
 )
 from pyracast.forecasts.scheduler import enqueue_due
-from pyracast.notifications.models import NotificationDelivery, ReminderPreference
+from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
@@ -130,7 +130,7 @@ def test_region_purge_removes_imported_reference_archive_and_preserves_other_own
         assert ForecastSnapshot.objects.filter(pk=snapshot_id).exists()
 
 
-def linked_records(system: System, plant: Plant) -> tuple[ForecastSnapshot, ReminderPreference]:
+def linked_records(system: System, plant: Plant) -> tuple[ForecastSnapshot, ReminderSchedule]:
     configuration = plant.configurations.get()
     source = snapshot_for(system, NOW.date(), power_kw=0.4)
     source.job.status = "succeeded"
@@ -167,8 +167,8 @@ def linked_records(system: System, plant: Plant) -> tuple[ForecastSnapshot, Remi
         purpose="forecasts",
         outcome="succeeded",
     )
-    preference = ReminderPreference.objects.create(
-        user=system.member,
+    schedule = ReminderSchedule.objects.create(
+        configured_by=system.member,
         region=system.region,
         enabled=True,
         times=["16:00"],
@@ -176,7 +176,7 @@ def linked_records(system: System, plant: Plant) -> tuple[ForecastSnapshot, Remi
     )
     for index, status in enumerate(("pending", "retry", "sending", "sent", "uncertain")):
         NotificationDelivery.objects.create(
-            preference=preference,
+            schedule=schedule,
             snapshot=source,
             status=status,
             scheduled_for=NOW + timedelta(minutes=index),
@@ -187,14 +187,14 @@ def linked_records(system: System, plant: Plant) -> tuple[ForecastSnapshot, Remi
     CollectionSchedule.objects.create(
         region=system.region, enabled=True, times=["16:00"], effective_from=NOW - timedelta(days=1)
     )
-    return source, preference
+    return source, schedule
 
 
 def test_region_trash_preserves_history_and_invalidates_pending_work(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    source, preference = linked_records(system, plant)
+    source, schedule = linked_records(system, plant)
     run = CalibrationRun.objects.get()
     CalibrationRun.objects.filter(pk=run.pk).update(
         status="running", lease_token=uuid.uuid4(), lease_expires_at=NOW + timedelta(minutes=5)
@@ -228,8 +228,8 @@ def test_region_trash_preserves_history_and_invalidates_pending_work(
     ]
     assert all(row.lease_token is None and row.lease_expires_at is None for row in states[:3])
     assert states[3].lease_token is not None
-    preference.refresh_from_db()
-    assert preference.enabled
+    schedule.refresh_from_db()
+    assert schedule.enabled
     assert CollectionSchedule.objects.get(region=region).times == ["16:00"]
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=1))
     assert trash_region(system.member, system.tenant.pk, region.pk).deleted_at == NOW
@@ -240,7 +240,7 @@ def test_restore_parent_preserves_individual_plant_trash_and_restarts_future_sch
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    _, preference = linked_records(system, plant)
+    _, schedule = linked_records(system, plant)
     args = (system.member, system.tenant.pk, system.region.pk)
     assert restore_region(*args).deleted_at is None
     assert restore_plant(*args, plant.pk).deleted_at is None
@@ -261,9 +261,9 @@ def test_restore_parent_preserves_individual_plant_trash_and_restarts_future_sch
     assert Plant.objects.get(pk=plant.pk).deleted_at == NOW
     assert Plant.objects.get(pk=active.pk).deleted_at is None
     assert CollectionSchedule.objects.get(region=region).effective_from == restored_at
-    preference.refresh_from_db()
-    assert preference.effective_from == restored_at
-    assert preference.times == ["16:00"]
+    schedule.refresh_from_db()
+    assert schedule.effective_from == restored_at
+    assert schedule.times == ["16:00"]
     with pytest.raises(ValidationError, match="location_already_has_plant"):
         restore_plant(*args, plant.pk)
     trash_plant(*args, active.pk)
@@ -364,7 +364,7 @@ def test_purge_region_removes_owned_dependencies_and_preserves_shared_quota_ledg
     assert not CalibrationRun.objects.exists()
     assert not CalibrationActivation.objects.exists()
     assert not ProductionObservation.objects.exists()
-    assert not ReminderPreference.objects.exists()
+    assert not ReminderSchedule.objects.exists()
     assert not NotificationDelivery.objects.exists()
     assert not CollectionSchedule.objects.exists()
     assert not PlantEvent.objects.filter(plant_id=plant.pk).exists()
@@ -386,7 +386,7 @@ def test_purge_region_removes_owned_dependencies_and_preserves_shared_quota_ledg
 
 def test_purge_plant_keeps_region_history_and_reminders(monkeypatch: pytest.MonkeyPatch) -> None:
     system, plant = make_plant(monkeypatch)
-    source, preference = linked_records(system, plant)
+    source, schedule = linked_records(system, plant)
     previous = CalibrationRun.objects.get(plant=plant)
     CalibrationRun.objects.create(
         plant=plant,
@@ -408,7 +408,7 @@ def test_purge_plant_keeps_region_history_and_reminders(monkeypatch: pytest.Monk
     assert SiteBinding.objects.filter(pk=system.binding.pk).exists()
     assert ForecastSnapshot.objects.filter(pk=source.pk).exists()
     assert ForecastResult.objects.filter(snapshot=source).exists()
-    assert ReminderPreference.objects.filter(pk=preference.pk).exists()
+    assert ReminderSchedule.objects.filter(pk=schedule.pk).exists()
     assert NotificationDelivery.objects.count() == 5
 
 

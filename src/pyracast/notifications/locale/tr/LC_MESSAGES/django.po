@@ -14,6 +14,9 @@ msgid_plural "%(days)d days, %(time)s"
 msgstr[0] "%(days)d gün, %(time)s"
 msgstr[1] "%(days)d gün, %(time)s"
 
+msgid "A supported reminder language is required."
+msgstr "Desteklenen bir hatırlatıcı dili seçilmelidir."
+
 msgid "Available partial energy"
 msgstr "Mevcut kısmi enerji"
 

@@ -63,7 +63,7 @@ def _render_message(
     today = delivery.scheduled_for.astimezone(zone).date()
     prepared_at = prepared_at or delivery.scheduled_for
     lines = [
-        _("Forecast for %(plant)s") % {"plant": delivery.preference.region.name},
+        _("Forecast for %(plant)s") % {"plant": delivery.schedule.region.name},
         _("Scheduled: %(scheduled)s (%(timezone)s)")
         % {
             "scheduled": delivery.scheduled_for.astimezone(zone).isoformat(),

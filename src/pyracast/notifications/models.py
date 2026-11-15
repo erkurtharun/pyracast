@@ -13,8 +13,8 @@ class NotificationSettings(models.Model):
         default=5,
         validators=[MinValueValidator(1)],
         help_text=(
-            "Global distinct recipient limit per plant across all members. Lowering it pauses "
-            "reminders at plants exceeding the limit until their recipient lists are revised."
+            "Global recipient limit per plant reminder schedule. Lowering it pauses reminders "
+            "at plants exceeding the limit until their recipient lists are revised."
         ),
     )
 
@@ -32,22 +32,36 @@ class NotificationSettings(models.Model):
         )
 
 
-class ReminderPreference(models.Model):
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+class ReminderSchedule(models.Model):
+    configured_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True
+    )
     region = models.ForeignKey(Region, on_delete=models.CASCADE)
     enabled = models.BooleanField(default=False)
     recipients = models.JSONField(default=list)
     times = models.JSONField(default=list)
     effective_from = models.DateTimeField()
+    language = models.CharField(
+        max_length=2, choices=(("en", "English"), ("tr", "Türkçe")), default="en"
+    )
+    retired_at = models.DateTimeField(null=True)
 
     class Meta:
         constraints = (
-            models.UniqueConstraint(fields=("user", "region"), name="unique_user_region_reminder"),
+            models.UniqueConstraint(
+                fields=("region",),
+                condition=models.Q(retired_at__isnull=True),
+                name="one_current_region_reminder_schedule",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(language__in=("en", "tr")),
+                name="reminder_schedule_language_valid",
+            ),
         )
 
 
 class NotificationDelivery(models.Model):
-    preference = models.ForeignKey(ReminderPreference, on_delete=models.CASCADE)
+    schedule = models.ForeignKey(ReminderSchedule, on_delete=models.CASCADE)
     scheduled_for = models.DateTimeField()
     status = models.CharField(max_length=20, default="pending")
     available_at = models.DateTimeField()
@@ -69,7 +83,7 @@ class NotificationDelivery(models.Model):
     class Meta:
         constraints = (
             models.UniqueConstraint(
-                fields=("preference", "scheduled_for", "recipient"),
+                fields=("schedule", "scheduled_for", "recipient"),
                 name="unique_reminder_recipient_slot",
             ),
             models.CheckConstraint(

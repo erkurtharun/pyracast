@@ -25,7 +25,7 @@ from pyracast.forecasts.models import CollectionJob, CollectionSchedule
 from pyracast.notifications.models import (
     NotificationDelivery,
     NotificationSettings,
-    ReminderPreference,
+    ReminderSchedule,
 )
 from pyracast.plants.models import CalibrationRun, Plant, ProductionObservation
 from pyracast.plants.sites import submit_site
@@ -149,15 +149,15 @@ def test_browser_against_live_django(
         timezone="Europe/Istanbul",
         reason="Confirm the revised survey coordinates.",
     )
-    review_reminder = ReminderPreference.objects.create(
-        user=outsider,
+    review_reminder = ReminderSchedule.objects.create(
+        configured_by=outsider,
         region=review_region,
         recipients=["operations-recipient@example.test"],
         times=["10:00"],
         effective_from=now,
     )
     NotificationDelivery.objects.create(
-        preference=review_reminder,
+        schedule=review_reminder,
         recipient="operations-recipient@example.test",
         status="uncertain",
         scheduled_for=now - timedelta(minutes=5),
@@ -222,7 +222,7 @@ def test_browser_against_live_django(
     schedule = CollectionSchedule.objects.get(region=system.region)
     assert schedule.enabled
     assert schedule.times == ["09:00", "16:00"]
-    reminder = ReminderPreference.objects.get(user=system.member, region=system.region)
+    reminder = ReminderSchedule.objects.get(configured_by=system.member, region=system.region)
     assert reminder.enabled
     assert reminder.recipients == ["forecast-one@example.test", "forecast-two@example.test"]
     assert reminder.times == ["10:00"]

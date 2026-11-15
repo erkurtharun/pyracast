@@ -5,6 +5,7 @@ from pyracast.notifications.operations import RECIPIENT_MAX_LENGTH
 
 class ReminderInput(serializers.Serializer[dict[str, object]]):
     enabled = serializers.BooleanField()
+    language = serializers.ChoiceField(choices=("en", "tr"))
     recipients = serializers.ListField(
         child=serializers.EmailField(max_length=RECIPIENT_MAX_LENGTH)
     )
@@ -35,6 +36,7 @@ class ReminderDeliveryOutput(serializers.Serializer[dict[str, object]]):
 
 class ReminderOutput(serializers.Serializer[dict[str, object]]):
     enabled = serializers.BooleanField()
+    language = serializers.ChoiceField(choices=("en", "tr"))
     times = serializers.ListField(child=serializers.CharField())
     recipients = serializers.ListField(child=serializers.EmailField())
     effective_recipients = serializers.ListField(child=serializers.CharField())

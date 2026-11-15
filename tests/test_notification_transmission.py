@@ -121,8 +121,8 @@ def test_open_connection_does_not_authorize_a_changed_delivery(
 
     def change_delivery() -> None:
         if change == "authority":
-            delivery.preference.user.is_active = False
-            delivery.preference.user.save(update_fields=("is_active",))
+            delivery.schedule.enabled = False
+            delivery.schedule.save(update_fields=("enabled",))
         elif change == "deadline":
             clock[0] = 2
         elif change == "deleted":
@@ -137,7 +137,7 @@ def test_open_connection_does_not_authorize_a_changed_delivery(
         delivery.refresh_from_db()
         assert delivery.status == "skipped"
         assert delivery.last_error == (
-            "preference_or_authority_changed"
+            "schedule_or_authority_changed"
             if change == "authority"
             else "delivery_deadline_exceeded"
         )

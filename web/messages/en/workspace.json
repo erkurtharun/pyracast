@@ -145,6 +145,7 @@
         "remove": "Remove",
         "addTime": "Add time",
         "emailRecipients": "Email recipients",
+        "emailLanguage": "Email language",
         "addAddress": "Add address",
         "loadingEmailReminders": "Loading email reminders…",
         "emailReminders": "Email reminders",

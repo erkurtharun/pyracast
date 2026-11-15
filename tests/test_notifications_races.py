@@ -19,11 +19,13 @@ def test_notification_candidate_deleted_before_region_lock(
 ) -> None:
     monkeypatch.setattr(timezone, "now", lambda: NOW)
     delivery = ready()
-    preference = delivery.preference
+    schedule = delivery.schedule
+    assert schedule.configured_by is not None
+    actor = schedule.configured_by
 
     def purge() -> None:
         if purge_region:
-            trash_region(preference.user, preference.region.tenant_id, preference.region_id)
+            trash_region(actor, schedule.region.tenant_id, schedule.region_id)
             purge_expired(NOW + timedelta(days=31))
         else:
             NotificationDelivery.objects.filter(pk=delivery.pk).delete()

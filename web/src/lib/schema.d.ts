@@ -1461,11 +1461,13 @@ export interface components {
         };
         ReminderInput: {
             enabled: boolean;
+            language: components["schemas"]["LanguageEnum"];
             recipients: string[];
             times: string[];
         };
         ReminderOutput: {
             enabled: boolean;
+            language: components["schemas"]["LanguageEnum"];
             times: string[];
             recipients: string[];
             effective_recipients: string[];

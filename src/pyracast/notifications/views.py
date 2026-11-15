@@ -8,11 +8,11 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from pyracast.notifications.models import NotificationDelivery, ReminderPreference
+from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.notifications.operations import (
     configure_reminders,
     effective_recipients,
-    get_preference,
+    get_reminder_schedule,
     recipient_limit,
     region_recipient_count,
 )
@@ -36,11 +36,11 @@ def _source_age(delivery: NotificationDelivery, now: datetime) -> float | None:
     return max(0.0, (basis - delivery.snapshot.collected_at).total_seconds())
 
 
-def preference_payload(preference: ReminderPreference, now: datetime) -> dict[str, object]:
-    recipients = effective_recipients(preference)
+def reminder_schedule_payload(schedule: ReminderSchedule, now: datetime) -> dict[str, object]:
+    recipients = effective_recipients(schedule)
     limit = recipient_limit()
-    count = region_recipient_count(preference.region)
-    binding = preference.region.approved_binding
+    count = region_recipient_count(schedule.region)
+    binding = schedule.region.approved_binding
     quota: dict[str, object] | None = None
     if binding is not None:
         account = binding.provider_account
@@ -69,20 +69,21 @@ def preference_payload(preference: ReminderPreference, now: datetime) -> dict[st
             "stale": age > timedelta(hours=24).total_seconds() if age is not None else None,
             "sent_at": delivery.sent_at,
         }
-        for delivery in NotificationDelivery.objects.filter(preference_id=preference.pk)
+        for delivery in NotificationDelivery.objects.filter(schedule__region_id=schedule.region_id)
         .select_related("snapshot")
         .order_by("-scheduled_for", "-pk")[:20]
     ]
     return {
-        "enabled": preference.enabled,
-        "times": preference.times,
-        "recipients": preference.recipients,
+        "enabled": schedule.enabled,
+        "language": schedule.language,
+        "times": schedule.times,
+        "recipients": schedule.recipients,
         "effective_recipients": recipients,
         "recipient_limit": limit,
         "recipient_count": count,
         "recipient_slots_remaining": max(0, limit - count),
         "recipient_limit_exceeded": count > limit,
-        "timezone": preference.region.timezone,
+        "timezone": schedule.region.timezone,
         "quota": quota,
         "deliveries": deliveries,
     }
@@ -92,15 +93,15 @@ class RemindersView(APIView):
     @extend_schema(responses=ReminderOutput)
     def get(self, request: Request, tenant_id: int, region_id: int) -> Response:
         now = timezone.now()
-        preference = get_preference(cast(User, request.user), tenant_id, region_id, now)
-        return Response(preference_payload(preference, now))
+        schedule = get_reminder_schedule(cast(User, request.user), tenant_id, region_id, now)
+        return Response(reminder_schedule_payload(schedule, now))
 
     @extend_schema(request=ReminderInput, responses=ReminderOutput)
     def put(self, request: Request, tenant_id: int, region_id: int) -> Response:
         data = ReminderInput(data=request.data)
         data.is_valid(raise_exception=True)
         now = timezone.now()
-        preference = configure_reminders(
+        schedule = configure_reminders(
             cast(User, request.user), tenant_id, region_id, now=now, **data.validated_data
         )
-        return Response(preference_payload(preference, now))
+        return Response(reminder_schedule_payload(schedule, now))

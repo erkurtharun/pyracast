@@ -169,7 +169,8 @@ export async function mockApi(
         else if (path.endsWith("/reminders/"))
             data = {
                 enabled: false,
-                recipients: [],
+                language: "en",
+                recipients: [user.email],
                 recipient_limit: 5,
                 recipient_count: 1,
                 recipient_slots_remaining: 4,

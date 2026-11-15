@@ -16,7 +16,7 @@ from pyracast.forecasts.models import (
 )
 from pyracast.forecasts.monitoring import delivery_health, record_dispatch_phase
 from pyracast.metering.models import EpiasCollectionJob
-from pyracast.notifications.models import NotificationDelivery, ReminderPreference
+from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.regions.models import Region
 from tests.test_domain import FakeAdapter, System, make_system
 from tests.test_metering import connected
@@ -105,15 +105,15 @@ def test_incomplete_and_interrupted_deliveries_remain_visible_to_monitoring() ->
     for name in DispatcherStatus.Phase.values:
         record_dispatch_phase(name, NOW)
     recent_forecast(system)
-    preference = ReminderPreference.objects.create(
-        user=system.member,
+    schedule = ReminderSchedule.objects.create(
+        configured_by=system.member,
         region=system.region,
         enabled=True,
         effective_from=NOW,
         recipients=["recipient@example.test"],
     )
     delivery = NotificationDelivery.objects.create(
-        preference=preference,
+        schedule=schedule,
         binding=system.binding,
         scheduled_for=NOW,
         available_at=NOW,
@@ -158,11 +158,11 @@ def test_long_cooldown_stale_forecasts_and_missed_delivery_are_not_healthy() -> 
     assert report["healthy"] is False
     CollectionSchedule.objects.create(region=system.region, enabled=False, effective_from=NOW)
     assert delivery_health(NOW, timedelta(minutes=5))["regions_without_recent_forecasts"] == 0
-    preference = ReminderPreference.objects.create(
-        user=system.member, region=system.region, enabled=True, effective_from=NOW
+    schedule = ReminderSchedule.objects.create(
+        configured_by=system.member, region=system.region, enabled=True, effective_from=NOW
     )
     NotificationDelivery.objects.create(
-        preference=preference,
+        schedule=schedule,
         binding=system.binding,
         scheduled_for=NOW,
         available_at=NOW,
@@ -248,8 +248,8 @@ def test_invalid_saved_recipient_is_an_explicit_health_failure_without_disclosur
     recent_forecast(system)
     for phase in DispatcherStatus.Phase.values:
         record_dispatch_phase(phase, NOW)
-    preference = ReminderPreference.objects.create(
-        user=system.member,
+    schedule = ReminderSchedule.objects.create(
+        configured_by=system.member,
         region=system.region,
         enabled=True,
         effective_from=NOW,
@@ -259,6 +259,6 @@ def test_invalid_saved_recipient_is_an_explicit_health_failure_without_disclosur
     assert report["invalid_reminder_recipients"] == 1
     assert report["healthy"] is False
     assert "private-invalid-recipient" not in json.dumps(report)
-    preference.recipients = ["valid@example.test"]
-    preference.save(update_fields=("recipients",))
+    schedule.recipients = ["valid@example.test"]
+    schedule.save(update_fields=("recipients",))
     assert delivery_health(NOW, timedelta(minutes=5))["healthy"] is True

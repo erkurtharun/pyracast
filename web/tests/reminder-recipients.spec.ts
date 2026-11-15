@@ -1,6 +1,85 @@
 import { expect, test } from "./support/test";
 import type { Page } from "@playwright/test";
-import { mockApi, region, user } from "./support/workspace";
+import { mockApi, paged, region, user } from "./support/workspace";
+
+test("shared reminder recipients and email language survive administrator transfer", async ({
+    page,
+}, testInfo) => {
+    await reminderApi(page, [user.email], 5, true);
+    await page.setViewportSize({ width: 320, height: 900 });
+    let currentUser = user;
+    let role = "admin";
+    let saves = 0;
+    await page.route("**/api/session/", (route) =>
+        route.fulfill({
+            json: {
+                user: currentUser,
+                language: "en",
+                csrf_token: "signed-token",
+            },
+        }),
+    );
+    await page.route("**/api/tenants/", (route) =>
+        route.fulfill({
+            json: paged([{ id: 1, name: "Sunfield Energy", role }]),
+        }),
+    );
+    await page.route("**/reminders/", (route) => {
+        if (route.request().method() === "PUT") saves++;
+        return route.fallback();
+    });
+    await openReminders(page);
+    await page.getByLabel("Email language", { exact: true }).selectOption("tr");
+    const outgoing = page.waitForRequest(
+        (request) =>
+            request.method() === "PUT" && request.url().endsWith("/reminders/"),
+    );
+    await page.getByRole("button", { name: "Save reminders" }).click();
+    expect((await outgoing).postDataJSON()).toMatchObject({
+        enabled: true,
+        recipients: [user.email],
+        times: ["08:00"],
+        language: "tr",
+    });
+    await expect(
+        page.getByLabel("Email language", { exact: true }),
+    ).toHaveValue("tr");
+    currentUser = { ...user, id: 2, email: "next-admin@example.test" };
+    await openReminders(page);
+    await expect(
+        page.getByLabel("Email address 1", { exact: true }),
+    ).toHaveValue(user.email);
+    await expect(
+        page.getByLabel("Email language", { exact: true }),
+    ).toHaveValue("tr");
+    await expect(
+        page.getByLabel("Delivery time 1", { exact: true }),
+    ).toHaveValue("08:00");
+    expect(
+        await page.evaluate(
+            () => document.documentElement.scrollWidth <= window.innerWidth,
+        ),
+    ).toBe(true);
+    await page.screenshot({
+        path: testInfo.outputPath("shared-reminders-320.png"),
+        fullPage: true,
+    });
+    role = "viewer";
+    await openReminders(page);
+    await expect(
+        page.getByLabel("Email address 1", { exact: true }),
+    ).toHaveValue(user.email);
+    await expect(
+        page.getByLabel("Email language", { exact: true }),
+    ).toHaveValue("tr");
+    await expect(
+        page.getByLabel("Email language", { exact: true }),
+    ).toBeDisabled();
+    await expect(
+        page.getByRole("button", { name: "Save reminders" }),
+    ).toHaveCount(0);
+    expect(saves).toBe(1);
+});
 
 async function openReminders(page: Page) {
     await page.goto("/");
@@ -16,36 +95,36 @@ async function openReminders(page: Page) {
 
 async function reminderApi(
     page: Page,
-    recipients: string[] = [],
+    recipients: string[] = [user.email],
     limit = 5,
-    otherRecipientCount = 0,
     enabled = false,
     delivery: Record<string, unknown> = {},
     dailyLimit = 10,
 ) {
     await mockApi(page);
-    let saved = { enabled, recipients, times: ["08:00"] };
+    let saved = { enabled, recipients, times: ["08:00"], language: "en" };
     await page.route("**/reminders/", async (route) => {
-        if (route.request().method() === "PUT")
-            saved = route.request().postDataJSON();
+        if (route.request().method() === "PUT") {
+            const payload = route.request().postDataJSON();
+            expect(["en", "tr"]).toContain(payload.language);
+            saved = {
+                ...payload,
+                recipients: payload.recipients.length
+                    ? payload.recipients
+                    : [user.email],
+            };
+        }
         await route.fulfill({
             json: {
                 ...saved,
-                effective_recipients: saved.recipients.length
-                    ? saved.recipients
-                    : [user.email],
+                effective_recipients: saved.recipients,
                 recipient_limit: limit,
-                recipient_count:
-                    Math.max(1, saved.recipients.length) + otherRecipientCount,
+                recipient_count: saved.recipients.length,
                 recipient_slots_remaining: Math.max(
                     0,
-                    limit -
-                        Math.max(1, saved.recipients.length) -
-                        otherRecipientCount,
+                    limit - saved.recipients.length,
                 ),
-                recipient_limit_exceeded:
-                    Math.max(1, saved.recipients.length) + otherRecipientCount >
-                    limit,
+                recipient_limit_exceeded: saved.recipients.length > limit,
                 timezone: region.timezone,
                 quota: {
                     daily_reminder_limit: dailyLimit,
@@ -124,7 +203,7 @@ for (const [kind, label] of [
     test(`delivered ${kind} is distinguished from mail acceptance`, async ({
         page,
     }) => {
-        await reminderApi(page, [], 5, 0, true, { forecast_status: kind });
+        await reminderApi(page, [], 5, true, { forecast_status: kind });
         await openReminders(page);
         await page.getByText("Recent deliveries", { exact: true }).click();
         await expect(
@@ -137,7 +216,7 @@ for (const [kind, label] of [
 test("uncertain acceptance explains the duplicate risk without exposing internal codes", async ({
     page,
 }) => {
-    await reminderApi(page, [], 5, 0, true, {
+    await reminderApi(page, [], 5, true, {
         status: "uncertain",
         last_error: "mail_outcome_uncertain",
         sent_at: null,
@@ -250,7 +329,7 @@ test("dynamic recipient limit and server error retain entered values", async ({
     ).toHaveValue("second@example.test");
 });
 
-test("automatic account email is editable and unchanged saves preserve the fallback", async ({
+test("saved recipient remains explicit when saving unchanged settings", async ({
     page,
 }) => {
     await reminderApi(page);
@@ -269,7 +348,10 @@ test("automatic account email is editable and unchanged saves preserve the fallb
             request.method() === "PUT" && request.url().endsWith("/reminders/"),
     );
     await page.getByRole("button", { name: "Save reminders" }).click();
-    expect((await outgoing).postDataJSON().recipients).toEqual([]);
+    expect((await outgoing).postDataJSON()).toMatchObject({
+        recipients: [user.email],
+        language: "en",
+    });
 });
 
 test("duplicate recipient addresses are rejected", async ({ page }) => {
@@ -315,7 +397,7 @@ test("saved reminder fields stay unavailable until the refreshed settings arrive
 });
 
 for (const width of [320, 390]) {
-    test(`automatic and custom recipients match the visible fields at ${width}px`, async ({
+    test(`stored and custom recipients match the visible fields at ${width}px`, async ({
         page,
     }) => {
         await page.setViewportSize({ width, height: 900 });
@@ -388,7 +470,7 @@ for (const width of [320, 390]) {
     });
 }
 
-test("an explicit account email stays explicit and a paused empty schedule can release recipients", async ({
+test("empty recipient input snapshots the saving account email even for a paused schedule", async ({
     page,
 }) => {
     await reminderApi(page, [user.email]);
@@ -413,6 +495,7 @@ test("an explicit account email stays explicit and a paused empty schedule can r
         enabled: false,
         recipients: [],
         times: [],
+        language: "en",
     });
     await expect(
         page.getByLabel("Email address 1", { exact: true }),
@@ -445,7 +528,7 @@ test("native delivery time controls require a schedule only when enabled", async
 test("delivery time controls stop at the current daily limit", async ({
     page,
 }) => {
-    await reminderApi(page, [], 5, 0, false, {}, 2);
+    await reminderApi(page, [], 5, false, {}, 2);
     await openReminders(page);
     await page.getByRole("button", { name: "Add time", exact: true }).click();
     await expect(
@@ -516,7 +599,7 @@ test("reminder access errors do not reveal recipient controls", async ({
 test("shared plant capacity rejection retains entered addresses", async ({
     page,
 }) => {
-    await reminderApi(page, ["mine@example.test"], 5, 3);
+    await reminderApi(page, ["mine@example.test"], 5);
     await openReminders(page);
     await expect(page.locator('input[name="recipients"]')).toHaveCount(1);
     await expect(
@@ -578,7 +661,7 @@ test("an enabled oversized recipient list can be paused without removing address
         { length: 6 },
         (_, index) => `person${index}@example.test`,
     );
-    await reminderApi(page, recipients, 5, 0, true);
+    await reminderApi(page, recipients, 5, true);
     await openReminders(page);
     await page.getByLabel("Enable forecast emails for this plant").uncheck();
     const outgoing = page.waitForRequest(

@@ -34,12 +34,12 @@ from pyracast.notifications.mail import NotSentError, PermanentlyNotSentError, s
 from pyracast.notifications.models import (
     NotificationDelivery,
     NotificationSettings,
-    ReminderPreference,
+    ReminderSchedule,
 )
-from pyracast.notifications.operations import configure_reminders, get_preference
+from pyracast.notifications.operations import configure_reminders, get_reminder_schedule
 from pyracast.notifications.schedule import local_slot
 from pyracast.notifications.scheduler import enqueue_due
-from pyracast.notifications.views import preference_payload
+from pyracast.notifications.views import reminder_schedule_payload
 from pyracast.regions.models import Region
 from tests.test_domain import NOW, System, make_system
 
@@ -55,20 +55,21 @@ def memory_mail() -> Iterator[None]:
         yield
 
 
-def configured() -> tuple[System, ReminderPreference]:
+def configured() -> tuple[System, ReminderSchedule]:
     system = make_system(approved=True)
     system.member.email = "default@example.com"
     system.member.save()
-    preference = configure_reminders(
+    schedule = configure_reminders(
         system.member,
         system.tenant.pk,
         system.region.pk,
+        language="en",
         enabled=True,
         recipients=[],
         times=["10:00"],
         now=NOW,
     )
-    return system, preference
+    return system, schedule
 
 
 def saved(system: System, when: datetime = NOW) -> ForecastSnapshot:
@@ -127,7 +128,7 @@ def ready() -> NotificationDelivery:
 
 
 def test_saved_delivery_pins_vintage_recipient_and_never_fetches() -> None:
-    system, preference = configured()
+    system, schedule = configured()
     snapshot = saved(system)
     requests, jobs = RequestAttempt.objects.count(), CollectionJob.objects.count()
     ids = enqueue_due(SLOT)
@@ -151,22 +152,24 @@ def test_saved_delivery_pins_vintage_recipient_and_never_fetches() -> None:
     assert len(message.alternatives) == len(message.attachments) == 1
     assert RequestAttempt.objects.count() == requests
     assert CollectionJob.objects.count() == jobs + 1
-    payload = preference_payload(preference, SLOT)
+    payload = reminder_schedule_payload(schedule, SLOT)
     assert payload["quota"] == {"daily_reminder_limit": 10, "queries_per_email": 0}
     assert len(payload["deliveries"]) == 1  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("status", ["pending", "retry"])
-def test_default_email_change_skips_pinned_delivery(status: str) -> None:
+def test_account_email_change_preserves_pinned_default_recipient(status: str) -> None:
     delivery = ready()
     NotificationDelivery.objects.filter(pk=delivery.pk).update(status=status)
-    User.objects.filter(pk=delivery.preference.user_id).update(email="changed@example.com")
-    assert not process_notification(delivery.pk, SLOT)
+    configured_by_id = delivery.schedule.configured_by_id
+    assert configured_by_id is not None
+    User.objects.filter(pk=configured_by_id).update(email="changed@example.com")
+    assert process_notification(delivery.pk, SLOT)
     delivery.refresh_from_db()
-    assert delivery.status == "skipped"
-    assert delivery.last_error == "preference_or_authority_changed"
+    assert delivery.status == "sent"
+    assert delivery.last_error == ""
     assert delivery.recipient == "default@example.com"
-    assert not mail.outbox
+    assert mail.outbox[0].to == ["default@example.com"]
 
 
 def test_default_email_change_preserves_explicit_region_recipient() -> None:
@@ -175,6 +178,7 @@ def test_default_email_change_preserves_explicit_region_recipient() -> None:
         system.member,
         system.tenant.pk,
         system.region.pk,
+        language="en",
         enabled=True,
         recipients=["region@example.com"],
         times=["10:00"],
@@ -211,6 +215,7 @@ def test_configuration_validates_times(times: list[str]) -> None:
             system.member,
             system.tenant.pk,
             system.region.pk,
+            language="en",
             enabled=True,
             recipients=[],
             times=times,
@@ -220,20 +225,21 @@ def test_configuration_validates_times(times: list[str]) -> None:
 
 def test_configuration_authority_defaults_and_missing_email() -> None:
     system = make_system()
-    empty = get_preference(system.member, system.tenant.pk, system.region.pk, NOW)
+    empty = get_reminder_schedule(system.member, system.tenant.pk, system.region.pk, NOW)
     assert not empty.enabled
-    assert preference_payload(empty, NOW)["quota"] is None
+    assert reminder_schedule_payload(empty, NOW)["quota"] is None
     other = Tenant.objects.create(name="Other")
     with pytest.raises(PermissionDenied):
-        get_preference(system.member, other.pk, system.region.pk, NOW)
+        get_reminder_schedule(system.member, other.pk, system.region.pk, NOW)
     Membership.objects.create(user=system.member, tenant=other)
     with pytest.raises(Region.DoesNotExist):
-        get_preference(system.member, other.pk, system.region.pk, NOW)
+        get_reminder_schedule(system.member, other.pk, system.region.pk, NOW)
     with pytest.raises(ValidationError):
         configure_reminders(
             system.member,
             system.tenant.pk,
             system.region.pk,
+            language="en",
             enabled=True,
             recipients=[],
             times=["10:00"],
@@ -244,6 +250,7 @@ def test_configuration_authority_defaults_and_missing_email() -> None:
             system.member,
             system.tenant.pk,
             system.region.pk,
+            language="en",
             enabled=True,
             recipients=["override@example.com"],
             times=["10:00"],
@@ -254,6 +261,7 @@ def test_configuration_authority_defaults_and_missing_email() -> None:
             system.member,
             system.tenant.pk,
             system.region.pk,
+            language="en",
             enabled=False,
             recipients=["bad"],
             times=[],
@@ -264,6 +272,7 @@ def test_configuration_authority_defaults_and_missing_email() -> None:
             system.member,
             system.tenant.pk,
             system.region.pk,
+            language="en",
             enabled=False,
             recipients=[],
             times=[],
@@ -277,6 +286,7 @@ def test_override_and_no_saved_forecast_are_explicit() -> None:
         system.member,
         system.tenant.pk,
         system.region.pk,
+        language="en",
         enabled=True,
         recipients=["override@example.com"],
         times=["10:00"],
@@ -313,49 +323,54 @@ def test_calendar_dst_gaps_folds_and_midnight() -> None:
         "suspended",
         "revision",
         "disabled",
-        "preference",
+        "schedule",
         "recipient",
         "binding",
         "wrong_region",
         "quota",
     ],
 )
-def test_worker_rechecks_authority_and_snapshot(change: str) -> None:
+def test_worker_checks_resource_policy_independently_of_configurer(change: str) -> None:
     delivery = ready()
-    preference = delivery.preference
+    schedule = delivery.schedule
     snapshot = delivery.snapshot
     assert snapshot is not None
+    configured_by_id = schedule.configured_by_id
+    assert configured_by_id is not None
     if change == "inactive":
-        User.objects.filter(pk=preference.user_id).update(is_active=False)
+        User.objects.filter(pk=configured_by_id).update(is_active=False)
     elif change == "membership":
-        Membership.objects.filter(user_id=preference.user_id).delete()
+        Membership.objects.filter(user_id=configured_by_id).delete()
     elif change == "suspended":
-        Region.objects.filter(pk=preference.region_id).update(status="suspended")
+        Region.objects.filter(pk=schedule.region_id).update(status="suspended")
     elif change == "revision":
-        Region.objects.filter(pk=preference.region_id).update(revision=2)
+        Region.objects.filter(pk=schedule.region_id).update(revision=2)
     elif change == "disabled":
-        ReminderPreference.objects.filter(pk=preference.pk).update(enabled=False)
-    elif change == "preference":
-        ReminderPreference.objects.filter(pk=preference.pk).update(
+        ReminderSchedule.objects.filter(pk=schedule.pk).update(enabled=False)
+    elif change == "schedule":
+        ReminderSchedule.objects.filter(pk=schedule.pk).update(
             effective_from=SLOT + timedelta(seconds=1)
         )
     elif change == "recipient":
         NotificationDelivery.objects.filter(pk=delivery.pk).update(recipient="")
-        User.objects.filter(pk=preference.user_id).update(email="")
+        ReminderSchedule.objects.filter(pk=schedule.pk).update(recipients=[""])
     elif change == "binding":
         NotificationDelivery.objects.filter(pk=delivery.pk).update(binding=None)
     elif change == "wrong_region":
         region = Region.objects.create(
-            tenant=preference.region.tenant, name="Other", latitude=0, longitude=0, timezone="UTC"
+            tenant=schedule.region.tenant, name="Other", latitude=0, longitude=0, timezone="UTC"
         )
-        ReminderPreference.objects.filter(pk=preference.pk).update(region=region)
+        ReminderSchedule.objects.filter(pk=schedule.pk).update(region=region)
     else:
         ProviderAccount.objects.filter(pk=snapshot.job.binding.provider_account_id).update(
             daily_quota=0
         )
-    assert not process_notification(delivery.pk, SLOT)
+    delivered = process_notification(delivery.pk, SLOT)
+    assert delivered is (change in {"inactive", "membership"})
     delivery.refresh_from_db()
-    assert delivery.status == "skipped"
+    assert delivery.status == ("sent" if delivered else "skipped")
+    if change == "recipient":
+        assert delivery.last_error == "missing_recipient"
 
 
 @pytest.mark.parametrize("mode", ["safe", "uncertain", "permanent"])
@@ -442,7 +457,7 @@ def test_full_summary_preserves_units_and_escapes_html() -> None:
 
 
 def test_stale_source_and_missed_schedule_are_visible() -> None:
-    system, preference = configured()
+    system, schedule = configured()
     saved(system, NOW - timedelta(days=2))
     ids = enqueue_due(SLOT)
     assert process_notification(ids[0], SLOT)
@@ -452,7 +467,7 @@ def test_stale_source_and_missed_schedule_are_visible() -> None:
     missed = NotificationDelivery.objects.get(pk=missed_ids[-1])
     assert missed.status == "skipped"
     assert missed.last_error == "missed_schedule"
-    payload = preference_payload(preference, next_slot)
+    payload = reminder_schedule_payload(schedule, next_slot)
     assert isinstance(payload["deliveries"], list)
     assert payload["deliveries"][0]["stale"] is True
 
@@ -465,7 +480,7 @@ def test_worker_drops_old_pending_after_outage() -> None:
 
 
 @pytest.mark.parametrize("change", ["inactive", "unbound", "suspended", "membership"])
-def test_scheduler_rechecks_authority(change: str) -> None:
+def test_scheduler_checks_binding_independently_of_configurer(change: str) -> None:
     system, _ = configured()
     saved(system)
     if change == "inactive":
@@ -476,50 +491,53 @@ def test_scheduler_rechecks_authority(change: str) -> None:
         Region.objects.filter(pk=system.region.pk).update(status="suspended")
     else:
         Membership.objects.filter(user=system.member).delete()
-    assert not enqueue_due(SLOT)
+    assert len(enqueue_due(SLOT)) == (1 if change in {"inactive", "membership"} else 0)
 
 
 def test_scheduler_skips_dst_gap_and_future_slots() -> None:
-    system, preference = configured()
+    system, schedule = configured()
     system.region.timezone = "America/New_York"
     system.region.save()
-    preference.times = ["02:30", "23:00"]
-    preference.effective_from = datetime(2026, 3, 8, tzinfo=UTC)
-    preference.save()
+    schedule.times = ["02:30", "23:00"]
+    schedule.effective_from = datetime(2026, 3, 8, tzinfo=UTC)
+    schedule.save()
     assert not enqueue_due(datetime(2026, 3, 8, 15, tzinfo=UTC))
 
 
-def test_missing_snapshot_delivery_response_and_read_only_default() -> None:
-    system, preference = configured()
+def test_missing_snapshot_delivery_response_is_shared_and_read_only() -> None:
+    system, schedule = configured()
     enqueue_due(SLOT)
-    payload = preference_payload(preference, SLOT)
+    payload = reminder_schedule_payload(schedule, SLOT)
     assert isinstance(payload["deliveries"], list)
     assert payload["deliveries"][0]["collected_at"] is None
     user = User.objects.create(username="read_only")
     Membership.objects.create(user=user, tenant=system.tenant)
-    before = ReminderPreference.objects.count()
-    empty = get_preference(user, system.tenant.pk, system.region.pk, SLOT)
-    assert preference_payload(empty, SLOT)["deliveries"] == []
-    assert ReminderPreference.objects.count() == before
+    before = ReminderSchedule.objects.count()
+    shared = get_reminder_schedule(user, system.tenant.pk, system.region.pk, SLOT)
+    assert shared.pk == schedule.pk
+    assert reminder_schedule_payload(shared, SLOT) == payload
+    assert ReminderSchedule.objects.count() == before
 
 
-def test_disabling_preferences_and_lowering_plan_cap() -> None:
+def test_disabling_shared_schedule_and_lowering_plan_cap() -> None:
     system, _ = configured()
-    preference = configure_reminders(
+    schedule = configure_reminders(
         system.member,
         system.tenant.pk,
         system.region.pk,
+        language="en",
         enabled=False,
         recipients=[],
         times=[],
         now=SLOT,
     )
-    assert not preference.enabled
+    assert not schedule.enabled
     assert not enqueue_due(SLOT)
     configure_reminders(
         system.member,
         system.tenant.pk,
         system.region.pk,
+        language="en",
         enabled=True,
         recipients=[],
         times=["10:00"],
@@ -561,7 +579,7 @@ def test_concurrent_schedulers_and_workers_are_idempotent() -> None:
     assert sorted(results) == [False, True]
 
 
-def test_api_is_per_user_and_tenant_scoped() -> None:
+def test_api_shares_region_reads_and_restricts_writes_to_admin() -> None:
     system, _ = configured()
     other = User.objects.create(username="other")
     Membership.objects.create(user=other, tenant=system.tenant)
@@ -569,18 +587,31 @@ def test_api_is_per_user_and_tenant_scoped() -> None:
     url = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/reminders/"
     assert client.get(url).status_code == 403
     client.force_authenticate(other)
-    assert not client.get(url).json()["enabled"]
+    assert client.get(url).json()["enabled"]
+    assert (
+        client.put(
+            url, {"enabled": False, "recipients": [], "times": [], "language": "en"}, format="json"
+        ).status_code
+        == 403
+    )
     client.force_authenticate(system.member)
     response = client.put(
         url,
-        {"enabled": True, "recipients": ["override@example.com"], "times": ["11:00"]},
+        {
+            "enabled": True,
+            "recipients": ["override@example.com"],
+            "times": ["11:00"],
+            "language": "en",
+        },
         format="json",
     )
     assert response.status_code == 200
     assert response.json()["recipients"] == ["override@example.com"]
     assert (
         client.put(
-            url, {"enabled": True, "recipients": [], "times": ["1:00"]}, format="json"
+            url,
+            {"enabled": True, "recipients": [], "times": ["1:00"], "language": "en"},
+            format="json",
         ).status_code
         == 400
     )
@@ -599,7 +630,7 @@ def test_recipient_api_accepts_five_and_admin_limit_changes_apply_immediately() 
     client.force_authenticate(system.member)
     url = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/reminders/"
     addresses = [f"person{index}@example.com" for index in range(6)]
-    data = {"enabled": True, "recipients": addresses[:5], "times": ["10:00"]}
+    data = {"enabled": True, "recipients": addresses[:5], "times": ["10:00"], "language": "en"}
     response = client.put(url, data, format="json")
     assert response.status_code == 200
     assert response.json()["recipients"] == addresses[:5]
@@ -627,6 +658,7 @@ def test_recipient_configuration_rejects_invalid_and_duplicate_addresses(
             system.member,
             system.tenant.pk,
             system.region.pk,
+            language="en",
             enabled=True,
             recipients=recipients,
             times=["10:00"],
@@ -634,38 +666,45 @@ def test_recipient_configuration_rejects_invalid_and_duplicate_addresses(
         )
 
 
-def test_recipients_trim_and_empty_list_uses_account_email() -> None:
+def test_recipients_trim_and_empty_input_snapshots_account_email() -> None:
     system, _ = configured()
-    preference = configure_reminders(
+    schedule = configure_reminders(
         system.member,
         system.tenant.pk,
         system.region.pk,
+        language="en",
         enabled=True,
         recipients=[" person@example.com "],
         times=["10:00"],
         now=NOW,
     )
-    assert preference.recipients == ["person@example.com"]
-    assert preference_payload(preference, NOW)["effective_recipients"] == ["person@example.com"]
-    preference = configure_reminders(
+    assert schedule.recipients == ["person@example.com"]
+    assert reminder_schedule_payload(schedule, NOW)["effective_recipients"] == [
+        "person@example.com"
+    ]
+    schedule = configure_reminders(
         system.member,
         system.tenant.pk,
         system.region.pk,
+        language="en",
         enabled=True,
         recipients=[],
         times=["10:00"],
         now=NOW,
     )
-    assert preference_payload(preference, NOW)["effective_recipients"] == ["default@example.com"]
+    assert reminder_schedule_payload(schedule, NOW)["effective_recipients"] == [
+        "default@example.com"
+    ]
 
 
 def test_recipient_limit_reduction_blocks_whole_queued_list_without_truncation() -> None:
-    system, preference = configured()
+    system, schedule = configured()
     addresses = ["first@example.com", "second@example.com"]
     configure_reminders(
         system.member,
         system.tenant.pk,
         system.region.pk,
+        language="en",
         enabled=True,
         recipients=addresses,
         times=["10:00"],
@@ -678,8 +717,8 @@ def test_recipient_limit_reduction_blocks_whole_queued_list_without_truncation()
     assert not enqueue_due(SLOT + timedelta(days=1))
     assert all(not process_notification(delivery_id, SLOT) for delivery_id in ids)
     assert set(NotificationDelivery.objects.values_list("status", flat=True)) == {"skipped"}
-    preference.refresh_from_db()
-    assert preference.recipients == addresses
+    schedule.refresh_from_db()
+    assert schedule.recipients == addresses
     assert not mail.outbox
 
 
@@ -689,6 +728,7 @@ def test_recipient_change_cancels_every_old_pending_delivery() -> None:
         system.member,
         system.tenant.pk,
         system.region.pk,
+        language="en",
         enabled=True,
         recipients=["a@example.com", "b@example.com"],
         times=["10:00"],
@@ -700,6 +740,7 @@ def test_recipient_change_cancels_every_old_pending_delivery() -> None:
         system.member,
         system.tenant.pk,
         system.region.pk,
+        language="en",
         enabled=True,
         recipients=["b@example.com", "c@example.com"],
         times=["10:00"],
@@ -713,11 +754,12 @@ def test_recipient_change_cancels_every_old_pending_delivery() -> None:
 
 
 def test_multiple_recipient_outcomes_are_independent_and_private() -> None:
-    system, preference = configured()
+    system, schedule = configured()
     configure_reminders(
         system.member,
         system.tenant.pk,
         system.region.pk,
+        language="en",
         enabled=True,
         recipients=["ok@example.com", "retry@example.com", "unknown@example.com"],
         times=["10:00"],
@@ -749,7 +791,7 @@ def test_multiple_recipient_outcomes_are_independent_and_private() -> None:
     retry = NotificationDelivery.objects.get(pk=ids[1])
     assert pending_notification_ids(retry.available_at) == [ids[1]]
     assert len(mail.outbox) == 1
-    payload = preference_payload(preference, SLOT)
+    payload = reminder_schedule_payload(schedule, SLOT)
     assert isinstance(payload["deliveries"], list)
     assert {row["recipient"] for row in payload["deliveries"]} == {
         "ok@example.com",
@@ -761,7 +803,9 @@ def test_multiple_recipient_outcomes_are_independent_and_private() -> None:
 def test_account_email_change_does_not_extend_already_pinned_slot() -> None:
     delivery = ready()
     assert process_notification(delivery.pk, SLOT)
-    User.objects.filter(pk=delivery.preference.user_id).update(email="changed@example.com")
+    configured_by_id = delivery.schedule.configured_by_id
+    assert configured_by_id is not None
+    User.objects.filter(pk=configured_by_id).update(email="changed@example.com")
     assert enqueue_due(SLOT + timedelta(minutes=1)) == [delivery.pk]
     assert NotificationDelivery.objects.count() == 1
     assert len(mail.outbox) == 1
@@ -770,22 +814,24 @@ def test_account_email_change_does_not_extend_already_pinned_slot() -> None:
 def test_fallback_configuration_reads_current_account_email_after_locking() -> None:
     system, _ = configured()
     User.objects.filter(pk=system.member.pk).update(email="fresh@example.com")
-    preference = configure_reminders(
+    schedule = configure_reminders(
         system.member,
         system.tenant.pk,
         system.region.pk,
+        language="en",
         enabled=True,
         recipients=[],
         times=["10:00"],
         now=NOW,
     )
-    assert preference_payload(preference, NOW)["effective_recipients"] == ["fresh@example.com"]
+    assert reminder_schedule_payload(schedule, NOW)["effective_recipients"] == ["fresh@example.com"]
     User.objects.filter(pk=system.member.pk).update(email="")
     with pytest.raises(ValidationError):
         configure_reminders(
             system.member,
             system.tenant.pk,
             system.region.pk,
+            language="en",
             enabled=True,
             recipients=[],
             times=["10:00"],
@@ -799,6 +845,7 @@ def test_multiple_recipient_concurrent_dispatch_pins_one_delivery_per_address() 
         system.member,
         system.tenant.pk,
         system.region.pk,
+        language="en",
         enabled=True,
         recipients=["a@example.com", "b@example.com"],
         times=["10:00"],
@@ -844,11 +891,11 @@ def test_notification_migration_preserves_legacy_recipients_and_delivery_history
         apps = executor.loader.project_state(old_target).apps
         preference_model = apps.get_model("notifications", "ReminderPreference")
         delivery_model = apps.get_model("notifications", "NotificationDelivery")
-        preference = preference_model.objects.get(user_id=system.member.pk)
-        preference.email = "legacy@example.com"
-        preference.save()
+        schedule = preference_model.objects.get(user_id=system.member.pk)
+        schedule.email = "legacy@example.com"
+        schedule.save()
         delivery = delivery_model.objects.create(
-            preference=preference,
+            preference=schedule,
             scheduled_for=SLOT,
             available_at=SLOT,
             recipient="historic@example.com",
@@ -858,7 +905,7 @@ def test_notification_migration_preserves_legacy_recipients_and_delivery_history
         )
     finally:
         MigrationExecutor(connection).migrate(current_targets)
-    restored = ReminderPreference.objects.get(pk=preference.pk)
+    restored = ReminderSchedule.objects.get(pk=schedule.pk)
     assert restored.recipients == ["legacy@example.com"]
     history = NotificationDelivery.objects.get(pk=delivery.pk)
     assert (history.recipient, history.status, history.sent_at, history.attempts) == (
@@ -870,13 +917,14 @@ def test_notification_migration_preserves_legacy_recipients_and_delivery_history
     assert NotificationSettings.objects.get(pk=1).max_recipients == 5
 
 
-def test_plant_recipient_cap_is_shared_distinct_and_private_between_members() -> None:
-    system, preference = configured()
+def test_new_administrator_replaces_one_shared_recipient_list_within_the_cap() -> None:
+    system, schedule = configured()
     addresses = [f"person{index}@example.com" for index in range(5)]
     configure_reminders(
         system.member,
         system.tenant.pk,
         system.region.pk,
+        language="en",
         enabled=True,
         recipients=addresses,
         times=["10:00"],
@@ -887,161 +935,203 @@ def test_plant_recipient_cap_is_shared_distinct_and_private_between_members() ->
     reassign_workspace_admin(
         system.admin, system.tenant.pk, other.pk, expected_admin_id=system.member.pk
     )
+    shared = get_reminder_schedule(other, system.tenant.pk, system.region.pk, NOW)
+    assert shared.pk == schedule.pk
+    assert shared.recipients == addresses
     with pytest.raises(ValidationError, match="in total"):
         configure_reminders(
             other,
             system.tenant.pk,
             system.region.pk,
+            language="en",
             enabled=True,
-            recipients=["other@example.com"],
+            recipients=[*addresses, "extra@example.com"],
             times=["11:00"],
             now=NOW,
         )
-    own = configure_reminders(
+    changed = configure_reminders(
         other,
         system.tenant.pk,
         system.region.pk,
+        language="tr",
         enabled=True,
         recipients=["PERSON0@example.com"],
         times=["11:00"],
         now=NOW,
     )
-    payload = preference_payload(own, NOW)
-    assert payload["recipient_count"] == 5
-    assert payload["recipient_slots_remaining"] == 0
+    assert changed.pk == schedule.pk
+    payload = reminder_schedule_payload(changed, NOW)
+    assert payload["recipient_count"] == 1
+    assert payload["recipient_slots_remaining"] == 4
     assert payload["recipients"] == ["PERSON0@example.com"]
+    assert payload["language"] == "tr"
     assert "person1@example.com" not in str(payload)
+    assert (
+        ReminderSchedule.objects.filter(region=system.region, retired_at__isnull=True).count() == 1
+    )
+    with pytest.raises(PermissionDenied):
+        configure_reminders(
+            system.member,
+            system.tenant.pk,
+            system.region.pk,
+            language="en",
+            enabled=True,
+            recipients=addresses,
+            times=["10:00"],
+            now=NOW,
+        )
     foreign = Tenant.objects.create(name="Foreign")
     with pytest.raises(PermissionDenied):
         configure_reminders(
             other,
             foreign.pk,
             system.region.pk,
+            language="en",
             enabled=True,
             recipients=["intruder@example.com"],
             times=["10:00"],
             now=NOW,
         )
-    preference.refresh_from_db()
-    assert preference.recipients == addresses
+    schedule.refresh_from_db()
+    assert schedule.recipients == ["PERSON0@example.com"]
+    assert schedule.configured_by_id == other.pk
 
 
-def test_paused_lists_reserve_slots_and_clearing_all_settings_releases_them() -> None:
+def test_paused_policy_preserves_recipients_and_empty_input_snapshots_account_email() -> None:
     system, _ = configured()
-    preference = configure_reminders(
+    schedule = configure_reminders(
         system.member,
         system.tenant.pk,
         system.region.pk,
+        language="en",
         enabled=False,
         recipients=["saved@example.com"],
         times=[],
         now=NOW,
     )
-    assert preference_payload(preference, NOW)["recipient_count"] == 1
-    preference = configure_reminders(
+    assert reminder_schedule_payload(schedule, NOW)["recipient_count"] == 1
+    assert schedule.recipients == ["saved@example.com"]
+    schedule = configure_reminders(
         system.member,
         system.tenant.pk,
         system.region.pk,
+        language="en",
         enabled=False,
         recipients=[],
         times=[],
         now=NOW,
     )
-    assert preference_payload(preference, NOW)["recipient_count"] == 0
+    assert not schedule.enabled
+    assert schedule.times == []
+    assert schedule.recipients == ["default@example.com"]
+    assert reminder_schedule_payload(schedule, NOW)["recipient_count"] == 1
 
 
-def test_over_limit_lists_allow_gradual_reduction_and_disabling() -> None:
+def test_over_limit_list_allows_gradual_reduction_and_disabling_without_truncation() -> None:
     system, _ = configured()
+    addresses = [f"person{index}@example.com" for index in range(5)]
     configure_reminders(
         system.member,
         system.tenant.pk,
         system.region.pk,
+        language="en",
         enabled=True,
-        recipients=["a@example.com", "b@example.com", "c@example.com"],
+        recipients=addresses,
         times=["10:00"],
-        now=NOW,
-    )
-    other = User.objects.create(username="other", email="other@example.com")
-    Membership.objects.create(user=other, tenant=system.tenant)
-    reassign_workspace_admin(
-        system.admin, system.tenant.pk, other.pk, expected_admin_id=system.member.pk
-    )
-    configure_reminders(
-        other,
-        system.tenant.pk,
-        system.region.pk,
-        enabled=True,
-        recipients=["d@example.com", "e@example.com"],
-        times=["11:00"],
         now=NOW,
     )
     NotificationSettings.objects.filter(pk=1).update(max_recipients=2)
     paused = configure_reminders(
-        other,
+        system.member,
         system.tenant.pk,
         system.region.pk,
+        language="en",
         enabled=False,
-        recipients=["d@example.com", "e@example.com"],
-        times=["11:00"],
+        recipients=addresses,
+        times=["10:00"],
         now=NOW,
     )
-    assert preference_payload(paused, NOW)["recipient_count"] == 5
-    reassign_workspace_admin(
-        system.admin, system.tenant.pk, system.member.pk, expected_admin_id=other.pk
-    )
+    assert not paused.enabled
+    assert paused.recipients == addresses
+    assert reminder_schedule_payload(paused, NOW)["recipient_count"] == 5
     reduced = configure_reminders(
         system.member,
         system.tenant.pk,
         system.region.pk,
+        language="en",
         enabled=True,
-        recipients=["a@example.com", "b@example.com"],
+        recipients=addresses[:3],
         times=["10:00"],
         now=NOW,
     )
-    assert preference_payload(reduced, NOW)["recipient_limit_exceeded"] is True
-    assert preference_payload(reduced, NOW)["recipient_count"] == 4
+    assert reminder_schedule_payload(reduced, NOW)["recipient_limit_exceeded"] is True
+    assert reminder_schedule_payload(reduced, NOW)["recipient_count"] == 3
     with pytest.raises(ValidationError):
         configure_reminders(
             system.member,
             system.tenant.pk,
             system.region.pk,
+            language="en",
             enabled=True,
-            recipients=["a@example.com", "b@example.com", "c@example.com"],
+            recipients=addresses[:4],
             times=["10:00"],
             now=NOW,
         )
+    recovered = configure_reminders(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        language="en",
+        enabled=True,
+        recipients=addresses[:2],
+        times=["10:00"],
+        now=NOW,
+    )
+    assert reminder_schedule_payload(recovered, NOW)["recipient_limit_exceeded"] is False
+    assert recovered.recipients == addresses[:2]
 
 
 @pytest.mark.parametrize("change", ["inactive", "membership"])
-def test_inactive_or_departed_members_do_not_reserve_plant_recipient_slots(change: str) -> None:
-    system, preference = configured()
+def test_configurer_inactivity_or_departure_keeps_the_shared_recipient_list(change: str) -> None:
+    system, schedule = configured()
     if change == "inactive":
         User.objects.filter(pk=system.member.pk).update(is_active=False)
     else:
         Membership.objects.filter(user=system.member).delete()
-    assert preference_payload(preference, NOW)["recipient_count"] == 0
+    assert reminder_schedule_payload(schedule, NOW)["recipient_count"] == 1
+    assert reminder_schedule_payload(schedule, NOW)["recipients"] == ["default@example.com"]
 
 
-def test_fallback_email_change_can_pause_every_member_at_plant_limit() -> None:
-    system, _ = configured()
+def test_email_changes_and_retired_lists_do_not_expand_current_recipient_cap() -> None:
+    system, current = configured()
     other = User.objects.create(username="other", email="default@example.com")
     Membership.objects.create(user=other, tenant=system.tenant)
-    ReminderPreference.objects.create(
-        user=other,
+    ReminderSchedule.objects.create(
+        configured_by=other,
         region=system.region,
-        enabled=True,
-        recipients=[],
+        enabled=False,
+        recipients=["historical@example.com"],
         times=["10:00"],
+        language="en",
         effective_from=NOW,
+        retired_at=NOW,
     )
     NotificationSettings.objects.filter(pk=1).update(max_recipients=1)
     saved(system)
     ids = enqueue_due(SLOT)
-    assert len(ids) == 2
+    assert len(ids) == 1
     User.objects.filter(pk=other.pk).update(email="changed@example.com")
-    assert not enqueue_due(SLOT + timedelta(days=1))
-    assert all(not process_notification(delivery_id, SLOT) for delivery_id in ids)
-    assert not mail.outbox
+    User.objects.filter(pk=system.member.pk).update(email="also-changed@example.com")
+    later = enqueue_due(SLOT + timedelta(days=1))
+    assert later
+    assert NotificationDelivery.objects.filter(
+        scheduled_for=SLOT + timedelta(days=1), schedule=current
+    ).exists()
+    assert all(process_notification(delivery_id, SLOT) for delivery_id in ids)
+    assert len(mail.outbox) == 1
+    assert mail.outbox[0].to == ["default@example.com"]
+    assert reminder_schedule_payload(current, NOW)["recipient_count"] == 1
+    assert set(NotificationDelivery.objects.values_list("schedule_id", flat=True)) == {current.pk}
 
 
 def test_concurrent_viewer_cannot_change_shared_reminder_capacity() -> None:
@@ -1059,6 +1149,7 @@ def test_concurrent_viewer_cannot_change_shared_reminder_capacity() -> None:
                     user,
                     system.tenant.pk,
                     system.region.pk,
+                    language="en",
                     enabled=True,
                     recipients=[f"{user.username}{index}@example.com" for index in range(3)],
                     times=["10:00"],
@@ -1073,15 +1164,15 @@ def test_concurrent_viewer_cannot_change_shared_reminder_capacity() -> None:
     with ThreadPoolExecutor(max_workers=2) as pool:
         outcomes = list(pool.map(configure, [system.member, other]))
     assert outcomes == [True, False]
-    assert not ReminderPreference.objects.filter(user=other).exists()
+    assert not ReminderSchedule.objects.filter(configured_by=other).exists()
 
 
 @pytest.mark.parametrize(
     "addresses", [[], ["one@example.com"], ["one@example.com", "two@example.com"]]
 )
 def test_reminder_api_exposes_only_canonical_recipient_fields(addresses: list[str]) -> None:
-    system, preference = configured()
-    ReminderPreference.objects.filter(pk=preference.pk).update(recipients=addresses)
+    system, schedule = configured()
+    ReminderSchedule.objects.filter(pk=schedule.pk).update(recipients=addresses)
     client = APIClient()
     client.force_authenticate(system.member)
     response = client.get(f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/reminders/")
@@ -1089,7 +1180,7 @@ def test_reminder_api_exposes_only_canonical_recipient_fields(addresses: list[st
     payload = response.json()
     assert {"email", "effective_email"}.isdisjoint(payload)
     assert payload["recipients"] == addresses
-    assert payload["effective_recipients"] == (addresses or ["default@example.com"])
+    assert payload["effective_recipients"] == addresses
 
 
 def test_reminder_api_requires_an_explicit_recipient_list() -> None:
@@ -1098,7 +1189,7 @@ def test_reminder_api_requires_an_explicit_recipient_list() -> None:
     client.force_authenticate(system.member)
     response = client.put(
         f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/reminders/",
-        {"enabled": True, "email": "obsolete@example.com", "times": ["10:00"]},
+        {"enabled": True, "email": "obsolete@example.com", "times": ["10:00"], "language": "en"},
         format="json",
     )
     assert response.status_code == 400
@@ -1133,7 +1224,7 @@ def test_email_column_removal_preserves_recipients_and_pinned_deliveries() -> No
         preference_model.objects.filter(pk=original.pk).delete()
         for index, (email, recipients, _) in enumerate(expected):
             user = User.objects.create(username=f"legacy-{index}")
-            preference = preference_model.objects.create(
+            schedule = preference_model.objects.create(
                 user_id=user.pk,
                 region_id=system.region.pk,
                 email=email,
@@ -1142,7 +1233,7 @@ def test_email_column_removal_preserves_recipients_and_pinned_deliveries() -> No
                 times=["10:00"],
                 enabled=False,
             )
-            ids.append(preference.pk)
+            ids.append(schedule.pk)
         delivery = delivery_model.objects.create(
             preference_id=ids[0],
             scheduled_for=SLOT,
@@ -1153,12 +1244,12 @@ def test_email_column_removal_preserves_recipients_and_pinned_deliveries() -> No
         )
         MigrationExecutor(connection).migrate(current_targets)
         assert list(
-            ReminderPreference.objects.filter(pk__in=ids)
+            ReminderSchedule.objects.filter(pk__in=ids)
             .order_by("pk")
             .values_list("recipients", flat=True)
         ) == [recipients for _, _, recipients in expected]
         history = NotificationDelivery.objects.get(pk=delivery.pk)
-        assert (history.preference_id, history.recipient, history.status, history.attempts) == (
+        assert (history.schedule_id, history.recipient, history.status, history.attempts) == (
             ids[0],
             "pinned@example.com",
             "uncertain",

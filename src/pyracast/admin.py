@@ -317,9 +317,9 @@ class NotificationDeliveryAdmin(ReadOnlyAdmin):
         "sent_at",
     )
     list_filter = ("status",)
-    search_fields = ("recipient", "preference__region__name")
+    search_fields = ("recipient", "schedule__region__name")
     fields = (
-        "preference",
+        "schedule",
         "recipient",
         "scheduled_for",
         "status",

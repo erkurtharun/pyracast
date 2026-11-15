@@ -83,7 +83,7 @@ Use conventional Django apps for accounts, regions, provider connections, foreca
 | HistoricalReferenceImport | Authorized source settings, immutable export digest and actual acquisition time |
 | ReferenceCapacityNormalization | Authorized capacity-only copies, original source lineage and conversion availability |
 | PlantForecast, PlantEvent | Immutable electrical result and audited plant operations |
-| NotificationSettings, ReminderPreference, NotificationDelivery | Shared plant recipient limit, per-user email schedules, pinned saved forecasts and per-recipient delivery outcomes |
+| NotificationSettings, ReminderSchedule, NotificationDelivery | Shared plant email schedule, explicit recipients and language, pinned saved forecasts and per-recipient delivery outcomes |
 | AuditEvent | Actor, action, target and timestamp for privileged changes |
 
 Regions select explicit provider accounts rather than embedding credentials. One canonical record per account spans tenants and credential rotations; duplicate records must not create independent quota budgets.
@@ -131,7 +131,8 @@ security and language settings remain available to each user. Verified platform
 administrators reassign the role at **Workspaces**, choosing an existing active member.
 Transfers check the previous administrator, serialize with writes and retain an audit
 record. Automatic calibration authorized by a former administrator stops until the
-new administrator enables it; previously authorized reminders remain deliverable.
+new administrator enables it. Plant reminder settings belong to the workspace and
+remain available to the new administrator without depending on the former account.
 
 Invitations grant read-only membership after explicit acceptance by the authenticated
 owner of the verified invited email. New invited accounts do not create another
@@ -161,7 +162,7 @@ navigation; every administration request independently enforces authorization.
 Administrators land in this workspace by default and can explicitly enter the
 customer workspace or account security without being redirected back.
 
-1. A tenant member submits a plant, coordinates, IANA timezone and technical declaration together through `sites/`; the location and plant commit atomically with state `pending`. Customer submissions never contain provider credentials. Existing locations without a plant can complete setup through the scoped plant endpoint.
+1. A workspace administrator submits a plant, coordinates, IANA timezone and technical declaration together through `sites/`; the location and plant commit atomically with state `pending`. Customer submissions never contain provider credentials. Existing locations without a plant can complete setup through the scoped plant endpoint.
 2. A platform admin records the authorized provider account and site binding. The backend validates credentials and site settings within that account's quota.
 3. One shared approval operation checks permissions and the validated configuration revision, then atomically records `approved`, materializes the plant's immutable binding-backed configuration, records an audit event and creates the first pending collection job. A pending plant's technical declaration remains editable until approval; the approved declaration remains available afterwards while subsequent technical changes create configuration revisions.
 4. A dispatcher delivers that durable job to the worker. The worker retrieves data, calculates and publishes a result.
@@ -171,7 +172,7 @@ Keep approval (`pending`, `approved`, `rejected`, `suspended`), connection healt
 
 PostgreSQL permits one active plant per region and one active location per tenant, comparing latitude and longitude rounded to six decimal places. The application uses the same rounding for new coordinates. The same location in another tenant is independent. Deleted definitions and their immutable archives remain intact; restoring a definition rejects an active replacement conflict. Migrations add constraints without deleting or merging existing records and require conflicting legacy active definitions to be resolved explicitly before migration. Provider reapproval creates a new configuration revision from the current technical parameters when the binding changes, preserving prior configuration and source identities.
 
-Members can rename a region without changing its revision or approval. Location changes are reviewed requests pinned to the current revision; one pending request per region is allowed. Administrator acceptance applies a new pending revision and removes the old approval. A replacement binding must be configured, validated and approved before collection resumes. Rejection preserves the current location.
+Workspace administrators can rename a region without changing its revision or approval. Location changes are reviewed requests pinned to the current revision; one pending request per region is allowed. Platform administrator acceptance applies a new pending revision and removes the old approval. A replacement binding must be configured, validated and approved before collection resumes. Rejection preserves the current location.
 
 ## Reliability and security
 
@@ -404,7 +405,7 @@ in text fields.
 
 Provide authenticated region submission/list/detail, platform-admin connection validation and approve/reject/suspend actions, and dated forecast retrieval. Generate OpenAPI; use explicit units, bounded date ranges, pagination and stable error codes. Approval transitions are operations, not writable status fields.
 
-Members can move their region or plant definitions to a tenant-scoped recycle bin. Keep data for 30 elapsed days from the first deletion; repeated deletion never extends the deadline. Normal reads and writes hide deleted definitions, and region deletion also hides its children and stops collection, calibration and reminders. Restoring a region preserves approval and configuration, resumes future schedules without catch-up, and leaves independently deleted plants in the bin. A plant can only be restored under an active region. Already submitted email cannot be recalled.
+Workspace administrators can move their region or plant definitions to a tenant-scoped recycle bin. Keep data for 30 elapsed days from the first deletion; repeated deletion never extends the deadline. Normal reads and writes hide deleted definitions, and region deletion also hides its children and stops collection, calibration and reminders. Restoring a region preserves approval and configuration, resumes future schedules without catch-up, and leaves independently deleted plants in the bin. A plant can only be restored under an active region. Already submitted email cannot be recalled.
 
 The dispatcher permanently purges expired definitions and their owned records in bounded transactional batches. Restore is unavailable at the deadline even if a purge batch is pending. Retain shared provider accounts and account request-attempt counters without deleted region/job links, so deletion cannot reset quota. Preserve historical data during the recovery period; deleting a definition is separate from replacing a forecast vintage.
 
@@ -520,7 +521,23 @@ When a plant was first configured after the selected day began, the ordinary out
 
 ## Saved-forecast email reminders
 
-Workspace administrators can configure their daily local `HH:MM` times and a recipient list for an approved plant. An empty list uses the member's account email. Active members' saved lists share one plant-wide limit of five distinct, case-insensitively compared addresses by default, editable through the MFA-protected admin's **Email reminder settings**. Paused lists retain their places; clearing the addresses and times while paused releases them. Inactive users and departed members do not reserve places. The API returns aggregate counts without exposing another member's addresses. A lower limit preserves saved lists but pauses the plant's deliveries until the aggregate fits; edits that reduce an existing excess remain possible. Requests require a `recipients` list, and `effective_recipients` resolves an empty list to the account email. Store only the recipient list. Migration `notifications.0005` preserves legacy-only addresses before removing the redundant email column; its reverse recreates the single-recipient mirror, not obsolete shadow values that disagreed with a nonempty canonical list.
+Each approved plant has one shared reminder schedule with daily local `HH:MM`
+times, explicit recipients and an English or Turkish email language. Workspace
+administrators edit it; other members can view it and its delivery history. An empty
+recipient list on save captures the administrator's current email. Later account
+changes do not change saved recipients. The configuring user is nullable audit
+information, not the schedule owner or a condition for sending.
+
+The default limit is five distinct, case-insensitively compared addresses per plant,
+editable through the MFA-protected admin's **Email reminder settings**. Lowering it
+preserves the schedule but pauses deliveries until its list fits; reducing an excess
+or disabling the schedule remains possible. Migration `notifications.0008` retains
+the current administrator's legacy schedule when available, otherwise an existing
+active member's. Other schedules are retired without merging their times or
+recipients. Retired schedules preserve delivery history but cannot send or consume
+the current schedule's recipient allowance. Rollback after a configuring account
+is deleted or ownership creates a legacy-key conflict requires the pre-release
+database backup; the migration rejects a lossy reverse conversion.
 
 The current provider plan's daily request limit also caps daily reminder times; this is a product limit, not a quota reservation. Emails make **zero provider requests** and do not consume the request ledger. A reduced plan limit retains only the earliest configured times within the current limit.
 
@@ -537,8 +554,8 @@ Select the newest eligible saved output with complete valid coverage of tomorrow
 under the pinned binding. If none exists, use the newest usable partial tomorrow
 output with a null complete total and explicit coverage. If neither exists, send an
 unavailable notice. Today's coverage never disqualifies a valid tomorrow forecast.
-Freeze one selected source for the whole plant slot and render text and HTML in
-each reminder owner's saved language, defaulting to English. Pin that language
+Freeze one selected source for the schedule's slot and render text and HTML in
+its explicit email language. Pin that language
 when scheduling; freeze each language's content before sending. Retries preserve
 the frozen message, and all languages share the same source and CSV values. Source age,
 fallback kind, collection time, units and completeness remain visible. Age over
@@ -563,8 +580,8 @@ failures leave durable unsent work for later recovery.
 Use region IANA timezones, skip nonexistent DST times and use the first occurrence
 of repeated times. Catch up at most two hours; older slots are recorded without
 sending a backlog. Before transmission, open the mail backend outside database
-transactions, then atomically recheck the lease, deadline, membership, approval,
-preferences, recipient and binding and record transmission permission. A worker
+transactions, then atomically recheck the lease, deadline, approval,
+current schedule, recipient and binding and record transmission permission. A worker
 that lost its lease while opening the connection cannot send. Expired leases before
 this marker can safely retry; after the marker they become `uncertain`, with no
 automatic second send. Preserve the original token so a late known response can
