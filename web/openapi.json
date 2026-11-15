@@ -289,6 +289,40 @@
                 }
             }
         },
+        "/api/tenants/{tenant_id}/members/{user_id}/": {
+            "delete": {
+                "operationId": "tenants_members_destroy",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "user_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": ["tenants"],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No response body"
+                    }
+                }
+            }
+        },
         "/api/tenants/{tenant_id}/regions/": {
             "get": {
                 "operationId": "tenants_regions_list",

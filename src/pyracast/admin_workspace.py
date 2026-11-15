@@ -20,10 +20,17 @@ from django.utils.translation import gettext_lazy
 
 from pyracast.accounts.models import Tenant
 from pyracast.accounts.operations import require_admin
+from pyracast.admin_health import summarize_health
+from pyracast.admin_health_queries import (
+    collection_jobs_for_issue,
+    metering_jobs_for_issue,
+    notification_deliveries_for_issue,
+    regions_for_issue,
+)
 from pyracast.connections.models import SiteBinding
-from pyracast.forecasts.models import CollectionJob, DispatcherStatus, ForecastSnapshot
+from pyracast.forecasts.models import DispatcherStatus, ForecastSnapshot
 from pyracast.forecasts.monitoring import delivery_health
-from pyracast.notifications.models import NotificationDelivery, NotificationSettings
+from pyracast.notifications.models import NotificationSettings
 from pyracast.notifications.operations import recipient_limit
 from pyracast.plants.models import Plant
 from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest
@@ -151,8 +158,15 @@ def summarize_plant(region: WithAnnotations[Region, WorkspaceAnnotations]) -> Pl
     )
 
 
-def plant_list_context(query: str, status: str, page: str) -> dict[str, Any]:
+def plant_list_context(query: str, status: str, page: str, issue: str = "") -> dict[str, Any]:
     regions = workspace_regions()
+    health_filter = None
+    if issue:
+        now = timezone.now()
+        summary = summarize_health(delivery_health(now, timedelta(minutes=5)))
+        health_filter = next((check for check in summary.checks if check.key == issue), None)
+        if health_filter:
+            regions = regions.filter(pk__in=regions_for_issue(issue, now).values("pk"))
     if query:
         regions = regions.filter(
             Q(name__icontains=query)
@@ -170,11 +184,13 @@ def plant_list_context(query: str, status: str, page: str) -> dict[str, Any]:
         "q": query,
         "status": status,
         "status_choices": STATUS_CHOICES,
+        "health_filter": health_filter,
     }
 
 
 def overview_context() -> dict[str, Any]:
     regions = workspace_regions()
+    health = delivery_health(timezone.now(), timedelta(minutes=5))
     counts = {status: 0 for status, _ in STATUS_CHOICES}
     counts.update(
         {
@@ -192,7 +208,8 @@ def overview_context() -> dict[str, Any]:
             summarize_plant(region)
             for region in regions.filter(status="pending").order_by("created_at", "pk")[:6]
         ],
-        "health": delivery_health(timezone.now(), timedelta(minutes=5)),
+        "health": health,
+        "health_summary": summarize_health(health),
         "location_change_plants": [
             {
                 "id": change.pk,
@@ -245,10 +262,15 @@ def recent_activity_context(
     ]
 
 
-def recent_work_context(region_id: int | None = None, limit: int = 20) -> dict[str, Any]:
-    collection_rows = CollectionJob.objects.filter(
-        binding__region__deleted_at__isnull=True
-    ).annotate(
+def recent_work_context(
+    region_id: int | None = None,
+    limit: int = 20,
+    *,
+    issue: str = "",
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    now = now or timezone.now()
+    collection_rows = collection_jobs_for_issue(issue, now).annotate(
         display_plant_name=Coalesce(
             Subquery(
                 Plant.objects.filter(
@@ -260,9 +282,7 @@ def recent_work_context(region_id: int | None = None, limit: int = 20) -> dict[s
             "binding__region__name",
         )
     )
-    delivery_rows = NotificationDelivery.objects.filter(
-        schedule__region__deleted_at__isnull=True
-    ).annotate(
+    delivery_rows = notification_deliveries_for_issue(issue, now).annotate(
         display_plant_name=Coalesce(
             Subquery(
                 Plant.objects.filter(
@@ -274,9 +294,11 @@ def recent_work_context(region_id: int | None = None, limit: int = 20) -> dict[s
             "schedule__region__name",
         )
     )
+    metering_rows = metering_jobs_for_issue(issue, now)
     if region_id is not None:
         collection_rows = collection_rows.filter(binding__region_id=region_id)
         delivery_rows = delivery_rows.filter(schedule__region_id=region_id)
+        metering_rows = metering_rows.filter(plant__region_id=region_id)
     collections = [
         {
             "id": row.pk,
@@ -313,116 +335,71 @@ def recent_work_context(region_id: int | None = None, limit: int = 20) -> dict[s
             "error_label": row.last_error.replace("_", " ").capitalize(),
             "attempts": row.attempts,
             "review_url": reverse("admin:workspace_plant", args=(row.schedule.region_id,)),
+            "forecast_status": (
+                _("Forecast unavailable")
+                if (row.prepared_message or {}).get("kind") == "unavailable"
+                else _("Partial forecast")
+                if (row.prepared_message or {}).get("tomorrow_complete") is False
+                else ""
+            ),
         }
         for row in delivery_rows.select_related("schedule__region__tenant").order_by(
             "-scheduled_for", "-pk"
         )[:limit]
     ]
-    return {"collections": collections, "deliveries": deliveries}
+    metering = [
+        {
+            "id": row.pk,
+            "plant_name": row.plant.name,
+            "company": row.plant.region.tenant.name,
+            "source_label": (
+                _("Reported production")
+                if row.source_kind == "realtime_generation"
+                else _("Settlement production")
+            ),
+            "target_day": row.target_day,
+            "period_end_day": row.period_end_day,
+            "scheduled_for": row.scheduled_for,
+            "next_attempt_at": row.next_attempt_at,
+            "status": row.status,
+            "status_label": (
+                _("Waiting for provider publication")
+                if row.status == "awaiting_publication"
+                else row.status.replace("_", " ").capitalize()
+            ),
+            "error_label": (
+                ""
+                if row.status == "awaiting_publication" and row.last_error == "unpublished_data"
+                else row.last_error.replace("_", " ").capitalize()
+            ),
+            "review_url": reverse("admin:workspace_plant", args=(row.plant.region_id,))
+            + "#epias-title",
+        }
+        for row in metering_rows.select_related("plant__region__tenant").order_by(
+            "-scheduled_for", "-pk"
+        )[:limit]
+    ]
+    return {"collections": collections, "deliveries": deliveries, "metering": metering}
 
 
-def operations_context() -> dict[str, Any]:
-    health = delivery_health(timezone.now(), timedelta(minutes=5))
-    checks = (
-        (
-            "invalid_reminder_recipients",
-            _("Invalid email recipients"),
-            _("Ask the member to correct the saved recipient addresses."),
-        ),
-        (
-            "unvalidated_provider_credentials",
-            _("Provider keys awaiting validation"),
-            _("Validate the current private key before collections resume."),
-        ),
-        (
-            "interrupted_notifications",
-            _("Interrupted emails"),
-            _("Review the outcome; uncertain transmission must not be resent automatically."),
-        ),
-        (
-            "missed_notifications",
-            _("Missed email times"),
-            _("Check notification worker availability and the delivery deadline."),
-        ),
-        (
-            "overdue_metering",
-            _("Delayed production collection"),
-            _("Check the production dispatcher and worker."),
-        ),
-        (
-            "interrupted_metering",
-            _("Interrupted production collection"),
-            _("The durable dispatcher recovers expired leases."),
-        ),
-        (
-            "unavailable_forecasts",
-            _("Emails without saved forecasts"),
-            _("Review the plant collection history and approved connection."),
-        ),
-        (
-            "partial_forecasts",
-            _("Emails with partial forecasts"),
-            _("Review saved forecast coverage; missing intervals are not zero."),
-        ),
-        (
-            "overdue_collections",
-            _("Delayed collections"),
-            _("Check the collection dispatcher and worker."),
-        ),
-        (
-            "interrupted_collections",
-            _("Interrupted collections"),
-            _("The durable dispatcher recovers expired leases."),
-        ),
-        (
-            "failed_collections",
-            _("Failed collections"),
-            _("Review the plant connection and recorded error."),
-        ),
-        (
-            "regions_without_recent_forecasts",
-            _("Plants without recent forecasts"),
-            _("Review saved acquisition times and collection settings."),
-        ),
-        (
-            "blocked_provider_credentials",
-            _("Provider keys needing attention"),
-            _("Replace the private key, then validate the connection."),
-        ),
-        (
-            "provider_cooldowns",
-            _("Provider request delays"),
-            _("Wait for provider recovery; preserve the shared daily quota."),
-        ),
-        (
-            "failed_notifications",
-            _("Email needing attention"),
-            _("Uncertain transmission must be reconciled before any manual resend."),
-        ),
-        (
-            "overdue_notifications",
-            _("Delayed emails"),
-            _("Check the dedicated notification worker."),
-        ),
-        (
-            "mail_authentication_failures",
-            _("Email authentication failures"),
-            _("Check deployment mail credentials."),
-        ),
-        (
-            "failed_metering",
-            _("Failed production collection"),
-            _("Review the reported-production connection."),
-        ),
-    )
+def operations_context(issue: str = "") -> dict[str, Any]:
+    now = timezone.now()
+    health = delivery_health(now, timedelta(minutes=5))
+    summary = summarize_health(health)
+    selected = next((check for check in summary.checks if check.key == issue), None)
+    issue = selected.key if selected else ""
+    section = selected.action_url.rsplit("#", 1)[-1] if selected else ""
     phases = {row.phase: row for row in DispatcherStatus.objects.all()}
     unhealthy_phases = cast(list[str], health["unhealthy_dispatch_phases"])
     return {
         "health": health,
-        "health_checks": [
-            {"key": key, "label": label, "count": health[key], "help": help_text}
-            for key, label, help_text in checks
-        ],
+        "health_summary": summary,
+        "health_checks": summary.checks,
+        "health_filter": selected,
+        "show_collections": not issue or section == "collections-title",
+        "show_deliveries": not issue or section == "deliveries-title",
+        "show_metering": not issue or section == "metering-title",
+        "show_dispatch": not issue or section == "dispatch-title",
         "dispatch_phases": [
             {
                 "label": label,
@@ -434,7 +411,7 @@ def operations_context() -> dict[str, Any]:
             }
             for name, label in DispatcherStatus.Phase.choices
         ],
-        **recent_work_context(),
+        **recent_work_context(issue=issue, now=now),
     }
 
 

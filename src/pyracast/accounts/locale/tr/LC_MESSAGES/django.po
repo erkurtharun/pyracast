@@ -7,6 +7,9 @@ msgstr ""
 msgid "Workspace administrator required."
 msgstr "Çalışma alanı yöneticisi yetkisi gereklidir."
 
+msgid "The workspace administrator cannot be removed."
+msgstr "Çalışma alanı yöneticisi çıkarılamaz."
+
 msgid "The workspace administrator changed. Reload before saving."
 msgstr "Çalışma alanı yöneticisi değişti. Kaydetmeden önce sayfayı yenileyin."
 

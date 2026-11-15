@@ -1,10 +1,18 @@
+from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
+from django.db.models.functions import Lower
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from pyracast.accounts.models import Membership, Tenant, WorkspaceAdminChange, WorkspaceInvitation
+from pyracast.accounts.models import (
+    Membership,
+    Tenant,
+    WorkspaceAdminChange,
+    WorkspaceInvitation,
+    WorkspaceMemberRemoval,
+)
 
 
 def require_member(actor: User, tenant_id: int) -> None:
@@ -30,6 +38,26 @@ def require_workspace_admin(actor: User, tenant_id: int) -> None:
         ).exists()
     ):
         raise PermissionDenied(_("Workspace administrator required."))
+
+
+@transaction.atomic
+def remove_workspace_member(actor: User, tenant_id: int, user_id: int) -> None:
+    require_workspace_admin(actor, tenant_id)
+    membership = Membership.objects.filter(tenant_id=tenant_id, user_id=user_id).first()
+    if membership is None:
+        return
+    if membership.role == Membership.Role.ADMIN or user_id == actor.pk:
+        raise ValidationError(_("The workspace administrator cannot be removed."))
+    emails = set(EmailAddress.objects.filter(user_id=user_id).values_list("email", flat=True))
+    emails.add(membership.user.email)
+    now = timezone.now()
+    WorkspaceInvitation.objects.filter(
+        tenant_id=tenant_id, accepted_at__isnull=True, expires_at__gt=now
+    ).alias(normalized_email=Lower("email")).filter(
+        normalized_email__in=[email.lower() for email in emails]
+    ).update(expires_at=now)
+    WorkspaceMemberRemoval.objects.create(tenant_id=tenant_id, actor=actor, user_id=user_id)
+    membership.delete()
 
 
 @transaction.atomic

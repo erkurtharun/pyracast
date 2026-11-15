@@ -137,6 +137,32 @@ a:hover {
     flex: none;
     color: #f0c869;
 }
+.language-switcher {
+    display: inline-flex;
+    align-self: flex-start;
+    padding: 3px;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    border-radius: 12px;
+}
+.language-switcher button {
+    min-height: 44px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--white);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.language-switcher button:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+.language-switcher button[aria-pressed="true"] {
+    background: var(--white);
+    color: var(--forest);
+}
 .rail-nav ul {
     display: grid;
     gap: 4px;
@@ -450,6 +476,9 @@ a.stat:hover {
     background: currentColor;
 }
 .badge--pending,
+.badge--review,
+.badge--delay,
+.badge--awaiting_publication,
 .badge--needs-validation,
 .badge--retry,
 .badge--running,
@@ -479,12 +508,14 @@ a.stat:hover {
     transform: rotate(45deg);
 }
 .badge--rejected,
+.badge--attention,
 .badge--failed {
     border-color: #e2b4ad;
     background: var(--danger-soft);
     color: var(--danger);
 }
 .badge--rejected::before,
+.badge--attention::before,
 .badge--failed::before {
     border-radius: 1px;
     background: currentColor;
@@ -638,37 +669,38 @@ a.stat:hover {
     text-align: right;
 }
 
-.checks {
+.health-checks {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 12px;
+    margin-top: 16px;
+}
+.health-check {
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+}
+.health-check-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
     gap: 12px;
 }
-.check {
-    display: grid;
-    grid-template-columns: 44px minmax(0, 1fr);
-    gap: 12px;
-    align-items: start;
-    padding: 14px;
-    border: 1px solid var(--line);
-    border-radius: 12px;
+.health-check-count {
+    min-width: 28px;
+    padding: 2px 8px;
+    border-radius: 8px;
     background: var(--surface);
-}
-.check--raised {
-    border-color: var(--amber);
-    background: var(--amber-soft);
-}
-.check-count {
-    font-size: 24px;
-    font-weight: 700;
-    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
     text-align: center;
 }
-.check-label {
-    display: flex;
-    flex-wrap: wrap;
+.health-check--action .health-check-count {
+    color: var(--danger);
+    background: var(--danger-soft);
+}
+.health-check .text-link {
+    display: inline-flex;
     align-items: center;
-    gap: 6px 10px;
-    font-weight: 600;
+    min-height: 44px;
 }
 
 .notices {
@@ -922,6 +954,7 @@ a.stat:hover {
     .rail {
         z-index: 20;
         flex-direction: row;
+        flex-wrap: wrap;
         align-items: center;
         justify-content: space-between;
         gap: 8px;
@@ -937,8 +970,12 @@ a.stat:hover {
         padding: 0 4px;
         font-size: 16px;
     }
+    .language-switcher {
+        order: 3;
+    }
     .rail-menu {
         display: block;
+        margin-left: auto;
     }
     .rail-menu > summary {
         display: flex;
@@ -1063,6 +1100,10 @@ a.stat:hover {
 @media (forced-colors: active) {
     .rail-nav a[aria-current] {
         border-left-color: Highlight;
+    }
+    .language-switcher button[aria-pressed="true"] {
+        outline: 2px solid Highlight;
+        outline-offset: -2px;
     }
     .badge::before {
         forced-color-adjust: none;

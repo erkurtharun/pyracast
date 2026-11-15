@@ -146,6 +146,7 @@ class PlatformAdminSite(admin.AdminSite):
             request.GET.get("q", "").strip()[:200],
             request.GET.get("status", ""),
             request.GET.get("page", "1"),
+            request.GET.get("issue", "")[:80],
         )
         query = request.GET.copy()
         query.pop("page", None)
@@ -156,7 +157,12 @@ class PlatformAdminSite(admin.AdminSite):
         return cast(RegionAdmin, self._registry[Region]).setup(request, object_id)
 
     def operations(self, request: HttpRequest) -> HttpResponse:
-        return self.workspace_response(request, "operations", _("Operations"), operations_context())
+        return self.workspace_response(
+            request,
+            "operations",
+            _("Operations"),
+            operations_context(request.GET.get("issue", "")[:80]),
+        )
 
     def settings(self, request: HttpRequest) -> HttpResponse:
         if request.method not in {"GET", "POST"}:

@@ -30,6 +30,7 @@ from pyracast.api.workspaces import (
     WorkspaceInvitationsView,
     WorkspaceInvitationView,
     WorkspaceMembersView,
+    WorkspaceMemberView,
 )
 from pyracast.forecasts.views import CollectionScheduleView
 from pyracast.plants.site_api import SitesView, SiteView
@@ -74,6 +75,7 @@ urlpatterns = [
     path("api/", include("pyracast.notifications.urls")),
     path("api/tenants/", TenantsView.as_view()),
     path("api/tenants/<int:tenant_id>/members/", WorkspaceMembersView.as_view()),
+    path("api/tenants/<int:tenant_id>/members/<int:user_id>/", WorkspaceMemberView.as_view()),
     path("api/tenants/<int:tenant_id>/invitations/", WorkspaceInvitationsView.as_view()),
     path(
         "api/tenants/<int:tenant_id>/invitations/<int:invitation_id>/",

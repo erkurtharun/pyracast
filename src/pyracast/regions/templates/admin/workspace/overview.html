@@ -67,17 +67,7 @@
           <h2 id="health-title">{% translate "Service health" %}</h2>
           <a class="text-link" href="{% url 'admin:workspace_operations' %}">{% translate "Open operations" %}</a>
         </div>
-        {% if health.healthy %}
-          <p><span class="badge badge--healthy">{% translate "All checks clear" %}</span></p>
-        {% else %}
-          <p><span class="badge badge--needs-attention">{% translate "Needs attention" %}</span></p>
-        {% endif %}
-        <dl class="facts facts--compact">
-          <div><dt>{% translate "Failed collections" %}</dt><dd>{{ health.failed_collections }}</dd></div>
-          <div><dt>{% translate "Email needing attention" %}</dt><dd>{{ health.failed_notifications }}</dd></div>
-          <div><dt>{% translate "Plants without recent forecasts" %}</dt><dd>{{ health.regions_without_recent_forecasts }}</dd></div>
-          <div><dt>{% translate "Provider request delays" %}</dt><dd>{{ health.provider_cooldowns }}</dd></div>
-        </dl>
+        {% include "admin/workspace/health.html" %}
       </section>
 
       <section class="panel" aria-labelledby="activity-title">

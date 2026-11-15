@@ -7,27 +7,12 @@
   <section class="panel" aria-labelledby="checks-title">
     <div class="panel-head">
       <h2 id="checks-title">{% translate "Health checks" %}</h2>
-      {% if health.healthy %}
-        <span class="badge badge--healthy">{% translate "All checks clear" %}</span>
-      {% else %}
-        <span class="badge badge--needs-attention">{% translate "Needs attention" %}</span>
-      {% endif %}
     </div>
-    {% if not health.healthy %}<ul class="checks">
-      {% for check in health_checks %}
-        {% if check.count %}<li class="check check--raised">
-          <span class="check-count">{{ check.count }}</span>
-          <div>
-            <p class="check-label">{{ check.label }}
-              <span class="badge badge--needs-attention">{% translate "Check" %}</span></p>
-            <p class="row-meta">{{ check.help }}</p>
-          </div>
-        </li>{% endif %}
-      {% endfor %}
-    </ul>{% endif %}
-    {% if health.unhealthy_dispatch_phases %}<p class="row-meta"><a class="text-link" href="#dispatch-title">{% translate "Review dispatcher status" %}</a></p>{% endif %}
+    {% include "admin/workspace/health.html" %}
   </section>
 
+  {% if health_filter %}<div class="panel-head"><p>{{ health_filter.label }}</p><a class="text-link" href="{% url 'admin:workspace_operations' %}">{% translate "Show all operations" %}</a></div>{% endif %}
+  {% if show_dispatch %}
   <section class="panel" aria-labelledby="dispatch-title">
     <div class="panel-head"><h2 id="dispatch-title">{% translate "Dispatch" %}</h2></div>
       <div class="table-wrap" role="region" aria-labelledby="dispatch-title" tabindex="0">
@@ -51,7 +36,9 @@
         </table>
       </div>
   </section>
+  {% endif %}
 
+  {% if show_collections %}
   <section class="panel" aria-labelledby="collections-title">
     <div class="panel-head"><h2 id="collections-title">{% translate "Data collection" %}</h2><p class="row-meta">{% translate "Latest 20 jobs" %}</p></div>
     {% if collections %}
@@ -83,7 +70,32 @@
       <p class="empty">{% translate "No collection jobs yet." %}</p>
     {% endif %}
   </section>
+  {% endif %}
 
+  {% if show_metering %}
+  <section class="panel" aria-labelledby="metering-title">
+    <div class="panel-head"><h2 id="metering-title">{% translate "EPİAŞ production collection" %}</h2><p class="row-meta">{% translate "Latest 20 jobs" %}</p></div>
+    {% if metering %}
+      <div class="table-wrap" role="region" aria-labelledby="metering-title" tabindex="0">
+        <table class="table table--stack">
+          <thead><tr><th scope="col">{% translate "Plant" %}</th><th scope="col">{% translate "Period" %}</th><th scope="col">{% translate "Status" %}</th><th scope="col">{% translate "Scheduled for" %}</th><th scope="col">{% translate "Next attempt" %}</th><th scope="col">{% translate "Last error" %}</th></tr></thead>
+          <tbody>
+            {% for job in metering %}<tr>
+              <th scope="row" data-label="{% translate "Plant" %}"><span class="cell"><a class="row-title" href="{{ job.review_url }}">{{ job.plant_name }}</a><span class="row-meta">{{ job.company }}</span></span></th>
+              <td data-label="{% translate "Period" %}"><span class="cell"><span>{{ job.target_day|date:"j M Y" }}{% if job.period_end_day and job.period_end_day != job.target_day %} – {{ job.period_end_day|date:"j M Y" }}{% endif %}</span><span class="row-meta">{{ job.source_label }}</span></span></td>
+              <td data-label="{% translate "Status" %}"><span class="badge badge--{{ job.status|slugify }}">{% translate job.status_label %}</span></td>
+              <td data-label="{% translate "Scheduled for" %}"><time datetime="{{ job.scheduled_for|date:'c' }}">{{ job.scheduled_for|date:"j M Y, H:i T" }}</time></td>
+              <td data-label="{% translate "Next attempt" %}">{% if job.status == "pending" %}<time datetime="{{ job.next_attempt_at|date:'c' }}">{{ job.next_attempt_at|date:"j M Y, H:i T" }}</time>{% else %}<span class="muted">—</span>{% endif %}</td>
+              <td data-label="{% translate "Last error" %}">{% if job.error_label %}{% translate job.error_label %}{% else %}<span class="muted">{% translate "None" %}</span>{% endif %}</td>
+            </tr>{% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}<p class="empty">{% translate "No production collection jobs match this view." %}</p>{% endif %}
+  </section>
+  {% endif %}
+
+  {% if show_deliveries %}
   <section class="panel" aria-labelledby="deliveries-title">
     <div class="panel-head"><h2 id="deliveries-title">{% translate "Email delivery" %}</h2><p class="row-meta">{% translate "Latest 20 deliveries" %}</p></div>
     {% if deliveries %}
@@ -105,6 +117,7 @@
                 <td data-label="{% translate "Status" %}">
                   <span class="cell">
                     <span class="badge badge--{{ delivery.status|slugify }}">{% translate delivery.status_label %}</span>
+                    {% if delivery.forecast_status %}<span class="row-meta">{{ delivery.forecast_status }}</span>{% endif %}
                     {% if delivery.status == "uncertain" %}<span class="row-meta">{% translate "The mail server's acceptance is unknown. Confirm with the mail provider before a manual resend." %}</span>{% endif %}
                   </span>
                 </td>
@@ -121,4 +134,5 @@
       <p class="empty">{% translate "No email deliveries yet." %}</p>
     {% endif %}
   </section>
+  {% endif %}
 {% endblock %}

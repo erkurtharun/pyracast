@@ -70,6 +70,17 @@ class WorkspaceAdminChange(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
 
+class WorkspaceMemberRemoval(models.Model):
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT)
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="workspace_member_removals"
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="workspace_removals"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
 class AuthenticationCacheEntry(models.Model):
     cache_key = models.CharField(max_length=255, primary_key=True)
     value = models.JSONField()

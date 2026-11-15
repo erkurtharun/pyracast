@@ -18,7 +18,7 @@ from pyracast.accounts.invitations import (
     revoke_workspace_invitation,
 )
 from pyracast.accounts.models import Membership, WorkspaceInvitation
-from pyracast.accounts.operations import require_workspace_admin
+from pyracast.accounts.operations import remove_workspace_member, require_workspace_admin
 from pyracast.api.serializers import InputSerializer
 
 
@@ -74,6 +74,16 @@ class WorkspaceMembersView(APIView):
                 ]
             }
         )
+
+
+class WorkspaceMemberView(APIView):
+    @extend_schema(responses={204: None})
+    def delete(self, request: Request, tenant_id: int, user_id: int) -> Response:
+        try:
+            remove_workspace_member(cast(User, request.user), tenant_id, user_id)
+        except DjangoValidationError as error:
+            raise ValidationError(error.messages) from error
+        return Response(status=204)
 
 
 class WorkspaceInvitationsView(APIView):

@@ -4,7 +4,9 @@
 {% block heading %}{% translate "Plants" %}{% endblock %}
 {% block lead %}<p class="lead">{% translate "Find a plant, then open it to review, connect or approve." %}</p>{% endblock %}
 {% block content %}
+  {% if health_filter %}<div class="panel-head"><p>{{ health_filter.label }}</p><a class="text-link" href="{% url 'admin:workspace_plants' %}">{% translate "Show all plants" %}</a></div>{% endif %}
   <form method="get" class="panel filters" role="search" aria-label="{% translate "Filter plants" %}">
+    {% if health_filter %}<input type="hidden" name="issue" value="{{ health_filter.key }}">{% endif %}
     <div class="field">
       <label for="plants-q">{% translate "Plant, location or company" %}</label>
       <input type="search" id="plants-q" name="q" value="{{ q }}" maxlength="200" autocomplete="off">

@@ -134,6 +134,11 @@ record. Automatic calibration authorized by a former administrator stops until t
 new administrator enables it. Plant reminder settings belong to the workspace and
 remain available to the new administrator without depending on the former account.
 
+Workspace administrators can remove another read-only member from that workspace;
+they cannot remove themselves or its administrator. Removal preserves the user's
+account, other memberships and workspace resources. Under the tenant lock, it records
+an audit entry and expires pending invitations for all known addresses of that user.
+
 Invitations grant read-only membership after explicit acceptance by the authenticated
 owner of the verified invited email. New invited accounts do not create another
 workspace. Invitations expire after seven days, store only a random token's hash,
@@ -161,6 +166,12 @@ The session projection exposes current MFA-verified administration access for
 navigation; every administration request independently enforces authorization.
 Administrators land in this workspace by default and can explicitly enter the
 customer workspace or account security without being redirected back.
+
+Admin health separates current problems requiring action, provider delays and recent
+outcomes requiring review, with links filtered to the affected plants or jobs. Recent
+outcome counters use the last 24 hours of scheduled time; newer successes do not imply
+that earlier failures were resolved. CLI monitoring retains its degraded result for
+these recent outcomes even when the admin presents them as review items.
 
 1. A workspace administrator submits a plant, coordinates, IANA timezone and technical declaration together through `sites/`; the location and plant commit atomically with state `pending`. Customer submissions never contain provider credentials. Existing locations without a plant can complete setup through the scoped plant endpoint.
 2. A platform admin records the authorized provider account and site binding. The backend validates credentials and site settings within that account's quota.

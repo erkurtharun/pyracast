@@ -322,7 +322,8 @@ def test_admin_switcher_requires_csrf_and_uses_account_preference() -> None:
         text = page.content.decode()
         assert '<html lang="tr">' in text
         assert heading in text
-        assert "Dili uygula" in text
+        assert 'class="language-switcher"' in text
+        assert 'value="tr" lang="tr" aria-pressed="true"' in text
         assert "no-store" in page.headers["Cache-Control"]
     assert Client().get("/admin/language/").status_code == 302
 

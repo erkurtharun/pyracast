@@ -173,7 +173,12 @@ function Workspace({
 }) {
     const t = useTranslations("Dashboard");
     const searchParams = useSearchParams();
-    const tenants = useCollection<Tenant>("/api/tenants/", 0, 30_000);
+    const [accessVersion, setAccessVersion] = useState(0);
+    const tenants = useCollection<Tenant>(
+        "/api/tenants/",
+        accessVersion,
+        30_000,
+    );
     const [selected, setSelected] = useState<number>(),
         [view, setView] = useState<"regions" | "profile" | "trash" | "members">(
             searchParams.get("account") === "security" ? "profile" : "regions",
@@ -412,6 +417,10 @@ function Workspace({
                                 key={tenant.id}
                                 tenant={tenant}
                                 token={session.csrf_token}
+                                userId={session.user!.id}
+                                onAccessChange={() =>
+                                    setAccessVersion((value) => value + 1)
+                                }
                             />
                         ) : tenant && canManage && view === "trash" ? (
                             <RecycleBin

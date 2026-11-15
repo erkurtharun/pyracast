@@ -21,6 +21,13 @@
         <span>{% translate "Pyracast operations" %}</span>
       </a>
 
+      <form class="language-switcher" method="post" action="{% url 'admin:workspace_language' %}" aria-label="{% translate "Language" %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+        <button type="submit" name="language" value="en" lang="en" aria-pressed="{% if request.LANGUAGE_CODE == "en" %}true{% else %}false{% endif %}">English</button>
+        <button type="submit" name="language" value="tr" lang="tr" aria-pressed="{% if request.LANGUAGE_CODE == "tr" %}true{% else %}false{% endif %}">Türkçe</button>
+      </form>
+
       <nav class="rail-nav rail-desktop" aria-label="{% translate "Workspace" %}">
         <ul>
           <li><a href="{% url 'admin:index' %}"{% if workspace_section == "overview" %} aria-current="page"{% endif %}>
@@ -46,16 +53,7 @@
           <li><a href="/?account=security">{% translate "Account security" %}</a></li>
           <li><a href="/?workspace=customer">{% translate "Customer workspace" %}</a></li>
         </ul>
-        <form method="post" action="{% url 'admin:workspace_language' %}">
-          {% csrf_token %}
-          <input type="hidden" name="next" value="{{ request.get_full_path }}">
-          <label for="desktop-language">{% translate "Language" %}</label>
-          <select id="desktop-language" name="language">
-            <option value="en" lang="en"{% if request.LANGUAGE_CODE == "en" %} selected{% endif %}>English</option>
-            <option value="tr" lang="tr"{% if request.LANGUAGE_CODE == "tr" %} selected{% endif %}>Türkçe</option>
-          </select>
-          <button type="submit" class="rail-button">{% translate "Apply language" %}</button>
-        </form>
+
         <form method="post" action="{% url 'admin:logout' %}">
           {% csrf_token %}
           <button type="submit" class="rail-button">{% translate "Sign out" %}</button>
@@ -80,16 +78,7 @@
               <li><a href="/?account=security">{% translate "Account security" %}</a></li>
               <li><a href="/?workspace=customer">{% translate "Customer workspace" %}</a></li>
             </ul>
-            <form method="post" action="{% url 'admin:workspace_language' %}">
-              {% csrf_token %}
-              <input type="hidden" name="next" value="{{ request.get_full_path }}">
-              <label for="mobile-language">{% translate "Language" %}</label>
-              <select id="mobile-language" name="language">
-                <option value="en" lang="en"{% if request.LANGUAGE_CODE == "en" %} selected{% endif %}>English</option>
-                <option value="tr" lang="tr"{% if request.LANGUAGE_CODE == "tr" %} selected{% endif %}>Türkçe</option>
-              </select>
-              <button type="submit" class="rail-button">{% translate "Apply language" %}</button>
-            </form>
+
             <form method="post" action="{% url 'admin:logout' %}">
               {% csrf_token %}
               <button type="submit" class="rail-button">{% translate "Sign out" %}</button>

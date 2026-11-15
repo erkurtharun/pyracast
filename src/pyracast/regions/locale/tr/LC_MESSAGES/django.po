@@ -116,9 +116,6 @@ msgstr ""
 msgid "Any status"
 msgstr "Tüm durumlar"
 
-msgid "Apply language"
-msgstr "Dili uygula"
-
 msgid "Approve"
 msgstr "Onayla"
 
@@ -1555,3 +1552,103 @@ msgid ""
 msgstr ""
 "Değişiklikten sonra yeni yönetici otomatik kalibrasyonu yeniden "
 "etkinleştirmelidir."
+
+msgid "Action needed"
+msgstr "İşlem gerekiyor"
+
+msgid "Ask the workspace administrator to correct the saved recipient addresses."
+msgstr "Kayıtlı alıcı adreslerini workspace yöneticisinin düzeltmesi gerekiyor."
+
+msgid "Check the dispatcher and worker; the dispatcher recovers expired leases."
+msgstr "Zamanlayıcı ve işleyici servislerini kontrol edin; kesintiye uğrayan işler otomatik kurtarılır."
+
+#, python-format
+msgid "Check the dispatcher process and its last successful run: %(phases)s."
+msgstr "Zamanlayıcı servisini ve son başarılı çalışmasını kontrol edin: %(phases)s."
+
+msgid "Dispatcher phases needing attention"
+msgstr "Zamanlayıcı sorunları"
+
+msgid "EPİAŞ production collection"
+msgstr "EPİAŞ veri toplama"
+
+msgid "Email outcomes needing review"
+msgstr "İncelenecek e-posta sonuçları"
+
+msgid "Forecast unavailable"
+msgstr "Tahmin mevcut değil"
+
+msgid "Next attempt"
+msgstr "Sonraki deneme"
+
+msgid "No production collection jobs match this view."
+msgstr "Bu görünümde üretim verisi toplama işi yok."
+
+msgid "Notifications prepared with partial forecasts"
+msgstr "Kısmi tahmin içeren bildirimler"
+
+msgid "Notifications prepared without saved forecasts"
+msgstr "Tahmin verisi olmayan bildirimler"
+
+msgid "Partial forecast"
+msgstr "Kısmi tahmin"
+
+msgid "Period"
+msgstr "Dönem"
+
+msgid "Production collection"
+msgstr "Üretim verisi toplama"
+
+msgid "Recent outcomes need review"
+msgstr "Son kayıtları inceleyin"
+
+msgid "Requests resume automatically after the provider delay. Preserve the shared quota."
+msgstr "Sağlayıcının bekleme süresi dolunca istekler otomatik devam eder. Ortak kotayı koruyun."
+
+msgid "Review affected plants"
+msgstr "İlgili santralleri aç"
+
+msgid "Review collections"
+msgstr "Veri toplama kayıtlarını aç"
+
+msgid "Review dispatcher"
+msgstr "Zamanlayıcı durumunu aç"
+
+msgid "Review emails"
+msgstr "E-posta kayıtlarını aç"
+
+msgid "Review failed, unavailable or unknown outcomes. Reconcile unknown acceptance before resending."
+msgstr "Başarısız veya sonucu belirsiz gönderimleri inceleyin. Yeniden göndermeden önce kabul durumunu doğrulayın."
+
+msgid "Review production collection"
+msgstr "EPİAŞ kayıtlarını aç"
+
+msgid "Review provider connections"
+msgstr "Sağlayıcı bağlantılarını aç"
+
+msgid "Review the provider key and validate the connection after correcting it."
+msgstr "Sağlayıcı anahtarını kontrol edin; düzelttikten sonra bağlantıyı doğrulayın."
+
+msgid "Review the recorded error and the plant connection before changing settings."
+msgstr "Ayarları değiştirmeden önce kayıtlı hatayı ve santral bağlantısını inceleyin."
+
+msgid "Review the recorded error, target period and reported-production connection."
+msgstr "Kayıtlı hatayı, ilgili dönemi ve EPİAŞ bağlantısını inceleyin."
+
+msgid "Review the recorded failure and ask the deployment operator to check mail credentials."
+msgstr "Kayıtlı hatayı inceleyin; sunucudaki e-posta erişim bilgilerini sistem sorumlusu kontrol etmelidir."
+
+msgid "Scheduled in the last 24 hours"
+msgstr "Son 24 saat için planlanan"
+
+msgid "Settlement production"
+msgstr "Uzlaştırma üretimi"
+
+msgid "Show all operations"
+msgstr "Tüm işlemleri göster"
+
+msgid "Show all plants"
+msgstr "Tüm santralleri göster"
+
+msgid "Waiting for provider publication"
+msgstr "Sağlayıcının yayımlaması bekleniyor"

@@ -80,6 +80,24 @@ test("an MFA administrator reviews plants and operations on desktop and mobile u
     ).toBe(true);
     await checkPage(page, testInfo, "admin-overview-desktop");
 
+    await page
+        .getByRole("link", {
+            name: "Review emails · Email outcomes needing review",
+            exact: true,
+        })
+        .click();
+    await expect(page).toHaveURL(
+        "/admin/operations/?issue=failed_notifications#deliveries-title",
+    );
+    await expect(
+        page.getByText("operations-recipient@example.test"),
+    ).toBeVisible();
+    await expect(page.locator("#collections-title")).toHaveCount(0);
+    await checkPage(page, testInfo, "admin-filtered-health-desktop");
+    await page.setViewportSize({ width: 320, height: 812 });
+    await checkPage(page, testInfo, "admin-filtered-health-mobile");
+    await page.setViewportSize({ width: 1440, height: 1000 });
+
     await page.getByRole("link", { name: "Plants", exact: true }).click();
     await expect(
         page.getByRole("heading", { name: "Plants", exact: true }),
@@ -241,12 +259,7 @@ test("an MFA administrator reviews plants and operations on desktop and mobile u
 
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto("/admin/");
-    await page
-        .getByRole("combobox", { name: "Language", exact: true })
-        .selectOption("tr");
-    await page
-        .getByRole("button", { name: "Apply language", exact: true })
-        .click();
+    await page.getByRole("button", { name: "Türkçe", exact: true }).click();
     try {
         await expect(page.locator("html")).toHaveAttribute("lang", "tr");
         await expect(
@@ -258,10 +271,7 @@ test("an MFA administrator reviews plants and operations on desktop and mobile u
     } finally {
         await page.setViewportSize({ width: 1440, height: 1000 });
         await page
-            .getByRole("combobox", { name: "Dil", exact: true })
-            .selectOption("en");
-        await page
-            .getByRole("button", { name: "Dili uygula", exact: true })
+            .getByRole("button", { name: "English", exact: true })
             .click();
         await expect(page.locator("html")).toHaveAttribute("lang", "en");
     }

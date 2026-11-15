@@ -2077,3 +2077,23 @@ pre,
 .member-list form .button {
     padding: 0.4rem 0.6rem;
 }
+.member-list .member-remove {
+    flex: 0 0 9rem;
+    margin-right: 0;
+}
+.member-removal-question {
+    overflow-wrap: anywhere;
+    font-weight: 650;
+}
+.workspace-member .field-hint {
+    display: block;
+}
+@media (max-width: 480px) {
+    .member-list .workspace-member {
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+    .member-list .member-remove {
+        flex-basis: auto;
+    }
+}

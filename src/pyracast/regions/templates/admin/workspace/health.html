@@ -1,0 +1,14 @@
+{% load i18n %}
+<p><span class="badge badge--{{ health_summary.tone }}">{{ health_summary.title }}</span></p>
+{% if health_summary.checks %}
+  <ul class="health-checks">
+    {% for check in health_summary.checks %}
+      <li class="health-check health-check--{{ check.category }}">
+        <div class="health-check-heading"><strong>{{ check.label }}</strong><span class="health-check-count">{{ check.count }}</span></div>
+        {% if check.category == "review" %}<p class="row-meta">{% translate "Scheduled in the last 24 hours" %}</p>{% endif %}
+        <p class="row-meta">{{ check.help }}</p>
+        <a class="text-link" href="{{ check.action_url }}">{{ check.action_label }}<span class="visually-hidden"> · {{ check.label }}</span></a>
+      </li>
+    {% endfor %}
+  </ul>
+{% endif %}
