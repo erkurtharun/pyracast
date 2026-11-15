@@ -80,6 +80,8 @@ On the configured Windows development machine, double-click `start.cmd`.
 It checks dependencies, syncs locked packages, migrates the database, starts the
 API, frontend, collection worker, mailer and dispatcher, then opens
 `http://127.0.0.1:3000`. Use `start.cmd --no-browser` to suppress the browser.
+Overlapping launcher commands wait up to ten minutes for the current operation;
+the first dependency installation can take a few minutes.
 
 `status.cmd` inspects processes; `stop.cmd` requests graceful shutdown.
 PostgreSQL/RabbitMQ remain running. The launcher reuses recorded workspace processes

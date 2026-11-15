@@ -1,3 +1,4 @@
+import errno
 import os
 import shutil
 import socket
@@ -5,6 +6,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any
@@ -318,6 +320,204 @@ def test_command_lock_excludes_another_os_process(tmp_path: Path) -> None:
     assert result.stdout.strip() == "locked"
     with launcher.command_lock(tmp_path):
         pass
+
+
+def read_child_line(process: subprocess.Popen[str]) -> str:
+    assert process.stdout is not None
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        line = executor.submit(process.stdout.readline)
+        try:
+            return line.result(timeout=5).strip()
+        except TimeoutError:
+            with suppress(psutil.NoSuchProcess):
+                launcher.terminate_tree(psutil.Process(process.pid))
+            process.wait(timeout=5)
+            raise AssertionError("Lock probe did not produce the expected output.") from None
+
+
+def test_command_lock_waits_for_another_process_to_release_it(tmp_path: Path) -> None:
+    repo = Path(__file__).resolve().parents[1]
+    acquired = tmp_path / "acquired"
+    code = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from scripts.dev import command_lock\n"
+        "with command_lock(Path(sys.argv[1]), timeout=5):\n"
+        "    Path(sys.argv[2]).touch()\n"
+        "    print('acquired', flush=True)\n"
+    )
+    process: subprocess.Popen[str] | None = None
+    try:
+        with launcher.command_lock(tmp_path):
+            process = subprocess.Popen(  # noqa: S603 -- isolated competing lock probe.
+                [sys.executable, "-c", code, str(tmp_path), str(acquired)],
+                cwd=repo,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            assert read_child_line(process) == (
+                "Another launcher command is running; waiting for it to finish..."
+            )
+            assert not acquired.exists()
+            assert process.poll() is None
+
+        output, _ = process.communicate(timeout=5)
+        assert process.returncode == 0
+        assert output.splitlines() == [
+            "Previous launcher command finished; continuing.",
+            "acquired",
+        ]
+        assert acquired.is_file()
+    finally:
+        if process is not None:
+            if process.poll() is None:
+                with suppress(psutil.NoSuchProcess):
+                    launcher.terminate_tree(psutil.Process(process.pid))
+            process.communicate(timeout=5)
+
+
+def test_command_lock_timeout_never_enters_the_protected_section(tmp_path: Path) -> None:
+    repo = Path(__file__).resolve().parents[1]
+    acquired = tmp_path / "acquired"
+    code = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from scripts.dev import command_lock\n"
+        "try:\n"
+        "    with command_lock(Path(sys.argv[1]), timeout=0.05):\n"
+        "        Path(sys.argv[2]).touch()\n"
+        "except RuntimeError as error:\n"
+        "    print(str(error), flush=True)\n"
+        "    raise SystemExit(7)\n"
+    )
+    with launcher.command_lock(tmp_path):
+        result = subprocess.run(  # noqa: S603 -- isolated lock timeout probe.
+            [sys.executable, "-c", code, str(tmp_path), str(acquired)],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+
+    assert result.returncode == 7
+    assert result.stdout.count("waiting for it to finish") == 1
+    assert "timed out" in result.stdout.lower()
+    assert not acquired.exists()
+    with launcher.command_lock(tmp_path):
+        pass
+
+
+def test_command_lock_is_released_after_process_crash_without_deleting_file(tmp_path: Path) -> None:
+    repo = Path(__file__).resolve().parents[1]
+    code = (
+        "import os, sys\n"
+        "from pathlib import Path\n"
+        "from scripts.dev import command_lock\n"
+        "with command_lock(Path(sys.argv[1])):\n"
+        "    print('acquired', flush=True)\n"
+        "    sys.stdin.readline()\n"
+        "    os._exit(9)\n"
+    )
+    process = subprocess.Popen(  # noqa: S603 -- isolated abrupt lock-owner exit.
+        [sys.executable, "-c", code, str(tmp_path)],
+        cwd=repo,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    try:
+        assert read_child_line(process) == "acquired"
+        with (
+            pytest.raises(RuntimeError, match="launcher command"),
+            launcher.command_lock(tmp_path),
+        ):
+            pytest.fail("A competing command entered the protected section.")
+        process.communicate("exit\n", timeout=5)
+        assert process.returncode == 9
+        assert (tmp_path / "launcher.lock").is_file()
+
+        with launcher.command_lock(tmp_path):
+            assert (tmp_path / "launcher.lock").is_file()
+    finally:
+        if process.poll() is None:
+            with suppress(psutil.NoSuchProcess):
+                launcher.terminate_tree(psutil.Process(process.pid))
+        process.communicate(timeout=5)
+
+
+def test_repeated_command_locks_do_not_grow_the_lock_file(tmp_path: Path) -> None:
+    for _ in range(20):
+        with launcher.command_lock(tmp_path):
+            pass
+
+    assert (tmp_path / "launcher.lock").stat().st_size <= 1
+
+
+@pytest.mark.parametrize("error_number", [errno.EBADF, errno.EIO])
+def test_command_lock_preserves_unrelated_os_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    error_number: int,
+) -> None:
+    failure = OSError(error_number, "Lock storage is unavailable.")
+    monkeypatch.setattr(launcher, "_lock_file", MagicMock(side_effect=failure))
+    sleep = MagicMock()
+    monkeypatch.setattr(time, "sleep", sleep)
+
+    with (
+        pytest.raises(OSError, match="Lock storage is unavailable") as caught,
+        launcher.command_lock(tmp_path, timeout=10),
+    ):
+        pytest.fail("An unavailable lock entered the protected section.")
+
+    assert caught.value is failure
+    sleep.assert_not_called()
+    assert capsys.readouterr() == ("", "")
+
+
+def test_main_waits_for_launcher_lock_before_reading_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[str] = []
+    state: dict[str, Any] = {"root": str(tmp_path), "processes": {}}
+
+    @contextmanager
+    def locked(directory: Path, *, timeout: float = 0) -> Iterator[None]:
+        assert directory == tmp_path / ".dev"
+        assert timeout == 600
+        events.append("lock")
+        yield
+        events.append("unlock")
+
+    def read(root: Path) -> dict[str, Any]:
+        assert root == tmp_path
+        events.append("read")
+        return state
+
+    def start(root: Path, current: dict[str, Any]) -> None:
+        assert root == tmp_path
+        assert current is state
+        events.append("start")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DJANGO_SETTINGS_MODULE", "tests.settings")
+    monkeypatch.setenv("PYRACAST_DEBUG", "0")
+    monkeypatch.setenv("PYRACAST_CSRF_ORIGINS", "")
+    monkeypatch.setattr(sys, "argv", ["scripts.dev", "start"])
+    monkeypatch.setattr(launcher, "ROOT", tmp_path)
+    monkeypatch.setattr(launcher, "load_environment", lambda: None)
+    monkeypatch.setattr(launcher, "command_lock", locked)
+    monkeypatch.setattr(launcher, "read_state", read)
+    monkeypatch.setattr(launcher, "start", start)
+
+    assert launcher.main() == 0
+    assert events == ["lock", "read", "start", "unlock"]
 
 
 def test_state_from_another_workspace_is_rejected(tmp_path: Path) -> None:

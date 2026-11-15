@@ -1,4 +1,5 @@
 import argparse
+import errno
 import hashlib
 import json
 import os
@@ -44,17 +45,34 @@ else:
 
 
 @contextmanager
-def command_lock(directory: Path) -> Iterator[None]:
+def command_lock(directory: Path, *, timeout: float = 0) -> Iterator[None]:
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / "launcher.lock").open("a+b") as stream:
         stream.seek(0)
-        stream.write(b"0")
-        stream.flush()
-        stream.seek(0)
-        try:
-            _lock_file(stream)
-        except OSError:
-            raise RuntimeError("Another launcher command is running.") from None
+        deadline = time.monotonic() + timeout
+        waiting = False
+        while True:
+            try:
+                _lock_file(stream)
+                break
+            except OSError as error:
+                if error.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError(
+                        "Timed out waiting for another launcher command. "
+                        "Let it finish, then retry; setup progress is in .dev/setup.log."
+                    ) from None
+                if not waiting:
+                    print(
+                        "Another launcher command is running; waiting for it to finish...",
+                        flush=True,
+                    )
+                    waiting = True
+                time.sleep(min(0.25, remaining))
+        if waiting:
+            print("Previous launcher command finished; continuing.", flush=True)
         try:
             yield
         finally:
@@ -432,7 +450,7 @@ def main() -> int:
         dict.fromkeys([*origins, "http://127.0.0.1:3000", "http://localhost:3000"])
     )
     try:
-        with command_lock(ROOT / ".dev"):
+        with command_lock(ROOT / ".dev", timeout=600):
             state = read_state(ROOT)
             if args.action == "start":
                 start(ROOT, state)
