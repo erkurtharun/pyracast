@@ -51,7 +51,7 @@ test("shows administrator-managed connection status and preserves the production
                 csrf_token: "token",
             };
         else if (path === "/api/tenants/")
-            data = paged([{ id: 1, name: "Tenant" }]);
+            data = paged([{ id: 1, name: "Tenant", role: "viewer" }]);
         else if (path.endsWith("/sites/")) data = paged([region]);
         else if (path.endsWith("/plants/")) data = paged([plant]);
         else if (path.endsWith("/forecast/"))

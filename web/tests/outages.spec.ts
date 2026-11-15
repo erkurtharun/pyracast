@@ -49,7 +49,7 @@ async function workspace(
                 csrf_token: "token",
             };
         else if (path === "/api/tenants/")
-            data = paged([{ id: 1, name: "Tenant" }]);
+            data = paged([{ id: 1, name: "Tenant", role: "admin" }]);
         else if (path.endsWith("/sites/")) data = paged([region]);
         else if (path.endsWith("/plants/"))
             data = paged([

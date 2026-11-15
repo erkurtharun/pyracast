@@ -992,6 +992,7 @@ test("mock contract: follows tenant pagination and keeps missing intervals visib
                     {
                         id: second ? 2 : 1,
                         name: second ? "Second workspace" : "Sunfield Energy",
+                        role: "viewer",
                     },
                 ],
             },
@@ -1911,7 +1912,7 @@ test("recycle bin ignores a prior workspace response and restores only in the se
         route.fulfill({
             json: paged([
                 { id: 1, name: "Sunfield Energy", role: "admin" },
-                { id: 2, name: "Second workspace" },
+                { id: 2, name: "Second workspace", role: "admin" },
             ]),
         }),
     );
