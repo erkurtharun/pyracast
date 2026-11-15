@@ -362,6 +362,41 @@ class PlantForecast(models.Model):
         )
 
 
+class ForecastIssuance(models.Model):
+    plant = models.ForeignKey(Plant, on_delete=models.PROTECT)
+    configuration = models.ForeignKey(PlantConfiguration, on_delete=models.PROTECT)
+    snapshot = models.ForeignKey("forecasts.ForecastSnapshot", on_delete=models.PROTECT)
+    calibration = models.ForeignKey(CalibrationRun, null=True, on_delete=models.PROTECT)
+    target_date = models.DateField()
+    published_at = models.DateTimeField()
+    cutoff_at = models.DateTimeField()
+    model_version = models.CharField(max_length=100)
+    factor = models.FloatField()
+    payloads = models.JSONField()
+    outage_scenarios = models.JSONField()
+    native_intervals = models.JSONField()
+
+    class Meta:
+        indexes = (models.Index(fields=("plant", "target_date"), name="issuance_plant_day"),)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("plant", "snapshot", "target_date"), name="forecast_issuance_unique"
+            ),
+            models.CheckConstraint(
+                condition=Q(factor__gt=0, factor__lt=float("inf")),
+                name="forecast_issuance_factor_finite",
+            ),
+            models.CheckConstraint(
+                condition=Q(published_at__lt=models.F("cutoff_at")),
+                name="forecast_issuance_before_daylight",
+            ),
+            models.CheckConstraint(
+                condition=Q(calibration__isnull=False) | Q(factor=1),
+                name="issuance_baseline_factor_identity",
+            ),
+        )
+
+
 class PlantEvent(models.Model):
     plant = models.ForeignKey(Plant, on_delete=models.PROTECT)
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT)

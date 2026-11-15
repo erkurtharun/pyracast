@@ -3,23 +3,25 @@ from typing import Any, cast
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
-from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext
 
 from pyracast.forecasts.actuals import ACTUAL_COMPOSITION_POLICY, select_archived_actual_source
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
-from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
+from pyracast.plants.forecast_archive import (
+    ARCHIVE_SELECTION_POLICY,
+    issuance_power_intervals,
+    select_forecast_issuance,
+)
 from pyracast.plants.forecasting import (
-    calibration_at,
     calibration_for_day,
     power_intervals,
     power_limit,
 )
 from pyracast.plants.measurement_policy import LEGACY_MEASUREMENT_POLICY, MEASUREMENT_POLICY
 from pyracast.plants.measurements import Measurement, select_measurements
-from pyracast.plants.models import Plant, PlantConfiguration
+from pyracast.plants.models import ForecastIssuance, Plant, PlantConfiguration
 from pyracast.plants.numerics import (
     CalibrationSample,
     PowerInterval,
@@ -28,13 +30,8 @@ from pyracast.plants.numerics import (
 )
 from pyracast.solar import DAYLIGHT_POLICY, daylight_window
 
-SELECTION_POLICY = "latest-published-before-local-cutoff-v1"
 
-
-def _selection_cutoff(day: date, zone: str, issuance_cutoff: time | None) -> datetime:
-    if issuance_cutoff is None:
-        start, _ = local_day_bounds(day, zone)
-        return start - timedelta(microseconds=1)
+def _selection_cutoff(day: date, zone: str, issuance_cutoff: time) -> datetime:
     local = datetime.combine(day - timedelta(days=1), issuance_cutoff, ZoneInfo(zone))
     cutoff = local.astimezone(UTC)
     if (
@@ -43,28 +40,6 @@ def _selection_cutoff(day: date, zone: str, issuance_cutoff: time | None) -> dat
     ):
         raise ValidationError(gettext("The local issuance cutoff is ambiguous or does not exist."))
     return cutoff
-
-
-def _snapshot(
-    configuration: PlantConfiguration, day: date, cutoff: datetime
-) -> ForecastSnapshot | None:
-    prior, start = local_day_bounds(day - timedelta(days=1), configuration.binding.timezone)
-    return (
-        ForecastSnapshot.objects.filter(
-            job__binding_id=configuration.binding_id,
-            job__status="succeeded",
-            job__target_date=day,
-            source_kind="forecast",
-            collected_at__gte=prior,
-            collected_at__lt=start,
-            collected_at__lte=cutoff,
-            available_at__lt=start,
-            available_at__lte=cutoff,
-        )
-        .filter(Q(issued_at__isnull=True) | Q(issued_at__lte=cutoff))
-        .order_by("-collected_at", "-pk")
-        .first()
-    )
 
 
 def _samples(
@@ -108,13 +83,18 @@ def _day(
     required_windows: RequiredWindows | None,
     comparison: str,
     cutoff: datetime,
-    issuance_cutoff: time | None,
+    selection_cutoff: datetime | None,
+    issuance: ForecastIssuance | None,
+    configuration_comparable: bool,
 ) -> tuple[dict[str, Any], tuple[CalibrationSample, ...], tuple[CalibrationSample, ...]]:
     result: dict[str, Any] = {
         "date": day,
         "status": "missing",
         "reason": None,
         "snapshot_id": None,
+        "issuance_id": issuance.pk if issuance is not None else None,
+        "configuration_id": configuration.pk,
+        "model_version": issuance.model_version if issuance is not None else None,
         "collected_at": None,
         "available_at": None,
         "calibration_id": None,
@@ -129,15 +109,13 @@ def _day(
         "source_kind": None,
         "historical_configuration_assumed": False,
         "provisional_production": False,
-        "selection_cutoff": None,
+        "selection_cutoff": selection_cutoff,
     }
     zone = configuration.binding.timezone
     start, end = local_day_bounds(day, zone)
     historical_model = comparison == "historical_model"
-    selection_cutoff = None if historical_model else _selection_cutoff(day, zone, issuance_cutoff)
-    result["selection_cutoff"] = selection_cutoff
-    if selection_cutoff is not None and configuration.created_at > selection_cutoff:
-        result["reason"] = "configuration_not_available"
+    if not configuration_comparable:
+        result["reason"] = "configuration_not_comparable"
         return result, (), ()
     actual_source = (
         select_archived_actual_source(configuration.binding, day, cutoff)
@@ -147,7 +125,9 @@ def _day(
     snapshot = (
         (actual_source.snapshot if actual_source is not None else None)
         if historical_model
-        else _snapshot(configuration, day, selection_cutoff or cutoff)
+        else issuance.snapshot
+        if issuance is not None
+        else None
     )
     if snapshot is None:
         result["reason"] = (
@@ -157,13 +137,21 @@ def _day(
     calibration = (
         calibration_for_day(configuration, day, cutoff)
         if historical_model
-        else calibration_at(configuration, selection_cutoff or cutoff)
+        else issuance.calibration
+        if issuance is not None
+        else None
     )
-    factor = cast(float, calibration.factor) if calibration is not None else 1.0
+    factor = (
+        issuance.factor
+        if issuance is not None
+        else cast(float, calibration.factor)
+        if calibration is not None
+        else 1.0
+    )
     result.update(
         snapshot_id=snapshot.pk,
         collected_at=snapshot.collected_at,
-        available_at=snapshot.available_at,
+        available_at=issuance.published_at if issuance is not None else snapshot.available_at,
         calibration_id=calibration.pk if calibration else None,
         factor=factor,
         source_kind=snapshot.source_kind,
@@ -193,16 +181,22 @@ def _day(
         )
     ]
     try:
-        intervals = power_intervals(
-            snapshot,
-            configuration,
-            source_intervals=actual_source.composition.intervals
-            if actual_source is not None and actual_source.composition is not None
-            else None,
-        )
-        cap = power_limit(configuration)
-        selected = _samples(readings, intervals, factor, cap)
-        baseline = _samples(readings, intervals, 1.0, cap)
+        if issuance is not None:
+            selected = _samples(readings, issuance_power_intervals(issuance), 1.0, None)
+            baseline = _samples(
+                readings, issuance_power_intervals(issuance, baseline=True), 1.0, None
+            )
+        else:
+            intervals = power_intervals(
+                snapshot,
+                configuration,
+                source_intervals=actual_source.composition.intervals
+                if actual_source is not None and actual_source.composition is not None
+                else None,
+            )
+            cap = power_limit(configuration)
+            selected = _samples(readings, intervals, factor, cap)
+            baseline = _samples(readings, intervals, 1.0, cap)
         evaluation = evaluate_samples(
             selected, timezone=zone, limit_mw=None, required_windows=required_windows
         )
@@ -301,6 +295,7 @@ def forecast_performance(
         if configuration
         else []
     )
+    measurement_cache = {configuration.pk: observations} if configuration else {}
     days: list[dict[str, Any]] = []
     selected: tuple[CalibrationSample, ...] = ()
     baseline: tuple[CalibrationSample, ...] = ()
@@ -315,14 +310,55 @@ def forecast_performance(
         }
     if configuration is not None:
         for offset in range((end_date - start_date).days + 1):
+            target = start_date + timedelta(days=offset)
+            selection_cutoff = (
+                _selection_cutoff(target, zone, issuance_cutoff)
+                if issuance_cutoff is not None
+                else None
+            )
+            issuance = (
+                select_forecast_issuance(
+                    plant,
+                    target,
+                    as_of=selection_cutoff,
+                    native_only=True,
+                )
+                if comparison == "archived_forecast"
+                else None
+            )
+            selected_configuration = issuance.configuration if issuance else configuration
+            comparable = (
+                selected_configuration.measurement_basis == configuration.measurement_basis
+                and selected_configuration.binding.timezone == zone
+            )
+            if comparable and selected_configuration.pk not in measurement_cache:
+                measurement_cache[selected_configuration.pk] = select_measurements(
+                    selected_configuration,
+                    start,
+                    end,
+                    now,
+                    policy=measurement_policy,
+                    incident_revision_ids=[],
+                )[0]
+            if (
+                required_windows is not None
+                and comparable
+                and selected_configuration.pk != configuration.pk
+            ):
+                location = selected_configuration.binding
+                required_windows[target] = daylight_window(
+                    target, zone, location.latitude, location.longitude
+                ).windows
             day, chosen, reference = _day(
-                configuration,
-                start_date + timedelta(days=offset),
-                observations,
+                selected_configuration,
+                target,
+                measurement_cache.get(selected_configuration.pk, []),
                 required_windows,
                 comparison,
                 now,
-                issuance_cutoff,
+                selection_cutoff or (issuance.cutoff_at if issuance else None),
+                issuance,
+                comparable,
             )
             days.append(day)
             selected += chosen
@@ -342,13 +378,13 @@ def forecast_performance(
         "evaluated_at": now,
         "evaluation_kind": "retrospective_model_comparison"
         if comparison == "historical_model"
-        else "historical_input_replay",
+        else "archived_published_forecast",
         "comparison": comparison,
         "selection_policy": ACTUAL_COMPOSITION_POLICY
         if any(day.get("reference_provenance") for day in days)
         else HISTORY_SELECTION_POLICY
         if comparison == "historical_model"
-        else SELECTION_POLICY,
+        else ARCHIVE_SELECTION_POLICY,
         "measurement_policy": measurement_policy,
         "configuration_created_at": configuration.created_at if configuration else None,
         "measurement_basis": configuration.measurement_basis if configuration else None,
@@ -359,6 +395,7 @@ def forecast_performance(
             day["reason"]
             in {
                 "configuration_not_available",
+                "configuration_not_comparable",
                 "forecast_not_available",
                 "estimated_actuals_not_available",
             }

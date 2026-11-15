@@ -151,7 +151,9 @@ def test_automatic_keeps_intraday_forecast_until_actual_values_arrive(
     assert read("estimated_actuals")["result"] is None
     if scope == "plant":
         assert after["result"]["energy_mwh"] == pytest.approx(468)
-        assert read("archived_forecast")["result"] is None
+        archived = read("archived_forecast")
+        assert archived["result"]["provenance"]["snapshot_id"] == first.pk
+        assert archived["result"]["energy_mwh"] == pytest.approx(312)
     assert list(ForecastResult.objects.values()) == result_rows
     assert not PlantForecast.objects.exists()
     assert RequestAttempt.objects.count() == requests

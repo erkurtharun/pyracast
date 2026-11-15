@@ -78,7 +78,7 @@ def test_default_day_ahead_evaluation_uses_latest_prior_day_forecast(
     publish(latest)
     measurements(system, configuration, 52)
     result = forecast_performance(plant, start_date=DAY, end_date=DAY)
-    assert result["selection_policy"] == "latest-published-before-local-cutoff-v1"
+    assert result["selection_policy"] == "latest-published-pre-daylight-issuance-v1"
     assert result["days"][0]["snapshot_id"] == latest.pk
     assert result["metrics"]["daily_mae_mwh"] == pytest.approx(0)
 
@@ -92,13 +92,17 @@ def test_explicit_local_cutoff_selects_source_and_calibration_from_same_informat
     assert configuration is not None
     cutoff = datetime.combine(DAY - timedelta(days=1), time(16), ZoneInfo(system.binding.timezone))
     early = snapshot_for(system, DAY, power_kw=0.4, collected_at=cutoff - timedelta(hours=1))
+    selected_factor(system, configuration, early.collected_at)
+    early_run = CalibrationRun.objects.latest("pk")
     publish(early)
     late = snapshot_for(system, DAY, power_kw=0.8, collected_at=cutoff)
-    publish(late)
     setattr(late, late_field, cutoff + timedelta(seconds=1))
-    late.save()
-    selected_factor(system, configuration, cutoff)
-    early_run = CalibrationRun.objects.latest("pk")
+    publish(
+        late,
+        published_at=cutoff + timedelta(seconds=1)
+        if late_field in {"collected_at", "available_at"}
+        else cutoff,
+    )
     selected_factor(system, configuration, cutoff + timedelta(seconds=1))
     CalibrationRun.objects.exclude(pk=early_run.pk).update(factor=0.6)
     measurements(system, configuration, 41.6)
@@ -136,7 +140,7 @@ def test_cutoff_does_not_use_configuration_created_later_or_estimated_actuals(
     unavailable = forecast_performance(
         plant, start_date=DAY, end_date=DAY, issuance_cutoff=time(16)
     )
-    assert unavailable["days"][0]["reason"] == "configuration_not_available"
+    assert unavailable["days"][0]["reason"] == "forecast_not_available"
     assert unavailable["missing_days"] == 1
 
 

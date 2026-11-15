@@ -4,7 +4,7 @@ import time
 import uuid
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
-from typing import cast
+from typing import TYPE_CHECKING, cast
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
@@ -41,9 +41,13 @@ from pyracast.forecasts.projections import prepare_daily_payloads
 from pyracast.forecasts.sources import snapshot_data
 from pyracast.forecasts.timing import effective_forecast_schedule, latest_forecast_slot
 from pyracast.irradiance import local_day_bounds
+from pyracast.plants.models import Plant
 from pyracast.provider_retry import next_retry_at, rate_limit_retry_after
 from pyracast.regions.models import Region
 from pyracast.weather import OpenMeteoProvider, WeatherError, serialize_weather
+
+if TYPE_CHECKING:
+    from pyracast.plants.forecast_archive import PreparedForecastIssuance
 
 logger = logging.getLogger(__name__)
 
@@ -309,8 +313,16 @@ def publish(
     now: datetime,
     *,
     daily_payloads: dict[str, dict[str, object]] | None = None,
+    prepared_issuances: tuple[PreparedForecastIssuance, ...] | None = None,
 ) -> bool:
+    from pyracast.plants.forecast_archive import (
+        prepare_forecast_issuances,
+        save_forecast_issuances,
+    )
+
     started = time.monotonic()
+    if prepared_issuances is None:
+        prepared_issuances = prepare_forecast_issuances(snapshot)
     with transaction.atomic():
         Region.objects.select_for_update().get(pk=lease.binding.region_id)
         job = CollectionJob.objects.select_for_update().get(pk=lease.job_id)
@@ -320,6 +332,11 @@ def publish(
         expected_kind = "estimated_actuals" if job.endpoint == "estimated_actuals" else "forecast"
         if snapshot.source_kind != expected_kind:
             raise ValidationError("Snapshot source must match the collection endpoint.")
+        plant = (
+            Plant.objects.select_for_update()
+            .filter(region_id=lease.binding.region_id, deleted_at__isnull=True)
+            .first()
+        )
         ProviderAccount.objects.select_for_update().get(pk=lease.binding.provider_account_id)
         now += timedelta(seconds=time.monotonic() - started)
         if (
@@ -341,6 +358,7 @@ def publish(
                         "daily_payloads": daily_payloads or {},
                     },
                 )
+                save_forecast_issuances(prepared_issuances, snapshot, now, plant=plant)
             ForecastSnapshot.objects.filter(pk=snapshot.pk, available_at__isnull=True).update(
                 available_at=now
             )
@@ -372,7 +390,6 @@ def publish(
         job.lease_expires_at = None
         job.save(update_fields=("status", "last_error", "lease_token", "lease_expires_at"))
         if job.status == "succeeded" and job.endpoint == "estimated_actuals":
-            from pyracast.plants.models import Plant
             from pyracast.plants.preparation import prepare_calibration
 
             for plant_id in Plant.objects.filter(
@@ -465,6 +482,8 @@ def collect(
     *,
     weather_provider: OpenMeteoProvider | None = None,
 ) -> bool:
+    from pyracast.plants.forecast_archive import prepare_forecast_issuances
+
     started = time.monotonic()
     lease = claim(job_id, now)
     if lease is None:
@@ -595,6 +614,7 @@ def collect(
     data = snapshot_data(snapshot)
     try:
         payload = calculator(lease.binding, lease.target_date, data)
+        prepared_issuances = prepare_forecast_issuances(snapshot)
     except Exception as exc:
         logger.warning(
             "Forecast calculation failed job_id=%s error_type=%s", lease.job_id, type(exc).__name__
@@ -610,6 +630,7 @@ def collect(
         payload,
         now + timedelta(seconds=time.monotonic() - started),
         daily_payloads=daily_payloads,
+        prepared_issuances=prepared_issuances,
     )
 
 

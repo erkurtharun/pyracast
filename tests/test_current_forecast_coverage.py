@@ -257,6 +257,6 @@ def test_explicit_as_of_stays_on_day_ahead_snapshot_without_vintage_composition(
     payload = cast(dict[str, Any], replay["result"])
     assert payload["energy_mwh"] == pytest.approx(312)
     assert payload["provenance"]["snapshot_id"] == first.pk
-    assert payload["provenance"]["selection_policy"] == "first-available-day-ahead-v1"
+    assert payload["provenance"]["selection_policy"] == "latest-published-pre-daylight-issuance-v1"
     assert "mixed_forecast_vintages" not in payload["quality_flags"]
-    assert PlantForecast.objects.get().payload == payload
+    assert not PlantForecast.objects.exists()

@@ -157,10 +157,10 @@ def test_settlement_revision_updates_assessment_while_preserving_forecast_and_ca
     config = plant.current_configuration
     assert config is not None
     source = snapshot_for(system, DAY)
-    publish(source)
     original_intervals = source.normalized_intervals
     start, _ = local_day_bounds(DAY, config.binding.timezone)
     selected_factor(system, config, start - timedelta(days=1))
+    publish(source)
     calibration = CalibrationRun.objects.get()
     linked = EpiasConnection.objects.create(
         plant=plant,

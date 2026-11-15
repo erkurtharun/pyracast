@@ -23,6 +23,7 @@ from pyracast.plants.operations import activate_calibration
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.plants.training import run_calibration
 from tests.test_domain import NOW, System
+from tests.test_historical_production_identity import record_identity
 from tests.test_plant_operations import make_plant, publish_snapshot, snapshot_for
 from tests.test_plant_training import actual_snapshot_for
 from tests.test_settlement_calibration import settlement
@@ -68,6 +69,7 @@ def test_provisional_fit_freezes_sources_then_settlement_prepares_a_new_candidat
         name="Plant",
         connected_by=system.member,
     )
+    record_identity(monkeypatch, connection, NOW)
     days = [FIRST_DAY + timedelta(days=offset) for offset in range(8)]
     snapshots = []
     for day in days:
@@ -108,7 +110,7 @@ def test_provisional_fit_freezes_sources_then_settlement_prepares_a_new_candidat
     moment = NOW + timedelta(minutes=1)
     monkeypatch.setattr(timezone, "now", lambda: moment)
     activate_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk, run.pk)
-    publish_snapshot(snapshot_for(system, date(2026, 11, 10), collected_at=NOW))
+    publish_snapshot(snapshot_for(system, date(2026, 11, 10), collected_at=moment))
     outlook = plant_forecast(
         system.member,
         system.tenant.pk,
@@ -163,6 +165,7 @@ def test_last_publication_prepares_once_when_seven_daylight_days_become_matched(
         name="Plant",
         connected_by=system.member,
     )
+    record_identity(monkeypatch, connection, NOW)
     for offset in range(6):
         day = FIRST_DAY + timedelta(days=offset)
         actual_snapshot_for(system, day)
@@ -287,6 +290,7 @@ def fitted_production(
         name="Plant",
         connected_by=system.member,
     )
+    record_identity(monkeypatch, connection, NOW)
     for offset in range(8):
         day = FIRST_DAY + timedelta(days=offset)
         actual_snapshot_for(system, day)
@@ -314,7 +318,7 @@ def test_changed_production_identity_uses_baseline_and_preserves_archived_foreca
         system.member, system.tenant.pk, system.region.pk, plant.pk, run.pk
     )
     target = date(2026, 11, 10)
-    publish_snapshot(snapshot_for(system, target, collected_at=NOW))
+    publish_snapshot(snapshot_for(system, target, collected_at=moment))
     args = (system.member, system.tenant.pk, system.region.pk, plant.pk)
     historical_cutoff = moment
     archived = plant_outlook(

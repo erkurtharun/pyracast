@@ -230,6 +230,9 @@ class PerformanceDay(serializers.Serializer[dict[str, Any]]):
     status = serializers.ChoiceField(choices=("matched", "missing"))
     reason = serializers.CharField(allow_null=True)
     snapshot_id = serializers.IntegerField(allow_null=True)
+    issuance_id = serializers.IntegerField(allow_null=True, required=False)
+    configuration_id = serializers.IntegerField(allow_null=True, required=False)
+    model_version = serializers.CharField(allow_null=True, required=False)
     source_snapshot_ids = serializers.ListField(child=serializers.IntegerField(), required=False)
     reference_provenance = serializers.JSONField(required=False)
     collected_at = serializers.DateTimeField(allow_null=True)
@@ -436,6 +439,7 @@ class PlantForecastOutput(serializers.Serializer[dict[str, Any]]):
     as_of = serializers.DateTimeField()
     configuration_id = serializers.IntegerField(allow_null=True)
     calibration_id = serializers.IntegerField(allow_null=True)
+    issuance_id = serializers.IntegerField(allow_null=True, required=False)
     freshness = serializers.CharField()
     source_kind = serializers.ChoiceField(choices=("forecast", "estimated_actuals", "mixed"))
     unavailable_reason = serializers.ChoiceField(

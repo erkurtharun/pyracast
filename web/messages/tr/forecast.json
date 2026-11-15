@@ -144,17 +144,18 @@
     "ForecastPerformance": {
         "historical_weather_estimates_are_not_available": "Geçmiş hava durumu tahminleri mevcut değil",
         "configuration_was_not_available_before_this_day": "Bu günün öncesinde yapılandırma mevcut değildi",
-        "dayahead_forecast_was_not_available": "Gün öncesi tahmin mevcut değildi",
+        "archived_forecast_unavailable": "Bu gün için arşivlenmiş tahmin yok",
+        "configuration_not_comparable": "Ölçüm esası veya saat dilimi değişmiş",
         "production_or_reference_coverage_is_incomplete_or": "Üretim veya referans veri kapsamı eksik ya da geçersiz",
         "saved_reference_data_is_invalid": "Kaydedilmiş referans verisi geçersiz",
         "production_comparison": "Üretim karşılaştırması",
         "how_comparison_is_measured": "Karşılaştırma nasıl hesaplanır?",
         "historical_model_uses_saved_weather_estimates_and": "Geçmiş model, kaydedilmiş hava durumu tahminlerini ve mevcut yapılandırmayı kullanır. Kalibrasyon, eğitim döneminden itibaren uygulanır. Bu geriye dönük karşılaştırma geçici üretim verilerini içerebilir. Tahmin doğruluğunu ölçmez.",
-        "archived_performance_replays_the_forecast_configuration_and": "Arşiv performansı, önceki günün kesim saatinde mevcut olan tahmini, yapılandırmayı ve kalibrasyonu yeniden değerlendirir. Kesim saati boşsa önceki yerel günün sonu kullanılır. Bu, sonucun o tarihte yayımlandığını göstermez.",
+        "archived_forecast_description": "Gün ışığı başlamadan kaydedilen son tahmini, o zamanki kalibrasyonuyla karşılaştırır. Daha erken bir tahmin için önceki günün kesim saatini seçin.",
         "comparison": "Karşılaştırma",
         "historical_model": "Geçmiş model",
         "archived_forecast_performance": "Arşivlenmiş tahmin performansı",
-        "previousday_cutoff": "Önceki günün kesim saati",
+        "previousday_cutoff": "Önceki günün kesim saati (isteğe bağlı)",
         "start_date": "Başlangıç tarihi",
         "end_date": "Bitiş tarihi",
         "load_performance": "Performansı getir",
@@ -174,7 +175,7 @@
         "no_complete_production_and_reference_pairs_are": "Bu aralıkta tam üretim ve referans eşleşmeleri yok. Başka bir aralık seçin veya kaydedilmiş üretim verilerini kontrol edin.",
         "daily_forecast_comparison": "Günlük tahmin karşılaştırması",
         "historical_daylight_model": "Geçmiş gün ışığı modeli",
-        "daylight_replay": "Gün ışığı yeniden değerlendirmesi",
+        "daylight_replay": "Arşivlenmiş tahmin",
         "date": "Tarih",
         "status": "Durum",
         "measured_reported_mwh": "Ölçülen / bildirilen (MWh)",
@@ -410,10 +411,9 @@
         "automatic": "Otomatik",
         "forecast_outlook": "Güncel tahmin görünümü",
         "archived_forecast": "Arşivlenmiş tahmin",
-        "archived_dayahead_forecast": "Arşivlenmiş gün öncesi tahmini",
         "estimated_actuals": "Gerçekleşen üretim tahminleri",
         "elapsed_intervals_model_estimates_not_meter_readings": "Bugünün ve geçmiş günlerin tamamlanan aralıkları · model tahminidir, sayaç ölçümü değildir.",
-        "saved_priorday_forecast_under_its_original_configuration": "Özgün yapılandırmasıyla kaydedilmiş önceki gün tahmini."
+        "archived_forecast_description": "Gün ışığı başlamadan, o zamanki kalibrasyonuyla kaydedilen son tahmin."
     },
     "CsvDownload": {
         "download_csv": "CSV indir"

@@ -4,14 +4,20 @@ from typing import Any
 import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+from django.db import connection, transaction
 from django.test import Client
+from django.test.utils import CaptureQueriesContext
 
 from pyracast.accounts.models import Membership, Tenant
+from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
+from pyracast.plants.forecast_archive import prepare_forecast_issuances, save_forecast_issuances
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
+    ForecastIssuance,
+    Plant,
     PlantConfiguration,
     PlantForecast,
     ProductionObservation,
@@ -25,11 +31,17 @@ pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 8)
 
 
-def publish(source: ForecastSnapshot) -> None:
-    source.available_at = source.collected_at
+def publish(source: ForecastSnapshot, *, published_at: datetime | None = None) -> None:
+    published_at = source.collected_at if published_at is None else published_at
+    source.available_at = published_at
     source.save()
     source.job.status = "succeeded"
     source.job.save()
+    with transaction.atomic():
+        plant = Plant.objects.select_for_update().get(region_id=source.binding.region_id)
+        save_forecast_issuances(
+            prepare_forecast_issuances(source), source, published_at, plant=plant
+        )
 
 
 def measurements(system: System, configuration: PlantConfiguration, energy: float) -> None:
@@ -70,7 +82,7 @@ def selected_factor(system: System, configuration: PlantConfiguration, at: datet
     CalibrationActivation.objects.filter(pk=activation.pk).update(created_at=at)
 
 
-def test_performance_replays_native_clipping_and_keeps_read_only(
+def test_performance_reads_frozen_native_clipping_and_keeps_read_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
@@ -83,7 +95,7 @@ def test_performance_replays_native_clipping_and_keeps_read_only(
     measurements(system, configuration, 90)
     selected_factor(system, configuration, NOW)
     result = forecast_performance(plant, start_date=DAY, end_date=DAY)
-    assert result["evaluation_kind"] == "historical_input_replay"
+    assert result["evaluation_kind"] == "archived_published_forecast"
     assert result["matched_days"] == result["requested_days"] == 1
     assert result["metrics"]["daily_mae_mwh"] == pytest.approx(0)
     assert result["days"][0]["predicted_energy_mwh"] == pytest.approx(2160)
@@ -92,6 +104,7 @@ def test_performance_replays_native_clipping_and_keeps_read_only(
     assert result["days"][0]["calibration_id"] is None
     assert result["days"][0]["snapshot_id"] == source.pk
     assert not PlantForecast.objects.exists()
+    assert ForecastIssuance.objects.count() == 1
 
 
 def test_daylight_performance_needs_no_night_readings_and_retains_boundary_energy(
@@ -159,11 +172,11 @@ def test_performance_uses_historical_activation_and_ignores_later_source_revisio
     configuration.export_limit_mw = None
     configuration.save()
     source = snapshot_for(system, DAY, power_kw=0.4)
-    publish(source)
     start, _ = local_day_bounds(DAY, system.binding.timezone)
     selected_factor(system, configuration, start - timedelta(days=1))
+    publish(source)
     measurements(system, configuration, 41.6)
-    later = snapshot_for(system, DAY, power_kw=0.9, collected_at=start + timedelta(hours=1))
+    later = snapshot_for(system, DAY, power_kw=0.9, collected_at=start + timedelta(hours=10))
     publish(later)
     actual = snapshot_for(system, DAY, power_kw=0.1, source_kind="estimated_actuals")
     publish(actual)
@@ -180,18 +193,19 @@ def test_unavailable_sources_are_not_counted_as_issued_forecasts(
 ) -> None:
     system, plant = make_plant(monkeypatch)
     source = snapshot_for(system, DAY)
-    publish(source)
     start, _ = local_day_bounds(DAY, system.binding.timezone)
-    if kind == "unpublished":
-        source.available_at = None
-    elif kind == "late_publication":
-        source.available_at = start
+    windows = daylight_window(
+        DAY, system.binding.timezone, system.binding.latitude, system.binding.longitude
+    ).windows
+    cutoff = windows[0][0] if windows else start
+    if kind == "late_publication":
+        publish(source, published_at=cutoff)
     elif kind == "late_issue":
-        source.issued_at = start
-    else:
+        source.issued_at = cutoff
+        publish(source)
+    elif kind == "failed":
         source.job.status = "failed"
         source.job.save()
-    source.save()
     result = forecast_performance(plant, start_date=DAY, end_date=DAY)
     assert result["matched_days"] == 0
     assert result["metrics"] is None
@@ -206,7 +220,6 @@ def test_performance_excludes_incomplete_days_and_retrospective_configuration(
     assert plant.current_configuration_id is not None
     configuration = PlantConfiguration.objects.get(pk=plant.current_configuration_id)
     source = snapshot_for(system, DAY)
-    publish(source)
     measurements(system, configuration, 52)
     reason = "incomplete_or_invalid_day"
     if kind == "meter":
@@ -219,11 +232,16 @@ def test_performance_excludes_incomplete_days_and_retrospective_configuration(
     elif kind == "invalid":
         source.normalized_intervals[0]["power_kw"] = -1
         source.save()
-        reason = "invalid_forecast_data"
+        reason = "forecast_not_available"
     else:
         configuration.created_at = NOW
         configuration.save()
-        reason = "configuration_not_available"
+        reason = "forecast_not_available"
+    if kind == "invalid":
+        with pytest.raises(ValueError, match="Invalid source power"):
+            publish(source)
+    else:
+        publish(source)
     result = forecast_performance(plant, start_date=DAY, end_date=DAY)
     assert result["matched_days"] == 0
     assert result["days"][0]["reason"] == reason
@@ -308,3 +326,127 @@ def test_valid_zero_days_remain_in_performance(
     assert result["metrics"]["daily_bias_mwh"] == pytest.approx(bias)
     if power == 0:
         assert result["metrics"]["source_positive_mae_mw"] is None
+
+
+def test_frozen_power_does_not_reapply_calibration_or_current_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    configuration = plant.current_configuration
+    assert configuration is not None
+    source = snapshot_for(system, DAY, power_kw=120 / 130)
+    selected_factor(system, configuration, source.collected_at)
+    selected = CalibrationRun.objects.get()
+    publish(source)
+    measurements(system, configuration, 96)
+    selected_factor(system, configuration, source.collected_at + timedelta(hours=1))
+    CalibrationRun.objects.exclude(pk=selected.pk).update(factor=0.5)
+    source.normalized_intervals[0]["power_kw"] = 999
+    source.save()
+
+    def changed_model(*args: object, **kwargs: object) -> None:
+        raise AssertionError("Archived performance must not calculate current model output.")
+
+    monkeypatch.setattr("pyracast.plants.performance.power_intervals", changed_model)
+    with CaptureQueriesContext(connection) as queries:
+        result = forecast_performance(plant, start_date=DAY, end_date=DAY)
+    unused_columns = (
+        "raw_payload",
+        "weather_payload",
+        "normalized_intervals",
+        "payloads",
+        "outage_scenarios",
+    )
+    assert not any(
+        f'"{column}"' in query["sql"]
+        for query in queries.captured_queries
+        for column in unused_columns
+    )
+    assert result["matched_days"] == 1
+    assert result["days"][0]["predicted_energy_mwh"] == pytest.approx(2304)
+    assert result["days"][0]["baseline_energy_mwh"] == pytest.approx(2400)
+    assert result["days"][0]["calibration_id"] == selected.pk
+    assert result["days"][0]["factor"] == 0.8
+    assert result["metrics"]["daily_mae_mwh"] == pytest.approx(0)
+
+
+def test_legacy_raw_snapshot_does_not_invent_a_published_electrical_issuance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    configuration = plant.current_configuration
+    assert configuration is not None
+    source = snapshot_for(system, DAY)
+    source.available_at = source.collected_at
+    source.save()
+    source.job.status = "succeeded"
+    source.job.save()
+    measurements(system, configuration, 52)
+    result = forecast_performance(plant, start_date=DAY, end_date=DAY)
+    assert result["days"][0]["reason"] == "forecast_not_available"
+    assert result["missing_days"] == 1
+    assert result["matched_days"] == 0
+    assert result["metrics"] is None
+    assert not ForecastIssuance.objects.exists()
+
+
+def test_pre_sunrise_update_wins_over_later_published_older_acquisition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    configuration = plant.current_configuration
+    assert configuration is not None
+    start, _ = local_day_bounds(DAY, system.binding.timezone)
+    old = snapshot_for(system, DAY, power_kw=0.2, collected_at=start - timedelta(hours=7))
+    early = snapshot_for(system, DAY, power_kw=0.4, collected_at=start + timedelta(hours=3))
+    publish(early)
+    publish(old, published_at=start + timedelta(hours=4))
+    publish(snapshot_for(system, DAY, power_kw=0.9, collected_at=start + timedelta(hours=10)))
+    measurements(system, configuration, 52)
+    result = forecast_performance(plant, start_date=DAY, end_date=DAY)
+    assert result["days"][0]["snapshot_id"] == early.pk
+    assert result["metrics"]["daily_mae_mwh"] == pytest.approx(0)
+
+
+@pytest.mark.parametrize("change", ["capacity", "basis", "timezone"])
+def test_archived_configuration_owns_measurements_without_mixing_meter_basis(
+    monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    configuration = plant.current_configuration
+    assert configuration is not None
+    source = snapshot_for(system, DAY)
+    publish(source)
+    issuance = ForecastIssuance.objects.get()
+    measurements(system, configuration, 52)
+    binding = system.binding
+    if change == "timezone":
+        binding = SiteBinding.objects.get(pk=binding.pk)
+        binding.pk = None
+        binding.region_revision += 1
+        binding.timezone = "Europe/Berlin"
+        binding.save()
+    later = PlantConfiguration.objects.create(
+        region_id=plant.region_id,
+        plant=plant,
+        binding=binding,
+        revision=2,
+        dc_capacity_mw=200,
+        inverter_capacity_mw=150,
+        measurement_basis="ac_generation" if change == "basis" else "net_export",
+        created_by=system.member,
+    )
+    plant.current_configuration = later
+    plant.save()
+    result = forecast_performance(plant, start_date=DAY, end_date=DAY)
+    day = result["days"][0]
+    assert day["configuration_id"] == configuration.pk
+    if change == "capacity":
+        assert day["issuance_id"] == issuance.pk
+        assert result["matched_days"] == 1
+        assert result["metrics"]["daily_mae_mwh"] == pytest.approx(0)
+    else:
+        assert day["reason"] == "configuration_not_comparable"
+        assert result["missing_days"] == 1
+        assert result["matched_days"] == 0
+        assert result["metrics"] is None

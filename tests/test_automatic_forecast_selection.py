@@ -10,7 +10,7 @@ from pyracast.forecasts.models import ForecastResult, ForecastSnapshot, RequestA
 from pyracast.incidents.operations import save_incident
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.history import plant_outlook
-from pyracast.plants.models import Plant, PlantConfiguration, PlantForecast
+from pyracast.plants.models import ForecastIssuance, Plant, PlantConfiguration, PlantForecast
 from pyracast.plants.operations import revise_plant
 from pyracast.regions.models import Region
 from tests.test_domain import System
@@ -202,6 +202,7 @@ def test_automatic_does_not_replace_latest_when_reference_transition_is_not_safe
             created_at=old.collected_at
         )
     elif change == "unpublished":
+        ForecastIssuance.objects.filter(snapshot=old).delete()
         ForecastResult.objects.filter(snapshot=old).delete()
     else:
         old.normalized_intervals[0]["power_kw"] = "invalid"
@@ -278,3 +279,53 @@ def test_new_reference_internal_missing_values_remain_authoritative(
     assert payload["coverage_fraction"] == pytest.approx(47 / 48)
     assert payload["intervals"][12]["mean_power_mw"] is None
     assert "reference_transition_fallback" not in payload["quality_flags"]
+
+
+def test_reference_transition_selects_archive_for_the_previous_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant, original_snapshot_id = reference_transition(monkeypatch)
+    current = plant.current_configuration
+    assert current is not None
+    start, _ = local_day_bounds(DAY, system.binding.timezone)
+    binding = SiteBinding.objects.get(pk=current.binding_id)
+    binding.pk = None
+    binding.site_id = "intermediate-site"
+    binding.save()
+    PlantConfiguration.objects.filter(pk=current.pk).update(revision=3)
+    intermediate = PlantConfiguration.objects.create(
+        plant=plant,
+        region=plant.region,
+        binding=binding,
+        revision=2,
+        dc_capacity_mw=130,
+        export_limit_mw=100,
+        measurement_basis="net_export",
+        created_by=system.member,
+        created_at=start + timedelta(hours=1),
+    )
+    PlantConfiguration.objects.filter(pk=intermediate.pk).update(
+        created_at=start + timedelta(hours=1)
+    )
+    plant.current_configuration = intermediate
+    plant.save(update_fields=["current_configuration"])
+    current_binding = system.binding
+    system.binding = binding
+    acquired = start + timedelta(hours=3)
+    source = publish_snapshot(snapshot_for(system, DAY, power_kw=100, collected_at=acquired))
+    assert ForecastIssuance.objects.filter(snapshot=source).exists()
+    plant.current_configuration = current
+    plant.save(update_fields=["current_configuration"])
+    system.binding = current_binding
+    outlook = plant_outlook(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        target_date=DAY,
+        resolution_minutes=60,
+        source="auto",
+    )
+    payload = cast(dict[str, Any], outlook["result"])
+    assert payload["provenance"]["snapshot_id"] == original_snapshot_id
+    assert "reference_transition_fallback" in payload["quality_flags"]

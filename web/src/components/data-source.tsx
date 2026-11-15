@@ -42,7 +42,7 @@ export function DataSourceControl({
                     </option>
                     {allowArchivedForecast && (
                         <option value="archived_forecast">
-                            {t("archived_dayahead_forecast")}
+                            {t("archived_forecast")}
                         </option>
                     )}
                     <option value="estimated_actuals">
@@ -57,9 +57,7 @@ export function DataSourceControl({
             )}
             {value === "archived_forecast" && (
                 <span className="fine">
-                    {t(
-                        "saved_priorday_forecast_under_its_original_configuration",
-                    )}
+                    {t("archived_forecast_description")}
                 </span>
             )}
         </>

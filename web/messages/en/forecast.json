@@ -144,17 +144,18 @@
     "ForecastPerformance": {
         "historical_weather_estimates_are_not_available": "Historical weather estimates are not available",
         "configuration_was_not_available_before_this_day": "Configuration was not available before this day",
-        "dayahead_forecast_was_not_available": "Day-ahead forecast was not available",
+        "archived_forecast_unavailable": "No forecast was archived for this day",
+        "configuration_not_comparable": "The measurement basis or timezone has changed",
         "production_or_reference_coverage_is_incomplete_or": "Production or reference coverage is incomplete or invalid",
         "saved_reference_data_is_invalid": "Saved reference data is invalid",
         "production_comparison": "Production comparison",
         "how_comparison_is_measured": "How comparison is measured",
         "historical_model_uses_saved_weather_estimates_and": "Historical model uses saved weather estimates and the current configuration. Calibration applies from its training period onward. This retrospective comparison can include provisional production. It does not measure forecast accuracy.",
-        "archived_performance_replays_the_forecast_configuration_and": "Archived performance replays the forecast, configuration and calibration available at the previous-day cutoff. A blank cutoff uses the end of the previous local day. This does not establish publication at the time.",
+        "archived_forecast_description": "Compares the last forecast saved before daylight began, with its original calibration. Set a previous-day cutoff to compare an earlier forecast.",
         "comparison": "Comparison",
         "historical_model": "Historical model",
         "archived_forecast_performance": "Archived forecast performance",
-        "previousday_cutoff": "Previous-day cutoff",
+        "previousday_cutoff": "Previous-day cutoff (optional)",
         "start_date": "Start date",
         "end_date": "End date",
         "load_performance": "Load performance",
@@ -174,7 +175,7 @@
         "no_complete_production_and_reference_pairs_are": "No complete production and reference pairs are available for this range. Select another range or check saved production data.",
         "daily_forecast_comparison": "Daily forecast comparison",
         "historical_daylight_model": "Historical daylight model",
-        "daylight_replay": "Daylight replay",
+        "daylight_replay": "Archived forecast",
         "date": "Date",
         "status": "Status",
         "measured_reported_mwh": "Measured / reported (MWh)",
@@ -410,10 +411,9 @@
         "automatic": "Automatic",
         "forecast_outlook": "Forecast outlook",
         "archived_forecast": "Archived forecast",
-        "archived_dayahead_forecast": "Archived day-ahead forecast",
         "estimated_actuals": "Estimated actuals",
         "elapsed_intervals_model_estimates_not_meter_readings": "Completed intervals today and on past days · model estimates, not meter readings.",
-        "saved_priorday_forecast_under_its_original_configuration": "Saved prior-day forecast under its original configuration."
+        "archived_forecast_description": "Last forecast saved before daylight, with its original calibration."
     },
     "CsvDownload": {
         "download_csv": "Download CSV"

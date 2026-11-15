@@ -16,6 +16,7 @@ from pyracast.plants.measurements import select_measurements
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
+    ForecastIssuance,
     Plant,
     PlantForecast,
     ProductionObservation,
@@ -168,7 +169,8 @@ def test_live_outlook_rejects_contaminated_factor_without_rewriting_saved_foreca
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
     original = plant_outlook(*scope, target_date=target, resolution_minutes=60)
     archived = plant_outlook(*scope, target_date=target, resolution_minutes=60, as_of=NOW)
-    saved = PlantForecast.objects.get()
+    saved = ForecastIssuance.objects.get()
+    frozen_payloads = saved.payloads
     assert cast(dict[str, Any], original["result"])["factor"] == 0.5
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=1))
     start, _ = local_day_bounds(date(2026, 11, 4), system.binding.timezone)
@@ -178,7 +180,7 @@ def test_live_outlook_rejects_contaminated_factor_without_rewriting_saved_foreca
     assert current["calibration_id"] is None
     assert "uncalibrated" in cast(dict[str, Any], current["result"])["quality_flags"]
     saved.refresh_from_db()
-    assert saved.payload == archived["result"]
+    assert saved.payloads == frozen_payloads
     historical = plant_outlook(*scope, target_date=target, resolution_minutes=60, as_of=NOW)
     assert cast(dict[str, Any], historical["result"])["factor"] == 0.5
     with pytest.raises(ValidationError, match="outage history changed"):
@@ -188,12 +190,13 @@ def test_live_outlook_rejects_contaminated_factor_without_rewriting_saved_foreca
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=2))
     past = plant_outlook(*scope, target_date=target, resolution_minutes=60)
     past_payload = cast(dict[str, Any], past["result"])
-    assert past_payload["factor"] == 1
-    assert past["calibration_id"] is None
-    assert "calibration_invalidated_by_outage_history" in past_payload["quality_flags"]
+    assert past_payload["factor"] == 0.5
+    assert past["calibration_id"] == ready.pk
+    assert "calibration_invalidated_by_outage_history" not in past_payload["quality_flags"]
+    assert past_payload == archived["result"]
     saved.refresh_from_db()
-    assert saved.payload == archived["result"]
-    assert PlantForecast.objects.count() == 1
+    assert saved.payloads == frozen_payloads
+    assert not PlantForecast.objects.exists()
 
 
 def test_outlook_shows_partial_outage_then_single_forecast_after_resolution(

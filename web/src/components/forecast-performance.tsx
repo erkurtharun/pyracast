@@ -51,11 +51,7 @@ export function ForecastPerformance({
             <details>
                 <summary>{t("how_comparison_is_measured")}</summary>
                 <p>{t("historical_model_uses_saved_weather_estimates_and")}</p>
-                <p>
-                    {t(
-                        "archived_performance_replays_the_forecast_configuration_and",
-                    )}
-                </p>
+                <p>{t("archived_forecast_description")}</p>
                 <p>{t("daylight_rules", { timezone })}</p>
             </details>
             <form className="forecast-controls" onSubmit={load}>
@@ -136,7 +132,8 @@ function PerformanceResults({
         configuration_not_available: t(
             "configuration_was_not_available_before_this_day",
         ),
-        forecast_not_available: t("dayahead_forecast_was_not_available"),
+        forecast_not_available: t("archived_forecast_unavailable"),
+        configuration_not_comparable: t("configuration_not_comparable"),
         incomplete_or_invalid_day: t(
             "production_or_reference_coverage_is_incomplete_or",
         ),

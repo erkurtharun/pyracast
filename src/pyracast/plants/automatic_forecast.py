@@ -92,17 +92,25 @@ def reference_transition_forecast(
     ):
         return latest
     try:
-        archived = archived_forecast(plant, target_date, resolution_minutes, now)
+        archived = archived_forecast(
+            plant, target_date, resolution_minutes, now, binding_id=previous.binding_id
+        )
     except ValidationError:
         return latest
     archived_payload = cast(dict[str, object] | None, archived["result"])
-    if archived_payload is None or archived_payload["complete"] is not True:
+    if (
+        archived["configuration_id"] != previous.pk
+        or archived_payload is None
+        or archived_payload["complete"] is not True
+    ):
         return latest
     provenance = cast(dict[str, object], archived_payload["provenance"])
-    snapshot = ForecastSnapshot.objects.get(
+    snapshot = ForecastSnapshot.objects.filter(
         pk=cast(int, provenance["snapshot_id"]), job__binding=previous.binding
-    )
-    if not history_day_complete(snapshot, target_date, previous.binding.timezone):
+    ).first()
+    if snapshot is None or not history_day_complete(
+        snapshot, target_date, previous.binding.timezone
+    ):
         return latest
     cast(list[str], archived_payload["quality_flags"]).append("reference_transition_fallback")
     provenance.update(
@@ -110,5 +118,6 @@ def reference_transition_forecast(
         current_configuration_id=current.pk,
         archived_selection_cutoff=archived["as_of"],
     )
+    archived.pop("outage_scenario", None)
     archived["as_of"] = now.isoformat()
     return archived

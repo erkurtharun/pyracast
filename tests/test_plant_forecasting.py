@@ -6,16 +6,15 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import Client
 
-from pyracast.forecasts.models import ForecastResult
 from pyracast.plants import forecasting
 from pyracast.plants.forecasting import plant_forecast, power_intervals, power_limit
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
+    ForecastIssuance,
     PlantConfiguration,
     PlantForecast,
 )
-from pyracast.plants.numerics import forecast
 from pyracast.plants.operations import activate_calibration, revise_plant
 from tests.test_domain import NOW
 from tests.test_plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
@@ -24,17 +23,15 @@ pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 9)
 
 
-def test_native_clipping_zero_missingness_and_immutable_cache(
+def test_native_clipping_zero_missingness_and_immutable_issuance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    source = publish_snapshot(snapshot_for(system, DAY, power_kw=0))
+    source = snapshot_for(system, DAY, power_kw=0)
     source.normalized_intervals[0]["power_kw"] = 120 / 130
     source.normalized_intervals[1]["power_kw"] = 80 / 130
     source.save()
-    ForecastResult.objects.filter(snapshot=source).update(
-        payload={"energy_kwh_m2": None, "complete": False}
-    )
+    publish_snapshot(source)
     result = plant_forecast(
         system.member,
         system.tenant.pk,
@@ -48,12 +45,7 @@ def test_native_clipping_zero_missingness_and_immutable_cache(
     assert numerical["intervals"][0]["energy_mwh"] == pytest.approx(90)
     assert numerical["intervals"][1]["energy_mwh"] == 0
     assert numerical["complete"]
-    assert result["regional_irradiance"] == {
-        "energy_kwh_m2": None,
-        "partial_energy_kwh_m2": None,
-        "complete": False,
-        "quality_flags": None,
-    }
+    assert cast(dict[str, Any], result["regional_irradiance"])["complete"] is False
     assert "geometry_not_modeled" in numerical["quality_flags"]
     as_of = source.collected_at + timedelta(minutes=10)
     second = plant_forecast(
@@ -67,7 +59,8 @@ def test_native_clipping_zero_missingness_and_immutable_cache(
     )
     assert second["result"] == numerical
     assert second["as_of"] != result["as_of"]
-    assert PlantForecast.objects.count() == 1
+    assert not PlantForecast.objects.exists()
+    assert ForecastIssuance.objects.count() == 1
     source.normalized_intervals[1]["power_kw"] = None
     source.save()
     partial = plant_forecast(
@@ -79,9 +72,8 @@ def test_native_clipping_zero_missingness_and_immutable_cache(
         resolution_minutes=30,
     )
     missing = cast(dict[str, Any], partial["result"])
-    assert missing["energy_mwh"] is None
-    assert missing["partial_energy_mwh"] == pytest.approx(50)
-    assert missing["intervals"][1]["energy_mwh"] is None
+    assert missing["energy_mwh"] == pytest.approx(90)
+    assert missing["intervals"][1]["energy_mwh"] == pytest.approx(40)
 
 
 def test_snapshot_selection_excludes_future_issue_collection_and_actuals(
@@ -89,7 +81,9 @@ def test_snapshot_selection_excludes_future_issue_collection_and_actuals(
 ) -> None:
     system, plant = make_plant(monkeypatch)
     first = publish_snapshot(snapshot_for(system, DAY))
-    publish_snapshot(snapshot_for(system, DAY, power_kw=0.3, collected_at=first.collected_at))
+    latest = publish_snapshot(
+        snapshot_for(system, DAY, power_kw=0.3, collected_at=first.collected_at)
+    )
     publish_snapshot(
         snapshot_for(
             system,
@@ -117,7 +111,7 @@ def test_snapshot_selection_excludes_future_issue_collection_and_actuals(
         target_date=DAY,
         resolution_minutes=60,
     )
-    assert cast(dict[str, Any], result["result"])["provenance"]["snapshot_id"] == first.pk
+    assert cast(dict[str, Any], result["result"])["provenance"]["snapshot_id"] == latest.pk
     assert result["unavailable_reason"] is None
 
 
@@ -157,7 +151,6 @@ def test_absent_configuration_and_source_are_explicit(monkeypatch: pytest.Monkey
         {"resolution_minutes": True},
         {"target_date": date(2025, 1, 1)},
         {"target_date": date(2027, 1, 1)},
-        {"as_of": NOW},
         {"as_of": NOW + timedelta(days=1)},
         {"as_of": datetime(2026, 11, 8)},
     ],
@@ -178,7 +171,7 @@ def test_active_calibration_is_available_at_issuance(
     monkeypatch: pytest.MonkeyPatch, future_field: str | None
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    source = publish_snapshot(snapshot_for(system, DAY))
+    source = snapshot_for(system, DAY)
     run = ready_run(system, plant)
     activation = activate_calibration(
         system.member, system.tenant.pk, system.region.pk, plant.pk, run.pk
@@ -190,6 +183,7 @@ def test_active_calibration_is_available_at_issuance(
     CalibrationActivation.objects.filter(pk=activation.pk).update(created_at=eligible)
     if future_field is not None:
         CalibrationRun.objects.filter(pk=run.pk).update(**{future_field: NOW})
+    publish_snapshot(source)
     result = plant_forecast(
         system.member,
         system.tenant.pk,
@@ -202,7 +196,7 @@ def test_active_calibration_is_available_at_issuance(
     assert cast(dict[str, Any], result["result"])["factor"] == (0.5 if future_field is None else 1)
 
 
-def test_historical_cached_result_survives_revision_but_new_output_cannot_publish(
+def test_historical_issuance_survives_revision_at_both_resolutions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
@@ -226,47 +220,42 @@ def test_historical_cached_result_survives_revision_but_new_output_cannot_publis
         target_date=DAY,
         resolution_minutes=60,
     )
-    assert historical["result"] == original["result"]
+    expected = cast(dict[str, Any], original["result"])
+    expected["quality_flags"].append("previous_configuration")
+    assert historical["result"] == expected
     assert historical["freshness"] == "stale"
-    with pytest.raises(ValidationError, match="configuration_changed"):
-        plant_forecast(
-            system.member,
-            system.tenant.pk,
-            system.region.pk,
-            plant.pk,
-            target_date=DAY,
-            resolution_minutes=30,
-        )
+    half_hourly = plant_forecast(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        target_date=DAY,
+        resolution_minutes=30,
+    )
+    assert half_hourly["configuration_id"] == original["configuration_id"]
+    assert cast(dict[str, Any], half_hourly["result"])["energy_mwh"] == expected["energy_mwh"]
 
 
-def test_configuration_change_during_calculation_cannot_publish(
+def test_archive_reader_never_recalculates_a_published_output(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    publish_snapshot(snapshot_for(system, DAY))
-    original = forecast
+    source = publish_snapshot(snapshot_for(system, DAY))
+    frozen = ForecastIssuance.objects.get(snapshot=source).payloads["60"]
 
-    def change(*args: Any, **kwargs: Any) -> dict[str, object]:
-        revise_plant(
-            system.member,
-            system.tenant.pk,
-            system.region.pk,
-            plant.pk,
-            name="New",
-            dc_capacity_mw=140,
-        )
-        return original(*args, **kwargs)
+    def unavailable(*args: Any, **kwargs: Any) -> dict[str, object]:
+        raise AssertionError("An archive must not execute the current transfer model.")
 
-    monkeypatch.setattr(forecasting, "forecast", change)
-    with pytest.raises(ValidationError, match="configuration_changed"):
-        plant_forecast(
-            system.member,
-            system.tenant.pk,
-            system.region.pk,
-            plant.pk,
-            target_date=DAY,
-            resolution_minutes=60,
-        )
+    monkeypatch.setattr(forecasting, "forecast", unavailable)
+    result = plant_forecast(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        target_date=DAY,
+        resolution_minutes=60,
+    )
+    assert cast(dict[str, Any], result["result"])["energy_mwh"] == frozen["energy_mwh"]
     assert not PlantForecast.objects.exists()
 
 
@@ -322,18 +311,19 @@ def test_corrupt_source_metadata_and_changed_timezone(monkeypatch: pytest.Monkey
         power_intervals(source, configuration)
     system.region.timezone = "UTC"
     system.region.save()
-    with pytest.raises(ValidationError, match="configured local day start"):
-        plant_forecast(
-            system.member,
-            system.tenant.pk,
-            system.region.pk,
-            plant.pk,
-            target_date=DAY,
-            resolution_minutes=60,
-        )
+    replay = plant_forecast(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        target_date=DAY,
+        resolution_minutes=60,
+    )
+    assert replay["result"] is None
+    assert replay["unavailable_reason"] == "forecast_unavailable"
 
 
-def test_first_available_day_ahead_source_remains_stable_after_late_refresh(
+def test_latest_published_pre_daylight_source_replaces_previous_forecast(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
@@ -342,7 +332,7 @@ def test_first_available_day_ahead_source_remains_stable_after_late_refresh(
     first = publish_snapshot(snapshot_for(system, DAY, collected_at=acquired))
     first.job.scheduled_slot = acquired - timedelta(minutes=1)
     first.job.save()
-    publish_snapshot(
+    newest = publish_snapshot(
         snapshot_for(system, DAY, power_kw=0.9, collected_at=datetime(2026, 11, 8, 20, tzinfo=UTC))
     )
     unavailable = plant_forecast(
@@ -354,7 +344,7 @@ def test_first_available_day_ahead_source_remains_stable_after_late_refresh(
         resolution_minutes=60,
         as_of=acquired - timedelta(seconds=1),
     )
-    assert unavailable["result"] is None
+    assert unavailable["snapshot_id"] == old.pk
     available = plant_forecast(
         system.member,
         system.tenant.pk,
@@ -373,12 +363,13 @@ def test_first_available_day_ahead_source_remains_stable_after_late_refresh(
         resolution_minutes=60,
     )
     provenance = cast(dict[str, Any], later["result"])["provenance"]
-    assert available["result"] == later["result"]
-    assert provenance["snapshot_id"] == first.pk
+    assert available["snapshot_id"] == first.pk
+    assert available["result"] != later["result"]
+    assert provenance["snapshot_id"] == newest.pk
     assert provenance["snapshot_id"] != old.pk
-    assert provenance["selection_policy"] == "first-available-day-ahead-v1"
-    assert provenance["late"] is True
-    assert provenance["lead_hours"] == pytest.approx(8 - 1 / 60)
+    assert provenance["selection_policy"] == "latest-published-pre-daylight-issuance-v1"
+    assert provenance["late"] is False
+    assert provenance["lead_hours"] == pytest.approx(1)
 
 
 @pytest.mark.parametrize("power_kw", [0.4, 2.0])
@@ -389,6 +380,9 @@ def test_finite_capacity_overflow_returns_validation_without_saving_forecast(
     explicit_as_of: bool,
 ) -> None:
     system, plant = make_plant(monkeypatch)
+    target = DAY + timedelta(days=1)
+    source = publish_snapshot(snapshot_for(system, target, power_kw=power_kw, collected_at=NOW))
+    frozen = ForecastIssuance.objects.get(snapshot=source).payloads["60"]
     plant = revise_plant(
         system.member,
         system.tenant.pk,
@@ -397,8 +391,6 @@ def test_finite_capacity_overflow_returns_validation_without_saving_forecast(
         name="Large finite capacity",
         dc_capacity_mw=1e308,
     )
-    target = DAY + timedelta(days=1)
-    publish_snapshot(snapshot_for(system, target, power_kw=power_kw, collected_at=NOW))
     client = Client()
     client.force_login(system.member)
     query = {"date": target.isoformat(), "resolution_minutes": "60"}
@@ -408,6 +400,11 @@ def test_finite_capacity_overflow_returns_validation_without_saving_forecast(
         f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/",
         query,
     )
+    if explicit_as_of:
+        assert response.status_code == 200
+        assert response.json()["result"]["energy_mwh"] == frozen["energy_mwh"]
+        assert response.json()["configuration_id"] != plant.current_configuration_id
+        return
     assert response.status_code == 400
     assert response.json() == {
         "code": "invalid_request",
@@ -417,3 +414,25 @@ def test_finite_capacity_overflow_returns_validation_without_saving_forecast(
         ],
     }
     assert not PlantForecast.objects.exists()
+
+
+def test_pure_projection_claims_archive_selection_only_after_publication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    configuration = plant.current_configuration
+    assert configuration is not None
+    source = snapshot_for(system, DAY)
+    projected = forecasting.forecast_payload(configuration, source, None, DAY, 60)
+    provenance = cast(dict[str, Any], projected["provenance"])
+    assert provenance["selection_policy"] == "single-snapshot-forecast-projection-v1"
+    assert "published_at" not in provenance
+    assert not ForecastIssuance.objects.exists()
+    publish_snapshot(source)
+    issued = ForecastIssuance.objects.get(snapshot=source)
+    published = issued.payloads["60"]
+    assert (
+        published["provenance"]["selection_policy"] == "latest-published-pre-daylight-issuance-v1"
+    )
+    assert published["provenance"]["published_at"] == source.collected_at.isoformat()
+    assert published["energy_mwh"] == projected["energy_mwh"]

@@ -23,7 +23,6 @@ from pyracast.plants.current_forecast import current_forecast, saved_forecast
 from pyracast.plants.forecasting import (
     archived_forecast,
     calibration_for_day,
-    declared_forecast,
     forecast_payload,
     plant_forecast,
 )
@@ -70,12 +69,14 @@ def plant_outlook(
             if source == "archived_forecast"
             else as_of or timezone.now()
         )
-        result["outage_scenario"] = incident_scenario(
-            result, target_date, resolution_minutes, scenario_at
-        )
+        frozen = "outage_scenario" in result
+        if not frozen:
+            result["outage_scenario"] = incident_scenario(
+                result, target_date, resolution_minutes, scenario_at
+            )
         result["production_diagnostic"] = (
             production_diagnostic(result, target_date, scenario_at)
-            if as_of is None and source != "archived_forecast"
+            if as_of is None and not frozen
             else None
         )
         return result
@@ -124,15 +125,14 @@ def _plant_outlook(
         if as_of is None and target_date >= today:
             selection = automatic_forecast if source == "auto" else current_forecast
             return selection(plant, target_date, resolution_minutes, now)
-        return _forecast_outlook(
+        return plant_forecast(
             actor,
             tenant_id,
             region.pk,
-            plant,
+            plant.pk,
             target_date=target_date,
             resolution_minutes=resolution_minutes,
             as_of=as_of,
-            projection_at=now if as_of is None else None,
         )
     if isinstance(resolution_minutes, bool) or resolution_minutes not in (30, 60):
         raise ValidationError(gettext("Resolution must be 30 or 60 minutes."))
@@ -196,15 +196,14 @@ def _plant_outlook(
         if fallback["result"] is not None:
             return fallback
     if snapshot is None and source == "auto" and as_of is not None:
-        return _forecast_outlook(
+        return plant_forecast(
             actor,
             tenant_id,
             region.pk,
-            plant,
+            plant.pk,
             target_date=target_date,
             resolution_minutes=resolution_minutes,
-            as_of=min(cutoff, local_day_bounds(target_date, region.timezone)[0]),
-            projection_at=now if as_of is None else None,
+            as_of=cutoff,
         )
     result = None
     if snapshot is not None and configuration is not None:
@@ -246,37 +245,3 @@ def _plant_outlook(
         "result": result,
         "regional_irradiance": irradiance,
     }
-
-
-def _forecast_outlook(
-    actor: User,
-    tenant_id: int,
-    region_id: int,
-    plant: Plant,
-    *,
-    target_date: date,
-    resolution_minutes: int,
-    as_of: datetime | None,
-    projection_at: datetime | None,
-) -> dict[str, object]:
-    result = plant_forecast(
-        actor,
-        tenant_id,
-        region_id,
-        plant.pk,
-        target_date=target_date,
-        resolution_minutes=resolution_minutes,
-        as_of=as_of,
-    )
-    if projection_at is None or result["unavailable_reason"] != "configuration_unavailable":
-        return result
-    return (
-        declared_forecast(
-            plant,
-            target_date,
-            resolution_minutes,
-            datetime.fromisoformat(cast(str, result["as_of"])),
-            projection_at,
-        )
-        or result
-    )

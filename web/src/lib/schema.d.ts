@@ -1275,6 +1275,9 @@ export interface components {
             status: components["schemas"]["PerformanceDayStatusEnum"];
             reason: string | null;
             snapshot_id: number | null;
+            issuance_id?: number | null;
+            configuration_id?: number | null;
+            model_version?: string | null;
             source_snapshot_ids?: number[];
             reference_provenance?: unknown;
             /** Format: date-time */
@@ -1362,6 +1365,7 @@ export interface components {
             as_of: string;
             configuration_id: number | null;
             calibration_id: number | null;
+            issuance_id?: number | null;
             freshness: string;
             source_kind: components["schemas"]["ForecastSourceKindEnum"];
             unavailable_reason:

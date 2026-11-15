@@ -120,7 +120,7 @@ def test_historical_model_applies_the_calibration_fitted_for_that_period(
     assert not PlantForecast.objects.exists()
     archived = client.get(url, {**query, "comparison": "archived_forecast"}).json()
     assert archived["matched_days"] == 0
-    assert archived["days"][0]["reason"] == "configuration_not_available"
+    assert archived["days"][0]["reason"] == "forecast_not_available"
 
 
 def test_historical_comparison_preserves_settlement_zero_and_latest_missing_hours(

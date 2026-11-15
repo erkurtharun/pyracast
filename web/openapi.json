@@ -4792,6 +4792,18 @@
                         "type": "integer",
                         "nullable": true
                     },
+                    "issuance_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "configuration_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "model_version": {
+                        "type": "string",
+                        "nullable": true
+                    },
                     "source_snapshot_ids": {
                         "type": "array",
                         "items": {
@@ -5085,6 +5097,10 @@
                         "nullable": true
                     },
                     "calibration_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "issuance_id": {
                         "type": "integer",
                         "nullable": true
                     },

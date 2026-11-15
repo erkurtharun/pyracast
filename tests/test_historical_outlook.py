@@ -1,5 +1,5 @@
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from django.contrib.auth.models import User
@@ -7,151 +7,94 @@ from django.core.exceptions import ValidationError
 from django.test import Client
 
 from pyracast.accounts.models import Membership, Tenant
-from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY, select_actual_snapshot
-from pyracast.forecasts.models import ForecastResult, ForecastSnapshot, RequestAttempt
+from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
-from pyracast.plants import forecasting
 from pyracast.plants.forecasting import plant_forecast
 from pyracast.plants.history import plant_outlook
-from pyracast.plants.models import Plant, PlantConfiguration, PlantForecast
-from pyracast.plants.operations import activate_calibration, revise_plant
+from pyracast.plants.models import ForecastIssuance, PlantConfiguration, PlantForecast
+from pyracast.plants.operations import revise_plant
 from pyracast.regions.models import Region
 from tests.test_domain import NOW, System
-from tests.test_plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
+from tests.test_plant_operations import make_plant, publish_snapshot, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 8)
 
 
-@pytest.mark.parametrize(
-    "state", ["failed", "pending", "unavailable", "late_available", "missing_result", "late_result"]
-)
-def test_forecast_selection_requires_publication_before_cutoff(
-    monkeypatch: pytest.MonkeyPatch, state: str
+@pytest.mark.parametrize("delay_minutes", [0, 15])
+def test_forecast_replay_requires_electrical_publication_before_cutoff(
+    monkeypatch: pytest.MonkeyPatch, delay_minutes: int
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    configuration = plant.configurations.get()
-    start, _ = local_day_bounds(DAY, system.binding.timezone)
-    cutoff = start - timedelta(minutes=10)
-    candidate = publish_snapshot(snapshot_for(system, DAY))
-    if state in {"failed", "pending"}:
-        candidate.job.status = state
-        candidate.job.save(update_fields=["status"])
-    elif state == "unavailable":
-        ForecastSnapshot.objects.filter(pk=candidate.pk).update(available_at=None)
-    elif state == "late_available":
-        ForecastSnapshot.objects.filter(pk=candidate.pk).update(
-            available_at=cutoff + timedelta(seconds=1)
-        )
-    elif state == "missing_result":
-        ForecastResult.objects.filter(snapshot=candidate).delete()
-    else:
-        ForecastResult.objects.filter(snapshot=candidate).update(
-            published_at=cutoff + timedelta(seconds=1)
-        )
-    assert forecasting.select_snapshot(configuration, DAY, cutoff) is None
-
-
-def test_forecast_selection_uses_first_published_before_local_day(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    system, plant = make_plant(monkeypatch)
-    configuration = plant.configurations.get()
-    start, _ = local_day_bounds(DAY, system.binding.timezone)
-    first = publish_snapshot(snapshot_for(system, DAY, collected_at=start - timedelta(hours=2)))
-    later = publish_snapshot(snapshot_for(system, DAY, collected_at=start - timedelta(hours=1)))
-    ForecastResult.objects.filter(snapshot=first).update(published_at=start)
-    assert forecasting.select_snapshot(configuration, DAY, start) == later
-    ForecastResult.objects.filter(snapshot=first).update(published_at=start - timedelta(minutes=30))
-    assert forecasting.select_snapshot(configuration, DAY, start - timedelta(minutes=30)) == first
-    assert forecasting.select_snapshot(configuration, DAY, start - timedelta(minutes=31)) == later
-
-
-def test_new_plant_projects_saved_forecast_without_backdating_or_calibration(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    target = DAY
-    system, plant = make_plant(monkeypatch)
-    configuration = plant.configurations.get()
-    PlantConfiguration.objects.filter(pk=configuration.pk).update(created_at=NOW)
-    reference = publish_snapshot(snapshot_for(system, target))
-    ForecastResult.objects.filter(snapshot=reference).update(
-        payload={"energy_kwh_m2": 3.5, "complete": True}
+    snapshot = snapshot_for(system, DAY)
+    published = snapshot.collected_at + timedelta(minutes=delay_minutes)
+    publish_snapshot(snapshot, published_at=published)
+    args = (system.member, system.tenant.pk, system.region.pk, plant.pk)
+    unavailable = plant_forecast(
+        *args, target_date=DAY, resolution_minutes=60, as_of=published - timedelta(microseconds=1)
     )
-    snapshot_for(system, target, power_kw=0.9, collected_at=NOW)
-    run = ready_run(system, plant)
-    activate_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk, run.pk)
-    requests = RequestAttempt.objects.count()
-    result = plant_outlook(
-        system.member,
-        system.tenant.pk,
-        system.region.pk,
-        plant.pk,
-        target_date=target,
+    assert unavailable["result"] is None
+    available = plant_forecast(*args, target_date=DAY, resolution_minutes=60, as_of=published)
+    assert available["snapshot_id"] == snapshot.pk
+    assert available["as_of"] == published.isoformat()
+    replay = plant_forecast(
+        *args,
+        target_date=DAY,
         resolution_minutes=60,
-        source="forecast",
+        as_of=datetime.fromisoformat(available["as_of"]),
     )
-    assert result["source_kind"] == "forecast"
-    assert result["freshness"] == "fresh"
-    assert result["configuration_id"] == configuration.pk
-    assert result["calibration_id"] is None
-    assert result["unavailable_reason"] is None
-    payload = result["result"]
-    assert isinstance(payload, dict)
-    assert payload["factor"] == 1
-    assert payload["energy_mwh"] == 1248
-    assert "historical_configuration_assumed" in payload["quality_flags"]
-    assert "uncalibrated" in payload["quality_flags"]
-    assert "estimated_actuals_not_metered" not in payload["quality_flags"]
-    assert payload["provenance"]["snapshot_id"] == reference.pk
-    assert payload["provenance"]["configuration_created_at"] == NOW.isoformat()
-    assert result["as_of"] == local_day_bounds(target, system.binding.timezone)[0].isoformat()
-    regional = result["regional_irradiance"]
-    assert isinstance(regional, dict)
-    assert regional["energy_kwh_m2"] == 3.5
+    assert replay == available
     assert not PlantForecast.objects.exists()
-    configuration.refresh_from_db()
-    assert configuration.created_at == NOW
-    assert RequestAttempt.objects.count() == requests
 
 
-@pytest.mark.parametrize("source", ["forecast", "auto"])
-def test_explicit_cutoff_keeps_new_configuration_unavailable(
+def test_later_pre_sunrise_forecast_replaces_previous_evening_archive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    start, _ = local_day_bounds(DAY, system.binding.timezone)
+    previous = publish_snapshot(
+        snapshot_for(system, DAY, power_kw=0.2, collected_at=start - timedelta(hours=7))
+    )
+    latest = publish_snapshot(
+        snapshot_for(system, DAY, power_kw=0.4, collected_at=start + timedelta(hours=3))
+    )
+    args = (system.member, system.tenant.pk, system.region.pk, plant.pk)
+    before = plant_forecast(
+        *args,
+        target_date=DAY,
+        resolution_minutes=60,
+        as_of=latest.collected_at - timedelta(seconds=1),
+    )
+    after = plant_forecast(*args, target_date=DAY, resolution_minutes=60, as_of=latest.collected_at)
+    assert before["snapshot_id"] == previous.pk
+    assert after["snapshot_id"] == latest.pk
+    assert after["as_of"] == latest.collected_at.isoformat()
+    assert after["result"] != before["result"]
+
+
+@pytest.mark.parametrize("source", ["forecast", "auto", "archived_forecast"])
+def test_new_configuration_cannot_reconstruct_a_historical_forecast(
     monkeypatch: pytest.MonkeyPatch, source: str
 ) -> None:
     system, plant = make_plant(monkeypatch)
     PlantConfiguration.objects.filter(plant=plant).update(created_at=NOW)
-    snapshot_for(system, DAY)
-    cutoff = local_day_bounds(DAY, system.binding.timezone)[0]
-    args = (system.member, system.tenant.pk, system.region.pk, plant.pk)
-    strict = plant_forecast(*args, target_date=DAY, resolution_minutes=30)
-    assert strict["unavailable_reason"] == "configuration_unavailable"
-    result = plant_outlook(
-        *args, target_date=DAY, resolution_minutes=30, source=source, as_of=cutoff
-    )
-    assert result == strict | {"outage_scenario": None, "production_diagnostic": None}
-    assert not PlantForecast.objects.exists()
-
-
-def test_projection_does_not_substitute_actuals_for_missing_forecast(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    system, plant = make_plant(monkeypatch)
-    PlantConfiguration.objects.filter(plant=plant).update(created_at=NOW)
-    actuals(system)
+    publish_snapshot(snapshot_for(system, DAY))
     result = plant_outlook(
         system.member,
         system.tenant.pk,
         system.region.pk,
         plant.pk,
         target_date=DAY,
-        resolution_minutes=30,
+        resolution_minutes=60,
+        source=source,
     )
-    assert result["configuration_id"] == plant.current_configuration_id
-    assert result["unavailable_reason"] == "forecast_unavailable"
     assert result["result"] is None
-    assert result["regional_irradiance"] is None
+    assert result["unavailable_reason"] == (
+        "estimated_actuals_unavailable" if source == "auto" else "configuration_unavailable"
+    )
+    assert result["outage_scenario"] is None
     assert not PlantForecast.objects.exists()
 
 
@@ -166,94 +109,26 @@ def test_eligible_archived_forecast_survives_a_later_configuration(
     revise_plant(*args, name="Revised", dc_capacity_mw=260, export_limit_mw=200)
     result = plant_outlook(*args, target_date=DAY, resolution_minutes=60)
     assert result["configuration_id"] == original_id
-    assert result["result"] == archived["result"]
+    expected = dict(cast(dict[str, Any], archived["result"]))
+    expected["quality_flags"] = [*expected["quality_flags"], "previous_configuration"]
+    assert result["result"] == expected
     assert result["freshness"] == "stale"
-    assert PlantForecast.objects.count() == 1
-
-
-@pytest.mark.parametrize("state", ["unconfigured", "future", "suspended", "disabled"])
-def test_projection_requires_a_current_available_configuration(
-    monkeypatch: pytest.MonkeyPatch, state: str
-) -> None:
-    system, plant = make_plant(monkeypatch)
-    PlantConfiguration.objects.filter(plant=plant).update(created_at=NOW)
-    snapshot_for(system, DAY)
-    if state == "unconfigured":
-        Plant.objects.filter(pk=plant.pk).update(current_configuration=None)
-    elif state == "future":
-        PlantConfiguration.objects.filter(plant=plant).update(created_at=NOW + timedelta(seconds=1))
-    elif state == "suspended":
-        Region.objects.filter(pk=system.region.pk).update(status="suspended")
-    else:
-        ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=False)
-    result = plant_outlook(
-        system.member,
-        system.tenant.pk,
-        system.region.pk,
-        plant.pk,
-        target_date=DAY,
-        resolution_minutes=30,
-    )
-    assert result["unavailable_reason"] == "configuration_unavailable"
-    assert result["result"] is None
     assert not PlantForecast.objects.exists()
 
 
-@pytest.mark.parametrize("change", ["revise", "suspend", "disable"])
-def test_projection_rechecks_current_configuration_after_calculation(
-    monkeypatch: pytest.MonkeyPatch, change: str
-) -> None:
-    system, plant = make_plant(monkeypatch)
-    PlantConfiguration.objects.filter(plant=plant).update(created_at=NOW)
-    publish_snapshot(snapshot_for(system, DAY))
-    original = forecasting.forecast_payload
-
-    def changed(*args: Any, **kwargs: Any) -> dict[str, object]:
-        result = original(*args, **kwargs)
-        if change == "revise":
-            revise_plant(
-                system.member,
-                system.tenant.pk,
-                system.region.pk,
-                plant.pk,
-                name="Revised",
-                dc_capacity_mw=260,
-            )
-        elif change == "suspend":
-            Region.objects.filter(pk=system.region.pk).update(status="suspended")
-        else:
-            ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=False)
-        return result
-
-    monkeypatch.setattr(forecasting, "forecast_payload", changed)
-    result = plant_outlook(
-        system.member,
-        system.tenant.pk,
-        system.region.pk,
-        plant.pk,
-        target_date=DAY,
-        resolution_minutes=30,
-    )
-    assert result["unavailable_reason"] == "configuration_unavailable"
-    assert result["result"] is None
-    assert not PlantForecast.objects.exists()
-
-
-def test_projection_api_keeps_tenant_boundaries_and_rejects_corrupt_source(
+def test_archive_api_keeps_tenant_boundaries_after_source_changes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    PlantConfiguration.objects.filter(plant=plant).update(created_at=NOW)
     source = publish_snapshot(snapshot_for(system, DAY))
     client = Client()
     client.force_login(system.member)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/"
-    response = client.get(path, {"date": DAY.isoformat()})
-    assert response.status_code == 200
-    assert response.json()["result"]["provenance"]["configuration_created_at"] == NOW.isoformat()
+    first = client.get(path, {"date": DAY.isoformat()})
+    assert first.status_code == 200
     source.normalized_intervals[0]["power_kw"] = -1
     source.save()
-    assert client.get(path, {"date": DAY.isoformat()}).status_code == 400
+    assert client.get(path, {"date": DAY.isoformat()}).json() == first.json()
     other = Tenant.objects.create(name="Other")
     user = User.objects.create_user("other-tenant")
     Membership.objects.create(tenant=other, user=user)
@@ -287,7 +162,7 @@ def test_past_actuals_use_declared_configuration_without_backdating_or_replacing
     archived_payload = archived["result"]
     assert isinstance(archived_payload, dict)
     assert archived_payload["energy_mwh"] == 1560
-    assert PlantForecast.objects.count() == 1
+    assert not PlantForecast.objects.exists()
     PlantConfiguration.objects.filter(pk=plant.current_configuration_id).update(created_at=NOW)
     client = Client()
     client.force_login(system.member)
@@ -313,8 +188,13 @@ def test_past_actuals_use_declared_configuration_without_backdating_or_replacing
     assert hourly.status_code == 200
     assert len(hourly.json()["result"]["intervals"]) == 24
     assert hourly.json()["result"]["energy_mwh"] == 1248
-    assert PlantForecast.objects.get(snapshot=forecast_source).payload == archived_payload
-    assert PlantForecast.objects.count() == 1
+    assert ForecastIssuance.objects.get(snapshot=forecast_source).payloads["30"] == {
+        **archived_payload,
+        "quality_flags": [
+            flag for flag in archived_payload["quality_flags"] if flag != "archived_forecast"
+        ],
+    }
+    assert not PlantForecast.objects.exists()
     assert PlantConfiguration.objects.get(pk=plant.current_configuration_id).created_at == NOW
     client.force_login(User.objects.create_user("unrelated-user"))
     assert client.get(path, {"date": DAY.isoformat(), "data_source": "auto"}).status_code == 403

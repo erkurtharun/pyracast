@@ -6,25 +6,21 @@ from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.db import transaction
-from django.db.models import Q
 from django.utils import timezone
 
 from pyracast.accounts.operations import require_member
-from pyracast.connections.models import ProviderAccount
 from pyracast.forecasts.capacity_normalization import normalization_provenance
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
-from pyracast.forecasts.models import ForecastResult, ForecastSnapshot
+from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.forecasts.projections import saved_day_payload
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
     Plant,
     PlantConfiguration,
-    PlantForecast,
 )
 from pyracast.plants.numerics import PowerInterval, forecast
-from pyracast.plants.operations import configuration_is_current
 from pyracast.plants.transfer import (
     calibration_matches_transfer,
     reference_power_mw,
@@ -34,7 +30,6 @@ from pyracast.plants.transfer import (
 from pyracast.regions.models import Region
 from pyracast.solar import Daylight, TimeWindows, daylight_energy_windows, daylight_window
 
-SELECTION_POLICY = "first-available-day-ahead-v1"
 RETROSPECTIVE_ACTIVATIONS = 60
 
 
@@ -83,36 +78,7 @@ def power_intervals(
     return tuple(result)
 
 
-def select_snapshot(
-    configuration: PlantConfiguration, target_date: date, as_of: datetime
-) -> ForecastSnapshot | None:
-    prior_start, day_start = local_day_bounds(
-        target_date - timedelta(days=1), configuration.binding.timezone
-    )
-    cutoff = min(as_of, day_start)
-    return (
-        ForecastSnapshot.objects.filter(
-            binding_id=configuration.binding_id,
-            job__target_date=target_date,
-            job__status="succeeded",
-            source_kind="forecast",
-            collected_at__gte=prior_start,
-            collected_at__lte=cutoff,
-            collected_at__lt=day_start,
-            available_at__lte=cutoff,
-            available_at__lt=day_start,
-            forecastresult__published_at__lte=cutoff,
-            forecastresult__published_at__lt=day_start,
-        )
-        .filter(Q(issued_at__isnull=True) | Q(issued_at__lte=cutoff, issued_at__lt=day_start))
-        .order_by("collected_at", "pk")
-        .first()
-    )
-
-
-def _usable(
-    run: CalibrationRun, configuration: PlantConfiguration, as_of: datetime, any_transfer: bool
-) -> bool:
+def _usable(run: CalibrationRun, configuration: PlantConfiguration, as_of: datetime) -> bool:
     from pyracast.plants.incident_policy import incidents_unchanged
 
     return (
@@ -125,15 +91,12 @@ def _usable(
         and run.completed_at <= as_of
         and run.cutoff_at <= as_of
         and run.created_at <= as_of
-        and (any_transfer or calibration_matches_transfer(run, configuration))
+        and calibration_matches_transfer(run, configuration)
         and incidents_unchanged(run, as_of)
     )
 
 
-def calibration_at(
-    configuration: PlantConfiguration, as_of: datetime, *, any_transfer: bool = False
-) -> CalibrationRun | None:
-    """`any_transfer` only locates saved outputs; new calculations need the current model."""
+def calibration_at(configuration: PlantConfiguration, as_of: datetime) -> CalibrationRun | None:
     activation = (
         CalibrationActivation.objects.select_related("calibration")
         .filter(configuration=configuration, created_at__lte=as_of)
@@ -143,7 +106,7 @@ def calibration_at(
     if activation is None or activation.calibration is None:
         return None
     run = activation.calibration
-    return run if _usable(run, configuration, as_of, any_transfer) else None
+    return run if _usable(run, configuration, as_of) else None
 
 
 def _fitted_start(run: CalibrationRun) -> date | None:
@@ -174,41 +137,9 @@ def calibration_for_day(
         if run is None:
             return None
         start = _fitted_start(run)
-        if start is not None and start <= day and _usable(run, configuration, as_of, False):
+        if start is not None and start <= day and _usable(run, configuration, as_of):
             return run
     return None
-
-
-def _historical_selection(
-    configuration: PlantConfiguration,
-    snapshot: ForecastSnapshot | None,
-    as_of: datetime,
-    target_date: date,
-    resolution_minutes: int,
-) -> tuple[CalibrationRun | None, PlantForecast | None]:
-    """Keep an output saved under the calibration selected then; never recalculate with a
-    factor fitted under another transfer model."""
-
-    def saved(selected_calibration: CalibrationRun | None) -> PlantForecast | None:
-        if snapshot is None:
-            return None
-        return PlantForecast.objects.filter(
-            configuration=configuration,
-            snapshot=snapshot,
-            calibration=selected_calibration,
-            resolution_minutes=resolution_minutes,
-            target_date=target_date,
-        ).first()
-
-    calibration = calibration_at(configuration, as_of, any_transfer=True)
-    record = saved(calibration)
-    if (
-        record is None
-        and calibration is not None
-        and not calibration_matches_transfer(calibration, configuration)
-    ):
-        return None, saved(None)
-    return calibration, record
 
 
 def forecast_daylight(
@@ -298,7 +229,7 @@ def forecast_payload(
     result["provenance"] = {
         "selection_policy": HISTORY_SELECTION_POLICY
         if snapshot.source_kind == "estimated_actuals"
-        else SELECTION_POLICY,
+        else "single-snapshot-forecast-projection-v1",
         "snapshot_id": snapshot.pk,
         "binding_id": configuration.binding_id,
         "capacity_normalization": normalization_provenance(snapshot),
@@ -322,157 +253,91 @@ def archived_forecast(
     resolution_minutes: int,
     now: datetime,
     as_of: datetime | None = None,
+    *,
+    binding_id: int | None = None,
 ) -> dict[str, object]:
-    region = plant.region
-    today = now.astimezone(ZoneInfo(region.timezone)).date()
-    if isinstance(resolution_minutes, bool) or resolution_minutes not in (30, 60):
-        raise ValidationError("Resolution must be 30 or 60 minutes.")
+    today = now.astimezone(ZoneInfo(plant.region.timezone)).date()
     if not today - timedelta(days=366) <= target_date <= today:
         raise ValidationError("date_out_of_range")
-    if as_of is not None and (as_of.utcoffset() is None or as_of > now):
-        raise ValidationError("as_of must be aware and no later than now.")
-    day_start, _ = local_day_bounds(target_date, region.timezone)
-    cutoff = min(as_of or now, day_start).astimezone(UTC)
-    configurations = PlantConfiguration.objects.select_related("binding__provider_account").filter(
-        plant=plant, created_at__lte=cutoff
+    return _issued_forecast(
+        plant, target_date, resolution_minutes, now, as_of=as_of, binding_id=binding_id
     )
-    configuration = configurations.order_by("-created_at", "-pk").first()
-    assumed = False
-    if configuration is None and as_of is None:
-        configuration = (
-            PlantConfiguration.objects.select_related("binding__provider_account")
-            .filter(plant=plant, created_at__lte=now)
-            .order_by("created_at", "pk")
-            .first()
-        )
-        assumed = configuration is not None
-    if configuration is None:
-        return {
-            "plant_id": plant.pk,
-            "date": target_date.isoformat(),
-            "timezone": region.timezone,
-            "as_of": cutoff.isoformat(),
-            "configuration_id": None,
-            "snapshot_id": None,
-            "calibration_id": None,
-            "source_kind": "forecast",
-            "freshness": "missing",
-            "unavailable_reason": "configuration_unavailable",
-            "result": None,
-            "regional_irradiance": None,
-        }
-    configured_start, _ = local_day_bounds(target_date, configuration.binding.timezone)
-    cutoff = min(cutoff, configured_start)
-    snapshot = select_snapshot(configuration, target_date, cutoff)
-    calibration, saved = (
-        (None, None)
-        if assumed
-        else _historical_selection(
-            configuration,
-            snapshot,
-            min(cutoff, configured_start - timedelta(microseconds=1)),
-            target_date,
-            resolution_minutes,
-        )
-    )
-    result: dict[str, object] | None = None
-    irradiance: dict[str, object] | None = None
-    if snapshot is not None:
-        try:
-            result = (
-                deepcopy(saved.payload)
-                if saved is not None
-                else forecast_payload(
-                    configuration, snapshot, calibration, target_date, resolution_minutes
-                )
-            )
-        except (ValueError, ArithmeticError) as exc:
-            raise ValidationError("calculation_out_of_range") from exc
-        flags = cast(list[str], result["quality_flags"])
-        flags.append("archived_forecast")
-        if assumed:
-            flags.append("historical_configuration_assumed")
-            cast(dict[str, object], result["provenance"])["configuration_created_at"] = (
-                configuration.created_at.isoformat()
-            )
-        if configuration.pk != plant.current_configuration_id:
-            flags.append("previous_configuration")
-        regional = ForecastResult.objects.get(snapshot=snapshot)
-        irradiance = {
-            key: regional.payload.get(key)
-            for key in ("energy_kwh_m2", "partial_energy_kwh_m2", "complete", "quality_flags")
-        }
-    return {
-        "plant_id": plant.pk,
-        "date": target_date.isoformat(),
-        "timezone": configuration.binding.timezone,
-        "as_of": cutoff.isoformat(),
-        "configuration_id": configuration.pk,
-        "snapshot_id": snapshot.pk if snapshot else None,
-        "calibration_id": calibration.pk if calibration else None,
-        "source_kind": "forecast",
-        "freshness": "missing"
-        if snapshot is None
-        else "fresh"
-        if configuration.pk == plant.current_configuration_id
-        else "stale",
-        "unavailable_reason": "forecast_unavailable" if snapshot is None else None,
-        "result": result,
-        "regional_irradiance": irradiance,
-    }
 
 
-def declared_forecast(
+def _issued_forecast(
     plant: Plant,
     target_date: date,
     resolution_minutes: int,
-    cutoff: datetime,
     now: datetime,
-) -> dict[str, object] | None:
-    if plant.current_configuration_id is None:
-        return None
-    configuration = (
-        PlantConfiguration.objects.select_related("binding__provider_account")
-        .filter(pk=plant.current_configuration_id, plant=plant, created_at__lte=now)
-        .first()
-    )
-    if configuration is None or not configuration_is_current(configuration):
-        return None
-    snapshot = select_snapshot(configuration, target_date, cutoff)
-    result = None
-    irradiance = None
-    if snapshot is not None:
-        try:
-            result = forecast_payload(
-                configuration, snapshot, None, target_date, resolution_minutes
-            )
-        except (ValueError, ArithmeticError) as exc:
-            raise ValidationError("calculation_out_of_range") from exc
-        cast(list[str], result["quality_flags"]).append("historical_configuration_assumed")
-        cast(dict[str, object], result["provenance"])["configuration_created_at"] = (
-            configuration.created_at.isoformat()
+    *,
+    as_of: datetime | None = None,
+    binding_id: int | None = None,
+) -> dict[str, object]:
+    from pyracast.plants.forecast_archive import forecast_cutoff, select_forecast_issuance
+
+    if isinstance(resolution_minutes, bool) or resolution_minutes not in (30, 60):
+        raise ValidationError("Resolution must be 30 or 60 minutes.")
+    if as_of is not None and (as_of.utcoffset() is None or as_of > now):
+        raise ValidationError("as_of must be aware and no later than now.")
+    cutoff = (as_of or now).astimezone(UTC)
+    issuance = select_forecast_issuance(plant, target_date, as_of=cutoff, binding_id=binding_id)
+    if issuance is None:
+        configuration = next(
+            (
+                candidate
+                for candidate in PlantConfiguration.objects.select_related("binding")
+                .filter(plant=plant, created_at__lte=cutoff)
+                .order_by("-created_at", "-pk")
+                if candidate.created_at < forecast_cutoff(target_date, candidate.binding)
+                and (binding_id is None or candidate.binding_id == binding_id)
+            ),
+            None,
         )
-        regional = ForecastResult.objects.get(snapshot=snapshot)
-        irradiance = {
-            key: regional.payload.get(key)
-            for key in ("energy_kwh_m2", "partial_energy_kwh_m2", "complete", "quality_flags")
+        return {
+            "plant_id": plant.pk,
+            "date": target_date.isoformat(),
+            "timezone": plant.region.timezone,
+            "as_of": cutoff.isoformat(),
+            "configuration_id": configuration.pk if configuration else None,
+            "snapshot_id": None,
+            "issuance_id": None,
+            "calibration_id": None,
+            "source_kind": "forecast",
+            "freshness": "missing",
+            "unavailable_reason": "forecast_unavailable"
+            if configuration is not None
+            else "configuration_unavailable",
+            "result": None,
+            "regional_irradiance": None,
+            "outage_scenario": None,
         }
-    configuration.binding.refresh_from_db()
-    configuration.binding.provider_account.refresh_from_db()
-    if not configuration_is_current(configuration):
-        return None
+    configuration, snapshot = issuance.configuration, issuance.snapshot
+    result = deepcopy(issuance.payloads[str(resolution_minutes)])
+    flags = cast(list[str], result["quality_flags"])
+    flags.append("archived_forecast")
+    if configuration.pk != plant.current_configuration_id:
+        flags.append("previous_configuration")
+    regional = saved_day_payload(snapshot, target_date)
     return {
         "plant_id": plant.pk,
         "date": target_date.isoformat(),
         "timezone": configuration.binding.timezone,
-        "as_of": cutoff.isoformat(),
+        "as_of": (as_of or min(now, issuance.cutoff_at)).astimezone(UTC).isoformat(),
         "configuration_id": configuration.pk,
-        "calibration_id": None,
+        "snapshot_id": snapshot.pk,
+        "issuance_id": issuance.pk,
+        "calibration_id": issuance.calibration_id,
         "source_kind": "forecast",
-        "freshness": "fresh" if snapshot is not None else "missing",
-        "unavailable_reason": None if snapshot is not None else "forecast_unavailable",
+        "freshness": "fresh" if configuration.pk == plant.current_configuration_id else "stale",
+        "unavailable_reason": None,
         "result": result,
-        "regional_irradiance": irradiance,
+        "regional_irradiance": {
+            key: regional.get(key)
+            for key in ("energy_kwh_m2", "partial_energy_kwh_m2", "complete", "quality_flags")
+        }
+        if regional is not None
+        else None,
+        "outage_scenario": deepcopy(issuance.outage_scenarios.get(str(resolution_minutes))),
     }
 
 
@@ -491,94 +356,6 @@ def plant_forecast(
     plant = Plant.objects.get(pk=plant_id, region=region, deleted_at__isnull=True)
     now = timezone.now()
     today = now.astimezone(ZoneInfo(region.timezone)).date()
-    if isinstance(resolution_minutes, bool) or resolution_minutes not in (30, 60):
-        raise ValidationError("Resolution must be 30 or 60 minutes.")
     if not today - timedelta(days=366) <= target_date <= today + timedelta(days=14):
         raise ValidationError("date_out_of_range")
-    day_start, _ = local_day_bounds(target_date, region.timezone)
-    if as_of is None:
-        as_of = min(now, day_start)
-    elif as_of.utcoffset() is None or as_of > now or as_of > day_start:
-        raise ValidationError("as_of must be aware and no later than now or the target day start.")
-    as_of = as_of.astimezone(UTC)
-    configuration = (
-        PlantConfiguration.objects.select_related("binding__provider_account")
-        .filter(plant=plant, created_at__lte=as_of)
-        .order_by("-created_at", "-pk")
-        .first()
-    )
-    if configuration is None:
-        return {
-            "plant_id": plant.pk,
-            "date": target_date.isoformat(),
-            "timezone": region.timezone,
-            "as_of": as_of.isoformat(),
-            "configuration_id": None,
-            "calibration_id": None,
-            "freshness": "missing",
-            "source_kind": "forecast",
-            "unavailable_reason": "configuration_unavailable",
-            "result": None,
-            "regional_irradiance": None,
-        }
-    # A historical binding may have a different timezone from the current region.
-    configured_start, _ = local_day_bounds(target_date, configuration.binding.timezone)
-    if as_of > configured_start:
-        raise ValidationError("as_of must not follow the configured local day start.")
-    snapshot = select_snapshot(configuration, target_date, as_of)
-    calibration, saved = _historical_selection(
-        configuration, snapshot, as_of, target_date, resolution_minutes
-    )
-    result: dict[str, object] | None = None
-    irradiance: dict[str, object] | None = None
-    if snapshot is not None:
-        if saved is None:
-            if not configuration_is_current(configuration):
-                raise ValidationError("configuration_changed")
-            try:
-                payload = forecast_payload(
-                    configuration, snapshot, calibration, target_date, resolution_minutes
-                )
-            except (ValueError, ArithmeticError) as exc:
-                raise ValidationError("calculation_out_of_range") from exc
-            with transaction.atomic():
-                Region.objects.select_for_update().get(pk=region.pk)
-                Plant.objects.select_for_update().get(pk=plant.pk)
-                ProviderAccount.objects.select_for_update().get(
-                    pk=configuration.binding.provider_account_id
-                )
-                configuration.binding.refresh_from_db()
-                configuration.binding.provider_account.refresh_from_db()
-                if not configuration_is_current(configuration):
-                    raise ValidationError("configuration_changed")
-                saved, _ = PlantForecast.objects.get_or_create(
-                    configuration=configuration,
-                    snapshot=snapshot,
-                    calibration=calibration,
-                    resolution_minutes=resolution_minutes,
-                    target_date=target_date,
-                    defaults={"payload": payload},
-                )
-        result = saved.payload
-        regional = ForecastResult.objects.get(snapshot=snapshot)
-        irradiance = {
-            key: regional.payload.get(key)
-            for key in ("energy_kwh_m2", "partial_energy_kwh_m2", "complete", "quality_flags")
-        }
-    return {
-        "plant_id": plant.pk,
-        "date": target_date.isoformat(),
-        "timezone": configuration.binding.timezone,
-        "as_of": as_of.isoformat(),
-        "configuration_id": configuration.pk,
-        "calibration_id": calibration.pk if calibration else None,
-        "source_kind": "forecast",
-        "freshness": "missing"
-        if snapshot is None
-        else "fresh"
-        if configuration_is_current(configuration)
-        else "stale",
-        "unavailable_reason": "forecast_unavailable" if snapshot is None else None,
-        "result": result,
-        "regional_irradiance": irradiance,
-    }
+    return _issued_forecast(plant, target_date, resolution_minutes, now, as_of=as_of)

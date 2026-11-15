@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import close_old_connections, connection
+from django.db import close_old_connections, connection, transaction
 from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant
@@ -96,14 +96,41 @@ def snapshot_for(
     )
 
 
-def publish_snapshot(snapshot: ForecastSnapshot) -> ForecastSnapshot:
+def publish_snapshot(
+    snapshot: ForecastSnapshot, *, published_at: datetime | None = None
+) -> ForecastSnapshot:
+    from pyracast.calculation import calculate
+    from pyracast.forecasts.projections import prepare_daily_payloads
+    from pyracast.forecasts.sources import snapshot_data
+    from pyracast.plants.forecast_archive import (
+        prepare_forecast_issuances,
+        save_forecast_issuances,
+    )
+
     snapshot.coverage_start = datetime.fromisoformat(snapshot.normalized_intervals[0]["start"])
     snapshot.coverage_end = datetime.fromisoformat(snapshot.normalized_intervals[-1]["end"])
-    snapshot.available_at = snapshot.collected_at
+    published_at = published_at or snapshot.collected_at
+    snapshot.available_at = published_at
     snapshot.save()
-    snapshot.job.status = "succeeded"
-    snapshot.job.save(update_fields=["status"])
-    ForecastResult.objects.create(snapshot=snapshot, payload={}, published_at=snapshot.collected_at)
+    prepared = prepare_forecast_issuances(snapshot)
+    data = snapshot_data(snapshot)
+    payload = calculate(snapshot.binding, snapshot.job.target_date, data)
+    daily_payloads = prepare_daily_payloads(
+        snapshot.binding, snapshot.job.target_date, data, calculate, payload
+    )
+    with transaction.atomic():
+        plant = (
+            Plant.objects.select_for_update().filter(region_id=snapshot.binding.region_id).first()
+        )
+        snapshot.job.status = "succeeded"
+        snapshot.job.save(update_fields=["status"])
+        ForecastResult.objects.create(
+            snapshot=snapshot,
+            payload=payload,
+            daily_payloads=daily_payloads,
+            published_at=published_at,
+        )
+        save_forecast_issuances(prepared, snapshot, published_at, plant=plant)
     return snapshot
 
 

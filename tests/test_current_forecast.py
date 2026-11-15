@@ -13,7 +13,7 @@ from pyracast.forecasts.models import ForecastResult, RequestAttempt
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants import current_forecast, forecasting
 from pyracast.plants.history import plant_outlook
-from pyracast.plants.models import Plant, PlantConfiguration, PlantForecast
+from pyracast.plants.models import ForecastIssuance, Plant, PlantConfiguration, PlantForecast
 from pyracast.plants.operations import activate_calibration, revise_plant
 from pyracast.regions.models import Region
 from tests.test_domain import NOW
@@ -50,10 +50,14 @@ def test_daily_acquisitions_refresh_live_outlook_and_keep_day_ahead_replay(
         *scope, target_date=DAY, resolution_minutes=60, source=source, as_of=acquired
     )
     archived_payload = cast(dict[str, Any], archived["result"])
-    assert archived_payload["provenance"]["snapshot_id"] == snapshots[0].pk
-    assert archived_payload["provenance"]["selection_policy"] == "first-available-day-ahead-v1"
-    assert archived_payload["energy_mwh"] == pytest.approx(312)
-    assert PlantForecast.objects.count() == 1
+    assert archived_payload["provenance"]["snapshot_id"] == snapshots[-1].pk
+    assert (
+        archived_payload["provenance"]["selection_policy"]
+        == "latest-published-pre-daylight-issuance-v1"
+    )
+    assert archived_payload["energy_mwh"] == pytest.approx(936)
+    assert not PlantForecast.objects.exists()
+    assert ForecastIssuance.objects.count() == 3
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=2))
     past = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, source=source)
     if source == "auto":
@@ -64,7 +68,7 @@ def test_daily_acquisitions_refresh_live_outlook_and_keep_day_ahead_replay(
         assert "forecast_fallback" in past_payload["quality_flags"]
     else:
         assert past["result"] == archived_payload
-    assert PlantForecast.objects.get().payload == archived_payload
+    assert not PlantForecast.objects.exists()
     assert RequestAttempt.objects.count() == requests
 
 

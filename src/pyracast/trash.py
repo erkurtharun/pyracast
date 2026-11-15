@@ -25,6 +25,7 @@ from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
+    ForecastIssuance,
     Plant,
     PlantConfiguration,
     PlantEvent,
@@ -186,6 +187,7 @@ def _purge_plant(plant: Plant) -> None:
     IncidentRevision.objects.filter(incident__plant=plant).delete()
     PlantIncident.objects.filter(plant=plant).delete()
     PlantForecast.objects.filter(configuration__plant=plant).delete()
+    ForecastIssuance.objects.filter(plant=plant).delete()
     CalibrationRun.objects.filter(plant=plant).update(comparison_activation=None)
     CalibrationActivation.objects.filter(plant=plant).delete()
     CalibrationRun.objects.filter(plant=plant).delete()

@@ -511,38 +511,46 @@ daylight overlap. The journal hides night slots but retains original saved readi
 
 ## Archived forecast evaluation
 
-The live current/future outlook uses the latest eligible published forecast and
-current configuration/calibration. It can change at each collection time and is
-not written over a historical forecast. The archived evaluation below retains
-the separate day-ahead information cutoff; live intraday updates do not enter it.
+The live current/future outlook can change at every collection time. Archived
+forecast evaluation instead scores the immutable electrical issuance saved before
+that target day's first astronomical daylight. Its selection policy is
+`latest-published-pre-daylight-issuance-v1`, shared with the archive screen.
+Acquisition and publication must both precede that cutoff; a known provider issue
+time must not follow acquisition. A pre-dawn same-day collection can replace the
+previous evening's forecast. Daytime forecasts and estimated actuals cannot.
+Polar day, polar night and midnight-crossing daylight use local midnight.
+The saved forecast horizon follows collection: its local day and the following
+two days. Intervals beyond that configured horizon are not archived.
 
-The plant performance endpoint replays archived day-ahead forecast inputs against
-meter energy for 1–90 completed local days. It uses only the current configuration's
-observations. Policy `latest-published-before-local-cutoff-v1` selects the newest
-successfully collected forecast acquired on the preceding local day and published
-by the selection cutoff. By default the cutoff is immediately before target-day
-start. Optional `issuance_cutoff` is an offset-free local time on the preceding
-day; ambiguous or nonexistent local times are rejected. Acquisition, publication
-and any known provider issue time must all be at or before that cutoff. The current
-configuration must already exist then, and only calibration activated and completed
-by that same cutoff is eligible. Never fall back to estimated actuals or a
-retrospectively declared configuration.
+The performance endpoint evaluates 1?90 completed local days. Optional
+`issuance_cutoff` is an offset-free local time on the preceding day and selects
+only issuances available by that earlier time; ambiguous or nonexistent local
+times are rejected. The latest eligible acquisition wins even when partial.
+Missing native intervals remain missing; no fallback invents complete coverage.
 
-Mark this as `historical_input_replay`: it does not prove that an electrical output
-was actually published at that historical time. Compare the selected historical
-factor and factor 1 on the same complete, valid days. With `daylight_only=true`,
-require complete daylight coverage and report `metric_scope: daylight_intervals`;
-this is the frontend default. The API's full-day mode retains 24-hour coverage and
-metrics. Both modes preserve whole meter boundary intervals. Keep valid zero-production
-and zero-source days in evaluation, including their errors. Reported incidents do
-not remove otherwise valid production from archived forecast scoring; explicit
-invalid/outage-quality readings remain excluded. Do not infer outages from zero
-alone. Source-positive MAE is null when no such intervals exist.
-Return daily measured/predicted/baseline MWh, signed error, snapshot and calibration
-identities, selection cutoffs, excluded-day reasons and aggregate MAE/bias. Return
-requested, matched, missing and excluded day counts plus scored interval/hour
-coverage. Missing days cannot become zero errors. This diagnostic does not train
-or activate a model and does not produce
+Mark this as `archived_published_forecast`. Use the issuance's frozen calibrated
+and factor-1 native power vectors, including the original clipping, without
+applying today's transfer model or calibration again. Select measurements under
+that issuance's configuration. Exclude a day as `configuration_not_comparable`
+when its measurement basis or timezone differs from the requested comparison;
+never aggregate incompatible quantities. Legacy raw snapshots and read-time
+caches do not establish that an electrical output was published then and are not
+promoted into issuances retrospectively.
+
+With `daylight_only=true`, require complete daylight coverage and report
+`metric_scope: daylight_intervals`; this is the frontend default. The API's
+full-day mode retains full local-day coverage and metrics. Both modes preserve
+whole meter boundary intervals. Keep valid zero-production and zero-source days
+in evaluation, including their errors. Reported incidents do not remove otherwise
+valid production from archived forecast scoring; explicit invalid/outage-quality
+readings remain excluded. Do not infer outages from zero alone. Source-positive
+MAE is null when no such intervals exist.
+
+Return daily measured/predicted/baseline MWh, signed error, issuance, snapshot,
+configuration, calibration and model identities, selection cutoffs, excluded-day
+reasons and aggregate MAE/bias. Return requested, matched, missing and excluded
+day counts plus scored interval/hour coverage. Missing days cannot become zero
+errors. This diagnostic does not train or activate a model and does not produce
 confidence intervals from a short or selectively observed history.
 
 The separate `historical_model` comparison uses saved estimated actuals available

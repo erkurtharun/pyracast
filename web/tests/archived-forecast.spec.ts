@@ -39,19 +39,19 @@ test("plant archive requests and displays the original forecast", async ({
         page.getByRole("option", { name: "Forecast outlook" }),
     ).toHaveAttribute("value", "forecast");
     await expect(
-        page.getByRole("option", { name: "Archived day-ahead forecast" }),
+        page.getByRole("option", { name: "Archived forecast" }),
     ).toHaveAttribute("value", "archived_forecast");
     await expect(
-        page.getByText("Archived forecast", { exact: true }),
+        page.locator(".tag").filter({ hasText: /^Archived forecast$/ }),
     ).toHaveCount(0);
     await page.getByLabel("Data source").selectOption("archived_forecast");
     await expect.poll(() => sources.at(-1)).toBe("archived_forecast");
     await expect(
-        page.getByText("Archived forecast", { exact: true }),
+        page.locator(".tag").filter({ hasText: /^Archived forecast$/ }),
     ).toBeVisible();
     await expect(
         page.getByText(
-            "Saved prior-day forecast under its original configuration.",
+            "Last forecast saved before daylight, with its original calibration.",
         ),
     ).toBeVisible();
     await expect(
