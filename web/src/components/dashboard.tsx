@@ -408,7 +408,9 @@ function Workspace({
                                     </ActionForm>
                                 </section>
                                 <AccountSecurity
+                                    key={`${session.user!.id}:${session.user!.mfa_required}`}
                                     token={session.csrf_token}
+                                    mfaRequired={session.user!.mfa_required}
                                     onSession={onSession}
                                 />
                             </>

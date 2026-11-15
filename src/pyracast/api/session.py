@@ -27,10 +27,14 @@ class SessionUserOutput(serializers.Serializer[Any]):
     username = serializers.CharField()
     email = serializers.EmailField(allow_blank=True)
     can_admin = serializers.SerializerMethodField()
+    mfa_required = serializers.SerializerMethodField()
     language_preference = serializers.SerializerMethodField()
 
     def get_language_preference(self, user: User) -> str | None:
         return user_language(user)
+
+    def get_mfa_required(self, user: User) -> bool:
+        return bool(user.is_staff or user.is_superuser)
 
     def get_can_admin(self, user: User) -> bool:
         return bool(

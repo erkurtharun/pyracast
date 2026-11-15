@@ -1529,6 +1529,7 @@ export interface components {
             username: string;
             email: string;
             readonly can_admin: boolean;
+            readonly mfa_required: boolean;
             readonly language_preference: string | null;
         };
         SiteInput: {

@@ -37,3 +37,6 @@ msgstr "Bu çalışma alanı adı zaten kullanılıyor."
 
 msgid "A workspace name is required."
 msgstr "Çalışma alanı adı gereklidir."
+
+msgid "Verify an authenticator before managing two-factor authentication."
+msgstr "İki adımlı doğrulamayı yönetmeden önce doğrulayıcı uygulamanızla kimliğinizi doğrulayın."

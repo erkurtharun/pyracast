@@ -7,7 +7,7 @@ from rest_framework.permissions import IsAuthenticated
 
 from pyracast import health
 from pyracast.accounts import headless
-from pyracast.accounts.mfa_views import ManageRecoveryCodesView
+from pyracast.accounts.mfa_views import ManageRecoveryCodesView, ManageTOTPView
 from pyracast.accounts.signup import CompanySignupView
 from pyracast.admin import site
 from pyracast.api.session import SessionLanguageView, SessionView
@@ -43,6 +43,10 @@ urlpatterns = [
     path(
         "api/auth/browser/v1/auth/email/verify",
         require_POST(VerifyEmailView.as_api_view(client=Client.BROWSER)),
+    ),
+    path(
+        "api/auth/browser/v1/account/authenticators/totp",
+        ManageTOTPView.as_api_view(client=Client.BROWSER),
     ),
     path(
         "api/auth/browser/v1/account/authenticators/recovery-codes",

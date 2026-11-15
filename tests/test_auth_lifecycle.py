@@ -444,12 +444,30 @@ def test_totp_and_recovery_codes_gate_login_and_cannot_be_replayed(
     now = time.time()
     # Reauthentication and CSRF requests can cross the 30-second TOTP boundary.
     monkeypatch.setattr(totp_auth, "time", SimpleNamespace(time=lambda: now))
+    assert (
+        submit(
+            client,
+            "account/authenticators/totp",
+            {"code": totp_code(setup.json()["meta"]["secret"], now)},
+        ).status_code
+        == 401
+    )
     assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
     assert (
         submit(
             client,
             "account/authenticators/totp",
             {"code": totp_code(setup.json()["meta"]["secret"], now)},
+        ).status_code
+        == 200
+    )
+    assert client.get(AUTH + "account/authenticators/recovery-codes").status_code == 401
+    monkeypatch.setattr(totp_auth, "time", SimpleNamespace(time=lambda: now + 31))
+    assert (
+        submit(
+            client,
+            "auth/2fa/reauthenticate",
+            {"code": totp_code(setup.json()["meta"]["secret"], now + 31)},
         ).status_code
         == 200
     )
@@ -466,12 +484,12 @@ def test_totp_and_recovery_codes_gate_login_and_cannot_be_replayed(
     assert pending.status_code == 401
     assert any(flow["id"] == "mfa_authenticate" for flow in pending.json()["data"]["flows"])
     assert client.get("/api/tenants/").status_code == 403
-    monkeypatch.setattr(totp_auth, "time", SimpleNamespace(time=lambda: now + 31))
+    monkeypatch.setattr(totp_auth, "time", SimpleNamespace(time=lambda: now + 62))
     assert (
         submit(
             client,
             "auth/2fa/authenticate",
-            {"code": totp_code(setup.json()["meta"]["secret"], now + 31)},
+            {"code": totp_code(setup.json()["meta"]["secret"], now + 62)},
         ).status_code
         == 200
     )
@@ -484,7 +502,7 @@ def test_totp_and_recovery_codes_gate_login_and_cannot_be_replayed(
                 submit(
                     client,
                     "auth/2fa/authenticate",
-                    {"code": totp_code(setup.json()["meta"]["secret"], now + 31)},
+                    {"code": totp_code(setup.json()["meta"]["secret"], now + 62)},
                 ).status_code
                 == 400
             )

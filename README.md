@@ -124,10 +124,12 @@ uv run --locked pyracast provision_admin_mfa --username YOUR_ADMIN --email admin
 uv run --locked pyracast fixture_demo --username YOUR_ADMIN
 ```
 
-Transfer the private enrollment URI to the administrator's authenticator securely;
-do not copy it into logs or tickets. Provisioning refuses to replace an existing
-factor. Administrators verify email, sign in with password/TOTP, then confirm MFA
-and save recovery codes in **Account security**.
+Scan the private terminal QR code with the administrator's authenticator; use a
+Unicode terminal wide enough to show the complete code without wrapping. The
+enrollment URI remains available for manual setup if the console cannot display
+the code. Keep both out of logs and tickets. Provisioning refuses to replace an
+existing factor. Administrators verify email, sign in with password/TOTP, then
+confirm MFA and save recovery codes in **Account settings**.
 
 Sign in at `http://127.0.0.1:3000/`. Administrators open `/admin/`; customers open
 their plant portfolio. The synthetic demo processes its durable job directly,

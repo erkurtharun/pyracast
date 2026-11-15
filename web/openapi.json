@@ -5653,6 +5653,10 @@
                         "type": "boolean",
                         "readOnly": true
                     },
+                    "mfa_required": {
+                        "type": "boolean",
+                        "readOnly": true
+                    },
                     "language_preference": {
                         "type": "string",
                         "nullable": true,
@@ -5664,6 +5668,7 @@
                     "email",
                     "id",
                     "language_preference",
+                    "mfa_required",
                     "username"
                 ]
             },
@@ -5964,7 +5969,7 @@
             "cookieAuth": {
                 "type": "apiKey",
                 "in": "cookie",
-                "name": "__Host-pyracast-sessionid"
+                "name": "sessionid"
             }
         }
     }

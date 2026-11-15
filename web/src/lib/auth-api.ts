@@ -1,22 +1,45 @@
 import { ApiError } from "./api";
 import { browserErrors } from "@/i18n/browser";
 
-export type AuthResult = {
+export class AuthResponseError extends ApiError {
+    constructor(
+        message: string,
+        readonly status: number,
+        fields: Record<string, string> = {},
+    ) {
+        super(message, fields);
+    }
+}
+
+export type AuthData = {
+    flows?: { id: string; is_pending?: boolean }[];
+    unused_codes?: string[];
+    unused_code_count?: number;
+    total_code_count?: number;
+    [key: string]: unknown;
+};
+
+export type AuthenticatorRecord = {
+    type: string;
+    unused_code_count?: number;
+    total_code_count?: number;
+    created_at?: number;
+    last_used_at?: number | null;
+};
+
+export type AuthResult<TData = AuthData> = {
     status: number;
-    data?: {
-        flows?: { id: string; is_pending?: boolean }[];
-        [key: string]: unknown;
-    };
+    data?: TData;
     meta?: { is_authenticated?: boolean; secret?: string; totp_url?: string };
     errors?: { message: string; param?: string; code?: string }[];
 };
 
-export async function authRequest(
+export async function authRequest<TData = AuthData>(
     path: string,
     method: string,
     token: string,
     body?: unknown,
-): Promise<AuthResult> {
+): Promise<AuthResult<TData>> {
     const t = browserErrors();
     const response = await fetch(`/api/auth/browser/v1/${path}`, {
         method,
@@ -32,21 +55,27 @@ export async function authRequest(
     });
     const data: unknown = await response.json().catch(() => null);
     if (!data || typeof data !== "object" || Array.isArray(data))
-        throw new ApiError(
+        throw new AuthResponseError(
             response.ok
                 ? t("invalidResponse")
                 : t("request", { status: response.status }),
+            response.status,
         );
-    const result = data as AuthResult;
+    const result = data as AuthResult<TData>;
     if (
         !response.ok &&
         response.status !== 401 &&
-        !(response.status === 404 && path === "account/authenticators/totp")
+        !(
+            response.status === 404 &&
+            method === "GET" &&
+            path === "account/authenticators/totp"
+        )
     ) {
         const errors = result.errors ?? [];
-        throw new ApiError(
+        throw new AuthResponseError(
             errors.map((error) => error.message).join(" ") ||
                 t("request", { status: response.status }),
+            response.status,
             Object.fromEntries(
                 errors
                     .filter((error) => error.param)

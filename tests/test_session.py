@@ -59,6 +59,7 @@ def test_session_login_logout_and_csrf_rotation() -> None:
         "username": user.username,
         "email": user.email,
         "can_admin": False,
+        "mfa_required": False,
         "language_preference": None,
     }
     assert (
@@ -171,3 +172,19 @@ def test_session_administration_access_tracks_live_role_and_mfa() -> None:
     user.save(update_fields=["is_superuser"])
     Authenticator.objects.filter(user=user).delete()
     assert client.get("/api/session/").json()["user"]["can_admin"] is False
+
+
+@pytest.mark.parametrize(
+    ("staff", "superuser"), [(False, False), (True, False), (False, True), (True, True)]
+)
+def test_session_mfa_requirement_tracks_privileged_roles(staff: bool, superuser: bool) -> None:
+    user = member()
+    user.is_staff, user.is_superuser = staff, superuser
+    user.save(update_fields=["is_staff", "is_superuser"])
+    client = Client()
+    client.force_login(user)
+    assert client.get("/api/session/").json()["user"]["mfa_required"] is (staff or superuser)
+    response = client.patch(
+        "/api/session/", {"mfa_required": False}, content_type="application/json"
+    )
+    assert response.status_code == 405

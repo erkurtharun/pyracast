@@ -438,9 +438,12 @@ Local development may explicitly select Django's console backend with
 `PYRACAST_EMAIL_BACKEND=console` and `PYRACAST_DEBUG=1`; messages, including usable
 verification codes, go to private local process logs. Console mail in production or
 an unknown backend stops startup. Email replacements require reauthentication
-and verification; password changes invalidate other sessions. Administrator recovery
-code access and regeneration require explicit MFA reauthentication within five minutes,
-bound to a still-enrolled factor; password reauthentication is insufficient.
+and verification; password changes invalidate other sessions. Customers can optionally
+enable TOTP from account settings. Enrollment renders the server-issued setup URI as a
+local QR code with a manual-key fallback. The browser keeps secrets only in component memory.
+Removing TOTP or accessing and regenerating recovery codes requires explicit MFA
+reauthentication within five minutes, bound to a still-enrolled factor; password
+reauthentication is insufficient. Platform administrators cannot remove TOTP.
 
 Requests sharing a valid session cookie serialize through a PostgreSQL advisory
 lock around session loading and response saving. This prevents concurrent code

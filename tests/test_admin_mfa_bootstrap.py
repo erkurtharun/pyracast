@@ -1,8 +1,10 @@
 import re
 from io import StringIO
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+import segno
 from allauth.account.internal.flows.login import record_authentication
 from allauth.account.models import EmailAddress
 from allauth.mfa.models import Authenticator
@@ -82,15 +84,41 @@ def test_every_platform_route_rejects_a_privileged_session_without_mfa_evidence(
 def test_trusted_command_provisions_encrypted_factor_and_never_replaces_it() -> None:
     user = administrator()
     output = StringIO()
-    call_command("provision_admin_mfa", username=user.username, stdout=output)
+    with patch(
+        "pyracast.accounts.management.commands.provision_admin_mfa.segno.make_qr",
+        wraps=segno.make_qr,
+    ) as encode:
+        call_command("provision_admin_mfa", username=user.username, stdout=output)
     uri = output.getvalue().splitlines()[-1]
+    encode.assert_called_once_with(uri)
+    assert "Scan this private QR code" in output.getvalue()
+    assert any(block in output.getvalue() for block in "\u2580\u2584\u2588")
+    assert "\x1b" not in output.getvalue()
     secret = parse_qs(urlsplit(uri).query)["secret"][0]
     authenticator = Authenticator.objects.get(user=user, type="totp")
     assert secret not in authenticator.data["secret"]
     assert MFAAdapter().decrypt(authenticator.data["secret"]) == secret
+    rejected_output = StringIO()
     with pytest.raises(CommandError, match="never replaces"):
-        call_command("provision_admin_mfa", username=user.username, stdout=StringIO())
+        call_command("provision_admin_mfa", username=user.username, stdout=rejected_output)
+    assert rejected_output.getvalue() == ""
     assert Authenticator.objects.filter(user=user).count() == 1
+
+
+def test_provisioning_retains_uri_fallback_when_console_cannot_encode_qr() -> None:
+    class AsciiConsole(StringIO):
+        def write(self, value: str) -> int:
+            value.encode("ascii")
+            return super().write(value)
+
+    user = administrator()
+    output = AsciiConsole()
+    call_command("provision_admin_mfa", username=user.username, stdout=output)
+    assert "This console cannot display the QR code" in output.getvalue()
+    uri = output.getvalue().splitlines()[-1]
+    secret = parse_qs(urlsplit(uri).query)["secret"][0]
+    authenticator = Authenticator.objects.get(user=user, type="totp")
+    assert MFAAdapter().decrypt(authenticator.data["secret"]) == secret
 
 
 @pytest.mark.parametrize("kind", ["missing", "customer", "inactive"])

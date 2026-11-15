@@ -1,50 +1,5 @@
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./support/test";
 import { mockApi } from "./support/workspace";
-
-test("account security enables TOTP and displays recovery codes only on request", async ({
-    page,
-}) => {
-    await mockApi(page);
-    await page.route(
-        "**/api/auth/browser/v1/account/authenticators/totp",
-        async (route) => {
-            expect(route.request().headers()["x-csrftoken"]).toBe(
-                "signed-token",
-            );
-            if (route.request().method() === "GET") {
-                await route.fulfill({
-                    status: 404,
-                    json: { status: 404, meta: { secret: "TESTSECRET" } },
-                });
-            } else {
-                expect(route.request().postDataJSON()).toEqual({
-                    code: "123456",
-                });
-                await route.fulfill({ json: { status: 200 } });
-            }
-        },
-    );
-    await page.route(
-        "**/api/auth/browser/v1/account/authenticators/recovery-codes",
-        (route) =>
-            route.fulfill({
-                json: {
-                    status: 200,
-                    data: { unused_codes: ["code-one", "code-two"] },
-                },
-            }),
-    );
-    await page.goto("/");
-    await page.getByRole("button", { name: "Account settings" }).click();
-    await expect(page.getByText("code-one")).not.toBeVisible();
-    await page.getByRole("button", { name: "Set up authenticator" }).click();
-    await expect(page.getByText("TESTSECRET")).toBeVisible();
-    await page.getByLabel("Authenticator code", { exact: true }).fill("123456");
-    await page.getByRole("button", { name: "Activate authenticator" }).click();
-    await expect(page.getByText("TESTSECRET")).not.toBeVisible();
-    await page.getByRole("button", { name: "Show recovery codes" }).click();
-    await expect(page.getByText("code-one")).toBeVisible();
-});
 
 test("an expired account session returns to sign in instead of asking for reauthentication", async ({
     page,
@@ -71,7 +26,7 @@ test("an expired account session returns to sign in instead of asking for reauth
             });
         },
     );
-    await page.goto("/");
+    await page.goto("/?workspace=customer");
     await page.getByRole("button", { name: "Account settings" }).click();
     await page.getByRole("button", { name: "Set up authenticator" }).click();
     await expect(
@@ -108,7 +63,7 @@ test("email confirmation requiring reauthentication does not report success", as
 test("administrator recovery codes request a fresh authenticator confirmation", async ({
     page,
 }) => {
-    await mockApi(page);
+    await mockApi(page, { admin: true });
     await page.route(
         "**/api/auth/browser/v1/account/authenticators/recovery-codes",
         (route) =>
@@ -127,13 +82,11 @@ test("administrator recovery codes request a fresh authenticator confirmation", 
                 },
             }),
     );
-    await page.goto("/");
+    await page.goto("/?workspace=customer");
     await page.getByRole("button", { name: "Account settings" }).click();
     await page.getByRole("button", { name: "Show recovery codes" }).click();
     await expect(
-        page.getByText(
-            "Verify an authenticator before managing administrator recovery codes.",
-        ),
+        page.getByRole("heading", { name: "Confirm with your authenticator" }),
     ).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Confirm authenticator" }),

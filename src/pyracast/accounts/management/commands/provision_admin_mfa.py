@@ -1,6 +1,8 @@
+from io import StringIO
 from typing import Any
 from urllib.parse import quote, urlencode
 
+import segno
 from allauth.account.models import EmailAddress
 from allauth.mfa.models import Authenticator
 from allauth.mfa.totp.internal.auth import generate_totp_secret
@@ -70,7 +72,16 @@ class Command(BaseCommand):
         record_security_event("admin_mfa_provisioned", user=user)
         label = quote(f"Pyracast:{user.email or user.username}", safe="")
         parameters = urlencode({"secret": secret, "issuer": "Pyracast", "period": 30, "digits": 6})
+        uri = f"otpauth://totp/{label}?{parameters}"
         self.stdout.write(
-            "Keep this enrollment URI private and transfer it to the administrator securely:"
+            "Scan this private QR code with the administrator's authenticator. "
+            "Keep the QR code and enrollment URI out of logs and tickets."
         )
-        self.stdout.write(f"otpauth://totp/{label}?{parameters}")
+        qr = StringIO()
+        segno.make_qr(uri).terminal(out=qr, compact=True)
+        try:
+            self.stdout.write(qr.getvalue())
+        except UnicodeEncodeError:
+            self.stdout.write("This console cannot display the QR code; use the enrollment URI.")
+        self.stdout.write("Private enrollment URI (manual fallback):")
+        self.stdout.write(uri)

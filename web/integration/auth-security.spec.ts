@@ -46,20 +46,45 @@ test("verified email and a recovery code protect a real browser session", async 
         page.getByRole("heading", { name: "Plants", exact: true }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Account settings" }).click();
-    await page
+    const identity = page.locator(".identity-details");
+    await identity.locator("summary").click();
+    await identity
         .getByLabel("Current password", { exact: true })
-        .first()
         .fill(password);
-    await page.getByRole("button", { name: "Confirm password" }).click();
+    await identity.getByRole("button", { name: "Confirm password" }).click();
     await expect(page.getByText("Identity confirmed.")).toBeVisible();
+    await identity.locator("summary").click();
+    const twoFactor = page.locator("section").filter({
+        has: page.getByRole("heading", {
+            name: "Two-factor authentication",
+            exact: true,
+        }),
+    });
     await page.getByRole("button", { name: "Set up authenticator" }).click();
-    const setupKey = page.getByText("Setup key:").locator("code");
+    await page.getByText("Can't scan? Use setup key", { exact: true }).click();
+    const setupKey = page.locator(".mfa-secret-code");
     await expect(setupKey).toBeVisible();
-    const code = totp(await setupKey.innerText());
+    const setupSecret = await setupKey.innerText();
+    const enrollmentStep = Math.floor(Date.now() / 30_000);
+    const code = totp(setupSecret);
     await page.getByLabel("Authenticator code", { exact: true }).fill(code);
     await page.getByRole("button", { name: "Activate authenticator" }).click();
     await expect(setupKey).not.toBeVisible();
-    await page.getByRole("button", { name: "Show recovery codes" }).click();
+    await expect(
+        twoFactor.getByRole("button", { name: "Confirm authenticator" }),
+    ).toBeVisible();
+    await expect
+        .poll(() => Math.floor(Date.now() / 30_000), {
+            timeout: 31_000,
+            intervals: [100, 250, 500],
+        })
+        .toBeGreaterThan(enrollmentStep);
+    await twoFactor
+        .getByLabel("Authenticator or recovery code")
+        .fill(totp(setupSecret));
+    await twoFactor
+        .getByRole("button", { name: "Confirm authenticator" })
+        .click();
     const firstCode = page.locator("main li code").first();
     await expect(firstCode).toBeVisible();
     const recoveryCode = await firstCode.innerText();
@@ -85,9 +110,14 @@ test("verified email and a recovery code protect a real browser session", async 
     ).toBeVisible();
     await page.getByRole("button", { name: "Account settings" }).click();
     const newPassword = `${password}-new`;
-    await page
+    const passwordSettings = page.locator("section").filter({
+        has: page.getByRole("heading", {
+            name: "Change password",
+            exact: true,
+        }),
+    });
+    await passwordSettings
         .getByLabel("Current password", { exact: true })
-        .last()
         .fill(password);
     await page.getByLabel("New password", { exact: true }).fill(newPassword);
     await page.getByRole("button", { name: "Change password" }).click();

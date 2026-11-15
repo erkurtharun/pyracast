@@ -30,6 +30,7 @@ export const user = {
     username: "solar.user",
     email: "solar@example.test",
     can_admin: false,
+    mfa_required: false,
 };
 export const paged = (results: unknown[]) => ({
     results,
@@ -70,9 +71,13 @@ export async function mockApi(
             );
             signedIn = false;
             data = { status: 401, meta: { is_authenticated: false } };
+        } else if (path === "/api/auth/browser/v1/account/authenticators") {
+            data = { status: 200, data: admin ? [{ type: "totp" }] : [] };
         } else if (path === "/api/session/") {
             data = {
-                user: signedIn ? { ...user, can_admin: admin } : null,
+                user: signedIn
+                    ? { ...user, can_admin: admin, mfa_required: admin }
+                    : null,
                 csrf_token: signedIn ? "signed-token" : "anonymous-token",
             };
         } else if (path === "/api/tenants/")
