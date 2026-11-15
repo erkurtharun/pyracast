@@ -120,6 +120,10 @@ def test_mixed_languages_share_one_frozen_source_and_retries_keep_original_conte
         [cell.value for row in sheet for cell in row if isinstance(cell.value, int | float)]
         for sheet in sheets
     ]
+    for sheet in sheets:
+        for day in (10, 11):
+            row = next(cell.row for cell in sheet["A"] if cell.value == datetime(2026, 11, day))
+            assert isinstance(sheet.cell(row, 3).value, int | float)
     assert numeric_values[0]
     assert numeric_values[0] == numeric_values[1] == numeric_values[2]
     assert "3.299 kWh/m²" in english["body"]
@@ -175,8 +179,9 @@ def test_missing_saved_data_is_reported_in_the_pinned_language_without_inventing
     assert "0.000 kWh/m²" not in messages[0].body
     assert "0,000 kWh/m²" not in messages[0].body
     sheet = attached_sheet(messages[0])
-    assert sheet["B5"].value is None
-    assert sheet["B6"].value is None
+    for day in (10, 11):
+        row = next(cell.row for cell in sheet["A"] if cell.value == datetime(2026, 11, day))
+        assert sheet.cell(row, 3).value is None
     assert not any(isinstance(cell.value, int | float) for row in sheet for cell in row)
     assert RequestAttempt.objects.count() == requests
 
@@ -388,7 +393,7 @@ def test_mail_rendering_restores_the_caller_language_and_preserves_typed_workboo
     assert sheet.title == "Tahmin"
     assert sheet["A5"].value == datetime(2026, 11, 10)
     assert sheet["A5"].number_format == "dd.mm.yyyy"
-    assert isinstance(sheet["B5"].value, float)
+    assert isinstance(sheet["C5"].value, float)
 
 
 def test_delivery_language_is_database_constrained() -> None:
@@ -414,7 +419,7 @@ def test_saved_forecast_updated_date_and_stale_warning_are_localized(days: int) 
     message = build_message(delivery)
     assert "Tahmin verisi 24 saatten eski." in message.body
     assert f"{9 - days} Kas 2026 16:00" in message.body
-    assert attached_sheet(message)["B2"].value == (
+    assert attached_sheet(message)["A2"].value == (
         snapshot.collected_at.astimezone(ZoneInfo(system.region.timezone)).replace(tzinfo=None)
     )
 

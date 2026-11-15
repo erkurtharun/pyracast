@@ -146,7 +146,7 @@ def test_saved_forecast_email_hides_weather_provider_in_all_alternatives() -> No
                 assert "solcast" not in content
                 assert "private-account" not in content
                 assert "test-only-solcast-key" not in content
-    assert attached_sheet(message)["B4"].value == "Forecast (kWh/m²)"
+    assert attached_sheet(message)["C4"].value == "Forecast (kWh/m²)"
     account.refresh_from_db()
     assert account.provider == "solcast"
     assert account.external_account_id == "private-account"
