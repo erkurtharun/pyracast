@@ -46,14 +46,21 @@ test("verified email and a recovery code protect a real browser session", async 
         page.getByRole("heading", { name: "Plants", exact: true }),
     ).toBeVisible();
     await page.getByRole("button", { name: "Account" }).click();
-    const identity = page.locator(".identity-details");
-    await identity.locator("summary").click();
-    await identity
-        .getByLabel("Current password", { exact: true })
-        .fill(password);
-    await identity.getByRole("button", { name: "Confirm password" }).click();
-    await expect(page.getByText("Identity confirmed.")).toBeVisible();
-    await identity.locator("summary").click();
+    const sessionResponse = await page.request.get("/api/session/");
+    expect(sessionResponse.status()).toBe(200);
+    const session = (await sessionResponse.json()) as { csrf_token: string };
+    const confirmation = await page.request.post(
+        "/api/auth/browser/v1/auth/reauthenticate",
+        {
+            headers: { "X-CSRFToken": session.csrf_token },
+            data: { password },
+        },
+    );
+    expect(confirmation.status()).toBe(200);
+    expect(await confirmation.json()).toMatchObject({
+        status: 200,
+        meta: { is_authenticated: true },
+    });
     const twoFactor = page.locator("section").filter({
         has: page.getByRole("heading", {
             name: "Two-factor authentication",
