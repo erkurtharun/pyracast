@@ -3,11 +3,13 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 from threading import Barrier, Event, Lock
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from allauth.account.internal.flows.code_verification import AbstractCodeVerificationProcess
 from allauth.account.models import EmailAddress
+from allauth.mfa.totp.internal import auth as totp_auth
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.contrib.sessions.exceptions import SessionInterrupted
@@ -191,7 +193,9 @@ def test_ordinary_api_response_cannot_restore_stale_code_attempts(
 
 
 @override_settings(MAILERS=MAILERS)
-def test_provisioned_legacy_admin_needs_totp_after_email_code() -> None:
+def test_provisioned_legacy_admin_needs_totp_after_email_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     user = User.objects.create_superuser(username="legacy-admin", password=PASSWORD)
     call_command(
         "provision_admin_mfa",
@@ -212,9 +216,11 @@ def test_provisioned_legacy_admin_needs_totp_after_email_code() -> None:
     assert client.get("/admin/").status_code == 302
     assert client.get("/api/platform/accounts/").status_code == 403
     secret = MFAAdapter().decrypt(user.authenticator_set.get(type="totp").data["secret"])
+    verification_at = time.time()
+    monkeypatch.setattr(totp_auth, "time", SimpleNamespace(time=lambda: verification_at))
     assert (
         submit(
-            client, "auth/2fa/authenticate", {"code": totp_code(secret, time.time())}
+            client, "auth/2fa/authenticate", {"code": totp_code(secret, verification_at)}
         ).status_code
         == 200
     )
