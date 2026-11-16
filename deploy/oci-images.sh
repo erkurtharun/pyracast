@@ -5,7 +5,8 @@ mode=$1
 directory=$(cd "$2" && pwd)
 revision=$3
 [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
-skopeo=quay.io/skopeo/stable@sha256:9fdeeda2801cf93a0a15bfb2154e44a0c5a0f3650e54586165bd1b732e503702
+# Upstream immutable tags retain release digests across daily rebuilds.
+skopeo=quay.io/containers/skopeo:v1.24.1-immutable@sha256:624827441117604d93ee87fa47fe003d1649f20c12eeaa5672fd19a86df5ead3
 options=(--rm --cap-drop ALL --security-opt no-new-privileges -v "$directory:/images:ro")
 
 case "$mode" in
