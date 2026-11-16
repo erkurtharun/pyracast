@@ -2005,3 +2005,14 @@ msgid "The existing import has a different source declaration."
 msgstr ""
 "Bu dosya daha önce farklı kaynak bilgileriyle yüklenmiş. Önceki kaydı "
 "kontrol edin."
+
+msgid ""
+"Check and import an authorized historical JSON or CSV export for this plant."
+msgstr ""
+"Bu santrale ait geçmiş JSON veya CSV verilerini kontrol edip yükleyin."
+
+msgid "Historical Solcast data"
+msgstr "Geçmiş Solcast verileri"
+
+msgid "Import historical data"
+msgstr "Geçmiş verileri yükle"
