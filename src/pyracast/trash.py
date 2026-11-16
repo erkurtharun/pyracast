@@ -184,6 +184,9 @@ def _purge_epias_history(plant: Plant) -> None:
 
 
 def _purge_plant(plant: Plant) -> None:
+    from pyracast.change_requests.models import ChangeRequest
+
+    ChangeRequest.objects.filter(plant=plant).delete()
     IncidentRevision.objects.filter(incident__plant=plant).delete()
     PlantIncident.objects.filter(plant=plant).delete()
     PlantForecast.objects.filter(configuration__plant=plant).delete()

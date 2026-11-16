@@ -203,13 +203,16 @@ export function ActionForm({
     children,
     submit,
     onSubmit,
+    permitted,
 }: {
     children: ReactNode;
     submit: string;
     onSubmit: (data: FormData) => Promise<void>;
+    permitted?: boolean;
 }) {
     const t = useTranslations("Common");
     const canManage = useCanManageWorkspace();
+    const canSubmit = permitted ?? canManage;
     const [state, setState] = useState<
         | { status: "idle" | "pending" | "success" }
         | { status: "error"; message: string; fields: Record<string, string> }
@@ -222,10 +225,10 @@ export function ActionForm({
     return (
         <form
             ref={formRef}
-            className={canManage ? undefined : "readonly-form"}
+            className={canSubmit ? undefined : "readonly-form"}
             onSubmit={async (event) => {
                 event.preventDefault();
-                if (!canManage || state.status === "pending") return;
+                if (!canSubmit || state.status === "pending") return;
                 const data = new FormData(event.currentTarget);
                 setState({ status: "pending" });
                 try {
@@ -282,9 +285,9 @@ export function ActionForm({
                 </div>
             )}
             <FormErrors value={state.status === "error" ? state.fields : {}}>
-                <fieldset disabled={!canManage || state.status === "pending"}>
+                <fieldset disabled={!canSubmit || state.status === "pending"}>
                     {children}
-                    {canManage && (
+                    {canSubmit && (
                         <div className="form-footer">
                             <button className="button" type="submit">
                                 {state.status === "pending"

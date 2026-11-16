@@ -27,3 +27,12 @@ class WorkspaceWritePermission(BasePermission):
             user__is_active=True,
             role=Membership.Role.ADMIN,
         ).exists()
+
+
+class WorkspaceMemberWritePermission(BasePermission):
+    def has_permission(self, request: Request, view: APIView) -> bool:
+        if request.user.pk is None:
+            return False
+        return Membership.objects.filter(
+            tenant_id=view.kwargs.get("tenant_id"), user_id=request.user.pk, user__is_active=True
+        ).exists()

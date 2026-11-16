@@ -28,8 +28,20 @@ def test_tenant_list_includes_only_authenticated_users_memberships(is_superuser:
         "next": None,
         "previous": None,
         "results": [
-            {"id": first.pk, "name": "First", "role": "admin"},
-            {"id": second.pk, "name": "Second", "role": "viewer"},
+            {
+                "id": first.pk,
+                "name": "First",
+                "role": "admin",
+                "pending_review_count": 0,
+                "unread_outcome_count": 0,
+            },
+            {
+                "id": second.pk,
+                "name": "Second",
+                "role": "viewer",
+                "pending_review_count": None,
+                "unread_outcome_count": 0,
+            },
         ],
     }
 

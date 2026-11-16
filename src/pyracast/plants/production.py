@@ -178,6 +178,15 @@ def production_history(
             role=Membership.Role.ADMIN,
         ).exists()
     )
+    may_propose = (
+        actor is not None
+        and Membership.objects.filter(
+            user=actor,
+            user__is_active=True,
+            tenant_id=plant.region.tenant_id,
+            role=Membership.Role.VIEWER,
+        ).exists()
+    )
     days, intervals = [], []
     day = start_date
     while day <= end_date:
@@ -222,10 +231,8 @@ def production_history(
                 and not (stamp.second or stamp.microsecond)
                 for stamp in (cursor, end)
             )
-            edit_reason = (
-                "workspace_readonly"
-                if not may_edit
-                else "configuration_unavailable"
+            technical_reason = (
+                "configuration_unavailable"
                 if configuration is None
                 else "configuration_not_current"
                 if not current
@@ -240,6 +247,7 @@ def production_history(
                 if not aligned
                 else None
             )
+            edit_reason = "workspace_readonly" if not may_edit else technical_reason
             available = interval_is_covered(native, cursor, end) and end <= now
             reason = (
                 "already_recorded"
@@ -267,6 +275,11 @@ def production_history(
                     "provider_original": _provider(originals[0]) if originals else None,
                     "provider_originals": [_provider(row) for row in originals],
                     "can_edit": edit_reason is None,
+                    "can_propose": may_propose and technical_reason is None,
+                    "can_propose_revert": may_propose
+                    and technical_reason is None
+                    and exact is not None,
+                    "proposal_unavailable_reason": technical_reason,
                     "can_revert": edit_reason is None and exact is not None,
                     "edit_unavailable_reason": edit_reason,
                 }

@@ -110,6 +110,7 @@ urlpatterns = [
     path("api/session/language/", SessionLanguageView.as_view()),
     path("api/", include("pyracast.notifications.urls")),
     path("api/tenants/", TenantsView.as_view()),
+    path("api/tenants/<int:tenant_id>/change-requests/", include("pyracast.change_requests.urls")),
     path("api/tenants/<int:tenant_id>/members/", WorkspaceMembersView.as_view()),
     path("api/tenants/<int:tenant_id>/members/<int:user_id>/", WorkspaceMemberView.as_view()),
     path("api/tenants/<int:tenant_id>/invitations/", WorkspaceInvitationsView.as_view()),

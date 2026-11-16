@@ -101,3 +101,50 @@ msgstr "Parolayı sıfırla"
 
 msgid "Confirm your identity"
 msgstr "Kimliğinizi doğrulayın"
+
+msgid "A reason of 1 to 500 characters is required."
+msgstr "1 ile 500 karakter arasında bir gerekçe gereklidir."
+
+msgid "Use a new request key for changed input."
+msgstr "Değiştirilen bilgiler için yeni bir talep anahtarı kullanın."
+
+msgid "Resolve or withdraw pending requests before submitting more."
+msgstr ""
+"Yeni talep göndermeden önce bekleyen talepleri sonuçlandırın veya geri "
+"çekin."
+
+msgid "Submit 1 to 100 production intervals."
+msgstr "1 ile 100 arasında üretim aralığı gönderin."
+
+msgid "The request already has a different outcome."
+msgstr "Talep zaten farklı bir sonuçla kapatıldı."
+
+msgid "The review context changed. Refresh and review again."
+msgstr "İnceleme verileri değişti. Sayfayı yenileyip yeniden inceleyin."
+
+msgid "The incident request target is incomplete."
+msgstr "Kesinti talebinin hedef bilgileri eksik."
+
+msgid "Unknown incident request action."
+msgstr "Bilinmeyen kesinti talebi işlemi."
+
+msgid ""
+"Incident identity and expected revision are required for existing incidents."
+msgstr ""
+"Mevcut kesintiler için kesinti kimliği ve beklenen revizyon gereklidir."
+
+msgid "Unsupported incident request fields."
+msgstr "Desteklenmeyen kesinti talebi alanları."
+
+msgid "Request numbers must be finite."
+msgstr "Talepteki sayılar sonlu olmalıdır."
+
+msgid "Incident values are required for create and update."
+msgstr "Oluşturma ve güncelleme için kesinti bilgileri gereklidir."
+
+msgid "The plant configuration changed. Submit a new request."
+msgstr "Santral yapılandırması değişti. Yeni bir talep gönderin."
+
+msgid "Workspace members submit requests; administrators edit directly."
+msgstr ""
+"Çalışma alanı üyeleri talep gönderir; yöneticiler doğrudan düzenleme yapar."

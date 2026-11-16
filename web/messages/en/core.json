@@ -168,7 +168,9 @@
         "addDetails": "Add its location and technical details in one request.",
         "currentEmail": "Current address: {email}. A new address replaces it after verification.",
         "members": "Members",
-        "readOnly": "Read-only access"
+        "readOnly": "Member · changes require approval",
+        "inbox": "Inbox",
+        "inboxCount": "Inbox, {count} updates"
     },
     "Common": {
         "invalidPage": "The server returned an invalid next page.",
@@ -232,7 +234,8 @@
             "provider_authentication_failed": "The data connection needs administrator attention. Saved data remains available.",
             "provider_throttled": "The data provider is limiting requests. Please try again later.",
             "quota_exhausted": "The daily data request budget is exhausted. Try again after it resets.",
-            "provider_unavailable": "The data provider is unavailable. Please try again later."
+            "provider_unavailable": "The data provider is unavailable. Please try again later.",
+            "workspace_busy": "Another update is in progress. Try again shortly."
         }
     },
     "ProductionCsv": {

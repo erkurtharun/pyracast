@@ -40,6 +40,26 @@ def require_workspace_admin(actor: User, tenant_id: int) -> None:
         raise PermissionDenied(_("Workspace administrator required."))
 
 
+def workspace_membership(actor: User, tenant_id: int, *, lock: bool = False) -> Membership:
+    if lock:
+        Tenant.objects.select_for_update().get(pk=tenant_id)
+    membership = Membership.objects.filter(
+        user_id=actor.pk, user__is_active=True, tenant_id=tenant_id
+    ).first()
+    if membership is None:
+        raise PermissionDenied("Tenant membership required.")
+    return membership
+
+
+def require_workspace_member(actor: User, tenant_id: int) -> Membership:
+    membership = workspace_membership(actor, tenant_id, lock=True)
+    if membership.role != Membership.Role.VIEWER:
+        raise PermissionDenied(
+            _("Workspace members submit requests; administrators edit directly.")
+        )
+    return membership
+
+
 @transaction.atomic
 def remove_workspace_member(actor: User, tenant_id: int, user_id: int) -> None:
     require_workspace_admin(actor, tenant_id)

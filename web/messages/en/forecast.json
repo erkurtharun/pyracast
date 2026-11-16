@@ -369,7 +369,8 @@
         "provider_original_interval": "Provider {interval}: {value}",
         "quality": "Data quality",
         "mixed": "Mixed quality",
-        "refresh_failed": "Could not refresh saved production. {error}"
+        "refresh_failed": "Could not refresh saved production. {error}",
+        "propose_interval": "Suggest correction for {interval}"
     },
     "ProductionImport": {
         "choose_a_csv_no_larger_than_2": "Choose a CSV no larger than 2 MiB.",

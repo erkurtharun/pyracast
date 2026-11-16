@@ -18,10 +18,12 @@ class InputSerializer(serializers.Serializer[dict[str, Any]]):
 
 class TenantOutput(serializers.ModelSerializer[Tenant]):
     role = serializers.ChoiceField(choices=Membership.Role.choices, read_only=True)
+    pending_review_count = serializers.IntegerField(allow_null=True, read_only=True)
+    unread_outcome_count = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Tenant
-        fields = ("id", "name", "role")
+        fields = ("id", "name", "role", "pending_review_count", "unread_outcome_count")
         read_only_fields = fields
 
 

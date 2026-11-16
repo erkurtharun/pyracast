@@ -63,16 +63,16 @@ def _covers(spans: list[tuple[datetime, datetime]], start: datetime, end: dateti
     return False
 
 
-def _configuration(
-    actor: User, tenant_id: int, region_id: int, plant_id: int, configuration_id: int
+def lock_production_configuration(
+    tenant_id: int, region_id: int, plant_id: int, configuration_id: int, *, lock: bool = True
 ) -> PlantConfiguration:
-    require_workspace_admin(actor, tenant_id)
-    region = Region.objects.select_for_update().get(
-        pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
-    )
-    plant = Plant.objects.select_for_update().get(
-        pk=plant_id, region=region, deleted_at__isnull=True
-    )
+    regions = Region.objects.all()
+    plants = Plant.objects.all()
+    if lock:
+        regions = regions.select_for_update()
+        plants = plants.select_for_update()
+    region = regions.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
+    plant = plants.get(pk=plant_id, region=region, deleted_at__isnull=True)
     configuration = PlantConfiguration.objects.select_related("binding").get(
         pk=configuration_id, plant=plant
     )
@@ -83,7 +83,7 @@ def _configuration(
     return configuration
 
 
-def _prepare(
+def prepare_production_changes(
     configuration: PlantConfiguration,
     unit: str,
     changes: list[ProductionChange],
@@ -160,8 +160,11 @@ def change_production(
     changes: list[ProductionChange],
 ) -> ObservationImportResult:
     with transaction.atomic():
-        configuration = _configuration(actor, tenant_id, region_id, plant_id, configuration_id)
-        prepared = _prepare(configuration, unit, changes)
+        require_workspace_admin(actor, tenant_id)
+        configuration = lock_production_configuration(
+            tenant_id, region_id, plant_id, configuration_id
+        )
+        prepared = prepare_production_changes(configuration, unit, changes)
         ids: list[int] = []
         created = 0
         for row in prepared:
@@ -202,6 +205,35 @@ def change_production(
         return {"created": created, "existing": len(ids) - created, "count": len(ids), "ids": ids}
 
 
+def production_change_warnings(
+    configuration: PlantConfiguration, prepared: list[PreparedChange]
+) -> list[dict[str, Any]]:
+    start = min(row.starts_at for row in prepared).replace(minute=0, second=0, microsecond=0)
+    last = max(row.ends_at for row in prepared)
+    end = last.replace(minute=0, second=0, microsecond=0)
+    if end < last:
+        end += timedelta(hours=1)
+    providers = select_provider_measurements(configuration, start, end, timezone.now())[0]
+    replaced = {row.previous.pk for row in prepared if row.previous is not None}
+    active = observation_heads(cutoff=timezone.now()).filter(
+        configuration=configuration,
+        is_reverted=False,
+        starts_at__lt=end,
+        ends_at__gt=start,
+    )
+    manual_spans = [(row.starts_at, row.ends_at) for row in active if row.pk not in replaced]
+    manual_spans.extend((row.starts_at, row.ends_at) for row in prepared if not row.reverted)
+    return [
+        {"code": "provider_hour_incomplete", "starts_at": row.starts_at, "ends_at": row.ends_at}
+        for row in providers
+        if any(
+            change.starts_at < row.ends_at and change.ends_at > row.starts_at for change in prepared
+        )
+        and any(begin < row.ends_at and finish > row.starts_at for begin, finish in manual_spans)
+        and not _covers(manual_spans, row.starts_at, row.ends_at)
+    ]
+
+
 def preview_production(
     actor: User,
     tenant_id: int,
@@ -213,7 +245,10 @@ def preview_production(
     observations: list[ObservationInput],
 ) -> dict[str, Any]:
     with transaction.atomic():
-        configuration = _configuration(actor, tenant_id, region_id, plant_id, configuration_id)
+        require_workspace_admin(actor, tenant_id)
+        configuration = lock_production_configuration(
+            tenant_id, region_id, plant_id, configuration_id
+        )
         changes = []
         for item in observations:
             changes.append(
@@ -227,7 +262,7 @@ def preview_production(
                     item.source,
                 )
             )
-        prepared = _prepare(configuration, unit, changes, capture_revisions=True)
+        prepared = prepare_production_changes(configuration, unit, changes, capture_revisions=True)
         start = min(row.starts_at for row in prepared).replace(minute=0, second=0, microsecond=0)
         last = max(row.ends_at for row in prepared)
         end = last.replace(minute=0, second=0, microsecond=0)
@@ -240,25 +275,7 @@ def preview_production(
             timezone.now(),
         )[0]
         current_values = {(row.starts_at, row.ends_at): row.energy_mwh for row in current}
-        providers = select_provider_measurements(configuration, start, end, timezone.now())[0]
-        replaced = {row.previous.pk for row in prepared if row.previous is not None}
-        active = observation_heads(cutoff=timezone.now()).filter(
-            configuration=configuration,
-            is_reverted=False,
-            starts_at__lt=end,
-            ends_at__gt=start,
-        )
-        manual_spans = [(row.starts_at, row.ends_at) for row in active if row.pk not in replaced]
-        manual_spans.extend((row.starts_at, row.ends_at) for row in prepared if not row.reverted)
-        warnings = [
-            {"code": "provider_hour_incomplete", "starts_at": row.starts_at, "ends_at": row.ends_at}
-            for row in providers
-            if any(
-                change.starts_at < row.ends_at and change.ends_at > row.starts_at
-                for change in prepared
-            )
-            and not _covers(manual_spans, row.starts_at, row.ends_at)
-        ]
+        warnings = production_change_warnings(configuration, prepared)
         return {
             "changes": [
                 {

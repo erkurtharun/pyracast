@@ -138,6 +138,312 @@
                 }
             }
         },
+        "/api/tenants/{tenant_id}/change-requests/": {
+            "get": {
+                "operationId": "tenants_change_requests_list",
+                "parameters": [
+                    {
+                        "name": "page",
+                        "required": false,
+                        "in": "query",
+                        "description": "A page number within the paginated result set.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer",
+                            "minimum": 1
+                        }
+                    },
+                    {
+                        "in": "query",
+                        "name": "scope",
+                        "schema": {
+                            "enum": ["pending", "history", "mine"],
+                            "type": "string",
+                            "default": "pending",
+                            "minLength": 1
+                        },
+                        "description": "* `pending` - pending\n* `history` - history\n* `mine` - mine"
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": ["tenants"],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PaginatedChangeRequestSummaryOutputList"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/change-requests/{request_id}/": {
+            "get": {
+                "operationId": "tenants_change_requests_retrieve",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "request_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": ["tenants"],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ChangeRequestOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/change-requests/{request_id}/approve/": {
+            "post": {
+                "operationId": "tenants_change_requests_approve_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "request_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": ["tenants"],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ApprovalInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ApprovalInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ApprovalInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ChangeRequestOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/change-requests/{request_id}/reject/": {
+            "post": {
+                "operationId": "tenants_change_requests_reject_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "request_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": ["tenants"],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RejectionInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RejectionInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/RejectionInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ChangeRequestOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/change-requests/{request_id}/seen/": {
+            "post": {
+                "operationId": "tenants_change_requests_seen_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "request_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": ["tenants"],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ChangeRequestOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/change-requests/{request_id}/withdraw/": {
+            "post": {
+                "operationId": "tenants_change_requests_withdraw_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "request_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": ["tenants"],
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ChangeRequestOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
         "/api/tenants/{tenant_id}/invitations/": {
             "get": {
                 "operationId": "tenants_invitations_retrieve",
@@ -1536,6 +1842,144 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/ActivationOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/change-requests/incidents/": {
+            "post": {
+                "operationId": "tenants_regions_plants_change_requests_incidents_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": ["tenants"],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/IncidentRequestInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/IncidentRequestInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/IncidentRequestInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ChangeRequestOutput"
+                                }
+                            }
+                        },
+                        "description": ""
+                    }
+                }
+            }
+        },
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/change-requests/production/": {
+            "post": {
+                "operationId": "tenants_regions_plants_change_requests_production_create",
+                "parameters": [
+                    {
+                        "in": "path",
+                        "name": "plant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "region_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    },
+                    {
+                        "in": "path",
+                        "name": "tenant_id",
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "required": true
+                    }
+                ],
+                "tags": ["tenants"],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ProductionRequestInput"
+                            }
+                        },
+                        "application/x-www-form-urlencoded": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ProductionRequestInput"
+                            }
+                        },
+                        "multipart/form-data": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ProductionRequestInput"
+                            }
+                        }
+                    },
+                    "required": true
+                },
+                "security": [
+                    {
+                        "cookieAuth": []
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ChangeRequestOutput"
                                 }
                             }
                         },
@@ -3078,11 +3522,6 @@
     },
     "components": {
         "schemas": {
-            "ActionEnum": {
-                "enum": ["set", "revert"],
-                "type": "string",
-                "description": "* `set` - set\n* `revert` - revert"
-            },
             "ActivationOutput": {
                 "type": "object",
                 "properties": {
@@ -3114,6 +3553,16 @@
                     "created_at",
                     "id"
                 ]
+            },
+            "ApprovalInput": {
+                "type": "object",
+                "properties": {
+                    "review_fingerprint": {
+                        "type": "string",
+                        "maxLength": 100
+                    }
+                },
+                "required": ["review_fingerprint"]
             },
             "AutomaticCalibrationAttemptOutput": {
                 "type": "object",
@@ -3380,6 +3829,216 @@
                     "window_start"
                 ]
             },
+            "ChangeRequestKindEnum": {
+                "enum": ["production", "incident"],
+                "type": "string",
+                "description": "* `production` - production\n* `incident` - incident"
+            },
+            "ChangeRequestOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "kind": {
+                        "$ref": "#/components/schemas/ChangeRequestKindEnum"
+                    },
+                    "status": {
+                        "$ref": "#/components/schemas/ChangeRequestStatusEnum"
+                    },
+                    "plant_id": {
+                        "type": "integer"
+                    },
+                    "region_id": {
+                        "type": "integer"
+                    },
+                    "plant_name": {
+                        "type": "string"
+                    },
+                    "configuration_id": {
+                        "type": "integer"
+                    },
+                    "proposed_by": {
+                        "$ref": "#/components/schemas/UserOutput"
+                    },
+                    "reason": {
+                        "type": "string"
+                    },
+                    "submitted_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "reviewed_by": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/UserOutput"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "closed_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "decision_reason": {
+                        "type": "string"
+                    },
+                    "former_member": {
+                        "type": "boolean"
+                    },
+                    "can_review": {
+                        "type": "boolean"
+                    },
+                    "can_withdraw": {
+                        "type": "boolean"
+                    },
+                    "unread": {
+                        "type": "boolean"
+                    },
+                    "timezone": {
+                        "type": "string"
+                    },
+                    "conflict": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ConflictOutput"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "review_fingerprint": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "production_items": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ProductionItemOutput"
+                        }
+                    },
+                    "incident": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/IncidentChangeOutput"
+                            }
+                        ],
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "can_review",
+                    "can_withdraw",
+                    "closed_at",
+                    "configuration_id",
+                    "conflict",
+                    "decision_reason",
+                    "former_member",
+                    "id",
+                    "incident",
+                    "kind",
+                    "plant_id",
+                    "plant_name",
+                    "production_items",
+                    "proposed_by",
+                    "reason",
+                    "region_id",
+                    "review_fingerprint",
+                    "reviewed_by",
+                    "status",
+                    "submitted_at",
+                    "timezone",
+                    "unread"
+                ]
+            },
+            "ChangeRequestStatusEnum": {
+                "enum": ["pending", "approved", "rejected", "withdrawn"],
+                "type": "string",
+                "description": "* `pending` - pending\n* `approved` - approved\n* `rejected` - rejected\n* `withdrawn` - withdrawn"
+            },
+            "ChangeRequestSummaryOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "kind": {
+                        "$ref": "#/components/schemas/ChangeRequestKindEnum"
+                    },
+                    "status": {
+                        "$ref": "#/components/schemas/ChangeRequestStatusEnum"
+                    },
+                    "plant_id": {
+                        "type": "integer"
+                    },
+                    "region_id": {
+                        "type": "integer"
+                    },
+                    "plant_name": {
+                        "type": "string"
+                    },
+                    "configuration_id": {
+                        "type": "integer"
+                    },
+                    "proposed_by": {
+                        "$ref": "#/components/schemas/UserOutput"
+                    },
+                    "reason": {
+                        "type": "string"
+                    },
+                    "submitted_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "reviewed_by": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/UserOutput"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "closed_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "decision_reason": {
+                        "type": "string"
+                    },
+                    "former_member": {
+                        "type": "boolean"
+                    },
+                    "can_review": {
+                        "type": "boolean"
+                    },
+                    "can_withdraw": {
+                        "type": "boolean"
+                    },
+                    "unread": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "can_review",
+                    "can_withdraw",
+                    "closed_at",
+                    "configuration_id",
+                    "decision_reason",
+                    "former_member",
+                    "id",
+                    "kind",
+                    "plant_id",
+                    "plant_name",
+                    "proposed_by",
+                    "reason",
+                    "region_id",
+                    "reviewed_by",
+                    "status",
+                    "submitted_at",
+                    "unread"
+                ]
+            },
             "CollectionJobOutput": {
                 "type": "object",
                 "properties": {
@@ -3603,6 +4262,18 @@
                     "surface_azimuth",
                     "surface_tilt"
                 ]
+            },
+            "ConflictOutput": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string"
+                    },
+                    "detail": {
+                        "type": "string"
+                    }
+                },
+                "required": ["code", "detail"]
             },
             "DaylightStatusEnum": {
                 "enum": ["normal", "polar_day", "polar_night"],
@@ -3967,11 +4638,117 @@
                 "type": "string",
                 "description": "* `forecast` - forecast\n* `estimated_actuals` - estimated_actuals\n* `mixed` - mixed"
             },
+            "IncidentBeforeOutput": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "$ref": "#/components/schemas/IncidentKindEnum"
+                    },
+                    "title": {
+                        "type": "string",
+                        "maxLength": 200
+                    },
+                    "notes": {
+                        "type": "string",
+                        "default": "",
+                        "maxLength": 2000
+                    },
+                    "starts_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "ends_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "available_dc_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0,
+                        "nullable": true
+                    },
+                    "available_inverter_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0,
+                        "nullable": true
+                    },
+                    "available_export_mw": {
+                        "type": "number",
+                        "format": "double",
+                        "minimum": 0,
+                        "nullable": true
+                    },
+                    "id": {
+                        "type": "integer"
+                    },
+                    "revision": {
+                        "type": "integer"
+                    }
+                },
+                "required": ["id", "kind", "revision", "starts_at", "title"]
+            },
+            "IncidentChangeActionEnum": {
+                "enum": ["create", "update", "resolve", "cancel"],
+                "type": "string",
+                "description": "* `create` - create\n* `update` - update\n* `resolve` - resolve\n* `cancel` - cancel"
+            },
+            "IncidentChangeOutput": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "$ref": "#/components/schemas/IncidentChangeActionEnum"
+                    },
+                    "incident_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "expected_revision": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "values": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/IncidentInput"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "ends_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "before": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/IncidentBeforeOutput"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "applied_revision_id": {
+                        "type": "integer",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "action",
+                    "applied_revision_id",
+                    "before",
+                    "ends_at",
+                    "expected_revision",
+                    "incident_id",
+                    "values"
+                ]
+            },
             "IncidentInput": {
                 "type": "object",
                 "properties": {
                     "kind": {
-                        "$ref": "#/components/schemas/KindEnum"
+                        "$ref": "#/components/schemas/IncidentKindEnum"
                     },
                     "title": {
                         "type": "string",
@@ -4011,6 +4788,11 @@
                     }
                 },
                 "required": ["kind", "starts_at", "title"]
+            },
+            "IncidentKindEnum": {
+                "enum": ["inverter", "panels", "grid", "other", "multiple"],
+                "type": "string",
+                "description": "* `inverter` - inverter\n* `panels` - panels\n* `grid` - grid\n* `other` - other\n* `multiple` - multiple"
             },
             "IncidentOutput": {
                 "type": "object",
@@ -4099,11 +4881,44 @@
                     "updated_at"
                 ]
             },
+            "IncidentRequestInput": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "$ref": "#/components/schemas/IncidentChangeActionEnum"
+                    },
+                    "idempotency_key": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "reason": {
+                        "type": "string",
+                        "default": "",
+                        "maxLength": 500
+                    },
+                    "incident_id": {
+                        "type": "integer",
+                        "minimum": 1
+                    },
+                    "expected_revision": {
+                        "type": "integer",
+                        "minimum": 1
+                    },
+                    "values": {
+                        "$ref": "#/components/schemas/IncidentInput"
+                    },
+                    "ends_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                },
+                "required": ["action", "idempotency_key"]
+            },
             "IncidentUpdate": {
                 "type": "object",
                 "properties": {
                     "kind": {
-                        "$ref": "#/components/schemas/KindEnum"
+                        "$ref": "#/components/schemas/IncidentKindEnum"
                     },
                     "title": {
                         "type": "string",
@@ -4207,11 +5022,6 @@
                     }
                 },
                 "required": ["delivery_status", "email", "expires_at", "id"]
-            },
-            "KindEnum": {
-                "enum": ["inverter", "panels", "grid", "other", "multiple"],
-                "type": "string",
-                "description": "* `inverter` - inverter\n* `panels` - panels\n* `grid` - grid\n* `other` - other\n* `multiple` - multiple"
             },
             "LanguageEnum": {
                 "enum": ["en", "tr"],
@@ -4501,6 +5311,34 @@
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/CalibrationSummaryOutput"
+                        }
+                    }
+                }
+            },
+            "PaginatedChangeRequestSummaryOutputList": {
+                "type": "object",
+                "required": ["count", "results"],
+                "properties": {
+                    "count": {
+                        "type": "integer",
+                        "example": 123
+                    },
+                    "next": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=4"
+                    },
+                    "previous": {
+                        "type": "string",
+                        "nullable": true,
+                        "format": "uri",
+                        "example": "http://api.example.org/accounts/?page=2"
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ChangeRequestSummaryOutput"
                         }
                     }
                 }
@@ -5319,6 +6157,11 @@
                     "surface_tilt"
                 ]
             },
+            "ProductionChangeActionEnum": {
+                "enum": ["set", "revert"],
+                "type": "string",
+                "description": "* `set` - set\n* `revert` - revert"
+            },
             "ProductionChangeRow": {
                 "type": "object",
                 "properties": {
@@ -5336,7 +6179,7 @@
                         "nullable": true
                     },
                     "action": {
-                        "$ref": "#/components/schemas/ActionEnum"
+                        "$ref": "#/components/schemas/ProductionChangeActionEnum"
                     },
                     "energy": {
                         "type": "number",
@@ -5590,22 +6433,135 @@
                     "edit_unavailable_reason": {
                         "type": "string",
                         "nullable": true
+                    },
+                    "can_propose": {
+                        "type": "boolean"
+                    },
+                    "can_propose_revert": {
+                        "type": "boolean"
+                    },
+                    "proposal_unavailable_reason": {
+                        "type": "string",
+                        "nullable": true
                     }
                 },
                 "required": [
                     "can_edit",
                     "can_enter",
+                    "can_propose",
+                    "can_propose_revert",
                     "can_revert",
                     "edit_unavailable_reason",
                     "effective",
                     "ends_at",
                     "observation",
+                    "proposal_unavailable_reason",
                     "provider_original",
                     "provider_originals",
                     "reference_available",
                     "revision_id",
                     "starts_at",
                     "unavailable_reason"
+                ]
+            },
+            "ProductionItemOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "starts_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "ends_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "action": {
+                        "$ref": "#/components/schemas/ProductionChangeActionEnum"
+                    },
+                    "expected_revision_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "baseline_energy_mwh": {
+                        "type": "number",
+                        "format": "double",
+                        "nullable": true
+                    },
+                    "baseline_source_kind": {
+                        "type": "string"
+                    },
+                    "current": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ProductionValueOutput"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "automatic": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ProductionValueOutput"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "provider_intervals": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ProviderIntervalOutput"
+                        }
+                    },
+                    "warnings": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ProductionWarningOutput"
+                        }
+                    },
+                    "proposed": {
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/ProductionValueOutput"
+                            }
+                        ],
+                        "nullable": true
+                    },
+                    "energy_mwh": {
+                        "type": "number",
+                        "format": "double",
+                        "nullable": true
+                    },
+                    "quality": {
+                        "type": "string"
+                    },
+                    "source": {
+                        "type": "string"
+                    },
+                    "applied_observation_id": {
+                        "type": "integer",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "action",
+                    "applied_observation_id",
+                    "automatic",
+                    "baseline_energy_mwh",
+                    "baseline_source_kind",
+                    "current",
+                    "ends_at",
+                    "energy_mwh",
+                    "expected_revision_id",
+                    "id",
+                    "proposed",
+                    "provider_intervals",
+                    "quality",
+                    "source",
+                    "starts_at",
+                    "warnings"
                 ]
             },
             "ProductionPreviewOutput": {
@@ -5734,6 +6690,39 @@
                 "type": "string",
                 "description": "* `valid` - Valid\n* `outage` - Outage\n* `curtailed` - Curtailed\n* `invalid` - Invalid"
             },
+            "ProductionRequestInput": {
+                "type": "object",
+                "properties": {
+                    "configuration_id": {
+                        "type": "integer",
+                        "minimum": 1
+                    },
+                    "unit": {
+                        "$ref": "#/components/schemas/UnitEnum"
+                    },
+                    "changes": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ProductionChangeRow"
+                        }
+                    },
+                    "idempotency_key": {
+                        "type": "string",
+                        "format": "uuid"
+                    },
+                    "reason": {
+                        "type": "string",
+                        "maxLength": 500
+                    }
+                },
+                "required": [
+                    "changes",
+                    "configuration_id",
+                    "idempotency_key",
+                    "reason",
+                    "unit"
+                ]
+            },
             "ProductionValueOutput": {
                 "type": "object",
                 "properties": {
@@ -5764,6 +6753,53 @@
                     "quality",
                     "source",
                     "source_kind"
+                ]
+            },
+            "ProductionWarningOutput": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string"
+                    },
+                    "starts_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "ends_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    }
+                },
+                "required": ["code", "ends_at", "starts_at"]
+            },
+            "ProviderIntervalOutput": {
+                "type": "object",
+                "properties": {
+                    "starts_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "ends_at": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "energy_mwh": {
+                        "type": "number",
+                        "format": "double"
+                    },
+                    "quality": {
+                        "type": "string"
+                    },
+                    "source_kind": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "ends_at",
+                    "energy_mwh",
+                    "quality",
+                    "source_kind",
+                    "starts_at"
                 ]
             },
             "RegionInput": {
@@ -5845,6 +6881,16 @@
                     }
                 },
                 "required": ["name"]
+            },
+            "RejectionInput": {
+                "type": "object",
+                "properties": {
+                    "reason": {
+                        "type": "string",
+                        "maxLength": 500
+                    }
+                },
+                "required": ["reason"]
             },
             "ReminderDeliveryOutput": {
                 "type": "object",
@@ -6303,9 +7349,24 @@
                             }
                         ],
                         "readOnly": true
+                    },
+                    "pending_review_count": {
+                        "type": "integer",
+                        "readOnly": true,
+                        "nullable": true
+                    },
+                    "unread_outcome_count": {
+                        "type": "integer",
+                        "readOnly": true
                     }
                 },
-                "required": ["id", "name", "role"]
+                "required": [
+                    "id",
+                    "name",
+                    "pending_review_count",
+                    "role",
+                    "unread_outcome_count"
+                ]
             },
             "TrashedPlantOutput": {
                 "type": "object",
@@ -6399,6 +7460,18 @@
                 "enum": ["MWh", "kWh"],
                 "type": "string",
                 "description": "* `MWh` - MWh\n* `kWh` - kWh"
+            },
+            "UserOutput": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "name": {
+                        "type": "string"
+                    }
+                },
+                "required": ["id", "name"]
             },
             "WorkspaceInvitationsOutput": {
                 "type": "object",

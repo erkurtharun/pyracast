@@ -245,6 +245,9 @@ async function setup(page: Page) {
                         ends_at,
                         can_enter: true,
                         can_edit: true,
+                        can_propose: false,
+                        can_propose_revert: false,
+                        proposal_unavailable_reason: null,
                         can_revert: observation !== null,
                         reference_available: true,
                         unavailable_reason: null,
@@ -705,7 +708,7 @@ for (const width of [320, 390, 1440]) {
                 name: labels.navigation,
                 exact: true,
             });
-            await expect(navigation.getByRole("button")).toHaveCount(3);
+            await expect(navigation.getByRole("button")).toHaveCount(4);
             await expect(
                 navigation.getByRole("button", { name: labels.trash }),
             ).toHaveCount(0);
@@ -815,7 +818,7 @@ test("mobile viewer retains the read-only indicator and no workspace management 
     );
     await page.goto("/app/");
     await expect(
-        page.getByText("Read-only access", { exact: true }),
+        page.getByText("Member · changes require approval", { exact: true }),
     ).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Members", exact: true }),
@@ -850,7 +853,7 @@ test("mobile platform administrator can reach administration and customer naviga
                 };
             }),
         );
-    expect(controls).toHaveLength(4);
+    expect(controls).toHaveLength(5);
     expect(
         controls.every(
             (control) =>

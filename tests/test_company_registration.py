@@ -108,7 +108,13 @@ def test_signup_requires_verification_before_tenant_access() -> None:
     assert login.status_code == 200
     assert login.json()["meta"]["is_authenticated"]
     assert client.get("/api/tenants/").json()["results"] == [
-        {"id": membership.tenant_id, "name": DETAILS["company_name"], "role": "admin"}
+        {
+            "id": membership.tenant_id,
+            "name": DETAILS["company_name"],
+            "role": "admin",
+            "pending_review_count": 0,
+            "unread_outcome_count": 0,
+        }
     ]
     assert client.get(f"/api/tenants/{other.pk}/regions/").status_code == 403
 

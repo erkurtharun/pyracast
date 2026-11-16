@@ -24,6 +24,8 @@ import { useWorkspaceInvitation } from "./workspace-invitation";
 import { WorkspaceAccess } from "./workspace-access";
 import { WorkspaceMembers, AcceptInvitation } from "./workspace-members";
 import { LanguageSelect } from "./language-select";
+import { ChangeRequestUpdates } from "./change-request-updates";
+import { OperationalInbox } from "./operational-inbox";
 import { isLanguage } from "@/i18n/language";
 
 export function Dashboard() {
@@ -266,14 +268,18 @@ function Workspace({
         30_000,
     );
     const [selected, setSelected] = useState<number>(),
-        [view, setView] = useState<"regions" | "profile" | "trash" | "members">(
-            searchParams.get("account") === "security" ? "profile" : "regions",
-        ),
+        [view, setView] = useState<
+            "regions" | "profile" | "trash" | "members" | "inbox"
+        >(searchParams.get("account") === "security" ? "profile" : "regions"),
         [logoutError, setLogoutError] = useState("");
     const tenant =
         tenants.data?.results.find((row) => row.id === selected) ??
         tenants.data?.results[0];
     const canManage = tenant?.role === "admin";
+    const pendingReviews = canManage ? (tenant?.pending_review_count ?? 0) : 0;
+    const unreadOutcomes = tenant?.unread_outcome_count ?? 0;
+    const inboxCount = pendingReviews + unreadOutcomes;
+    const refreshChangeRequests = () => setAccessVersion((value) => value + 1);
     return (
         <div className="shell">
             <a
@@ -342,6 +348,28 @@ function Workspace({
                             {t("members")}
                         </button>
                     )}
+                    {tenant && (
+                        <button
+                            className={view === "inbox" ? "active" : ""}
+                            aria-current={view === "inbox" ? "page" : undefined}
+                            aria-label={
+                                inboxCount
+                                    ? t("inboxCount", { count: inboxCount })
+                                    : t("inbox")
+                            }
+                            onClick={() => setView("inbox")}
+                        >
+                            {t("inbox")}
+                            {inboxCount > 0 && (
+                                <strong
+                                    className="inbox-badge"
+                                    aria-hidden="true"
+                                >
+                                    {inboxCount}
+                                </strong>
+                            )}
+                        </button>
+                    )}
                     <button
                         className={view === "profile" ? "active" : ""}
                         aria-current={view === "profile" ? "page" : undefined}
@@ -391,7 +419,9 @@ function Workspace({
                                   ? t("recycleBin")
                                   : view === "members"
                                     ? t("members")
-                                    : t("accountSettings")}
+                                    : view === "inbox"
+                                      ? t("inbox")
+                                      : t("accountSettings")}
                         </strong>
                     </span>
                     <span className="topbar-label">{tenant?.name}</span>
@@ -405,167 +435,182 @@ function Workspace({
                 >
                     {logoutError && <Notice error>{logoutError}</Notice>}
                     {tenants.error && <Notice error>{tenants.error}</Notice>}
-                    <WorkspaceAccess value={view === "profile" || canManage}>
-                        {view === "profile" ? (
-                            <>
-                                <div className="page-heading">
-                                    <div>
-                                        <h1>{t("accountSettings")}</h1>
+                    <ChangeRequestUpdates value={refreshChangeRequests}>
+                        <WorkspaceAccess
+                            value={view === "profile" || canManage}
+                        >
+                            {view === "profile" ? (
+                                <>
+                                    <div className="page-heading">
+                                        <div>
+                                            <h1>{t("accountSettings")}</h1>
+                                        </div>
                                     </div>
-                                </div>
-                                <section className="panel narrow">
-                                    <h2>{t("emailAddress")}</h2>
-                                    <p className="account-email">
-                                        {session.user?.email}
-                                    </p>
-                                    <details className="account-disclosure">
-                                        <summary>{t("changeEmail")}</summary>
-                                        <p className="fine">
-                                            {t("currentEmail", {
-                                                email:
-                                                    session.user?.email ?? "",
-                                            })}
+                                    <section className="panel narrow">
+                                        <h2>{t("emailAddress")}</h2>
+                                        <p className="account-email">
+                                            {session.user?.email}
                                         </p>
-                                        <ActionForm
-                                            submit={t("sendVerification")}
-                                            onSubmit={async (data) => {
-                                                const result =
-                                                    await authRequest(
-                                                        "account/email",
-                                                        "POST",
-                                                        session.csrf_token,
-                                                        {
-                                                            email: data.get(
-                                                                "email",
-                                                            ),
-                                                        },
-                                                    );
-                                                if (
-                                                    result.status === 401 &&
-                                                    !result.meta
-                                                        ?.is_authenticated
-                                                ) {
-                                                    onSession(
-                                                        await request<Session>(
-                                                            "/api/session/",
-                                                        ),
-                                                    );
-                                                    throw new Error(
-                                                        t("sessionExpired"),
-                                                    );
-                                                }
-                                                if (result.status === 401)
-                                                    throw new Error(
-                                                        t("confirmIdentity"),
-                                                    );
-                                            }}
-                                        >
-                                            <Field
-                                                label={t("newEmail")}
-                                                name="email"
-                                                type="email"
-                                            />
-                                        </ActionForm>
-                                        <ActionForm
-                                            submit={t("verifyEmail")}
-                                            onSubmit={async (data) => {
-                                                const result =
-                                                    await authRequest(
-                                                        "auth/email/verify",
-                                                        "POST",
-                                                        session.csrf_token,
-                                                        {
-                                                            key: data.get(
-                                                                "key",
-                                                            ),
-                                                        },
-                                                    );
-                                                if (result.status === 401) {
+                                        <details className="account-disclosure">
+                                            <summary>
+                                                {t("changeEmail")}
+                                            </summary>
+                                            <p className="fine">
+                                                {t("currentEmail", {
+                                                    email:
+                                                        session.user?.email ??
+                                                        "",
+                                                })}
+                                            </p>
+                                            <ActionForm
+                                                submit={t("sendVerification")}
+                                                onSubmit={async (data) => {
+                                                    const result =
+                                                        await authRequest(
+                                                            "account/email",
+                                                            "POST",
+                                                            session.csrf_token,
+                                                            {
+                                                                email: data.get(
+                                                                    "email",
+                                                                ),
+                                                            },
+                                                        );
                                                     if (
+                                                        result.status === 401 &&
                                                         !result.meta
                                                             ?.is_authenticated
-                                                    )
+                                                    ) {
                                                         onSession(
                                                             await request<Session>(
                                                                 "/api/session/",
                                                             ),
                                                         );
-                                                    throw new Error(
-                                                        result.meta
-                                                            ?.is_authenticated
-                                                            ? t(
-                                                                  "confirmIdentity",
-                                                              )
-                                                            : t(
-                                                                  "sessionExpired",
-                                                              ),
+                                                        throw new Error(
+                                                            t("sessionExpired"),
+                                                        );
+                                                    }
+                                                    if (result.status === 401)
+                                                        throw new Error(
+                                                            t(
+                                                                "confirmIdentity",
+                                                            ),
+                                                        );
+                                                }}
+                                            >
+                                                <Field
+                                                    label={t("newEmail")}
+                                                    name="email"
+                                                    type="email"
+                                                />
+                                            </ActionForm>
+                                            <ActionForm
+                                                submit={t("verifyEmail")}
+                                                onSubmit={async (data) => {
+                                                    const result =
+                                                        await authRequest(
+                                                            "auth/email/verify",
+                                                            "POST",
+                                                            session.csrf_token,
+                                                            {
+                                                                key: data.get(
+                                                                    "key",
+                                                                ),
+                                                            },
+                                                        );
+                                                    if (result.status === 401) {
+                                                        if (
+                                                            !result.meta
+                                                                ?.is_authenticated
+                                                        )
+                                                            onSession(
+                                                                await request<Session>(
+                                                                    "/api/session/",
+                                                                ),
+                                                            );
+                                                        throw new Error(
+                                                            result.meta
+                                                                ?.is_authenticated
+                                                                ? t(
+                                                                      "confirmIdentity",
+                                                                  )
+                                                                : t(
+                                                                      "sessionExpired",
+                                                                  ),
+                                                        );
+                                                    }
+                                                    onSession(
+                                                        await request<Session>(
+                                                            "/api/session/",
+                                                        ),
                                                     );
-                                                }
-                                                onSession(
-                                                    await request<Session>(
-                                                        "/api/session/",
-                                                    ),
-                                                );
-                                            }}
-                                        >
-                                            <Field
-                                                label={t("emailCode")}
-                                                name="key"
-                                                autoComplete="one-time-code"
-                                            />
-                                        </ActionForm>
-                                    </details>
-                                </section>
-                                <AccountSecurity
-                                    key={`${session.user!.id}:${session.user!.mfa_required}`}
+                                                }}
+                                            >
+                                                <Field
+                                                    label={t("emailCode")}
+                                                    name="key"
+                                                    autoComplete="one-time-code"
+                                                />
+                                            </ActionForm>
+                                        </details>
+                                    </section>
+                                    <AccountSecurity
+                                        key={`${session.user!.id}:${session.user!.mfa_required}`}
+                                        token={session.csrf_token}
+                                        mfaRequired={session.user!.mfa_required}
+                                        hasPassword={
+                                            session.user!.has_usable_password
+                                        }
+                                        email={session.user!.email}
+                                        onSession={onSession}
+                                    />
+                                </>
+                            ) : tenant && view === "inbox" ? (
+                                <OperationalInbox
+                                    key={`${tenant.id}:${tenant.role}`}
+                                    tenant={tenant}
                                     token={session.csrf_token}
-                                    mfaRequired={session.user!.mfa_required}
-                                    hasPassword={
-                                        session.user!.has_usable_password
-                                    }
-                                    email={session.user!.email}
-                                    onSession={onSession}
                                 />
-                            </>
-                        ) : tenant && canManage && view === "members" ? (
-                            <WorkspaceMembers
-                                key={tenant.id}
-                                tenant={tenant}
-                                token={session.csrf_token}
-                                userId={session.user!.id}
-                                onAccessChange={() =>
-                                    setAccessVersion((value) => value + 1)
-                                }
-                            />
-                        ) : tenant && canManage && view === "trash" ? (
-                            <>
-                                <button
-                                    className="back-button"
-                                    onClick={() => setView("regions")}
-                                >
-                                    {t("overview")}
-                                </button>
-                                <RecycleBin
+                            ) : tenant && canManage && view === "members" ? (
+                                <WorkspaceMembers
                                     key={tenant.id}
-                                    tenant={tenant.id}
+                                    tenant={tenant}
                                     token={session.csrf_token}
+                                    userId={session.user!.id}
+                                    onAccessChange={() =>
+                                        setAccessVersion((value) => value + 1)
+                                    }
                                 />
-                            </>
-                        ) : tenant ? (
-                            <Regions
-                                key={tenant.id}
-                                tenant={tenant}
-                                token={session.csrf_token}
-                                onTrash={() => setView("trash")}
-                            />
-                        ) : tenants.loading ? (
-                            <p role="status">{t("loadingWorkspaces")}</p>
-                        ) : (
-                            <Empty title={t("noWorkspace")}>
-                                {t("contactAdmin")}
-                            </Empty>
-                        )}
-                    </WorkspaceAccess>
+                            ) : tenant && canManage && view === "trash" ? (
+                                <>
+                                    <button
+                                        className="back-button"
+                                        onClick={() => setView("regions")}
+                                    >
+                                        {t("overview")}
+                                    </button>
+                                    <RecycleBin
+                                        key={tenant.id}
+                                        tenant={tenant.id}
+                                        token={session.csrf_token}
+                                    />
+                                </>
+                            ) : tenant ? (
+                                <Regions
+                                    key={tenant.id}
+                                    tenant={tenant}
+                                    token={session.csrf_token}
+                                    onTrash={() => setView("trash")}
+                                />
+                            ) : tenants.loading ? (
+                                <p role="status">{t("loadingWorkspaces")}</p>
+                            ) : (
+                                <Empty title={t("noWorkspace")}>
+                                    {t("contactAdmin")}
+                                </Empty>
+                            )}
+                        </WorkspaceAccess>
+                    </ChangeRequestUpdates>
                 </main>
             </div>
         </div>

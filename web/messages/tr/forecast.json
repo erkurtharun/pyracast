@@ -369,7 +369,8 @@
         "provider_original_interval": "Sağlayıcı {interval}: {value}",
         "quality": "Veri durumu",
         "mixed": "Karma veri durumu",
-        "refresh_failed": "Kayıtlı üretim yenilenemedi. {error}"
+        "refresh_failed": "Kayıtlı üretim yenilenemedi. {error}",
+        "propose_interval": "{interval} aralığı için düzeltme öner"
     },
     "ProductionImport": {
         "choose_a_csv_no_larger_than_2": "En fazla 2 MiB boyutunda bir CSV seçin.",

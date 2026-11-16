@@ -1816,7 +1816,7 @@ pre,
         grid-column: 1/-1;
         grid-row: 2;
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(65px, 1fr));
         gap: 4px;
         margin: 0;
     }
@@ -2435,4 +2435,92 @@ pre,
     display: grid;
     gap: 4px;
     overflow-wrap: anywhere;
+}
+.inbox-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.5em;
+    padding: 2px 6px;
+    margin-left: 6px;
+    border-radius: 20px;
+    background: var(--ink);
+    color: var(--surface);
+    font-size: 12px;
+}
+.inbox-list {
+    display: grid;
+    gap: 16px;
+    min-width: 0;
+}
+.inbox-filters {
+    margin-bottom: 20px;
+}
+.inbox-card,
+.inbox-detail,
+.proposal-comparison {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.inbox-detail {
+    border-top: 1px solid var(--line);
+    margin-top: 20px;
+    padding-top: 20px;
+}
+.proposal-comparison {
+    margin: 20px 0;
+    padding: 16px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+}
+.proposal-values {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+.proposal-values h5 {
+    margin: 12px 0 0;
+    font-size: 14px;
+}
+.proposal-energy {
+    font-size: 20px;
+    font-weight: 650;
+    margin: 8px 0;
+}
+.incident-proposal-values > div {
+    border-bottom: 1px solid var(--line);
+    padding: 10px 0;
+}
+.incident-proposal-values dt {
+    font-weight: 650;
+}
+.incident-proposal-values dd {
+    margin: 4px 0 0;
+}
+.incident-proposal-values dd > span {
+    display: block;
+    margin-top: 4px;
+}
+.inbox-decisions {
+    display: grid;
+    gap: 16px;
+    margin-top: 20px;
+}
+.inbox-decisions > button {
+    justify-self: start;
+}
+.inbox-unread {
+    font-weight: 650;
+}
+.submission-reason {
+    white-space: pre-wrap;
+}
+@media (max-width: 480px) {
+    .proposal-values {
+        grid-template-columns: 1fr;
+        gap: 4px;
+    }
+    .proposal-comparison {
+        padding: 12px;
+    }
 }

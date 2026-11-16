@@ -176,7 +176,7 @@ test("lost administrator access refreshes workspace role and removes write contr
         .getByRole("button", { name: "Remove from workspace", exact: true })
         .click();
     await expect(
-        page.getByText("Read-only access", { exact: true }),
+        page.getByText("Member · changes require approval", { exact: true }),
     ).toBeVisible();
     await expect(
         page.getByRole("button", { name: "Members", exact: true }),

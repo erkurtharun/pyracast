@@ -1,7 +1,7 @@
 from typing import Any, cast
 
 from django.contrib.auth.models import User
-from django.db.models import F, QuerySet
+from django.db.models import Count, F, Q, QuerySet
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -33,6 +33,7 @@ from pyracast.api.serializers import (
     TenantOutput,
     TransitionInput,
 )
+from pyracast.change_requests.models import ChangeRequest
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import create_account, rotate_secret, validate_binding
 from pyracast.forecasts.history import OutlookRequestError, regional_outlook
@@ -60,13 +61,41 @@ class TenantsView(GenericAPIView[Tenant]):
     def get_queryset(self) -> QuerySet[Tenant]:
         return (
             Tenant.objects.filter(membership__user=cast(User, self.request.user))
-            .annotate(role=F("membership__role"))
+            .annotate(role=F("membership__role"), current_membership_id=F("membership__pk"))
             .order_by("id")
         )
 
     @extend_schema(responses=TenantOutput(many=True))
     def get(self, _request: Request) -> Response:
-        page = self.paginate_queryset(self.get_queryset())
+        page = list(self.paginate_queryset(self.get_queryset()) or [])
+        membership_ids = [row.__dict__["current_membership_id"] for row in page]
+        counters = (
+            ChangeRequest.objects.filter(
+                plant__region__tenant_id__in=[row.pk for row in page],
+                plant__deleted_at__isnull=True,
+                plant__region__deleted_at__isnull=True,
+            )
+            .values("plant__region__tenant_id")
+            .annotate(
+                pending=Count("pk", filter=Q(status="pending")),
+                unread=Count(
+                    "pk",
+                    filter=Q(
+                        proposed_by_id=self.request.user.pk,
+                        proposer_membership_id__in=membership_ids,
+                        status__in=("approved", "rejected"),
+                        outcome_seen_at__isnull=True,
+                    ),
+                ),
+            )
+        )
+        by_tenant = {row["plant__region__tenant_id"]: row for row in counters}
+        for row in page:
+            counts = by_tenant.get(row.pk)
+            row.__dict__["pending_review_count"] = (
+                (counts["pending"] if counts else 0) if row.__dict__["role"] == "admin" else None
+            )
+            row.__dict__["unread_outcome_count"] = counts["unread"] if counts else 0
         return self.get_paginated_response(TenantOutput(page, many=True).data)
 
 

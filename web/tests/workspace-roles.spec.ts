@@ -43,13 +43,11 @@ test("Turkish workspace roles and invitation labels preserve readable characters
     await expect(
         page.getByRole("button", { name: "Davet gönder", exact: true }),
     ).toBeVisible();
-    await expect(
-        page.getByText("Görüntüleyici", { exact: true }),
-    ).toBeVisible();
+    await expect(page.getByText("Üye", { exact: true })).toBeVisible();
     role = "viewer";
     await page.reload();
     await expect(
-        page.getByText("Salt okunur erişim", { exact: true }),
+        page.getByText("Üye · değişiklikler onay gerektirir", { exact: true }),
     ).toBeVisible();
     await expect(
         page.getByRole("button", {
@@ -109,8 +107,8 @@ test("viewer reads shared settings without write controls or requests", async ({
     await expect(page.locator(".readonly-form button:visible")).toHaveCount(0);
     await page.getByRole("button", { name: "Outages", exact: true }).click();
     await expect(
-        page.getByRole("button", { name: "Report outage", exact: true }),
-    ).toHaveCount(0);
+        page.getByRole("button", { name: "Submit outage", exact: true }),
+    ).toBeVisible();
     await page
         .getByRole("button", { name: "Calibration", exact: true })
         .click();

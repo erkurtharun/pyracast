@@ -168,7 +168,9 @@
         "addDetails": "Konumunu ve teknik bilgilerini tek seferde ekleyin.",
         "currentEmail": "Mevcut adres: {email}. Yeni adres doğrulandıktan sonra bunun yerini alır.",
         "members": "Üyeler",
-        "readOnly": "Salt okunur erişim"
+        "readOnly": "Üye · değişiklikler onay gerektirir",
+        "inbox": "Gelen kutusu",
+        "inboxCount": "Gelen kutusu, {count} güncelleme"
     },
     "Common": {
         "invalidPage": "Sunucu geçersiz bir sonraki sayfa döndürdü.",
@@ -232,7 +234,8 @@
             "provider_authentication_failed": "Veri bağlantısı için yönetici müdahalesi gerekiyor. Kayıtlı veriler kullanılabilir.",
             "provider_throttled": "Veri sağlayıcısı istekleri sınırlıyor. Lütfen daha sonra tekrar deneyin.",
             "quota_exhausted": "Günlük veri isteği kotası tükendi. Sıfırlandıktan sonra tekrar deneyin.",
-            "provider_unavailable": "Veri sağlayıcısına ulaşılamıyor. Lütfen daha sonra tekrar deneyin."
+            "provider_unavailable": "Veri sağlayıcısına ulaşılamıyor. Lütfen daha sonra tekrar deneyin.",
+            "workspace_busy": "Başka bir güncelleme sürüyor. Birazdan yeniden deneyin."
         }
     },
     "ProductionCsv": {

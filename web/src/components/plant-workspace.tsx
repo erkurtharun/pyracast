@@ -14,6 +14,7 @@ import { MoveToRecycleBin } from "./recycle-bin";
 import { ForecastPanel } from "./forecast-panel";
 import { ForecastPerformance } from "./forecast-performance";
 import { Outages } from "./outages";
+import { OwnPendingRequests } from "./operational-inbox";
 import {
     PlantConfigurationFields,
     configurationInput,
@@ -77,6 +78,13 @@ export function PlantWorkspace({
             <button className="back-button" onClick={onBack}>
                 {t("allPlants")}
             </button>
+            {!canManage && (tab === "production" || tab === "outages") && (
+                <OwnPendingRequests
+                    tenantBase={`${base.split("/regions/")[0]}/`}
+                    plantId={plant.id}
+                    revision={productionRevision + outageRevision}
+                />
+            )}
             <div className="page-heading plant-identity">
                 <div>
                     <p className="eyebrow">{t("solarPlant")}</p>

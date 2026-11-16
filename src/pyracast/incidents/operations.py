@@ -114,16 +114,16 @@ def select_incidents(
     return tuple(result)
 
 
-def _scope(actor: User, tenant_id: int, region_id: int, plant_id: int) -> Plant:
-    require_workspace_admin(actor, tenant_id)
-    Region.objects.select_for_update().get(
-        pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
-    )
-    return (
-        Plant.objects.select_for_update(of=("self",))
-        .select_related("current_configuration")
-        .get(pk=plant_id, region_id=region_id, deleted_at__isnull=True)
-    )
+def lock_incident_plant(
+    tenant_id: int, region_id: int, plant_id: int, *, lock: bool = True
+) -> Plant:
+    regions = Region.objects.all()
+    plants = Plant.objects.select_related("current_configuration")
+    if lock:
+        regions = regions.select_for_update()
+        plants = plants.select_for_update(of=("self",))
+    regions.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
+    return plants.get(pk=plant_id, region_id=region_id, deleted_at__isnull=True)
 
 
 def _validate(values: dict[str, Any], configuration: PlantConfiguration, now: datetime) -> None:
@@ -196,6 +196,59 @@ def _record(row: PlantIncident, actor: User) -> None:
     incidents_changed(row.plant_id)
 
 
+def prepare_incident(
+    actor: User,
+    plant: Plant,
+    *,
+    incident_id: int | None = None,
+    expected_revision: int | None = None,
+    values: dict[str, Any],
+    lock: bool = True,
+) -> PlantIncident:
+    if incident_id is None:
+        configuration = plant.current_configuration
+        if configuration is None:
+            raise ValidationError(gettext("A plant configuration is required."))
+        row = PlantIncident(
+            plant=plant,
+            declared_configuration=configuration,
+            created_by=actor,
+            updated_by=actor,
+        )
+    else:
+        rows = PlantIncident.objects.select_related("declared_configuration")
+        if lock:
+            rows = rows.select_for_update()
+        row = rows.get(pk=incident_id, plant=plant)
+        if expected_revision != row.revision:
+            raise RevisionConflict
+        if row.cancelled_at is not None:
+            raise ValidationError(gettext("A cancelled incident cannot be changed."))
+        configuration = (
+            plant.current_configuration if row.ends_at is None else row.declared_configuration
+        )
+        if configuration is None:
+            raise ValidationError(gettext("A plant configuration is required."))
+        row.declared_configuration = configuration
+        row.revision += 1
+        row.updated_by = actor
+    _validate(values, configuration, timezone.now())
+    overlap = (
+        PlantIncident.objects.filter(plant=plant, cancelled_at__isnull=True)
+        .exclude(pk=row.pk)
+        .filter(starts_at__lt=values["ends_at"])
+        if values["ends_at"] is not None
+        else PlantIncident.objects.filter(plant=plant, cancelled_at__isnull=True).exclude(pk=row.pk)
+    )
+    from django.db.models import Q
+
+    if overlap.filter(Q(ends_at__isnull=True) | Q(ends_at__gt=values["starts_at"])).exists():
+        raise ValidationError(gettext("Incident periods must not overlap."))
+    for name, value in values.items():
+        setattr(row, name, value)
+    return row
+
+
 def save_incident(
     actor: User,
     tenant_id: int,
@@ -207,54 +260,50 @@ def save_incident(
     **values: Any,
 ) -> PlantIncident:
     with transaction.atomic():
-        plant = _scope(actor, tenant_id, region_id, plant_id)
-        if incident_id is None:
-            configuration = plant.current_configuration
-            if configuration is None:
-                raise ValidationError(gettext("A plant configuration is required."))
-            row = PlantIncident(
-                plant=plant,
-                declared_configuration=configuration,
-                created_by=actor,
-                updated_by=actor,
-            )
-        else:
-            row = (
-                PlantIncident.objects.select_for_update()
-                .select_related("declared_configuration")
-                .get(pk=incident_id, plant=plant)
-            )
-            if expected_revision != row.revision:
-                raise RevisionConflict
-            if row.cancelled_at is not None:
-                raise ValidationError(gettext("A cancelled incident cannot be changed."))
-            configuration = (
-                plant.current_configuration if row.ends_at is None else row.declared_configuration
-            )
-            if configuration is None:
-                raise ValidationError(gettext("A plant configuration is required."))
-            row.declared_configuration = configuration
-            row.revision += 1
-            row.updated_by = actor
-        _validate(values, configuration, timezone.now())
-        overlap = (
-            PlantIncident.objects.filter(plant=plant, cancelled_at__isnull=True)
-            .exclude(pk=row.pk)
-            .filter(starts_at__lt=values["ends_at"])
-            if values["ends_at"] is not None
-            else PlantIncident.objects.filter(plant=plant, cancelled_at__isnull=True).exclude(
-                pk=row.pk
-            )
+        require_workspace_admin(actor, tenant_id)
+        plant = lock_incident_plant(tenant_id, region_id, plant_id)
+        row = prepare_incident(
+            actor,
+            plant,
+            incident_id=incident_id,
+            expected_revision=expected_revision,
+            values=values,
         )
-        from django.db.models import Q
-
-        if overlap.filter(Q(ends_at__isnull=True) | Q(ends_at__gt=values["starts_at"])).exists():
-            raise ValidationError(gettext("Incident periods must not overlap."))
-        for name, value in values.items():
-            setattr(row, name, value)
         row.save()
         _record(row, actor)
         return row
+
+
+def prepare_incident_finish(
+    actor: User,
+    plant: Plant,
+    *,
+    incident_id: int,
+    expected_revision: int,
+    ends_at: datetime | None = None,
+    cancel: bool = False,
+    lock: bool = True,
+) -> PlantIncident:
+    rows = PlantIncident.objects.all()
+    if lock:
+        rows = rows.select_for_update()
+    row = rows.get(pk=incident_id, plant=plant)
+    if row.revision != expected_revision:
+        raise RevisionConflict
+    if row.cancelled_at is not None or (not cancel and row.ends_at is not None):
+        raise ValidationError(gettext("The incident is already closed."))
+    now = timezone.now()
+    if cancel:
+        row.cancelled_at = now
+    elif (
+        ends_at is None or ends_at.utcoffset() is None or ends_at <= row.starts_at or ends_at > now
+    ):
+        raise ValidationError(gettext("End must be aware, after start and no later than now."))
+    else:
+        row.ends_at = ends_at
+    row.revision += 1
+    row.updated_by = actor
+    return row
 
 
 def finish_incident(
@@ -269,26 +318,16 @@ def finish_incident(
     cancel: bool = False,
 ) -> PlantIncident:
     with transaction.atomic():
-        plant = _scope(actor, tenant_id, region_id, plant_id)
-        row = PlantIncident.objects.select_for_update().get(pk=incident_id, plant=plant)
-        if row.revision != expected_revision:
-            raise RevisionConflict
-        if row.cancelled_at is not None or (not cancel and row.ends_at is not None):
-            raise ValidationError(gettext("The incident is already closed."))
-        now = timezone.now()
-        if cancel:
-            row.cancelled_at = now
-        elif (
-            ends_at is None
-            or ends_at.utcoffset() is None
-            or ends_at <= row.starts_at
-            or ends_at > now
-        ):
-            raise ValidationError(gettext("End must be aware, after start and no later than now."))
-        else:
-            row.ends_at = ends_at
-        row.revision += 1
-        row.updated_by = actor
+        require_workspace_admin(actor, tenant_id)
+        plant = lock_incident_plant(tenant_id, region_id, plant_id)
+        row = prepare_incident_finish(
+            actor,
+            plant,
+            incident_id=incident_id,
+            expected_revision=expected_revision,
+            ends_at=ends_at,
+            cancel=cancel,
+        )
         row.save()
         _record(row, actor)
         return row

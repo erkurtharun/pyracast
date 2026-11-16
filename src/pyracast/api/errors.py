@@ -3,8 +3,10 @@ from typing import Any
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import OperationalError
 from django.utils import timezone
 from django.utils.translation import gettext, gettext_noop
+from psycopg.errors import LockNotAvailable
 from rest_framework.response import Response
 from rest_framework.views import exception_handler as drf_exception_handler
 
@@ -56,6 +58,8 @@ def _localized_message(message: str) -> str:
 
 
 def exception_handler(exc: Exception, context: dict[str, Any]) -> Response | None:
+    if isinstance(exc, OperationalError) and isinstance(exc.__cause__, LockNotAvailable):
+        return Response({"code": "workspace_busy"}, status=503, headers={"Retry-After": "1"})
     if isinstance(exc, ObjectDoesNotExist):
         return Response({"code": "not_found"}, status=404)
     if isinstance(exc, DjangoValidationError):

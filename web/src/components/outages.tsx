@@ -3,6 +3,10 @@ import { useCanManageWorkspace } from "./workspace-access";
 import { useTranslations, useLocale, useFormatter } from "next-intl";
 
 import { useState } from "react";
+import {
+    useChangeRequestUpdates,
+    useProposalKey,
+} from "./change-request-updates";
 import { request } from "@/lib/api";
 import type { components } from "@/lib/schema";
 import { ActionForm, Field, Notice, Select, Tag, useCollection } from "./ui";
@@ -48,6 +52,24 @@ export function Outages({
 }) {
     const t = useTranslations("Outages");
     const canManage = useCanManageWorkspace();
+    const proposals = useTranslations("ChangeRequests");
+    const proposalKey = useProposalKey();
+    const requestsChanged = useChangeRequestUpdates();
+    const [submitted, setSubmitted] = useState(false);
+    async function propose(payload: unknown) {
+        await request(
+            `${base}change-requests/incidents/`,
+            "POST",
+            {
+                ...(payload as object),
+                idempotency_key: proposalKey.forPayload(payload),
+            },
+            token,
+        );
+        proposalKey.reset();
+        setSubmitted(true);
+        requestsChanged();
+    }
     const locale = useLocale();
     const formatNumber = useFormatter();
     const kinds: Record<string, string> = {
@@ -75,12 +97,22 @@ export function Outages({
                 <div>
                     <h2>{t("plantOutages")}</h2>
                 </div>
-                {canManage && (
-                    <button className="button" onClick={() => setEditor("new")}>
-                        {t("reportOutage")}
+                {(canManage || currentConfigurationId) && (
+                    <button
+                        className="button"
+                        onClick={() => {
+                            proposalKey.reset();
+                            setEditor("new");
+                        }}
+                    >
+                        {canManage
+                            ? t("reportOutage")
+                            : proposals("proposeOutage")}
                     </button>
                 )}
             </div>
+            {submitted && <Notice>{proposals("submitted")}</Notice>}
+            {!canManage && <p className="fine">{proposals("approvalHelp")}</p>}
             <p className="fine">
                 {t("deviceTimezone", { timezone: deviceTimezone })}
                 {deviceTimezone !== timezone
@@ -92,7 +124,7 @@ export function Outages({
                 <p>{t("reportingHelp")}</p>
                 <p className="fine">{t("editingHelp")}</p>
             </details>
-            {canManage && editor && (
+            {editor && (
                 <section
                     aria-label={
                         editor === "new" ? t("reportOutage") : t("editOutage")
@@ -108,25 +140,40 @@ export function Outages({
                                 : `${editor.id}-${editor.revision}`
                         }
                         outage={editor === "new" ? undefined : editor}
-                        onSave={async (data) => {
+                        proposal={!canManage}
+                        onSave={async (data, reason) => {
                             const existing =
                                 editor === "new" ? undefined : editor;
-                            await request(
-                                `${base}outages/${existing ? `${existing.id}/` : ""}`,
-                                existing ? "PUT" : "POST",
-                                {
-                                    ...data,
+                            if (!canManage) {
+                                await propose({
+                                    action: existing ? "update" : "create",
+                                    reason,
                                     ...(existing
                                         ? {
+                                              incident_id: existing.id,
                                               expected_revision:
                                                   existing.revision,
                                           }
                                         : {}),
-                                } satisfies
-                                    | OutageInput
-                                    | components["schemas"]["IncidentUpdate"],
-                                token,
-                            );
+                                    values: data,
+                                });
+                            } else
+                                await request(
+                                    `${base}outages/${existing ? `${existing.id}/` : ""}`,
+                                    existing ? "PUT" : "POST",
+                                    {
+                                        ...data,
+                                        ...(existing
+                                            ? {
+                                                  expected_revision:
+                                                      existing.revision,
+                                              }
+                                            : {}),
+                                    } satisfies
+                                        | OutageInput
+                                        | components["schemas"]["IncidentUpdate"],
+                                    token,
+                                );
                             setEditor(null);
                             changed();
                         }}
@@ -244,29 +291,44 @@ export function Outages({
                                     currentConfigurationId && (
                                     <Notice>{t("configurationChanged")}</Notice>
                                 )}
-                            {canManage && outage.status !== "cancelled" && (
+                            {outage.status !== "cancelled" && (
                                 <div className="button-group">
                                     <button
                                         className="button secondary"
-                                        onClick={() => setEditor(outage)}
+                                        onClick={() => {
+                                            proposalKey.reset();
+                                            setEditor(outage);
+                                        }}
                                     >
-                                        {t("editReport")}
+                                        {canManage
+                                            ? t("editReport")
+                                            : proposals("proposeUpdate")}
                                     </button>
                                     {outage.status === "active" && (
                                         <button
                                             className="button secondary"
-                                            onClick={() =>
-                                                setResolving(outage.id)
-                                            }
+                                            onClick={() => {
+                                                proposalKey.reset();
+                                                setResolving(outage.id);
+                                            }}
                                         >
-                                            {t("resolveOutage")}
+                                            {canManage
+                                                ? t("resolveOutage")
+                                                : proposals(
+                                                      "proposeResolution",
+                                                  )}
                                         </button>
                                     )}
                                 </div>
                             )}
-                            {canManage && resolving === outage.id && (
+                            {resolving === outage.id && (
                                 <ActionForm
-                                    submit={t("saveResolution")}
+                                    permitted
+                                    submit={
+                                        canManage
+                                            ? t("saveResolution")
+                                            : proposals("send")
+                                    }
                                     onSubmit={async (data) => {
                                         const ends = timestamp(
                                             data,
@@ -281,20 +343,33 @@ export function Outages({
                                             throw new Error(
                                                 t("resolutionAfterStart"),
                                             );
-                                        await request(
-                                            `${base}outages/${outage.id}/resolve/`,
-                                            "POST",
-                                            {
+                                        if (!canManage)
+                                            await propose({
+                                                action: "resolve",
+                                                incident_id: outage.id,
                                                 expected_revision:
                                                     outage.revision,
                                                 ends_at: ends,
-                                            } satisfies components["schemas"]["ResolveInput"],
-                                            token,
-                                        );
+                                                reason: String(
+                                                    data.get("reason") ?? "",
+                                                ),
+                                            });
+                                        else
+                                            await request(
+                                                `${base}outages/${outage.id}/resolve/`,
+                                                "POST",
+                                                {
+                                                    expected_revision:
+                                                        outage.revision,
+                                                    ends_at: ends,
+                                                } satisfies components["schemas"]["ResolveInput"],
+                                                token,
+                                            );
                                         setResolving(null);
                                         changed();
                                     }}
                                 >
+                                    {!canManage && <ProposalReason />}
                                     <Field
                                         label={t("resolvedAtDeviceTime")}
                                         name="ends_at"
@@ -305,26 +380,46 @@ export function Outages({
                                     />
                                 </ActionForm>
                             )}
-                            {canManage && outage.status !== "cancelled" && (
+                            {outage.status !== "cancelled" && (
                                 <details>
                                     <summary>
-                                        {t("cancelAnIncorrectEntry")}
+                                        {canManage
+                                            ? t("cancelAnIncorrectEntry")
+                                            : proposals("proposeCancellation")}
                                     </summary>
                                     <ActionForm
-                                        submit={t("cancelOutage")}
-                                        onSubmit={async () => {
-                                            await request(
-                                                `${base}outages/${outage.id}/cancel/`,
-                                                "POST",
-                                                {
+                                        permitted
+                                        submit={
+                                            canManage
+                                                ? t("cancelOutage")
+                                                : proposals("send")
+                                        }
+                                        onSubmit={async (data) => {
+                                            if (!canManage)
+                                                await propose({
+                                                    action: "cancel",
+                                                    incident_id: outage.id,
                                                     expected_revision:
                                                         outage.revision,
-                                                } satisfies components["schemas"]["RevisionInput"],
-                                                token,
-                                            );
+                                                    reason: String(
+                                                        data.get("reason") ??
+                                                            "",
+                                                    ),
+                                                });
+                                            else
+                                                await request(
+                                                    `${base}outages/${outage.id}/cancel/`,
+                                                    "POST",
+                                                    {
+                                                        expected_revision:
+                                                            outage.revision,
+                                                    } satisfies components["schemas"]["RevisionInput"],
+                                                    token,
+                                                );
                                             changed();
                                         }}
                                     >
+                                        {!canManage && <ProposalReason />}
                                         <label className="field">
                                             <span>
                                                 <input
@@ -348,11 +443,14 @@ export function Outages({
 function OutageForm({
     outage,
     onSave,
+    proposal = false,
 }: {
     outage?: Outage;
-    onSave: (data: OutageInput) => Promise<void>;
+    proposal?: boolean;
+    onSave: (data: OutageInput, reason: string) => Promise<void>;
 }) {
     const t = useTranslations("Outages");
+    const proposals = useTranslations("ChangeRequests");
 
     const capacities = [
         outage?.available_dc_mw,
@@ -370,7 +468,14 @@ function OutageForm({
     );
     return (
         <ActionForm
-            submit={outage ? t("saveOutageChanges") : t("saveOutage")}
+            permitted
+            submit={
+                proposal
+                    ? proposals("send")
+                    : outage
+                      ? t("saveOutageChanges")
+                      : t("saveOutage")
+            }
             onSubmit={async (data) => {
                 const starts = timestamp(data, "starts_at", t);
                 const ends = timestamp(data, "ends_at", t);
@@ -388,18 +493,24 @@ function OutageForm({
                     ["inverter", "panels", "grid", "other", "multiple"] as const
                 ).find((value) => value === data.get("kind"));
                 if (!kind) throw new Error(t("chooseAValidOutageType"));
-                await onSave({
-                    kind,
-                    title: String(data.get("title") ?? ""),
-                    notes: String(data.get("notes") ?? ""),
-                    starts_at: starts,
-                    ends_at: ends,
-                    available_dc_mw: capacity("available_dc_mw"),
-                    available_inverter_mw: capacity("available_inverter_mw"),
-                    available_export_mw: capacity("available_export_mw"),
-                });
+                await onSave(
+                    {
+                        kind,
+                        title: String(data.get("title") ?? ""),
+                        notes: String(data.get("notes") ?? ""),
+                        starts_at: starts,
+                        ends_at: ends,
+                        available_dc_mw: capacity("available_dc_mw"),
+                        available_inverter_mw: capacity(
+                            "available_inverter_mw",
+                        ),
+                        available_export_mw: capacity("available_export_mw"),
+                    },
+                    String(data.get("reason") ?? ""),
+                );
             }}
         >
+            {proposal && <ProposalReason />}
             <div className="form-grid">
                 <Select
                     label={t("outageType")}
@@ -489,5 +600,15 @@ function OutageForm({
                 <textarea name="notes" defaultValue={outage?.notes} />
             </label>
         </ActionForm>
+    );
+}
+
+function ProposalReason() {
+    const t = useTranslations("ChangeRequests");
+    return (
+        <label className="field">
+            {t("optionalReason")}
+            <textarea name="reason" maxLength={500} />
+        </label>
     );
 }

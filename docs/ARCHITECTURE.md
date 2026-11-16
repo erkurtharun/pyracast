@@ -78,6 +78,7 @@ Use conventional Django apps for accounts, regions, provider connections, foreca
 | PlantSubmission | Typed customer technical declaration before provider configuration is approved |
 | PlantIncident, IncidentRevision | Non-overlapping operating periods, remaining capacities and immutable corrections |
 | ProductionObservation | Interval energy, quality, source, configuration and recording time |
+| ChangeRequest, ProductionChangeItem, IncidentChange | Member proposals, reviewed values and atomic workspace decisions |
 | EpiasConnection, EpiasCollectionJob, EpiasSnapshot | Plant identity, independent collection and immutable reported-production acquisitions |
 | CalibrationRun, CalibrationActivation | Durable fit, reproducible dataset, held-out evaluation and audited manual/automatic activation history |
 | HistoricalReferenceImport | Authorized source settings, immutable export digest and actual acquisition time |
@@ -147,7 +148,8 @@ without a password can confirm a code sent to their verified email. Linking is
 bound to the initiating user, and disconnects lock the user record to preserve a
 working login method. Provider sign-in retains Pyracast's local MFA requirements.
 
-Each workspace has one administrator; other members have read-only access. Workspace
+Each workspace has one administrator; other members can read data and propose production
+corrections or outage changes for that administrator's approval. Workspace
 administrators can invite members and change that workspace's customer settings, but
 gain no platform privileges. Both the API and application operations enforce these
 permissions; mutations lock the tenant before its resources. Personal account,
@@ -158,16 +160,38 @@ record. Automatic calibration authorized by a former administrator stops until t
 new administrator enables it. Plant reminder settings belong to the workspace and
 remain available to the new administrator without depending on the former account.
 
-Workspace administrators can remove another read-only member from that workspace;
+Workspace administrators can remove another member from that workspace;
 they cannot remove themselves or its administrator. Removal preserves the user's
 account, other memberships and workspace resources. Under the tenant lock, it records
 an audit entry and expires pending invitations for all known addresses of that user.
 
-Invitations grant read-only membership after explicit acceptance by the authenticated
+Invitations grant member access after explicit acceptance by the authenticated
 owner of the verified invited email. New invited accounts do not create another
 workspace. Invitations expire after seven days, store only a random token's hash,
 and can be cancelled. A replacement invitation or administrator transfer invalidates
 the previous pending grant. Issuance is rate-limited per workspace and recipient.
+
+Member proposals are immutable and separate from production and incident records.
+They do not affect totals, forecasts or calibration before approval. The current
+workspace administrator reviews the existing and proposed values, then approves,
+or rejects with a reason. Administrators retain direct editing; platform privileges
+alone do not authorize workspace decisions. Authors can withdraw pending proposals.
+
+Approval rechecks authorization, the pinned configuration and target revisions, and
+the values shown during review. A changed review context requires reloading; an
+unchanged provider reacquisition does not. Approval calls the existing production
+or incident operation and records its outcome in one transaction, under the
+Tenant → Region → Plant → ChangeRequest lock order. Retries cannot apply a request
+twice. Conflicting proposals remain pending until explicitly rejected or withdrawn.
+Approval and rejection preserve production values at decision time. Detail reads
+do not lock collection rows; approval revalidates the displayed context under locks.
+
+The application inbox reads these durable requests: current administrators see
+pending reviews and members see their own requests and unread decisions. Reading
+a pending request does not resolve it. Administrator transfers change inbox access
+immediately. Removing a member retains their proposals for explicit administrator
+review, but rejoining does not restore the old membership's author permissions.
+Notifications are in the application; this workflow does not send email.
 
 Customers navigate a single plant portfolio. Location and technical details are
 collected in three short steps with a review before submission. A plant has one
@@ -687,6 +711,7 @@ notification worker's threads do not share mail connections or OAuth token state
 
 - [W3C language preferences](https://www.w3.org/International/questions/qa-accept-lang-locales), [Microsoft message formatting](https://learn.microsoft.com/en-us/globalization/internationalization/message-formatting), [next-intl App Router](https://next-intl.dev/docs/getting-started/app-router), [Django translation](https://docs.djangoproject.com/en/6.1/topics/i18n/translation/).
 - [Django custom administration views](https://docs.djangoproject.com/en/6.1/ref/contrib/admin/), [Cloudscape resource views](https://cloudscape.design/patterns/resource-management/view/), [GOV.UK check answers](https://design-system.service.gov.uk/patterns/check-answers/), [USWDS responsive tables](https://designsystem.digital.gov/components/table/).
+- [OWASP transaction authorization](https://cheatsheetseries.owasp.org/cheatsheets/Transaction_Authorization_Cheat_Sheet.html), [GitLab review-context checks](https://docs.gitlab.com/api/merge_request_approvals/#approve-merge-request), [Carbon notification patterns](https://www.carbondesignsystem.com/building-blocks/core/patterns/notifications).
 - [The Twelve-Factor App](https://12factor.net/), [Django design philosophies](https://docs.djangoproject.com/en/6.1/misc/design-philosophies/), [PEP 8](https://peps.python.org/pep-0008/).
 - [Python 3.15.2](https://www.python.org/downloads/release/python-3152/), [Django 6.1.3](https://docs.djangoproject.com/en/6.1/releases/6.1.3/), [DRF releases](https://www.django-rest-framework.org/community/release-notes/).
 - [pvlib](https://pvlib-python.readthedocs.io/en/stable/), [Dramatiq releases](https://pypi.org/project/dramatiq/) and [platform history](https://dramatiq.io/changelog.html).

@@ -127,7 +127,19 @@ def test_native_foreign_keys_have_validated_deferred_ownership_targets() -> None
             "plants_plantconfiguration",
             ("id", "plant_id"),
         ),
+        "proposal_configuration_owner_fk": (
+            "change_requests_changerequest",
+            ("configuration_id", "plant_id"),
+            "plants_plantconfiguration",
+            ("id", "plant_id"),
+        ),
     }
+    project_models = tuple(
+        model
+        for model in apps.get_models(include_auto_created=True)
+        if model.__module__.startswith("pyracast.")
+    )
+    project_tables = sorted({model._meta.db_table for model in project_models})
     with connection.cursor() as cursor:
         cursor.execute(
             """
@@ -149,9 +161,9 @@ def test_native_foreign_keys_have_validated_deferred_ownership_targets() -> None
             JOIN pg_namespace ns ON ns.oid = child.relnamespace
             JOIN pg_class parent ON parent.oid = c.confrelid
             WHERE c.contype = 'f' AND ns.nspname = current_schema()
-                AND child.relname ~
-                    '^(accounts|connections|forecasts|incidents|metering|notifications|plants|regions)_'
-            """
+                AND child.relname::text = ANY(%s)
+            """,
+            (project_tables,),
         )
         rows = cursor.fetchall()
     actual = {
@@ -168,8 +180,7 @@ def test_native_foreign_keys_have_validated_deferred_ownership_targets() -> None
             field.target_field.model._meta.db_table,
             (field.target_field.column,),
         )
-        for model in apps.get_models()
-        if model.__module__.startswith("pyracast.")
+        for model in project_models
         for field in model._meta.local_fields
         if isinstance(field, models.ForeignKey)
         and field.deconstruct()[3].get("db_constraint", True)

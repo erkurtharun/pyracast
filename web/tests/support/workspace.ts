@@ -87,7 +87,9 @@ export async function mockApi(
             };
         } else if (path === "/api/tenants/")
             data = paged([{ id: 1, name: "Sunfield Energy", role: "admin" }]);
-        else if (
+        else if (/\/api\/tenants\/\d+\/change-requests\/$/.test(path)) {
+            data = paged([]);
+        } else if (
             path === "/api/tenants/1/regions/" ||
             path === "/api/tenants/1/sites/"
         ) {

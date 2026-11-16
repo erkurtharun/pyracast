@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     "pyracast.incidents",
     "pyracast.notifications",
     "pyracast.metering",
+    "pyracast.change_requests",
 ]
 MIDDLEWARE = [
     "pyracast.accounts.middleware.TrustedProxyHeaders",
@@ -216,6 +217,11 @@ SPECTACULAR_SETTINGS = {
         "EpiasSourceKindEnum": "pyracast.metering.history.PRODUCTION_SOURCES",
         "ForecastSourceKindEnum": ["forecast", "estimated_actuals", "mixed"],
         "ProductionQualityEnum": "pyracast.plants.models.OBSERVATION_QUALITIES",
+        "ChangeRequestStatusEnum": ["pending", "approved", "rejected", "withdrawn"],
+        "ChangeRequestKindEnum": ["production", "incident"],
+        "IncidentKindEnum": ["inverter", "panels", "grid", "other", "multiple"],
+        "IncidentChangeActionEnum": ["create", "update", "resolve", "cancel"],
+        "ProductionChangeActionEnum": ["set", "revert"],
     },
 }
 LANGUAGE_CODE = "en"

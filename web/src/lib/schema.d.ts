@@ -68,6 +68,102 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/tenants/{tenant_id}/change-requests/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["tenants_change_requests_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tenants/{tenant_id}/change-requests/{request_id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["tenants_change_requests_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tenants/{tenant_id}/change-requests/{request_id}/approve/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["tenants_change_requests_approve_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tenants/{tenant_id}/change-requests/{request_id}/reject/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["tenants_change_requests_reject_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tenants/{tenant_id}/change-requests/{request_id}/seen/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["tenants_change_requests_seen_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tenants/{tenant_id}/change-requests/{request_id}/withdraw/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["tenants_change_requests_withdraw_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/tenants/{tenant_id}/invitations/": {
         parameters: {
             query?: never;
@@ -318,6 +414,38 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["tenants_regions_plants_calibrations_activate_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/change-requests/incidents/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["tenants_regions_plants_change_requests_incidents_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/change-requests/production/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["tenants_regions_plants_change_requests_production_create"];
         delete?: never;
         options?: never;
         head?: never;
@@ -632,12 +760,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /**
-         * @description * `set` - set
-         *     * `revert` - revert
-         * @enum {string}
-         */
-        ActionEnum: "set" | "revert";
         ActivationOutput: {
             readonly id: number;
             configuration_id: number;
@@ -645,6 +767,9 @@ export interface components {
             actor_id: number | null;
             /** Format: date-time */
             readonly created_at: string;
+        };
+        ApprovalInput: {
+            review_fingerprint: string;
         };
         AutomaticCalibrationAttemptOutput: {
             calibration_id: number | null;
@@ -739,6 +864,68 @@ export interface components {
             readonly result: unknown;
             readonly dataset_sha256: string;
         };
+        /**
+         * @description * `production` - production
+         *     * `incident` - incident
+         * @enum {string}
+         */
+        ChangeRequestKindEnum: "production" | "incident";
+        ChangeRequestOutput: {
+            id: number;
+            kind: components["schemas"]["ChangeRequestKindEnum"];
+            status: components["schemas"]["ChangeRequestStatusEnum"];
+            plant_id: number;
+            region_id: number;
+            plant_name: string;
+            configuration_id: number;
+            proposed_by: components["schemas"]["UserOutput"];
+            reason: string;
+            /** Format: date-time */
+            submitted_at: string;
+            reviewed_by: components["schemas"]["UserOutput"] | null;
+            /** Format: date-time */
+            closed_at: string | null;
+            decision_reason: string;
+            former_member: boolean;
+            can_review: boolean;
+            can_withdraw: boolean;
+            unread: boolean;
+            timezone: string;
+            conflict: components["schemas"]["ConflictOutput"] | null;
+            review_fingerprint: string | null;
+            production_items: components["schemas"]["ProductionItemOutput"][];
+            incident: components["schemas"]["IncidentChangeOutput"] | null;
+        };
+        /**
+         * @description * `pending` - pending
+         *     * `approved` - approved
+         *     * `rejected` - rejected
+         *     * `withdrawn` - withdrawn
+         * @enum {string}
+         */
+        ChangeRequestStatusEnum:
+            "pending" | "approved" | "rejected" | "withdrawn";
+        ChangeRequestSummaryOutput: {
+            id: number;
+            kind: components["schemas"]["ChangeRequestKindEnum"];
+            status: components["schemas"]["ChangeRequestStatusEnum"];
+            plant_id: number;
+            region_id: number;
+            plant_name: string;
+            configuration_id: number;
+            proposed_by: components["schemas"]["UserOutput"];
+            reason: string;
+            /** Format: date-time */
+            submitted_at: string;
+            reviewed_by: components["schemas"]["UserOutput"] | null;
+            /** Format: date-time */
+            closed_at: string | null;
+            decision_reason: string;
+            former_member: boolean;
+            can_review: boolean;
+            can_withdraw: boolean;
+            unread: boolean;
+        };
         CollectionJobOutput: {
             id: number;
             endpoint: string;
@@ -801,6 +988,10 @@ export interface components {
             readonly surface_azimuth: number | null;
             /** Format: date-time */
             readonly created_at: string;
+        };
+        ConflictOutput: {
+            code: string;
+            detail: string;
         };
         /**
          * @description * `normal` - normal
@@ -935,8 +1126,44 @@ export interface components {
          * @enum {string}
          */
         ForecastSourceKindEnum: "forecast" | "estimated_actuals" | "mixed";
+        IncidentBeforeOutput: {
+            kind: components["schemas"]["IncidentKindEnum"];
+            title: string;
+            /** @default  */
+            notes: string;
+            /** Format: date-time */
+            starts_at: string;
+            /** Format: date-time */
+            ends_at?: string | null;
+            /** Format: double */
+            available_dc_mw?: number | null;
+            /** Format: double */
+            available_inverter_mw?: number | null;
+            /** Format: double */
+            available_export_mw?: number | null;
+            id: number;
+            revision: number;
+        };
+        /**
+         * @description * `create` - create
+         *     * `update` - update
+         *     * `resolve` - resolve
+         *     * `cancel` - cancel
+         * @enum {string}
+         */
+        IncidentChangeActionEnum: "create" | "update" | "resolve" | "cancel";
+        IncidentChangeOutput: {
+            action: components["schemas"]["IncidentChangeActionEnum"];
+            incident_id: number | null;
+            expected_revision: number | null;
+            values: components["schemas"]["IncidentInput"] | null;
+            /** Format: date-time */
+            ends_at: string | null;
+            before: components["schemas"]["IncidentBeforeOutput"] | null;
+            applied_revision_id: number | null;
+        };
         IncidentInput: {
-            kind: components["schemas"]["KindEnum"];
+            kind: components["schemas"]["IncidentKindEnum"];
             title: string;
             /** @default  */
             notes: string;
@@ -951,6 +1178,15 @@ export interface components {
             /** Format: double */
             available_export_mw?: number | null;
         };
+        /**
+         * @description * `inverter` - inverter
+         *     * `panels` - panels
+         *     * `grid` - grid
+         *     * `other` - other
+         *     * `multiple` - multiple
+         * @enum {string}
+         */
+        IncidentKindEnum: "inverter" | "panels" | "grid" | "other" | "multiple";
         IncidentOutput: {
             readonly id: number;
             readonly revision: number;
@@ -974,8 +1210,20 @@ export interface components {
             /** Format: date-time */
             readonly updated_at: string;
         };
+        IncidentRequestInput: {
+            action: components["schemas"]["IncidentChangeActionEnum"];
+            /** Format: uuid */
+            idempotency_key: string;
+            /** @default  */
+            reason: string;
+            incident_id?: number;
+            expected_revision?: number;
+            values?: components["schemas"]["IncidentInput"];
+            /** Format: date-time */
+            ends_at?: string;
+        };
         IncidentUpdate: {
-            kind: components["schemas"]["KindEnum"];
+            kind: components["schemas"]["IncidentKindEnum"];
             title: string;
             /** @default  */
             notes: string;
@@ -1010,15 +1258,6 @@ export interface components {
             readonly expires_at: string;
             readonly delivery_status: components["schemas"]["DeliveryStatusEnum"];
         };
-        /**
-         * @description * `inverter` - inverter
-         *     * `panels` - panels
-         *     * `grid` - grid
-         *     * `other` - other
-         *     * `multiple` - multiple
-         * @enum {string}
-         */
-        KindEnum: "inverter" | "panels" | "grid" | "other" | "multiple";
         /**
          * @description * `en` - en
          *     * `tr` - tr
@@ -1127,6 +1366,21 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["CalibrationSummaryOutput"][];
+        };
+        PaginatedChangeRequestSummaryOutputList: {
+            /** @example 123 */
+            count: number;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?page=4
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?page=2
+             */
+            previous?: string | null;
+            results: components["schemas"]["ChangeRequestSummaryOutput"][];
         };
         PaginatedIncidentOutputList: {
             /** @example 123 */
@@ -1423,13 +1677,19 @@ export interface components {
             /** Format: date-time */
             readonly created_at: string;
         };
+        /**
+         * @description * `set` - set
+         *     * `revert` - revert
+         * @enum {string}
+         */
+        ProductionChangeActionEnum: "set" | "revert";
         ProductionChangeRow: {
             /** Format: date-time */
             starts_at: string;
             /** Format: date-time */
             ends_at: string;
             expected_revision_id: number | null;
-            action: components["schemas"]["ActionEnum"];
+            action: components["schemas"]["ProductionChangeActionEnum"];
             /** Format: double */
             energy?: number;
             /** @default valid */
@@ -1496,6 +1756,31 @@ export interface components {
             can_edit: boolean;
             can_revert: boolean;
             edit_unavailable_reason: string | null;
+            can_propose: boolean;
+            can_propose_revert: boolean;
+            proposal_unavailable_reason: string | null;
+        };
+        ProductionItemOutput: {
+            id: number;
+            /** Format: date-time */
+            starts_at: string;
+            /** Format: date-time */
+            ends_at: string;
+            action: components["schemas"]["ProductionChangeActionEnum"];
+            expected_revision_id: number | null;
+            /** Format: double */
+            baseline_energy_mwh: number | null;
+            baseline_source_kind: string;
+            current: components["schemas"]["ProductionValueOutput"] | null;
+            automatic: components["schemas"]["ProductionValueOutput"] | null;
+            provider_intervals: components["schemas"]["ProviderIntervalOutput"][];
+            warnings: components["schemas"]["ProductionWarningOutput"][];
+            proposed: components["schemas"]["ProductionValueOutput"] | null;
+            /** Format: double */
+            energy_mwh: number | null;
+            quality: string;
+            source: string;
+            applied_observation_id: number | null;
         };
         ProductionPreviewOutput: {
             changes: components["schemas"]["ProductionChangeRow"][];
@@ -1544,6 +1829,14 @@ export interface components {
          * @enum {string}
          */
         ProductionQualityEnum: "valid" | "outage" | "curtailed" | "invalid";
+        ProductionRequestInput: {
+            configuration_id: number;
+            unit: components["schemas"]["UnitEnum"];
+            changes: components["schemas"]["ProductionChangeRow"][];
+            /** Format: uuid */
+            idempotency_key: string;
+            reason: string;
+        };
         ProductionValueOutput: {
             /** Format: double */
             energy_mwh: number;
@@ -1552,6 +1845,23 @@ export interface components {
             source_kind: string;
             provisional: boolean;
             aggregated: boolean;
+        };
+        ProductionWarningOutput: {
+            code: string;
+            /** Format: date-time */
+            starts_at: string;
+            /** Format: date-time */
+            ends_at: string;
+        };
+        ProviderIntervalOutput: {
+            /** Format: date-time */
+            starts_at: string;
+            /** Format: date-time */
+            ends_at: string;
+            /** Format: double */
+            energy_mwh: number;
+            quality: string;
+            source_kind: string;
         };
         RegionInput: {
             name: string;
@@ -1574,6 +1884,9 @@ export interface components {
         };
         RegionRenameInput: {
             name: string;
+        };
+        RejectionInput: {
+            reason: string;
         };
         ReminderDeliveryOutput: {
             id: number;
@@ -1699,6 +2012,8 @@ export interface components {
             readonly id: number;
             readonly name: string;
             readonly role: components["schemas"]["RoleEnum"];
+            readonly pending_review_count: number | null;
+            readonly unread_outcome_count: number;
         };
         TrashedPlantOutput: {
             readonly id: number;
@@ -1737,6 +2052,10 @@ export interface components {
          * @enum {string}
          */
         UnitEnum: "MWh" | "kWh";
+        UserOutput: {
+            id: number;
+            name: string;
+        };
         WorkspaceInvitationsOutput: {
             invitations: components["schemas"]["InvitationOutput"][];
         };
@@ -1845,6 +2164,159 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaginatedTenantOutputList"];
+                };
+            };
+        };
+    };
+    tenants_change_requests_list: {
+        parameters: {
+            query?: {
+                /** @description A page number within the paginated result set. */
+                page?: number;
+                plant_id?: number;
+                /**
+                 * @description * `pending` - pending
+                 *     * `history` - history
+                 *     * `mine` - mine
+                 */
+                scope?: "pending" | "history" | "mine";
+            };
+            header?: never;
+            path: {
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedChangeRequestSummaryOutputList"];
+                };
+            };
+        };
+    };
+    tenants_change_requests_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeRequestOutput"];
+                };
+            };
+        };
+    };
+    tenants_change_requests_approve_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalInput"];
+                "application/x-www-form-urlencoded": components["schemas"]["ApprovalInput"];
+                "multipart/form-data": components["schemas"]["ApprovalInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeRequestOutput"];
+                };
+            };
+        };
+    };
+    tenants_change_requests_reject_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RejectionInput"];
+                "application/x-www-form-urlencoded": components["schemas"]["RejectionInput"];
+                "multipart/form-data": components["schemas"]["RejectionInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeRequestOutput"];
+                };
+            };
+        };
+    };
+    tenants_change_requests_seen_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeRequestOutput"];
+                };
+            };
+        };
+    };
+    tenants_change_requests_withdraw_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeRequestOutput"];
                 };
             };
         };
@@ -2544,6 +3016,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActivationOutput"];
+                };
+            };
+        };
+    };
+    tenants_regions_plants_change_requests_incidents_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plant_id: number;
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IncidentRequestInput"];
+                "application/x-www-form-urlencoded": components["schemas"]["IncidentRequestInput"];
+                "multipart/form-data": components["schemas"]["IncidentRequestInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeRequestOutput"];
+                };
+            };
+        };
+    };
+    tenants_regions_plants_change_requests_production_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plant_id: number;
+                region_id: number;
+                tenant_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProductionRequestInput"];
+                "application/x-www-form-urlencoded": components["schemas"]["ProductionRequestInput"];
+                "multipart/form-data": components["schemas"]["ProductionRequestInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeRequestOutput"];
                 };
             };
         };
