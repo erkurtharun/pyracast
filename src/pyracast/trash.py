@@ -26,6 +26,7 @@ from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
     ForecastIssuance,
+    ForecastReconstruction,
     Plant,
     PlantConfiguration,
     PlantEvent,
@@ -188,6 +189,7 @@ def _purge_plant(plant: Plant) -> None:
     PlantIncident.objects.filter(plant=plant).delete()
     PlantForecast.objects.filter(configuration__plant=plant).delete()
     ForecastIssuance.objects.filter(plant=plant).delete()
+    ForecastReconstruction.objects.filter(plant=plant).delete()
     CalibrationRun.objects.filter(plant=plant).update(comparison_activation=None)
     CalibrationActivation.objects.filter(plant=plant).delete()
     CalibrationRun.objects.filter(plant=plant).delete()

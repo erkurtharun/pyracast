@@ -171,8 +171,12 @@ export function ForecastPanel({
     const mixedVintages =
         Array.isArray(result.quality_flags) &&
         result.quality_flags.includes("mixed_forecast_vintages");
+    const reconstructed =
+        Array.isArray(result.quality_flags) &&
+        result.quality_flags.includes("reconstructed_forecast");
     const provenance = result.provenance as
         | {
+              reconstructed_at?: string;
               source_snapshots?: {
                   snapshot_id: number;
                   collected_at: string;
@@ -306,6 +310,7 @@ export function ForecastPanel({
                         <Tag>{t("updated_estimates_and_forecast")}</Tag>
                     )}
                     {mixedVintages && <Tag>{t("mixed_forecast_updates")}</Tag>}
+                    {reconstructed && <Tag>{t("reconstructed_forecast")}</Tag>}
                     {Array.isArray(result.quality_flags) &&
                         result.quality_flags.includes("archived_forecast") && (
                             <Tag>{t("archived_forecast")}</Tag>
@@ -574,6 +579,27 @@ export function ForecastPanel({
             )}
             <details className="provenance">
                 <summary>{t("source_quality")}</summary>
+                {reconstructed &&
+                    provenance?.reconstructed_at &&
+                    Number.isFinite(
+                        Date.parse(provenance.reconstructed_at),
+                    ) && (
+                        <p>
+                            {t("reconstructed_at", {
+                                date: new Intl.DateTimeFormat(locale, {
+                                    timeZone: forecast.timezone,
+                                    year: "numeric",
+                                    month: "2-digit",
+                                    day: "2-digit",
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                    hourCycle: "h23",
+                                }).format(
+                                    new Date(provenance.reconstructed_at),
+                                ),
+                            })}
+                        </p>
+                    )}
                 {diagnostic && (
                     <p>
                         {diagnostic.reference_kind === "uncalibrated_reference"

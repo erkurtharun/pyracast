@@ -397,6 +397,32 @@ class ForecastIssuance(models.Model):
         )
 
 
+class ForecastReconstruction(models.Model):
+    plant = models.ForeignKey(Plant, on_delete=models.PROTECT)
+    configuration = models.ForeignKey(PlantConfiguration, on_delete=models.PROTECT)
+    snapshot = models.ForeignKey("forecasts.ForecastSnapshot", on_delete=models.PROTECT)
+    calibration = models.ForeignKey(CalibrationRun, on_delete=models.PROTECT)
+    target_date = models.DateField()
+    reconstructed_at = models.DateTimeField()
+    source_cutoff_at = models.DateTimeField()
+    model_version = models.CharField(max_length=100)
+    factor = models.FloatField()
+    payloads = models.JSONField()
+
+    class Meta:
+        indexes = (models.Index(fields=("plant", "target_date"), name="reconstruction_plant_day"),)
+        constraints = (
+            models.UniqueConstraint(
+                fields=("snapshot", "configuration", "calibration", "target_date", "model_version"),
+                name="forecast_reconstruction_unique",
+            ),
+            models.CheckConstraint(
+                condition=Q(factor__gt=0, factor__lt=float("inf")),
+                name="reconstruction_factor_finite",
+            ),
+        )
+
+
 class PlantEvent(models.Model):
     plant = models.ForeignKey(Plant, on_delete=models.PROTECT)
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT)

@@ -16,6 +16,8 @@
         "download_both_scenarios_csv": "İki senaryoyu CSV olarak indir",
         "download_csv": "CSV indir",
         "mixed_forecast_updates": "Birleştirilmiş tahmin güncellemeleri",
+        "reconstructed_forecast": "Güncel kalibrasyonla yeniden hesaplandı",
+        "reconstructed_at": "Hesaplama zamanı: {date}",
         "archived_forecast": "Arşivlenmiş tahmin",
         "provisional_production_calibration": "Geçici üretim verisiyle kalibrasyon",
         "needs_validation": "Doğrulama gerekli",
@@ -79,6 +81,7 @@
         "calibration_id": "Kalibrasyon {id}.",
         "forecast_update": "Tahmin güncellemesi {id}: toplanma {date}",
         "qualityFlags": {
+            "reconstructed_forecast": "Güncel kalibrasyonla yeniden hesaplandı",
             "missing_source_interval": "Kaynak aralığı eksik",
             "unvalidated": "Doğrulanmamış",
             "partial_sunlight": "Kısmi gün ışığı",
@@ -413,7 +416,7 @@
         "archived_forecast": "Arşivlenmiş tahmin",
         "estimated_actuals": "Gerçekleşen üretim tahminleri",
         "elapsed_intervals_model_estimates_not_meter_readings": "Bugünün ve geçmiş günlerin tamamlanan aralıkları · model tahminidir, sayaç ölçümü değildir.",
-        "archived_forecast_description": "Gün ışığı başlamadan, o zamanki kalibrasyonuyla kaydedilen son tahmin."
+        "archived_forecast_description": "Gün ışığı başlamadan alınan tahminler."
     },
     "CsvDownload": {
         "download_csv": "CSV indir"

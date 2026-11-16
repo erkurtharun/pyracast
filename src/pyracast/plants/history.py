@@ -20,6 +20,7 @@ from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.automatic_forecast import automatic_forecast
 from pyracast.plants.current_forecast import current_forecast, saved_forecast
+from pyracast.plants.forecast_reconstruction import reconstructed_forecast
 from pyracast.plants.forecasting import (
     archived_forecast,
     calibration_for_day,
@@ -118,7 +119,12 @@ def _plant_outlook(
     if source not in {"auto", "forecast", "estimated_actuals", "archived_forecast"}:
         raise ValidationError(gettext("Unsupported data source."))
     if source == "archived_forecast":
-        return archived_forecast(plant, target_date, resolution_minutes, now, as_of=as_of)
+        archived = archived_forecast(plant, target_date, resolution_minutes, now, as_of=as_of)
+        if as_of is None and archived["result"] is None:
+            reconstructed = reconstructed_forecast(plant, target_date, resolution_minutes, now)
+            if reconstructed is not None:
+                return reconstructed
+        return archived
     if source == "estimated_actuals" and target_date == today and as_of is None:
         return current_forecast(plant, target_date, resolution_minutes, now, actuals_only=True)
     if source == "forecast" or (source == "auto" and target_date >= today):
