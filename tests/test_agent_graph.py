@@ -82,6 +82,7 @@ def test_graph_commands_share_the_same_cache_without_mutating_session_environmen
     assert options["check"] is False
     assert "shell" not in options
     assert command[0] == "/installed/code-review-graph"
+    assert command[1] == operation
     assert command[2:4] == ["--repo", str(Path(agent_graph.__file__).resolve().parents[1])]
     if operation == "query":
         assert command[4:] == ["--", "callers_of", "function with spaces"]

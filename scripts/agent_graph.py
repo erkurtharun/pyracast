@@ -63,11 +63,14 @@ def main(argv: list[str] | None = None) -> int:
         environment["CRG_HOME"] = str(directory)
         # Queries otherwise fall back into the checkout before a registry entry exists.
         environment["CRG_DATA_DIR"] = str(directory)
-        command = [executable, args.operation, "--repo", str(root)]
         if args.operation == "query":
             # Query operands must not be interpreted as child CLI options.
-            command.extend(["--", args.pattern, args.target])
+            command = [executable, "query", "--repo", str(root), "--", args.pattern, args.target]
+        elif args.operation == "build":
+            command = [executable, "build", "--repo", str(root)]
+            command.extend(["--skip-flows", "--data-dir", str(directory)])
         else:
+            command = [executable, "update", "--repo", str(root)]
             command.extend(["--skip-flows", "--data-dir", str(directory)])
         return subprocess.run(  # noqa: S603 -- fixed executable and parsed argument list; no shell.
             command, cwd=root, env=environment, check=False
