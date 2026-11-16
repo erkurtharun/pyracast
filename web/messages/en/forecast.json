@@ -16,8 +16,6 @@
         "download_both_scenarios_csv": "Download both scenarios CSV",
         "download_csv": "Download CSV",
         "mixed_forecast_updates": "Mixed forecast updates",
-        "reconstructed_forecast": "Recalculated with the latest calibration",
-        "reconstructed_at": "Recalculated at: {date}",
         "archived_forecast": "Archived forecast",
         "provisional_production_calibration": "Provisional production calibration",
         "needs_validation": "Needs validation",
@@ -81,7 +79,6 @@
         "calibration_id": "Calibration {id}.",
         "forecast_update": "Forecast update {id}: collected {date}",
         "qualityFlags": {
-            "reconstructed_forecast": "Recalculated with the latest calibration",
             "missing_source_interval": "missing source interval",
             "unvalidated": "unvalidated",
             "partial_sunlight": "partial sunlight",
@@ -416,7 +413,7 @@
         "archived_forecast": "Archived forecast",
         "estimated_actuals": "Estimated actuals",
         "elapsed_intervals_model_estimates_not_meter_readings": "Completed intervals today and on past days · model estimates, not meter readings.",
-        "archived_forecast_description": "Forecasts collected before daylight."
+        "archived_forecast_description": "Last forecast saved before daylight, with its original calibration."
     },
     "CsvDownload": {
         "download_csv": "Download CSV"
