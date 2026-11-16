@@ -850,7 +850,8 @@ msgid "Production entry requires the current approved configuration."
 msgstr "Üretim girişi için güncel ve onaylı yapılandırma gereklidir."
 
 msgid "Production changed. Reload the latest values before saving."
-msgstr "Üretim verileri değişti. Kaydetmeden önce güncel değerleri yeniden yükleyin."
+msgstr ""
+"Üretim verileri değişti. Kaydetmeden önce güncel değerleri yeniden yükleyin."
 
 msgid "A production batch must stay within 31 local days."
 msgstr "Bir üretim grubu en fazla 31 yerel günü kapsayabilir."
@@ -1574,15 +1575,21 @@ msgstr ""
 msgid "Action needed"
 msgstr "İşlem gerekiyor"
 
-msgid "Ask the workspace administrator to correct the saved recipient addresses."
-msgstr "Kayıtlı alıcı adreslerini workspace yöneticisinin düzeltmesi gerekiyor."
+msgid ""
+"Ask the workspace administrator to correct the saved recipient addresses."
+msgstr ""
+"Kayıtlı alıcı adreslerini workspace yöneticisinin düzeltmesi gerekiyor."
 
-msgid "Check the dispatcher and worker; the dispatcher recovers expired leases."
-msgstr "Zamanlayıcı ve işleyici servislerini kontrol edin; kesintiye uğrayan işler otomatik kurtarılır."
+msgid ""
+"Check the dispatcher and worker; the dispatcher recovers expired leases."
+msgstr ""
+"Zamanlayıcı ve işleyici servislerini kontrol edin; kesintiye uğrayan işler "
+"otomatik kurtarılır."
 
 #, python-format
 msgid "Check the dispatcher process and its last successful run: %(phases)s."
-msgstr "Zamanlayıcı servisini ve son başarılı çalışmasını kontrol edin: %(phases)s."
+msgstr ""
+"Zamanlayıcı servisini ve son başarılı çalışmasını kontrol edin: %(phases)s."
 
 msgid "Dispatcher phases needing attention"
 msgstr "Zamanlayıcı sorunları"
@@ -1620,8 +1627,12 @@ msgstr "Üretim verisi toplama"
 msgid "Recent outcomes need review"
 msgstr "Son kayıtları inceleyin"
 
-msgid "Requests resume automatically after the provider delay. Preserve the shared quota."
-msgstr "Sağlayıcının bekleme süresi dolunca istekler otomatik devam eder. Ortak kotayı koruyun."
+msgid ""
+"Requests resume automatically after the provider delay. Preserve the shared "
+"quota."
+msgstr ""
+"Sağlayıcının bekleme süresi dolunca istekler otomatik devam eder. Ortak "
+"kotayı koruyun."
 
 msgid "Review affected plants"
 msgstr "İlgili santralleri aç"
@@ -1635,8 +1646,12 @@ msgstr "Zamanlayıcı durumunu aç"
 msgid "Review emails"
 msgstr "E-posta kayıtlarını aç"
 
-msgid "Review failed, unavailable or unknown outcomes. Reconcile unknown acceptance before resending."
-msgstr "Başarısız veya sonucu belirsiz gönderimleri inceleyin. Yeniden göndermeden önce kabul durumunu doğrulayın."
+msgid ""
+"Review failed, unavailable or unknown outcomes. Reconcile unknown acceptance"
+" before resending."
+msgstr ""
+"Başarısız veya sonucu belirsiz gönderimleri inceleyin. Yeniden göndermeden "
+"önce kabul durumunu doğrulayın."
 
 msgid "Review production collection"
 msgstr "EPİAŞ kayıtlarını aç"
@@ -1644,17 +1659,27 @@ msgstr "EPİAŞ kayıtlarını aç"
 msgid "Review provider connections"
 msgstr "Sağlayıcı bağlantılarını aç"
 
-msgid "Review the provider key and validate the connection after correcting it."
-msgstr "Sağlayıcı anahtarını kontrol edin; düzelttikten sonra bağlantıyı doğrulayın."
+msgid ""
+"Review the provider key and validate the connection after correcting it."
+msgstr ""
+"Sağlayıcı anahtarını kontrol edin; düzelttikten sonra bağlantıyı doğrulayın."
 
-msgid "Review the recorded error and the plant connection before changing settings."
-msgstr "Ayarları değiştirmeden önce kayıtlı hatayı ve santral bağlantısını inceleyin."
+msgid ""
+"Review the recorded error and the plant connection before changing settings."
+msgstr ""
+"Ayarları değiştirmeden önce kayıtlı hatayı ve santral bağlantısını "
+"inceleyin."
 
-msgid "Review the recorded error, target period and reported-production connection."
+msgid ""
+"Review the recorded error, target period and reported-production connection."
 msgstr "Kayıtlı hatayı, ilgili dönemi ve EPİAŞ bağlantısını inceleyin."
 
-msgid "Review the recorded failure and ask the deployment operator to check mail credentials."
-msgstr "Kayıtlı hatayı inceleyin; sunucudaki e-posta erişim bilgilerini sistem sorumlusu kontrol etmelidir."
+msgid ""
+"Review the recorded failure and ask the deployment operator to check mail "
+"credentials."
+msgstr ""
+"Kayıtlı hatayı inceleyin; sunucudaki e-posta erişim bilgilerini sistem "
+"sorumlusu kontrol etmelidir."
 
 msgid "Scheduled in the last 24 hours"
 msgstr "Son 24 saat için planlanan"
@@ -1670,3 +1695,313 @@ msgstr "Tüm santralleri göster"
 
 msgid "Waiting for provider publication"
 msgstr "Sağlayıcının yayımlaması bekleniyor"
+
+msgid "30 minutes"
+msgstr "30 dakika"
+
+msgid "60 minutes"
+msgstr "60 dakika"
+
+msgid "Ambiguous or nonexistent local source timestamp."
+msgstr ""
+"Yaz saati geçişi nedeniyle belirsiz veya geçersiz bir saat var. Saat farkını"
+" dosyada açıkça belirtin."
+
+msgid "An explicit PT30M or PT60M interval period is required."
+msgstr ""
+"30 veya 60 dakikalık periyot bilgisi gerekli. Dosyada yoksa periyodu seçin."
+
+msgid "Approve the current Solcast configuration before importing."
+msgstr "İçe aktarmadan önce güncel Solcast yapılandırmasını onaylayın."
+
+msgid "Azimuth"
+msgstr "Azimut"
+
+msgid "Azimuth / losses"
+msgstr "Azimut / kayıplar"
+
+msgid "CSV rows must match the column header."
+msgstr "CSV satırları sütun başlıklarıyla eşleşmelidir."
+
+msgid "Check a JSON or CSV export before saving."
+msgstr "JSON veya CSV dosyasını kaydetmeden önce kontrol edin."
+
+msgid "Checking…"
+msgstr "Kontrol ediliyor…"
+
+msgid "Choose an upload action."
+msgstr "Önizleme veya kaydetme işlemini seçin."
+
+msgid "Choose one file at a time."
+msgstr "Tek seferde bir dosya seçin."
+
+msgid ""
+"Confirm the historical modeled product and selected reference settings."
+msgstr ""
+"Dosyanın seçili referansa ait geçmiş model verileri olduğunu onaylayın."
+
+msgid "Confirm the selected reference configuration."
+msgstr "Seçili referans yapılandırmasını onaylayın."
+
+msgid "Conflicting source metadata declarations."
+msgstr "Dosyada çelişen yapılandırma bilgileri var."
+
+msgid "Conflicts — import blocked"
+msgstr "Uyuşmazlıklar — içe aktarılamaz"
+
+msgid "Coverage (UTC)"
+msgstr "Tarih aralığı (UTC)"
+
+msgid "DC capacity"
+msgstr "DC kapasitesi"
+
+msgid "DC capacity not declared"
+msgstr "DC kapasitesi belirtilmemiş"
+
+msgid "Drop a Solcast file here or choose a file"
+msgstr "Solcast dosyasını buraya bırakın veya dosya seçin"
+
+msgid "Duplicate JSON object keys are not supported."
+msgstr "JSON dosyasında aynı alan birden fazla kez tanımlanmış."
+
+msgid "Duplicate source columns are not supported."
+msgstr "Dosyada aynı sütun birden fazla kez tanımlanmış."
+
+msgid "Expected exactly one Solcast rooftop power column in kW."
+msgstr "Dosyada kW biriminde tek bir Solcast güç sütunu bulunmalıdır."
+
+msgid "Expected historical estimated_actuals, not forecasts or irradiance."
+msgstr ""
+"Dosya, geçmiş güç verilerini (estimated_actuals) içermelidir; tahmin veya "
+"ışınım verileri yüklenemez."
+
+msgid "Expected interval objects."
+msgstr "Dosyadaki kayıt biçimi geçersiz."
+
+msgid "File interpretation options"
+msgstr "Eksik dosya bilgileri"
+
+msgid "File preview"
+msgstr "Dosya önizlemesi"
+
+msgid "Historical Solcast file"
+msgstr "Geçmiş Solcast verileri"
+
+msgid "Historical data saved. Repeated uploads reuse the existing import."
+msgstr "Geçmiş veriler kaydedildi. Aynı dosya tekrar kayıt oluşturmaz."
+
+msgid "Historical input cannot contain future or incomplete intervals."
+msgstr "Gelecekteki veya henüz tamamlanmamış zaman aralıkları yüklenemez."
+
+msgid "Historical intervals must be sorted and non-overlapping."
+msgstr "Kayıtlar zaman sırasına göre dizilmeli ve çakışmamalıdır."
+
+msgid "Historical upload must contain between 1 and 200000 intervals."
+msgstr "Dosya 1–200.000 kayıt içermelidir."
+
+msgid "Import historical Solcast data"
+msgstr "Geçmiş Solcast verilerini yükle"
+
+msgid "Interval"
+msgstr "Periyot"
+
+msgid ""
+"Interval duration was declared by the operator, not provided by every row."
+msgstr "Eksik periyot bilgisi seçiminize göre tamamlandı."
+
+msgid "Interval, only when missing from the file"
+msgstr "Periyot (dosyada yoksa)"
+
+msgid "Intervals"
+msgstr "Kayıtlar"
+
+msgid "Invalid period timestamp."
+msgstr "Kayıt zamanı geçersiz."
+
+msgid "Latitude"
+msgstr "Enlem"
+
+msgid "Local days"
+msgstr "Yerel tarihler"
+
+msgid "Longitude"
+msgstr "Boylam"
+
+msgid "Losses"
+msgstr "Kayıplar"
+
+msgid "Matches selected configuration"
+msgstr "Yapılandırmayla eşleşenler"
+
+msgid "Naive source timestamps were interpreted using the selected timezone."
+msgstr "Saat farkı bulunmayan kayıtlar seçilen saat dilimine göre yorumlandı."
+
+msgid "Naive timestamps require an explicit source timezone."
+msgstr "Dosyada saat farkı belirtilmemiş. Dosyanın saat dilimini seçin."
+
+msgid "Nonfinite JSON values are not supported."
+msgstr "JSON dosyasında geçersiz sayısal değer var."
+
+msgid "Not present in file"
+msgstr "Dosyada bulunmayanlar"
+
+msgid ""
+"Only information present in the file can be checked. Missing information is "
+"not independently verified."
+msgstr ""
+"Yalnızca dosyadaki bilgiler kontrol edilir. Eksik bilgiler doğrulanmış "
+"sayılmaz."
+
+msgid "Period start/end bounds disagree with the interval duration."
+msgstr "Başlangıç ve bitiş saatleri periyot süresiyle uyuşmuyor."
+
+msgid "Plant timezone"
+msgstr "Santralin saat dilimi"
+
+msgid "Power basis"
+msgstr "Güç türü"
+
+msgid "Power must be a finite nonnegative number in kW."
+msgstr "Güç, kW biriminde sonlu ve sıfır veya pozitif bir sayı olmalıdır."
+
+msgid "Preview file"
+msgstr "Dosyayı kontrol et"
+
+msgid "Read from file"
+msgstr "Dosyadan oku"
+
+msgid "Reference capacity"
+msgstr "Referans kapasitesi"
+
+msgid "Resolve the file conflicts before importing."
+msgstr "İçe aktarmadan önce dosyadaki uyuşmazlıkları giderin."
+
+msgid "Review the file"
+msgstr "Dosyayı kontrol edin"
+
+msgid "Save historical data"
+msgstr "Verileri kaydet"
+
+msgid "Saving…"
+msgstr "Kaydediliyor…"
+
+msgid ""
+"Select the same file again before saving. The file must match this preview."
+msgstr ""
+"Kaydetmek için aynı dosyayı yeniden seçin. Dosya bu önizlemeyle "
+"eşleşmelidir."
+
+msgid "Selected reference configuration"
+msgstr "Seçili referans yapılandırması"
+
+msgid "Selected timezone conflicts with the file's source timezone."
+msgstr "Seçilen saat dilimi dosyadaki saat dilimiyle uyuşmuyor."
+
+msgid "Source information checks"
+msgstr "Yapılandırma kontrolü"
+
+msgid "Source metadata must be an object."
+msgstr "Dosyanın yapılandırma bilgileri geçerli bir nesne olmalıdır."
+
+msgid "Source settings change within the uploaded file."
+msgstr "Dosya içindeki yapılandırma bilgileri tutarlı değil."
+
+msgid "Source timezone"
+msgstr "Dosyanın saat dilimi"
+
+msgid "Source timezone, only for timestamps without an offset"
+msgstr "Saat dilimi (dosyada belirtilmemişse)"
+
+msgid ""
+"The file does not verify all reference settings; operator confirmation is "
+"required."
+msgstr ""
+"Dosyada tüm yapılandırma bilgileri yok. Seçili referansa ait olduğunu "
+"onaylayın."
+
+msgid "The file or selected configuration changed. Preview the file again."
+msgstr "Dosya veya yapılandırma değişti. Dosyayı yeniden kontrol edin."
+
+msgid "The plant configuration changed. Preview the file again."
+msgstr "Santralin yapılandırması değişti. Dosyayı yeniden kontrol edin."
+
+msgid "The preview expired or is invalid. Preview the file again."
+msgstr "Önizleme geçersiz veya süresi dolmuş. Dosyayı yeniden kontrol edin."
+
+msgid "The request failed. Try again."
+msgstr "İşlem tamamlanamadı. Yeniden deneyin."
+
+msgid ""
+"The selected reference has no declared DC capacity; settings matching is "
+"incomplete."
+msgstr ""
+"Seçili referansın DC kapasitesi belirtilmemiş. Yapılandırma eşleşmesi "
+"tamamlanamıyor."
+
+msgid ""
+"This is historical model data for the selected reference configuration."
+msgstr ""
+"Bu dosya, seçili referans yapılandırmasına ait geçmiş model verilerini "
+"içeriyor."
+
+msgid "Tilt"
+msgstr "Eğim"
+
+msgid "Timestamp convention"
+msgstr "Zaman damgası tanımı"
+
+msgid "Timestamp offsets in file"
+msgstr "Dosyadaki saat farkları"
+
+msgid "Unit"
+msgstr "Birim"
+
+msgid "Upload a UTF-8 JSON or CSV export."
+msgstr "UTF-8 biçiminde bir JSON veya CSV dosyası yükleyin."
+
+msgid "Use one power product and one interval period per upload."
+msgstr "Her dosyada tek bir güç ürünü ve periyot kullanılmalıdır."
+
+msgid ""
+"Use these only if the file does not declare its timezone or interval. An "
+"existing timestamp offset is preserved."
+msgstr "Yalnızca dosyada eksikse doldurun. Dosyadaki saat farkları korunur."
+
+msgid "Warnings"
+msgstr "Uyarılar"
+
+msgid "Back to plant"
+msgstr "Santrale dön"
+
+msgid "Coverage (plant time)"
+msgstr "Tarih aralığı (santral saati)"
+
+msgid "Product"
+msgstr "Veri ürünü"
+
+msgid "Source metadata conflicts with the selected reference: %(field)s."
+msgstr "Dosyadaki %(field)s bilgisi seçili referansla uyuşmuyor."
+
+msgid "Source metadata conflicts with the uploaded intervals: %(field)s."
+msgstr "Dosyadaki %(field)s bilgisi kayıtlarla uyuşmuyor."
+
+msgid "The JSON export is nested too deeply."
+msgstr "JSON dosyasının iç içe yapısı desteklenen sınırı aşıyor."
+
+msgid "A current authorized and validated Solcast binding is required."
+msgstr ""
+"Güncel, yetkilendirilmiş ve doğrulanmış bir Solcast bağlantısı gerekli."
+
+msgid "Historical upload must contain between 1 byte and 7 MiB."
+msgstr "Dosya boş olmamalı ve 7 MiB boyutunu aşmamalıdır."
+
+msgid "JSON or CSV, up to 7 MiB. Selecting a file does not upload it."
+msgstr "JSON veya CSV, en fazla 7 MiB. Dosya seçildiğinde yükleme başlamaz."
+
+msgid "Select a file no larger than 7 MiB."
+msgstr "En fazla 7 MiB boyutunda bir dosya seçin."
+
+msgid "The existing import has a different source declaration."
+msgstr ""
+"Bu dosya daha önce farklı kaynak bilgileriyle yüklenmiş. Önceki kaydı "
+"kontrol edin."

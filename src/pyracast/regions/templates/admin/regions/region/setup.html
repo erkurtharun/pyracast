@@ -13,6 +13,11 @@
   </dl>
 {% endblock %}
 {% block content %}
+  <section class="panel" aria-labelledby="historical-title">
+    <div class="panel-head"><h2 id="historical-title">{% translate "Historical Solcast data" %}</h2></div>
+    <p class="row-meta">{% translate "Check and import an authorized historical JSON or CSV export for this plant." %}</p>
+    <a class="btn btn--quiet" href="{% url 'admin:workspace_historical_import' region.pk %}">{% translate "Import historical data" %}</a>
+  </section>
   {% if setup_form.errors or action_form.errors or review_form.errors or epias_form.errors %}
     <section class="notice notice--error" role="alert" tabindex="-1" data-error-summary aria-labelledby="errors-title">
       <h2 id="errors-title">{% translate "Review the changes" %}</h2>

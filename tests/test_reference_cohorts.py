@@ -22,6 +22,8 @@ def prepare_cohorts(
     unknown: int = 0,
     native_power: float = 0.4,
     invalid_native_day: bool = False,
+    settings_matched: bool | None = None,
+    file_product: str | None = None,
 ) -> tuple[System, Plant, CalibrationRun]:
     system, plant = make_plant(monkeypatch)
     assert plant.current_configuration_id is not None
@@ -29,7 +31,9 @@ def prepare_cohorts(
         binding=system.binding,
         sha256="a" * 64,
         source_name="authorized-export.json",
-        source_settings={"product": "historical_rooftop_pv"},
+        source_settings={"product": "historical_rooftop_pv"}
+        | ({"settings_matched": settings_matched} if settings_matched is not None else {})
+        | ({"upload_provenance": {"file_product": file_product}} if file_product else {}),
         imported_by=system.admin,
         imported_at=NOW,
         interval_count=historical * 48,
@@ -125,6 +129,60 @@ def test_pooling_follows_day_counts_not_candidate_holdout_performance(
     assert cohort["pooled_products"] == ["rooftop_pv_power", "historical_rooftop_pv"]
     assert run.result["valid_days"] == 22
     assert run.status == "rejected"
+
+
+@pytest.mark.parametrize("settings_matched", [False, True, None])
+def test_unmatched_import_settings_keep_history_out_of_the_supported_native_pool(
+    monkeypatch: pytest.MonkeyPatch, settings_matched: bool | None
+) -> None:
+    _, _, run = prepare_cohorts(
+        monkeypatch, native=7, historical=23, settings_matched=settings_matched
+    )
+    assert run_calibration(run.pk, NOW)
+    run.refresh_from_db()
+    supported = settings_matched is not False
+    assert run.status == "ready"
+    assert run.result["valid_days"] == (30 if supported else 7)
+    cohort = run.dataset_manifest["reference_cohort"]
+    assert cohort["pooled_products"] == (
+        ["rooftop_pv_power", "historical_rooftop_pv"] if supported else ["rooftop_pv_power"]
+    )
+    assert cohort["cohorts"]["historical_rooftop_pv"]["complete_matched_days"] == (
+        23 if supported else 0
+    )
+    assert cohort["cohorts"]["unknown"]["complete_matched_days"] == (0 if supported else 23)
+    source = run.dataset_manifest["sources"]["2026-07-01"]
+    assert source["source_product"] == ("historical_rooftop_pv" if supported else "unknown")
+    settings = source["reference_import"]["source_settings"]
+    assert settings["product"] == "historical_rooftop_pv"
+    assert settings.get("settings_matched") is settings_matched
+    validation = run.result["current_source_validation"]
+    assert validation["historical_valid_days"] == (23 if supported else 0)
+    assert validation["eligible"] is supported
+
+
+def test_uploaded_hobby_product_never_becomes_native_collection_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, _, run = prepare_cohorts(
+        monkeypatch, native=0, historical=30, file_product="rooftop_pv_power"
+    )
+    assert run_calibration(run.pk, NOW)
+    run.refresh_from_db()
+    assert run.status == "ready"
+    cohort = run.dataset_manifest["reference_cohort"]
+    assert cohort["selected_product"] == "historical_rooftop_pv"
+    assert cohort["cohorts"]["rooftop_pv_power"]["complete_matched_days"] == 0
+    source = run.dataset_manifest["sources"]["2026-07-01"]
+    assert source["source_product"] == "historical_rooftop_pv"
+    assert source["reference_import"]["source_settings"]["upload_provenance"] == {
+        "file_product": "rooftop_pv_power"
+    }
+    validation = run.result["current_source_validation"]
+    assert validation["historical_valid_days"] == 30
+    assert validation["native_valid_days"] == 0
+    assert validation["holdout_days"] == 0
+    assert not validation["eligible"]
 
 
 def test_pooled_cohort_counts_only_complete_valid_matched_daylight_days(

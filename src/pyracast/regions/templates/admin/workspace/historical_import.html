@@ -1,0 +1,44 @@
+{% extends "admin/workspace/base.html" %}
+{% load i18n static %}
+{% block extrahead %}<script src="{% static 'pyracast/admin-historical.js' %}" defer></script><link rel="stylesheet" href="{% static 'pyracast/admin-historical.css' %}">{% endblock %}
+{% block title %}{% translate "Import historical Solcast data" %}{% endblock %}
+{% block heading %}{% translate "Import historical Solcast data" %}{% endblock %}
+{% block backlink %}<a class="back-link" href="{% url 'admin:workspace_plant' region.pk %}">{% translate "Back to plant" %}</a>{% endblock %}
+{% block lead %}<p class="lead">{{ region.tenant.name }} · {{ region.name }} · {{ region.timezone }}</p>{% endblock %}
+{% block content %}
+  {% if binding %}
+    <section class="panel">
+      <p>{% translate "Check a JSON or CSV export before saving." %}</p>
+      <details><summary>{% translate "Selected reference configuration" %}</summary>
+        <dl class="facts">
+          <div><dt>{% translate "Resource ID" %}</dt><dd>{{ binding.site_id }}</dd></div>
+          <div><dt>{% translate "Local timezone" %}</dt><dd>{{ region.timezone }}</dd></div>
+          <div><dt>{% translate "Location" %}</dt><dd>{{ region.latitude }}, {{ region.longitude }}</dd></div>
+          <div><dt>{% translate "Reference capacity" %}</dt><dd>{{ binding.capacity_kw }} kW AC / {% if binding.dc_capacity_kw != None %}{{ binding.dc_capacity_kw }} kW DC{% else %}{% translate "DC capacity not declared" %}{% endif %}</dd></div>
+          <div><dt>{% translate "Azimuth / losses" %}</dt><dd>{{ binding.azimuth_degrees }}° / {{ binding.losses_percent }}%</dd></div>
+        </dl>
+      </details>
+    </section>
+    <form class="panel" method="post" enctype="multipart/form-data" data-historical-upload data-saving="{% translate 'Saving…' %}" data-checking="{% translate 'Checking…' %}" data-network-error="{% translate 'The request failed. Try again.' %}" data-saved="{% translate 'Historical data saved. Repeated uploads reuse the existing import.' %}" data-intervals="{% translate 'Intervals' %}" data-single-file="{% translate 'Choose one file at a time.' %}">
+      {% csrf_token %}
+      <div class="upload-drop" data-upload-drop>
+        <label for="{{ form.file.id_for_label }}"><strong>{% translate "Drop a Solcast file here or choose a file" %}</strong></label>
+        {{ form.file }}
+        <p class="hint">{% translate "JSON or CSV, up to 7 MiB. Selecting a file does not upload it." %}</p>
+      </div>
+      <details class="upload-options"><summary>{% translate "File interpretation options" %}</summary>
+        <p class="hint">{% translate "Use these only if the file does not declare its timezone or interval. An existing timestamp offset is preserved." %}</p>
+        <div class="field-grid"><div class="field">{{ form.source_timezone.label_tag }}{{ form.source_timezone }}</div><div class="field">{{ form.period.label_tag }}{{ form.period }}</div></div>
+      </details>
+      <div class="form-actions"><button type="submit" name="action" value="preview" class="btn btn--primary" data-preview-button>{% translate "Preview file" %}</button></div>
+      <div data-preview-result aria-live="polite">{% include "admin/workspace/historical_preview.html" %}</div>
+      <div data-save-controls{% if not preview or preview.conflicts or form.errors %} hidden{% endif %}>
+        <input type="hidden" name="preview_token" value="{{ preview_token }}" data-preview-token>
+        <p>{{ form.settings_confirmed }} {{ form.settings_confirmed.label_tag }}</p>
+        <noscript><p class="hint">{% translate "Select the same file again before saving. The file must match this preview." %}</p></noscript>
+        <button type="submit" name="action" value="save" class="btn btn--primary" data-save-button>{% translate "Save historical data" %}</button>
+      </div>
+      <p role="status" data-upload-status></p>
+    </form>
+  {% else %}<p class="notice notice--error">{% translate "Approve the current Solcast configuration before importing." %}</p>{% endif %}
+{% endblock %}

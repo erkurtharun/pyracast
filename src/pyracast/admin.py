@@ -24,6 +24,7 @@ from pyracast.accounts.language import explicit_language, save_user_language, se
 from pyracast.accounts.models import Tenant
 from pyracast.accounts.security import has_verified_mfa
 from pyracast.admin_forms import BindingActionForm, EpiasConnectionForm, ProviderSetupForm
+from pyracast.admin_historical import historical_import
 from pyracast.admin_tenants import WorkspaceAdministratorForm, tenant_list_context
 from pyracast.admin_workspace import (
     ReviewDecisionForm,
@@ -88,6 +89,11 @@ class PlatformAdminSite(admin.AdminSite):
             path("logout/", self.admin_view(self.workspace_logout), name="logout"),
             path("language/", self.admin_view(self.language), name="workspace_language"),
             path("plants/<int:object_id>/", self.admin_view(self.plant), name="workspace_plant"),
+            path(
+                "plants/<int:object_id>/historical-import/",
+                self.admin_view(self.historical_import),
+                name="workspace_historical_import",
+            ),
             path(
                 "plants/<int:object_id>/decision/",
                 self.admin_view(self.decision),
@@ -155,6 +161,9 @@ class PlatformAdminSite(admin.AdminSite):
 
     def plant(self, request: HttpRequest, object_id: int) -> HttpResponse:
         return cast(RegionAdmin, self._registry[Region]).setup(request, object_id)
+
+    def historical_import(self, request: HttpRequest, object_id: int) -> HttpResponse:
+        return historical_import(self, request, object_id)
 
     def operations(self, request: HttpRequest) -> HttpResponse:
         return self.workspace_response(

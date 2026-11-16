@@ -107,6 +107,29 @@ def test_sparse_history_keeps_only_days_inside_the_calendar_window() -> None:
     assert date.fromisoformat(holdout[0]) - date.fromisoformat(training[0]) == timedelta(days=30)
 
 
+@pytest.mark.parametrize(("training_days", "fold_count"), [(7, 0), (8, 1), (9, 1), (10, 1)])
+def test_sparse_recent_training_does_not_create_wrapped_rolling_folds(
+    training_days: int, fold_count: int
+) -> None:
+    offsets = set(range(23 - training_days)) | set(range(53 - training_days, 60))
+    report = _fit(
+        tuple(sample for sample in _history(60) if (sample.start - START).days in offsets)
+    )
+    assert report["valid_days"] == 30
+    assert report["training_days"] == training_days
+    rolling = cast(dict[str, object], report["rolling_origin"])
+    assert rolling["status"] == ("diagnostic" if fold_count else "insufficient")
+    folds = cast(list[dict[str, object]], rolling["folds"])
+    assert len(folds) == fold_count
+    holdout = cast(list[str], report["holdout_day_dates"])
+    for fold in folds:
+        training = cast(list[str], fold["training_day_dates"])
+        evaluation = cast(list[str], fold["evaluation_day_dates"])
+        assert len(evaluation) == 3
+        assert max(training) < min(evaluation)
+        assert max(evaluation) < min(holdout)
+
+
 def test_fit_clips_native_power_before_hourly_energy() -> None:
     samples = []
     for sample in _history():

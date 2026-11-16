@@ -604,6 +604,8 @@ def _rolling_origin(
     folds: list[dict[str, object]] = []
     for offset in (9, 6, 3):
         evaluation_start = len(days) - offset
+        if evaluation_start < 0:
+            continue
         training_days = days[:evaluation_start]
         evaluation_days = days[evaluation_start : evaluation_start + 3]
         eligible = _eligible([row for row in rows if row.day in training_days], cap)

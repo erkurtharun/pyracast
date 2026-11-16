@@ -1,0 +1,9 @@
+.upload-drop { padding: 24px; border: 2px dashed var(--line); border-radius: 12px; }
+.upload-drop label { display: block; margin-bottom: 12px; }
+.upload-drop input { max-width: 100%; }
+.upload-drop.is-dragging { border-color: var(--accent); outline: 2px solid currentColor; }
+.upload-options, .upload-preview { margin-top: 20px; }
+.upload-preview dd { overflow-wrap: anywhere; }
+[data-save-controls] { margin-top: 20px; }
+[data-historical-upload] [hidden] { display: none; }
+@media (max-width: 600px) { .upload-drop { padding: 16px; } }

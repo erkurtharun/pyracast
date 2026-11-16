@@ -1,0 +1,22 @@
+{% load i18n tz %}
+{% if form.errors %}<div class="notice notice--error" role="alert" data-error-summary tabindex="-1"><h2>{% translate "Review the file" %}</h2>{{ form.errors }}</div>{% endif %}
+{% if preview %}
+  <section class="upload-preview" aria-labelledby="preview-title">
+    <h2 id="preview-title">{% translate "File preview" %}</h2>
+    <p class="row-meta">{{ file_name }}</p>
+    <dl class="facts">
+      <div><dt>{% translate "Intervals" %}</dt><dd>{{ preview.interval_count }} · {{ preview.period }} · {{ preview.unit }}</dd></div>
+      <div><dt>{% translate "Coverage (UTC)" %}</dt><dd>{{ preview.coverage_start|timezone:"UTC"|date:"Y-m-d H:i T" }} – {{ preview.coverage_end|timezone:"UTC"|date:"Y-m-d H:i T" }}</dd></div>
+      <div><dt>{% translate "Coverage (plant time)" %}</dt><dd>{{ preview.coverage_start|timezone:region.timezone|date:"Y-m-d H:i O" }} – {{ preview.coverage_end|timezone:region.timezone|date:"Y-m-d H:i O" }}</dd></div>
+      <div><dt>{% translate "Plant timezone" %}</dt><dd>{{ region.timezone }}</dd></div>
+      <div><dt>{% translate "Source timezone" %}</dt><dd>{{ source_timezone }}</dd></div>
+      <div><dt>{% translate "Local days" %}</dt><dd>{{ preview.local_days|first|date:"Y-m-d" }} – {{ preview.local_days|last|date:"Y-m-d" }} ({{ preview.local_days|length }})</dd></div>
+    </dl>
+    {% if preview.conflicts %}<div class="notice notice--error"><h3>{% translate "Conflicts — import blocked" %}</h3><ul>{% for issue in preview.conflicts %}<li>{% translate issue %}</li>{% endfor %}</ul></div>{% endif %}
+    {% if preview.warnings %}<div class="callout callout--warn"><h3>{% translate "Warnings" %}</h3><ul>{% for issue in preview.warnings %}<li>{% translate issue %}</li>{% endfor %}</ul></div>{% endif %}
+    <details><summary>{% translate "Source information checks" %}</summary>
+      <p>{% translate "Only information present in the file can be checked. Missing information is not independently verified." %}</p>
+      <dl class="facts"><div><dt>{% translate "Matches selected configuration" %}</dt><dd>{{ verified_labels|join:", "|default:_("None") }}</dd></div><div><dt>{% translate "Not present in file" %}</dt><dd>{{ missing_labels|join:", "|default:_("None") }}</dd></div></dl>
+    </details>
+  </section>
+{% endif %}

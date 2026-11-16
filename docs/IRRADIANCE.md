@@ -420,10 +420,14 @@ new binding does not restart from one week of data; each day still uses exactly 
 Legacy unknown products remain a separate cohort and are never pooled. If no cohort has
 seven days, keep the fit insufficient. Record the pooled products, coverage counts and
 excluded samples; preserve the full pinned source manifest for audit.
-Import historical exports with an explicit settings manifest matching the
-approved binding, preserve native timestamps/means and the original payload digest,
-and record the actual import/publication time. Never infer settings from the filename
-or backdate availability. Automatic activation additionally needs all seven final holdout
+Import historical exports against the approved binding. Admin uploads verify metadata
+present in JSON/CSV and record missing settings as the operator's same-configuration
+declaration; conflicting metadata blocks the import. Undeclared reference DC capacity
+keeps the import in the separate unknown cohort. Preserve native timestamps/means,
+the original payload digest and the actual import/publication time. Source timezone
+may differ from the binding timezone: convert instants to UTC before local-day grouping.
+Never infer settings from the filename or backdate availability.
+Automatic activation additionally needs all seven final holdout
 days from the current binding's native Hobby estimated actuals or explicitly authorized
 capacity-normalized copies of that product, and at least 30 selected training and holdout
 days that are such days or the settings-matched historical export. Recompute this gate

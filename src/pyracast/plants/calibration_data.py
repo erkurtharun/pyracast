@@ -106,7 +106,11 @@ def _reference_manifest(snapshot: ForecastSnapshot) -> dict[str, object]:
         "snapshot_id": snapshot.pk,
         "binding_id": snapshot.job.binding_id,
         "source_kind": snapshot.source_kind,
-        "source_product": imported.source_settings["product"]
+        "source_product": (
+            "unknown"
+            if imported.source_settings.get("settings_matched") is False
+            else imported.source_settings["product"]
+        )
         if imported is not None
         else "rooftop_pv_power"
         if original.job.endpoint == "estimated_actuals" and original.job.reference_import_id is None

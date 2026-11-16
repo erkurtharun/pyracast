@@ -1,6 +1,6 @@
 from collections import defaultdict
 from dataclasses import asdict, dataclass, fields
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from math import isfinite
 from pathlib import Path
 from typing import Any
@@ -10,6 +10,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
+from django.utils.translation import gettext as _
 
 from pyracast.accounts.operations import require_admin
 from pyracast.connections.models import ProviderAccount, SiteBinding
@@ -101,7 +102,7 @@ def parse_source_settings(value: object) -> HistoricalSourceSettings:
     )
 
 
-def _validate_binding(binding: SiteBinding, source: HistoricalSourceSettings) -> None:
+def _validate_authorized_binding(binding: SiteBinding) -> None:
     account = binding.provider_account
     if (
         not binding_is_current(binding)
@@ -113,7 +114,11 @@ def _validate_binding(binding: SiteBinding, source: HistoricalSourceSettings) ->
         or binding.power_basis != "ac"
         or not binding.settings_verification_reference
     ):
-        raise ValidationError("A current authorized and validated Solcast binding is required.")
+        raise ValidationError(_("A current authorized and validated Solcast binding is required."))
+
+
+def _validate_binding(binding: SiteBinding, source: HistoricalSourceSettings) -> None:
+    _validate_authorized_binding(binding)
     for name in (
         "latitude",
         "longitude",
@@ -175,64 +180,78 @@ def import_historical_reference(
         binding = SiteBinding.objects.select_for_update().get(pk=binding.pk)
         binding.provider_account = account
         _validate_binding(binding, source)
-        previous = HistoricalReferenceImport.objects.filter(
-            binding=binding, sha256=power.sha256
-        ).first()
-        if previous is not None:
-            if previous.source_settings != asdict(source):
-                raise ValidationError("The existing import has a different source declaration.")
-            return previous
-        record = HistoricalReferenceImport.objects.create(
+        return _archive_historical_reference(
+            actor, region, binding, power, power_path.name, asdict(source), moment
+        )
+
+
+def _archive_historical_reference(
+    actor: User,
+    region: Region,
+    binding: SiteBinding,
+    power: PowerFile,
+    source_name: str,
+    source_settings: dict[str, Any],
+    moment: datetime,
+) -> HistoricalReferenceImport:
+    previous = HistoricalReferenceImport.objects.filter(
+        binding=binding, sha256=power.sha256
+    ).first()
+    if previous is not None:
+        if previous.source_settings != source_settings:
+            raise ValidationError(_("The existing import has a different source declaration."))
+        return previous
+    record = HistoricalReferenceImport.objects.create(
+        binding=binding,
+        sha256=power.sha256,
+        source_name=source_name,
+        source_settings=source_settings,
+        imported_by=actor,
+        imported_at=moment,
+        interval_count=len(power.intervals),
+    )
+    for day, indexes in _day_indexes(power, ZoneInfo(binding.timezone)).items():
+        job = CollectionJob.objects.create(
             binding=binding,
-            sha256=power.sha256,
-            source_name=power_path.name,
-            source_settings=asdict(source),
-            imported_by=actor,
-            imported_at=moment,
-            interval_count=len(power.intervals),
+            reference_import=record,
+            endpoint="historical_import",
+            scheduled_slot=moment,
+            target_date=day,
+            status="succeeded",
+            available_at=moment,
         )
-        for day, indexes in _day_indexes(power, ZoneInfo(binding.timezone)).items():
-            job = CollectionJob.objects.create(
-                binding=binding,
-                reference_import=record,
-                endpoint="historical_import",
-                scheduled_slot=moment,
-                target_date=day,
-                status="succeeded",
-                available_at=moment,
-            )
-            normalized: list[dict[str, Any]] = [
-                {
-                    "start": power.intervals[index].start.isoformat(),
-                    "end": power.intervals[index].end.isoformat(),
-                    "power_kw": power.intervals[index].power_kw,
-                }
-                for index in indexes
-            ]
-            ForecastSnapshot.objects.create(
-                job=job,
-                binding=binding,
-                raw_payload={
-                    "estimated_actuals": [power.raw_rows[index] for index in indexes],
-                    "historical_import": {
-                        "id": record.pk,
-                        "sha256": power.sha256,
-                        "source_settings": asdict(source),
-                    },
+        normalized: list[dict[str, Any]] = [
+            {
+                "start": power.intervals[index].start.isoformat(),
+                "end": power.intervals[index].end.isoformat(),
+                "power_kw": power.intervals[index].power_kw,
+            }
+            for index in indexes
+        ]
+        ForecastSnapshot.objects.create(
+            job=job,
+            binding=binding,
+            raw_payload={
+                "estimated_actuals": [power.raw_rows[index] for index in indexes],
+                "historical_import": {
+                    "id": record.pk,
+                    "sha256": power.sha256,
+                    "source_settings": source_settings,
                 },
-                normalized_intervals=normalized,
-                collected_at=moment,
-                available_at=moment,
-                issued_at=None,
-                source_kind="estimated_actuals",
-                coverage_start=power.intervals[indexes[0]].start,
-                coverage_end=power.intervals[indexes[-1]].end,
-            )
-        AuditEvent.objects.create(
-            actor=actor,
-            region=region,
-            action="historical_reference_imported",
-            revision=region.revision,
+            },
+            normalized_intervals=normalized,
+            collected_at=moment,
+            available_at=moment,
+            issued_at=None,
+            source_kind="estimated_actuals",
+            coverage_start=power.intervals[indexes[0]].start,
+            coverage_end=power.intervals[indexes[-1]].end,
         )
-        transaction.on_commit(lambda: _prepare_region_calibrations(region_id))
+    AuditEvent.objects.create(
+        actor=actor,
+        region=region,
+        action="historical_reference_imported",
+        revision=region.revision,
+    )
+    transaction.on_commit(lambda: _prepare_region_calibrations(region.pk))
     return record
