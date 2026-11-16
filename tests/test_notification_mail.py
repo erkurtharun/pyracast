@@ -7,7 +7,6 @@ from threading import Barrier, get_ident
 import pytest
 from django.core import mail
 from django.core.mail import EmailMultiAlternatives
-from django.core.mail.backends.smtp import EmailBackend
 from django.test import override_settings
 
 from pyracast import settings as project_settings
@@ -19,12 +18,13 @@ from pyracast.notifications.mail import (
     send_message,
 )
 from pyracast.notifications.models import NotificationDelivery
+from pyracast.smtp import EmailBackend
 
 
 def test_pending_csv_delivery_preserves_its_frozen_content_after_the_xlsx_upgrade() -> None:
     delivery = NotificationDelivery(
         id=17,
-        recipient="recipient@example.com",
+        recipients=["recipient@example.com"],
         prepared_message={
             "subject": "Saved forecast",
             "body": "Frozen text",
@@ -50,7 +50,7 @@ def test_default_smtp_configuration_has_a_bounded_socket_timeout(
     monkeypatch.setenv("PYRACAST_EMAIL_BACKEND", "smtp")
     configuration = run_path(str(Path(project_settings.__file__)))
     mailer = configuration["MAILERS"]["default"]
-    assert mailer["BACKEND"] == "django.core.mail.backends.smtp.EmailBackend"
+    assert mailer["BACKEND"] == "pyracast.smtp.EmailBackend"
     with override_settings(MAILERS=configuration["MAILERS"]):
         backend = mail.mailers["default"]
     assert isinstance(backend, EmailBackend)
@@ -78,11 +78,22 @@ class SMTP:
         if self.open_error is not None:
             raise self.open_error
 
-    def sendmail(self, *args: object, **kwargs: object) -> dict[str, tuple[int, bytes]]:
+    def ehlo_or_helo_if_needed(self) -> None:
         if self.send_error is not None:
             raise self.send_error
+
+    def has_extn(self, name: str) -> bool:
+        return False
+
+    def mail(self, sender: str, options: list[str]) -> tuple[int, bytes]:
+        return 250, b"OK"
+
+    def rcpt(self, recipient: str) -> tuple[int, bytes]:
+        return 250, b"OK"
+
+    def data(self, content: bytes) -> tuple[int, bytes]:
         type(self).accepted += 1
-        return {}
+        return 250, b"Accepted"
 
     def quit(self) -> None:
         type(self).closed = True
@@ -133,7 +144,7 @@ def test_smtp_classifies_acceptance_at_the_real_django_backend_boundary(
         override_settings(
             MAILERS={
                 "default": {
-                    "BACKEND": "django.core.mail.backends.smtp.EmailBackend",
+                    "BACKEND": "pyracast.smtp.EmailBackend",
                     "OPTIONS": {"host": "localhost"},
                 }
             }
@@ -154,7 +165,7 @@ def test_smtp_quit_failure_does_not_discard_confirmed_acceptance(smtp: type[SMTP
     with override_settings(
         MAILERS={
             "default": {
-                "BACKEND": "django.core.mail.backends.smtp.EmailBackend",
+                "BACKEND": "pyracast.smtp.EmailBackend",
                 "OPTIONS": {"host": "localhost"},
             }
         }
@@ -174,7 +185,7 @@ def test_zero_backend_deliveries_are_reported_as_known_non_acceptance(
         override_settings(
             MAILERS={
                 "default": {
-                    "BACKEND": "django.core.mail.backends.smtp.EmailBackend",
+                    "BACKEND": "pyracast.smtp.EmailBackend",
                     "OPTIONS": {"host": "localhost"},
                 }
             }
@@ -202,7 +213,7 @@ def test_smtp_does_not_send_when_the_open_connection_loses_transmission_authorit
         override_settings(
             MAILERS={
                 "default": {
-                    "BACKEND": "django.core.mail.backends.smtp.EmailBackend",
+                    "BACKEND": "pyracast.smtp.EmailBackend",
                     "OPTIONS": {"host": "localhost"},
                 }
             }
@@ -233,7 +244,7 @@ def test_configured_mailer_lookups_create_independent_backends_without_connectin
         override_settings(
             MAILERS={
                 "default": {
-                    "BACKEND": "django.core.mail.backends.smtp.EmailBackend",
+                    "BACKEND": "pyracast.smtp.EmailBackend",
                     "OPTIONS": {"host": "localhost", "timeout": 15},
                 }
             }

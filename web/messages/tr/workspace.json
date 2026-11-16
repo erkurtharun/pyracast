@@ -166,7 +166,7 @@
         "deliveryTimes": "Gönderim saatleri ({timezone})",
         "deliveryTime": "Gönderim saati {index, number}",
         "removeDeliveryTime": "Gönderim saatini kaldır: {index, number}",
-        "recipientLimitExceeded": "Gönderim duraklatıldı. Sürdürmek için santralin kayıtlı alıcılarını {limit, number} ile sınırlayın.",
+        "recipientLimitExceeded": "{limit, number} alıcı sınırı aşıldığında gönderim duraklatılır. Adresleri azaltın veya çalışma alanı üyelerini kapatın.",
         "emailAddress": "E-posta adresi {index, number}",
         "removeEmailAddress": "E-posta adresini kaldır: {index, number}",
         "recipientLimit": "En fazla {limit, number} e-posta adresi kullanın.",
@@ -190,7 +190,13 @@
         "deliveryTimeRequired": "En az bir gönderim saati ekleyin.",
         "duplicateEmail": "Her e-posta adresini yalnızca bir kez girin.",
         "approvalRequired": "Hatırlatıcılar, santral onaylandıktan sonra etkinleştirilebilir.",
-        "quotaCount": "{count, number} / {limit, number}"
+        "quotaCount": "{count, number} / {limit, number}",
+        "includeWorkspaceMembers": "Çalışma alanı üyelerini ekle",
+        "membershipSync": "Aktif, doğrulanmış üyeler otomatik eklenir ve çıkarılır.",
+        "workspaceMembers": "Çalışma alanı üyeleri ({count, number})",
+        "noWorkspaceMembers": "Henüz aktif, doğrulanmış üye yok.",
+        "otherAddresses": "Diğer adresler",
+        "groupPrivacy": "Her gönderim saatinde tek e-posta. Alıcılar birbirini göremez (BCC)."
     },
     "Outages": {
         "plantOutages": "Santral kesintileri",

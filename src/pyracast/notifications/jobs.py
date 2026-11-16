@@ -14,6 +14,7 @@ from django.db import DatabaseError, transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from pyracast.accounts.models import Tenant
 from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.mail import (
     NotSentError,
@@ -25,11 +26,11 @@ from pyracast.notifications.mail import (
 )
 from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.operations import (
-    effective_recipients,
     recipient_limit,
     region_recipient_count,
 )
 from pyracast.notifications.preparation import prepare_delivery
+from pyracast.notifications.recipients import permitted_recipients
 from pyracast.notifications.scheduler import MAX_LATENESS
 from pyracast.regions.models import Region
 
@@ -39,12 +40,11 @@ logger = logging.getLogger(__name__)
 
 def _eligible(delivery: NotificationDelivery, limit: int) -> bool:
     schedule = delivery.schedule
-    recipients = effective_recipients(schedule)
     return (
         delivery.binding is not None
         and schedule.enabled
         and schedule.retired_at is None
-        and delivery.recipient in recipients
+        and bool(delivery.recipients)
         and region_recipient_count(schedule.region) <= limit
         and schedule.effective_from <= delivery.scheduled_for
         and schedule.region_id == delivery.binding.region_id
@@ -84,13 +84,27 @@ def _locked_delivery(delivery_id: int) -> NotificationDelivery | None:
     return NotificationDelivery.objects.select_for_update().filter(pk=delivery_id).first()
 
 
-def _mark_transmit(delivery_id: int, token: uuid.UUID, now: datetime) -> bool:
+def _lock_workspace(delivery_id: int) -> None:
+    tenant_id = (
+        NotificationDelivery.objects.filter(pk=delivery_id)
+        .values_list("schedule__region__tenant_id", flat=True)
+        .first()
+    )
+    if tenant_id is not None:
+        Tenant.objects.select_for_update().filter(pk=tenant_id).first()
+
+
+def _mark_transmit(
+    delivery_id: int, token: uuid.UUID, now: datetime, message: EmailMultiAlternatives
+) -> bool:
     started = time.monotonic()
     with transaction.atomic():
+        _lock_workspace(delivery_id)
         limit = recipient_limit(lock=True)
         delivery = _locked_delivery(delivery_id)
         if delivery is None or delivery.status != "sending" or delivery.lease_token != token:
             return False
+        delivery.recipients = permitted_recipients(delivery)
         eligible = _eligible(delivery, limit)
         now += timedelta(seconds=time.monotonic() - started)
         if delivery.lease_expires_at is None or delivery.lease_expires_at <= now:
@@ -106,7 +120,8 @@ def _mark_transmit(delivery_id: int, token: uuid.UUID, now: datetime) -> bool:
             delivery.save()
             return False
         delivery.transmit_started_at = now
-        delivery.save(update_fields=("transmit_started_at",))
+        delivery.save(update_fields=("recipients", "transmit_started_at"))
+        message.bcc = list(delivery.recipients)
         return True
 
 
@@ -121,6 +136,7 @@ def process_notification(
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
     with transaction.atomic():
+        _lock_workspace(delivery_id)
         limit = recipient_limit(lock=True)
         delivery = _locked_delivery(delivery_id)
         if delivery is None:
@@ -132,6 +148,7 @@ def process_notification(
             return False
         if delivery.status not in {"pending", "retry"} or delivery.available_at > now:
             return False
+        delivery.recipients = permitted_recipients(delivery)
         if not _eligible(delivery, limit):
             delivery.status, delivery.last_error = "skipped", "schedule_or_authority_changed"
             delivery.save()
@@ -140,14 +157,13 @@ def process_notification(
             delivery.status, delivery.last_error = "skipped", "missed_schedule"
             delivery.save()
             return False
-        recipient = delivery.recipient
         try:
-            validate_email(recipient)
+            for recipient in delivery.recipients:
+                validate_email(recipient)
         except ValidationError:
             delivery.status, delivery.last_error = "skipped", "missing_recipient"
             delivery.save()
             return False
-        delivery.recipient = recipient
         slot_deliveries = NotificationDelivery.objects.filter(
             schedule_id=delivery.schedule_id,
             binding_id=delivery.binding_id,
@@ -211,7 +227,10 @@ def process_notification(
 
         def before_send() -> bool:
             return _mark_transmit(
-                delivery_id, token, entered_at + timedelta(seconds=time.monotonic() - started)
+                delivery_id,
+                token,
+                entered_at + timedelta(seconds=time.monotonic() - started),
+                message,
             )
 
         if sender is None:

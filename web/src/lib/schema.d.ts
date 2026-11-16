@@ -1577,7 +1577,7 @@ export interface components {
         };
         ReminderDeliveryOutput: {
             id: number;
-            recipient: string;
+            recipients: string[];
             /** Format: date-time */
             scheduled_for: string;
             status: string;
@@ -1595,12 +1595,16 @@ export interface components {
         };
         ReminderInput: {
             enabled: boolean;
+            /** @default false */
+            include_workspace_members: boolean;
             language: components["schemas"]["LanguageEnum"];
             recipients: string[];
             times: string[];
         };
         ReminderOutput: {
             enabled: boolean;
+            include_workspace_members: boolean;
+            workspace_recipients: string[];
             language: components["schemas"]["LanguageEnum"];
             times: string[];
             recipients: string[];

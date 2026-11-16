@@ -26,14 +26,14 @@ def test_transfer_preserves_one_shared_schedule_and_its_deliveries(
 ) -> None:
     monkeypatch.setattr(timezone, "now", lambda: NOW)
     system = make_system(approved=True)
-    system.member.email = "original@example.com"
+    system.member.email = "configurer@example.com"
     system.member.save(update_fields=["email"])
     schedule = configure_reminders(
         system.member,
         system.tenant.pk,
         system.region.pk,
         enabled=True,
-        recipients=[],
+        recipients=["original@example.com"],
         times=["10:00"],
         language="tr",
         now=NOW,
@@ -65,7 +65,7 @@ def test_transfer_preserves_one_shared_schedule_and_its_deliveries(
     identifiers = enqueue_due(SLOT)
     assert len(identifiers) == 1
     delivery = NotificationDelivery.objects.get(pk=identifiers[0])
-    assert delivery.recipient == "original@example.com"
+    assert delivery.recipients == ["original@example.com"]
     assert delivery.language == "tr"
     messages: list[EmailMultiAlternatives] = []
     assert process_notification(delivery.pk, SLOT, sender=messages.append)
@@ -83,7 +83,7 @@ def test_transfer_preserves_one_shared_schedule_and_its_deliveries(
     assert schedule.language == "en"
     delivery.refresh_from_db()
     assert delivery.language == "tr"
-    assert delivery.recipient == "original@example.com"
+    assert delivery.recipients == ["original@example.com"]
     assert response.json()["deliveries"][0]["id"] == delivery.pk
     system.member.refresh_from_db()
     system.member.is_active = True
@@ -212,7 +212,7 @@ def test_shared_read_includes_retired_schedule_delivery_history() -> None:
     )
     delivery = NotificationDelivery.objects.create(
         schedule=retired,
-        recipient="historical@example.com",
+        recipients=["historical@example.com"],
         scheduled_for=NOW - timedelta(days=1),
         available_at=NOW - timedelta(days=1),
         status="sent",
@@ -229,7 +229,7 @@ def test_shared_read_includes_retired_schedule_delivery_history() -> None:
     assert response.json()["recipients"] == ["current@example.com"]
     assert response.json()["language"] == "en"
     assert response.json()["deliveries"][0]["id"] == delivery.pk
-    assert response.json()["deliveries"][0]["recipient"] == "historical@example.com"
+    assert response.json()["deliveries"][0]["recipients"] == ["historical@example.com"]
 
 
 @pytest.mark.parametrize("render_failure", [False, True])
@@ -267,7 +267,8 @@ def test_current_slot_preparation_never_reads_or_updates_retired_delivery_conten
     frozen = NotificationDelivery.objects.create(
         schedule=retired,
         binding=system.binding,
-        recipient="old@example.com",
+        recipients=["old@example.com"],
+        grouped=False,
         scheduled_for=SLOT,
         available_at=SLOT,
         status="sent",
@@ -277,7 +278,8 @@ def test_current_slot_preparation_never_reads_or_updates_retired_delivery_conten
     untouched = NotificationDelivery.objects.create(
         schedule=retired,
         binding=system.binding,
-        recipient="pending@example.com",
+        recipients=["pending@example.com"],
+        grouped=False,
         scheduled_for=SLOT,
         available_at=SLOT,
         status="pending",
@@ -300,6 +302,6 @@ def test_current_slot_preparation_never_reads_or_updates_retired_delivery_conten
     untouched.refresh_from_db()
     assert frozen.prepared_message == original
     assert frozen.language == "en"
-    assert frozen.recipient == "old@example.com"
+    assert frozen.recipients == ["old@example.com"]
     assert untouched.prepared_message is None
     assert untouched.status == "pending"

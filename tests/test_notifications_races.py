@@ -3,6 +3,7 @@ from datetime import timedelta
 import pytest
 from django.utils import timezone
 
+from pyracast.accounts.models import Tenant
 from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.models import NotificationDelivery
 from pyracast.trash import purge_expired, trash_region
@@ -14,7 +15,7 @@ pytestmark = pytest.mark.django_db(transaction=True)
 
 
 @pytest.mark.parametrize("purge_region", [True, False])
-def test_notification_candidate_deleted_before_region_lock(
+def test_notification_candidate_deleted_before_authority_lock(
     monkeypatch: pytest.MonkeyPatch, purge_region: bool
 ) -> None:
     monkeypatch.setattr(timezone, "now", lambda: NOW)
@@ -32,7 +33,11 @@ def test_notification_candidate_deleted_before_region_lock(
 
     assert (
         _race_before_region_lock(
-            monkeypatch, "first", lambda: process_notification(delivery.pk, SLOT), purge
+            monkeypatch,
+            "first",
+            lambda: process_notification(delivery.pk, SLOT),
+            purge,
+            lock_model=Tenant,
         )
         is False
     )

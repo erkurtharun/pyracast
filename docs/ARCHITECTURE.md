@@ -83,7 +83,7 @@ Use conventional Django apps for accounts, regions, provider connections, foreca
 | HistoricalReferenceImport | Authorized source settings, immutable export digest and actual acquisition time |
 | ReferenceCapacityNormalization | Authorized capacity-only copies, original source lineage and conversion availability |
 | PlantForecast, PlantEvent | Immutable electrical result and audited plant operations |
-| NotificationSettings, ReminderSchedule, NotificationDelivery | Shared plant email schedule, explicit recipients and language, pinned saved forecasts and per-recipient delivery outcomes |
+| NotificationSettings, ReminderSchedule, NotificationDelivery | Shared plant email schedule, explicit recipients and language, pinned saved forecasts and grouped delivery outcomes |
 | AuditEvent | Actor, action, target and timestamp for privileged changes |
 
 Regions select explicit provider accounts rather than embedding credentials. One canonical record per account spans tenants and credential rotations; duplicate records must not create independent quota budgets.
@@ -566,15 +566,20 @@ The plant-only `archived_forecast` source and explicit `as_of` queries read thes
 ## Saved-forecast email reminders
 
 Each approved plant has one shared reminder schedule with daily local `HH:MM`
-times, explicit recipients and an English or Turkish email language. Workspace
-administrators edit it; other members can view it and its delivery history. An empty
-recipient list on save captures the administrator's current email. Later account
-changes do not change saved recipients. The configuring user is nullable audit
-information, not the schedule owner or a condition for sending.
+times, extra recipient addresses and an English or Turkish email language. Workspace
+administrators edit it; other members can view it and its delivery history. Optional
+workspace membership inclusion adds active members' verified account addresses.
+Membership changes update this group automatically. Without that option, an empty
+list on save captures the administrator's current email. Extra addresses retain their
+saved value; known member addresses retain their membership identity even after an
+email change. Removing a member also removes their saved addresses from current
+schedules. The configuring user is nullable audit information, not the schedule owner.
 
 The default limit is five distinct, case-insensitively compared addresses per plant,
+including automatically included members,
 editable through the MFA-protected admin's **Email reminder settings**. Lowering it
-preserves the schedule but pauses deliveries until its list fits; reducing an excess
+preserves the schedule but pauses deliveries until its list fits. Membership growth
+above the limit also pauses delivery without truncating the group; reducing an excess
 or disabling the schedule remains possible. Migration `notifications.0008` retains
 the current administrator's legacy schedule when available, otherwise an existing
 active member's. Other schedules are retired without merging their times or
@@ -585,10 +590,20 @@ database backup; the migration rejects a lossy reverse conversion.
 
 The current provider plan's daily request limit also caps daily reminder times; this is a product limit, not a quota reservation. Emails make **zero provider requests** and do not consume the request ledger. A reduced plan limit retains only the earliest configured times within the current limit.
 
-The dispatcher pins the approved binding and complete recipient set for each slot.
-Each address gets its own message and durable delivery record, so addresses remain
-private and failures or retries stay independent. An existing slot never expands to
-new recipients, including after an account email change. If collection is scheduled
+The dispatcher pins the approved binding and recipient set for each slot. One durable
+delivery sends one message with all recipients in BCC. Addresses remain private;
+acceptance, uncertainty and retries apply to that message. An existing slot never
+expands to new recipients. Before transmission, the frozen set can only shrink to
+still-authorized recipients, including removal while the mail connection opens.
+Pinned membership IDs and per-delivery address revocations prevent removal and
+rejoining from reviving old slot authority, even when an address was originally
+external. Revocations survive late mail responses and safe retries without changing
+an already authorized envelope. Rejoining restores automatic inclusion in new slots.
+Tenant locking serializes membership changes with the transmission permission marker;
+removal after that marker cannot revoke an already authorized in-flight message.
+Migration `notifications.0009` preserves old individual deliveries and their outcomes;
+an existing slot is never re-enqueued as a group. Reversing multi-recipient groups,
+automatic membership or delivery revocations requires the pre-release backup. If collection is scheduled
 at the same local time, preparation waits for that exact job to finish, for at most
 15 minutes. Its acquisition may become eligible within that grace period; every
 other acquisition must have been collected and published by the original reminder
@@ -638,7 +653,7 @@ Use region IANA timezones, skip nonexistent DST times and use the first occurren
 of repeated times. Catch up at most two hours; older slots are recorded without
 sending a backlog. Before transmission, open the mail backend outside database
 transactions, then atomically recheck the lease, deadline, approval,
-current schedule, recipient and binding and record transmission permission. A worker
+current schedule, recipients and binding and record transmission permission. A worker
 that lost its lease while opening the connection cannot send. Expired leases before
 this marker can safely retry; after the marker they become `uncertain`, with no
 automatic second send. Preserve the original token so a late known response can
@@ -647,6 +662,11 @@ remain uncertain because their transmission phase is unknown. Migration
 `notifications.0006` conservatively marks existing sending/uncertain rows using
 their saved acceptance time or scheduled time; this legacy marker is not an
 observed mail transmission timestamp.
+
+SMTP submits DATA only after every envelope recipient accepts RCPT. Any recipient
+rejection resets the transaction before content is sent, so a retry cannot duplicate
+a partially accepted group. Gmail uses one API request with BCC headers. Neither
+backend equates acceptance with inbox delivery.
 
 Known non-acceptance allows at most eight attempts within the two-hour delivery
 window, with exponential delay capped at 30 minutes plus 0–30 seconds of jitter.

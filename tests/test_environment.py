@@ -139,6 +139,4 @@ def test_smtp_remains_the_default_backend(
     monkeypatch.setenv("PYRACAST_DEBUG", debug)
     monkeypatch.delenv("PYRACAST_EMAIL_BACKEND", raising=False)
     configuration = runpy.run_path(str(Path(__file__).parents[1] / "src/pyracast/settings.py"))
-    assert configuration["MAILERS"]["default"]["BACKEND"] == (
-        "django.core.mail.backends.smtp.EmailBackend"
-    )
+    assert configuration["MAILERS"]["default"]["BACKEND"] == ("pyracast.smtp.EmailBackend")

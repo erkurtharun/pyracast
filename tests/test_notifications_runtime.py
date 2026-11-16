@@ -100,6 +100,6 @@ def test_rabbitmq_duplicate_reminder_sends_one_mail_without_provider_requests(
     assert delivery.status == "sent"
     assert delivery.attempts == 1
     assert len(mail.outbox) == 1
-    assert mail.outbox[0].to == ["default@example.com"]
+    assert mail.outbox[0].bcc == ["default@example.com"]
     assert RequestAttempt.objects.count() == requests
     assert CollectionJob.objects.count() == jobs

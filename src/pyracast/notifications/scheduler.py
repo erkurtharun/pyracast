@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections, transaction
 
+from pyracast.accounts.models import Tenant
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
@@ -14,6 +15,7 @@ from pyracast.notifications.operations import (
     region_recipient_count,
     validate_recipient,
 )
+from pyracast.notifications.recipients import pin_recipient_memberships
 from pyracast.notifications.schedule import local_slot
 from pyracast.regions.models import Region
 
@@ -66,6 +68,7 @@ def _enqueue_schedule(schedule: ReminderSchedule, now: datetime) -> list[int]:
             if slot is None or slot > now or slot < schedule.effective_from:
                 continue
             with transaction.atomic():
+                Tenant.objects.select_for_update().get(pk=region.tenant_id)
                 limit = recipient_limit(lock=True)
                 locked_region = Region.objects.select_for_update().filter(pk=region.pk).first()
                 current = ReminderSchedule.objects.filter(
@@ -83,7 +86,7 @@ def _enqueue_schedule(schedule: ReminderSchedule, now: datetime) -> list[int]:
                 recipients = effective_recipients(current)
                 for address in recipients:
                     validate_recipient(address)
-                if region_recipient_count(locked_region) > limit:
+                if not recipients or region_recipient_count(locked_region) > limit:
                     continue
                 existing_ids = list(
                     NotificationDelivery.objects.filter(schedule=current, scheduled_for=slot)
@@ -104,20 +107,18 @@ def _enqueue_schedule(schedule: ReminderSchedule, now: datetime) -> list[int]:
                     .order_by("-collected_at", "-pk")
                     .first()
                 )
-                for recipient in recipients:
-                    delivery, _ = NotificationDelivery.objects.get_or_create(
-                        schedule=current,
-                        scheduled_for=slot,
-                        recipient=recipient,
-                        defaults={
-                            "language": current.language,
-                            "snapshot": snapshot,
-                            "binding": binding,
-                            "preparation_deadline": slot + PREPARATION_GRACE,
-                            "available_at": now,
-                            "status": "skipped" if now - slot > MAX_LATENESS else "pending",
-                            "last_error": "missed_schedule" if now - slot > MAX_LATENESS else "",
-                        },
-                    )
-                    ids.append(delivery.pk)
+                delivery = NotificationDelivery.objects.create(
+                    schedule=current,
+                    scheduled_for=slot,
+                    recipients=recipients,
+                    recipient_memberships=pin_recipient_memberships(current, recipients),
+                    language=current.language,
+                    snapshot=snapshot,
+                    binding=binding,
+                    preparation_deadline=slot + PREPARATION_GRACE,
+                    available_at=now,
+                    status="skipped" if now - slot > MAX_LATENESS else "pending",
+                    last_error="missed_schedule" if now - slot > MAX_LATENESS else "",
+                )
+                ids.append(delivery.pk)
     return ids

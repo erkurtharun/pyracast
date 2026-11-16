@@ -81,7 +81,7 @@ function DeliveryTimes({
                                 );
                             }}
                         >
-                            {t("remove")}
+                            <span aria-hidden="true">&times;</span>
                         </button>
                     )}
                 </div>
@@ -126,17 +126,63 @@ function RecipientFields({ data }: { data: ReminderSchedule }) {
         })),
     );
     const { prefix, focusRow } = useRowFocus(rows);
-    const count = rows.filter((row) => row.value.trim()).length;
+    const [includeMembers, setIncludeMembers] = useState(
+        data.include_workspace_members,
+    );
+    const count = new Set(
+        [
+            ...rows.map((row) => row.value.trim()).filter(Boolean),
+            ...(includeMembers ? data.workspace_recipients : []),
+        ].map((email) => email.toLowerCase()),
+    ).size;
     return (
         <fieldset className="reminder-recipients">
             <legend>{t("emailRecipients")}</legend>
-            {data.recipient_limit_exceeded && (
+            <span className="recipient-count fine" aria-live="polite">
+                {t("quotaCount", { count, limit: data.recipient_limit })}
+            </span>
+            <p className="fine">{t("groupPrivacy")}</p>
+            {count > data.recipient_limit && (
                 <Notice>
-                    {t("recipientLimitExceeded", {
-                        limit: data.recipient_limit,
-                    })}
+                    {t(
+                        data.recipient_limit_exceeded
+                            ? "recipientLimitExceeded"
+                            : "recipientLimit",
+                        {
+                            limit: data.recipient_limit,
+                        },
+                    )}
                 </Notice>
             )}
+            <label className="check-field">
+                <input
+                    type="checkbox"
+                    name="include_workspace_members"
+                    checked={includeMembers}
+                    onChange={(event) =>
+                        setIncludeMembers(event.target.checked)
+                    }
+                />
+                {t("includeWorkspaceMembers")}
+            </label>
+            <p className="fine">{t("membershipSync")}</p>
+            <details className="reminder-members">
+                <summary>
+                    {t("workspaceMembers", {
+                        count: data.workspace_recipients.length,
+                    })}
+                </summary>
+                {data.workspace_recipients.length ? (
+                    <ul>
+                        {data.workspace_recipients.map((email) => (
+                            <li key={email}>{email}</li>
+                        ))}
+                    </ul>
+                ) : (
+                    <p className="fine">{t("noWorkspaceMembers")}</p>
+                )}
+            </details>
+            <p className="recipient-label">{t("otherAddresses")}</p>
             {rows.map((row, index) => (
                 <div className="recipient-row" key={row.id}>
                     <label className="field" htmlFor={`${prefix}-${row.id}`}>
@@ -145,6 +191,8 @@ function RecipientFields({ data }: { data: ReminderSchedule }) {
                             id={`${prefix}-${row.id}`}
                             name="recipients"
                             type="email"
+                            autoCapitalize="none"
+                            autoCorrect="off"
                             value={row.value}
                             onChange={(event) =>
                                 setRows(
@@ -176,7 +224,7 @@ function RecipientFields({ data }: { data: ReminderSchedule }) {
                                 );
                             }}
                         >
-                            {t("remove")}
+                            <span aria-hidden="true">&times;</span>
                         </button>
                     )}
                 </div>
@@ -184,7 +232,10 @@ function RecipientFields({ data }: { data: ReminderSchedule }) {
             <button
                 className="button secondary"
                 type="button"
-                disabled={rows.length >= data.recipient_limit}
+                disabled={
+                    count >= data.recipient_limit ||
+                    rows.length >= data.recipient_limit
+                }
                 onClick={() => {
                     const id = Math.max(-1, ...rows.map((row) => row.id)) + 1;
                     focusRow(id);
@@ -199,10 +250,6 @@ function RecipientFields({ data }: { data: ReminderSchedule }) {
             >
                 {t("addAddress")}
             </button>
-            <span className="fine">
-                {" "}
-                {t("quotaCount", { count, limit: data.recipient_limit })}
-            </span>
         </fieldset>
     );
 }
@@ -304,14 +351,24 @@ function ReminderSettings({
                             .map((value) => String(value).trim())
                             .filter(Boolean);
                         const enabled = form.get("enabled") === "on";
+                        const includeWorkspaceMembers =
+                            form.get("include_workspace_members") === "on";
+                        const recipientCount = new Set(
+                            [
+                                ...recipients,
+                                ...(includeWorkspaceMembers
+                                    ? data.workspace_recipients
+                                    : []),
+                            ].map((email) => email.toLowerCase()),
+                        ).size;
                         if (enabled && !times.length)
                             throw new Error(t("deliveryTimeRequired"));
                         if (
                             enabled &&
-                            recipients.length > data.recipient_limit &&
+                            recipientCount > data.recipient_limit &&
                             !(
                                 data.recipient_limit_exceeded &&
-                                recipients.length < data.recipients.length
+                                recipientCount < data.recipient_count
                             )
                         )
                             throw new Error(
@@ -331,6 +388,8 @@ function ReminderSettings({
                             {
                                 enabled,
                                 recipients,
+                                include_workspace_members:
+                                    includeWorkspaceMembers,
                                 language: form.get("language"),
                                 times: [...new Set(times)].sort(
                                     (a, b) =>
@@ -404,7 +463,7 @@ function ReminderSettings({
                                             timezone: region.timezone,
                                         })}
                                     </th>
-                                    <th>{t("recipient")}</th>
+                                    <th>{t("emailRecipients")}</th>
                                     <th>{t("status")}</th>
                                     <th>{t("collected")}</th>
                                     <th>{t("dataAge")}</th>
@@ -422,7 +481,11 @@ function ReminderSettings({
                                                 timeZone: region.timezone,
                                             })}
                                         </td>
-                                        <td>{row.recipient}</td>
+                                        <td className="delivery-recipients">
+                                            {row.recipients.map((email) => (
+                                                <div key={email}>{email}</div>
+                                            ))}
+                                        </td>
                                         <td>
                                             <Tag
                                                 tone={

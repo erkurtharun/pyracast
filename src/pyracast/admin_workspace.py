@@ -323,7 +323,7 @@ def recent_work_context(
             "id": row.pk,
             "plant_name": row.display_plant_name,
             "company": row.schedule.region.tenant.name,
-            "recipient": row.recipient,
+            "recipient": ", ".join(row.recipients),
             "status": row.status,
             "status_label": {
                 "sent": _("Accepted by email service"),

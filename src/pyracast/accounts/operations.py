@@ -50,6 +50,13 @@ def remove_workspace_member(actor: User, tenant_id: int, user_id: int) -> None:
         raise ValidationError(_("The workspace administrator cannot be removed."))
     emails = set(EmailAddress.objects.filter(user_id=user_id).values_list("email", flat=True))
     emails.add(membership.user.email)
+    from pyracast.notifications.recipients import remove_member_recipients
+
+    verified_emails = set(
+        EmailAddress.objects.filter(user_id=user_id, verified=True).values_list("email", flat=True)
+    )
+    verified_emails.add(membership.user.email)
+    remove_member_recipients(tenant_id, membership.pk, verified_emails)
     now = timezone.now()
     WorkspaceInvitation.objects.filter(
         tenant_id=tenant_id, accepted_at__isnull=True, expires_at__gt=now

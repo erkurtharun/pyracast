@@ -166,7 +166,7 @@
         "deliveryTimes": "Delivery times ({timezone})",
         "deliveryTime": "Delivery time {index, number}",
         "removeDeliveryTime": "Remove delivery time {index, number}",
-        "recipientLimitExceeded": "Sending is paused. Reduce the plant's saved recipients to {limit, number} to resume.",
+        "recipientLimitExceeded": "Sending is paused above {limit, number} recipients. Remove addresses or turn off workspace members.",
         "emailAddress": "Email address {index, number}",
         "removeEmailAddress": "Remove email address {index, number}",
         "recipientLimit": "Use at most {limit, plural, one {# email address} other {# email addresses}}.",
@@ -190,7 +190,13 @@
         "deliveryTimeRequired": "Add at least one delivery time.",
         "duplicateEmail": "Enter each email address only once.",
         "approvalRequired": "Reminders can be enabled once this plant is approved.",
-        "quotaCount": "{count, number} / {limit, number}"
+        "quotaCount": "{count, number} / {limit, number}",
+        "includeWorkspaceMembers": "Include workspace members",
+        "membershipSync": "Active, verified members are added and removed automatically.",
+        "workspaceMembers": "Workspace members ({count, number})",
+        "noWorkspaceMembers": "No active, verified members yet.",
+        "otherAddresses": "Other addresses",
+        "groupPrivacy": "One email per send time. Recipients cannot see each other (BCC)."
     },
     "Outages": {
         "plantOutages": "Plant outages",

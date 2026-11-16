@@ -40,7 +40,8 @@ def pinned_deliveries(
             binding=system.binding,
             snapshot=snapshot,
             preparation_deadline=SLOT + timedelta(minutes=15),
-            recipient=recipient,
+            recipients=[recipient],
+            grouped=False,
             language=language,
         )
         for recipient in recipients
@@ -63,7 +64,7 @@ def test_schedule_pins_explicit_language_for_every_recipient_and_defaults_to_eng
     )
     with translation.override("tr" if language != "tr" else "en"):
         ids = enqueue_due(SLOT)
-    assert len(ids) == 2
+    assert len(ids) == 1
     assert set(NotificationDelivery.objects.values_list("language", flat=True)) == {
         language or "en"
     }
@@ -152,7 +153,7 @@ def test_mixed_languages_share_one_frozen_source_and_retries_keep_original_conte
     assert all(delivery.status == "sent" for delivery in current)
     assert messages[0].body == messages[-1].body
     assert len({message.extra_headers["Message-ID"] for message in messages}) == 3
-    assert all(len(message.to) == 1 for message in messages)
+    assert all(len(message.bcc) == 1 for message in messages)
     assert not process_notification(first.pk, SLOT + timedelta(minutes=5), sender=messages.append)
     assert len(messages) == 4
     assert RequestAttempt.objects.count() == requests
@@ -201,7 +202,7 @@ def test_render_failure_freezes_distinct_plain_fallbacks_and_preserves_them_on_r
         "tr" if first_language == "en" else "en",
         ["other@example.com", "external@example.com"],
     )
-    first = NotificationDelivery.objects.get(schedule=schedule, recipient=system.member.email)
+    first = NotificationDelivery.objects.get(schedule=schedule, recipients=[system.member.email])
 
     def broken(*args: object, **kwargs: object) -> EmailMultiAlternatives:
         raise RuntimeError("The normal renderer is unavailable.")
@@ -263,7 +264,10 @@ def test_later_language_uses_the_already_frozen_slot_source_and_preparation_time
     schedule.save(update_fields=["recipients", "language"])
     assert enqueue_due(SLOT) == [delivery_id]
     later = pinned_deliveries(system, schedule, "tr", ["other@example.com", "external@example.com"])
-    assert {record.recipient for record in later} == {"other@example.com", "external@example.com"}
+    assert {address for record in later for address in record.recipients} == {
+        "other@example.com",
+        "external@example.com",
+    }
     for record in later:
         assert process_notification(record.pk, SLOT + timedelta(minutes=1), sender=messages.append)
     latest = list(NotificationDelivery.objects.all())
@@ -405,7 +409,7 @@ def test_delivery_language_is_database_constrained() -> None:
             language="de",
             scheduled_for=SLOT,
             available_at=SLOT,
-            recipient="default@example.com",
+            recipients=["default@example.com"],
         )
 
 

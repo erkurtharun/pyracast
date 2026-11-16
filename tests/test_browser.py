@@ -158,7 +158,7 @@ def test_browser_against_live_django(
     )
     NotificationDelivery.objects.create(
         schedule=review_reminder,
-        recipient="operations-recipient@example.test",
+        recipients=["operations-recipient@example.test"],
         status="uncertain",
         scheduled_for=now - timedelta(minutes=5),
         available_at=now,

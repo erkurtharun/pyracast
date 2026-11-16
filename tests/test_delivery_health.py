@@ -41,7 +41,7 @@ def test_health_report_keeps_a_bounded_query_budget(delivery_count: int) -> None
     for index in range(delivery_count):
         NotificationDelivery.objects.create(
             schedule=schedule,
-            recipient="recipient@example.test",
+            recipients=["recipient@example.test"],
             scheduled_for=NOW - timedelta(minutes=index),
             available_at=NOW,
             status="sent",
@@ -148,7 +148,7 @@ def test_incomplete_and_interrupted_deliveries_remain_visible_to_monitoring() ->
         scheduled_for=NOW,
         available_at=NOW,
         status="sending",
-        recipient="recipient@example.test",
+        recipients=["recipient@example.test"],
         lease_expires_at=None,
     )
     assert delivery_health(NOW, timedelta(minutes=5))["interrupted_notifications"] == 1
@@ -198,7 +198,7 @@ def test_long_cooldown_stale_forecasts_and_missed_delivery_are_not_healthy() -> 
         available_at=NOW,
         status="skipped",
         last_error="missed_schedule",
-        recipient="recipient@example.test",
+        recipients=["recipient@example.test"],
     )
     report = delivery_health(NOW, timedelta(minutes=5))
     assert report["missed_notifications"] == 1

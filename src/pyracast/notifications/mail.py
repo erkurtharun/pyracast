@@ -72,7 +72,7 @@ def build_unavailable_message(
         subject=payload["subject"],
         body=payload["body"],
         from_email=settings.DEFAULT_FROM_EMAIL,
-        to=[delivery.recipient],
+        bcc=delivery.recipients,
         headers={"Message-ID": f"<pyracast-reminder-{delivery.pk}@notifications.pyracast>"},
     ), payload
 
@@ -84,7 +84,7 @@ def _restore_message(
         subject=payload["subject"],
         body=payload["body"],
         from_email=settings.DEFAULT_FROM_EMAIL,
-        to=[delivery.recipient],
+        bcc=delivery.recipients,
         headers={"Message-ID": f"<pyracast-reminder-{delivery.pk}@notifications.pyracast>"},
     )
     message.attach_alternative(payload["html"], "text/html")

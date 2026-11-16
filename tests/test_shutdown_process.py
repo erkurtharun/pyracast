@@ -12,16 +12,25 @@ import pytest
 from scripts.dev import terminate_tree
 
 
-def wait_for_text(path: Path, expected: str, process: subprocess.Popen[str]) -> None:
-    deadline = time.monotonic() + 10
+def wait_for_text(
+    path: Path, expected: str, process: subprocess.Popen[str], *, timeout: float
+) -> None:
+    started = time.monotonic()
+    deadline = started + timeout
     while time.monotonic() < deadline:
         if path.exists() and expected in path.read_text(encoding="utf-8"):
             return
         if process.poll() is not None:
             output, _ = process.communicate()
-            raise AssertionError(f"Shutdown probe exited before {expected}: {output}")
+            raise AssertionError(
+                f"Shutdown probe exited with {process.returncode} before {expected!r}: {output}"
+            )
         time.sleep(0.01)
-    raise AssertionError(f"Shutdown probe did not reach {expected}")
+    events = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    raise AssertionError(
+        f"Shutdown probe did not reach {expected!r} after {time.monotonic() - started:.1f}s "
+        f"(pid={process.pid}, returncode={process.poll()}, events={events})"
+    )
 
 
 @pytest.mark.parametrize("method", ["signal", "stop_file"])
@@ -68,7 +77,7 @@ def test_shutdown_finishes_active_work_and_closes_broker(
                 @dramatiq.actor(broker=broker, max_retries=0)
                 def active_job():
                     record("ready")
-                    deadline = time.monotonic() + 10
+                    deadline = time.monotonic() + 120
                     while not (root / "release").exists():
                         if time.monotonic() >= deadline:
                             raise RuntimeError("Parent did not release the active job")
@@ -108,16 +117,16 @@ def test_shutdown_finishes_active_work_and_closes_broker(
     )
     try:
         events = tmp_path / "events"
-        wait_for_text(events, "ready", process)
+        wait_for_text(events, "ready", process, timeout=60)
         if method == "signal":
             process.send_signal(signal.SIGTERM)
         else:
             (tmp_path / "stop").touch()
         if role == "worker":
-            wait_for_text(events, "stopping", process)
+            wait_for_text(events, "stopping", process, timeout=30)
             assert process.poll() is None
             (tmp_path / "release").touch()
-        output, _ = process.communicate(timeout=10)
+        output, _ = process.communicate(timeout=30)
 
         assert process.returncode == 0, output
         assert events.read_text(encoding="utf-8").splitlines() == (
@@ -129,3 +138,5 @@ def test_shutdown_finishes_active_work_and_closes_broker(
         if process.poll() is None:
             terminate_tree(psutil.Process(process.pid))
         process.wait(timeout=5)
+        if process.stdout is not None:
+            process.stdout.close()

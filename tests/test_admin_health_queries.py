@@ -129,7 +129,8 @@ def delivery(
 ) -> NotificationDelivery:
     return NotificationDelivery.objects.create(
         schedule=schedule,
-        recipient=f"recipient-{NotificationDelivery.objects.count()}@example.com",
+        recipients=[f"recipient-{NotificationDelivery.objects.count()}@example.com"],
+        grouped=False,
         scheduled_for=scheduled,
         available_at=available,
         status=status,

@@ -153,11 +153,11 @@ def test_saved_delivery_pins_vintage_recipient_and_never_fetches() -> None:
     assert not process_notification(ids[0], SLOT + timedelta(minutes=3))
     delivery = NotificationDelivery.objects.get(pk=ids[0])
     assert delivery.snapshot_id == snapshot.pk != future.pk
-    assert delivery.recipient == "default@example.com"
+    assert delivery.recipients == ["default@example.com"]
     assert len(mail.outbox) == 1
     message = mail.outbox[0]
     assert isinstance(message, EmailMultiAlternatives)
-    assert message.to == ["default@example.com"]
+    assert message.bcc == ["default@example.com"]
     assert "Irradiance estimate, not plant electricity." in message.body
     assert "kWh/m²" in message.body
     assert "10 Nov 2026" in message.body
@@ -187,8 +187,8 @@ def test_account_email_change_preserves_pinned_default_recipient(status: str) ->
     delivery.refresh_from_db()
     assert delivery.status == "sent"
     assert delivery.last_error == ""
-    assert delivery.recipient == "default@example.com"
-    assert mail.outbox[0].to == ["default@example.com"]
+    assert delivery.recipients == ["default@example.com"]
+    assert mail.outbox[0].bcc == ["default@example.com"]
 
 
 def test_default_email_change_preserves_explicit_region_recipient() -> None:
@@ -209,9 +209,9 @@ def test_default_email_change_preserves_explicit_region_recipient() -> None:
     assert process_notification(delivery_id, SLOT)
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     assert delivery.status == "sent"
-    assert delivery.recipient == "region@example.com"
+    assert delivery.recipients == ["region@example.com"]
     assert len(mail.outbox) == 1
-    assert mail.outbox[0].to == ["region@example.com"]
+    assert mail.outbox[0].bcc == ["region@example.com"]
 
 
 @pytest.mark.parametrize(
@@ -314,7 +314,7 @@ def test_override_and_no_saved_forecast_are_explicit() -> None:
     ids = enqueue_due(SLOT)
     delivery = NotificationDelivery.objects.get(pk=ids[0])
     assert delivery.status == "pending"
-    assert delivery.recipient == "override@example.com"
+    assert delivery.recipients == ["override@example.com"]
     assert process_notification(delivery.pk, SLOT)
     assert "Tomorrow's forecast is unavailable" in mail.outbox[0].body
     saved(system)
@@ -352,6 +352,12 @@ def test_calendar_dst_gaps_folds_and_midnight() -> None:
 def test_worker_checks_resource_policy_independently_of_configurer(change: str) -> None:
     delivery = ready()
     schedule = delivery.schedule
+    schedule.recipients = ["external@example.com"]
+    schedule.recipient_memberships = {}
+    schedule.save(update_fields=("recipients", "recipient_memberships"))
+    delivery.recipients = ["external@example.com"]
+    delivery.recipient_memberships = {}
+    delivery.save(update_fields=("recipients", "recipient_memberships"))
     snapshot = delivery.snapshot
     assert snapshot is not None
     configured_by_id = schedule.configured_by_id
@@ -371,7 +377,7 @@ def test_worker_checks_resource_policy_independently_of_configurer(change: str) 
             effective_from=SLOT + timedelta(seconds=1)
         )
     elif change == "recipient":
-        NotificationDelivery.objects.filter(pk=delivery.pk).update(recipient="")
+        NotificationDelivery.objects.filter(pk=delivery.pk).update(recipients=[""])
         ReminderSchedule.objects.filter(pk=schedule.pk).update(recipients=[""])
     elif change == "binding":
         NotificationDelivery.objects.filter(pk=delivery.pk).update(binding=None)
@@ -504,7 +510,10 @@ def test_worker_drops_old_pending_after_outage() -> None:
 
 @pytest.mark.parametrize("change", ["inactive", "unbound", "suspended", "membership"])
 def test_scheduler_checks_binding_independently_of_configurer(change: str) -> None:
-    system, _ = configured()
+    system, schedule = configured()
+    schedule.recipients = ["external@example.com"]
+    schedule.recipient_memberships = {}
+    schedule.save(update_fields=("recipients", "recipient_memberships"))
     saved(system)
     if change == "inactive":
         User.objects.filter(pk=system.member.pk).update(is_active=False)
@@ -735,7 +744,7 @@ def test_recipient_limit_reduction_blocks_whole_queued_list_without_truncation()
     )
     saved(system)
     ids = enqueue_due(SLOT)
-    assert len(ids) == 2
+    assert len(ids) == 1
     NotificationSettings.objects.filter(pk=1).update(max_recipients=1)
     assert not enqueue_due(SLOT + timedelta(days=1))
     assert all(not process_notification(delivery_id, SLOT) for delivery_id in ids)
@@ -776,51 +785,47 @@ def test_recipient_change_cancels_every_old_pending_delivery() -> None:
     assert not mail.outbox
 
 
-def test_multiple_recipient_outcomes_are_independent_and_private() -> None:
+@pytest.mark.parametrize("outcome", ["sent", "retry", "uncertain"])
+def test_multiple_recipients_share_one_private_message_and_delivery_outcome(outcome: str) -> None:
     system, schedule = configured()
+    addresses = ["ok@example.com", "retry@example.com", "unknown@example.com"]
     configure_reminders(
         system.member,
         system.tenant.pk,
         system.region.pk,
         language="en",
         enabled=True,
-        recipients=["ok@example.com", "retry@example.com", "unknown@example.com"],
+        recipients=addresses,
         times=["10:00"],
         now=NOW,
     )
     saved(system)
-    ids = enqueue_due(SLOT)
+    (delivery_id,) = enqueue_due(SLOT)
 
     def sender(message: EmailMultiAlternatives) -> None:
-        assert len(message.to) == 1
+        assert not message.to
         assert not message.cc
-        assert not message.bcc
-        if message.to == ["retry@example.com"]:
+        assert message.bcc == addresses
+        assert all(address not in message.body for address in addresses)
+        if outcome == "retry":
             raise NotSentError
-        if message.to == ["unknown@example.com"]:
+        if outcome == "uncertain":
             raise TimeoutError
         send_message(message)
 
-    assert [process_notification(delivery_id, SLOT, sender=sender) for delivery_id in ids] == [
-        True,
-        False,
-        False,
-    ]
-    assert dict(NotificationDelivery.objects.values_list("recipient", "status")) == {
-        "ok@example.com": "sent",
-        "retry@example.com": "retry",
-        "unknown@example.com": "uncertain",
-    }
-    retry = NotificationDelivery.objects.get(pk=ids[1])
-    assert pending_notification_ids(retry.available_at) == [ids[1]]
-    assert len(mail.outbox) == 1
+    assert process_notification(delivery_id, SLOT, sender=sender) is (outcome == "sent")
+    delivery = NotificationDelivery.objects.get(pk=delivery_id)
+    assert delivery.recipients == addresses
+    assert delivery.grouped
+    assert delivery.status == outcome
+    assert pending_notification_ids(delivery.available_at) == (
+        [delivery_id] if outcome == "retry" else []
+    )
+    assert len(mail.outbox) == (1 if outcome == "sent" else 0)
     payload = reminder_schedule_payload(schedule, SLOT)
     assert isinstance(payload["deliveries"], list)
-    assert {row["recipient"] for row in payload["deliveries"]} == {
-        "ok@example.com",
-        "retry@example.com",
-        "unknown@example.com",
-    }
+    assert len(payload["deliveries"]) == 1
+    assert payload["deliveries"][0]["recipients"] == addresses
 
 
 def test_account_email_change_does_not_extend_already_pinned_slot() -> None:
@@ -862,7 +867,7 @@ def test_fallback_configuration_reads_current_account_email_after_locking() -> N
         )
 
 
-def test_multiple_recipient_concurrent_dispatch_pins_one_delivery_per_address() -> None:
+def test_multiple_recipient_concurrent_dispatch_pins_one_grouped_delivery() -> None:
     system, _ = configured()
     configure_reminders(
         system.member,
@@ -888,11 +893,10 @@ def test_multiple_recipient_concurrent_dispatch_pins_one_delivery_per_address() 
     with ThreadPoolExecutor(max_workers=2) as pool:
         first, second = list(pool.map(lambda _: enqueue(), range(2)))
     assert first == second
-    assert len(first) == NotificationDelivery.objects.count() == 2
-    assert set(NotificationDelivery.objects.values_list("recipient", flat=True)) == {
-        "a@example.com",
-        "b@example.com",
-    }
+    assert len(first) == NotificationDelivery.objects.count() == 1
+    delivery = NotificationDelivery.objects.get()
+    assert delivery.grouped
+    assert delivery.recipients == ["a@example.com", "b@example.com"]
 
 
 def test_notification_settings_database_constraints() -> None:
@@ -931,8 +935,8 @@ def test_notification_migration_preserves_legacy_recipients_and_delivery_history
     restored = ReminderSchedule.objects.get(pk=schedule.pk)
     assert restored.recipients == ["legacy@example.com"]
     history = NotificationDelivery.objects.get(pk=delivery.pk)
-    assert (history.recipient, history.status, history.sent_at, history.attempts) == (
-        "historic@example.com",
+    assert (history.recipients, history.status, history.sent_at, history.attempts) == (
+        ["historic@example.com"],
         "sent",
         SLOT,
         1,
@@ -1117,12 +1121,15 @@ def test_over_limit_list_allows_gradual_reduction_and_disabling_without_truncati
 @pytest.mark.parametrize("change", ["inactive", "membership"])
 def test_configurer_inactivity_or_departure_keeps_the_shared_recipient_list(change: str) -> None:
     system, schedule = configured()
+    schedule.recipients = ["external@example.com"]
+    schedule.recipient_memberships = {}
+    schedule.save(update_fields=("recipients", "recipient_memberships"))
     if change == "inactive":
         User.objects.filter(pk=system.member.pk).update(is_active=False)
     else:
         Membership.objects.filter(user=system.member).delete()
     assert reminder_schedule_payload(schedule, NOW)["recipient_count"] == 1
-    assert reminder_schedule_payload(schedule, NOW)["recipients"] == ["default@example.com"]
+    assert reminder_schedule_payload(schedule, NOW)["recipients"] == ["external@example.com"]
 
 
 def test_email_changes_and_retired_lists_do_not_expand_current_recipient_cap() -> None:
@@ -1152,7 +1159,7 @@ def test_email_changes_and_retired_lists_do_not_expand_current_recipient_cap() -
     ).exists()
     assert all(process_notification(delivery_id, SLOT) for delivery_id in ids)
     assert len(mail.outbox) == 1
-    assert mail.outbox[0].to == ["default@example.com"]
+    assert mail.outbox[0].bcc == ["default@example.com"]
     assert reminder_schedule_payload(current, NOW)["recipient_count"] == 1
     assert set(NotificationDelivery.objects.values_list("schedule_id", flat=True)) == {current.pk}
 
@@ -1272,9 +1279,9 @@ def test_email_column_removal_preserves_recipients_and_pinned_deliveries() -> No
             .values_list("recipients", flat=True)
         ) == [recipients for _, _, recipients in expected]
         history = NotificationDelivery.objects.get(pk=delivery.pk)
-        assert (history.schedule_id, history.recipient, history.status, history.attempts) == (
+        assert (history.schedule_id, history.recipients, history.status, history.attempts) == (
             ids[0],
-            "pinned@example.com",
+            ["pinned@example.com"],
             "uncertain",
             1,
         )

@@ -102,7 +102,7 @@ def test_oversized_saved_recipient_does_not_block_another_tenant_or_pending_deli
     deliveries = list(NotificationDelivery.objects.filter(schedule=healthy))
     assert len(deliveries) == 1
     assert deliveries[0].status == "pending"
-    assert deliveries[0].recipient == "healthy@example.com"
+    assert deliveries[0].recipients == ["healthy@example.com"]
     actor.send.assert_called_once_with(deliveries[0].pk)
     assert not NotificationDelivery.objects.filter(schedule=broken).exists()
     broken.refresh_from_db()
@@ -127,18 +127,15 @@ def test_slot_database_failure_rolls_back_its_recipients_before_another_tenant_c
         now=NOW,
     )
     healthy = another_tenant_schedule(system)
-    original = QuerySet.get_or_create
+    original = QuerySet.create
 
-    def create(queryset: QuerySet[Any], **kwargs: Any) -> tuple[Any, bool]:
-        if (
-            queryset.model is NotificationDelivery
-            and kwargs.get("recipient") == "second@example.com"
-        ):
+    def create(queryset: QuerySet[Any], **kwargs: Any) -> Any:
+        if queryset.model is NotificationDelivery and kwargs.get("schedule") == broken:
             with connection.cursor() as cursor:
                 cursor.execute("SELECT 1 / 0")
         return original(queryset, **kwargs)
 
-    monkeypatch.setattr(QuerySet, "get_or_create", create)
+    monkeypatch.setattr(QuerySet, "create", create)
     with pytest.raises(NotificationSchedulingError):
         enqueue_due(SLOT)
     assert not NotificationDelivery.objects.filter(schedule=broken).exists()

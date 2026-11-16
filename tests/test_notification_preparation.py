@@ -221,26 +221,30 @@ def test_shared_recipients_and_retries_keep_the_same_prepared_content() -> None:
         language="en",
         now=NOW,
     )
-    ids = enqueue_due(SLOT)
+    (delivery_id,) = enqueue_due(SLOT)
+    attempted: list[EmailMultiAlternatives] = []
 
     def fail(message: EmailMultiAlternatives) -> None:
+        attempted.append(message)
         raise NotSentError
 
-    assert not process_notification(ids[0], SLOT, sender=fail)
-    first = NotificationDelivery.objects.get(pk=ids[0])
-    second = NotificationDelivery.objects.get(pk=ids[1])
-    assert first.prepared_message == second.prepared_message
-    assert "second@example.com" not in str(first.prepared_message)
+    assert not process_notification(delivery_id, SLOT, sender=fail)
+    delivery = NotificationDelivery.objects.get(pk=delivery_id)
+    original = delivery.prepared_message
+    assert original is not None
+    assert "second@example.com" not in str(original)
+    assert attempted[0].bcc == ["default@example.com", "second@example.com"]
     complete_saved(system, SLOT - timedelta(minutes=1))
     Region.objects.filter(pk=system.region.pk).update(name="Changed after preparation")
-    assert process_notification(second.pk, SLOT + timedelta(seconds=1))
-    assert process_notification(first.pk, first.available_at)
-    first.refresh_from_db()
-    second.refresh_from_db()
-    assert first.snapshot_id == second.snapshot_id == old.pk
-    assert first.prepared_message == second.prepared_message
-    assert mail.outbox[0].body == mail.outbox[1].body
-    assert mail.outbox[0].to != mail.outbox[1].to
+    assert process_notification(delivery.pk, delivery.available_at)
+    delivery.refresh_from_db()
+    assert delivery.snapshot_id == old.pk
+    assert delivery.prepared_message == original
+    assert delivery.attempts == 2
+    assert len(mail.outbox) == 1
+    assert mail.outbox[0].body == attempted[0].body
+    assert mail.outbox[0].attachments == attempted[0].attachments
+    assert mail.outbox[0].bcc == attempted[0].bcc
 
 
 def test_partial_tomorrow_survives_missing_today_and_does_not_invent_daily_total() -> None:
@@ -281,7 +285,8 @@ def test_legacy_unprepared_recipient_reuses_existing_slot_content() -> None:
         binding=system.binding,
         snapshot=snapshot,
         scheduled_for=SLOT,
-        recipient="legacy@example.com",
+        recipients=["legacy@example.com"],
+        grouped=False,
         available_at=SLOT,
     )
     schedule.recipients = ["legacy@example.com"]

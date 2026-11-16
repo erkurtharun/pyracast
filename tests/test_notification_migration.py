@@ -25,7 +25,7 @@ def test_upgrade_preserves_legacy_smtp_ambiguity_without_marking_unstarted_work(
         for offset, status in enumerate(("sending", "uncertain", "pending", "retry"), start=1):
             record = records.objects.create(
                 preference_id=delivery.schedule_id,
-                recipient=delivery.recipient,
+                recipient=delivery.recipients[0],
                 snapshot_id=delivery.snapshot_id,
                 scheduled_for=SLOT + timedelta(seconds=offset),
                 available_at=SLOT,

@@ -47,7 +47,7 @@ def test_historical_health_reasons_are_visible_and_link_to_the_matching_records(
         schedule=schedule,
         scheduled_for=NOW,
         available_at=NOW,
-        recipient="recipient@example.test",
+        recipients=["recipient@example.test"],
         status="sent",
         prepared_message={"kind": "saved_partial", "tomorrow_complete": False},
     )
@@ -133,7 +133,7 @@ def test_metering_periods_publication_waits_and_email_content_are_distinct(
         schedule=schedule,
         scheduled_for=NOW,
         available_at=NOW,
-        recipient="recipient@example.test",
+        recipients=["recipient@example.test"],
         prepared_message={"kind": "unavailable"},
     )
     assert recent_work_context()["deliveries"][0]["forecast_status"] == "Forecast unavailable"

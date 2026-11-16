@@ -195,7 +195,10 @@ def test_reminder_candidate_purged_before_region_lock(monkeypatch: pytest.Monkey
         purge_expired(NOW + timedelta(days=31))
 
     assert (
-        _race_before_region_lock(monkeypatch, "first", lambda: enqueue_reminders(SLOT), purge) == []
+        _race_before_region_lock(
+            monkeypatch, "get", lambda: enqueue_reminders(SLOT), purge, lock_model=Tenant
+        )
+        == []
     )
 
 

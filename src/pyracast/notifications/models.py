@@ -39,6 +39,8 @@ class ReminderSchedule(models.Model):
     region = models.ForeignKey(Region, on_delete=models.CASCADE)
     enabled = models.BooleanField(default=False)
     recipients = models.JSONField(default=list)
+    include_workspace_members = models.BooleanField(default=False)
+    recipient_memberships = models.JSONField(default=dict)
     times = models.JSONField(default=list)
     effective_from = models.DateTimeField()
     language = models.CharField(
@@ -68,7 +70,10 @@ class NotificationDelivery(models.Model):
     attempts = models.PositiveIntegerField(default=0)
     lease_token = models.UUIDField(null=True)
     lease_expires_at = models.DateTimeField(null=True)
-    recipient = models.EmailField(blank=True, default="")
+    recipients = models.JSONField(default=list)
+    recipient_memberships = models.JSONField(default=dict)
+    grouped = models.BooleanField(default=True)
+    revoked_recipients = models.JSONField(default=list)
     language = models.CharField(
         max_length=2, choices=(("en", "English"), ("tr", "Türkçe")), default="en"
     )
@@ -83,8 +88,9 @@ class NotificationDelivery(models.Model):
     class Meta:
         constraints = (
             models.UniqueConstraint(
-                fields=("schedule", "scheduled_for", "recipient"),
-                name="unique_reminder_recipient_slot",
+                fields=("schedule", "scheduled_for"),
+                condition=models.Q(grouped=True),
+                name="unique_reminder_group_slot",
             ),
             models.CheckConstraint(
                 condition=models.Q(language__in=("en", "tr")),

@@ -69,8 +69,10 @@ def message() -> EmailMultiAlternatives:
     )
 
 
+@pytest.mark.parametrize("blind_only", [False, True])
 def test_gmail_serializes_recipients_html_csv_and_stable_message_id(
     gmail_transport: Callable[[Callable[[httpx.Request], httpx.Response]], None],
+    blind_only: bool,
 ) -> None:
     requests: list[httpx.Request] = []
 
@@ -85,6 +87,9 @@ def test_gmail_serializes_recipients_html_csv_and_stable_message_id(
     gmail_transport(respond)
     email = message()
     email.cc, email.bcc = ["copy@example.com"], ["blind@example.com"]
+    if blind_only:
+        email.to, email.cc = [], []
+        email.bcc = ["first@example.com", "second@example.com"]
     email.reply_to = ["reply@pyracast.app"]
     email.attach_alternative("<p>Forecast</p>", "text/html")
     email.attach("forecast.csv", "date,energy_kwh\n2026-11-13,45\n", "text/csv")
@@ -106,9 +111,14 @@ def test_gmail_serializes_recipients_html_csv_and_stable_message_id(
     raw = base64.urlsafe_b64decode(json.loads(requests[1].content)["raw"])
     mime = BytesParser(policy=policy.default).parsebytes(raw)
     assert str(mime["From"]) == OPTIONS["sender"]
-    assert str(mime["To"]) == "customer@example.com"
-    assert str(mime["Cc"]) == "copy@example.com"
-    assert str(mime["Bcc"]) == "blind@example.com"
+    if blind_only:
+        assert mime["To"] is None
+        assert mime["Cc"] is None
+        assert str(mime["Bcc"]) == "first@example.com, second@example.com"
+    else:
+        assert str(mime["To"]) == "customer@example.com"
+        assert str(mime["Cc"]) == "copy@example.com"
+        assert str(mime["Bcc"]) == "blind@example.com"
     assert str(mime["Reply-To"]) == "reply@pyracast.app"
     assert str(mime["Message-ID"]) == "<delivery-123@notifications.pyracast>"
     parts = {part.get_content_type(): part for part in mime.walk() if not part.is_multipart()}

@@ -324,7 +324,7 @@ class DispatcherStatusAdmin(ReadOnlyAdmin):
 class NotificationDeliveryAdmin(ReadOnlyAdmin):
     list_display = (
         "id",
-        "recipient",
+        "recipients",
         "scheduled_for",
         "status",
         "attempts",
@@ -332,10 +332,10 @@ class NotificationDeliveryAdmin(ReadOnlyAdmin):
         "sent_at",
     )
     list_filter = ("status",)
-    search_fields = ("recipient", "schedule__region__name")
+    search_fields = ("recipients", "schedule__region__name")
     fields = (
         "schedule",
-        "recipient",
+        "recipients",
         "scheduled_for",
         "status",
         "available_at",

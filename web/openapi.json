@@ -5852,17 +5852,12 @@
                     "id": {
                         "type": "integer"
                     },
-                    "recipient": {
-                        "oneOf": [
-                            {
-                                "type": "string",
-                                "format": "email"
-                            },
-                            {
-                                "type": "string",
-                                "maxLength": 0
-                            }
-                        ]
+                    "recipients": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "format": "email"
+                        }
                     },
                     "scheduled_for": {
                         "type": "string",
@@ -5913,7 +5908,7 @@
                     "id",
                     "last_error",
                     "late",
-                    "recipient",
+                    "recipients",
                     "scheduled_for",
                     "sent_at",
                     "source_age_seconds",
@@ -5926,6 +5921,10 @@
                 "properties": {
                     "enabled": {
                         "type": "boolean"
+                    },
+                    "include_workspace_members": {
+                        "type": "boolean",
+                        "default": false
                     },
                     "language": {
                         "$ref": "#/components/schemas/LanguageEnum"
@@ -5954,6 +5953,16 @@
                 "properties": {
                     "enabled": {
                         "type": "boolean"
+                    },
+                    "include_workspace_members": {
+                        "type": "boolean"
+                    },
+                    "workspace_recipients": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "format": "email"
+                        }
                     },
                     "language": {
                         "$ref": "#/components/schemas/LanguageEnum"
@@ -6011,6 +6020,7 @@
                     "deliveries",
                     "effective_recipients",
                     "enabled",
+                    "include_workspace_members",
                     "language",
                     "quota",
                     "recipient_count",
@@ -6019,7 +6029,8 @@
                     "recipient_slots_remaining",
                     "recipients",
                     "times",
-                    "timezone"
+                    "timezone",
+                    "workspace_recipients"
                 ]
             },
             "ReminderQuotaOutput": {

@@ -282,7 +282,8 @@ def test_frozen_report_survives_later_input_changes_new_language_and_retry(
     new_language = NotificationDelivery.objects.create(
         schedule=delivery.schedule,
         binding=delivery.binding,
-        recipient="turkish@example.com",
+        recipients=["turkish@example.com"],
+        grouped=False,
         language="tr",
         scheduled_for=SLOT,
         available_at=SLOT,

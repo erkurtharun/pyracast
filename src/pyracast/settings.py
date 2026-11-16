@@ -271,7 +271,9 @@ MAILERS = {
     "default": {
         "BACKEND": "pyracast.gmail.EmailBackend"
         if _email_backend == "gmail"
-        else f"django.core.mail.backends.{_email_backend}.EmailBackend",
+        else "pyracast.smtp.EmailBackend"
+        if _email_backend == "smtp"
+        else "django.core.mail.backends.console.EmailBackend",
         "OPTIONS": {
             "host": os.environ.get("PYRACAST_EMAIL_HOST", "localhost"),
             "port": int(os.environ.get("PYRACAST_EMAIL_PORT", "587")),

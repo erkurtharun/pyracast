@@ -217,6 +217,8 @@ export async function mockApi(
                 enabled: false,
                 language: "en",
                 recipients: [user.email],
+                include_workspace_members: false,
+                workspace_recipients: [user.email],
                 recipient_limit: 5,
                 recipient_count: 1,
                 recipient_slots_remaining: 4,

@@ -1,6 +1,5 @@
 import re
 from datetime import datetime
-from typing import cast
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
@@ -11,13 +10,14 @@ from django.utils.translation import gettext
 from pyracast.accounts.operations import require_member, require_workspace_admin
 from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.models import (
-    NotificationDelivery,
     NotificationSettings,
     ReminderSchedule,
 )
+from pyracast.notifications.recipients import effective_recipients as effective_recipients
+from pyracast.notifications.recipients import recipient_memberships
 from pyracast.regions.models import Region
 
-RECIPIENT_MAX_LENGTH = cast(int, NotificationDelivery._meta.get_field("recipient").max_length)
+RECIPIENT_MAX_LENGTH = 254
 
 
 def validate_recipient(address: str) -> None:
@@ -37,7 +37,7 @@ def invalid_reminder_recipient_count() -> int:
         region__deleted_at__isnull=True,
         region__status="approved",
         region__approved_binding__provider_account__enabled=True,
-    ):
+    ).select_related("region"):
         try:
             for address in effective_recipients(schedule):
                 validate_recipient(address)
@@ -53,10 +53,6 @@ def recipient_limit(*, lock: bool = False) -> int:
     return NotificationSettings.objects.values_list("max_recipients", flat=True).first() or 5
 
 
-def effective_recipients(schedule: ReminderSchedule) -> list[str]:
-    return list(schedule.recipients)
-
-
 def normalize_recipients(recipients: list[str]) -> list[str]:
     normalized = [address.strip() for address in recipients]
     for address in normalized:
@@ -68,7 +64,7 @@ def normalize_recipients(recipients: list[str]) -> list[str]:
 
 def region_recipient_count(region: Region) -> int:
     schedule = ReminderSchedule.objects.filter(region=region, retired_at__isnull=True).first()
-    return len({address.casefold() for address in schedule.recipients}) if schedule else 0
+    return len(effective_recipients(schedule)) if schedule else 0
 
 
 def get_reminder_schedule(
@@ -91,6 +87,7 @@ def configure_reminders(
     times: list[str],
     language: str,
     now: datetime,
+    include_workspace_members: bool = False,
 ) -> ReminderSchedule:
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
@@ -100,18 +97,32 @@ def configure_reminders(
         require_workspace_admin(actor, tenant_id)
         address_limit = recipient_limit(lock=True)
         actor.refresh_from_db(fields=["email"])
-        addresses = normalize_recipients(recipients or [actor.email])
+        addresses = normalize_recipients(
+            recipients if recipients or include_workspace_members else [actor.email]
+        )
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
         schedule, _ = ReminderSchedule.objects.get_or_create(
             region=region, retired_at__isnull=True, defaults={"effective_from": now}
         )
-        current_count = len(schedule.recipients)
-        proposed_count = len(addresses)
+        current_count = len(effective_recipients(schedule))
         disabling_unchanged = (
-            not enabled and addresses == schedule.recipients and sorted(times) == schedule.times
+            not enabled
+            and addresses == schedule.recipients
+            and sorted(times) == schedule.times
+            and include_workspace_members == schedule.include_workspace_members
         )
+        schedule.recipients = addresses
+        schedule.include_workspace_members = include_workspace_members
+        known_members = recipient_memberships(tenant_id)
+        known_members.update(schedule.recipient_memberships)
+        schedule.recipient_memberships = {
+            address.casefold(): known_members[address.casefold()]
+            for address in addresses
+            if address.casefold() in known_members
+        }
+        proposed_count = len(effective_recipients(schedule))
         if proposed_count > address_limit and not (
             proposed_count < current_count or disabling_unchanged
         ):

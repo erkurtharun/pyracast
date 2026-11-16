@@ -227,7 +227,8 @@ def test_prepared_intraday_report_freezes_message_attachment_and_later_language(
     new_language = NotificationDelivery.objects.create(
         schedule=delivery.schedule,
         binding=delivery.binding,
-        recipient="turkish@example.com",
+        recipients=["turkish@example.com"],
+        grouped=False,
         language="tr",
         scheduled_for=SLOT,
         available_at=SLOT,

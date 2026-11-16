@@ -14,8 +14,8 @@ from pyracast.notifications.operations import (
     effective_recipients,
     get_reminder_schedule,
     recipient_limit,
-    region_recipient_count,
 )
+from pyracast.notifications.recipients import workspace_recipients
 from pyracast.notifications.serializers import ReminderInput, ReminderOutput
 
 
@@ -39,7 +39,7 @@ def _source_age(delivery: NotificationDelivery, now: datetime) -> float | None:
 def reminder_schedule_payload(schedule: ReminderSchedule, now: datetime) -> dict[str, object]:
     recipients = effective_recipients(schedule)
     limit = recipient_limit()
-    count = region_recipient_count(schedule.region)
+    count = len(recipients)
     binding = schedule.region.approved_binding
     quota: dict[str, object] | None = None
     if binding is not None:
@@ -51,7 +51,7 @@ def reminder_schedule_payload(schedule: ReminderSchedule, now: datetime) -> dict
     deliveries = [
         {
             "id": delivery.pk,
-            "recipient": delivery.recipient,
+            "recipients": delivery.recipients,
             "scheduled_for": delivery.scheduled_for,
             "status": delivery.status,
             "last_error": delivery.last_error,
@@ -78,6 +78,8 @@ def reminder_schedule_payload(schedule: ReminderSchedule, now: datetime) -> dict
         "language": schedule.language,
         "times": schedule.times,
         "recipients": schedule.recipients,
+        "include_workspace_members": schedule.include_workspace_members,
+        "workspace_recipients": workspace_recipients(schedule.region.tenant_id),
         "effective_recipients": recipients,
         "recipient_limit": limit,
         "recipient_count": count,

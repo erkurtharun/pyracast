@@ -153,7 +153,8 @@ def test_shared_reminder_migration_preserves_schedules_and_frozen_delivery_histo
         )
     original_preferences = set(old_preference.objects.values_list("pk", flat=True))
     original_deliveries = list(old_delivery.objects.order_by("pk").values())
-    MigrationExecutor(connection).migrate([("notifications", "0008_shared_reminder_schedules")])
+    executor = MigrationExecutor(connection)
+    executor.migrate(executor.loader.graph.leaf_nodes())
     assert connection.vendor == "postgresql"
     assert set(ReminderSchedule.objects.values_list("pk", flat=True)) == original_preferences
     chosen = ReminderSchedule.objects.get(pk=admin_setting.pk)
@@ -194,6 +195,10 @@ def test_shared_reminder_migration_preserves_schedules_and_frozen_delivery_histo
     for original in original_deliveries:
         expected = original.copy()
         expected["schedule_id"] = expected.pop("preference_id")
+        expected["recipients"] = [expected.pop("recipient")]
+        expected["recipient_memberships"] = {}
+        expected["revoked_recipients"] = []
+        expected["grouped"] = False
         assert NotificationDelivery.objects.values().get(pk=original["id"]) == expected
     User.objects.filter(pk=administrator.pk).update(email="replacement@example.com")
     chosen.refresh_from_db()
@@ -209,28 +214,53 @@ def test_shared_reminder_migration_preserves_schedules_and_frozen_delivery_histo
         ReminderSchedule.objects.filter(pk=chosen.pk).update(language="fr")
     delivery = NotificationDelivery.objects.first()
     assert delivery is not None
+    NotificationDelivery.objects.create(
+        schedule_id=delivery.schedule_id,
+        scheduled_for=delivery.scheduled_for,
+        recipients=delivery.recipients,
+        available_at=now,
+    )
     with pytest.raises(IntegrityError), transaction.atomic():
         NotificationDelivery.objects.create(
             schedule_id=delivery.schedule_id,
             scheduled_for=delivery.scheduled_for,
-            recipient=delivery.recipient,
+            recipients=delivery.recipients,
             available_at=now,
         )
+
+
+@pytest.fixture
+def shared_reminders_schema() -> Iterator[Apps]:
+    executor = MigrationExecutor(connection)
+    latest = executor.loader.graph.leaf_nodes()
+    target = [node for node in latest if node[0] != "notifications"] + [
+        ("notifications", "0008_shared_reminder_schedules")
+    ]
+    executor.migrate(target)
+    try:
+        yield executor.loader.project_state(target).apps
+    finally:
+        MigrationExecutor(connection).migrate(latest)
 
 
 @pytest.mark.parametrize("missing_configurer", [True, False])
 def test_unsafe_reminder_rollback_keeps_latest_schema_and_data(
     missing_configurer: bool,
+    shared_reminders_schema: Apps,
 ) -> None:
+    schedules = cast(Any, shared_reminders_schema).get_model("notifications", "ReminderSchedule")
+    deliveries = cast(Any, shared_reminders_schema).get_model(
+        "notifications", "NotificationDelivery"
+    )
     now = timezone.now()
     tenant = Tenant.objects.create(name="Blocked reminder rollback")
     user = User.objects.create(username="configurer", email="configurer@example.com")
     region = Region.objects.create(
         tenant=tenant, name="Region", latitude=1.0, longitude=1.0, timezone="UTC"
     )
-    schedule = ReminderSchedule.objects.create(
-        configured_by=None if missing_configurer else user,
-        region=region,
+    schedule = schedules.objects.create(
+        configured_by_id=None if missing_configurer else user.pk,
+        region_id=region.pk,
         recipients=["preserved@example.com"],
         times=["10:00"],
         language="tr",
@@ -238,16 +268,16 @@ def test_unsafe_reminder_rollback_keeps_latest_schema_and_data(
         enabled=True,
     )
     if not missing_configurer:
-        ReminderSchedule.objects.create(
-            configured_by=user,
-            region=region,
+        schedules.objects.create(
+            configured_by_id=user.pk,
+            region_id=region.pk,
             recipients=["archived@example.com"],
             times=["09:00"],
             effective_from=now,
             enabled=False,
             retired_at=now,
         )
-    NotificationDelivery.objects.create(
+    deliveries.objects.create(
         schedule=schedule,
         scheduled_for=now,
         available_at=now,
@@ -258,30 +288,28 @@ def test_unsafe_reminder_rollback_keeps_latest_schema_and_data(
         attempts=1,
         transmit_started_at=now,
     )
-    original_schedules = list(ReminderSchedule.objects.order_by("pk").values())
-    original_deliveries = list(NotificationDelivery.objects.order_by("pk").values())
+    original_schedules = list(schedules.objects.order_by("pk").values())
+    original_deliveries = list(deliveries.objects.order_by("pk").values())
     executor = MigrationExecutor(connection)
     before = [node for node in executor.loader.graph.leaf_nodes() if node[0] != "notifications"] + [
         ("notifications", "0007_notificationdelivery_language")
     ]
     with pytest.raises(IrreversibleError, match="restore a pre-migration database backup"):
         executor.migrate(before)
-    assert list(ReminderSchedule.objects.order_by("pk").values()) == original_schedules
-    assert list(NotificationDelivery.objects.order_by("pk").values()) == original_deliveries
+    assert list(schedules.objects.order_by("pk").values()) == original_schedules
+    assert list(deliveries.objects.order_by("pk").values()) == original_deliveries
     assert ("notifications", "0008_shared_reminder_schedules") in MigrationRecorder(
         connection
     ).applied_migrations()
     with connection.cursor() as cursor:
         tables = connection.introspection.table_names(cursor)
         schedule_constraints = connection.introspection.get_constraints(
-            cursor, ReminderSchedule._meta.db_table
+            cursor, schedules._meta.db_table
         )
         delivery_constraints = connection.introspection.get_constraints(
-            cursor, NotificationDelivery._meta.db_table
+            cursor, deliveries._meta.db_table
         )
-        fields = connection.introspection.get_table_description(
-            cursor, ReminderSchedule._meta.db_table
-        )
+        fields = connection.introspection.get_table_description(cursor, schedules._meta.db_table)
     assert "notifications_reminderschedule" in tables
     assert "notifications_reminderpreference" not in tables
     assert {
@@ -291,7 +319,7 @@ def test_unsafe_reminder_rollback_keeps_latest_schema_and_data(
     assert "unique_reminder_recipient_slot" in delivery_constraints
     assert next(field for field in fields if field.name == "configured_by_id").null_ok
     with pytest.raises(IntegrityError), transaction.atomic():
-        ReminderSchedule.objects.create(region=region, effective_from=now)
+        schedules.objects.create(region_id=region.pk, effective_from=now)
 
 
 def test_compatible_reminder_rollback_preserves_all_rows_and_never_reenables_archives() -> None:
@@ -326,7 +354,8 @@ def test_compatible_reminder_rollback_preserves_all_rows_and_never_reenables_arc
             schedule=schedule,
             scheduled_for=now,
             available_at=now,
-            recipient=schedule.recipients[0],
+            recipients=list(schedule.recipients),
+            grouped=False,
             status="sent",
             language="tr",
             prepared_message={"body": "Frozen content"},
@@ -361,6 +390,11 @@ def test_compatible_reminder_rollback_preserves_all_rows_and_never_reenables_arc
         for original in original_deliveries:
             expected: dict[str, object] = dict(original)
             expected["preference_id"] = expected.pop("schedule_id")
+            addresses = cast(list[str], expected.pop("recipients"))
+            expected["recipient"] = addresses[0]
+            expected.pop("recipient_memberships")
+            assert expected.pop("revoked_recipients") == []
+            expected.pop("grouped")
             assert deliveries.objects.values().get(pk=original["id"]) == expected
     finally:
         MigrationExecutor(connection).migrate(latest)

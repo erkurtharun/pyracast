@@ -100,31 +100,50 @@ async function reminderApi(
     enabled = false,
     delivery: Record<string, unknown> = {},
     dailyLimit = 10,
+    members: string[] = [user.email],
+    includeMembers = false,
 ) {
     await mockApi(page);
-    let saved = { enabled, recipients, times: ["08:00"], language: "en" };
+    let saved = {
+        enabled,
+        recipients,
+        times: ["08:00"],
+        language: "en",
+        include_workspace_members: includeMembers,
+    };
     await page.route("**/reminders/", async (route) => {
         if (route.request().method() === "PUT") {
             const payload = route.request().postDataJSON();
             expect(["en", "tr"]).toContain(payload.language);
             saved = {
                 ...payload,
-                recipients: payload.recipients.length
-                    ? payload.recipients
-                    : [user.email],
+                recipients:
+                    payload.recipients.length ||
+                    payload.include_workspace_members
+                        ? payload.recipients
+                        : [user.email],
             };
         }
+        const effective = [
+            ...new Map(
+                [
+                    ...saved.recipients,
+                    ...(saved.include_workspace_members ? members : []),
+                ].map((email) => [email.toLowerCase(), email]),
+            ).values(),
+        ];
         await route.fulfill({
             json: {
                 ...saved,
-                effective_recipients: saved.recipients,
+                workspace_recipients: members,
+                effective_recipients: effective,
                 recipient_limit: limit,
-                recipient_count: saved.recipients.length,
+                recipient_count: effective.length,
                 recipient_slots_remaining: Math.max(
                     0,
-                    limit - saved.recipients.length,
+                    limit - effective.length,
                 ),
-                recipient_limit_exceeded: saved.recipients.length > limit,
+                recipient_limit_exceeded: effective.length > limit,
                 timezone: region.timezone,
                 quota: {
                     daily_reminder_limit: dailyLimit,
@@ -133,7 +152,7 @@ async function reminderApi(
                 deliveries: [
                     {
                         id: 1,
-                        recipient: saved.recipients[0] ?? user.email,
+                        recipients: effective,
                         scheduled_for: "2026-01-01T08:00:00Z",
                         collected_at: null,
                         source_age_seconds: null,
@@ -151,6 +170,207 @@ async function reminderApi(
         });
     });
 }
+
+test("workspace toggle counts unique addresses live and keeps manual recipients separate at 320px", async ({
+    page,
+}, testInfo) => {
+    await page.setViewportSize({ width: 320, height: 900 });
+    await reminderApi(page, ["MEMBER@example.test"], 5, true, {}, 10, [
+        "member@example.test",
+        "second@example.test",
+    ]);
+    await openReminders(page);
+    const toggle = page.getByLabel("Include workspace members", {
+        exact: true,
+    });
+    await expect(page.getByText("1 / 5", { exact: true })).toBeVisible();
+    await toggle.check();
+    await expect(page.getByText("2 / 5", { exact: true })).toBeVisible();
+    await page.getByText("Workspace members (2)", { exact: true }).click();
+    await expect(
+        page.getByRole("listitem").filter({ hasText: "second@example.test" }),
+    ).toBeVisible();
+    await page
+        .getByRole("button", { name: "Add address", exact: true })
+        .click();
+    await page
+        .getByLabel("Email address 2", { exact: true })
+        .fill("extra@example.test");
+    await expect(page.getByText("3 / 5", { exact: true })).toBeVisible();
+    const outgoing = page.waitForRequest(
+        (request) =>
+            request.method() === "PUT" && request.url().endsWith("/reminders/"),
+    );
+    await page.getByRole("button", { name: "Save reminders" }).click();
+    expect((await outgoing).postDataJSON()).toMatchObject({
+        include_workspace_members: true,
+        recipients: ["MEMBER@example.test", "extra@example.test"],
+    });
+    await expect(toggle).toBeChecked();
+    await expect(page.getByText("3 / 5", { exact: true })).toBeVisible();
+    await toggle.uncheck();
+    await expect(page.getByText("2 / 5", { exact: true })).toBeVisible();
+    expect(
+        await page.evaluate(
+            () => document.documentElement.scrollWidth <= window.innerWidth,
+        ),
+    ).toBe(true);
+    await page.screenshot({
+        path: testInfo.outputPath("workspace-recipients-320.png"),
+        fullPage: true,
+    });
+});
+
+test("automatic-only recipients persist without capturing the saving administrator", async ({
+    page,
+}) => {
+    await reminderApi(page, [], 5, true, {}, 10, ["member@example.test"], true);
+    await openReminders(page);
+    const address = page.getByLabel("Email address 1", { exact: true });
+    await expect(address).toHaveValue("");
+    const outgoing = page.waitForRequest(
+        (request) =>
+            request.method() === "PUT" && request.url().endsWith("/reminders/"),
+    );
+    await page.getByRole("button", { name: "Save reminders" }).click();
+    expect((await outgoing).postDataJSON()).toMatchObject({
+        include_workspace_members: true,
+        recipients: [],
+    });
+    await expect(address).toHaveValue("");
+    await expect(page.getByText("1 / 5", { exact: true })).toBeVisible();
+    await page.getByText("Recent deliveries", { exact: true }).click();
+    await expect(
+        page.getByRole("cell", { name: "member@example.test", exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("cell", { name: user.email, exact: true }),
+    ).toHaveCount(0);
+});
+
+test("workspace recipients stay readable while viewer controls are disabled", async ({
+    page,
+}) => {
+    await page.setViewportSize({ width: 320, height: 900 });
+    await reminderApi(page, [], 5, true, {}, 10, ["member@example.test"], true);
+    await page.route("**/api/tenants/", (route) =>
+        route.fulfill({
+            json: paged([{ id: 1, name: "Sunfield Energy", role: "viewer" }]),
+        }),
+    );
+    await openReminders(page);
+    await expect(
+        page.getByLabel("Include workspace members", { exact: true }),
+    ).toBeDisabled();
+    await page.getByText("Workspace members (1)", { exact: true }).click();
+    await expect(
+        page.getByRole("listitem").filter({ hasText: "member@example.test" }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: "Save reminders", exact: true }),
+    ).toHaveCount(0);
+});
+
+test("an oversized automatic group preserves every member and can be turned off", async ({
+    page,
+}) => {
+    const members = Array.from(
+        { length: 6 },
+        (_, index) => `member${index}@example.test`,
+    );
+    await reminderApi(
+        page,
+        ["extra@example.test"],
+        5,
+        true,
+        {},
+        10,
+        members,
+        true,
+    );
+    await openReminders(page);
+    await expect(page.getByText("7 / 5", { exact: true })).toBeVisible();
+    await expect(
+        page.getByText("Sending is paused", { exact: false }),
+    ).toBeVisible();
+    await page.getByText("Workspace members (6)", { exact: true }).click();
+    for (const member of members) {
+        await expect(
+            page.getByRole("listitem").filter({ hasText: member }),
+        ).toBeVisible();
+    }
+    await page
+        .getByLabel("Include workspace members", { exact: true })
+        .uncheck();
+    await expect(page.getByText("1 / 5", { exact: true })).toBeVisible();
+    const outgoing = page.waitForRequest(
+        (request) =>
+            request.method() === "PUT" && request.url().endsWith("/reminders/"),
+    );
+    await page.getByRole("button", { name: "Save reminders" }).click();
+    expect((await outgoing).postDataJSON()).toMatchObject({
+        include_workspace_members: false,
+        recipients: ["extra@example.test"],
+    });
+});
+
+test("turning on a new oversized automatic group shows the limit before saving", async ({
+    page,
+}) => {
+    const members = Array.from(
+        { length: 6 },
+        (_, index) => `member${index}@example.test`,
+    );
+    await reminderApi(page, [], 5, true, {}, 10, members);
+    let saves = 0;
+    await page.route("**/reminders/", (route) => {
+        if (route.request().method() === "PUT") saves++;
+        return route.fallback();
+    });
+    await openReminders(page);
+    await page.getByLabel("Include workspace members", { exact: true }).check();
+    await expect(page.getByText("6 / 5", { exact: true })).toBeVisible();
+    await expect(
+        page.getByText("Use at most 5 email addresses.", { exact: true }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Save reminders" }).click();
+    await expect(page.locator(".notice[role=alert]")).toContainText(
+        "Use at most 5 email addresses.",
+    );
+    expect(saves).toBe(0);
+});
+
+test("Turkish automatic recipient labels preserve readable characters", async ({
+    page,
+}) => {
+    await reminderApi(page);
+    await page.route("**/api/session/", (route) =>
+        route.fulfill({
+            json: { user, language: "tr", csrf_token: "signed-token" },
+        }),
+    );
+    await page.goto("/app/");
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page.getByRole("button", { name: "Işınım", exact: true }).click();
+    await page.getByRole("button", { name: "Ayarlar", exact: true }).click();
+    await page
+        .getByRole("button", { name: "E-posta hatırlatıcıları", exact: true })
+        .click();
+    await expect(
+        page.getByLabel("Çalışma alanı üyelerini ekle", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByText("Diğer adresler", { exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByText(
+            "Her gönderim saatinde tek e-posta. Alıcılar birbirini göremez (BCC).",
+            { exact: true },
+        ),
+    ).toBeVisible();
+});
 
 for (const [field, add, remove] of [
     ["Email address", "Add address", "Remove email address"],
@@ -282,7 +502,9 @@ test("five recipients can be added, removed, saved and reloaded at 320px", async
     ).toHaveValue("person5@example.test");
     await page.getByText("Recent deliveries", { exact: true }).click();
     await expect(
-        page.getByRole("cell", { name: "person1@example.test", exact: true }),
+        page
+            .getByRole("cell")
+            .getByText("person1@example.test", { exact: true }),
     ).toBeVisible();
     expect(
         await page.evaluate(
@@ -493,6 +715,7 @@ test("empty recipient input snapshots the saving account email even for a paused
     await page.getByRole("button", { name: "Save reminders" }).click();
     expect((await cleared).postDataJSON()).toEqual({
         enabled: false,
+        include_workspace_members: false,
         recipients: [],
         times: [],
         language: "en",
