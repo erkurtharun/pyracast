@@ -49,7 +49,7 @@ if (uploadForm instanceof HTMLFormElement) {
     uploadForm.setAttribute("aria-busy", "true");
     status.textContent = action === "save" ? uploadForm.dataset.saving : uploadForm.dataset.checking;
     try {
-      const response = await fetch(uploadForm.action, {
+      const response = await fetch(uploadForm.getAttribute("action") || window.location.href, {
         method: "POST", body: data, headers: { Accept: "application/json" }, credentials: "same-origin",
       });
       const payload = await response.json();

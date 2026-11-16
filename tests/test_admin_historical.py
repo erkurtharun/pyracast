@@ -55,6 +55,7 @@ def test_preview_then_save_is_explicit_and_repeat_upload_is_idempotent(
     assert page.status_code == 200
     assert b'type="file"' in page.content
     assert b"admin-historical.js" in page.content
+    assert f'action="{url}"'.encode() in page.content
     checked = preview(client, url)
     assert checked["can_save"]
     assert "Not present in file" in checked["html"]

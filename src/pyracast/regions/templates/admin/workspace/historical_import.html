@@ -19,7 +19,7 @@
         </dl>
       </details>
     </section>
-    <form class="panel" method="post" enctype="multipart/form-data" data-historical-upload data-saving="{% translate 'Saving…' %}" data-checking="{% translate 'Checking…' %}" data-network-error="{% translate 'The request failed. Try again.' %}" data-saved="{% translate 'Historical data saved. Repeated uploads reuse the existing import.' %}" data-intervals="{% translate 'Intervals' %}" data-single-file="{% translate 'Choose one file at a time.' %}">
+    <form class="panel" method="post" action="{% url 'admin:workspace_historical_import' region.pk %}" enctype="multipart/form-data" data-historical-upload data-saving="{% translate 'Saving…' %}" data-checking="{% translate 'Checking…' %}" data-network-error="{% translate 'The request failed. Try again.' %}" data-saved="{% translate 'Historical data saved. Repeated uploads reuse the existing import.' %}" data-intervals="{% translate 'Intervals' %}" data-single-file="{% translate 'Choose one file at a time.' %}">
       {% csrf_token %}
       <div class="upload-drop" data-upload-drop>
         <label for="{{ form.file.id_for_label }}"><strong>{% translate "Drop a Solcast file here or choose a file" %}</strong></label>
