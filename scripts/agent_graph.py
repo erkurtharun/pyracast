@@ -55,15 +55,20 @@ def main(argv: list[str] | None = None) -> int:
         executable = shutil.which("code-review-graph")
         if executable is None:
             raise FileNotFoundError("Install the user-level code-review-graph CLI before using it.")
+        if sys.platform == "win32" and Path(executable).suffix.casefold() in {".bat", ".cmd"}:
+            # Windows routes batch files through cmd.exe even without shell=True.
+            raise ValueError(
+                "Use the native code-review-graph executable; batch launchers are unsafe."
+            )
         environment["CRG_HOME"] = str(directory)
         # Queries otherwise fall back into the checkout before a registry entry exists.
         environment["CRG_DATA_DIR"] = str(directory)
-        command = [executable, args.operation]
+        command = [executable, args.operation, "--repo", str(root)]
         if args.operation == "query":
-            command.extend([args.pattern, args.target])
+            # Query operands must not be interpreted as child CLI options.
+            command.extend(["--", args.pattern, args.target])
         else:
             command.extend(["--skip-flows", "--data-dir", str(directory)])
-        command.extend(["--repo", str(root)])
         return subprocess.run(  # noqa: S603 -- fixed executable and parsed argument list; no shell.
             command, cwd=root, env=environment, check=False
         ).returncode
