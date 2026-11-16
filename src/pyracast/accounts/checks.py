@@ -42,7 +42,7 @@ def check_authentication_mail_delivery(**_kwargs: Any) -> list[CheckMessage]:
     address = parseaddr(settings.DEFAULT_FROM_EMAIL)[1]
     options = mailer.get("OPTIONS", {})
     production_backend = (
-        mailer["BACKEND"] == "django.core.mail.backends.smtp.EmailBackend" and options.get("host")
+        mailer["BACKEND"] == "pyracast.smtp.EmailBackend" and options.get("host")
     ) or (
         mailer["BACKEND"] == "pyracast.gmail.EmailBackend"
         and all(options.get(key) for key in ("client_id", "client_secret", "refresh_token"))

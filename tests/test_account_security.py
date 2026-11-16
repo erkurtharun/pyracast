@@ -2,6 +2,8 @@ import json
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from runpy import run_path
 from threading import Barrier
 
 import pytest
@@ -12,12 +14,15 @@ from allauth.mfa.models import Authenticator
 from django.conf import LazySettings
 from django.contrib.auth.models import User
 from django.contrib.sessions.backends.db import SessionStore
+from django.core import mail
 from django.core.cache import cache
+from django.core.checks import Tags, run_checks
 from django.core.exceptions import ImproperlyConfigured, PermissionDenied
 from django.db import close_old_connections, connections, transaction
 from django.http import HttpRequest, HttpResponse
-from django.test import Client, RequestFactory
+from django.test import Client, RequestFactory, override_settings
 
+from pyracast import settings as project_settings
 from pyracast.accounts.cache import AuthenticationCache
 from pyracast.accounts.checks import (
     check_authentication_mail_delivery,
@@ -26,6 +31,7 @@ from pyracast.accounts.checks import (
 from pyracast.accounts.middleware import TrustedProxyHeaders
 from pyracast.accounts.security import has_verified_mfa, normalize_client_ip
 from pyracast.api.middleware import PrivateAPIResponses
+from pyracast.smtp import EmailBackend as SMTPEmailBackend
 
 
 @pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
@@ -190,7 +196,7 @@ def test_deployment_requires_production_mail_configuration(settings: LazySetting
     settings.DEFAULT_FROM_EMAIL = "Pyracast <accounts@example.com>"
     settings.MAILERS = {
         "default": {
-            "BACKEND": "django.core.mail.backends.smtp.EmailBackend",
+            "BACKEND": "pyracast.smtp.EmailBackend",
             "OPTIONS": {"host": "smtp.example.com"},
         }
     }
@@ -198,6 +204,53 @@ def test_deployment_requires_production_mail_configuration(settings: LazySetting
     settings.DEBUG = True
     settings.DEFAULT_FROM_EMAIL = "noreply@localhost"
     assert check_authentication_mail_delivery() == []
+
+
+@pytest.mark.parametrize("configured_backend", [None, "smtp"])
+def test_configured_smtp_passes_registered_production_mail_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, configured_backend: str | None
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("PYRACAST_DEBUG", "0")
+    monkeypatch.setenv("PYRACAST_FROM_EMAIL", "Pyracast <accounts@example.com>")
+    monkeypatch.setenv("PYRACAST_PUBLIC_ORIGIN", "https://app.example.com")
+    monkeypatch.setenv("PYRACAST_EMAIL_HOST", "smtp.example.com")
+    if configured_backend is None:
+        monkeypatch.delenv("PYRACAST_EMAIL_BACKEND", raising=False)
+    else:
+        monkeypatch.setenv("PYRACAST_EMAIL_BACKEND", configured_backend)
+    configuration = run_path(str(Path(project_settings.__file__)))
+    with override_settings(
+        DEBUG=configuration["DEBUG"],
+        MAILERS=configuration["MAILERS"],
+        DEFAULT_FROM_EMAIL=configuration["DEFAULT_FROM_EMAIL"],
+        PYRACAST_PUBLIC_ORIGIN=configuration["PYRACAST_PUBLIC_ORIGIN"],
+    ):
+        assert isinstance(mail.mailers["default"], SMTPEmailBackend)
+        checks = run_checks(tags=[Tags.security], include_deployment_checks=True)
+    assert [
+        check for check in checks if check.id is not None and check.id.startswith("accounts.")
+    ] == []
+
+
+@pytest.mark.parametrize(
+    ("backend", "options"),
+    [
+        ("pyracast.smtp.EmailBackend", {}),
+        ("pyracast.smtp.EmailBackend", {"host": ""}),
+        ("django.core.mail.backends.smtp.EmailBackend", {"host": "smtp.example.com"}),
+        ("django.core.mail.backends.console.EmailBackend", {"host": "smtp.example.com"}),
+        ("django.core.mail.backends.locmem.EmailBackend", {"host": "smtp.example.com"}),
+        ("custom.smtp.EmailBackend", {"host": "smtp.example.com"}),
+    ],
+)
+def test_production_mail_check_rejects_unsupported_or_unconfigured_smtp(
+    settings: LazySettings, backend: str, options: dict[str, str]
+) -> None:
+    settings.DEBUG = False
+    settings.DEFAULT_FROM_EMAIL = "Pyracast <accounts@example.com>"
+    settings.MAILERS = {"default": {"BACKEND": backend, "OPTIONS": options}}
+    assert [error.id for error in check_authentication_mail_delivery()] == ["accounts.E001"]
 
 
 @pytest.mark.parametrize(
