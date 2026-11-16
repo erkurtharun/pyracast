@@ -62,9 +62,10 @@ out/
 # Local agent/IDE state and scanner output
 /.codex/*
 !/.codex/hooks.json
-!/.codex/hooks/
-/.codex/hooks/*
-!/.codex/hooks/*.py
+/.claude/*
+!/.claude/settings.json
+/.mcp.json
+/CLAUDE.local.md
 .code-review-graph/
 .code-review-graph.db*
 .idea/

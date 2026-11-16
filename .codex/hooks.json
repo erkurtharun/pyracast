@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --locked --no-build --quiet python -c \"import runpy,subprocess; runpy.run_path(subprocess.check_output(['git','rev-parse','--show-toplevel'],text=True).strip()+'/.codex/hooks/quality.py',run_name='__main__')\" post-tool",
+            "command": "uv run --locked --no-build --quiet python -c \"import runpy,subprocess; runpy.run_path(subprocess.check_output(['git','rev-parse','--show-toplevel'],text=True).strip()+'/.agents/hooks.py',run_name='__main__')\" post-tool",
             "timeout": 60
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --locked --no-build --quiet python -c \"import runpy,subprocess; runpy.run_path(subprocess.check_output(['git','rev-parse','--show-toplevel'],text=True).strip()+'/.codex/hooks/quality.py',run_name='__main__')\" pre-read",
+            "command": "uv run --locked --no-build --quiet python -c \"import runpy,subprocess; runpy.run_path(subprocess.check_output(['git','rev-parse','--show-toplevel'],text=True).strip()+'/.agents/hooks.py',run_name='__main__')\" pre-read",
             "timeout": 30
           }
         ]

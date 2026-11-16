@@ -6,13 +6,56 @@ from pathlib import Path
 
 import pytest
 
-HOOK_SOURCE = Path(__file__).resolve().parents[1] / ".codex" / "hooks" / "quality.py"
-HOOK_CONFIGURATION = HOOK_SOURCE.parents[1] / "hooks.json"
+ROOT = Path(__file__).resolve().parents[1]
+HOOK_SOURCE = ROOT / ".agents" / "hooks.py"
+HOOK_CONFIGURATION = ROOT / ".codex" / "hooks.json"
 
 
 def test_hooks_leave_full_project_checks_to_the_explicit_quality_command() -> None:
     hooks = json.loads(HOOK_CONFIGURATION.read_text(encoding="utf-8"))["hooks"]
     assert "Stop" not in hooks
+
+
+def test_both_clients_use_the_same_hook_logic_without_project_permission_overrides() -> None:
+    codex = json.loads(HOOK_CONFIGURATION.read_text(encoding="utf-8"))
+    claude = json.loads((ROOT / ".claude" / "settings.json").read_text(encoding="utf-8"))
+    assert claude == codex
+    assert set(claude) == {"hooks"}
+    for groups in claude["hooks"].values():
+        for group in groups:
+            for hook in group["hooks"]:
+                assert "/.agents/hooks.py" in hook["command"]
+
+
+@pytest.mark.parametrize(
+    ("path", "ignored"),
+    [
+        (".claude/settings.local.json", True),
+        (".claude/settings.json", False),
+        (".mcp.json", True),
+        ("CLAUDE.local.md", True),
+    ],
+)
+def test_personal_agent_configuration_remains_ignored(path: str, ignored: bool) -> None:
+    result = _run(["git", "check-ignore", "--no-index", path], ROOT)
+    assert result.returncode == (0 if ignored else 1), result.stderr
+
+
+def test_configured_hook_command_runs_from_a_nested_directory() -> None:
+    hooks = json.loads(HOOK_CONFIGURATION.read_text(encoding="utf-8"))["hooks"]
+    payload = {"tool_name": "Read", "tool_input": {"file_path": str(ROOT / ".venv" / "pyvenv.cfg")}}
+    result = subprocess.run(  # noqa: S602 -- execute the tracked hook command as the clients do.
+        hooks["PreToolUse"][0]["hooks"][0]["command"],
+        shell=True,
+        cwd=ROOT / "tests",
+        input=json.dumps(payload),
+        capture_output=True,
+        encoding="utf-8",
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
 
 
 def test_post_tool_preserves_registration_imports(repository: Path) -> None:
@@ -55,9 +98,9 @@ def _run(
 
 @pytest.fixture
 def repository(tmp_path: Path) -> Path:
-    hooks = tmp_path / ".codex" / "hooks"
+    hooks = tmp_path / ".agents"
     hooks.mkdir(parents=True)
-    shutil.copyfile(HOOK_SOURCE, hooks / "quality.py")
+    shutil.copyfile(HOOK_SOURCE, hooks / "hooks.py")
     return tmp_path
 
 
@@ -65,7 +108,7 @@ def _invoke(
     root: Path, event: str, payload: dict[str, object] | str
 ) -> subprocess.CompletedProcess[str]:
     return _run(
-        [sys.executable, str(root / ".codex" / "hooks" / "quality.py"), event],
+        [sys.executable, str(root / ".agents" / "hooks.py"), event],
         root,
         stdin=payload if isinstance(payload, str) else json.dumps(payload),
     )
@@ -225,6 +268,46 @@ def test_direct_reads_of_excluded_directories_are_denied(repository: Path, path:
     assert output["hookEventName"] == "PreToolUse"
     assert output["permissionDecision"] == "deny"
     assert output["permissionDecisionReason"]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".venv-verify/module.py",
+        "env/module.py",
+        "__pypackages__/module.py",
+        "web/.next/server/page.js",
+        "web/.next-approvals/server/page.js",
+        "web/out/index.html",
+    ],
+)
+def test_direct_reads_of_frontend_output_and_alternate_environments_are_denied(
+    repository: Path, path: str
+) -> None:
+    result = _invoke(
+        repository, "pre-read", {"tool_name": "Read", "tool_input": {"file_path": path}}
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "path"),
+    [
+        ("view_image", "web/test-results/proposal-320.png"),
+        ("Read", "web/test-results/failing-test/error-context.md"),
+        ("Read", "web/node_modules/next/dist/docs/index.md"),
+        ("Read", "docs/.next-steps.md"),
+    ],
+)
+def test_verification_artifacts_remain_available_for_debugging(
+    repository: Path, tool_name: str, path: str
+) -> None:
+    result = _invoke(
+        repository, "pre-read", {"tool_name": tool_name, "tool_input": {"file_path": path}}
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
 
 
 def test_mcp_multi_read_checks_absolute_and_relative_paths(repository: Path) -> None:

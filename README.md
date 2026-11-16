@@ -316,14 +316,17 @@ database backups target a one-hour recovery point; VM downtime is accepted.
 Deployment remains disabled until the operator configures the project and sets
 `GCP_DEPLOY_ENABLED=true`.
 
-[AGENTS.md](AGENTS.md) owns the editing/verification workflow. Shared hooks in
-`.codex/hooks.json` format edited Python files and guard source reads; run the full
-check explicitly before delivery. Non-managed hooks need the user's `/hooks`
-trust, and local MCP configuration/credentials remain ignored.
+[AGENTS.md](AGENTS.md) is the shared workflow; `CLAUDE.md` imports it without copying
+instructions. Both clients use the same skill paths listed there. Hook adapters in
+`.codex/hooks.json` and `.claude/settings.json` call `.agents/hooks.py` to format
+edited Python files and guard direct source reads. Shell commands and dependency
+execution remain available. Run the full check explicitly before delivery.
+Codex hooks must be enabled and trusted through `/hooks`; changed hook hashes need
+new trust. Claude needs workspace trust. Personal settings and MCP credentials stay ignored.
 
-`ctx7` and `code-review-graph` are user-level CLI tools. Keep `CRG_HOME` and its
-graph data outside the checkout. First build the graph with
-`code-review-graph build --repo . --skip-flows --data-dir <CRG_HOME>`; updates use
-the same directory, while queries resolve it through `CRG_HOME` without a
-`--data-dir` flag. The optional [Sonar MCP server](https://github.com/SonarSource/sonarqube-mcp-server)
+`ctx7` and `code-review-graph` are user-level CLIs. Initialize the graph with
+`uv run --locked python scripts/agent_graph.py build`; use the wrapper for updates
+and queries too. It shares an external per-user cache via child-only `CRG_HOME`
+and `CRG_DATA_DIR`, honors an external absolute override, and rejects checkout paths.
+The optional [Sonar MCP server](https://github.com/SonarSource/sonarqube-mcp-server)
 uses ignored local configuration and Java 21+ or Docker.

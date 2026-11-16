@@ -81,7 +81,7 @@ select = ["E", "F", "I", "B", "UP", "SIM", "S", "PT", "RUF", "N", "ERA"]
 python_version = "3.15"
 strict = true
 warn_unreachable = true
-files = ["src", "tests", "scripts", "deploy", ".codex/hooks"]
+files = ["src", "tests", "scripts", "deploy", ".agents/hooks.py"]
 plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
 
 [tool.django-stubs]

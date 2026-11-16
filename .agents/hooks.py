@@ -19,9 +19,13 @@ EXCLUDED_DIRECTORIES = frozenset(
         ".mypy_cache",
         ".ruff_cache",
         ".hypothesis",
+        ".next",
     }
 )
-ROOT_ARTIFACT_DIRECTORIES = frozenset({"htmlcov", "build", "dist", "data", "media", "staticfiles"})
+ROOT_ARTIFACT_DIRECTORIES = frozenset(
+    {"htmlcov", "build", "dist", "data", "media", "staticfiles", "env", "__pypackages__"}
+)
+WEB_ARTIFACT_DIRECTORIES = frozenset({"out", "build", "dist"})
 
 
 def _object(value: JsonValue) -> JsonObject:
@@ -157,8 +161,15 @@ def denied_read(payload: JsonObject, root: Path) -> bool:
         for resolved in (Path(os.path.abspath(candidate)), candidate.resolve()):
             if resolved.is_relative_to(root):
                 parts = resolved.relative_to(root).parts
-                if (parts and parts[0].casefold() in ROOT_ARTIFACT_DIRECTORIES) or any(
-                    part.casefold() in EXCLUDED_DIRECTORIES for part in parts
+                if (
+                    (parts and parts[0].casefold() in ROOT_ARTIFACT_DIRECTORIES)
+                    or any(part.casefold() in EXCLUDED_DIRECTORIES for part in parts)
+                    or any(part.casefold().startswith((".venv-", ".next-")) for part in parts[:-1])
+                    or (
+                        len(parts) > 1
+                        and parts[0].casefold() == "web"
+                        and parts[1].casefold() in WEB_ARTIFACT_DIRECTORIES
+                    )
                 ):
                     return True
     return False
@@ -168,7 +179,7 @@ def main(argv: list[str] | None = None, *, root: Path | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("event", choices=("post-tool", "pre-read"))
     event = parser.parse_args(argv).event
-    root = (root or Path(__file__).resolve().parents[2]).resolve()
+    root = (root or Path(__file__).resolve().parents[1]).resolve()
     try:
         value: object = json.load(sys.stdin)
         if not isinstance(value, dict):
