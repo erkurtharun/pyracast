@@ -330,3 +330,14 @@ def test_invalid_saved_recipient_is_an_explicit_health_failure_without_disclosur
     schedule.recipients = ["valid@example.test"]
     schedule.save(update_fields=("recipients",))
     assert delivery_health(NOW, timedelta(minutes=5))["healthy"] is True
+
+
+@pytest.mark.django_db
+def test_dispatch_phase_stores_duration_and_published_count() -> None:
+    record_dispatch_phase("collection", NOW, duration_ms=1250, published=4)
+    record_dispatch_phase("retention", NOW, "OperationalError", duration_ms=8)
+    rows = {row.phase: row for row in DispatcherStatus.objects.all()}
+    assert (rows["collection"].duration_ms, rows["collection"].published) == (1250, 4)
+    assert rows["collection"].succeeded_at == NOW
+    assert (rows["retention"].duration_ms, rows["retention"].published) == (8, None)
+    assert rows["retention"].succeeded_at is None

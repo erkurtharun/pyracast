@@ -1,11 +1,17 @@
 import logging
+import re
 from pathlib import Path
+from typing import cast
 from unittest.mock import MagicMock
 
 import pytest
 from django.core.management import CommandError, call_command
+from django.db import OperationalError
 
+from pyracast import runtime
+from pyracast.forecasts import scheduler
 from pyracast.forecasts.management.commands import dispatch as command
+from tests.test_domain import make_system
 
 
 @pytest.fixture(autouse=True)
@@ -102,3 +108,75 @@ def test_dispatch_loop_recovers_after_a_failed_cycle(
     assert cycles == ["finished", "finished"]
     assert collection.call_count == 2
     broker.close.assert_called_once()
+
+
+def mock_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(command, "make_broker", MagicMock())
+    for factory in (
+        "make_actor",
+        "make_calibration_actor",
+        "make_notification_actor",
+        "make_epias_actor",
+    ):
+        monkeypatch.setattr(command, factory, MagicMock())
+
+
+def recorded_phases() -> dict[str, tuple[str, int | None, int]]:
+    record = cast(MagicMock, command.record_dispatch_phase)
+    return {
+        call.args[0]: (call.args[2], call.kwargs["published"], call.kwargs["duration_ms"])
+        for call in record.call_args_list
+    }
+
+
+def test_phase_records_duration_and_published_count(
+    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+) -> None:
+    from pyracast.forecasts.monitoring import PhaseOutcome
+
+    mock_runtime(monkeypatch)
+    monkeypatch.setattr(command, "dispatch_notifications", MagicMock(return_value=3))
+    monkeypatch.setattr(command, "dispatch", MagicMock(return_value=PhaseOutcome(published=2)))
+    monkeypatch.setattr(command, "dispatch_calibrations", MagicMock(return_value=1))
+    monkeypatch.setattr(command, "purge_expired", MagicMock(return_value={"plants": 4}))
+    monkeypatch.setattr(command, "dispatch_epias", MagicMock(return_value=0))
+    call_command("dispatch")
+    phases = recorded_phases()
+    assert {name: values[:2] for name, values in phases.items()} == {
+        "notifications": ("", 3),
+        "collection": ("", 2),
+        "calibration": ("", 1),
+        "retention": ("", None),
+        "metering": ("", 0),
+    }
+    assert all(values[2] >= 0 for values in phases.values())
+    finished = [
+        record.getMessage()
+        for record in pyracast_logs.records
+        if record.getMessage().startswith("dispatch_phase_finished")
+    ]
+    assert len(finished) == 5
+    assert re.fullmatch(
+        r"dispatch_phase_finished phase=collection duration_ms=\d+ published=2 error=", finished[1]
+    )
+
+
+@pytest.mark.django_db(transaction=True)
+def test_collection_scheduling_failure_records_region_count_and_published_jobs(
+    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+) -> None:
+    make_system(approved=True)
+    mock_runtime(monkeypatch)
+
+    def contended(*args: object) -> list[int]:
+        raise OperationalError("private lock detail")
+
+    monkeypatch.setattr(scheduler, "_enqueue_region", contended)
+    monkeypatch.setattr(runtime, "pending_job_ids", MagicMock(return_value=[11, 19]))
+    for name in ("dispatch_notifications", "dispatch_calibrations", "dispatch_epias"):
+        monkeypatch.setattr(command, name, MagicMock(return_value=0))
+    monkeypatch.setattr(command, "purge_expired", MagicMock(return_value={}))
+    with pytest.raises(CommandError, match="collection"):
+        call_command("dispatch")
+    assert recorded_phases()["collection"][:2] == ("collection_regions_failed:1", 2)
+    assert "private lock detail" not in pyracast_logs.text

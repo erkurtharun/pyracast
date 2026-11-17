@@ -1,3 +1,4 @@
+import logging
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -37,10 +38,46 @@ def test_lock_contention_returns_retryable_response_without_exposing_database_de
     assert tenant.name == "Contended workspace"
 
 
-@pytest.mark.parametrize("cause", [None, DeadlockDetected("unrelated database failure")])
-def test_other_database_failures_are_not_classified_as_workspace_contention(
-    cause: Exception | None,
-) -> None:
+def test_deadlock_is_retryable_but_not_reported_as_lock_timeout() -> None:
     error = OperationalError("Database operation failed")
-    error.__cause__ = cause
-    assert exception_handler(error, {}) is None
+    error.__cause__ = DeadlockDetected("deadlock detected")
+    response = exception_handler(error, {})
+    assert response is not None
+    assert response.status_code == 503
+    assert response.data == {"code": "database_conflict"}
+    assert response["Retry-After"] == "1"
+
+
+def test_unclassified_database_error_is_a_logged_server_error(
+    pyracast_logs: pytest.LogCaptureFixture,
+) -> None:
+    response = exception_handler(OperationalError("private database detail"), {})
+    assert response is not None
+    assert response.status_code == 500
+    assert response.data["code"] == "server_error"
+    [record] = [record for record in pyracast_logs.records if record.name == "pyracast.api"]
+    assert record.levelno == logging.ERROR
+    assert record.exc_info is not None
+    assert f"request_id={response.data['request_id']}" in record.getMessage()
+    assert "private database detail" not in str(response.data)
+
+
+@pytest.mark.django_db(transaction=True)
+def test_statement_timeout_answers_503_request_timeout(
+    pyracast_logs: pytest.LogCaptureFixture,
+) -> None:
+    try:
+        with transaction.atomic(), connection.cursor() as cursor:
+            cursor.execute("SET LOCAL statement_timeout = '50ms'")
+            cursor.execute("SELECT pg_sleep(2)")
+    except OperationalError as error:
+        response = exception_handler(error, {})
+    else:
+        raise AssertionError("The statement finished before its timeout.")
+    assert response is not None
+    assert response.status_code == 503
+    assert set(response.data) == {"code", "request_id"}
+    assert response.data["code"] == "request_timeout"
+    [record] = [record for record in pyracast_logs.records if record.name == "pyracast.api"]
+    assert record.levelno == logging.ERROR
+    assert f"request_id={response.data['request_id']}" in record.getMessage()

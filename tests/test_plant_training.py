@@ -1,3 +1,4 @@
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from threading import Event
@@ -471,3 +472,79 @@ def test_concurrent_delivery_only_publishes_one_calibration(
     assert run.attempts == 1
     assert run.status == "insufficient"
     assert PlantEvent.objects.filter(action="calibration_completed").count() == 1
+
+
+def test_worker_failure_logs_type_and_origin_not_message(
+    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    run = request_run(system, plant)
+
+    def fail(*args: Any, **kwargs: Any) -> FitResult:
+        raise ValueError("sensitive malformed provider payload")
+
+    monkeypatch.setattr(training, "fit_calibration", fail)
+    assert not run_calibration(run.pk, NOW)
+    [message] = [
+        record.getMessage()
+        for record in pyracast_logs.records
+        if record.getMessage().startswith("calibration_attempt_failed")
+    ]
+    assert message.startswith(
+        f"calibration_attempt_failed run={run.pk} attempt=1 error_type=ValueError "
+        "origin=pyracast.plants.training:"
+    )
+    assert message.endswith(":run_calibration")
+    assert "sensitive" not in pyracast_logs.text
+
+
+def test_lost_lease_is_logged(
+    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    run = request_run(system, plant)
+    lease = training._claim(run.pk, NOW)
+    assert lease is not None
+    expired = NOW + LEASE_DURATION + timedelta(seconds=1)
+    assert not training._publish(
+        lease, FitResult("insufficient", None, "insufficient", {}), {}, expired
+    )
+    training._fail(lease, expired)
+    assert [
+        record.getMessage()
+        for record in pyracast_logs.records
+        if record.getMessage().startswith("calibration_lease_lost")
+    ] == [f"calibration_lease_lost run={run.pk}"] * 2
+
+
+@pytest.mark.parametrize(("attempts", "reason"), [(3, "attempt_limit"), (0, "invalid_cutoff")])
+def test_terminal_claim_failure_is_logged(
+    monkeypatch: pytest.MonkeyPatch,
+    pyracast_logs: pytest.LogCaptureFixture,
+    attempts: int,
+    reason: str,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    run = request_run(system, plant)
+    run.attempts = attempts
+    if reason == "invalid_cutoff":
+        run.cutoff_at = NOW + timedelta(seconds=1)
+    run.save()
+    assert not run_calibration(run.pk, NOW)
+    assert f"calibration_run_failed run={run.pk} reason={reason}" in [
+        record.getMessage() for record in pyracast_logs.records
+    ]
+
+
+def test_fit_completion_logs_duration(
+    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    run = request_run(system, plant)
+    run_calibration(run.pk, NOW)
+    [message] = [
+        record.getMessage()
+        for record in pyracast_logs.records
+        if record.getMessage().startswith("calibration_fit_completed")
+    ]
+    assert re.fullmatch(rf"calibration_fit_completed run={run.pk} seconds=\d+\.\d{{3}}", message)

@@ -1,3 +1,4 @@
+import logging
 import os
 from collections.abc import Iterator
 
@@ -10,6 +11,16 @@ from hypothesis import settings
 settings.register_profile("gate", derandomize=True, deadline=None, database=None)
 settings.register_profile("explore", max_examples=2000, deadline=None)
 settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "gate"))
+
+
+@pytest.fixture
+def pyracast_logs(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> pytest.LogCaptureFixture:
+    # The "pyracast" logger does not propagate, so caplog sees its records only through this.
+    monkeypatch.setattr(logging.getLogger("pyracast"), "propagate", True)
+    caplog.set_level(logging.INFO, logger="pyracast")
+    return caplog
 
 
 @pytest.fixture(name="django_db_modify_db_settings", scope="session")
