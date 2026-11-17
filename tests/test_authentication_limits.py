@@ -5,7 +5,7 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass
-from threading import Barrier, BrokenBarrierError
+from threading import Barrier, BrokenBarrierError, Event
 from types import SimpleNamespace
 from typing import Any
 
@@ -149,6 +149,23 @@ def hold_password_checks(
         return correct
 
     monkeypatch.setattr(User, "check_password", held)
+
+
+def hold_correct_password(monkeypatch: pytest.MonkeyPatch) -> tuple[Event, Event]:
+    # A correct password check signals `held` after its slots are reserved and answers only
+    # once `release` is set.
+    held, release = Event(), Event()
+    check_password = User.check_password
+
+    def checked(user: User, raw_password: str) -> bool:
+        correct = check_password(user, raw_password)
+        if correct:
+            held.set()
+            release.wait(timeout=10)
+        return correct
+
+    monkeypatch.setattr(User, "check_password", checked)
+    return held, release
 
 
 def fail_daily(client: Client, email: str, failures: int, clock: Clock) -> None:
@@ -455,6 +472,36 @@ def test_a_success_beside_the_last_daily_failure_does_not_lock(
     )
     assert statuses == [400, 200]
     assert login(Client(enforce_csrf_checks=True), user.email, PASSWORD).status_code == 200
+
+
+def test_a_refusal_beside_a_pending_correct_password_leaves_the_quota_as_it_was(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = member()
+    fail_daily(Client(enforce_csrf_checks=True), user.email, 98, clock)
+    held, release = hold_correct_password(monkeypatch)
+
+    def beside_the_held_check() -> list[list[str]]:
+        assert held.wait(timeout=10)
+        try:
+            return [
+                error_codes(login(Client(enforce_csrf_checks=True), user.email, WRONG))
+                for _ in range(2)
+            ]
+        finally:
+            release.set()
+
+    success, codes = in_parallel(
+        [
+            lambda: login(Client(enforce_csrf_checks=True), user.email, PASSWORD).status_code,
+            beside_the_held_check,
+        ]
+    )
+    assert success == 200
+    assert codes == [["email_password_mismatch"], ["too_many_login_attempts"]]
+    client = Client(enforce_csrf_checks=True)
+    assert error_codes(login(client, user.email, WRONG)) == ["email_password_mismatch"]
+    assert error_codes(login(client, user.email, PASSWORD)) == ["too_many_login_attempts"]
 
 
 def test_refusals_just_before_daily_failures_expire_leave_the_short_window_free(
