@@ -881,13 +881,6 @@ msgstr ""
 "Kaydetme işlemi, doğrulanması ve onaylanması gereken bekleyen bir revizyon "
 "oluşturur."
 
-msgid ""
-"This request was made for an earlier revision and cannot be approved. Reject"
-" it so the customer can request the change again."
-msgstr ""
-"Bu talep önceki bir revizyon için yapıldı ve onaylanamaz. Müşterinin "
-"değişikliği yeniden talep edebilmesi için reddedin."
-
 msgid "Unknown production action."
 msgstr "Bilinmeyen üretim işlemi."
 
