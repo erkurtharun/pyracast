@@ -86,7 +86,11 @@ class SessionRequestSerialization:
             with serialize_session(session_key):
                 return self.get_response(request)
         except SessionBusyError:
-            if request.method == "GET" and request.headers.get("Sec-Fetch-Mode") == "navigate":
+            if (
+                request.method == "GET"
+                and request.headers.get("Sec-Fetch-Mode") == "navigate"
+                and not request.path.startswith("/api/")
+            ):
                 return _busy_page(request)
             return error_json(request, lambda: coded(ErrorCode.SESSION_BUSY, 429, retry_after=1))
 

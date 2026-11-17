@@ -1,4 +1,4 @@
-import { ApiError, errorFromResponse } from "./api/errors";
+import { ApiError, errorFromResponse, isContractBody } from "./api/errors";
 import { browserErrors } from "@/i18n/browser";
 
 export type AuthData = {
@@ -66,10 +66,12 @@ export async function authRequest<TData = AuthData>(
             path === "account/authenticators/totp"
         )
     ) {
+        if (isContractBody(data))
+            throw errorFromResponse(response.status, data);
         const errors = result.errors ?? [];
         throw new ApiError(
             errors.map((error) => error.message).join(" ") ||
-                errorFromResponse(response.status, data).message,
+                t("request", { status: response.status }),
             {
                 status: response.status,
                 fields: Object.fromEntries(

@@ -18,6 +18,7 @@ from django.db import DatabaseError
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone, translation
 from django.utils.cache import patch_cache_control
+from django.utils.translation import gettext
 from psycopg.errors import DeadlockDetected, LockNotAvailable, QueryCanceled
 from rest_framework import exceptions
 from rest_framework.response import Response
@@ -92,7 +93,9 @@ def _joined(messages: list[str]) -> str:
 
 
 def _detail_items(detail: Any, path: tuple[str, ...] = ()) -> Iterator[tuple[str, str]]:
-    if isinstance(detail, dict):
+    if isinstance(detail, str):
+        yield ".".join(path), detail
+    elif isinstance(detail, dict):
         for key, value in detail.items():
             yield from _detail_items(value, (*path, str(key)))
     elif any(isinstance(item, dict | list) for item in detail):
@@ -115,13 +118,18 @@ def _invalid(items: Iterator[tuple[str, str]]) -> ApiError:
     return ApiError(400, ErrorCode.INVALID_REQUEST, message, fields or None)
 
 
+def _translated(messages: list[str]) -> str:
+    # Raise sites outside the API pass catalogued English literals; translate them here.
+    return _joined([gettext(message) for message in messages if message])
+
+
 def _django_invalid(error: DjangoValidationError) -> ApiError:
     if hasattr(error, "error_dict"):
         return _invalid(
-            (key if key != "__all__" else "", _joined(messages))
+            (key if key != "__all__" else "", _translated(messages))
             for key, messages in error.message_dict.items()
         )
-    return _invalid(iter([("", _joined(error.messages))]))
+    return _invalid(iter([("", _translated(error.messages))]))
 
 
 def _domain(error: DomainError) -> ApiError:

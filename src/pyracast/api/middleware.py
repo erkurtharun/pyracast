@@ -1,9 +1,11 @@
 from collections.abc import Callable
 
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseNotAllowed
 from django.utils.cache import patch_cache_control
 
 from pyracast.accounts.audit import record_security_event
+from pyracast.api.errors import coded, error_json
+from pyracast.errors import ErrorCode
 
 
 class PrivateAPIResponses:
@@ -12,8 +14,14 @@ class PrivateAPIResponses:
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
         response = self.get_response(request)
-        if request.path.startswith("/api/"):
-            patch_cache_control(response, private=True, no_store=True)
+        if not request.path.startswith("/api/"):
+            return response
+        if isinstance(response, HttpResponseNotAllowed):
+            # Django method guards and allauth views refuse without a body.
+            refusal = error_json(request, lambda: coded(ErrorCode.METHOD_NOT_ALLOWED, 405))
+            refusal["Allow"] = response["Allow"]
+            response = refusal
+        patch_cache_control(response, private=True, no_store=True)
         if request.path.startswith("/api/auth/") and response.status_code == 429:
             record_security_event("authentication_request_throttled", request=request)
         return response
