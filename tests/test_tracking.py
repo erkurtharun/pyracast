@@ -17,7 +17,8 @@ from pyracast.plants.transfer import (
 )
 
 LATITUDE, LONGITUDE = 37.80375, 34.460913
-# Gains of an independent pvlib chain; scripts/check_scientific.py regenerates and compares them.
+# Gains of an independent pvlib chain rounded to four decimals; scripts/check_scientific.py
+# recomputes and compares them.
 REFERENCE_CHAIN = json.loads(
     (Path(__file__).parent / "fixtures" / "tracking_gain_reference.json").read_text("utf-8")
 )

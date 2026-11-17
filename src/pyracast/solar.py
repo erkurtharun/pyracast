@@ -2,6 +2,7 @@ from collections.abc import Iterable, Iterator
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from itertools import pairwise
 from math import isfinite
 from typing import Literal
 
@@ -204,29 +205,29 @@ def _brackets(
 
 def _horizon_events(observer: Observer, start: datetime, end: datetime) -> list[Event]:
     # Astral's event is kept wherever a bracket claims it, so its timings stay unchanged; the
-    # scan finds the crossings Astral misses near 00:00 UTC or inside one step. The scan starts
-    # one step early so that an event exactly at the start of the day has a bracket.
+    # scan finds the crossings Astral misses near 00:00 UTC or inside one step. The scan runs
+    # one step beyond both ends of the day so that an event and its crossing on opposite sides
+    # of a day boundary still meet; the caller keeps the events inside the day.
     unmatched = _astral_events(observer, start, end)
-    events: list[Event] = []
-    left = start - _SCAN_STEP
-    low = _height(observer, left)
-    while left < end:
-        right = min(left + _SCAN_STEP, end)
-        high = _height(observer, right)
-        events.extend(
-            _claim(observer, unmatched, *bracket)
-            for bracket in _brackets(observer, left, right, low, high)
-        )
-        left, low = right, high
-    return sorted(events)
+    moments = [start - _SCAN_STEP]
+    while moments[-1] < end:
+        moments.append(min(moments[-1] + _SCAN_STEP, end))
+    moments.append(end + _SCAN_STEP)
+    samples = [(moment, _height(observer, moment)) for moment in moments]
+    return sorted(
+        _claim(observer, unmatched, *bracket)
+        for (left, low), (right, high) in pairwise(samples)
+        for bracket in _brackets(observer, left, right, low, high)
+    )
 
 
 def _claim(
     observer: Observer, unmatched: list[Event], left: datetime, right: datetime, rising: bool
 ) -> Event:
     # Near the poles the sun grazes the horizon and Astral's event can sit minutes from the
-    # crossing, so an event is kept only where the horizon test flips within the slack.
-    match = next(
+    # crossing, so an event is kept only where the horizon test flips within the slack. Astral
+    # can report one crossing for two UTC dates a fraction of a second apart; the nearer wins.
+    match = min(
         (
             event
             for event in unmatched
@@ -235,7 +236,8 @@ def _claim(
             and _sun_is_up(observer, event[0] - _MATCH_SLACK) != rising
             and _sun_is_up(observer, event[0] + _MATCH_SLACK) == rising
         ),
-        None,
+        key=lambda event: max(left - event[0], event[0] - right, timedelta()),
+        default=None,
     )
     if match is None:
         return _bisect_crossing(observer, left, right), rising

@@ -74,7 +74,7 @@ def test_seven_saved_days_do_not_enable_ten_and_batch_rolls_back(
     assert not ProductionObservation.objects.exists()
 
 
-# A Pacific point west of Peru, kept in Lima's zone: Astral finds no sunset for the UTC date
+# A point in the open Pacific, kept in Lima's zone: Astral finds no sunset for the UTC date
 # 2026-11-04 because the sunsets around it fall just before and after 00:00 UTC.
 ASTRAL_MISS_DAY = date(2026, 11, 4)
 

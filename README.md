@@ -254,10 +254,12 @@ Additional checks:
 | `npm --prefix web run check:coverage` | Production-browser V8 coverage of authored TypeScript; writes `web/coverage/lcov.info` |
 | `PYRACAST_BROWSER_TEST=1` with `uv run --locked pytest tests/test_browser.py -n 1 --no-cov` | Browser ? real Django/PostgreSQL, fixture providers/mail |
 | `PYRACAST_LIVE_QUEUE=1` and dedicated `PYRACAST_RABBITMQ_URL` | Real-broker tests; uses default/calibration queues |
-| `uv run --no-project --python 3.15.2 python scripts/check_scientific.py` | Locked optional scientific stack with checksum-pinned HDF5 build |
+| `uv run --no-project --python 3.15.2 python scripts/check_scientific.py` | Locked optional scientific stack with checksum-pinned HDF5 build; pvlib recomputation of the tracker gain table |
 
 The scientific helper needs a C compiler. It checks installation, linked HDF5 and a
-pvlib calculation, not irradiance accuracy. Persistent installation of the
+pvlib calculation, then recomputes the tracker gain reference table with pvlib and fails
+when the table or `tracking_gain` leaves its tolerance; it does not check irradiance
+provider accuracy. Persistent installation of the
 `scientific` extra needs [native h5py setup](https://docs.h5py.org/en/stable/build.html);
 Windows also needs an open `os.add_dll_directory` handle before importing h5py/pvlib.
 The default application does not require this extra.

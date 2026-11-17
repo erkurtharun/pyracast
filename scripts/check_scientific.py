@@ -16,7 +16,6 @@ LINUX_ARCHIVE = "hdf5-2.2.0-ubuntu-2404_gcc.tar.gz"
 LINUX_SHA256 = "efa520a59202830a0d48ac7da1312314507ec1fcc40c744cf7b1c37a5edfaaeb"
 
 SMOKE = """
-import importlib.util
 import json
 import os
 import platform
@@ -31,6 +30,8 @@ import numpy as np
 import pandas as pd
 import pvlib
 
+from pyracast.plants.tracking import tracking_gain
+
 assert h5py.version.hdf5_version == "2.2.0", h5py.version.hdf5_version
 times = pd.DatetimeIndex(["2026-06-21T12:00:00Z"])
 result = pvlib.solarposition.get_solarposition(times, 40, 29)
@@ -42,19 +43,13 @@ print(f"h5py {h5py.__version__}, HDF5 {h5py.version.hdf5_version}, pvlib {pvlib.
 print(f"solar position: zenith {zenith:.6f}, azimuth {azimuth:.6f}")
 
 root = Path(sys.argv[1])
-# Loaded by path: the package root reads installed metadata the scientific venv need not have.
-spec = importlib.util.spec_from_file_location(
-    "tracking", root / "src" / "pyracast" / "plants" / "tracking.py"
-)
-tracking = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(tracking)
 
 
-def scalar(values):
+def scalar(values: object) -> float:
     return float(np.ravel(values)[0])
 
 
-def chain_gain(reference, zenith, azimuth, day_of_year):
+def chain_gain(reference: float, zenith: float, azimuth: float, day_of_year: int) -> float:
     # GHI from p = 0.9964 g - 0.1484 g^2 (g = GHI / 1000), the documented model input.
     ghi = 1000 * (sqrt(0.9964**2 - 4 * 0.1484 * reference) - 0.9964) / (2 * -0.1484)
     parts = pvlib.irradiance.erbs(ghi, zenith, day_of_year)
@@ -76,7 +71,7 @@ def chain_gain(reference, zenith, azimuth, day_of_year):
         )["poa_global"]
     )
 
-    def cell(irradiance):
+    def cell(irradiance: float) -> float:
         return pvlib.temperature.pvsyst_cell(
             irradiance, 0.0, u_c=29.0, u_v=0.0, module_efficiency=0.0, alpha_absorption=1.0
         )
@@ -88,8 +83,8 @@ table = root / "tests" / "fixtures" / "tracking_gain_reference.json"
 for case in json.loads(table.read_text("utf-8")):
     inputs = (case["reference_fraction"], case["zenith"], case["azimuth"], case["day_of_year"])
     expected = chain_gain(*inputs)
-    model = tracking.tracking_gain(*inputs)
-    assert abs(expected - case["gain"]) <= 0.001, (case, expected)
+    model = tracking_gain(*inputs)
+    assert abs(expected - case["gain"]) <= 0.0001, (case, expected)
     assert abs(model - expected) <= 0.012, (case, model, expected)
     print(f"tracker gain {inputs}: pvlib {expected:.4f}, model {model:.4f}")
 """
