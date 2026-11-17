@@ -29,7 +29,6 @@ TOOLING = frozenset(
         "test_dev_launcher",
         "test_er_diagram",
         "test_hooks",
-        "test_move_test_support",
         "test_postgres_workspace",
         "test_pytest_shard",
         "test_quality_gate",

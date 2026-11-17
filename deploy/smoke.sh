@@ -181,6 +181,13 @@ assert request.META["HTTP_X_REAL_IP"] == "198.51.100.7", request.META
 assert "HTTP_CF_CONNECTING_IP" not in request.META
 '
 [[ $(docker inspect --format '{{.Config.User}}' "$("${compose[@]}" ps -q gateway)") == 10001:10001 ]]
+"${compose[@]}" exec -T api python -c '
+import django
+django.setup()
+from django.utils import translation
+with translation.override("tr"):
+    assert translation.gettext("Continue to sign in") == "Oturum a\u00e7maya devam et"
+'
 "${compose[@]}" exec -T api python - <<'PY'
 import os
 import time
@@ -392,4 +399,4 @@ except ProgrammingError:
 else:
     raise SystemExit('Runtime role unexpectedly owns DDL permission after the restore')
 PY
-echo 'Production containers, TLS routing, static assets, session and sign-in API, workspace app shell, database roles, fixture queue publication, graceful idle shutdown, and database reset and restore passed.'
+echo 'Production containers, TLS routing, static assets, Turkish catalogs, session and sign-in API, workspace app shell, database roles, fixture queue publication, graceful idle shutdown, and database reset and restore passed.'
