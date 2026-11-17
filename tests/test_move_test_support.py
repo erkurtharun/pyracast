@@ -21,8 +21,10 @@ def helper() -> int:
 def test_helper() -> None:
     assert helper() == 6
 """
-BETA = """\
-from tests.support.alpha import helper
+# Built from PACKAGE so that a rerun of the codemod over tests/ leaves this fixture unchanged.
+PACKAGE = "tests"
+BETA = f"""\
+from {PACKAGE}.test_alpha import helper
 
 BACKEND = "tests.test_alpha.helper"
 
