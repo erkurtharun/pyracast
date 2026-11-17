@@ -1,0 +1,8 @@
+[
+  {
+    "advisory": "GHSA-fc5q-39xc-vjpf",
+    "package": "picomatch",
+    "reason": "No patched release exists. The ReDoS needs an attacker-controlled glob pattern; picomatch runs only in lint and build tooling (eslint, typescript-eslint, the next-intl message watcher) with patterns from this repository.",
+    "expires": "2026-12-17"
+  }
+]
