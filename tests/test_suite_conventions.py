@@ -19,15 +19,40 @@ def _imported_modules(path: Path) -> set[str]:
     return modules
 
 
-def test_no_test_module_imports_another_test_module() -> None:
+def _test_module_imports(root: Path) -> dict[str, list[str]]:
     importers = {
-        str(path.relative_to(TESTS)): sorted(
+        path.relative_to(root).as_posix(): sorted(
             module for module in _imported_modules(path) if re.match(r"tests\.test_", module)
         )
-        for path in sorted(TESTS.rglob("*.py"))
+        for path in sorted(root.rglob("*.py"))
     }
+    return {path: modules for path, modules in importers.items() if modules}
 
-    assert {path: modules for path, modules in importers.items() if modules} == {}
+
+def test_no_test_module_imports_another_test_module() -> None:
+    assert _test_module_imports(TESTS) == {}
+
+
+def test_the_import_ratchet_resolves_relative_and_package_imports(tmp_path: Path) -> None:
+    tests = tmp_path / "tests"
+    (tests / "support").mkdir(parents=True)
+    (tests / "test_beta.py").write_text(
+        "from . import test_alpha\nfrom .test_alpha import helper\n", encoding="utf-8"
+    )
+    (tests / "test_gamma.py").write_text(
+        "from tests import test_alpha, conftest\nimport tests.test_alpha\n", encoding="utf-8"
+    )
+    (tests / "support" / "builders.py").write_text(
+        "from ..test_alpha import helper\nfrom . import domain\nfrom tests.support import x\n",
+        encoding="utf-8",
+    )
+    (tests / "test_alpha.py").write_text("from tests.support.domain import NOW\n", encoding="utf-8")
+
+    assert _test_module_imports(tests) == {
+        "support/builders.py": ["tests.test_alpha"],
+        "test_beta.py": ["tests.test_alpha"],
+        "test_gamma.py": ["tests.test_alpha"],
+    }
 
 
 def test_mail_is_captured_in_memory_for_every_mailer() -> None:

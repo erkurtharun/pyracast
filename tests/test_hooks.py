@@ -412,11 +412,13 @@ SENSITIVE_PATHS = [
     "secrets\\database.json",
     ".env",
     ".env.production",
+    ".envrc",
     "web/.env.local",
     "web\\.env.local",
     ".dev/backups/ideal-state/manifest.json",
     ".dev\\backups\\ideal-state\\dump.custom",
     "infra/terraform/terraform.tfvars",
+    "infra/terraform/production.auto.tfvars.json",
     "infra/terraform/plan.tfplan",
     "infra\\terraform\\terraform.tfstate",
 ]
@@ -478,6 +480,8 @@ def test_example_environment_files_and_launcher_logs_remain_readable(
         "get_file_text_by_path --pathInProject .env",
         "get_file_text_by_path --pathInProject=secrets/runtime.json",
         'get_file_text_by_path --pathInProject "web/.env.local"',
+        "get_file_text_by_path --pathInProject .envrc",
+        "get_file_text_by_path --pathInProject infra/terraform/terraform.tfvars.json",
         "get_file_text_by_path --pathInProject .venv/pyvenv.cfg",
         "read_file data\\fixture.json",
         "read_file '{root}/.dev/backups/x/manifest.json'",
@@ -553,17 +557,23 @@ def test_configured_matchers_cover_reads_through_the_ide_and_shell_tools() -> No
         "gh -R owner/repo pr merge 18",
         "gh workflow run release.yml --ref main",
         "gh api repos/owner/repo/actions/workflows/release.yml/dispatches -f ref=main",
+        'git commit -m "Document PYRACAST_ORCHESTRATOR_PUSH=1"; git push origin main',
+        "echo PYRACAST_ORCHESTRATOR_PUSH=1 && git push origin main",
+        "git log --grep PYRACAST_ORCHESTRATOR_PUSH=1\ngit push origin main",
     ],
 )
-@pytest.mark.parametrize("tool_name", ["Bash", "PowerShell", "exec_command"])
+@pytest.mark.parametrize(
+    ("tool_name", "input_key"),
+    [("Bash", "command"), ("PowerShell", "command"), ("exec_command", "cmd")],
+)
 def test_shell_commands_that_publish_need_the_orchestrator_marker(
-    repository: Path, tool_name: str, command: str
+    repository: Path, tool_name: str, input_key: str, command: str
 ) -> None:
     decision = _decision(
         _invoke(
             repository,
             "pre-shell",
-            {"tool_name": tool_name, "tool_input": {"command": command}},
+            {"tool_name": tool_name, "tool_input": {input_key: command}},
             env=_environment_without_marker(),
         )
     )
@@ -580,6 +590,7 @@ def test_shell_commands_that_publish_need_the_orchestrator_marker(
         "git push origin HEAD:refs/heads/pr/K02",
         "git push origin --delete pr/K02",
         "git commit -m 'Describe the change'",
+        "git commit -m 'Explain why; git push origin main is refused'",
         "git status; git log --oneline -5",
         "gh pr create --title Title --body Body",
         "gh pr view 18 --json state",
@@ -620,6 +631,7 @@ def test_shell_tools_that_pass_an_argument_vector_are_checked(repository: Path) 
         ("git push origin main", {"PYRACAST_ORCHESTRATOR_PUSH": "1"}),
         ("$env:PYRACAST_ORCHESTRATOR_PUSH='1'; git push origin main", {}),
         ("PYRACAST_ORCHESTRATOR_PUSH=1 gh pr merge 18 --squash", {}),
+        ("export PYRACAST_ORCHESTRATOR_PUSH=1\ngit push origin main", {}),
     ],
 )
 def test_the_orchestrator_marker_allows_publishing(
