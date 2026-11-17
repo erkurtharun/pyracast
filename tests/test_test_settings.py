@@ -22,6 +22,7 @@ def test_test_sessions_do_not_wait_for_wal_flush() -> None:
 
 SETTINGS_PROBE = """
 import json
+import os
 from django.conf import settings
 names = (
     "DEBUG", "ALLOWED_HOSTS", "CSRF_TRUSTED_ORIGINS", "PYRACAST_PUBLIC_ORIGIN",
@@ -31,7 +32,9 @@ names = (
     "SESSION_COOKIE_SECURE", "CSRF_COOKIE_SECURE", "SESSION_COOKIE_NAME", "CSRF_COOKIE_NAME",
     "SOCIALACCOUNT_PROVIDERS", "MAILERS", "DEFAULT_FROM_EMAIL", "STATIC_ROOT", "LOGGING",
 )
-print(json.dumps({name: repr(getattr(settings, name)) for name in names}))
+values = {name: repr(getattr(settings, name)) for name in names}
+values["open_meteo_key"] = repr(os.environ.get("PYRACAST_OPEN_METEO_API_KEY"))
+print(json.dumps(values))
 """
 
 HOSTILE_ENVIRONMENT = {
@@ -48,6 +51,7 @@ HOSTILE_ENVIRONMENT = {
     "PYRACAST_FROM_EMAIL": "Local <local@example.org>",
     "PYRACAST_EMAIL_PORT": "2525",
     "PYRACAST_LOG_LEVEL": "DEBUG",
+    "PYRACAST_OPEN_METEO_API_KEY": "local-key",
 }
 
 
@@ -87,3 +91,4 @@ def test_test_settings_ignore_a_hostile_environment(tmp_path: Path) -> None:
     assert expected["DEBUG"] == "False"
     assert expected["PYRACAST_CUTOFF_LOCAL"] == "datetime.time(16, 0)"
     assert expected["SESSION_COOKIE_NAME"] == "'sessionid'"
+    assert expected["open_meteo_key"] == "''"

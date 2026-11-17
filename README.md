@@ -234,8 +234,9 @@ The backend gate runs formatting, Ruff, strict mypy, the translation, ER-diagram
 migration and Django checks, then parallel pytest with the 100% branch-coverage floor
 configured in `pyproject.toml`. With `web/node_modules` installed it also runs
 `scripts/generate_api_schema.py --check` and `npm --prefix web run check:static`;
-without it, it prints one `SKIPPED web` line. `--static-only` skips pytest,
-`--tests-only` runs only pytest and arguments after `--` are passed to pytest. It runs as many pytest
+without it, it prints one `SKIPPED web` line; with it but no `npm` on PATH, it exits 2.
+`--static-only` skips pytest, `--tests-only` runs only pytest and arguments after `--` are
+passed to pytest (add `--no-cov` when selecting tests: the floor applies to the whole suite). It runs as many pytest
 workers as physical cores, at most six, unless `PYTEST_XDIST_AUTO_NUM_WORKERS` is
 set, and a test that runs longer than 300 seconds prints every thread's stack. Use
 `uv run --locked ruff format .` for formatting. Deliberate dependency upgrades

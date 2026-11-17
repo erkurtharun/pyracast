@@ -71,7 +71,12 @@ def arguments(argv: list[str] | None) -> tuple[argparse.Namespace, list[str]]:
 def web_npm(root: Path) -> str | None:
     if not (root / "web" / "node_modules").is_dir():
         return None
-    return shutil.which("npm")
+    if npm := shutil.which("npm"):
+        return npm
+    raise FileNotFoundError(
+        "web/node_modules exists but npm is missing from PATH; install Node.js or remove "
+        "web/node_modules."
+    )
 
 
 def static_stages(root: Path) -> list[Stage]:
@@ -98,7 +103,7 @@ def static_stages(root: Path) -> list[Stage]:
     npm = web_npm(root)
     if npm is None:
         print(
-            "SKIPPED web: web/node_modules or npm is missing; run `npm ci` in web/ to include "
+            "SKIPPED web: web/node_modules is missing; run `npm ci` in web/ to include "
             "the API schema and web static checks.",
             flush=True,
         )
@@ -194,7 +199,11 @@ def main(argv: list[str] | None = None) -> int:
             print(error, file=sys.stderr)
             return 2
         print(f"pytest-xdist workers: {environment[XDIST_WORKERS]}", flush=True)
-    stages = [] if args.tests_only else static_stages(root)
+    try:
+        stages = [] if args.tests_only else static_stages(root)
+    except FileNotFoundError as error:
+        print(error, file=sys.stderr)
+        return 2
     if not args.static_only:
         stages.append(pytest_stage(args, settings, coverage_floor, pytest_arguments))
     shard_output: Path | None = None

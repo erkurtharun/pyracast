@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
 from io import StringIO
@@ -72,3 +73,97 @@ def test_check_mode_reports_a_stale_schema(
     output = capsys.readouterr().out
     assert "web/openapi.json is stale" in output
     assert "npm --prefix web run api:generate" in output
+
+
+COMMITTED_SCHEMA = Path(__file__).resolve().parents[1] / "web/openapi.json"
+
+
+def committed_web(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, types: bytes) -> Path:
+    (tmp_path / "src/lib").mkdir(parents=True)
+    (tmp_path / "openapi.json").write_bytes(COMMITTED_SCHEMA.read_bytes())
+    (tmp_path / "src/lib/schema.d.ts").write_bytes(types)
+    monkeypatch.setattr(generate_api_schema, "WEB", tmp_path)
+
+    def fresh_schema(output: Path) -> int:
+        output.write_bytes(COMMITTED_SCHEMA.read_bytes())
+        return 0
+
+    monkeypatch.setattr(generate_api_schema, "generate_openapi", fresh_schema)
+    return tmp_path
+
+
+def node_tools(monkeypatch: pytest.MonkeyPatch, types: bytes) -> None:
+    def web_tool(*arguments: str, stdin: bytes | None = None) -> bytes:
+        if arguments[0] == "openapi-typescript":
+            return types
+        assert arguments[0] == "prettier"
+        assert stdin is not None
+        return stdin
+
+    monkeypatch.setattr(generate_api_schema, "web_tool", web_tool)
+
+
+@pytest.mark.parametrize(
+    ("committed_types", "stale"), [(b"fresh types\n", False), (b"stale types\n", True)]
+)
+def test_check_mode_compares_the_generated_types(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    committed_types: bytes,
+    stale: bool,
+) -> None:
+    web = committed_web(tmp_path, monkeypatch, committed_types)
+    node_tools(monkeypatch, b"fresh types\n")
+
+    assert generate_api_schema.main(["--check"]) == int(stale)
+
+    output = capsys.readouterr().out
+    assert ("web/src/lib/schema.d.ts is stale" in output) is stale
+    assert "web/openapi.json is stale" not in output
+    assert ("API schema and generated types are current." in output) is not stale
+    assert (web / "src/lib/schema.d.ts").read_bytes() == committed_types
+
+
+def test_check_mode_reports_a_schema_that_differs_only_in_formatting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    web = committed_web(tmp_path, monkeypatch, b"fresh types\n")
+    compact = json.dumps(json.loads(COMMITTED_SCHEMA.read_bytes())).encode()
+    (web / "openapi.json").write_bytes(compact)
+    node_tools(monkeypatch, b"fresh types\n")
+
+    assert generate_api_schema.main(["--check"]) == 1
+
+    output = capsys.readouterr().out
+    assert "web/openapi.json is stale" in output
+    assert "schema.d.ts is stale" not in output
+    assert (web / "openapi.json").read_bytes() == compact
+
+
+def test_check_mode_requires_npx(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    committed_web(tmp_path, monkeypatch, b"fresh types\n")
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+
+    assert generate_api_schema.main(["--check"]) == 1
+
+    assert "npx is missing" in capsys.readouterr().err
+
+
+def test_check_mode_returns_the_exit_code_of_a_failing_node_tool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    committed_web(tmp_path, monkeypatch, b"fresh types\n")
+
+    def failing_tool(*arguments: str, stdin: bytes | None = None) -> bytes:
+        raise subprocess.CalledProcessError(4, ["npx", *arguments], b"", b"prettier failed\n")
+
+    monkeypatch.setattr(generate_api_schema, "web_tool", failing_tool)
+
+    assert generate_api_schema.main(["--check"]) == 4
+
+    captured = capsys.readouterr()
+    assert "prettier failed" in captured.err
+    assert "current" not in captured.out

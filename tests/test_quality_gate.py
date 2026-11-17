@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import shutil
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
@@ -248,3 +249,33 @@ def test_gate_stops_at_the_first_failing_stage(
 
     assert commands[-1][1:] == ["-m", "mypy"]
     assert re.search(r"^Failed mypy in \d+\.\ds \(exit 3\)$", capsys.readouterr().out, re.M)
+
+
+def test_web_stages_run_only_with_installed_dependencies_and_npm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(shutil, "which", lambda name: f"/bin/{name}")
+    assert check.web_npm(tmp_path) is None
+
+    (tmp_path / "web" / "node_modules").mkdir(parents=True)
+    assert check.web_npm(tmp_path) == "/bin/npm"
+
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    with pytest.raises(FileNotFoundError, match="npm is missing"):
+        check.web_npm(tmp_path)
+
+
+def test_gate_fails_when_web_dependencies_exist_without_npm(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    commands = record_runs(monkeypatch, None)
+
+    def missing_npm(root: Path) -> str:
+        raise FileNotFoundError("web/node_modules exists but npm is missing from PATH")
+
+    monkeypatch.setattr(check, "web_npm", missing_npm)
+
+    assert check.main(["--static-only"]) == 2
+
+    assert commands == []
+    assert "npm is missing" in capsys.readouterr().err

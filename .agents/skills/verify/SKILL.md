@@ -7,7 +7,8 @@ Use `uv run --locked python scripts/check.py` for the shared formatting, lint, t
 Django and test checks; after `npm ci` in `web/` it also checks the API schema, the
 generated types and the web static checks, and without `web/node_modules` it says
 `SKIPPED web`. `--static-only` skips pytest, `--tests-only` runs only pytest, and
-arguments after `--` go to pytest (`check.py --tests-only -- tests/test_api.py`).
+arguments after `--` go to pytest; a narrowed run adds `--no-cov`, because the coverage floor
+applies to the whole suite (`check.py --tests-only -- --no-cov tests/test_api.py`).
 `PYTEST_XDIST_AUTO_NUM_WORKERS` overrides the worker cap of six. Every stage prints
 its duration. Tests use fixed `PYRACAST_*` values from `tests/settings.py`, so a local
 `.env` changes only the database connection. Build packaging changes with `uv build --no-sources`; CI also

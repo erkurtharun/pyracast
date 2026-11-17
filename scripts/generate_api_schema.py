@@ -12,6 +12,19 @@ WEB = Path(__file__).resolve().parents[1] / "web"
 FIX = "npm --prefix web run api:generate"
 
 
+def run(
+    command: list[str],
+    cwd: Path | str,
+    *,
+    env: dict[str, str] | None = None,
+    stdin: bytes | None = None,
+    capture: bool = False,
+) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(  # noqa: S603
+        command, cwd=cwd, env=env, input=stdin, capture_output=capture, check=False
+    )
+
+
 def generate_openapi(output: Path) -> int:
     environment = {
         key: value
@@ -21,7 +34,7 @@ def generate_openapi(output: Path) -> int:
     environment["PYRACAST_SECRET_KEY"] = token_urlsafe(48)
     # A clean working directory prevents the application from loading a local .env file.
     with TemporaryDirectory(prefix="pyracast-schema-") as directory:
-        result = subprocess.run(  # noqa: S603
+        result = run(
             [
                 sys.executable,
                 "-m",
@@ -33,9 +46,8 @@ def generate_openapi(output: Path) -> int:
                 "--format=openapi-json",
                 f"--file={output}",
             ],
-            cwd=directory,
+            directory,
             env=environment,
-            check=False,
         )
     return result.returncode
 
@@ -44,9 +56,9 @@ def web_tool(*arguments: str, stdin: bytes | None = None) -> bytes:
     npx = shutil.which("npx")
     if npx is None:
         raise RuntimeError("npx is missing; install Node.js and run `npm ci` in web/.")
-    return subprocess.run(  # noqa: S603
-        [npx, "--no-install", *arguments], cwd=WEB, input=stdin, capture_output=True, check=True
-    ).stdout
+    result = run([npx, "--no-install", *arguments], WEB, stdin=stdin, capture=True)
+    result.check_returncode()
+    return result.stdout
 
 
 def formatted(content: bytes, path: str) -> bytes:

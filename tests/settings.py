@@ -31,6 +31,7 @@ os.environ.update(
     PYRACAST_GMAIL_CLIENT_SECRET="",
     PYRACAST_GMAIL_REFRESH_TOKEN="",
     PYRACAST_LOG_LEVEL="INFO",
+    PYRACAST_OPEN_METEO_API_KEY="",
 )
 
 from pyracast.settings import *  # noqa: F403 -- Django settings overlay.
