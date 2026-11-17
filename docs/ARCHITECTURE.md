@@ -111,8 +111,9 @@ The customer shell stays neutral until the session supplies its language.
 `next-intl` catalogs localize the interface and display formats; Django gettext
 covers administration, validation and email. Plant timezones, units, ISO timestamps
 and CSV values remain independent of language. CI checks catalog completeness and
-interpolation contracts; `uv run python scripts/translations.py` rebuilds the
-committed gettext binaries after editing their source catalogs.
+interpolation contracts. Gettext binaries are not committed: `scripts/check.py`, the
+development launcher and the backend image build compile them; run
+`uv run python scripts/translations.py` before starting Django or pytest directly.
 
 Public product, privacy and terms pages render on the server without an API session.
 English uses `/`, `/privacy/` and `/terms/`; Turkish uses the corresponding `/tr/`
