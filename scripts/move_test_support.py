@@ -1,6 +1,5 @@
-# Moves what test modules import from other test modules into tests/support/. Rerun it after a
-# rebase that brings new `from tests.test_<x> import ...` lines; moved names only get their imports
-# rewritten.
+# Rerun after a rebase that brings new `from tests.test_<x> import ...` lines; names already moved
+# only get their imports rewritten.
 import ast
 import re
 import subprocess

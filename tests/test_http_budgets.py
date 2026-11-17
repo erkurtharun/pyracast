@@ -113,7 +113,7 @@ def test_polled_reads_stay_within_their_statement_budget(workspace: Workspace, r
         response = workspace.client.get(url)
 
     assert response.status_code == 200, response.content
-    locks = any("FOR UPDATE" in statement["sql"] for statement in captured.captured_queries)
+    locks = any("FOR UPDATE" in statement for statement in captured)
     assert locks == (route in ROW_LOCKING_READS)
 
 

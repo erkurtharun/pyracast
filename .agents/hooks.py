@@ -38,7 +38,7 @@ READ_TOOLS = frozenset(
         "view_image",
     }
 )
-CREDENTIAL_SUFFIXES = (".tfvars", ".tfplan", ".tfstate", ".tfstate.backup")
+CREDENTIAL_SUFFIXES = (".tfvars", ".tfvars.json", ".tfplan", ".tfstate", ".tfstate.backup")
 CONTEXT_REASON = (
     "Direct reads of generated, environment and data directories are excluded from project context."
 )
@@ -48,6 +48,8 @@ PUBLISH_REASON = (
     "Agent sessions push only pull request branches (pr/*) and do not merge pull requests or "
     f"dispatch workflows; the orchestrator sets {PUBLISH_MARKER}=1 for that."
 )
+MARKER_ASSIGNMENT = re.compile(rf"(?:\$env:)?{PUBLISH_MARKER}=1", re.IGNORECASE)
+ASSIGNMENT = re.compile(r"(?:\$env:)?[A-Za-z_]\w*=.*", re.IGNORECASE)
 PUSH_SCOPE_OPTIONS = frozenset({"--all", "--mirror", "--tags"})
 
 
@@ -174,7 +176,7 @@ def _sensitive_name(name: str) -> bool:
     name = name.casefold()
     if name.endswith(".example"):
         return False
-    return name == ".env" or name.startswith(".env.") or name.endswith(CREDENTIAL_SUFFIXES)
+    return name.startswith(".env") or name.endswith(CREDENTIAL_SUFFIXES)
 
 
 def _sensitive(parts: tuple[str, ...]) -> bool:
@@ -250,7 +252,30 @@ def denied_read(payload: JsonObject, root: Path) -> str | None:
 
 
 def _segments(command: str) -> list[list[str]]:
-    return [_command_tokens(part) for part in re.split(r"&&|\|\||[;|&\n]", command)]
+    lexer = shlex.shlex(
+        command.replace("\\", "/").replace("\n", ";"), posix=True, punctuation_chars=True
+    )
+    lexer.whitespace_split = True
+    try:
+        tokens = list(lexer)
+    except ValueError:
+        return [_command_tokens(part) for part in re.split(r"&&|\|\||[;|&\n]", command)]
+    segments: list[list[str]] = [[]]
+    for token in tokens:
+        if token and set(token) <= set(lexer.punctuation_chars):
+            segments.append([])
+        else:
+            segments[-1].append(token)
+    return segments
+
+
+def _assigns_marker(tokens: list[str]) -> bool:
+    for token in tokens:
+        if MARKER_ASSIGNMENT.fullmatch(token):
+            return True
+        if token not in {"export", "env"} and not ASSIGNMENT.fullmatch(token):
+            return False
+    return False
 
 
 def _program(token: str) -> str:
@@ -299,15 +324,21 @@ def _segment_publishes(tokens: list[str]) -> bool:
     return False
 
 
-def denied_shell(payload: JsonObject) -> str | None:
-    command = _object(payload.get("tool_input")).get("command")
+def _shell_command(arguments: JsonObject) -> str | None:
+    command = arguments.get("command", arguments.get("cmd"))
     if isinstance(command, list):
-        command = " ".join(part for part in command if isinstance(part, str))
-    if not isinstance(command, str) or os.environ.get(PUBLISH_MARKER) == "1":
+        return " ".join(part for part in command if isinstance(part, str))
+    return command if isinstance(command, str) else None
+
+
+def denied_shell(payload: JsonObject) -> str | None:
+    command = _shell_command(_object(payload.get("tool_input")))
+    if command is None or os.environ.get(PUBLISH_MARKER) == "1":
         return None
-    if re.search(rf"{PUBLISH_MARKER}\s*=\s*['\"]?1\b", command):
+    segments = _segments(command)
+    if any(_assigns_marker(tokens) for tokens in segments):
         return None
-    if any(_segment_publishes(tokens) for tokens in _segments(command)):
+    if any(_segment_publishes(tokens) for tokens in segments):
         return PUBLISH_REASON
     return None
 

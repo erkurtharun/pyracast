@@ -46,7 +46,6 @@ PURGED = frozenset(
         "regions.Region",
     }
 )
-# Removed by the database cascade of a purged parent.
 CASCADED = frozenset(
     {
         "change_requests.IncidentChange",
