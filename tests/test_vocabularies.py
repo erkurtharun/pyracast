@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from typing import cast, get_args
 
@@ -24,7 +25,9 @@ from tests.support.vocabularies import (
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
-OPENAPI = Path(__file__).resolve().parents[1] / "web" / "openapi.json"
+WEB = Path(__file__).resolve().parents[1] / "web"
+OPENAPI = WEB / "openapi.json"
+TYPESCRIPT = WEB / "src" / "lib" / "schema.d.ts"
 
 
 def _stored(vocabulary: StoredVocabulary) -> object:
@@ -86,9 +89,12 @@ def test_stored_vocabulary_is_exported_by_name_to_the_api_schema(
         name for name, choices in _exported().items() if choices.choices == vocabulary.choices
     ]
     assert len(exported) == 1
+    values = [value for value, _ in vocabulary.choices]
     components = json.loads(OPENAPI.read_text(encoding="utf-8"))["components"]["schemas"]
-    if exported[0] in components:
-        assert components[exported[0]]["enum"] == [value for value, _ in vocabulary.choices]
+    assert components[exported[0]]["enum"] == values
+    union = re.search(rf"\b{exported[0]}:([^;]+);", TYPESCRIPT.read_text(encoding="utf-8"))
+    assert union is not None
+    assert re.findall(r'"([^"]*)"', union[1]) == values
 
 
 @pytest.mark.parametrize(("vocabulary", "value"), _stored_values())
@@ -109,7 +115,7 @@ def test_serializer_rejects_values_outside_the_vocabulary(
 def test_operation_rejects_values_outside_the_vocabulary(
     case: InputVocabulary, value: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert_operation_rejects(case.operation(monkeypatch), value)
+    assert_operation_rejects(case, case.operation(monkeypatch), value)
 
 
 def test_supported_languages_have_one_value_set() -> None:

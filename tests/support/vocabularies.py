@@ -67,6 +67,8 @@ class InputVocabulary:
     data: dict[str, object]
     field: str
     operation: Operation
+    accepted: str
+    error: str
     rejected: tuple[str, ...] = (OUTSIDE,)
 
 
@@ -96,9 +98,13 @@ def assert_serializer_rejects(case: InputVocabulary, value: str) -> None:
     assert case.field in refused.errors
 
 
-def assert_operation_rejects(operation: Callable[[str], object], value: str) -> None:
-    with pytest.raises(ValidationError):
+def assert_operation_rejects(
+    case: InputVocabulary, operation: Callable[[str], object], value: str
+) -> None:
+    with pytest.raises(ValidationError) as raised:
         operation(value)
+    assert raised.value.messages == [case.error]
+    operation(case.accepted)
 
 
 def _membership(monkeypatch: pytest.MonkeyPatch) -> models.Model:
@@ -256,6 +262,8 @@ INPUT_VOCABULARIES = (
         {"provider": "solcast", "external_account_id": "account", "api_key": "key"},
         "provider",
         _create_account,
+        accepted="fixture",
+        error="Invalid provider account identity.",
     ),
     InputVocabulary(
         "power_basis",
@@ -269,6 +277,8 @@ INPUT_VOCABULARIES = (
         },
         "power_basis",
         _configure_binding,
+        accepted="dc",
+        error="An AC or DC power basis is required.",
     ),
     InputVocabulary(
         "region_transition",
@@ -276,15 +286,27 @@ INPUT_VOCABULARIES = (
         {"status": "rejected"},
         "status",
         _transition_region,
+        accepted="suspended",
+        error="Use approval for approval transitions.",
         rejected=(OUTSIDE, "approved", "pending"),
     ),
-    InputVocabulary("language", LanguageInput, {"language": "en"}, "language", _save_language),
+    InputVocabulary(
+        "language",
+        LanguageInput,
+        {"language": "en"},
+        "language",
+        _save_language,
+        accepted="tr",
+        error="unsupported_language",
+    ),
     InputVocabulary(
         "incident_change_action",
         IncidentRequestInput,
         {"action": "create", "idempotency_key": str(uuid4())},
         "action",
         _submit_incident,
+        accepted="create",
+        error="Unknown incident request action.",
     ),
     InputVocabulary(
         "production_change_action",
@@ -298,5 +320,7 @@ INPUT_VOCABULARIES = (
         },
         "action",
         _submit_production,
+        accepted="set",
+        error="Unknown production action.",
     ),
 )
