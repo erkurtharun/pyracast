@@ -162,22 +162,56 @@ def test_removing_and_rejoining_cannot_revive_pinned_membership() -> None:
     assert not mail.outbox
 
 
-def test_member_growth_pauses_without_truncation_and_removal_resumes() -> None:
+def paused_slot(schedule: ReminderSchedule) -> NotificationDelivery:
+    delivery = NotificationDelivery.objects.get(schedule=schedule, scheduled_for=SLOT)
+    assert delivery.status == "skipped"
+    assert delivery.recipients == []
+    assert delivery.recipient_memberships == {}
+    assert delivery.snapshot is None
+    return delivery
+
+
+def test_member_growth_pauses_without_truncation_and_removal_resumes_next_slot() -> None:
     system, _ = configured()
     users = [member(system, f"member{i}@example.com") for i in range(5)]
     schedule = group(system)
     extra = member(system, "extra@example.com")
     assert len(effective_recipients(schedule)) == 6
     assert reminder_schedule_payload(schedule, SLOT)["recipient_limit_exceeded"] is True
-    assert enqueue_due(SLOT) == []
+    enqueue_due(SLOT)
+    assert paused_slot(schedule).last_error == "recipient_limit_exceeded"
     with pytest.raises(ValidationError, match="at most 5"):
         group(system)
     remove_workspace_member(system.member, system.tenant.pk, extra.pk)
+    next_slot = SLOT + timedelta(days=1)
+    enqueue_due(next_slot)
+    assert NotificationDelivery.objects.filter(schedule=schedule).count() == 2
+    resumed = NotificationDelivery.objects.get(schedule=schedule, scheduled_for=next_slot)
+    assert resumed.status == "pending"
+    assert set(resumed.recipients) == {user.email for user in users}
+
+
+def test_over_limit_slot_records_a_skipped_row() -> None:
+    system, _ = configured()
+    for index in range(6):
+        member(system, f"member{index}@example.com")
+    schedule = ReminderSchedule.objects.get()
+    ReminderSchedule.objects.filter(pk=schedule.pk).update(include_workspace_members=True)
     ids = enqueue_due(SLOT)
-    assert len(ids) == 1
-    assert set(NotificationDelivery.objects.get(pk=ids[0]).recipients) == {
-        user.email for user in users
-    }
+    delivery = paused_slot(schedule)
+    assert delivery.last_error == "recipient_limit_exceeded"
+    assert ids == [delivery.pk]
+    assert enqueue_due(SLOT) == [delivery.pk]
+    assert NotificationDelivery.objects.count() == 1
+
+
+def test_no_recipient_slot_records_a_skipped_row() -> None:
+    _, schedule = configured()
+    ReminderSchedule.objects.filter(pk=schedule.pk).update(recipients=[])
+    enqueue_due(SLOT)
+    assert paused_slot(schedule).last_error == "no_recipients"
+    assert not process_notification(paused_slot(schedule).pk, SLOT)
+    assert not mail.outbox
 
 
 def test_member_removal_does_not_change_accepted_history_or_other_workspaces() -> None:

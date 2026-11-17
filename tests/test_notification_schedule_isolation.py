@@ -83,32 +83,35 @@ def test_request_and_application_reject_oversized_recipients_without_changing_sc
     assert schedule.recipients == ["default@example.com"]
 
 
-def test_oversized_saved_recipient_does_not_block_another_tenant_or_pending_delivery(
+@pytest.mark.parametrize("stored", ["oversized", "malformed"])
+def test_invalid_saved_recipient_records_a_skipped_slot_without_blocking_another_tenant(
+    stored: str,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     system, broken = configured()
     healthy = another_tenant_schedule(system)
     address = recipient(255)
-    ReminderSchedule.objects.filter(pk=broken.pk).update(recipients=[address])
+    ReminderSchedule.objects.filter(pk=broken.pk).update(
+        recipients=[address] if stored == "oversized" else [None]
+    )
     actor = MagicMock()
     logger = logging.getLogger("test.notifications.scheduler")
     monkeypatch.setattr("pyracast.notifications.scheduler.logger", logger)
-    with (
-        caplog.at_level(logging.ERROR),
-        pytest.raises(NotificationSchedulingError, match="1 email reminder"),
-    ):
+    with caplog.at_level(logging.INFO):
         runtime.dispatch_notifications(actor, SLOT)
     deliveries = list(NotificationDelivery.objects.filter(schedule=healthy))
     assert len(deliveries) == 1
     assert deliveries[0].status == "pending"
     assert deliveries[0].recipients == ["healthy@example.com"]
+    paused = NotificationDelivery.objects.get(schedule=broken)
+    assert (paused.status, paused.last_error) == ("skipped", "invalid_recipient")
+    assert paused.recipients == []
     actor.send.assert_called_once_with(deliveries[0].pk)
-    assert not NotificationDelivery.objects.filter(schedule=broken).exists()
     broken.refresh_from_db()
-    assert broken.recipients == [address]
+    assert broken.recipients == ([address] if stored == "oversized" else [None])
     assert address not in caplog.text
-    assert "ValidationError" in caplog.text
+    assert f"schedule_id={broken.pk} reason=invalid_recipient" in caplog.text
     assert invalid_reminder_recipient_count() == 1
 
 

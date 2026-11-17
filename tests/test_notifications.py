@@ -391,11 +391,13 @@ def test_worker_checks_resource_policy_independently_of_configurer(change: str) 
             daily_quota=0
         )
     delivered = process_notification(delivery.pk, SLOT)
-    assert delivered is (change in {"inactive", "membership"})
+    assert delivered is (change in {"inactive", "membership", "schedule"})
     delivery.refresh_from_db()
     assert delivery.status == ("sent" if delivered else "skipped")
     if change == "recipient":
         assert delivery.last_error == "missing_recipient"
+    if change == "disabled":
+        assert delivery.last_error == "cancelled_by_settings_change"
 
 
 @pytest.mark.parametrize("mode", ["safe", "uncertain", "permanent"])
@@ -764,34 +766,71 @@ def test_recipient_limit_reduction_blocks_whole_queued_list_without_truncation()
     assert not mail.outbox
 
 
-def test_recipient_change_cancels_every_old_pending_delivery() -> None:
-    system, _ = configured()
-    configure_reminders(
+def reconfigure(
+    system: System,
+    recipients: list[str],
+    *,
+    times: tuple[str, ...] = ("10:00",),
+    enabled: bool = True,
+    now: datetime = SLOT + timedelta(seconds=1),
+) -> ReminderSchedule:
+    return configure_reminders(
         system.member,
         system.tenant.pk,
         system.region.pk,
         language="en",
-        enabled=True,
-        recipients=["a@example.com", "b@example.com"],
-        times=["10:00"],
-        now=NOW,
+        enabled=enabled,
+        recipients=recipients,
+        times=list(times),
+        now=now,
     )
+
+
+def test_recipient_change_keeps_the_queued_row_for_still_permitted_recipients() -> None:
+    system, _ = configured()
+    reconfigure(system, ["a@example.com", "b@example.com"], now=NOW)
     saved(system)
     ids = enqueue_due(SLOT)
-    configure_reminders(
-        system.member,
-        system.tenant.pk,
-        system.region.pk,
-        language="en",
-        enabled=True,
-        recipients=["b@example.com", "c@example.com"],
-        times=["10:00"],
-        now=SLOT + timedelta(seconds=1),
-    )
-    assert all(
-        not process_notification(delivery_id, SLOT + timedelta(seconds=2)) for delivery_id in ids
-    )
-    assert set(NotificationDelivery.objects.values_list("status", flat=True)) == {"skipped"}
+    reconfigure(system, ["b@example.com", "c@example.com"])
+    assert process_notification(ids[0], SLOT + timedelta(seconds=2))
+    assert mail.outbox[0].bcc == ["b@example.com"]
+    assert NotificationDelivery.objects.get(pk=ids[0]).recipients == ["b@example.com"]
+
+
+def test_unchanged_resave_keeps_the_queued_email() -> None:
+    system, schedule = configured()
+    saved(system)
+    key = enqueue_due(SLOT)[0]
+    resaved = reconfigure(system, [])
+    assert resaved.pk == schedule.pk
+    assert resaved.effective_from == NOW
+    assert process_notification(key, SLOT + timedelta(seconds=2))
+    assert mail.outbox[0].bcc == ["default@example.com"]
+
+
+def test_retry_row_survives_a_recipient_addition() -> None:
+    system, _ = configured()
+    reconfigure(system, ["a@example.com"], now=NOW)
+    saved(system)
+    key = enqueue_due(SLOT)[0]
+    NotificationDelivery.objects.filter(pk=key).update(status="retry", attempts=1)
+    reconfigure(system, ["a@example.com", "b@example.com"])
+    assert process_notification(key, SLOT + timedelta(seconds=2))
+    assert mail.outbox[0].bcc == ["a@example.com"]
+
+
+@pytest.mark.parametrize("change", ["time", "disabled"])
+def test_removed_time_cancels_with_settings_change_code(change: str) -> None:
+    system, _ = configured()
+    saved(system)
+    key = enqueue_due(SLOT)[0]
+    if change == "time":
+        reconfigure(system, [], times=("11:00",))
+    else:
+        reconfigure(system, [], enabled=False)
+    assert not process_notification(key, SLOT + timedelta(seconds=2))
+    delivery = NotificationDelivery.objects.get(pk=key)
+    assert (delivery.status, delivery.last_error) == ("skipped", "cancelled_by_settings_change")
     assert not mail.outbox
 
 
