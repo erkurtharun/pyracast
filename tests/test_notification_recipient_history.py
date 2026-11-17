@@ -37,7 +37,9 @@ def test_sent_history_revokes_an_address_that_another_delivery_pinned_as_externa
     membership = Membership.objects.get(tenant=system.tenant, user=user)
     historical = NotificationDelivery.objects.create(
         schedule=schedule,
+        binding=system.binding,
         scheduled_for=SLOT + timedelta(minutes=1),
+        preparation_deadline=SLOT + timedelta(minutes=1),
         available_at=SLOT,
         status="sent",
         recipients=[user.email],
@@ -111,7 +113,9 @@ def test_historical_alias_does_not_revoke_a_different_pinned_member() -> None:
     pending = NotificationDelivery.objects.get(pk=enqueue_due(SLOT)[0])
     historical = NotificationDelivery.objects.create(
         schedule=schedule,
+        binding=system.binding,
         scheduled_for=SLOT - timedelta(days=1),
+        preparation_deadline=SLOT - timedelta(days=1),
         available_at=SLOT - timedelta(days=1),
         status="sent",
         recipients=[current.email],

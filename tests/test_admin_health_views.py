@@ -8,6 +8,7 @@ from pyracast.forecasts.models import DispatcherStatus
 from pyracast.forecasts.monitoring import record_dispatch_phase
 from pyracast.metering.models import EpiasCollectionJob
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
+from pyracast.notifications.scheduler import PREPARATION_GRACE
 from tests.test_api import verified_admin
 from tests.test_delivery_health import NOW, recent_forecast
 from tests.test_metering import connected
@@ -45,7 +46,9 @@ def test_historical_health_reasons_are_visible_and_link_to_the_matching_records(
     schedule = ReminderSchedule.objects.create(region=system.region, effective_from=NOW)
     delivery = NotificationDelivery.objects.create(
         schedule=schedule,
+        binding=system.binding,
         scheduled_for=NOW,
+        preparation_deadline=NOW + PREPARATION_GRACE,
         available_at=NOW,
         recipients=["recipient@example.test"],
         status="sent",
@@ -131,7 +134,9 @@ def test_metering_periods_publication_waits_and_email_content_are_distinct(
     schedule = ReminderSchedule.objects.create(region=system.region, effective_from=NOW)
     NotificationDelivery.objects.create(
         schedule=schedule,
+        binding=system.binding,
         scheduled_for=NOW,
+        preparation_deadline=NOW + PREPARATION_GRACE,
         available_at=NOW,
         recipients=["recipient@example.test"],
         prepared_message={"kind": "unavailable"},

@@ -99,12 +99,16 @@ def test_mail_rendering_restores_the_caller_language_and_preserves_typed_workboo
 
 def test_delivery_language_is_database_constrained() -> None:
     system, schedule = configured()
-    with pytest.raises(IntegrityError), transaction.atomic():
+    with (
+        pytest.raises(IntegrityError, match="notification_delivery_language_valid"),
+        transaction.atomic(),
+    ):
         NotificationDelivery.objects.create(
             schedule=schedule,
             binding=system.binding,
             language="de",
             scheduled_for=SLOT,
+            preparation_deadline=SLOT,
             available_at=SLOT,
             recipients=["default@example.com"],
         )

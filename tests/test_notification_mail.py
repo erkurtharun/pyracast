@@ -1,4 +1,5 @@
 import smtplib
+from base64 import b64encode
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from runpy import run_path
@@ -11,6 +12,7 @@ from django.test import override_settings
 
 from pyracast import settings as project_settings
 from pyracast.notifications.mail import (
+    XLSX_MIME,
     NotSentError,
     PermanentlyNotSentError,
     SendCancelledError,
@@ -42,6 +44,31 @@ def test_pending_csv_delivery_preserves_its_frozen_content_after_the_xlsx_upgrad
         "text/csv",
     )
     assert message.extra_headers["Message-ID"] == "<pyracast-reminder-17@notifications.pyracast>"
+
+
+def test_a_prepared_delivery_restores_its_frozen_message_and_workbook() -> None:
+    workbook = b"PK\x03\x04 frozen workbook"
+    delivery = NotificationDelivery(
+        id=18,
+        recipients=["recipient@example.com"],
+        prepared_message={
+            "subject": "Saved forecast",
+            "body": "Frozen text",
+            "html": "<p>Frozen text</p>",
+            "format": "xlsx",
+            "attachment_name": "forecast-2026-11-15.xlsx",
+            "attachment_base64": b64encode(workbook).decode("ascii"),
+        },
+    )
+    message = build_message(delivery)
+    assert (message.subject, message.body, message.bcc) == (
+        "Saved forecast",
+        "Frozen text",
+        ["recipient@example.com"],
+    )
+    assert message.alternatives[0][0] == "<p>Frozen text</p>"
+    assert message.attachments == [("forecast-2026-11-15.xlsx", workbook, XLSX_MIME)]
+    assert message.extra_headers["Message-ID"] == "<pyracast-reminder-18@notifications.pyracast>"
 
 
 def test_default_smtp_configuration_has_a_bounded_socket_timeout(

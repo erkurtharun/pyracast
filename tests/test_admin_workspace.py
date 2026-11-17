@@ -27,6 +27,7 @@ from pyracast.notifications.models import (
     NotificationSettings,
     ReminderSchedule,
 )
+from pyracast.notifications.scheduler import PREPARATION_GRACE
 from pyracast.plants.models import Plant
 from pyracast.regions.models import AuditEvent, Region
 from pyracast.regions.operations import request_location_change
@@ -361,7 +362,9 @@ def test_operations_show_safe_recent_records_and_recorded_dispatch_health() -> N
     )
     delivery = NotificationDelivery.objects.create(
         schedule=schedule,
+        binding=system.binding,
         scheduled_for=now,
+        preparation_deadline=now + PREPARATION_GRACE,
         available_at=now,
         recipients=["customer@example.com"],
         status="uncertain",
@@ -406,7 +409,13 @@ def test_recent_work_uses_the_plant_name_with_a_location_fallback() -> None:
     schedule = ReminderSchedule.objects.create(
         configured_by=system.member, region=system.region, effective_from=now
     )
-    NotificationDelivery.objects.create(schedule=schedule, scheduled_for=now, available_at=now)
+    NotificationDelivery.objects.create(
+        schedule=schedule,
+        binding=system.binding,
+        scheduled_for=now,
+        preparation_deadline=now + PREPARATION_GRACE,
+        available_at=now,
+    )
     context = recent_work_context()
     assert context["collections"][0]["plant_name"] == system.region.name
     assert context["deliveries"][0]["plant_name"] == system.region.name

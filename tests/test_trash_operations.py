@@ -167,9 +167,11 @@ def linked_records(system: System, plant: Plant) -> tuple[ForecastSnapshot, Remi
         NotificationDelivery.objects.create(
             schedule=schedule,
             snapshot=source,
+            binding=system.binding,
             status=status,
             prepared_message={"kind": "current"} if status == "sending" else None,
             scheduled_for=NOW + timedelta(minutes=index),
+            preparation_deadline=NOW + timedelta(minutes=index),
             available_at=NOW,
             lease_token=uuid.uuid4(),
             lease_expires_at=NOW + timedelta(minutes=5),

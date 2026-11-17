@@ -306,20 +306,27 @@ def test_removal_and_group_transmission_serialize_on_workspace_lock() -> None:
 
 
 def test_one_delivery_per_reminder_slot_prevents_duplicate_dispatch() -> None:
-    _, schedule = configured()
+    system, schedule = configured()
     first = NotificationDelivery.objects.create(
         schedule=schedule,
+        binding=system.binding,
         scheduled_for=SLOT,
+        preparation_deadline=SLOT,
         available_at=SLOT,
         recipients=["sent@example.com"],
         status="sent",
     )
     assert enqueue_due(SLOT) == [first.pk]
     assert not process_notification(first.pk, SLOT)
-    with pytest.raises(IntegrityError), transaction.atomic():
+    with (
+        pytest.raises(IntegrityError, match="unique_reminder_group_slot"),
+        transaction.atomic(),
+    ):
         NotificationDelivery.objects.create(
             schedule=schedule,
+            binding=system.binding,
             scheduled_for=SLOT,
+            preparation_deadline=SLOT,
             available_at=SLOT,
             recipients=["duplicate@example.com"],
         )

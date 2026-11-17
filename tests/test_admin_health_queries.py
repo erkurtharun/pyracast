@@ -19,6 +19,7 @@ from pyracast.forecasts.models import (
 from pyracast.forecasts.monitoring import delivery_health
 from pyracast.metering.models import EpiasCollectionJob
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
+from pyracast.notifications.scheduler import PREPARATION_GRACE
 from pyracast.regions.models import Region
 from tests.test_domain import System, make_system
 from tests.test_metering import connected
@@ -139,8 +140,10 @@ def delivery(
     )
     return NotificationDelivery.objects.create(
         schedule=ReminderSchedule.objects.create(region=region, effective_from=NOW),
+        binding=SiteBinding.objects.get(region=schedule.region),
         recipients=[f"recipient-{count}@example.com"],
         scheduled_for=scheduled,
+        preparation_deadline=scheduled + PREPARATION_GRACE,
         available_at=available,
         status=status,
         lease_expires_at=lease,

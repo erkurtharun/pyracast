@@ -383,7 +383,7 @@ def test_worker_checks_resource_policy_independently_of_configurer(change: str) 
         NotificationDelivery.objects.filter(pk=delivery.pk).update(recipients=[""])
         ReminderSchedule.objects.filter(pk=schedule.pk).update(recipients=[""])
     elif change == "binding":
-        NotificationDelivery.objects.filter(pk=delivery.pk).update(binding=None)
+        Region.objects.filter(pk=schedule.region_id).update(approved_binding=None)
     elif change == "wrong_region":
         region = Region.objects.create(
             tenant=schedule.region.tenant, name="Other", latitude=0, longitude=0, timezone="UTC"
@@ -470,6 +470,16 @@ def test_a_delivery_is_sending_only_with_prepared_content_in_a_known_state() -> 
         rows.update(status="sending", prepared_message=None)
     rows.update(status="sending", prepared_message={"kind": "unavailable"})
     assert rows.get().status == "sending"
+
+
+@pytest.mark.parametrize("field", ["binding", "preparation_deadline"])
+def test_a_delivery_always_pins_its_binding_and_preparation_deadline(field: str) -> None:
+    rows = NotificationDelivery.objects.filter(pk=ready().pk)
+    with (
+        pytest.raises(IntegrityError, match="violates not-null constraint"),
+        transaction.atomic(),
+    ):
+        rows.update(**{field: None})
 
 
 def test_locmem_adapter_zero_return_is_known_not_sent() -> None:
