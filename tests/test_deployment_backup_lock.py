@@ -3,6 +3,7 @@ import re
 import signal
 import subprocess
 import time
+import types
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -194,9 +195,9 @@ def test_hourly_upload_finishing_after_a_newer_prerelease_backup_leaves_the_poin
     assert [name for name, _ in backup_host.uploads] == [hourly, prerelease[0]]
     assert [details["object"] for _, _, details in backup_host.events] == [prerelease[0], hourly]
     assert json.loads(backup_host.last_backup.read_text())["object"] == prerelease[0]
-    assert [path.name for path in backup_host.last_backup.parent.iterdir() if path.is_file()] == [
-        backup_host.last_backup.name
-    ]
+    assert sorted(
+        path.name for path in backup_host.last_backup.parent.iterdir() if path.is_file()
+    ) == ["backup-sequence", backup_host.last_backup.name]
     assert unguarded == []
 
 
@@ -213,6 +214,98 @@ def test_a_newer_hourly_backup_moves_the_pointer_forward(backup_host: BackupHost
     pointer = json.loads(backup_host.last_backup.read_text())
     assert pointer["object"] == second
     assert pointer["snapshot_at"] <= pointer["completed_at"]
+
+
+def test_snapshots_are_ordered_by_sequence_when_the_clock_goes_backwards(
+    backup_host: BackupHost, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = time.time()
+    clock = [now + 3600]
+    monkeypatch.setattr(
+        backup,
+        "time",
+        types.SimpleNamespace(time=lambda: clock[0], monotonic=time.monotonic, sleep=time.sleep),
+    )
+    second = backup_host.directory / "prerelease"
+    second.mkdir()
+    prerelease: list[str | None] = []
+
+    def corrected_clock_and_a_release(name: str) -> None:
+        if "-hourly-" in name and not prerelease:
+            clock[0] = now
+            prerelease.append(
+                backup.create_backup(backup_host.release, "private-backups", "prerelease", second)
+            )
+
+    backup_host.on_upload = corrected_clock_and_a_release
+    late = backup.create_backup(
+        backup_host.release, "private-backups", "hourly", backup_host.directory
+    )
+    after_release = json.loads(backup_host.last_backup.read_text())
+    newer = backup.create_backup(
+        backup_host.release, "private-backups", "hourly", backup_host.directory
+    )
+
+    assert late is not None
+    assert after_release["object"] == prerelease[0]
+    pointer = json.loads(backup_host.last_backup.read_text())
+    assert pointer["object"] == newer
+    assert pointer["sequence"] == after_release["sequence"] + 1
+
+
+@pytest.mark.parametrize("sequence_file", [None, "unreadable", "3"])
+def test_a_lost_sequence_continues_above_the_pointer(
+    backup_host: BackupHost, sequence_file: str | None
+) -> None:
+    backup_host.last_backup.write_text(
+        json.dumps({"object": "postgres/earlier.dump", "sequence": 7, "snapshot_at": 0})
+    )
+    if sequence_file is not None:
+        backup_host.last_backup.with_name("backup-sequence").write_text(sequence_file)
+
+    name = backup.create_backup(
+        backup_host.release, "private-backups", "hourly", backup_host.directory
+    )
+
+    pointer = json.loads(backup_host.last_backup.read_text())
+    assert (pointer["object"], pointer["sequence"]) == (name, 8)
+    assert backup_host.last_backup.with_name("backup-sequence").read_text() == "8"
+
+
+def test_hourly_sequence_is_taken_under_the_release_lock(
+    backup_host: BackupHost, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    replace = Path.replace
+    unlocked: list[Path] = []
+
+    def watched(source: Path, target: Path) -> Path:
+        if target.name == "backup-sequence" and not backup_host.held:
+            unlocked.append(target)
+        return replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", watched)
+    backup.create_backup(backup_host.release, "private-backups", "hourly", backup_host.directory)
+
+    assert backup_host.last_backup.with_name("backup-sequence").read_text() == "1"
+    assert unlocked == []
+
+
+def test_backup_stopped_during_a_release_reports_a_skip_not_a_failure(
+    backup_host: BackupHost, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backup_host.blocked.touch()
+
+    def interrupted(_arguments: list[str] | None) -> int:
+        backup_host.handlers[signal.SIGTERM](signal.SIGTERM, None)
+        return 0
+
+    monkeypatch.setattr(backup, "main", interrupted)
+    with pytest.raises(SystemExit) as stopped:
+        backup.run([])
+    assert stopped.value.code == 143
+    assert backup_host.events == [
+        ("pyracast_backup_skipped", "WARNING", {"reason": "stopped_for_release"})
+    ]
 
 
 def test_prerelease_backup_records_its_object_in_the_release_directory(

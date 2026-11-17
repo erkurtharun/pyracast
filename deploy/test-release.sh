@@ -36,7 +36,9 @@ elif [[ ${1:-} == */bootstrap_database.py || ${1:-} == */backup.py ]]; then
     if [[ $MODE == killed-backup ]]; then kill -KILL "$PPID"; exit 0; fi
     touch /backup-complete
     release_dir=$(sed -n 's/.* --release-dir \([^ ]*\) .*/\1/p' <<<"$*")
-    printf '{"object": "postgres/fixture-prerelease.dump"}\n' >"$release_dir/prerelease-backup.json"
+    object=postgres/fixture-prerelease.dump
+    if [[ $MODE == record-invalid ]]; then object='postgres/x.dump; touch /record-injected'; fi
+    printf '{"object": "%s"}\n' "$object" >"$release_dir/prerelease-backup.json"
   fi
 else
   exec /usr/local/bin/python3 "$@"
@@ -63,6 +65,10 @@ cat >/mock-bin/systemctl <<'SH'
 #!/bin/bash
 printf 'systemctl %s\n' "$*" >>/calls
 if [[ $MODE == final-start && "$*" == 'start pyracast.service' ]]; then exit 53; fi
+if [[ "$*" == 'show --property=LoadState --value pyracast-backup.service' ]]; then echo loaded; fi
+if [[ "$*" == 'is-active --quiet pyracast-backup.service' ]]; then
+  if [[ $MODE == backup-busy ]]; then exit 0; else exit 3; fi
+fi
 SH
 cat >/mock-bin/systemd-analyze <<'SH'
 #!/bin/bash
@@ -194,7 +200,7 @@ units_installed() {
   grep -Fxq 'systemctl enable --now pyracast-backup.timer pyracast-watchdog.timer' /calls
 }
 
-for MODE in preflight deploy-check plan secrets units-invalid image live-artifact redeploy-preflight drain backup support-postgres support-rabbit migration health tls response success first-success redeploy final-start first-backup killed-backup killed lock-wait lock-timeout maintenance-success maintenance-migration; do
+for MODE in preflight deploy-check plan secrets units-invalid image live-artifact redeploy-preflight drain backup support-postgres support-rabbit migration health tls response success first-success redeploy final-start first-backup killed-backup killed lock-wait lock-timeout maintenance-success maintenance-migration backup-busy record-invalid; do
   export MODE
   rm -rf /opt/pyracast/current /opt/pyracast/current.next /opt/pyracast/releases/* /run/pyracast
   rm -f /var/lib/pyracast/release-blocked /migration-entered /backup-entered /backup-complete /support-changed /database-initialized
@@ -290,7 +296,7 @@ for MODE in preflight deploy-check plan secrets units-invalid image live-artifac
         absent ' stop '
         units_untouched
         ;;
-      drain|backup|first-backup|support-postgres|support-rabbit|migration|maintenance-migration|health|tls|response)
+      drain|backup|first-backup|backup-busy|record-invalid|support-postgres|support-rabbit|migration|maintenance-migration|health|tls|response)
         case "$MODE" in
           drain) test "$result" == 47 ;;
           backup|first-backup) test "$result" == 45 ;;
@@ -303,12 +309,17 @@ for MODE in preflight deploy-check plan secrets units-invalid image live-artifac
             ;;
           health) test "$result" == 44 ;;
           tls) test "$result" == 60 ;;
-          response) test "$result" == 1 ;;
+          response|backup-busy) test "$result" == 1 ;;
+          record-invalid)
+            test "$result" == 1
+            grep -Fq "$new_release/prerelease-backup.json is unreadable" /result
+            if grep -Fq 'record-injected' /result; then exit 1; fi
+            ;;
         esac
         test -f /var/lib/pyracast/release-blocked
         grep -Fq 'reset_database.py /etc/pyracast/host.json abort' /result
         case "$MODE" in
-          drain|backup|first-backup)
+          drain|backup|first-backup|backup-busy|record-invalid)
             if grep -q 'restore --confirm' /result; then exit 1; fi
             ;;
           *) grep -Fq 'host.json restore --confirm postgres/fixture-prerelease.dump' /result ;;
@@ -328,7 +339,11 @@ for MODE in preflight deploy-check plan secrets units-invalid image live-artifac
           test "$(readlink /opt/pyracast/current)" == /opt/pyracast/releases/old
         fi
         absent 'current/deploy/compose.yaml up -d --wait'
-        if [[ $MODE == backup || $MODE == first-backup || $MODE == drain ]]; then
+        if [[ $MODE == backup-busy ]]; then
+          grep -Fq 'pyracast-backup.service is still active' /result
+          test ! -e /backup-entered
+        fi
+        if [[ $MODE == backup || $MODE == first-backup || $MODE == drain || $MODE == backup-busy ]]; then
           test ! -e /support-changed
         fi
         units_untouched
@@ -364,7 +379,9 @@ for MODE in preflight deploy-check plan secrets units-invalid image live-artifac
           / stop -t 660 dispatcher$/ { if (!verified || !reset) exit 1; producer=NR }
           / stop -t 660 worker notifications$/ { if (!producer) exit 1; workers=NR }
           / stop -t 100 gateway api web$/ { if (!workers) exit 1; drained=NR }
-          / --kind prerelease$/ { if (!first && !drained) exit 1; backup=NR }
+          /^systemctl stop pyracast-backup.service$/ { if (!first && !drained) exit 1; stopped=NR }
+          /^systemctl is-active --quiet pyracast-backup.service$/ { if (!stopped) exit 1; inactive=NR }
+          / --kind prerelease$/ { if (!inactive) exit 1; backup=NR }
           / up -d postgres$/ { if (!backup) exit 1; postgres=NR }
           / up -d rabbitmq$/ { if (!postgres) exit 1; broker=NR }
           / run --rm --no-deps migrate$/ { if (!broker) exit 1; migration=NR }

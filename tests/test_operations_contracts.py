@@ -750,3 +750,35 @@ def test_failed_maintenance_names_the_recorded_prerelease_object_for_the_reset_t
     assert f"{tool} restore --confirm OBJECT" in deployment
     assert f"/opt/pyracast/releases/<sha>-<hash>/{backup.PRERELEASE_RECORD}" in deployment
     assert "last-backup.json` and run" not in deployment
+
+
+def test_installer_stops_a_running_hourly_backup_before_its_prerelease_backup() -> None:
+    script = text(DEPLOY / "install-release.sh")
+    steps = [
+        "flock --timeout 300 9",
+        "systemctl stop pyracast-backup.service",
+        "systemctl is-active --quiet pyracast-backup.service",
+        "--kind prerelease",
+        f'prerelease_record "$release/{backup.PRERELEASE_RECORD}"',
+        "run --rm --no-deps migrate\n",
+    ]
+    positions = [script.index(step) for step in steps]
+
+    assert positions == sorted(positions)
+    assert "pyracast-backup.timer" not in script
+    assert "ExecStop" not in shipped_unit("pyracast-backup.service")
+
+
+def test_installer_validates_the_record_before_its_failure_message_can_print_it() -> None:
+    script = text(DEPLOY / "install-release.sh")
+    function = re.search(r"^prerelease_record\(\) \{\n(.*?)^\}", script, re.S | re.M)
+
+    assert function
+    assert r"=~ ^postgres/[A-Za-z0-9/_.-]+\.dump$ ]] || return 1" in function[1]
+    assert re.findall(r"prerelease_object=\S*", script) == [
+        "prerelease_object=",
+        "prerelease_object=$candidate",
+    ]
+    assert script.index("if ! candidate=$(prerelease_record") < script.index(
+        "prerelease_object=$candidate"
+    )

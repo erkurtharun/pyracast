@@ -342,6 +342,8 @@ def test_first_delivery_check_runs_and_records_its_time(watched: Host) -> None:
     [
         ({"completed_at": "recent"}, 0, False),
         ({"completed_at": "old"}, 0, True),
+        ({"completed_at": "ahead"}, 0, True),
+        ({"completed_at": "slightly ahead"}, 0, False),
         ({"completed_at": "recent"}, 3 * 3600, False),
         ("not json", 3 * 3600, True),
         ({"object": "postgres/x.dump"}, 0, False),
@@ -353,7 +355,12 @@ def test_backup_age_uses_the_recorded_completion_time(
     watched: Host, marker: object, age: float, stale: bool
 ) -> None:
     now = time.time()
-    completed = {"recent": now - 60, "old": now - 3 * 3600}
+    completed = {
+        "recent": now - 60,
+        "old": now - 3 * 3600,
+        "ahead": now + 3600,
+        "slightly ahead": now + 60,
+    }
     if marker is None:
         watched.last_backup.unlink()
         target = watched.release / "deploy/release.env"
