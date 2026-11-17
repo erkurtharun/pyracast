@@ -21,16 +21,14 @@ POLLED = {
     "api/tenants/": ("", 18),
     "api/tenants/<int:tenant_id>/sites/": ("", 19),
     "api/tenants/<int:tenant_id>/change-requests/": ("scope=pending&plant_id={plant}", 19),
-    f"{REGION}forecast/": (f"date={DAY}&data_source=forecast", 21),
+    f"{REGION}forecast/": (f"date={DAY}&data_source=forecast", 24),
     f"{REGION}collection-schedule/": ("", 20),
     f"{REGION}plants/": ("", 19),
-    f"{PLANT}forecast/": (f"date={DAY}&resolution_minutes=60&data_source=forecast", 33),
+    f"{PLANT}forecast/": (f"date={DAY}&resolution_minutes=60&data_source=forecast", 29),
     f"{PLANT}production/": (f"start_date={DAY}&end_date={DAY}&native_intervals=true", 31),
     f"{PLANT}calibrations/": ("", 19),
     f"{PLANT}calibration/automation/": ("", 19),
 }
-# A polled read takes no row lock; a read listed here still does and leaves the list with its fix.
-ROW_LOCKING_READS = frozenset({f"{PLANT}forecast/"})
 NOT_POLLED = frozenset(
     {
         "api/tenants/<int:tenant_id>/change-requests/<int:request_id>/",
@@ -113,8 +111,7 @@ def test_polled_reads_stay_within_their_statement_budget(workspace: Workspace, r
         response = workspace.client.get(url)
 
     assert response.status_code == 200, response.content
-    locks = any("FOR UPDATE" in statement for statement in captured)
-    assert locks == (route in ROW_LOCKING_READS)
+    assert not [statement for statement in captured if "FOR UPDATE" in statement]
 
 
 def test_site_list_reads_do_not_grow_with_the_number_of_sites(workspace: Workspace) -> None:
