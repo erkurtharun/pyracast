@@ -16,7 +16,7 @@ from django.contrib.auth.models import User
 from django.urls import URLPattern, URLResolver
 from dramatiq.brokers.stub import StubBroker
 
-from deploy import authorize_gmail, backup, host, reset_database, watchdog
+from deploy import authorize_gmail, backup, host, release_record, reset_database, watchdog
 from pyracast import gmail
 from pyracast.accounts.authentication import email_identity
 from pyracast.forecasts.historical_upload import MAX_UPLOAD_BYTES
@@ -738,7 +738,7 @@ def test_failed_maintenance_names_the_recorded_prerelease_object_for_the_reset_t
     script = text(DEPLOY / "install-release.sh")
     deployment = text(ROOT / "docs" / "DEPLOYMENT.md")
     tool = "python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json"
-    record = f'"$release/{backup.PRERELEASE_RECORD}"'
+    record = f'"$release/{release_record.RECORD}"'
     dump = script.index("--kind prerelease")
 
     assert script.index(record) < dump < script.index(record, dump)
@@ -748,37 +748,34 @@ def test_failed_maintenance_names_the_recorded_prerelease_object_for_the_reset_t
     assert "$recovery restore --confirm $prerelease_object" in script
     assert f"{tool} abort" in deployment
     assert f"{tool} restore --confirm OBJECT" in deployment
-    assert f"/opt/pyracast/releases/<sha>-<hash>/{backup.PRERELEASE_RECORD}" in deployment
+    assert f"/opt/pyracast/releases/<sha>-<hash>/{release_record.RECORD}" in deployment
     assert "last-backup.json` and run" not in deployment
 
 
-def test_installer_stops_a_running_hourly_backup_before_its_prerelease_backup() -> None:
+def test_installer_takes_the_recorded_object_only_from_the_validating_reader() -> None:
     script = text(DEPLOY / "install-release.sh")
-    steps = [
-        "flock --timeout 300 9",
-        "systemctl stop pyracast-backup.service",
-        "systemctl is-active --quiet pyracast-backup.service",
-        "--kind prerelease",
-        f'prerelease_record "$release/{backup.PRERELEASE_RECORD}"',
-        "run --rm --no-deps migrate\n",
-    ]
-    positions = [script.index(step) for step in steps]
+    reader = (
+        f'if ! candidate=$(python3 "$release/deploy/release_record.py" '
+        f'"$release/{release_record.RECORD}"); then'
+    )
 
-    assert positions == sorted(positions)
-    assert "pyracast-backup.timer" not in script
-    assert "ExecStop" not in shipped_unit("pyracast-backup.service")
-
-
-def test_installer_validates_the_record_before_its_failure_message_can_print_it() -> None:
-    script = text(DEPLOY / "install-release.sh")
-    function = re.search(r"^prerelease_record\(\) \{\n(.*?)^\}", script, re.S | re.M)
-
-    assert function
-    assert r"=~ ^postgres/[A-Za-z0-9/_.-]+\.dump$ ]] || return 1" in function[1]
     assert re.findall(r"prerelease_object=\S*", script) == [
         "prerelease_object=",
         "prerelease_object=$candidate",
     ]
-    assert script.index("if ! candidate=$(prerelease_record") < script.index(
-        "prerelease_object=$candidate"
+    assert reader in script
+    assert script.index(reader) < script.index("prerelease_object=$candidate")
+    assert script.count(release_record.RECORD) == script.count(f"$release/{release_record.RECORD}")
+    assert "json.load" not in script
+
+
+def test_a_release_that_cannot_get_the_lock_says_nothing_changed() -> None:
+    script = text(DEPLOY / "install-release.sh")
+    wait = re.search(
+        r"^flock --timeout (\d+) 9 \|\| \{ echo '([^']*)' >&2; exit 1; \}$", script, re.M
     )
+
+    assert wait
+    assert "backup" in wait[2]
+    assert "nothing was changed" in wait[2]
+    assert script.index(wait[0]) < script.index("mkdir -p /run/pyracast")
