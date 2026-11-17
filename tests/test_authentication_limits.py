@@ -13,10 +13,12 @@ import pytest
 from allauth.account.internal import stagekit
 from allauth.account.models import EmailAddress
 from allauth.core.internal import ratelimit
+from allauth.mfa.models import Authenticator
 from allauth.mfa.totp.internal import auth as totp_auth
 from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
 from django.contrib.auth.models import User
 from django.core import mail
+from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connections
 from django.test import Client, override_settings
 
@@ -266,6 +268,48 @@ def test_five_wrong_second_factor_codes_lock_the_account_code_check(
     assert error_codes(
         submit(client, "auth/2fa/authenticate", {"code": totp_code(secret, now)})
     ) == ["too_many_login_attempts"]
+
+
+def test_a_pending_second_factor_without_an_authenticator_refuses_the_code(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = time.time()
+    client, secret = pending_second_factor(monkeypatch, now, "member")
+    Authenticator.objects.all().delete()
+
+    assert error_codes(
+        submit(client, "auth/2fa/authenticate", {"code": totp_code(secret, now)})
+    ) == ["incorrect_code"]
+    assert client.get("/api/session/").json()["user"] is None
+
+
+def test_an_authenticator_refusal_releases_only_its_own_failure_reservations(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, _ = pending_second_factor(monkeypatch, time.time(), "member")
+    guess_unknown_addresses(client, 0, 5)
+    for _ in range(4):
+        assert error_codes(submit(client, "auth/2fa/authenticate", {"code": "000000"})) == [
+            "incorrect_code"
+        ]
+
+    def unavailable(authenticator: TOTP, code: str) -> bool:
+        raise ValidationError("The authenticator is temporarily unavailable.", code="rate_limited")
+
+    with monkeypatch.context() as validation:
+        validation.setattr(TOTP, "validate_code", unavailable)
+        assert error_codes(submit(client, "auth/2fa/authenticate", {"code": "000000"})) == [
+            "rate_limited"
+        ]
+
+    assert error_codes(submit(client, "auth/2fa/authenticate", {"code": "000000"})) == [
+        "incorrect_code"
+    ]
+    assert error_codes(login(client, "absent-5@example.com", WRONG)) == ["too_many_login_attempts"]
+    client.defaults["REMOTE_ADDR"] = "198.51.100.7"
+    assert error_codes(submit(client, "auth/2fa/authenticate", {"code": "000000"})) == [
+        "too_many_login_attempts"
+    ]
 
 
 def refuse_codes_before_the_first_daily_failures_expire(
