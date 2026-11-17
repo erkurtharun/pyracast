@@ -305,7 +305,11 @@ def site_ready(_host, attempts):
 
 reset_database.upload_backup = upload
 reset_database.site_ready = site_ready
-reset_database.write_runtime_secrets = lambda _host: False
+reset_database.write_runtime_secrets = lambda _host: None
+run = subprocess.run
+subprocess.run = lambda command, *args, **kwargs: (
+    subprocess.CompletedProcess(command, 0) if command[0] == 'systemctl'
+    else run(command, *args, **kwargs))
 if importlib.util.find_spec('fcntl') is None:
     reset_database.release_lock = lambda _host: contextlib.nullcontext()
 reset_database.load_host = lambda config: reset_database.Host(

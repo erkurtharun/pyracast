@@ -334,15 +334,12 @@ def require_maintenance(host: Host) -> None:
         )
 
 
-def write_runtime_secrets(host: Host) -> bool:
-    """Renders the environment files with this release; True when the host restarted."""
-    restarted = not (host.environment / "runtime.env").is_file()
+def write_runtime_secrets(host: Host) -> None:
     step(f"Writing the runtime secrets with {host.release}/deploy/runtime_secrets.py")
     subprocess.run(
         [sys.executable, str(host.release / "deploy/runtime_secrets.py"), str(host.config)],
         check=True,
     )
-    return restarted
 
 
 def start_support(host: Host) -> None:
@@ -599,7 +596,7 @@ def release_serves(host: Host) -> bool:
     return result.returncode == 0
 
 
-def start_release(host: Host, restarted: bool) -> None:
+def start_release(host: Host) -> None:
     step(f"Starting the release in {host.release}")
     try:
         subprocess.run(
@@ -615,9 +612,8 @@ def start_release(host: Host, restarted: bool) -> None:
         raise
     host.marker.unlink(missing_ok=True)
     sync(host.marker.parent)
-    if restarted:
-        # After a restart the unit was refused while the marker existed, so it is inactive.
-        subprocess.run(["systemctl", "start", "pyracast.service"], check=True)
+    subprocess.run(["systemctl", "reset-failed", "pyracast.service"], check=True)
+    subprocess.run(["systemctl", "start", "pyracast.service"], check=True)
 
 
 def end_session(host: Host) -> None:
@@ -692,7 +688,7 @@ def abort(host: Host) -> None:
                 "now would serve it without its data. Run "
                 f"{host.command(f'restore --confirm {session.object}')}"
             )
-        restarted = write_runtime_secrets(host)
+        write_runtime_secrets(host)
         start_support(host)
         if not release_serves(host):
             raise RefusedError(
@@ -700,7 +696,7 @@ def abort(host: Host) -> None:
                 "reports unapplied migrations. Bring the data back with restore --confirm OBJECT "
                 "(see 'A release that fails during maintenance' in the deployment guide)."
             )
-        start_release(host, restarted)
+        start_release(host)
         end_session(host)
     print("The previous release serves again and the marker is removed. Nothing else to do.")
 
@@ -741,7 +737,7 @@ def restore(host: Host, name: str) -> None:
                 f"its data. Run {host.command(f'restore --confirm {session.object}')}"
             )
         host.state.mkdir(mode=0o700, parents=True, exist_ok=True)
-        restarted = write_runtime_secrets(host)
+        write_runtime_secrets(host)
         if load_record(host, name) is None:
             fetch_record(host, name)
         record, archive = verified_record(host, name)
@@ -765,7 +761,7 @@ def restore(host: Host, name: str) -> None:
                 f"The release in {host.release} cannot serve the restored database: migrate "
                 "--check reports unapplied migrations. Restore an archive that this release wrote."
             )
-        start_release(host, restarted)
+        start_release(host)
         end_session(host)
     print(f"\n{name} is restored and the previous release serves again; the marker is removed.")
 

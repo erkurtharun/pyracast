@@ -452,8 +452,8 @@ and name the `restore` command for that object.
 
 When readiness fails after a start, `abort` and `restore` stop the application again
 in the installer's order and keep the marker, so the same command can be run again.
-Both render the environment files with the release they start; if the host restarted
-during maintenance they also start `pyracast.service` after removing the marker.
+Both render the environment files with the release they start, and after removing the
+marker they reset and start `pyracast.service`, which refused to start while it existed.
 
 ### One-time reset of the production database
 

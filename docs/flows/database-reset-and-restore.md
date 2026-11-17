@@ -6,7 +6,7 @@ The owner runs `deploy/reset_database.py` as root on the production VM to take t
 
 - Operator: `python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json {prepare | abort | reset --confirm OBJECT | restore --confirm OBJECT}` (`deploy/reset_database.py` `main`). `host.json` supplies `backup_bucket` and `runtime_secret_version` (`load_host`); the release directory is `/opt/pyracast/current`.
 - Reuse: `compose_command` and `upload_backup` from `deploy/backup.py`, `access_token` from `deploy/operations_log.py`; `abort`, `reset` and `restore` render the environment files with `deploy/runtime_secrets.py` of `/opt/pyracast/current`.
-- Smoke: `deploy/smoke.sh` runs `main` through a driver that replaces only the bucket upload, the runtime secrets, the public readiness probe and, where `fcntl` is missing, the host lock.
+- Smoke: `deploy/smoke.sh` runs `main` through a driver that replaces only the bucket upload, the runtime secrets, the public readiness probe, `systemctl` and, where `fcntl` is missing, the host lock.
 
 ## Sequence
 
@@ -43,10 +43,10 @@ sequenceDiagram
     T->>H: "session replaced with OBJECT, sync"
     T->>PG: "recreate, bootstrap, pg_restore with owners and ACLs, compare counts, role checks, migrate --check"
     T->>PG: "compose up --detach --wait, curl readiness"
-    T->>H: "remove release-blocked and the session"
+    T->>H: "remove release-blocked, start pyracast.service, remove the session"
     O->>T: abort
     T->>PG: "migrate --check, compose up --detach --wait, curl readiness"
-    T->>H: "remove release-blocked and the session"
+    T->>H: "remove release-blocked, start pyracast.service, remove the session"
 ```
 
 ## Data
@@ -96,7 +96,7 @@ sequenceDiagram
 
 ## Tests
 
-- `tests/test_deployment_reset.py` with a fake `subprocess`: stop order and marker before the stops, upload and kept archive, every refusal before a destructive call, the session across a successful and a failed later release, the session synced before the drop, count mismatch, lock refusal of every subcommand, verification cleanup and readiness wait, queue purge and drop order, bootstrap without role statements, restore with owners and its check order, download checksum, host restart for `abort`, `reset` and `restore` (Compose needs the environment files), readiness failure and retry, the command line's exit codes, interruption and next steps. `tests/test_deployment_helpers.py`: Python 3.12 syntax and `--help` without dependencies.
+- `tests/test_deployment_reset.py` with a fake `subprocess`: stop order and marker before the stops, upload and kept archive, every refusal before a destructive call, the session across a successful and a failed later release, the session synced before the drop, count mismatch, lock refusal of every subcommand, verification cleanup and readiness wait, queue purge and drop order, bootstrap without role statements, restore with owners and its check order, download checksum, host restart for `abort`, `reset` and `restore` (Compose needs the environment files), the unit started after every `abort` and `restore`, readiness failure and retry, the command line's exit codes, interruption and next steps. `tests/test_deployment_helpers.py`: Python 3.12 syntax and `--help` without dependencies.
 - `deploy/smoke.sh` (CI and Release): `prepare` then `abort` serves again; `prepare`, `reset`, a pre-release dump of the empty database, `migrate` from zero under the restricted owner and a start; an `abort` that is refused after the reset; the stop of a failed release, then `restore`: row counts, table owners, the runtime role's missing DDL right and a stored password are back and the site is ready.
 - `deploy/test-release.sh`: the installer with a marker that holds a session succeeds and removes it, or fails in `migrate` and keeps its content.
 - Gaps: the real bucket upload and download, the production readiness probe, `systemctl` and the release lock on the VM run first on the host; the proof of a restored sign-in is a stored password checked in the container, not an HTTP login (email verification and MFA). `dump_database` and `verify_archive` copy about 90 lines of `deploy/backup.py` (`create_backup`, `restore_archive`) to keep this package off the S list; folding them together belongs to P109, which changes `backup.py`. No Playwright coverage applies.

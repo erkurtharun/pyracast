@@ -197,6 +197,12 @@ def kept_archive(host: Host, name: str) -> Path:
     return host.state / name.rsplit("/", 1)[-1]
 
 
+START_UNIT = [
+    ["systemctl", "reset-failed", "pyracast.service"],
+    ["systemctl", "start", "pyracast.service"],
+]
+
+
 def secrets_call(host: Host) -> list[str]:
     return [sys.executable, str(host.release / "deploy/runtime_secrets.py"), str(host.config)]
 
@@ -400,9 +406,9 @@ def test_abort_starts_the_previous_release_and_clears_the_marker(
     secrets = commands.calls.index(secrets_call(host))
     check = commands.index("api pyracast migrate --check")
     assert secrets < check < full_start(commands)
-    assert commands.calls[-1][:3] == ["sync", "-f", str(host.marker.parent)]
-    assert "--retry" in commands.calls[-2]
-    assert ["systemctl", "start", "pyracast.service"] not in commands.calls
+    assert commands.calls[-3][:3] == ["sync", "-f", str(host.marker.parent)]
+    assert "--retry" in commands.calls[-4]
+    assert commands.calls[-2:] == START_UNIT
     assert not host.session.exists()
     assert "serves again" in capsys.readouterr().out
 
@@ -503,7 +509,7 @@ def test_abort_writes_runtime_secrets_and_rearms_the_unit_after_a_host_restart(
     reset_database.abort(host)
     secrets = commands.calls.index(secrets_call(host))
     assert secrets < commands.index("up --detach --wait --wait-timeout 180")
-    assert commands.calls[-1] == ["systemctl", "start", "pyracast.service"]
+    assert commands.calls[-2:] == START_UNIT
     assert not host.marker.exists()
 
 
@@ -515,13 +521,28 @@ def test_reset_and_restore_write_the_runtime_secrets_after_a_host_restart(
     reset_database.reset(host, name)
     first = len(commands.calls)
     assert commands.calls.index(secrets_call(host)) < commands.index(" up --detach")
-    (host.environment / "runtime.env").unlink()
+    fail_release(commands, host)
     reset_database.restore(host, name)
     restored = commands.calls[first:]
     assert restored.index(secrets_call(host)) < next(
         position for position, call in enumerate(restored) if "up" in call
     )
-    assert commands.calls[-1] == ["systemctl", "start", "pyracast.service"]
+    assert commands.calls[-2:] == START_UNIT
+    assert not host.marker.exists()
+
+
+def test_a_retried_abort_after_a_host_restart_starts_the_unit(
+    host: Host, commands: FakeCommands, uploads: dict[str, bytes]
+) -> None:
+    prepared(host, uploads)
+    (host.environment / "runtime.env").unlink()
+    commands.ready = False
+    with pytest.raises(RuntimeError, match="did not answer ok"):
+        reset_database.abort(host)
+    assert not any("systemctl" in call for call in commands.calls)
+    commands.ready = True
+    reset_database.abort(host)
+    assert commands.calls[-2:] == START_UNIT
     assert not host.marker.exists()
 
 
