@@ -2034,3 +2034,13 @@ msgstr "Geçmiş Solcast verileri"
 
 msgid "Import historical data"
 msgstr "Geçmiş verileri yükle"
+
+msgid "Paused email times"
+msgstr "Duraklatılan e-posta zamanları"
+
+msgid ""
+"A plant's recipient list is over the limit, empty or holds an invalid address. "
+"Ask the workspace administrator to correct it."
+msgstr ""
+"Bir santralin alıcı listesi sınırı aşıyor, boş veya geçersiz bir adres içeriyor. "
+"Çalışma alanı yöneticisinden düzeltmesini isteyin."

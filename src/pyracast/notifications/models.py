@@ -62,6 +62,9 @@ class ReminderSchedule(models.Model):
         )
 
 
+PAUSED_DELIVERY_ERRORS = ("recipient_limit_exceeded", "no_recipients", "invalid_recipient")
+
+
 class NotificationDelivery(models.Model):
     schedule = models.ForeignKey(ReminderSchedule, on_delete=models.CASCADE)
     scheduled_for = models.DateTimeField()

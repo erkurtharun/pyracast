@@ -38,20 +38,21 @@ LEASE_DURATION = timedelta(minutes=5)
 logger = logging.getLogger(__name__)
 
 
-def _eligible(delivery: NotificationDelivery, limit: int) -> bool:
+def _skip_reason(delivery: NotificationDelivery, limit: int) -> str | None:
     schedule = delivery.schedule
-    return (
-        delivery.binding is not None
-        and schedule.enabled
-        and schedule.retired_at is None
-        and bool(delivery.recipients)
-        and region_recipient_count(schedule.region) <= limit
-        and schedule.effective_from <= delivery.scheduled_for
-        and schedule.region_id == delivery.binding.region_id
-        and delivery.scheduled_for.astimezone(ZoneInfo(schedule.region.timezone)).strftime("%H:%M")
-        in schedule.times[: delivery.binding.provider_account.daily_quota]
-        and binding_can_notify(delivery.binding)
-    )
+    clock = delivery.scheduled_for.astimezone(ZoneInfo(schedule.region.timezone)).strftime("%H:%M")
+    if not schedule.enabled or schedule.retired_at is not None or clock not in schedule.times:
+        return "cancelled_by_settings_change"
+    if (
+        delivery.binding is None
+        or not delivery.recipients
+        or region_recipient_count(schedule.region) > limit
+        or schedule.region_id != delivery.binding.region_id
+        or clock not in schedule.times[: delivery.binding.provider_account.daily_quota]
+        or not binding_can_notify(delivery.binding)
+    ):
+        return "schedule_or_authority_changed"
+    return None
 
 
 def _recover_interrupted(delivery: NotificationDelivery, now: datetime) -> None:
@@ -105,16 +106,14 @@ def _mark_transmit(
         if delivery is None or delivery.status != "sending" or delivery.lease_token != token:
             return False
         delivery.recipients = permitted_recipients(delivery)
-        eligible = _eligible(delivery, limit)
+        reason = _skip_reason(delivery, limit)
         now += timedelta(seconds=time.monotonic() - started)
         if delivery.lease_expires_at is None or delivery.lease_expires_at <= now:
             _recover_interrupted(delivery, now)
             return False
-        if not eligible or now - delivery.scheduled_for > MAX_LATENESS:
+        if reason is not None or now - delivery.scheduled_for > MAX_LATENESS:
             delivery.status = "skipped"
-            delivery.last_error = (
-                "schedule_or_authority_changed" if not eligible else "delivery_deadline_exceeded"
-            )
+            delivery.last_error = reason or "delivery_deadline_exceeded"
             delivery.lease_token = None
             delivery.lease_expires_at = None
             delivery.save()
@@ -149,8 +148,8 @@ def process_notification(
         if delivery.status not in {"pending", "retry"} or delivery.available_at > now:
             return False
         delivery.recipients = permitted_recipients(delivery)
-        if not _eligible(delivery, limit):
-            delivery.status, delivery.last_error = "skipped", "schedule_or_authority_changed"
+        if (reason := _skip_reason(delivery, limit)) is not None:
+            delivery.status, delivery.last_error = "skipped", reason
             delivery.save()
             return False
         if now - delivery.scheduled_for > MAX_LATENESS:

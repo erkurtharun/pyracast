@@ -5,7 +5,7 @@ from django.db.models import Count, F, OuterRef, Q, Subquery
 from pyracast.connections.models import ProviderAccount
 from pyracast.forecasts.models import CollectionJob, DispatcherStatus, ForecastSnapshot
 from pyracast.metering.models import EpiasCollectionJob
-from pyracast.notifications.models import NotificationDelivery
+from pyracast.notifications.models import PAUSED_DELIVERY_ERRORS, NotificationDelivery
 from pyracast.notifications.operations import invalid_reminder_recipient_count
 from pyracast.regions.models import Region
 
@@ -99,8 +99,19 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
                 scheduled_for__gte=recent,
             ),
         ),
+        paused_notifications=Count(
+            "pk",
+            filter=Q(
+                status="skipped",
+                last_error__in=PAUSED_DELIVERY_ERRORS,
+                scheduled_for__gte=recent,
+            ),
+        ),
     )
-    saved_forecast_notifications = notification_counts.pop("saved_forecast_notifications")
+    informational = {
+        key: notification_counts.pop(key)
+        for key in ("saved_forecast_notifications", "paused_notifications")
+    }
     counters = {
         "invalid_reminder_recipients": invalid_reminder_recipient_count(),
         "unvalidated_provider_credentials": active_regions.exclude(
@@ -132,5 +143,5 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
         "checked_at": now.isoformat(),
         "unhealthy_dispatch_phases": stale_phases,
         **counters,
-        "saved_forecast_notifications": saved_forecast_notifications,
+        **informational,
     }

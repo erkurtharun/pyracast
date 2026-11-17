@@ -28,10 +28,12 @@ sequenceDiagram
     D->>S: notifications phase each poll
     loop each enabled schedule, slots of yesterday and today up to now
         S->>DB: lock Tenant, NotificationSettings, Region
-        alt binding not notifiable, time removed, no recipients or over limit
+        alt binding not notifiable, schedule disabled or time removed
             Note over S: nothing recorded
         else slot row exists
             Note over S: reuse existing id
+        else no recipients, over limit or invalid stored address
+            S->>DB: insert delivery skipped with the reason, no recipients
         else new slot
             S->>DB: insert delivery pending, or skipped missed_schedule if older than 2 h
         end
@@ -42,7 +44,7 @@ sequenceDiagram
     W->>DB: lock Tenant, NotificationSettings, Region, delivery
     alt not pending or retry, not yet available, or live lease
         Note over W: return, expired lease is recovered
-    else authority, recipients or deadline lost
+    else settings, authority, recipients or deadline lost
         W->>DB: status skipped
     else ready
         W->>P: prepare or reuse frozen message
@@ -82,21 +84,22 @@ sequenceDiagram
 ## Authorization
 
 No user acts in this flow; authority is the state of the plant at each step and is checked three times.
-- Scheduling (`scheduler.py` `_enqueue_schedule`, under Tenant, settings and Region locks): `eligibility.py` `binding_can_notify` (region not deleted, approved, current revision, binding is the approved one, provider account enabled and authorized), schedule enabled and current, slot not before `effective_from`, clock within `times[:daily_quota]`, every address passes `validate_recipient`, effective count within the global limit.
-- Claim (`jobs.py` `process_notification` -> `_eligible`, same locks plus the delivery row): the same checks against the pinned binding; recipients shrink to `recipients.py` `permitted_recipients` (still effective, not revoked, a pinned member still active) and each must pass `validate_email`.
-- Transmit (`jobs.py` `_mark_transmit` inside `send_message`'s `before_send`): repeats the recipient shrink and `_eligible`, checks the lease token and expiry and the 2 h deadline, then writes `transmit_started_at` and the final BCC list.
+- Scheduling (`scheduler.py` `_enqueue_schedule`, under Tenant, settings and Region locks): `eligibility.py` `binding_can_notify` (region not deleted, approved, current revision, binding is the approved one, provider account enabled and authorized), schedule enabled and current, slot not before `effective_from`, clock within `times[:daily_quota]`. A due slot whose effective recipients are empty, above the global limit or fail `validate_recipient` gets a `skipped` row with the reason and no recipients.
+- Claim (`jobs.py` `process_notification` -> `_skip_reason`, same locks plus the delivery row): the same checks against the pinned binding, except `effective_from`; recipients shrink to `recipients.py` `permitted_recipients` (still effective, not revoked, a pinned member still active) and each must pass `validate_email`.
+- Transmit (`jobs.py` `_mark_transmit` inside `send_message`'s `before_send`): repeats the recipient shrink and `_skip_reason`, checks the lease token and expiry and the 2 h deadline, then writes `transmit_started_at` and the final BCC list.
 - Database: unique `unique_reminder_group_slot` (schedule, scheduled_for, where `grouped`); check constraints on status and language. The history is readable by any active workspace member of a non-trashed region (`operations.py` `get_reminder_schedule` -> `require_member`): the region's 20 newest rows, recipient addresses included.
 
 ## Failure paths
 
 | Condition | Result |
 | --- | --- |
-| Schedule raises (invalid stored address, malformed recipients, DB error) | Its remaining slots are dropped for this cycle; other schedules continue; pending ids are still published; `NotificationSchedulingError`; phase recorded with the error type |
+| Schedule raises an unexpected error (for example a database error) | Its remaining slots are dropped for this cycle; other schedules continue; pending ids are still published; `NotificationSchedulingError`; phase recorded with the error type |
 | Publishing raises (`pending_notification_ids` or `actor.send`) | Phase recorded with that error, which replaces a scheduling error; rows stay ready and are republished next cycle |
 | Slot older than 2 h when first scheduled | Row created `skipped`, `missed_schedule` |
-| No recipients or recipient count above the global limit | No row while it lasts; once it clears without a settings save the slot is created (`pending` within 2 h, else `skipped` `missed_schedule`) |
+| Due slot with no effective recipient, more than the global limit, or a stored address that fails `validate_recipient` or is not a string | Row created `skipped` with `no_recipients`, `recipient_limit_exceeded` or `invalid_recipient`, `recipients` empty, no snapshot; logged with the schedule id and reason, never the address; the slot is not retried when the cause clears, the next slot is created normally; counted in `paused_notifications` (informational) |
 | Unknown or purged delivery id, or its region row is gone | Worker returns without any change |
-| Authority, schedule, time or limit changed, or no permitted recipient left, before claim or transmit | `skipped`, `schedule_or_authority_changed` |
+| Schedule disabled or retired, or the slot's local time removed from `times`, before claim or transmit | `skipped`, `cancelled_by_settings_change` |
+| Binding, region, quota or limit changed, or no permitted recipient left, before claim or transmit | `skipped`, `schedule_or_authority_changed` |
 | Claimed or transmitted after 2 h | `skipped`, `missed_schedule` (claim) or `delivery_deadline_exceeded` (transmit) |
 | A pinned address fails `validate_email` at claim | `skipped`, `missing_recipient` |
 | Slot collection pending, or due but not yet created, before the 15 min deadline | Status unchanged; `available_at` moved to `min(now + 30 s, deadline)` |
@@ -115,7 +118,7 @@ No user acts in this flow; authority is the state of the plant at each step and 
 - Idempotency: one row per (schedule, slot); duplicate queue messages find a non-ready status or a live lease and return. The final outcome update requires the original lease token, so a late answer can still resolve an `interrupted_send` row of the same attempt. Once `transmit_started_at` is set, a lost outcome is never retried automatically.
 - Times: `MAX_LATENESS` 2 h from the slot, `PREPARATION_GRACE` 15 min, `LEASE_DURATION` 5 min. Claim and transmit add the elapsed lock wait to `now` before deadline checks.
 - Retry: at most 8 attempts, delay `min(60 * 2^(n-1), 1800)` s plus 0-30 s jitter, only if the retry time is before the 2 h deadline. Dramatiq never retries; PostgreSQL state plus the next dispatcher cycle does.
-- A save of reminder settings (`operations.py` `configure_reminders`) and a restore from trash (`trash.py` `restore_region`) reset `effective_from` to now: earlier slots are never created, and pending or retrying rows from before a save become `skipped`.
+- A save of reminder settings (`operations.py` `configure_reminders`) and a restore from trash (`trash.py` `restore_region`) reset `effective_from` to now: earlier slots are never created. Rows already queued are not cancelled by the new boundary; they are re-checked against the settings, authority and permitted recipients above. An unchanged settings save writes nothing.
 - Recipients pinned at scheduling only shrink; revocations (`remove_member_recipients`) survive retries.
 - Content: newest complete tomorrow forecast (`kind` `current` if from the slot's own collection job, else `saved_complete`), else newest partial (`saved_partial`), else a full report with `kind` `unavailable`; frozen once and reused by every retry. Emails make no provider requests.
 - DST: nonexistent local times are skipped, repeated times use the first occurrence (`schedule.py` `local_slot`).
@@ -125,6 +128,6 @@ No user acts in this flow; authority is the state of the plant at each step and 
 - Scheduling and runtime: `tests/test_notifications.py`, `test_notifications_runtime.py`, `test_notification_schedule_isolation.py`, `test_notification_recipient_validation.py`, `test_shared_reminder_schedule.py`, `test_dispatch_resilience.py`.
 - Preparation and content: `test_notification_preparation.py`, `test_notification_completeness.py`, `test_notification_intraday.py`, `test_notification_report_data.py`, `test_notification_presentation.py`, `test_notification_workbook.py`, `test_notification_language.py`, `test_notification_render_failure.py`.
 - Transmission and concurrency: `test_notification_transmission.py`, `test_notifications_races.py`, `test_notification_mail.py`, `test_smtp_mail.py`, `test_gmail_mail.py`.
-- Recipients: `test_notification_groups.py`, `test_notification_group_boundaries.py`, `test_notification_revocations.py`, `test_notification_recipient_history.py`; trash and restore: `test_trash_operations.py`, `test_trash_boundaries.py`; health counters: `test_delivery_health.py`.
+- Recipients: `test_notification_groups.py`, `test_notification_group_boundaries.py`, `test_notification_revocations.py`, `test_notification_recipient_history.py`; trash and restore: `test_trash_operations.py`, `test_trash_boundaries.py`; health counters: `test_delivery_health.py`, `test_admin_health_queries.py`.
 - Playwright: `web/tests/reminder-recipients.spec.ts` renders delivery history from a mocked API only.
-- Gaps: no test of contention on the global settings lock under `lock_timeout`; no check that every backend `last_error` code has a UI label; a settings save cancelling a delivery is pinned for `pending` only (`test_notifications.py`), not `retry`; no test asserts `definition_trashed`.
+- Gaps: no test of contention on the global settings lock under `lock_timeout`; no check that every backend `last_error` code has a UI label; no test asserts `definition_trashed`.

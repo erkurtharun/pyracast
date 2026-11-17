@@ -758,7 +758,10 @@ def test_recipient_limit_reduction_blocks_whole_queued_list_without_truncation()
     ids = enqueue_due(SLOT)
     assert len(ids) == 1
     NotificationSettings.objects.filter(pk=1).update(max_recipients=1)
-    assert not enqueue_due(SLOT + timedelta(days=1))
+    enqueue_due(SLOT + timedelta(days=1))
+    paused = NotificationDelivery.objects.get(scheduled_for=SLOT + timedelta(days=1))
+    assert (paused.status, paused.last_error) == ("skipped", "recipient_limit_exceeded")
+    assert paused.recipients == []
     assert all(not process_notification(delivery_id, SLOT) for delivery_id in ids)
     assert set(NotificationDelivery.objects.values_list("status", flat=True)) == {"skipped"}
     schedule.refresh_from_db()

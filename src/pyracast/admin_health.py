@@ -140,6 +140,17 @@ def summarize_health(report: Mapping[str, object]) -> HealthSummary:
             "deliveries",
         ),
         (
+            "paused_notifications",
+            _("Paused email times"),
+            _(
+                "A plant's recipient list is over the limit, empty or holds an invalid address. "
+                "Ask the workspace administrator to correct it."
+            ),
+            _("Review emails"),
+            "review",
+            "deliveries",
+        ),
+        (
             "unavailable_forecasts",
             _("Notifications prepared without saved forecasts"),
             _("Review the plant collection history and approved connection."),

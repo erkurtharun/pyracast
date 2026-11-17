@@ -309,6 +309,10 @@ function ReminderSettings({
         mail_deadline_exceeded: t("deadlineExceeded"),
         preference_or_authority_changed: t("preferenceChanged"),
         schedule_or_authority_changed: t("preferenceChanged"),
+        cancelled_by_settings_change: t("cancelledBySettingsChange"),
+        recipient_limit_exceeded: t("recipientLimitPaused"),
+        no_recipients: t("noRecipientsPaused"),
+        invalid_recipient: t("invalidRecipientPaused"),
         missing_recipient: t("missingRecipient"),
         no_saved_forecast: t("noSavedForecast"),
     };
