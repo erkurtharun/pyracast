@@ -4,11 +4,14 @@ from typing import Any, cast
 from allauth.account import app_settings as account_settings
 from allauth.account.adapter import DefaultAccountAdapter
 from allauth.account.models import EmailAddress
+from allauth.core import context as allauth_context
+from allauth.core import ratelimit
 from allauth.core.exceptions import ImmediateHttpResponse
+from allauth.core.internal import ratelimit as ratelimit_store
 from allauth.headless.internal.restkit.response import ErrorResponse
-from allauth.mfa.models import Authenticator
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.mail import EmailMultiAlternatives
 from django.db import IntegrityError, transaction
@@ -17,6 +20,8 @@ from django.template.loader import render_to_string
 from django.utils import translation
 from django.utils.translation import gettext_lazy
 
+from pyracast.accounts.audit import record_security_event
+from pyracast.accounts.authentication import email_identity
 from pyracast.accounts.language import user_language
 from pyracast.accounts.security import normalize_client_ip
 from pyracast.mail_delivery import NotSentError
@@ -27,6 +32,26 @@ LOGIN_LIMITED_MESSAGE = gettext_lazy(
     "Too many sign-in attempts, or a verification code was sent recently. "
     "Try again in a few minutes."
 )
+FAILED_LOGIN_FROM_CLIENT = "login_failed_ip"
+ANONYMOUS_ACCOUNT_MAIL = "anonymous_account_mail"
+ANONYMOUS_ACCOUNT_TEMPLATES = frozenset(
+    {"account/email/unknown_account", "account/email/account_already_exists"}
+)
+
+
+def count_failed_second_factor(request: HttpRequest, **_kwargs: object) -> None:
+    ratelimit.consume(request, action=FAILED_LOGIN_FROM_CLIENT)
+
+
+def daily_login_failures_exhausted(request: HttpRequest, key: str) -> bool:
+    # The longest `login_failed` window is the per-address daily allowance; allauth stores one
+    # pruned timestamp list per rate, so a full list means the latest failure used the last slot.
+    rates = ratelimit_store.get_rates(app="allauth.account", action="login_failed")
+    daily = max(rates, key=lambda rate: rate.duration)
+    cache_key = ratelimit_store.get_cache_key(
+        request, app="allauth.account", action="login_failed", rate=daily, key=key
+    )
+    return len(cache.get(cache_key, [])) >= daily.amount
 
 
 class AccountAdapter(DefaultAccountAdapter):
@@ -64,15 +89,26 @@ class AccountAdapter(DefaultAccountAdapter):
             )
         return message
 
-    def authenticate(self, request: HttpRequest, **credentials: Any) -> User | None:
-        user = cast(User | None, super().authenticate(request, **credentials))
-        if (
-            user is not None
-            and (user.is_staff or user.is_superuser)
-            and not Authenticator.objects.filter(user=user, type=Authenticator.Type.TOTP).exists()
-        ):
-            return None
-        return user
+    def pre_authenticate(self, request: HttpRequest, **credentials: Any) -> None:
+        try:
+            if not ratelimit.consume(request, action=FAILED_LOGIN_FROM_CLIENT, dry_run=True):
+                raise self.validation_error("too_many_login_attempts")
+            super().pre_authenticate(request, **credentials)
+        except ValidationError:
+            record_security_event("login_locked", request=request)
+            raise
+
+    def authentication_failed(self, request: HttpRequest, **credentials: Any) -> None:
+        ratelimit.consume(request, action=FAILED_LOGIN_FROM_CLIENT)
+        key = self._get_login_attempts_cache_key(request, **credentials)
+        if daily_login_failures_exhausted(request, key):
+            self.send_login_locked_notice(credentials.get("email", ""))
+
+    def send_login_locked_notice(self, email: str) -> None:
+        user = email_identity(email)
+        address = EmailAddress.objects.get_primary_email(user) if user is not None else None
+        if address:
+            self.send_mail("account/email/login_locked", address, {"user": user})
 
     def get_client_ip(self, request: HttpRequest) -> str:
         try:
@@ -100,6 +136,11 @@ class AccountAdapter(DefaultAccountAdapter):
         return True
 
     def send_mail(self, template_prefix: str, email: str, context: dict[str, Any]) -> None:
+        if template_prefix in ANONYMOUS_ACCOUNT_TEMPLATES and not ratelimit.consume(
+            allauth_context.request, action=ANONYMOUS_ACCOUNT_MAIL, key="all"
+        ):
+            logger.warning("account_mail_skipped template=%s reason=budget", template_prefix)
+            return
         user = context.get("user")
         preference = user_language(user) if isinstance(user, User) else None
         language = preference or translation.get_language()

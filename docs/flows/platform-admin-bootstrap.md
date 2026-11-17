@@ -52,7 +52,7 @@ sequenceDiagram
 
 - No application authorization: the trust boundary is shell access to the host or container (`Command.help` says "trusted operator channel"). There is no operator identity, password or step-up.
 - Target eligibility is checked inside the command: active and (`is_staff` or `is_superuser`). Later admin access uses other predicates: `get_can_admin` needs both flags, `PlatformAdminSite.has_permission` needs active, staff and superuser, `pyracast.api.views` `PlatformAdmin` needs active and superuser; all three also need MFA evidence in the session.
-- Enforcement that makes the CLI the only bootstrap path: `pyracast.accounts.adapters` `AccountAdapter.authenticate` and `pyracast.accounts.social` `SocialAccountAdapter.pre_social_login` (existing social accounts) refuse privileged users without a `totp` row; `pyracast.accounts.middleware` `PrivilegedAuthenticatorEnrollment` blocks GET and POST on the customer TOTP endpoint for them; `pyracast.accounts.mfa_views` `ManageTOTPView` refuses their `DELETE`.
+- Enforcement that makes the CLI the only bootstrap path: `pyracast.accounts.authentication` `AuthenticationBackend` and `pyracast.accounts.social` `SocialAccountAdapter.pre_social_login` (existing social accounts) refuse privileged users without a `totp` row; `pyracast.accounts.middleware` `PrivilegedAuthenticatorEnrollment` blocks GET and POST on the customer TOTP endpoint for them; `pyracast.accounts.mfa_views` `ManageTOTPView` refuses their `DELETE`.
 - Database: partial unique constraint `unique_authenticator_type` allows one `totp` row per user; `select_for_update` serializes two concurrent provisioning runs for the same user.
 
 ## Failure paths
@@ -71,7 +71,7 @@ sequenceDiagram
 | Any `CommandError` above | Transaction rolled back, nothing written, nothing printed to stdout |
 | Console cannot encode the QR (`UnicodeEncodeError`) | Factor already committed; prints a fallback line, then the URI |
 | Output lost after commit (closed pipe, lost terminal; inferred) | Factor exists, secret is gone; a rerun is refused, no supported recovery |
-| Privileged user without TOTP signs in later | 400 generic login error (password) or `PermissionDenied` (social) |
+| Privileged user without TOTP signs in later | 400 generic login error, counted as a failed password (password), or `PermissionDenied` (social) |
 
 ## Rules and invariants
 

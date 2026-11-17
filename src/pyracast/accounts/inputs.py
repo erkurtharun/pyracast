@@ -1,5 +1,7 @@
 from typing import Any
 
+from allauth.account.adapter import get_adapter
+from allauth.core import context
 from allauth.headless.account.inputs import (
     ChangePasswordInput as AllauthChangePasswordInput,
 )
@@ -19,6 +21,7 @@ from django import forms
 from django.contrib.auth.models import User
 from django.core.validators import MaxLengthValidator
 
+from pyracast.accounts.audit import record_security_event
 from pyracast.accounts.authentication import email_identity
 
 
@@ -52,7 +55,14 @@ class ResetPasswordInput(PasswordInput, AllauthResetPasswordInput):
 
 
 class ChangePasswordInput(PasswordInput, AllauthChangePasswordInput):
-    pass
+    user: User
+
+    def clean_current_password(self) -> str:
+        current_password: str = self.cleaned_data["current_password"]
+        if current_password and not self.user.check_password(current_password):
+            record_security_event("password_change_failed", request=context.request, user=self.user)
+            raise get_adapter().validation_error("enter_current_password")
+        return current_password
 
 
 class ReauthenticateInput(PasswordInput, AllauthReauthenticateInput):

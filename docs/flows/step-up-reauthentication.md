@@ -68,7 +68,7 @@ sequenceDiagram
 | No session | 401, `meta.is_authenticated` false; `refreshExpiredSession` reloads `/api/session/`, message `sessionExpired` |
 | No fresh proof | 401, `is_authenticated` true; `data.flows` or error code `mfa_reauthentication_required`; form opens (email change: message only). Linking with a lapsed proof: redirect with `error=reauthentication_required` before the provider, `error=permission_denied` at the callback |
 | Wrong password or code, or code requested for an address not verified for the user | 400 with `param` `password`, `code` or `email` (`unknown_email`); field error plus alert |
-| `login_failed` (password: IP and primary email; MFA: `mfa-auth-user-<pk>`) or `request_login_code` exceeded | 400 `too_many_login_attempts` |
+| `login_failed` (password: primary email; MFA: `mfa-auth-user-<pk>`), `login_failed_ip` (password and MFA failures per IP) or `request_login_code` exceeded | 400 `too_many_login_attempts` |
 | `reauthenticate` limit (10/min per user, shared by password and code request), or the same session's lock busy for 5 s | 429 (lock: `session_busy`, `Retry-After: 1`); generic request-failed message |
 | Email code expired, exhausted (3 attempts) or never requested | 409; generic request-failed message, no resend control |
 | Mail backend error on code request | Contained and logged by the account mail adapter (`account-mail-notifications`); 200 with the code state saved as on success, so the form asks for a code that did not arrive and offers no resend; the user closes and reopens the form to request a new code, which the API accepts. A failed recovery-code notification after regeneration is contained the same way; the new codes are returned |
@@ -79,7 +79,7 @@ sequenceDiagram
 
 - Window: 300 s from the latest `reauthenticated` record, not extended by use. Session idle (30 min) and age (12 h) limits still apply; logout drops the records with the session.
 - Email code: 3 minutes (`LOGIN_BY_CODE_TIMEOUT` default), 3 attempts (the third wrong code ends the state), no resends (`LOGIN_BY_CODE_SUPPORTS_RESEND` unset). `AccountAdapter.send_mail` defers to `transaction.on_commit`, which runs at once because no request transaction is open; no queue.
-- Limits stack: a password check also consumes `login_failed` (10/10m per IP, 5/10m per key); MFA proof consumes `login_failed` under `mfa-auth-user-<pk>`; `2fa/reauthenticate` and `code/confirm` have no `reauthenticate` decorator.
+- Limits stack: a password check also consumes `login_failed` (5/10m and 100/d per key) and a failed one `login_failed_ip` (10/10m per IP); MFA proof consumes `login_failed` under `mfa-auth-user-<pk>` and a wrong code `login_failed_ip`; `2fa/reauthenticate` and `code/confirm` have no `reauthenticate` decorator.
 - Lock order: requests of one session serialize on an advisory lock (`session_lock` middleware) before `mfa_views` takes the `auth_user` row lock.
 - TOTP activation never replays: after proof the form returns to enrolment and a fresh code must be entered; showing the new recovery codes then needs a separate MFA proof. Other operations get exactly one replay.
 

@@ -57,7 +57,7 @@ sequenceDiagram
 
 - Console gate: `has_permission` runs on every `admin_view` request, shell endpoints included, and again inside `each_context`. Role flags and the authenticator row are read live, so demotion or factor removal applies on the next click.
 - MFA evidence: `has_verified_mfa` needs an active user and a session record (bound to this user id) with method `mfa`, type `totp` or `recovery_codes`, whose id names a current authenticator of this user. It exists only after a completed MFA login or MFA reauthentication.
-- Login side: `AccountAdapter.authenticate` and `SocialAccountAdapter` refuse staff or superusers without TOTP; `MFAAdapter.can_delete_authenticator`, `ManageTOTPView` and `PrivilegedAuthenticatorEnrollment` block removing or self-enrolling an admin factor.
+- Login side: `AuthenticationBackend` and `SocialAccountAdapter` refuse staff or superusers without TOTP; `MFAAdapter.can_delete_authenticator`, `ManageTOTPView` and `PrivilegedAuthenticatorEnrollment` block removing or self-enrolling an admin factor.
 - SPA: `SessionUserOutput.get_can_admin` only steers navigation. `pyracast.api.views.PlatformAdmin` repeats the rule for `/api/platform/` without `is_staff`; operations re-check only `require_admin` (active superuser, no MFA).
 - CSRF: `CsrfViewMiddleware` (and `csrf_protect` inside `admin_view`) rejects a POST without token with 403 before the gate runs, `/admin/login/` included.
 

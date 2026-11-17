@@ -103,8 +103,8 @@ def test_inactive_account_cannot_create_a_session() -> None:
     user = member(active=False)
     client = Client(enforce_csrf_checks=True)
     response = submit(client, "auth/login", {"email": user.email, "password": PASSWORD})
-    assert response.status_code == 401
-    assert not response.json()["meta"]["is_authenticated"]
+    assert response.status_code == 400
+    assert [error["code"] for error in response.json()["errors"]] == ["email_password_mismatch"]
     assert client.get("/api/session/").json()["user"] is None
 
 

@@ -179,13 +179,18 @@ MFA_REAUTHENTICATION_REQUIRED = True
 MFA_RECOVERY_CODES_SHOW_ONCE = True
 MFA_TOTP_ISSUER = "Pyracast"
 USERSESSIONS_TRACK_ACTIVITY = True
+# allauth clears every rate of `login_failed` after a second-factor success or a password reset,
+# so that action stays per address and the per-IP failure count is a project action of its own.
 ACCOUNT_RATE_LIMITS = {
     "login": "20/m/ip",
-    "login_failed": "10/10m/ip,5/10m/key",
+    "login_failed": "5/10m/key,100/d/key",
+    "login_failed_ip": "10/10m/ip",
     "signup": "5/h/ip",
     "reset_password": "5/h/ip,3/h/key",
     "reset_password_from_key": "10/h/ip",
-    "confirm_email": "1/1m/key",
+    "confirm_email": "1/1m/key,6/h/key",
+    "change_password": "5/10m/user",
+    "anonymous_account_mail": "20/h/key",
 }
 CACHES = {
     "default": {

@@ -14,7 +14,9 @@ from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
 from django.contrib.auth.models import User
 from django.core import mail
 from django.test import Client, override_settings
+from django.utils import translation
 
+from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.audit import logger as security_logger
 from tests.test_auth_lifecycle import PASSWORD, mailed_code, member, submit, totp_code
 from tests.test_company_registration import signup
@@ -219,6 +221,25 @@ def test_the_hundredth_failure_in_a_day_locks_the_address_until_a_password_reset
     assert login(client, user.email, PASSWORD + "new").status_code == 200
 
 
+@pytest.mark.parametrize(
+    ("language", "subject"),
+    [
+        ("en", "Password sign-in to your account is paused"),
+        ("tr", "Hesab\u0131n\u0131zda parolayla oturum açma duraklat\u0131ld\u0131"),
+    ],
+)
+@override_settings(ACCOUNT_EMAIL_SUBJECT_PREFIX="[Pyracast] ")
+def test_the_daily_lock_notice_is_written_in_the_account_language(
+    language: str, subject: str
+) -> None:
+    with translation.override(language):
+        message = AccountAdapter().render_mail(
+            "account/email/login_locked", "member@example.com", {}
+        )
+    assert message.subject == "[Pyracast] " + subject
+    assert subject in str(message.body)
+
+
 def test_the_daily_lock_notice_is_not_sent_for_an_unknown_address(clock: Clock) -> None:
     client = Client(enforce_csrf_checks=True)
     for _ in range(20):
@@ -303,10 +324,11 @@ def test_wrong_current_passwords_are_limited_per_ten_minutes_and_recorded(
         assert submit(client, "account/password/change", change).status_code == 400
         clock.advance(61)
     assert submit(client, "account/password/change", change).status_code == 429
-    assert (
-        security_events(security_log)
-        == [{"event": "password_change_failed", "user_id": user.pk, "client_ip": "127.0.0.1"}] * 5
-    )
+    assert security_events(security_log) == [
+        {"event": "password_change_failed", "user_id": user.pk, "client_ip": "127.0.0.1"}
+    ] * 5 + [
+        {"event": "authentication_request_throttled", "user_id": None, "client_ip": "127.0.0.1"}
+    ]
     user.refresh_from_db()
     assert user.check_password(PASSWORD)
 
