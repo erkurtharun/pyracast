@@ -72,7 +72,7 @@ def test_validation_errors_identify_each_item_in_a_list() -> None:
     ("language", "message"),
     [
         ("en", "The server could not complete this request."),
-        ("tr", "Sunucu bu isteği tamamlayamadı."),
+        ("tr", "Sunucu bu isteği tamamlayamad\u0131."),
     ],
 )
 def test_non_object_error_responses_receive_the_localized_contract(

@@ -309,8 +309,10 @@ def with_error_contract(request: HttpRequest, response: HttpResponse) -> HttpRes
     try:
         body = json.loads(response.content)
     except ValueError:
-        return response
-    if not isinstance(body, dict) or {"code", "message"} <= body.keys():
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    if {"code", "message"} <= body.keys():
         return response
     with translation.override(_language(request)):
         error = _status_error(request, response.status_code, body, response.get("Retry-After"))
