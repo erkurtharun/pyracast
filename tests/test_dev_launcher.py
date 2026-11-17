@@ -582,7 +582,7 @@ def test_start_compiles_the_translation_catalogs_before_migrating(
     root = tmp_path.resolve()
     (root / ".dev").mkdir()
     monkeypatch.setattr(launcher, "PORTS", {})
-    monkeypatch.setattr(launcher, "ensure_dependencies", lambda state: None)
+    monkeypatch.setattr(launcher, "ensure_dependencies", lambda: None)
     monkeypatch.setattr(launcher, "frontend_command", lambda *args, **kwargs: [])
     setups: list[list[str]] = []
 
