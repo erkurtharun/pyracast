@@ -561,11 +561,13 @@ verification and restart on the real host in about five minutes of downtime.
    **Actions → CI → Run workflow → main** first. The installer migrates the empty
    database, starts the services, probes readiness and removes the marker, which
    ends the session.
-6. Only if step 5 fails before promotion (its log has "Release failed during
-   maintenance." and `readlink -f /opt/pyracast/current` still names the release
-   that served before the reset), type the `restore` command `reset` printed (the
-   object of step 1, never the one in `last-backup.json`, which is the dump of the
-   empty database):
+6. Only if step 5 fails before promotion, type the `restore` command `reset`
+   printed. That is the case when `/var/lib/pyracast/release-blocked` still exists
+   and `readlink -f /opt/pyracast/current` still names the release that served
+   before the reset, whether the run failed in preflight (no "Release failed during
+   maintenance." line) or later. Use the object of step 1, never the one in
+   `last-backup.json`: once the release has taken its own backup, that is a dump of
+   the empty database.
 
    ```bash
    python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json restore --confirm OBJECT
@@ -577,9 +579,9 @@ verification and restart on the real host in about five minutes of downtime.
    `OBJECT is restored and the previous release serves again; the marker is removed.`
    Production then serves the previous release with its data. A failure after
    promotion prints "Release SHA is serving" instead: the new release already serves
-   the empty database and the marker is gone, so `restore` refuses; run the command
-   the log names to finish the release. The erased data stays in the archive of
-   step 1.
+   the newly migrated database and the marker is gone, so `restore` refuses; run the
+   command the log names to finish the release. The erased data stays in the archive
+   of step 1.
 7. Create the first administrator as in "Create the administrator and verify the
    service" above.
 8. The watchdog may report `last_verified_backup_older_than_90_minutes` once after
