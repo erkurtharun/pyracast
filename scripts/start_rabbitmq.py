@@ -8,6 +8,7 @@ import tempfile
 import time
 import urllib.request
 import zipfile
+from importlib import import_module
 from pathlib import Path
 
 from scripts.start_postgres import durable_root, require_durable
@@ -40,6 +41,20 @@ def port_open() -> bool:
         return sock.connect_ex(("127.0.0.1", PORT)) == 0
 
 
+def amqp_ready() -> bool:
+    pika = import_module("pika")
+    parameters = pika.URLParameters(QUEUE_URL)
+    parameters.socket_timeout = 1
+    parameters.stack_timeout = 2
+    parameters.blocked_connection_timeout = 1
+    try:
+        connection = pika.BlockingConnection(parameters)
+        connection.close()
+    except pika.exceptions.AMQPError, OSError:
+        return False
+    return True
+
+
 def start_broker(root: Path, server: Path) -> None:
     env = os.environ.copy()
     env["ERLANG_HOME"] = str(root / "erlang")
@@ -59,7 +74,7 @@ def start_broker(root: Path, server: Path) -> None:
     while time.monotonic() < deadline:
         if process.poll() is not None:
             raise RuntimeError(f"RabbitMQ exited before readiness; see {log}")
-        if port_open():
+        if amqp_ready():
             return
         time.sleep(1)
     subprocess.run(  # noqa: S603 -- taskkill targets only this process tree.
@@ -79,10 +94,12 @@ def start_broker(root: Path, server: Path) -> None:
 
 def provision_windows(root: Path) -> str:
     if port_open():
+        if not amqp_ready():
+            raise RuntimeError(f"Port {PORT} is occupied without a usable AMQP connection.")
         return "running"
     root.mkdir(parents=True, exist_ok=True)
     erlang = root / "erlang"
-    if not (erlang / "bin").is_dir():
+    if not (erlang / "bin" / "erl.exe").is_file():
         download_and_extract(ERLANG_URL, ERLANG_SHA256, root / "erlang.zip", erlang)
     if not (root / SERVER).is_file():
         download_and_extract(RABBITMQ_URL, RABBITMQ_SHA256, root / "rabbitmq.zip", root)
@@ -100,19 +117,20 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--ephemeral", action="store_true", help="use a throwaway broker (CI)")
     ephemeral = parser.parse_args(argv).ephemeral
-    if sys.platform != "win32":
-        raise RuntimeError("This RabbitMQ bootstrap is for Windows; see README for Docker.")
-    if ephemeral:
-        root = Path(tempfile.mkdtemp(prefix="pyracast-rabbitmq-"))
+    if sys.platform == "win32":
+        if ephemeral:
+            root = Path(tempfile.mkdtemp(prefix="pyracast-rabbitmq-"))
+        else:
+            root = durable_root() / "rabbitmq"
+            require_durable(root)
+        status = provision_windows(root)
+        github_env = os.environ.get("GITHUB_ENV")
+        if github_env:
+            with Path(github_env).open("a", encoding="utf-8") as output:
+                output.write(f"PYRACAST_LIVE_QUEUE=1\nPYRACAST_RABBITMQ_URL={QUEUE_URL}\n")
+        print(f"RabbitMQ {status} at {QUEUE_URL}; state and log: {root}", flush=True)
     else:
-        root = durable_root() / "rabbitmq"
-        require_durable(root)
-    status = provision_windows(root)
-    github_env = os.environ.get("GITHUB_ENV")
-    if github_env:
-        with Path(github_env).open("a", encoding="utf-8") as output:
-            output.write(f"PYRACAST_LIVE_QUEUE=1\nPYRACAST_RABBITMQ_URL={QUEUE_URL}\n")
-    print(f"RabbitMQ {status} at {QUEUE_URL}; state and log: {root}", flush=True)
+        raise RuntimeError("This RabbitMQ bootstrap is for Windows; see README for Docker.")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from django.db import connection
 
@@ -19,7 +19,10 @@ class WeatherFixture(OpenMeteoProvider):
         self.calls += 1
         if self.fail:
             raise WeatherError("weather_request_failed")
-        stamps = [start - timedelta(hours=1) + timedelta(hours=i) for i in range(26)]
+        first = start.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
+        stamps = [first - timedelta(hours=1)]
+        while stamps[-1] < end:
+            stamps.append(stamps[-1] + timedelta(hours=1))
         return normalize_weather(
             {
                 "latitude": latitude,
@@ -34,10 +37,10 @@ class WeatherFixture(OpenMeteoProvider):
                 },
                 "hourly": {
                     "time": [int(stamp.timestamp()) for stamp in stamps],
-                    "temperature_2m": [10] * 26,
-                    "snow_depth": [0] * 26,
-                    "snowfall": [0] * 26,
-                    "shortwave_radiation": [600] * 26,
+                    "temperature_2m": [10] * len(stamps),
+                    "snow_depth": [0] * len(stamps),
+                    "snowfall": [0] * len(stamps),
+                    "shortwave_radiation": [600] * len(stamps),
                 },
             },
             latitude=latitude,

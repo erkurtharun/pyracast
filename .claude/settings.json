@@ -14,7 +14,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "^(Read|read_file|read_text_file|read_multiple_files|get_file_text_by_path|view_image|mcp__.*__(read_file|read_text_file|read_multiple_files|get_file_text_by_path|execute_tool))$",
+        "matcher": "^(Read|read_file|read_text_file|read_multiple_files|get_file_text_by_path|view_image|mcp__.*__(read|read_file|read_text_file|read_multiple_files|get_file_text_by_path|view_image|execute_tool))$",
         "hooks": [
           {
             "type": "command",
@@ -24,7 +24,7 @@
         ]
       },
       {
-        "matcher": "^(Bash|PowerShell|shell|local_shell|exec_command)$",
+        "matcher": "^(Bash|PowerShell|shell|local_shell|exec_command|mcp__.*__execute_tool)$",
         "hooks": [
           {
             "type": "command",

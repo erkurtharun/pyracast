@@ -11,7 +11,7 @@ NOW = datetime(2026, 11, 12, 13, tzinfo=UTC)
 
 
 def recent_forecast(system: System) -> ForecastSnapshot:
-    job = CollectionJob.objects.get()
+    job = CollectionJob.objects.get(binding=system.binding)
     job.status = "succeeded"
     job.save(update_fields=("status",))
     snapshot = ForecastSnapshot.objects.create(

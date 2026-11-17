@@ -1,6 +1,8 @@
 import ast
 from pathlib import Path
 
+import pytest
+
 from scripts import move_test_support
 
 ALPHA = """\
@@ -65,3 +67,47 @@ def test_imported_builders_move_to_the_support_package_once(tmp_path: Path) -> N
     move_test_support.main(tests)
 
     assert {path: path.read_bytes() for path in tests.rglob("*.py")} == snapshot
+
+
+def test_moved_fixtures_remain_discoverable_in_the_original_test_module(tmp_path: Path) -> None:
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    source = """\
+import pytest
+
+@pytest.fixture
+def value():
+    return 3
+
+def helper(value):
+    return value
+
+def test_helper(value):
+    assert helper(value) == 3
+"""
+    (tests / "test_alpha.py").write_text(source, encoding="utf-8")
+    (tests / "test_beta.py").write_text(BETA, encoding="utf-8")
+
+    move_test_support.main(tests)
+
+    names = {
+        alias.name
+        for node in ast.parse((tests / "test_alpha.py").read_text(encoding="utf-8")).body
+        if isinstance(node, ast.ImportFrom) and node.module == "tests.support.alpha"
+        for alias in node.names
+    }
+    assert names == {"helper", "value"}
+
+
+def test_relative_imports_are_refused_before_any_file_is_written(tmp_path: Path) -> None:
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    source = "from .helpers import value\n\ndef helper():\n    return value\n"
+    path = tests / "test_alpha.py"
+    path.write_text(source, encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="Relative imports"):
+        move_test_support.move(tests, "alpha", {"helper"})
+
+    assert path.read_text(encoding="utf-8") == source
+    assert not (tests / "support").exists()

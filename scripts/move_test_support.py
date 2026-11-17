@@ -72,9 +72,12 @@ def closure(names: set[str], found: dict[str, Definition]) -> set[str]:
 
 def import_block(source: str) -> str:
     lines = source.splitlines()
+    nodes = ast.parse(source).body
+    if any(isinstance(node, ast.ImportFrom) and node.level for node in nodes):
+        raise RuntimeError("Relative imports must be made absolute before moving test support.")
     statements = [
         "\n".join(lines[node.lineno - 1 : node.end_lineno])
-        for node in ast.parse(source).body
+        for node in nodes
         if isinstance(node, ast.Import | ast.ImportFrom)
     ]
     return "\n".join(statements)
@@ -108,20 +111,23 @@ def move(tests: Path, stem: str, names: set[str]) -> set[str]:
     ordered = sorted((found[name] for name in moved), key=lambda item: item.start)
     blocks = ["\n".join(lines[item.start - 1 : item.end]) for item in ordered]
     existing = target.read_text(encoding="utf-8") if target.is_file() else ""
+    header = import_block(source)
     target.parent.mkdir(exist_ok=True)
     (target.parent / "__init__.py").touch()
-    header = import_block(source)
     target.write_bytes(
         "\n\n\n".join(part for part in (header, existing, *blocks) if part).encode() + b"\n"
     )
     removed = {line for item in ordered for line in range(item.start, item.end + 1)}
     remaining = "\n".join(line for number, line in enumerate(lines, 1) if number not in removed)
-    used = {node.id for node in ast.walk(ast.parse(remaining)) if isinstance(node, ast.Name)}
-    still_used = sorted(moved & used)
+    remaining_nodes = list(ast.walk(ast.parse(remaining)))
+    used = {node.id for node in remaining_nodes if isinstance(node, ast.Name)}
+    parameters = {node.arg for node in remaining_nodes if isinstance(node, ast.arg)}
+    still_used = sorted(moved & (used | parameters))
     if still_used:
-        remaining = (
-            f"from tests.support.{stem} import {', '.join(still_used)}\n" + remaining.lstrip("\n")
+        imports = ", ".join(
+            f"{name} as {name}" if name in parameters else name for name in still_used
         )
+        remaining = f"from tests.support.{stem} import {imports}\n" + remaining.lstrip("\n")
     source_path.write_bytes(remaining.encode() + b"\n")
     return moved
 

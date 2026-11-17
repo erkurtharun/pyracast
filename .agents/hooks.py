@@ -184,12 +184,14 @@ def _sensitive(parts: tuple[str, ...]) -> bool:
     return folded[:1] == ("secrets",) or folded[:2] == (".dev", "backups")
 
 
-def _context_noise(parts: tuple[str, ...]) -> bool:
+def _context_noise(parts: tuple[str, ...], *, directory: bool) -> bool:
     folded = tuple(part.casefold() for part in parts)
     return (
         (bool(folded) and folded[0] in ROOT_ARTIFACT_DIRECTORIES)
         or any(part in EXCLUDED_DIRECTORIES for part in folded)
-        or any(part.startswith((".venv-", ".next-")) for part in folded[:-1])
+        or any(
+            part.startswith((".venv-", ".next-")) for part in (folded if directory else folded[:-1])
+        )
         or (len(folded) > 1 and folded[0] == "web" and folded[1] in WEB_ARTIFACT_DIRECTORIES)
     )
 
@@ -205,7 +207,7 @@ def denied_path(value: str, base: Path, root: Path) -> str | None:
             parts = resolved.relative_to(root).parts
             if _sensitive(parts):
                 return SENSITIVE_REASON
-            if _context_noise(parts):
+            if _context_noise(parts, directory=resolved.is_dir()):
                 return CONTEXT_REASON
     return None
 
@@ -219,11 +221,28 @@ def _command_tokens(command: str) -> list[str]:
 
 def _ide_command_paths(command: str) -> list[str]:
     paths: list[str] = []
-    for token in _command_tokens(command):
+    path_options = {
+        "--file_path",
+        "--filePath",
+        "--pathInProject",
+        "--relativePath",
+        "--path",
+        "--filename",
+        "--paths",
+        "--directoryPath",
+    }
+    tokens = _command_tokens(command)
+    for index, token in enumerate(tokens):
         value = re.sub(r"^--?[\w-]+=", "", token)
         if not value or value.startswith("-"):
             continue
-        if "/" in value or _sensitive_name(value):
+        if (
+            "/" in value
+            or _sensitive_name(value)
+            or token.partition("=")[0] in path_options
+            or (index > 0 and tokens[index - 1] in path_options)
+            or (index == 1 and tokens[0].rsplit("__", 1)[-1].casefold() in READ_TOOLS)
+        ):
             paths.append(value)
     return paths
 
@@ -251,10 +270,10 @@ def denied_read(payload: JsonObject, root: Path) -> str | None:
     return next(iter(reasons), None)
 
 
-def _segments(command: str) -> list[list[str]]:
-    lexer = shlex.shlex(
-        command.replace("\\", "/").replace("\n", ";"), posix=True, punctuation_chars=True
-    )
+def _segments(command: str, *, windows: bool) -> list[list[str]]:
+    lexer = shlex.shlex(command.replace("\n", ";"), posix=True, punctuation_chars=True)
+    if windows:
+        lexer.escape = ""
     lexer.whitespace_split = True
     try:
         tokens = list(lexer)
@@ -279,7 +298,7 @@ def _assigns_marker(tokens: list[str]) -> bool:
 
 
 def _program(token: str) -> str:
-    return PurePosixPath(token).name.casefold().removesuffix(".exe")
+    return PurePosixPath(token.replace("\\", "/")).name.casefold().removesuffix(".exe")
 
 
 def _git_push_refused(arguments: list[str]) -> bool:
@@ -295,7 +314,19 @@ def _git_push_refused(arguments: list[str]) -> bool:
 def _git_subcommand(arguments: list[str]) -> tuple[str, list[str]]:
     index = 0
     while index < len(arguments) and arguments[index].startswith("-"):
-        index += 2 if arguments[index] in {"-C", "-c"} else 1
+        index += (
+            2
+            if arguments[index]
+            in {
+                "-C",
+                "-c",
+                "--git-dir",
+                "--work-tree",
+                "--namespace",
+                "--config-env",
+            }
+            else 1
+        )
     if index >= len(arguments):
         return "", []
     return arguments[index], arguments[index + 1 :]
@@ -313,32 +344,71 @@ def _gh_refused(arguments: list[str]) -> bool:
     )
 
 
+def _wrapped_command(program: str, arguments: list[str]) -> tuple[str, bool] | None:
+    if program in {"bash", "sh", "dash", "zsh", "ksh"}:
+        options = {"-c", "-lc", "-cl"}
+        windows = False
+    elif program in {"powershell", "pwsh"}:
+        options = {"-command", "-c"}
+        windows = True
+    elif program == "cmd":
+        options = {"/c", "/k"}
+        windows = True
+    elif program == "execute_terminal_command":
+        options = {"--command"}
+        windows = os.name == "nt"
+    else:
+        return None
+    for index, argument in enumerate(arguments):
+        option, separator, value = argument.partition("=")
+        if option.casefold() in options:
+            if separator:
+                return value, windows
+            if index + 1 < len(arguments):
+                if program in {"powershell", "pwsh", "cmd"}:
+                    return " ".join(arguments[index + 1 :]), windows
+                return arguments[index + 1], windows
+    return None
+
+
 def _segment_publishes(tokens: list[str]) -> bool:
     for index, token in enumerate(tokens):
         program = _program(token)
+        if program == "echo":
+            return False
         if program == "git":
             subcommand, arguments = _git_subcommand(tokens[index + 1 :])
             return subcommand == "push" and _git_push_refused(arguments)
         if program == "gh":
             return _gh_refused(tokens[index + 1 :])
+        wrapped = _wrapped_command(program, tokens[index + 1 :])
+        if wrapped is not None:
+            command, windows = wrapped
+            return _command_publishes(command, windows=windows)
     return False
 
 
 def _shell_command(arguments: JsonObject) -> str | None:
     command = arguments.get("command", arguments.get("cmd"))
     if isinstance(command, list):
-        return " ".join(part for part in command if isinstance(part, str))
+        return shlex.join(part for part in command if isinstance(part, str))
     return command if isinstance(command, str) else None
+
+
+def _command_publishes(command: str, *, windows: bool) -> bool:
+    segments = _segments(command, windows=windows)
+    return not any(_assigns_marker(tokens) for tokens in segments) and any(
+        _segment_publishes(tokens) for tokens in segments
+    )
 
 
 def denied_shell(payload: JsonObject) -> str | None:
     command = _shell_command(_object(payload.get("tool_input")))
     if command is None or os.environ.get(PUBLISH_MARKER) == "1":
         return None
-    segments = _segments(command)
-    if any(_assigns_marker(tokens) for tokens in segments):
-        return None
-    if any(_segment_publishes(tokens) for tokens in segments):
+    tool_name = payload.get("tool_name")
+    windows = tool_name == "PowerShell" or (tool_name != "Bash" and os.name == "nt")
+    if _command_publishes(command, windows=windows):
         return PUBLISH_REASON
     return None
 

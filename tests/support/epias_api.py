@@ -61,6 +61,8 @@ def archive_source(
         readings=readings,
         raw_payload={"items": readings},
         content_sha256="a" * 64,
+        complete=set(values) == set(range(24))
+        and all(value is not None for value in values.values()),
     )
 
 

@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 from typing import Any
 
 import pika  # type: ignore[import-untyped]
@@ -83,16 +84,34 @@ def _ensure_rabbitmq() -> None:
     print(f"RabbitMQ {parameters.host}:{parameters.port}", flush=True)
     if _rabbit_ready(parameters):
         return
-    if sys.platform != "win32":
-        raise RuntimeError("RabbitMQ is unavailable; start it with the README Docker command.")
-    if parameters.host not in LOCAL_HOSTS or parameters.port != start_rabbitmq.PORT:
-        raise RuntimeError(
-            f"RabbitMQ is unavailable at {parameters.host}:{parameters.port}; the helper starts "
-            f"a broker only on 127.0.0.1:{start_rabbitmq.PORT}."
-        )
-    start_rabbitmq.main([])
-    if not _rabbit_ready(parameters):
+    if sys.platform == "win32":
+        if parameters.host not in LOCAL_HOSTS or parameters.port != start_rabbitmq.PORT:
+            raise RuntimeError(
+                f"RabbitMQ is unavailable at {parameters.host}:{parameters.port}; "
+                f"the helper starts a broker only on 127.0.0.1:{start_rabbitmq.PORT}."
+            )
+        credentials = parameters.credentials
+        supported = pika.URLParameters(start_rabbitmq.QUEUE_URL)
+        if (
+            not isinstance(credentials, pika.PlainCredentials)
+            or credentials.username != supported.credentials.username
+            or credentials.password != supported.credentials.password
+            or parameters.virtual_host != supported.virtual_host
+            or parameters.ssl_options is not None
+        ):
+            raise RuntimeError(
+                "Automatic RabbitMQ provisioning supports only guest credentials, "
+                "the / virtual host and plain AMQP. Start the configured broker separately."
+            )
+        start_rabbitmq.main([])
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            if _rabbit_ready(parameters):
+                return
+            time.sleep(1)
         raise RuntimeError("RabbitMQ did not become available; see broker.log in its data root.")
+    else:
+        raise RuntimeError("RabbitMQ is unavailable; start it with the README Docker command.")
 
 
 def ensure_dependencies() -> None:
