@@ -31,7 +31,15 @@ environment_files=(runtime.env broker.env database.env)
 maintenance_started=0
 promoted=0
 prerelease_object=
+record_unreadable=0
 recovery='python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json'
+prerelease_record() {
+  local object
+  object=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["object"])' "$1") \
+    || return 1
+  [[ $object =~ ^postgres/[A-Za-z0-9/_.-]+\.dump$ ]] || return 1
+  printf '%s\n' "$object"
+}
 begin_maintenance() {
   maintenance_started=1
   touch /var/lib/pyracast/release-blocked && sync -f /var/lib/pyracast/release-blocked \
@@ -60,7 +68,10 @@ cleanup() {
         echo 'Writing /var/lib/pyracast/release-blocked failed; recreate it before recovery.' >&2
       fi
       if [[ -n $prerelease_object ]]; then
+        echo "Pre-release record: $release/prerelease-backup.json" >&2
         echo "Before migrate, recover with: $recovery abort. In or after migrate, with: $recovery restore --confirm $prerelease_object" >&2
+      elif (( record_unreadable == 1 )); then
+        echo "The pre-release record $release/prerelease-backup.json is unreadable. Recover with: $recovery abort" >&2
       else
         echo "Recover with: $recovery abort" >&2
       fi
@@ -152,13 +163,23 @@ if [[ -L /opt/pyracast/current ]]; then
   "${old[@]}" stop -t 660 worker notifications
   "${old[@]}" stop -t 100 gateway api web
 fi
+# An hourly backup that is already past the lock would finish after this release's dump.
+if [[ $(systemctl show --property=LoadState --value pyracast-backup.service) == loaded ]]; then
+  systemctl stop pyracast-backup.service
+fi
+if systemctl is-active --quiet pyracast-backup.service; then
+  echo 'pyracast-backup.service is still active; the pre-release backup was not taken.' >&2
+  exit 1
+fi
 # Back up the running database before a new support image can modify its data directory.
 rm -f "$release/prerelease-backup.json"
 python3 "$release/deploy/backup.py" /etc/pyracast/host.json --release-dir "$release" --kind prerelease
 sync -f "$release"
-prerelease_object=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["object"])' \
-  "$release/prerelease-backup.json")
-[[ $prerelease_object =~ ^postgres/[A-Za-z0-9/_.-]+\.dump$ ]]
+if ! candidate=$(prerelease_record "$release/prerelease-backup.json"); then
+  record_unreadable=1
+  exit 1
+fi
+prerelease_object=$candidate
 "${compose[@]}" up -d postgres
 wait_for_database
 "${compose[@]}" up -d rabbitmq

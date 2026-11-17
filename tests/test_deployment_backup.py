@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from deploy import backup, operations_log
+from deploy import backup, host, operations_log
 
 
 @pytest.mark.parametrize("valid_checksum", [True, False])
@@ -75,6 +75,7 @@ def test_failed_dump_cannot_publish_a_successful_backup(
 
     monkeypatch.setattr(subprocess, "run", failed_dump)
     monkeypatch.setattr(backup, "upload_backup", upload)
+    monkeypatch.setattr(host, "LAST_BACKUP", tmp_path / "last-backup.json")
     with pytest.raises(subprocess.CalledProcessError):
         backup.create_backup(tmp_path, "private-backups", "prerelease", tmp_path)
     assert uploaded == []

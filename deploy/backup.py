@@ -151,7 +151,32 @@ def dump_database(release: Path, archive: Path) -> None:
             raise
 
 
-def locked_dump(release: Path, archive: Path) -> float | None:
+type Snapshot = tuple[int, float]
+
+
+def pointer_sequence() -> int:
+    try:
+        return int(json.loads(host.LAST_BACKUP.read_text())["sequence"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return 0
+
+
+def file_sequence(path: Path) -> int:
+    try:
+        return int(path.read_text())
+    except (OSError, ValueError):
+        return 0
+
+
+def take_snapshot() -> Snapshot:
+    # Caller holds the release lock. A lost sequence file must not restart below the pointer.
+    sequence_file = host.LAST_BACKUP.with_name("backup-sequence")
+    sequence = max(file_sequence(sequence_file), pointer_sequence()) + 1
+    write_atomically(sequence_file, str(sequence))
+    return sequence, time.time()
+
+
+def locked_dump(release: Path, archive: Path) -> Snapshot | None:
     with host.release_lock(HOURLY_LOCK_WAIT_SECONDS) as locked:
         if not locked:
             report("pyracast_backup_skipped", "WARNING", reason="lock_timeout")
@@ -159,9 +184,9 @@ def locked_dump(release: Path, archive: Path) -> float | None:
         if host.RELEASE_BLOCKED.exists():
             report("pyracast_backup_skipped", "WARNING", reason="release_blocked")
             return None
-        snapshot_at = time.time()
+        snapshot = take_snapshot()
         dump_database(release, archive)
-    return snapshot_at
+    return snapshot
 
 
 def write_atomically(path: Path, content: str) -> None:
@@ -173,15 +198,17 @@ def write_atomically(path: Path, content: str) -> None:
     temporary.replace(path)
 
 
-def record_backup(name: str, snapshot_at: float) -> None:
-    # Uploads finish out of order: the pointer keeps the newest snapshot, not the last upload.
+def record_backup(name: str, snapshot: Snapshot) -> None:
+    # Uploads finish out of order: the pointer keeps the highest sequence, not the last upload.
+    sequence, snapshot_at = snapshot
     with host.pointer_lock():
-        try:
-            newest = float(json.loads(host.LAST_BACKUP.read_text())["snapshot_at"])
-        except (OSError, ValueError, KeyError, TypeError):
-            newest = 0.0
-        if snapshot_at >= newest:
-            pointer = {"object": name, "snapshot_at": snapshot_at, "completed_at": time.time()}
+        if sequence >= pointer_sequence():
+            pointer = {
+                "object": name,
+                "sequence": sequence,
+                "snapshot_at": snapshot_at,
+                "completed_at": time.time(),
+            }
             write_atomically(host.LAST_BACKUP, json.dumps(pointer))
 
 
@@ -190,18 +217,18 @@ def create_backup(release: Path, bucket: str, kind: str, directory: Path) -> str
     archive = directory / "database.dump"
     if kind == "prerelease":
         # The installer already holds the release lock; a second lock request would wait forever.
-        snapshot_at: float | None = time.time()
+        snapshot: Snapshot | None = take_snapshot()
         dump_database(release, archive)
     else:
-        snapshot_at = locked_dump(release, archive)
-    if snapshot_at is None:
+        snapshot = locked_dump(release, archive)
+    if snapshot is None:
         return None
     stamp = datetime.datetime.now(datetime.UTC).strftime("%Y/%m/%d/%Y%m%dT%H%M%SZ")
     name = f"postgres/{stamp}-{kind}-{uuid.uuid4().hex}.dump"
     upload_backup(bucket, name, archive)
     if kind == "prerelease":
         write_atomically(release / PRERELEASE_RECORD, json.dumps({"object": name}))
-    record_backup(name, snapshot_at)
+    record_backup(name, snapshot)
     report(
         "pyracast_backup_succeeded",
         "INFO",
@@ -376,7 +403,9 @@ def run(arguments: list[str] | None = None) -> int:
     try:
         return main(arguments)
     except SystemExit as stopped:
-        if stopped.code == 143:
+        if stopped.code == 143 and host.RELEASE_BLOCKED.exists():
+            report("pyracast_backup_skipped", "WARNING", reason="stopped_for_release")
+        elif stopped.code == 143:
             report("pyracast_backup_failed", "ERROR", reason="terminated")
         raise
     except Exception:

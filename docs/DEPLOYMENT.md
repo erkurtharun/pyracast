@@ -372,7 +372,8 @@ fixtures do not establish provider access or inbox delivery.
   A worker that exhausts its five automatic retries stays stopped until restarted.
   Do not automatically resend an email marked `uncertain`.
 - **Host supervision:** `pyracast-watchdog.timer` runs independent checks (capacity,
-  backup age, containers, delivery at most every five minutes, origin certificate)
+  backup age, where a completion time over five minutes ahead of the clock counts
+  as stale, containers, delivery at most every five minutes, origin certificate)
   within one deadline and ends each run with a `pyracast_watchdog_heartbeat` whose
   `state` is `ok`, `blocked`, `unit_failed` or `lock_busy`; a missing heartbeat
   alerts. It restarts application containers only under the release lock and never
@@ -410,9 +411,12 @@ fixtures do not establish provider access or inbox delivery.
   the private backup bucket; each release requires another successful dump before
   migration. The hourly dump waits up to ten minutes for the release lock, holds it
   only while dumping and reports `pyracast_backup_skipped` when a release keeps the
-  lock or stays blocked. `/var/lib/pyracast/last-backup.json` names the newest
-  snapshot by dump time: an hourly upload that finishes after a newer pre-release
-  dump does not replace it. Cloud Storage lifecycle cleanup expires objects after
+  lock or stays blocked. Each dump takes the next number from
+  `/var/lib/pyracast/backup-sequence` under the release lock, and
+  `last-backup.json` names the highest number uploaded, so an hourly upload that
+  finishes after a newer pre-release dump does not replace it, whatever the clock
+  did. A release stops a running hourly backup before its own dump; that run
+  reports `pyracast_backup_skipped`. Cloud Storage lifecycle cleanup expires objects after
   seven days; deletion is asynchronous. Check the last successful upload, not just timer
   activation. A one-hour recovery point depends on successful hourly backups;
   failures increase possible data loss, and there is no WAL/PITR recovery. Keep
@@ -585,11 +589,14 @@ The Release run is red in "Transfer the verified release and deploy through IAP"
 and its log has "Release failed during maintenance." with the outcome of the stop
 commands: either every one succeeded and the application is stopped, or one failed
 and the log names the `docker compose ... ps` command that shows what still runs;
-stop it before recovery, because `abort` and `restore` refuse while an application
-container runs or the marker is missing (the log also says when writing the marker
-failed). The log then prints the recovery commands. On an upgrade `current` still
-points to the release that served before maintenance. A preflight failure prints
-none of this and changes nothing; during a reset the marker `reset` left stays. A
+stop it before recovery. Both `abort` and `restore` refuse without the marker (the
+log says when writing it failed) and `restore` also refuses while an application
+container runs, but `abort` does not check for running containers. The log then
+prints the recovery commands. On an upgrade `current` still points to the release
+that served before maintenance. On an upgrade, a preflight failure prints none of this, keeps the
+running release and its environment files and creates no marker (it may have
+written the new release directory and enabled or reset `pyracast.service`); during
+a reset the marker `reset` left stays. A
 failure after promotion prints "Release SHA is serving" instead, stops nothing and
 names the command that finishes it; a rerun of that release is refused because it
 is already live.
@@ -600,9 +607,10 @@ is already live.
 - Failure in or after `migrate`: release a forward fix, or run the printed
   `restore --confirm` command. It names the pre-release dump that this run took,
   recorded before `migrate` in
-  `/opt/pyracast/releases/<sha>-<hash>/prerelease-backup.json` (the newest entry of
-  `ls -t /opt/pyracast/releases`); a rerun of the same release replaces that record, so note
-  the object first. `restore` downloads and verifies the object before it drops
+  `/opt/pyracast/releases/<sha>-<hash>/prerelease-backup.json`, the path the log
+  prints as "Pre-release record"; a rerun of the same release replaces that record,
+  so note the object first. When the record is unreadable the log says so and
+  offers only `abort`. `restore` downloads and verifies the object before it drops
   anything.
 
 ## Verification boundary
