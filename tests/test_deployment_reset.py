@@ -304,12 +304,12 @@ def test_prepare_blocks_drains_dumps_uploads_verifies_and_keeps_the_archive(
     assert commands.running == SUPPORT
     stops = [call[call.index("stop") + 1 :] for call in commands.calls if "stop" in call]
     assert stops == [
-        ["-t", "100", "gateway", "api", "web"],
         ["-t", "660", "dispatcher"],
         ["-t", "660", "worker", "notifications"],
+        ["-t", "100", "gateway", "api", "web"],
     ]
     assert commands.calls.index(["sync", "-f", str(host.marker)]) < commands.index(" stop ")
-    assert commands.index(" stop -t 660 worker") < commands.index("pg_dump")
+    assert commands.index(" stop -t 100 gateway") < commands.index("pg_dump")
     listed = commands.calls[commands.index(" ps --services")]
     assert listed[-6:] == ["--status", "running", "--status", "restarting", "--status", "paused"]
     probe = commands.calls[0]
@@ -1323,11 +1323,11 @@ def test_command_line_reports_refusals_failures_and_the_next_step(
 
 
 CLEANUP_HEADER = "Writing the maintenance marker back and stopping the application again"
-ORDERED_STOPS = [["gateway", "api", "web"], ["dispatcher"], ["worker", "notifications"]]
+ORDERED_STOPS = [["dispatcher"], ["worker", "notifications"], ["gateway", "api", "web"]]
 STOP_POINTS = {
-    "ingress stop": "gateway, api, web",
     "dispatcher stop": "dispatcher",
     "consumer stop": "worker, notifications",
+    "ingress stop": "gateway, api, web",
 }
 STOP_SUMMARY = "Stop commands in the installer's order: "
 ARRIVED = "{} arrived after the start failed; every cleanup step was still attempted."
@@ -1706,11 +1706,11 @@ def handlers() -> list[object]:
     ("trigger", "fault"),
     [
         pytest.param(CLEANUP_HEADER, "broken pipe", id="broken-stdout-at-the-cleanup-header"),
-        pytest.param("Stopping gateway", "closed", id="closed-stdout-before-the-first-stop"),
+        pytest.param("Stopping dispatcher", "closed", id="closed-stdout-before-the-first-stop"),
         pytest.param(CLEANUP_HEADER, "SIGINT", id="sigint-at-the-cleanup-header"),
-        pytest.param("Stopping gateway", "SIGINT", id="sigint-after-the-marker-restoration"),
-        pytest.param("Stopping dispatcher", "SIGINT", id="sigint-between-two-stops"),
-        pytest.param("Stopping worker", "SIGTERM", id="sigterm-before-the-last-stop"),
+        pytest.param("Stopping dispatcher", "SIGINT", id="sigint-after-the-marker-restoration"),
+        pytest.param("Stopping worker", "SIGINT", id="sigint-between-two-stops"),
+        pytest.param("Stopping gateway", "SIGTERM", id="sigterm-before-the-last-stop"),
     ],
 )
 def test_a_failed_start_shuts_down_despite_a_failing_console_or_a_signal(

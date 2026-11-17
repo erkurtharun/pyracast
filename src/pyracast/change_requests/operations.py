@@ -10,12 +10,8 @@ from django.db.models import Q, QuerySet
 from django.utils import timezone
 from django.utils.translation import gettext
 
+from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import Membership
-from pyracast.accounts.operations import (
-    require_workspace_admin,
-    require_workspace_member,
-    workspace_membership,
-)
 from pyracast.change_requests.models import ChangeRequest, IncidentChange, ProductionChangeItem
 from pyracast.change_requests.preparation import (
     INCIDENT_FIELDS,
@@ -115,7 +111,7 @@ def submit_production(
     reason: str,
     idempotency_key: UUID,
 ) -> ChangeRequest:
-    membership = require_workspace_member(actor, tenant_id)
+    membership = tenant_membership(actor, tenant_id, role=Membership.Role.VIEWER, lock=True)
     reason = _reason(reason, required=True)
     if not 1 <= len(changes) <= 100:
         raise ValidationError(gettext("Submit 1 to 100 production intervals."))
@@ -181,7 +177,7 @@ def submit_incident(
     values: dict[str, Any] | None = None,
     ends_at: datetime | None = None,
 ) -> ChangeRequest:
-    membership = require_workspace_member(actor, tenant_id)
+    membership = tenant_membership(actor, tenant_id, role=Membership.Role.VIEWER, lock=True)
     reason = _reason(reason)
     payload_hash = digest(
         {
@@ -232,7 +228,7 @@ def submit_incident(
 
 
 def visible_requests(actor: User, tenant_id: int) -> QuerySet[ChangeRequest]:
-    membership = workspace_membership(actor, tenant_id)
+    membership = tenant_membership(actor, tenant_id)
     return ChangeRequest.objects.filter(
         Q(plant__region__tenant__membership__role=Membership.Role.ADMIN)
         | Q(proposed_by_id=actor.pk, proposer_membership_id=membership.pk),
@@ -274,7 +270,7 @@ def _validate(actor: User, request: ChangeRequest, plant: Plant, *, lock: bool =
 def approve_request(
     actor: User, tenant_id: int, request_id: int, *, review_fingerprint: str
 ) -> ChangeRequest:
-    require_workspace_admin(actor, tenant_id)
+    tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
     scoped = _request(actor, tenant_id, request_id)
     plant = lock_incident_plant(tenant_id, scoped.plant.region_id, scoped.plant_id)
     request = _request(actor, tenant_id, request_id, lock=True)
@@ -339,7 +335,7 @@ def _close(request: ChangeRequest, status: str, actor: User | None, reason: str 
 
 @transaction.atomic
 def reject_request(actor: User, tenant_id: int, request_id: int, *, reason: str) -> ChangeRequest:
-    require_workspace_admin(actor, tenant_id)
+    tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
     scoped = _request(actor, tenant_id, request_id)
     plant = lock_incident_plant(tenant_id, scoped.plant.region_id, scoped.plant_id)
     request = _request(actor, tenant_id, request_id, lock=True)
@@ -353,7 +349,7 @@ def reject_request(actor: User, tenant_id: int, request_id: int, *, reason: str)
 
 @transaction.atomic
 def withdraw_request(actor: User, tenant_id: int, request_id: int) -> ChangeRequest:
-    membership = workspace_membership(actor, tenant_id, lock=True)
+    membership = tenant_membership(actor, tenant_id, lock=True)
     request = _request(actor, tenant_id, request_id, lock=True)
     if request.proposed_by_id != actor.pk or request.proposer_membership_id != membership.pk:
         raise ChangeRequest.DoesNotExist
@@ -364,7 +360,7 @@ def withdraw_request(actor: User, tenant_id: int, request_id: int) -> ChangeRequ
 
 @transaction.atomic
 def mark_seen(actor: User, tenant_id: int, request_id: int) -> ChangeRequest:
-    membership = workspace_membership(actor, tenant_id, lock=True)
+    membership = tenant_membership(actor, tenant_id, lock=True)
     request = _request(actor, tenant_id, request_id, lock=True)
     if request.proposed_by_id != actor.pk or request.proposer_membership_id != membership.pk:
         raise ChangeRequest.DoesNotExist

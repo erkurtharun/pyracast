@@ -70,6 +70,10 @@ class Command(BaseCommand):
                 unit=options["unit"],
                 observations=rows,
             )
+        except ValidationError as exc:
+            raise CommandError("Observation import failed: " + " ".join(exc.messages)) from exc
+        except PermissionDenied as exc:
+            raise CommandError(f"Observation import failed: {exc}") from exc
         except (
             OSError,
             UnicodeError,
@@ -77,8 +81,6 @@ class Command(BaseCommand):
             ValueError,
             TypeError,
             ObjectDoesNotExist,
-            PermissionDenied,
-            ValidationError,
         ) as exc:
             raise CommandError(
                 "Observation import failed: invalid file, input, access, or record."

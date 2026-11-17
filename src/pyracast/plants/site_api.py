@@ -2,7 +2,6 @@ from typing import Any, cast
 
 from django.contrib.auth.models import User
 from django.db.models import QuerySet
-from django.shortcuts import get_object_or_404
 from drf_spectacular.utils import extend_schema, extend_schema_field
 from rest_framework import serializers
 from rest_framework.generics import GenericAPIView
@@ -51,11 +50,3 @@ class SitesView(GenericAPIView[Region]):
         data.is_valid(raise_exception=True)
         site = submit_site(cast(User, request.user), tenant_id, **data.validated_data)
         return Response(SiteOutput(site).data, status=201)
-
-
-class SiteView(SitesView):
-    @extend_schema(responses=SiteOutput)
-    def get(self, request: Request, tenant_id: int, region_id: int = 0) -> Response:
-        return Response(SiteOutput(get_object_or_404(self.get_queryset(), pk=region_id)).data)
-
-    http_method_names = ("get", "head", "options")

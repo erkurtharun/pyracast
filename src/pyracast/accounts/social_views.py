@@ -18,6 +18,7 @@ from allauth.headless.socialaccount.views import (
 from allauth.headless.socialaccount.views import (
     RedirectToProviderView as AllauthRedirectToProviderView,
 )
+from allauth.socialaccount.internal.flows.signup import get_pending_signup
 from allauth.socialaccount.models import SocialAccount, SocialApp
 from allauth.socialaccount.providers.google.provider import GoogleProvider
 from allauth.socialaccount.providers.google.views import oauth2_callback as google_callback
@@ -29,11 +30,10 @@ from django.http import (
     HttpRequest,
     HttpResponse,
     HttpResponseBase,
-    HttpResponseNotFound,
     HttpResponseRedirect,
 )
 from django.template.loader import render_to_string
-from django.views.decorators.http import require_GET, require_http_methods
+from django.views.decorators.http import require_GET
 
 from pyracast.accounts.signup import workspace_signup_transaction
 from pyracast.accounts.social import locked_social_user
@@ -49,7 +49,7 @@ class ProviderSignupView(AllauthProviderSignupView):
     input_class = CompanySocialSignupInput
 
     def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
-        if request.method == "POST":
+        if request.method == "POST" and get_pending_signup(request) is not None:
             limited = ratelimit.consume_or_429(request, action="signup")
             if limited:
                 return limited
@@ -144,11 +144,6 @@ class ManageProvidersView(AllauthManageProvidersView):
             if user is None:
                 return AuthenticationResponse(request)
             return super().dispatch(request, *args, **kwargs)
-
-
-@require_http_methods(["GET", "POST"])
-def disabled_provider_token(_request: HttpRequest) -> HttpResponseNotFound:
-    return HttpResponseNotFound()
 
 
 @require_GET

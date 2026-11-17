@@ -214,7 +214,6 @@ def test_provisioned_legacy_admin_needs_totp_after_email_code(
     assert response.status_code == 401
     assert not response.json()["meta"]["is_authenticated"]
     assert client.get("/admin/").status_code == 302
-    assert client.get("/api/platform/accounts/").status_code == 403
     secret = MFAAdapter().decrypt(user.authenticator_set.get(type="totp").data["secret"])
     verification_at = time.time()
     monkeypatch.setattr(totp_auth, "time", SimpleNamespace(time=lambda: verification_at))
@@ -225,7 +224,6 @@ def test_provisioned_legacy_admin_needs_totp_after_email_code(
         == 200
     )
     assert client.get("/admin/").status_code == 200
-    assert client.get("/api/platform/accounts/").status_code == 405
 
 
 def acquire_on_another_connection(key: str) -> bool:

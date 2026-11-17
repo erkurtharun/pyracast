@@ -1,3 +1,5 @@
+import json
+from io import StringIO
 from typing import Any
 
 import pytest
@@ -5,6 +7,7 @@ from allauth.account.models import EmailAddress
 from allauth.mfa.models import Authenticator
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.core.management import call_command
 from django.test import Client
 
 from tests.support.api import verified_admin
@@ -94,8 +97,8 @@ def test_inactive_account_cannot_create_a_session() -> None:
     user = member(active=False)
     client = Client(enforce_csrf_checks=True)
     response = submit(client, "auth/login", {"email": user.email, "password": PASSWORD})
-    assert response.status_code == 401
-    assert not response.json()["meta"]["is_authenticated"]
+    assert response.status_code == 400
+    assert [error["code"] for error in response.json()["errors"]] == ["email_password_mismatch"]
     assert client.get("/api/session/").json()["user"] is None
 
 
@@ -142,11 +145,9 @@ def test_password_change_requires_current_password_and_invalidates_all_sessions(
 
 
 def test_session_schema_exposes_only_projection() -> None:
-    client = Client()
-    client.force_login(member())
-    response = client.get("/api/schema/?format=json")
-    assert response.status_code == 200
-    session = response.json()["paths"]["/api/session/"]
+    output = StringIO()
+    call_command("spectacular", format="openapi-json", stdout=output)
+    session = json.loads(output.getvalue())["paths"]["/api/session/"]
     assert "get" in session
     assert "patch" not in session
 

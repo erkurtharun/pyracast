@@ -55,10 +55,10 @@ def test_public_projection_preserves_customer_text_and_production_attribution() 
     [
         ("solcast_forecast", "forecast"),
         ("solcast_estimated_actuals", "estimated_actuals"),
-        ("unknown Solcast metadata", "source_details_unavailable"),
+        ("unknown Solcast metadata", None),
     ],
 )
-def test_legacy_source_kinds_have_public_aliases(value: str, expected: str) -> None:
+def test_legacy_source_kinds_have_public_aliases(value: str, expected: str | None) -> None:
     assert public_source_data({"source_kind": value}) == {"source_kind": expected}
 
 
@@ -88,35 +88,65 @@ def test_legacy_quality_warnings_keep_severity_and_unknown_flags_remain_visible(
         ]
     }
     assert public_source_data(
-        {"detail": {"Solcast error": "private", "source": "Solcast failed"}}
-    ) == {"detail": {"source": "source_details_unavailable"}}
+        {"detail": {"Solcast error": "private", "message": "Solcast failed"}}
+    ) == {"detail": {"message": None}}
     assert public_source_data({"result": {"solcast_ghi_wm2": 50, "solcast_kwh_m2": None}}) == {
         "result": {"reference_ghi_wm2": 50, "reference_kwh_m2": None}
     }
     assert public_source_data({"result": {"provider": {"name": "Solcast"}, "name": "Solcast"}}) == {
-        "result": {"name": "source_details_unavailable"}
+        "result": {"name": None}
     }
     assert public_source_data({"provider": None}) == {}
 
 
-def test_renderer_preserves_platform_contract_and_sanitizes_customer_errors() -> None:
+def test_renderer_sanitizes_every_response() -> None:
     renderer = CustomerJSONRenderer()
     factory = APIRequestFactory()
     data = {"detail": "Solcast authentication failed", "provider_account_id": 42}
-    assert renderer.render(data) == b'{"detail":"source_details_unavailable"}'
-    assert renderer.render(
-        data, renderer_context={"request": Request(factory.get("/api/tenants/1/"))}
-    ) == renderer.render(data)
+    assert renderer.render(data) == b'{"detail":null}'
+    for path in ("/api/tenants/1/", "/api/platform/accounts/"):
+        assert renderer.render(
+            data, renderer_context={"request": Request(factory.get(path))}
+        ) == renderer.render(data)
     assert (
-        renderer.render(
-            data, renderer_context={"request": Request(factory.get("/api/platform/accounts/"))}
-        )
-        == b'{"detail":"Solcast authentication failed","provider_account_id":42}'
+        renderer.render({"detail": {0: ["Solcast request failed"]}}) == b'{"detail":{"0":[null]}}'
     )
-    assert (
-        renderer.render({"detail": {0: ["Solcast request failed"]}})
-        == b'{"detail":{"0":["source_details_unavailable"]}}'
-    )
+
+
+@pytest.mark.parametrize("technical", [False, True])
+def test_customer_source_text_is_never_rewritten(technical: bool) -> None:
+    value = {"source": "Solcast sheet", "nested": [{"source": "solcast export"}]}
+    assert public_source_data(value, technical=technical) == value
+
+
+def test_operator_provenance_reaches_customers_as_an_allowlist() -> None:
+    stored = {
+        "capacity_normalization": {
+            "policy": "capacity-ratio-v1",
+            "factor": 2.0,
+            "authorized_by_id": 4,
+            "source_binding_id": 5,
+            "raw_payload_capacity_kw": 1.0,
+        },
+        "reference_capacity_normalization": None,
+        "reference_import": {
+            "id": 1,
+            "source_name": "private.json",
+            "source_settings": {
+                "unit": "kW",
+                "source_reference": "private",
+                "upload_provenance": {"warnings": [], "file_metadata": {"site": "private"}},
+            },
+        },
+    }
+    assert public_source_data(stored) == {
+        "capacity_normalization": {"policy": "capacity-ratio-v1", "factor": 2.0},
+        "reference_capacity_normalization": None,
+        "reference_import": {
+            "id": 1,
+            "source_settings": {"unit": "kW", "upload_provenance": {"warnings": []}},
+        },
+    }
 
 
 @pytest.mark.django_db(transaction=True)

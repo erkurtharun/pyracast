@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from pyracast import trash
-from pyracast.accounts.operations import require_member
+from pyracast.accounts.authorization import tenant_membership
 from pyracast.api.serializers import RegionOutput
 from pyracast.plants.serializers import EmptyInput
 from pyracast.regions.models import Region
@@ -44,7 +44,7 @@ class TrashedRegionsView(GenericAPIView[Region]):
 
     def get_queryset(self) -> QuerySet[Region]:
         tenant_id = self.kwargs["tenant_id"]
-        require_member(cast(User, self.request.user), tenant_id)
+        tenant_membership(cast(User, self.request.user), tenant_id)
         return Region.objects.filter(tenant_id=tenant_id, deleted_at__isnull=False).order_by(
             "deleted_at", "id"
         )

@@ -8,7 +8,6 @@ from pyracast.plants.api import (
     CalibrationsView,
     CalibrationView,
     ForecastView,
-    ObservationsView,
     PerformanceView,
     PlantsView,
     PlantView,
@@ -17,7 +16,7 @@ from pyracast.plants.api import (
     ProductionView,
     ResetView,
 )
-from pyracast.plants.epias_api import EpiasConnectionView, EpiasHistoryView
+from pyracast.plants.epias_api import EpiasConnectionView
 
 urlpatterns = [
     path("", PlantsView.as_view()),
@@ -28,12 +27,10 @@ urlpatterns = [
     path("<int:plant_id>/outages/<int:incident_id>/", IncidentView.as_view()),
     path("<int:plant_id>/outages/<int:incident_id>/resolve/", ResolveView.as_view()),
     path("<int:plant_id>/outages/<int:incident_id>/cancel/", CancelView.as_view()),
-    path("<int:plant_id>/observations/", ObservationsView.as_view()),
     path("<int:plant_id>/production/", ProductionView.as_view()),
     path("<int:plant_id>/production/changes/", ProductionChangesView.as_view()),
     path("<int:plant_id>/production/preview/", ProductionPreviewView.as_view()),
     path("<int:plant_id>/production-source/", EpiasConnectionView.as_view()),
-    path("<int:plant_id>/reported-production/", EpiasHistoryView.as_view()),
     path("<int:plant_id>/performance/", PerformanceView.as_view()),
     path("<int:plant_id>/calibrations/", CalibrationsView.as_view()),
     path("<int:plant_id>/calibrations/<int:calibration_id>/", CalibrationView.as_view()),

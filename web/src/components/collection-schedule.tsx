@@ -1,5 +1,5 @@
 "use client";
-import { useTranslations, useLocale, useFormatter } from "next-intl";
+import { useTranslations, useLocale } from "next-intl";
 import { useEffect, useState } from "react";
 import type { components } from "@/lib/schema";
 import { request, type Region } from "@/lib/api";
@@ -81,7 +81,6 @@ function ScheduleEditor({
 }) {
     const t = useTranslations("CollectionSchedule");
     const locale = useLocale();
-    const format = useFormatter();
     const endpointLabels: Record<string, string> = {
         forecasts: t("forecast"),
         estimated_actuals: t("historicalEstimates"),
@@ -112,13 +111,14 @@ function ScheduleEditor({
     };
 
     const [times, setTimes] = useState(data.times);
-    const nextReset = new Date(
-        Date.parse(`${data.quota_utc_day}T00:00:00Z`) + 86_400_000,
-    ).toLocaleString(locale, {
-        timeZone: data.timezone,
-        dateStyle: "medium",
-        timeStyle: "short",
-    });
+    const moment = (value: string | null, missing: string) =>
+        value
+            ? new Date(value).toLocaleString(locale, {
+                  timeZone: data.timezone,
+                  dateStyle: "medium",
+                  timeStyle: "short",
+              })
+            : missing;
     return (
         <>
             <section className="panel">
@@ -236,41 +236,20 @@ function ScheduleEditor({
                 </ActionForm>
             </section>
             <section className="panel">
-                <h3>{t("accountUsageTodayUTC")}</h3>
+                <h3>{t("collectionStatus")}</h3>
                 <div className="stats">
                     <Stat
-                        label={t("requestsUsed")}
-                        value={format.number(data.used_today)}
+                        label={t("lastSuccess")}
+                        value={moment(data.last_success_at, t("notYet"))}
                     />
                     <Stat
-                        label={t("trackedRemaining")}
-                        value={format.number(data.remaining_today)}
-                    />
-                    <Stat
-                        label={t("dailyLimit")}
-                        value={format.number(data.daily_request_limit)}
+                        label={t("nextCollection")}
+                        value={moment(
+                            data.next_collection_at,
+                            t("notScheduled"),
+                        )}
                     />
                 </div>
-                <details>
-                    <summary>{t("usageDetails")}</summary>
-                    <p className="fine">
-                        {t("usagePolicy", {
-                            day: data.quota_utc_day,
-                            reset: nextReset,
-                            timezone: data.timezone,
-                            limit: data.max_forecast_times,
-                        })}
-                    </p>
-                    {data.requests_by_outcome && (
-                        <p className="fine">
-                            {t("trackedAttempts", {
-                                succeeded: data.requests_by_outcome.succeeded,
-                                failed: data.requests_by_outcome.failed,
-                                uncertain: data.requests_by_outcome.uncertain,
-                            })}
-                        </p>
-                    )}
-                </details>
             </section>
             {data.recent_jobs?.length > 0 && (
                 <details className="panel">

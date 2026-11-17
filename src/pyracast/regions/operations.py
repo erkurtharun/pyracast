@@ -9,8 +9,8 @@ from django.db import transaction
 from django.utils import timezone as django_timezone
 from django.utils.translation import gettext
 
-from pyracast.accounts.models import Tenant
-from pyracast.accounts.operations import require_admin, require_workspace_admin
+from pyracast.accounts.authorization import require_platform_admin, tenant_membership
+from pyracast.accounts.models import Membership, Tenant
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.models import CollectionJob
 from pyracast.regions.models import (
@@ -66,7 +66,7 @@ def submit_region(
     if not name.strip() or len(name) > 200:
         raise ValidationError(gettext("A region name of at most 200 characters is required."))
     with transaction.atomic():
-        require_workspace_admin(actor, tenant_id)
+        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
         require_available_location(tenant_id, latitude, longitude)
         return Region.objects.create(
             tenant_id=tenant_id,
@@ -75,30 +75,6 @@ def submit_region(
             longitude=canonical_coordinate(longitude),
             timezone=timezone,
         )
-
-
-def update_region(
-    actor: User,
-    region_id: int,
-    tenant_id: int,
-    *,
-    name: str,
-) -> Region:
-    if not name.strip() or len(name) > 200:
-        raise ValidationError(gettext("A region name of at most 200 characters is required."))
-    with transaction.atomic():
-        require_workspace_admin(actor, tenant_id)
-        region = Region.objects.select_for_update().get(
-            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
-        )
-        if region.name == name.strip():
-            return region
-        region.name = name.strip()
-        region.save(update_fields=("name",))
-        AuditEvent.objects.create(
-            actor=actor, region=region, action="region_renamed", revision=region.revision
-        )
-    return region
 
 
 def request_location_change(
@@ -117,7 +93,7 @@ def request_location_change(
     if len(reason) > 1000:
         raise ValidationError(gettext("A reason of at most 1000 characters is required."))
     with transaction.atomic():
-        require_workspace_admin(actor, tenant_id)
+        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
@@ -155,7 +131,7 @@ def request_location_change(
 def review_location_change(
     actor: User, request_id: int, *, approve: bool
 ) -> RegionLocationChangeRequest:
-    require_admin(actor)
+    require_platform_admin(actor)
     with transaction.atomic():
         change = RegionLocationChangeRequest.objects.get(pk=request_id)
         if approve:
@@ -232,7 +208,7 @@ def configure_binding(
     installation_date: date | None = None,
     settings_verification_reference: str = "",
 ) -> SiteBinding:
-    require_admin(actor)
+    require_platform_admin(actor)
     if not site_id.strip() or len(site_id) > 200:
         raise ValidationError("A provider site identity is required.")
     if not math.isfinite(capacity_kw) or capacity_kw <= 0:
@@ -292,7 +268,7 @@ def configure_binding(
 
 
 def approve_region(actor: User, region_id: int, binding_id: int, now: datetime) -> CollectionJob:
-    require_admin(actor)
+    require_platform_admin(actor)
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
     with transaction.atomic():
@@ -338,7 +314,7 @@ def approve_region(actor: User, region_id: int, binding_id: int, now: datetime) 
 
 
 def transition_region(actor: User, region_id: int, status: str) -> Region:
-    require_admin(actor)
+    require_platform_admin(actor)
     if status not in {"rejected", "suspended"}:
         raise ValidationError("Use approval for approval transitions.")
     with transaction.atomic():

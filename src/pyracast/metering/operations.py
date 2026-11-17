@@ -1,12 +1,10 @@
-from datetime import date, timedelta
-
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Max, Min, Q
 from django.utils import timezone
 
-from pyracast.accounts.operations import require_admin, require_member
+from pyracast.accounts.authorization import require_platform_admin, tenant_membership
 from pyracast.epias import EpiasClient
 from pyracast.metering.client import get_epias_client
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
@@ -17,7 +15,7 @@ from pyracast.regions.models import Region
 
 def member_plant(plant_id: int, actor: User) -> Plant:
     plant = Plant.objects.select_related("region").get(pk=plant_id, region__deleted_at__isnull=True)
-    require_member(actor, plant.region.tenant_id)
+    tenant_membership(actor, plant.region.tenant_id)
     return plant
 
 
@@ -29,7 +27,7 @@ def connect_epias(
     expected_eic: str,
     client: EpiasClient | None = None,
 ) -> EpiasConnection:
-    require_admin(actor)
+    require_platform_admin(actor)
     plant = Plant.objects.select_related("region").get(pk=plant_id, region__deleted_at__isnull=True)
     if isinstance(provider_plant_id, bool) or provider_plant_id <= 0 or not expected_eic.strip():
         raise ValidationError("invalid_epias_plant")
@@ -46,7 +44,7 @@ def connect_epias(
     with transaction.atomic():
         Region.objects.select_for_update().get(pk=plant.region_id)
         plant = Plant.objects.select_for_update().get(pk=plant.pk)
-        require_admin(User.objects.select_for_update().get(pk=actor.pk))
+        require_platform_admin(User.objects.select_for_update().get(pk=actor.pk))
         if (
             plant.region.deleted_at is not None
             or plant.current_configuration is None
@@ -86,12 +84,12 @@ def connect_epias(
 
 
 def disconnect_epias(plant_id: int, *, actor: User) -> None:
-    require_admin(actor)
+    require_platform_admin(actor)
     plant = Plant.objects.select_related("region").get(pk=plant_id, region__deleted_at__isnull=True)
     with transaction.atomic():
         Region.objects.select_for_update().get(pk=plant.region_id)
         Plant.objects.select_for_update().get(pk=plant.pk)
-        require_admin(User.objects.select_for_update().get(pk=actor.pk))
+        require_platform_admin(User.objects.select_for_update().get(pk=actor.pk))
         connection = EpiasConnection.objects.select_for_update().filter(plant=plant).first()
         if connection is None:
             return
@@ -166,35 +164,3 @@ def _source_identity(connection: EpiasConnection) -> Q:
             job__provider_plant__id=connection.settlement_plant_id,
         )
     return sources & Q(job__provider_plant__eic=connection.eic)
-
-
-def read_epias_history(
-    plant_id: int,
-    *,
-    actor: User,
-    start_day: date | None = None,
-    end_day: date | None = None,
-    source_kind: str | None = "realtime_generation",
-) -> list[EpiasSnapshot]:
-    plant = member_plant(plant_id, actor)
-    end_day = end_day or timezone.now().date()
-    start_day = start_day or end_day - timedelta(days=30)
-    if end_day < start_day or (end_day - start_day).days > 366:
-        raise ValidationError("invalid_history_window")
-    if source_kind not in {None, "realtime_generation", "settlement_injection"}:
-        raise ValidationError("invalid_production_source")
-    connection = EpiasConnection.objects.filter(plant=plant).first()
-    if connection is None:
-        return []
-    snapshots = EpiasSnapshot.objects.filter(
-        _source_identity(connection),
-        connection=connection,
-        target_day__range=(start_day, end_day),
-    )
-    if source_kind is not None:
-        snapshots = snapshots.filter(source_kind=source_kind)
-    return list(
-        snapshots.order_by(
-            "target_day", "source_kind", "-collected_at", "-available_at", "-pk"
-        ).distinct("target_day", "source_kind")
-    )

@@ -1252,11 +1252,27 @@ def test_reminder_api_requires_an_explicit_recipient_list() -> None:
     client.force_authenticate(system.member)
     response = client.put(
         f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/reminders/",
-        {"enabled": True, "email": "obsolete@example.com", "times": ["10:00"], "language": "en"},
+        {"enabled": True, "times": ["10:00"], "language": "en"},
         format="json",
     )
     assert response.status_code == 400
     assert response.json() == {
         "code": "http_400",
         "detail": {"recipients": ["This field is required."]},
+    }
+    response = client.put(
+        f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/reminders/",
+        {
+            "enabled": True,
+            "email": "obsolete@example.com",
+            "recipients": [system.member.email],
+            "times": ["10:00"],
+            "language": "en",
+        },
+        format="json",
+    )
+    assert response.status_code == 400
+    assert response.json() == {
+        "code": "http_400",
+        "detail": {"non_field_errors": ["Unknown fields are not accepted."]},
     }

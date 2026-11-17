@@ -19,7 +19,7 @@ def admin_system() -> System:
 
 
 def setup_url(system: System) -> str:
-    return reverse("admin:regions_region_setup", args=(system.region.pk,))
+    return reverse("admin:workspace_plant", args=(system.region.pk,))
 
 
 def setup_input(system: System, **changes: object) -> dict[str, object]:

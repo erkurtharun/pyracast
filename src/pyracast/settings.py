@@ -29,7 +29,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "django.contrib.admin",
+    "django.contrib.admin.apps.SimpleAdminConfig",
     "django.contrib.postgres",
     "allauth",
     "allauth.account",
@@ -158,6 +158,7 @@ ACCOUNT_SESSION_REMEMBER = False
 ACCOUNT_LOGOUT_ON_PASSWORD_CHANGE = True
 ACCOUNT_LOGIN_ON_EMAIL_CONFIRMATION = False
 ACCOUNT_LOGIN_ON_PASSWORD_RESET = False
+ACCOUNT_LOGIN_TIMEOUT = 900
 PASSWORD_RESET_TIMEOUT = 3600
 HEADLESS_ONLY = True
 HEADLESS_CLIENTS = ("browser",)
@@ -178,13 +179,19 @@ MFA_REAUTHENTICATION_REQUIRED = True
 MFA_RECOVERY_CODES_SHOW_ONCE = True
 MFA_TOTP_ISSUER = "Pyracast"
 USERSESSIONS_TRACK_ACTIVITY = True
+PASSWORD_CHANGE_MAX_ATTEMPTS = 5
+PASSWORD_CHANGE_WINDOW_MINUTES = 10
+# allauth clears every rate of `login_failed` after a second-factor success or a password reset,
+# so that action stays per address and the per-IP failure count is a project action of its own.
 ACCOUNT_RATE_LIMITS = {
     "login": "20/m/ip",
-    "login_failed": "10/10m/ip,5/10m/key",
+    "login_failed": "5/10m/key,100/d/key",
+    "login_failed_ip": "10/10m/ip",
     "signup": "5/h/ip",
     "reset_password": "5/h/ip,3/h/key",
     "reset_password_from_key": "10/h/ip",
-    "confirm_email": "1/1m/key",
+    "confirm_email": "1/1m/key,6/h/key",
+    "change_password": f"{PASSWORD_CHANGE_MAX_ATTEMPTS}/{PASSWORD_CHANGE_WINDOW_MINUTES}m/user",
 }
 CACHES = {
     "default": {
@@ -202,6 +209,7 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
+    "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
     "DEFAULT_RENDERER_CLASSES": ["pyracast.api.renderers.CustomerJSONRenderer"],
     "EXCEPTION_HANDLER": "pyracast.api.errors.exception_handler",
 }
@@ -209,11 +217,9 @@ SPECTACULAR_SETTINGS = {
     "TITLE": "Pyracast API",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
-    "PREPROCESSING_HOOKS": ["pyracast.api.schema.customer_endpoints"],
     "ENUM_NAME_OVERRIDES": {
         "PowerBasisEnum": [("ac", "ac"), ("dc", "dc")],
         "CalibrationStatusEnum": "pyracast.plants.serializers.calibration_status_choices",
-        "EpiasSourceKindEnum": "pyracast.metering.history.PRODUCTION_SOURCES",
         "ForecastSourceKindEnum": ["forecast", "estimated_actuals", "mixed"],
         "ProductionQualityEnum": "pyracast.plants.models.OBSERVATION_QUALITIES",
         "ChangeRequestStatusEnum": ["pending", "approved", "rejected", "withdrawn"],

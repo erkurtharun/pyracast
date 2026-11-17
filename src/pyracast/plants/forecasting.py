@@ -8,7 +8,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from pyracast.accounts.operations import require_member
+from pyracast.accounts.authorization import tenant_membership
 from pyracast.forecasts.capacity_normalization import normalization_provenance
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.models import ForecastSnapshot
@@ -351,7 +351,7 @@ def plant_forecast(
     resolution_minutes: int,
     as_of: datetime | None = None,
 ) -> dict[str, object]:
-    require_member(actor, tenant_id)
+    tenant_membership(actor, tenant_id)
     region = Region.objects.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
     plant = Plant.objects.get(pk=plant_id, region=region)
     now = timezone.now()

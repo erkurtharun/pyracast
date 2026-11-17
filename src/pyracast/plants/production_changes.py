@@ -9,7 +9,8 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext
 
-from pyracast.accounts.operations import require_workspace_admin
+from pyracast.accounts.authorization import tenant_membership
+from pyracast.accounts.models import Membership
 from pyracast.plants.measurements import select_measurements, select_provider_measurements
 from pyracast.plants.models import Plant, PlantConfiguration, PlantEvent, ProductionObservation
 from pyracast.plants.observations import observation_heads
@@ -160,7 +161,7 @@ def change_production(
     changes: list[ProductionChange],
 ) -> ObservationImportResult:
     with transaction.atomic():
-        require_workspace_admin(actor, tenant_id)
+        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
         configuration = lock_production_configuration(
             tenant_id, region_id, plant_id, configuration_id
         )
@@ -245,7 +246,7 @@ def preview_production(
     observations: list[ObservationInput],
 ) -> dict[str, Any]:
     with transaction.atomic():
-        require_workspace_admin(actor, tenant_id)
+        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
         configuration = lock_production_configuration(
             tenant_id, region_id, plant_id, configuration_id
         )

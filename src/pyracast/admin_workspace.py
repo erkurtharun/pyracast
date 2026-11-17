@@ -18,8 +18,8 @@ from django.utils import timezone
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 
+from pyracast.accounts.authorization import require_platform_admin
 from pyracast.accounts.models import Tenant
-from pyracast.accounts.operations import require_admin
 from pyracast.admin_health import summarize_health
 from pyracast.admin_health_queries import (
     collection_jobs_for_issue,
@@ -416,7 +416,7 @@ class WorkspaceSettingsForm(forms.Form):
     expected_max_recipients = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
 
     def apply(self, actor: User) -> None:
-        require_admin(actor)
+        require_platform_admin(actor)
         with transaction.atomic():
             settings, _created = NotificationSettings.objects.select_for_update().get_or_create(
                 pk=1
@@ -452,7 +452,7 @@ class ReviewDecisionForm(forms.Form):
     )
 
     def apply(self, actor: User, region_id: int) -> None:
-        require_admin(actor)
+        require_platform_admin(actor)
         data = self.cleaned_data
         with transaction.atomic():
             if data["action"] == "approve_location":

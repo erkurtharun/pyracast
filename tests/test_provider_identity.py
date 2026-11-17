@@ -32,7 +32,7 @@ IDENTITIES = [
 def test_raw_provider_variants_share_one_account_and_quota(
     original: str, equivalent: str, expected: str
 ) -> None:
-    admin = User.objects.create(username="admin", is_superuser=True)
+    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
     existing = ProviderAccount.objects.create(
         provider="\xa0FIXTURE\t",
         external_account_id=original,
@@ -69,7 +69,7 @@ def test_raw_provider_variants_share_one_account_and_quota(
 def test_new_account_identity_uses_database_unicode_casefold(
     original: str, equivalent: str, expected: str
 ) -> None:
-    admin = User.objects.create(username="admin", is_superuser=True)
+    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
     created = create_account(
         admin, provider="fixture", external_account_id=original, api_key=provider_key()
     )
@@ -85,7 +85,7 @@ def test_new_account_identity_uses_database_unicode_casefold(
 
 
 def test_dotted_and_dotless_turkish_identities_keep_distinct_accounts() -> None:
-    admin = User.objects.create(username="admin", is_superuser=True)
+    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
     accounts = [
         create_account(
             admin, provider="fixture", external_account_id=identity, api_key=provider_key()
@@ -97,7 +97,7 @@ def test_dotted_and_dotless_turkish_identities_keep_distinct_accounts() -> None:
 
 
 def test_concurrent_unicode_account_creation_keeps_one_quota_identity() -> None:
-    admin = User.objects.create(username="admin", is_superuser=True)
+    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
     barrier = Barrier(2)
 
     def create(identity: str) -> int:
