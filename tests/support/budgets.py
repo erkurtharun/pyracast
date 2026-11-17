@@ -1,18 +1,27 @@
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 
 from django.db import connections
 from django.test.utils import CaptureQueriesContext
 
-# Tests mirror `default` into the `auth_cache` alias, so only `default` is counted.
-ALIAS = "default"
+ALIASES = ("default", "auth_cache")
 
 
 @contextmanager
-def query_budget(max_queries: int) -> Iterator[CaptureQueriesContext]:
-    with CaptureQueriesContext(connections[ALIAS]) as captured:
-        yield captured
-    statements = [query["sql"] for query in captured.captured_queries]
+def captured_statements() -> Iterator[list[str]]:
+    statements: list[str] = []
+    with ExitStack() as stack:
+        captures = [
+            stack.enter_context(CaptureQueriesContext(connections[alias])) for alias in ALIASES
+        ]
+        yield statements
+    statements.extend(query["sql"] for capture in captures for query in capture.captured_queries)
+
+
+@contextmanager
+def query_budget(max_queries: int) -> Iterator[list[str]]:
+    with captured_statements() as statements:
+        yield statements
     assert len(statements) <= max_queries, (
         f"{len(statements)} queries exceed the budget of {max_queries}:\n" + "\n".join(statements)
     )
@@ -20,9 +29,9 @@ def query_budget(max_queries: int) -> Iterator[CaptureQueriesContext]:
 
 def count_queries(action: Callable[[], object]) -> int:
     action()
-    with CaptureQueriesContext(connections[ALIAS]) as captured:
+    with captured_statements() as statements:
         action()
-    return len(captured)
+    return len(statements)
 
 
 def assert_scale_invariant(

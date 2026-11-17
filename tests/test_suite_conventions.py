@@ -9,11 +9,15 @@ TESTS = Path(__file__).resolve().parent
 LOCMEM = "django.core.mail.backends.locmem.EmailBackend"
 
 
-def _imported_modules(path: Path) -> set[str]:
+def _imported_modules(path: Path, root: Path) -> set[str]:
+    package = ["tests", *path.relative_to(root).parent.parts]
     modules: set[str] = set()
     for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-        if isinstance(node, ast.ImportFrom) and node.module:
-            modules.add(node.module)
+        if isinstance(node, ast.ImportFrom):
+            base = package[: len(package) - node.level + 1] if node.level else []
+            module = ".".join([*base, *([node.module] if node.module else [])])
+            modules.add(module)
+            modules.update(f"{module}.{alias.name}" for alias in node.names)
         elif isinstance(node, ast.Import):
             modules.update(alias.name for alias in node.names)
     return modules
@@ -22,7 +26,11 @@ def _imported_modules(path: Path) -> set[str]:
 def _test_module_imports(root: Path) -> dict[str, list[str]]:
     importers = {
         path.relative_to(root).as_posix(): sorted(
-            module for module in _imported_modules(path) if re.match(r"tests\.test_", module)
+            {
+                match.group()
+                for module in _imported_modules(path, root)
+                if (match := re.match(r"tests\.test_\w+", module))
+            }
         )
         for path in sorted(root.rglob("*.py"))
     }

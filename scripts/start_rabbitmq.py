@@ -19,7 +19,8 @@ RABBITMQ_URL = (
     "rabbitmq-server-windows-4.4.0.zip"
 )
 RABBITMQ_SHA256 = "c077a084890e57e1498e479913d4d5bda77e88647e153b433e97f72a31431542"
-QUEUE_URL = "amqp://guest:guest@127.0.0.1:5672/%2F"
+PORT = 5672
+QUEUE_URL = f"amqp://guest:guest@127.0.0.1:{PORT}/%2F"
 SERVER = Path("rabbitmq_server-4.4.0") / "sbin" / "rabbitmq-server.bat"
 
 
@@ -36,7 +37,7 @@ def download_and_extract(url: str, digest: str, archive: Path, destination: Path
 def port_open() -> bool:
     with socket.socket() as sock:
         sock.settimeout(0.5)
-        return sock.connect_ex(("127.0.0.1", 5672)) == 0
+        return sock.connect_ex(("127.0.0.1", PORT)) == 0
 
 
 def start_broker(root: Path, server: Path) -> None:
@@ -87,7 +88,7 @@ def provision_windows(root: Path) -> str:
         download_and_extract(RABBITMQ_URL, RABBITMQ_SHA256, root / "rabbitmq.zip", root)
     config = root / "rabbitmq.conf"
     if not config.is_file():
-        config.write_text("listeners.tcp.1 = 127.0.0.1:5672\n", encoding="utf-8")
+        config.write_text(f"listeners.tcp.1 = 127.0.0.1:{PORT}\n", encoding="utf-8")
     start_broker(root, root / SERVER)
     return "started"
 

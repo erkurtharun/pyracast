@@ -1,6 +1,7 @@
 import argparse
 import csv
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -11,6 +12,7 @@ import tempfile
 import time
 import urllib.request
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +22,7 @@ POSTGRES_IMAGE = (
     "postgres:18.6@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42"
 )
 CONTAINER = "pyracast-postgres"
+EPHEMERAL_CONTAINER = "pyracast-postgres-ephemeral"
 VOLUME = "pyracast-postgres-data"
 # Only for throwaway clusters: a crash can lose or corrupt data that was not flushed.
 NON_DURABLE_OPTIONS = (
@@ -163,65 +166,101 @@ def start_server(command: list[str], env: dict[str, str]) -> None:
     )
 
 
+def database_exists(binary: Path, port: str, env: dict[str, str]) -> bool:
+    found = execute(
+        [
+            str(binary / "psql.exe"),
+            "-h",
+            "127.0.0.1",
+            "-p",
+            port,
+            "-U",
+            "pyracast",
+            "-d",
+            "postgres",
+            "-w",
+            "-X",
+            "-tAc",
+            "SELECT 1 FROM pg_database WHERE datname = 'pyracast'",
+        ],
+        env=env,
+        check=True,
+        capture_output=True,
+    ).stdout
+    return found.strip() == "1"
+
+
 def provision_windows(root: Path, port: str, options: tuple[str, ...]) -> str:
     data = root / "data"
-    if (data / "PG_VERSION").is_file() and accepts_connections(port):
-        return "running"
-    if not (data / "PG_VERSION").is_file() and data.exists() and any(data.iterdir()):
+    cluster = (data / "PG_VERSION").is_file()
+    if not cluster and data.exists() and any(data.iterdir()):
         raise RuntimeError(f"{data} is not a PostgreSQL cluster; nothing was changed.")
     binary = install_binaries(root)
     env = os.environ.copy()
     env["PATH"] = os.pathsep.join((str(binary), str(binary.parent / "lib"), env.get("PATH", "")))
-    created = not (data / "PG_VERSION").is_file()
-    if created:
-        windows_preflight(binary, env)
+    if cluster and accepts_connections(port):
+        status = "running"
+    else:
+        if not cluster:
+            windows_preflight(binary, env)
+            run(
+                str(binary / "initdb.exe"),
+                "-D",
+                str(data),
+                "-U",
+                "pyracast",
+                "--auth=trust",
+                "--encoding=UTF8",
+                "--no-locale",
+                env=env,
+            )
+        server = " ".join(("-h", "127.0.0.1", "-p", port, *options))
+        log = root / "postgres.log"
+        pg_ctl = str(binary / "pg_ctl.exe")
+        start_server(
+            [pg_ctl, "-D", str(data), "-l", str(log), "-o", server, "-w", "-t", "60", "start"], env
+        )
+        status = "started" if cluster else "created"
+    if not database_exists(binary, port, env):
         run(
-            str(binary / "initdb.exe"),
-            "-D",
-            str(data),
+            str(binary / "createdb.exe"),
+            "-h",
+            "127.0.0.1",
+            "-p",
+            port,
             "-U",
             "pyracast",
-            "--auth=trust",
-            "--encoding=UTF8",
-            "--no-locale",
+            "pyracast",
             env=env,
         )
-    server = " ".join(("-h", "127.0.0.1", "-p", port, *options))
-    log = root / "postgres.log"
-    pg_ctl = str(binary / "pg_ctl.exe")
-    start_server(
-        [pg_ctl, "-D", str(data), "-l", str(log), "-o", server, "-w", "-t", "60", "start"], env
+    return status
+
+
+@dataclass(frozen=True)
+class Container:
+    running: bool
+    volumes: frozenset[str]
+    command: tuple[str, ...]
+
+
+def inspect_container(docker: str, name: str) -> Container | None:
+    result = execute([docker, "container", "inspect", name], capture_output=True, check=False)
+    if result.returncode:
+        return None
+    (details,) = json.loads(result.stdout)
+    mounts = details.get("Mounts") or []
+    return Container(
+        running=details["State"]["Running"] is True,
+        volumes=frozenset(mount["Name"] for mount in mounts if mount.get("Type") == "volume"),
+        command=tuple(details["Config"].get("Cmd") or ()),
     )
-    if not created:
-        return "started"
-    run(
-        str(binary / "createdb.exe"),
-        "-h",
-        "127.0.0.1",
-        "-p",
-        port,
-        "-U",
-        "pyracast",
-        "pyracast",
-        env=env,
-    )
-    return "created"
 
 
-def container_state(docker: str, name: str) -> str | None:
-    result = execute(
-        [docker, "inspect", "--format", "{{.State.Running}}", name],
-        capture_output=True,
-        check=False,
-    )
-    return result.stdout.strip() if result.returncode == 0 else None
-
-
-def wait_for_container(docker: str) -> None:
+def wait_for_container(docker: str, name: str) -> None:
     for _ in range(60):
         if (
             execute(
-                (docker, "exec", CONTAINER, "pg_isready", "-U", "pyracast"),
+                (docker, "exec", name, "pg_isready", "-U", "pyracast"),
                 check=False,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -236,11 +275,20 @@ def wait_for_container(docker: str) -> None:
 def provision_docker(
     docker: str, port: str, options: tuple[str, ...], *, volume: str | None
 ) -> str:
-    state = container_state(docker, CONTAINER) if volume else None
-    if state == "true":
+    name = CONTAINER if volume else EPHEMERAL_CONTAINER
+    existing = inspect_container(docker, name) if volume else None
+    if existing is not None and (
+        volume not in existing.volumes
+        or not frozenset(NON_DURABLE_OPTIONS[1::2]).isdisjoint(existing.command)
+    ):
+        raise RuntimeError(
+            f"Container {name} does not keep durable data in volume {volume}; nothing was "
+            "changed. Move its data or remove it, then rerun."
+        )
+    if existing is not None and existing.running:
         return "running"
-    if state is not None:
-        run(docker, "start", CONTAINER)
+    if existing is not None:
+        run(docker, "start", name)
         status = "started"
     else:
         storage = ("--volume", f"{volume}:/var/lib/postgresql") if volume else ()
@@ -249,7 +297,7 @@ def provision_docker(
             "run",
             "--detach",
             "--name",
-            CONTAINER,
+            name,
             "-p",
             f"127.0.0.1:{port}:5432",
             *storage,
@@ -263,7 +311,7 @@ def provision_docker(
             *(("postgres", *options) if options else ()),
         )
         status = "created"
-    wait_for_container(docker)
+    wait_for_container(docker, name)
     return status
 
 
@@ -278,6 +326,7 @@ def parse(argv: list[str] | None) -> argparse.Namespace:
         action="store_true",
         help="turn off fsync, synchronous_commit and full_page_writes; needs --ephemeral",
     )
+    parser.add_argument("--port", type=int, help="listening port; defaults to PGPORT, else 55432")
     arguments = parser.parse_args(argv)
     if arguments.non_durable and not arguments.ephemeral:
         parser.error("--non-durable is only for a throwaway cluster; add --ephemeral")
@@ -287,7 +336,7 @@ def parse(argv: list[str] | None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     arguments = parse(argv)
     options = NON_DURABLE_OPTIONS if arguments.non_durable else ()
-    port = str(int(os.environ.get("PGPORT", "55432")))
+    port = str(arguments.port or int(os.environ.get("PGPORT", "55432")))
     if sys.platform == "win32":
         if arguments.ephemeral:
             root = windows_workspace()

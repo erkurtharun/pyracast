@@ -7,15 +7,15 @@ import psycopg
 
 from scripts import start_postgres, start_rabbitmq
 
-LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+LOCAL_HOSTS = {"127.0.0.1", "localhost"}
 REJECTED = "{service} rejected the configured credentials; check {settings} in .env."
 
 
-def _postgres_available() -> bool:
+def _postgres_available(host: str, port: str) -> bool:
     try:
         with psycopg.connect(
-            host=os.environ.get("PGHOST", "127.0.0.1"),
-            port=os.environ.get("PGPORT", "5432"),
+            host=host,
+            port=port,
             dbname=os.environ.get("PGDATABASE", "pyracast"),
             user=os.environ.get("PGUSER", "pyracast"),
             password=os.environ.get("PGPASSWORD", ""),
@@ -37,17 +37,17 @@ def _postgres_available() -> bool:
 
 def _ensure_postgres() -> None:
     host = os.environ.get("PGHOST", "127.0.0.1")
-    port = os.environ.get("PGPORT", "5432")
+    port = str(int(os.environ.get("PGPORT", "5432")))
     if host not in LOCAL_HOSTS:
         raise RuntimeError(
-            f"The launcher uses only a loopback database; PGHOST is {host}. "
-            "Run remote databases without the launcher."
+            f"The launcher uses only a loopback database on 127.0.0.1 or localhost; PGHOST is "
+            f"{host}. Run other databases without the launcher."
         )
     print(f"PostgreSQL {host}:{port}/{os.environ.get('PGDATABASE', 'pyracast')}", flush=True)
-    if _postgres_available():
+    if _postgres_available(host, port):
         return
-    start_postgres.main([])
-    if not _postgres_available():
+    start_postgres.main(["--port", port])
+    if not _postgres_available(host, port):
         raise RuntimeError("PostgreSQL did not become available; see its log in the data root.")
 
 
@@ -83,8 +83,13 @@ def _ensure_rabbitmq() -> None:
     print(f"RabbitMQ {parameters.host}:{parameters.port}", flush=True)
     if _rabbit_ready(parameters):
         return
-    if sys.platform != "win32" or parameters.host not in LOCAL_HOSTS:
+    if sys.platform != "win32":
         raise RuntimeError("RabbitMQ is unavailable; start it with the README Docker command.")
+    if parameters.host not in LOCAL_HOSTS or parameters.port != start_rabbitmq.PORT:
+        raise RuntimeError(
+            f"RabbitMQ is unavailable at {parameters.host}:{parameters.port}; the helper starts "
+            f"a broker only on 127.0.0.1:{start_rabbitmq.PORT}."
+        )
     start_rabbitmq.main([])
     if not _rabbit_ready(parameters):
         raise RuntimeError("RabbitMQ did not become available; see broker.log in its data root.")
