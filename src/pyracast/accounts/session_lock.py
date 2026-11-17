@@ -104,7 +104,7 @@ def _busy_page(request: HttpRequest) -> HttpResponse:
         )
     response = HttpResponse(page, status=503)
     if "session_retry" not in request.GET:
-        path = request.get_full_path()
+        path = "/" + request.get_full_path().lstrip("/")
         # One automatic reload: the marker stops a refresh loop while the session stays busy.
         response["Refresh"] = f"1; url={path}{'&' if '?' in path else '?'}session_retry=1"
     patch_cache_control(response, private=True, no_store=True)

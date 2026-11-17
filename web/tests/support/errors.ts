@@ -16,11 +16,13 @@ export function allauthErrorBody(
     code: ErrorCode,
     errors: AllauthError[],
 ) {
-    const fields = Object.fromEntries(
-        errors.flatMap((error) =>
-            error.param ? [[error.param, error.message]] : [],
-        ),
-    );
+    const fields: Record<string, string> = {};
+    for (const error of errors) {
+        if (error.param)
+            fields[error.param] = [fields[error.param], error.message]
+                .filter(Boolean)
+                .join(" ");
+    }
     return {
         status,
         errors,

@@ -1995,6 +1995,15 @@ export interface operations {
                     "application/json": components["schemas"]["InvitationAcceptanceOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     session_retrieve: {
@@ -2012,6 +2021,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionOutput"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -2037,6 +2055,15 @@ export interface operations {
                     "application/json": components["schemas"]["SessionOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_list: {
@@ -2057,6 +2084,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaginatedTenantOutputList"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -2090,6 +2126,15 @@ export interface operations {
                     "application/json": components["schemas"]["PaginatedChangeRequestSummaryOutputList"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_change_requests_retrieve: {
@@ -2110,6 +2155,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChangeRequestOutput"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -2138,6 +2192,15 @@ export interface operations {
                     "application/json": components["schemas"]["ChangeRequestOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_change_requests_reject_create: {
@@ -2164,6 +2227,15 @@ export interface operations {
                     "application/json": components["schemas"]["ChangeRequestOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_change_requests_seen_create: {
@@ -2184,6 +2256,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChangeRequestOutput"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -2208,6 +2289,15 @@ export interface operations {
                     "application/json": components["schemas"]["ChangeRequestOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_invitations_retrieve: {
@@ -2227,6 +2317,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceInvitationsOutput"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -2254,6 +2353,15 @@ export interface operations {
                     "application/json": components["schemas"]["InvitationOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_invitations_destroy: {
@@ -2275,6 +2383,15 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_members_retrieve: {
@@ -2294,6 +2411,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceMembersOutput"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -2317,6 +2443,15 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_regions_destroy: {
@@ -2338,6 +2473,15 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_regions_collection_schedule_retrieve: {
@@ -2358,6 +2502,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CollectionScheduleOutput"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -2384,6 +2537,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CollectionScheduleOutput"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -2416,6 +2578,15 @@ export interface operations {
                     "application/json": components["schemas"]["ForecastOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_regions_location_change_requests_list: {
@@ -2439,6 +2610,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaginatedLocationChangeOutputList"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -2467,6 +2647,15 @@ export interface operations {
                     "application/json": components["schemas"]["LocationChangeOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_regions_plants_list: {
@@ -2490,6 +2679,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaginatedPlantOutputList"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -2516,6 +2714,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlantOutput"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -2545,6 +2752,15 @@ export interface operations {
                     "application/json": components["schemas"]["PlantOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_regions_plants_destroy: {
@@ -2567,6 +2783,15 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_regions_plants_calibration_automation_retrieve: {
@@ -2588,6 +2813,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CalibrationAutomationOutput"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -2617,6 +2851,15 @@ export interface operations {
                     "application/json": components["schemas"]["CalibrationAutomationOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_regions_plants_calibration_reset_create: {
@@ -2638,6 +2881,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActivationOutput"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -2664,6 +2916,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaginatedCalibrationSummaryOutputList"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -2693,6 +2954,15 @@ export interface operations {
                     "application/json": components["schemas"]["CalibrationOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_regions_plants_calibrations_retrieve: {
@@ -2717,6 +2987,15 @@ export interface operations {
                     "application/json": components["schemas"]["CalibrationOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_regions_plants_calibrations_activate_create: {
@@ -2739,6 +3018,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActivationOutput"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -2768,6 +3056,15 @@ export interface operations {
                     "application/json": components["schemas"]["ChangeRequestOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_regions_plants_change_requests_production_create: {
@@ -2793,6 +3090,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChangeRequestOutput"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -2837,6 +3143,15 @@ export interface operations {
                     "application/json": components["schemas"]["PlantForecastOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_regions_plants_outages_list: {
@@ -2861,6 +3176,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaginatedIncidentOutputList"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -2888,6 +3212,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IncidentOutput"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -2918,6 +3251,15 @@ export interface operations {
                     "application/json": components["schemas"]["IncidentOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_regions_plants_outages_cancel_create: {
@@ -2946,6 +3288,15 @@ export interface operations {
                     "application/json": components["schemas"]["IncidentOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_regions_plants_outages_resolve_create: {
@@ -2972,6 +3323,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IncidentOutput"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -3007,6 +3367,15 @@ export interface operations {
                     "application/json": components["schemas"]["PerformanceOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_regions_plants_production_retrieve: {
@@ -3040,6 +3409,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProductionHistoryOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_regions_plants_production_source_retrieve: {
@@ -3061,6 +3439,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EpiasConnectionOutput"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -3090,6 +3477,15 @@ export interface operations {
                     "application/json": components["schemas"]["ObservationImportOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_regions_plants_production_preview_create: {
@@ -3117,6 +3513,15 @@ export interface operations {
                     "application/json": components["schemas"]["ProductionPreviewOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_regions_plants_restore_create: {
@@ -3140,6 +3545,15 @@ export interface operations {
                     "application/json": components["schemas"]["PlantOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_regions_reminders_retrieve: {
@@ -3160,6 +3574,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReminderOutput"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -3188,6 +3611,15 @@ export interface operations {
                     "application/json": components["schemas"]["ReminderOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_regions_restore_create: {
@@ -3208,6 +3640,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RegionOutput"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -3232,6 +3673,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaginatedSiteOutputList"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };
@@ -3259,6 +3709,15 @@ export interface operations {
                     "application/json": components["schemas"]["SiteOutput"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_trash_plants_list: {
@@ -3283,6 +3742,15 @@ export interface operations {
                     "application/json": components["schemas"]["PaginatedTrashedPlantOutputList"];
                 };
             };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
         };
     };
     tenants_trash_regions_list: {
@@ -3305,6 +3773,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaginatedTrashedRegionOutputList"];
+                };
+            };
+            /** @description API failure. */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
         };

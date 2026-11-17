@@ -22,4 +22,13 @@ def error_components(result: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
         },
         "required": ["code", "message"],
     }
+    for path in result.get("paths", {}).values():
+        for method in ("get", "post", "put", "patch", "delete", "head", "options", "trace"):
+            if method in path:
+                path[method]["responses"]["default"] = {
+                    "description": "API failure.",
+                    "content": {
+                        "application/json": {"schema": {"$ref": "#/components/schemas/Error"}}
+                    },
+                }
     return result
