@@ -312,7 +312,17 @@ successful `main` CI runs trigger it automatically. The workflow:
 
 Image artifacts expire after one day and are deleted after successful deployment.
 Retry a failed Release while its artifact remains available; otherwise run
-**Actions → CI → Run workflow → main** to produce a fresh verified release.
+**Actions → CI → Run workflow → main**. A successful CI run on `main` triggers
+Release automatically, so nothing else is needed after a failed deployment.
+To redeploy `main`:
+
+1. Run CI on `main`. Its automatic Release deploys unless the classification
+   skips it.
+2. If that Release run's summary says "Nothing to release" (`main` differs from
+   the deployed commit only in unshipped paths; see "Verification boundary"
+   below), run **Actions → Release → Run workflow → main** while that CI run's
+   image artifact is unexpired (one day). Once it has expired, repeat step 1 and
+   dispatch Release after its automatic Release skipped again.
 When retrying CI, choose **Re-run all jobs** so reports and images belong to the
 same attempt; **Re-run failed jobs** cannot supply a complete release record.
 
@@ -392,7 +402,10 @@ fixtures do not establish provider access or inbox delivery.
   backup or a restore test.
 - **Key rotation:** add a numeric runtime secret version, update Terraform's
   `runtime_secret_version`, apply it, and run the VM startup script through a
-  controlled maintenance session to refresh `/etc/pyracast/host.json`, then deploy.
+  controlled maintenance session to refresh `/etc/pyracast/host.json`, then
+  redeploy `main`: run CI on `main`; if its automatic Release skipped the
+  deployment ("Nothing to release"), dispatch Release while that run's image
+  artifact is unexpired (see the redeploy steps under the release procedure).
   Django encryption rotation also requires `PYRACAST_SECRET_KEY_FALLBACKS` and
   `reencrypt_secrets` before removing old keys. RabbitMQ's `RABBITMQ_DEFAULT_PASS`
   only initializes a new data directory: existing broker passwords require a
@@ -424,6 +437,15 @@ CI also retains native Windows and Ubuntu quality, browser, scientific and packa
 checks and validates Terraform without provisioning resources. BuildKit caches
 each image separately; PRs can read the main cache but cannot publish or deploy.
 Superseded CI runs are cancelled; production releases remain serialized.
+An automatic release whose changes since the newest `production` deployment,
+when that deployment succeeded, lie only in unshipped paths (`docs/`, backend
+and web tests, `scripts/`, agent, scanner and Dependabot configuration, the root
+and `web/` Git ignore files and `web/.prettierignore`; the exact list is in
+`deploy/release_scope.py`) skips the `deploy` job and names that deployed commit
+in the run summary; any doubt deploys. The classification never skips a manual
+dispatch of Release, which still needs green CI and an unexpired artifact for
+the current `main` commit and is refused when `main` advanced after the
+dispatch; it is also how to redeploy after a manual recovery.
 Windows backend tests run in two groups, with complete test selection and the
 combined 100% coverage floor verified before release. Sonar starts when the Linux
 coverage reports are ready. Merged `main` still runs all checks because its source

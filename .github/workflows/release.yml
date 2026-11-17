@@ -21,15 +21,17 @@ jobs:
       github.ref == 'refs/heads/main' &&
       (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       contents: read
       actions: read
+      deployments: read
     outputs:
       sha: ${{ steps.authorize.outputs.sha }}
       ci_run_id: ${{ steps.authorize.outputs.ci_run_id }}
       ci_run_attempt: ${{ steps.authorize.outputs.ci_run_attempt }}
       artifact_id: ${{ steps.authorize.outputs.artifact_id }}
+      release: ${{ steps.classify.outputs.release }}
     steps:
       - name: Authorize the current main commit against its exact CI run
         id: authorize
@@ -45,6 +47,10 @@ jobs:
             const { data: main } = await github.rest.repos.getBranch({ ...repository, branch: 'main' });
             const sha = main.commit.sha;
             if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('Invalid main SHA');
+            // The production deployment record carries the dispatch-time commit; it must be the one deployed.
+            if (context.eventName === 'workflow_dispatch' && context.sha !== sha) {
+              throw new Error('Main advanced after the dispatch; dispatch Release again');
+            }
             let run;
             if (context.eventName === 'workflow_run') {
               ({ data: run } = await github.rest.actions.getWorkflowRun({
@@ -87,9 +93,61 @@ jobs:
             core.setOutput('ci_run_attempt', run.run_attempt);
             core.setOutput('artifact_id', candidates[0].id);
             await core.summary.addRaw(`Authorized main commit ${sha} using CI run ${run.id}.`).write();
+      # The classification steps only ever narrow the release to a skip; each of them failing
+      # leaves the release output unset, and deploy runs unless it is exactly 'false'.
+      # A newest deployment (by created_at) whose newest status is not success leaves production
+      # in doubt, so only the newest deployment can serve as the baseline, never an older one.
+      - name: Find the commit of the newest production deployment when it succeeded
+        id: deployed
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            try {
+              const newest = records => records.reduce((latest, record) =>
+                Date.parse(record.created_at) > Date.parse(latest.created_at) ? record : latest);
+              const { data: deployments } = await github.rest.repos.listDeployments({
+                ...context.repo, environment: 'production', per_page: 10,
+              });
+              if (deployments.length === 0) {
+                core.warning('No production deployment found; releasing.');
+                return;
+              }
+              const deployment = newest(deployments);
+              const { data: statuses } = await github.rest.repos.listDeploymentStatuses({
+                ...context.repo, deployment_id: deployment.id, per_page: 100,
+              });
+              if (statuses.length > 0 && newest(statuses).state === 'success') {
+                core.setOutput('sha', deployment.sha);
+              } else {
+                core.warning('The newest production deployment has not succeeded; releasing.');
+              }
+            } catch (error) {
+              core.warning(`Deployment record unavailable; releasing: ${error.message}`);
+            }
+      # The default ref is main (workflow_run, or a dispatch on main), never a fork's code. The
+      # full-history clone fetches main after authorize, so it contains the authorized commit,
+      # which the classifier receives as its argument whatever commit is checked out.
+      - name: Check out main with full history
+        continue-on-error: true
+        timeout-minutes: 3
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify the changes since the deployed commit
+        id: classify
+        continue-on-error: true
+        timeout-minutes: 1
+        env:
+          DEPLOYED_SHA: ${{ steps.deployed.outputs.sha }}
+          RELEASE_SHA: ${{ steps.authorize.outputs.sha }}
+        run: python3 deploy/release_scope.py "$GITHUB_EVENT_NAME" "$DEPLOYED_SHA" "$RELEASE_SHA"
 
   deploy:
     needs: authorize
+    if: needs.authorize.outputs.release != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment: production
