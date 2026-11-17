@@ -9,7 +9,7 @@ from typing import Any, TypedDict
 
 GITHUB_ADVISORY = re.compile(r"https://github\.com/advisories/(GHSA(?:-[0-9a-z]{4}){3})")
 EXCEPTION_KEYS = {"advisory", "package", "reason", "expires"}
-# npm audit exits 1 when it reports vulnerabilities; any other non-zero status is a failed audit.
+# npm audit exits 1 exactly when it reports vulnerabilities; any other status is a failed audit.
 AUDIT_STATUSES = {0, 1}
 
 
@@ -30,22 +30,44 @@ def advisory_id(cause: dict[str, Any]) -> str:
     raise ValueError(f"Advisory without an identity: {cause!r}")
 
 
+def leads_to_advisory(
+    name: str, direct: dict[str, set[str]], references: dict[str, set[str]]
+) -> bool:
+    pending, seen = [name], set[str]()
+    while pending:
+        current = pending.pop()
+        if current not in seen:
+            seen.add(current)
+            if direct[current]:
+                return True
+            pending.extend(references[current])
+    return False
+
+
 def reported_advisories(report: Any) -> set[str]:
     if not isinstance(report, dict) or "error" in report:
         raise ValueError(f"npm audit failed: {report!r}")
-    if report.get("auditReportVersion") != 2 or not isinstance(report.get("vulnerabilities"), dict):
+    vulnerabilities = report.get("vulnerabilities")
+    if report.get("auditReportVersion") != 2 or not isinstance(vulnerabilities, dict):
         raise ValueError("Unsupported npm audit report.")
-    found: set[str] = set()
-    for name, package in report["vulnerabilities"].items():
+    direct: dict[str, set[str]] = {}
+    references: dict[str, set[str]] = {}
+    for name, package in vulnerabilities.items():
         causes = package.get("via") if isinstance(package, dict) else None
         if not isinstance(causes, list) or not causes:
             raise ValueError(f"Vulnerability {name} has no causes.")
+        direct[name], references[name] = set(), set()
         for cause in causes:
             if isinstance(cause, dict):
-                found.add(advisory_id(cause))
-            elif not isinstance(cause, str):
+                direct[name].add(advisory_id(cause))
+            elif isinstance(cause, str) and cause in vulnerabilities:
+                references[name].add(cause)
+            else:
                 raise ValueError(f"Vulnerability {name} has an unknown cause: {cause!r}")
-    return found
+    for name in vulnerabilities:
+        if not leads_to_advisory(name, direct, references):
+            raise ValueError(f"Vulnerability {name} leads to no advisory.")
+    return set().union(*direct.values())
 
 
 def load_exceptions(text: str) -> list[AuditException]:
@@ -91,7 +113,17 @@ def run_audit(web: Path) -> Any:
     )
     if result.returncode not in AUDIT_STATUSES:
         raise RuntimeError(f"npm audit exited with {result.returncode}: {result.stderr.strip()}")
-    return json.loads(result.stdout)
+    report = json.loads(result.stdout)
+    if (
+        isinstance(report, dict)
+        and "error" not in report
+        and result.returncode != int(bool(report.get("vulnerabilities")))
+    ):
+        raise RuntimeError(
+            f"npm audit exited with {result.returncode}, contradicting its report: "
+            f"{result.stderr.strip()}"
+        )
+    return report
 
 
 def main(arguments: list[str] | None = None) -> int:

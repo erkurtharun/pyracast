@@ -19,6 +19,7 @@ from scripts.npm_audit import (
 TODAY = date(2026, 11, 17)
 REPORT_ERRORS = (
     "npm audit failed|Unsupported npm audit report|has no causes|unknown cause|without an identity"
+    "|leads to no advisory"
 )
 EXCEPTION_ERRORS = "must be a list|Malformed audit exception|Invalid isoformat"
 PICOMATCH = {
@@ -32,7 +33,8 @@ REPORT: dict[str, Any] = {
     "vulnerabilities": {
         "picomatch": {"via": [PICOMATCH]},
         "micromatch": {"via": ["picomatch"]},
-        "next": {"via": [NEXT]},
+        "fast-glob": {"via": ["micromatch"]},
+        "next": {"via": ["picomatch", NEXT]},
     },
 }
 
@@ -76,6 +78,8 @@ def test_advisories_without_a_github_identity_keep_their_npm_source() -> None:
         report(a={"via": [7]}),
         report(a={"via": [{"url": "https://example.test/advisory"}]}),
         report(a={"via": [{"source": True, "url": "https://example.test/advisory"}]}),
+        report(a={"via": [PICOMATCH]}, b={"via": ["missing"]}),
+        report(a={"via": [PICOMATCH]}, b={"via": ["c"]}, c={"via": ["b"]}),
     ],
 )
 def test_a_report_npm_did_not_produce_as_expected_fails(bad: Any) -> None:
@@ -151,14 +155,23 @@ def fake_npm(
     monkeypatch.setattr(subprocess, "run", run)
 
 
-@pytest.mark.parametrize("status", [0, 1])
+@pytest.mark.parametrize(("status", "audit"), [(0, report()), (1, REPORT)])
 def test_npm_reports_with_its_normal_statuses(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int, audit: dict[str, Any]
 ) -> None:
     calls: list[list[str]] = []
-    fake_npm(monkeypatch, json.dumps(REPORT), calls, status=status)
-    assert run_audit(tmp_path) == REPORT
+    fake_npm(monkeypatch, json.dumps(audit), calls, status=status)
+    assert run_audit(tmp_path) == audit
     assert calls == [["/bin/npm", "audit", "--json"]]
+
+
+@pytest.mark.parametrize(("status", "audit"), [(0, REPORT), (1, report())])
+def test_a_status_that_contradicts_the_report_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int, audit: dict[str, Any]
+) -> None:
+    fake_npm(monkeypatch, json.dumps(audit), [], status=status)
+    with pytest.raises(RuntimeError, match=f"exited with {status}, contradicting its report"):
+        run_audit(tmp_path)
 
 
 def test_any_other_npm_status_fails_even_with_a_parseable_report(
