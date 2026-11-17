@@ -504,8 +504,8 @@ verification and restart on the real host in about five minutes of downtime.
    ```
 
    Expect `==> Blocking automatic starts with /var/lib/pyracast/release-blocked`,
-   `==> Stopping gateway, api, web`, `==> Stopping dispatcher`,
-   `==> Stopping worker, notifications`, `==> Dumping database pyracast`,
+   `==> Stopping dispatcher`, `==> Stopping worker, notifications`,
+   `==> Stopping gateway, api, web`, `==> Dumping database pyracast`,
    `==> Uploading gs://BUCKET/postgres/...-prereset-....dump`,
    `==> Restoring the archive into a throwaway PostgreSQL`,
    `==> Exporting the Solcast snapshots` and its upload line, then
@@ -581,10 +581,10 @@ An interrupted `prepare` is recovered with `abort`, then `prepare` again; runnin
 
 The Release run is red in "Transfer the verified release and deploy through IAP"
 and its log ends with "Release failed during maintenance. Application remains
-stopped". Check the installer log and `readlink -f /opt/pyracast/current` first.
-If promotion completed, `current` points to the new release: fix the reported host
-or service-unit error and rerun that release. The cases below apply when `current`
-still points to the release that served before maintenance.
+stopped" and the two recovery commands; `current` still points to the release that
+served before maintenance. A failure after promotion prints "Release SHA is serving"
+instead, stops nothing and names the command that finishes it; a rerun of that
+release is refused because it is already live.
 
 - During the one-time reset: step 6 above.
 - Failure before `migrate`: run `reset_database.py /etc/pyracast/host.json abort`.

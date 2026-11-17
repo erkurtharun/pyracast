@@ -48,7 +48,7 @@ cleanup() {
       "${compose[@]}" stop -t 660 dispatcher || true
       "${compose[@]}" stop -t 660 worker notifications || true
       "${compose[@]}" stop -t 100 gateway api web || true
-      echo 'Release failed during maintenance. Application remains stopped; inspect backups, support services and migrations before recovery.' >&2
+      echo 'Release failed during maintenance. Application remains stopped. Before migrate, recover with python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json abort; in or after migrate, with python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json restore --confirm OBJECT (see "A release that fails during maintenance" in the deployment guide).' >&2
     else
       for name in "${environment_files[@]}"; do
         if [[ -f "$session/$name" ]]; then cp "$session/$name" "/run/pyracast/$name"; fi

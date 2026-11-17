@@ -374,9 +374,9 @@ else:
     raise SystemExit('Runtime role unexpectedly owns DDL permission after the reset')
 PY
 # A release that fails after maintenance began leaves the application stopped; restore recovers it.
-"${compose[@]}" stop -t 100 gateway api web
 "${compose[@]}" stop -t 660 dispatcher
 "${compose[@]}" stop -t 660 worker notifications
+"${compose[@]}" stop -t 100 gateway api web
 "${reset_tool[@]}" restore --confirm "$object"
 test ! -e "$temporary/release-blocked"
 ready

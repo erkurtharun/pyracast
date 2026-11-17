@@ -304,6 +304,7 @@ for MODE in preflight deploy-check plan secrets units-invalid image live-artifac
           response) test "$result" == 1 ;;
         esac
         test -f /var/lib/pyracast/release-blocked
+        grep -Fq 'reset_database.py /etc/pyracast/host.json restore --confirm OBJECT' /result
         grep -q 'stop -t 660 dispatcher' /calls
         grep -q 'stop -t 660 worker notifications' /calls
         grep -q 'stop -t 100 gateway api web' /calls

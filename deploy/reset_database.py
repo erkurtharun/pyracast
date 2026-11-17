@@ -33,9 +33,9 @@ from deploy.operations_log import access_token
 
 # The installer's drain order: ingress first, then the producer, then the consumers.
 STOP_ORDER = (
-    ("100", ("gateway", "api", "web")),
     ("660", ("dispatcher",)),
     ("660", ("worker", "notifications")),
+    ("100", ("gateway", "api", "web")),
 )
 APPLICATION_SERVICES = frozenset(service for _, group in STOP_ORDER for service in group)
 SUPPORT_SERVICES = ("postgres", "rabbitmq")
