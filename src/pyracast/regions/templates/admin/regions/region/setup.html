@@ -331,7 +331,7 @@
       <summary>{% translate "Recent activity" %}</summary>
       <ul class="rows rows--tight">
         {% for event in recent_activity %}<li class="row row--block">
-          <p class="row-title-plain">{% translate event.action_label %}</p>
+          <p class="row-title-plain">{{ event.action_label }}</p>
           <p class="row-meta">{% if event.actor__username %}{{ event.actor__username }} · {% endif %}<time datetime="{{ event.created_at|date:'c' }}">{{ event.created_at|date:"j M Y, H:i T" }}</time></p>
         </li>{% endfor %}
       </ul>

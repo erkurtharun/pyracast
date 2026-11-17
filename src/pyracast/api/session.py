@@ -14,11 +14,11 @@ from rest_framework.views import APIView
 
 from pyracast.accounts.authorization import has_platform_admin_session, requires_admin_mfa
 from pyracast.accounts.language import (
-    LANGUAGES,
     save_user_language,
     set_language_cookie,
     user_language,
 )
+from pyracast.accounts.models import Language
 from pyracast.api.serializers import InputSerializer
 
 
@@ -46,7 +46,7 @@ class SessionUserOutput(serializers.Serializer[Any]):
 class SessionOutput(serializers.Serializer[Any]):
     user = SessionUserOutput(allow_null=True)
     csrf_token = serializers.CharField()
-    language = serializers.ChoiceField(choices=LANGUAGES)
+    language = serializers.ChoiceField(choices=Language.choices)
 
 
 def session_output(request: Request) -> dict[str, Any]:
@@ -73,7 +73,7 @@ class SessionView(APIView):
 
 
 class LanguageInput(InputSerializer):
-    language = serializers.ChoiceField(choices=LANGUAGES)
+    language = serializers.ChoiceField(choices=Language.choices)
 
 
 @extend_schema(auth=[])

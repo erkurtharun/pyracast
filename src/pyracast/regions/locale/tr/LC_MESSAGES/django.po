@@ -2024,3 +2024,12 @@ msgid ""
 msgstr ""
 "Bir santralin alıcı listesi sınırı aşıyor, boş veya geçersiz bir adres içeriyor. "
 "Çalışma alanı yöneticisinden düzeltmesini isteyin."
+
+msgid "Provider account created"
+msgstr "Sağlayıcı hesabı oluşturuldu"
+
+msgid "Provider key rotated"
+msgstr "Sağlayıcı anahtarı yenilendi"
+
+msgid "Provider request pause cleared"
+msgstr "Sağlayıcı istek beklemesi kaldırıldı"

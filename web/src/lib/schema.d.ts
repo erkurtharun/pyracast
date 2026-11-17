@@ -675,6 +675,46 @@ export interface components {
         ApprovalInput: {
             review_fingerprint: string;
         };
+        /**
+         * @description * `region_renamed` - Plant location renamed
+         *     * `location_change_requested` - Location change requested
+         *     * `location_change_approved` - Location change approved
+         *     * `location_change_rejected` - Location change rejected
+         *     * `location_change_rebased` - Location change request moved to the new revision
+         *     * `binding_configured` - Provider connection configured
+         *     * `connection_validated` - Provider connection validated
+         *     * `region_approved` - Plant approved
+         *     * `region_rejected` - Plant rejected
+         *     * `region_suspended` - Plant suspended
+         *     * `region_trashed` - Plant location moved to trash
+         *     * `region_restored` - Plant location restored
+         *     * `collection_schedule_updated` - Collection schedule updated
+         *     * `historical_reference_imported` - Historical reference imported
+         *     * `reference_capacity_normalized` - Reference capacity normalized
+         *     * `provider_account_created` - Provider account created
+         *     * `provider_secret_rotated` - Provider key rotated
+         *     * `provider_cooldown_cleared` - Provider request pause cleared
+         * @enum {string}
+         */
+        AuditActionEnum:
+            | "region_renamed"
+            | "location_change_requested"
+            | "location_change_approved"
+            | "location_change_rejected"
+            | "location_change_rebased"
+            | "binding_configured"
+            | "connection_validated"
+            | "region_approved"
+            | "region_rejected"
+            | "region_suspended"
+            | "region_trashed"
+            | "region_restored"
+            | "collection_schedule_updated"
+            | "historical_reference_imported"
+            | "reference_capacity_normalized"
+            | "provider_account_created"
+            | "provider_secret_rotated"
+            | "provider_cooldown_cleared";
         AutomaticCalibrationAttemptOutput: {
             calibration_id: number | null;
             status: components["schemas"]["AutomaticCalibrationAttemptOutputStatusEnum"];
@@ -688,6 +728,13 @@ export interface components {
          * @enum {string}
          */
         AutomaticCalibrationAttemptOutputStatusEnum: "activated" | "skipped";
+        /**
+         * @description * `unknown` - Unknown
+         *     * `healthy` - Healthy
+         *     * `error` - Error
+         * @enum {string}
+         */
+        BindingHealthEnum: "unknown" | "healthy" | "error";
         CalibrationAutomationOutput: {
             enabled: boolean;
             authorized: boolean;
@@ -769,8 +816,8 @@ export interface components {
             readonly dataset_sha256: string;
         };
         /**
-         * @description * `production` - production
-         *     * `incident` - incident
+         * @description * `production` - Production
+         *     * `incident` - Incident
          * @enum {string}
          */
         ChangeRequestKindEnum: "production" | "incident";
@@ -801,10 +848,10 @@ export interface components {
             incident: components["schemas"]["IncidentChangeOutput"] | null;
         };
         /**
-         * @description * `pending` - pending
-         *     * `approved` - approved
-         *     * `rejected` - rejected
-         *     * `withdrawn` - withdrawn
+         * @description * `pending` - Pending
+         *     * `approved` - Approved
+         *     * `rejected` - Rejected
+         *     * `withdrawn` - Withdrawn
          * @enum {string}
          */
         ChangeRequestStatusEnum:
@@ -906,14 +953,6 @@ export interface components {
             /** Format: date-time */
             ends_at: string;
         };
-        /**
-         * @description * `pending` - Pending
-         *     * `accepted` - Accepted
-         *     * `failed` - Failed
-         *     * `uncertain` - Uncertain
-         * @enum {string}
-         */
-        DeliveryStatusEnum: "pending" | "accepted" | "failed" | "uncertain";
         EpiasConnectionOutput: {
             connected: boolean;
             provider_plant_id: number | null;
@@ -975,10 +1014,10 @@ export interface components {
             revision: number;
         };
         /**
-         * @description * `create` - create
-         *     * `update` - update
-         *     * `resolve` - resolve
-         *     * `cancel` - cancel
+         * @description * `create` - Create
+         *     * `update` - Update
+         *     * `resolve` - Resolve
+         *     * `cancel` - Cancel
          * @enum {string}
          */
         IncidentChangeActionEnum: "create" | "update" | "resolve" | "cancel";
@@ -1074,8 +1113,17 @@ export interface components {
         };
         InvitationAcceptanceOutput: {
             tenant_id: number;
-            role: components["schemas"]["RoleEnum"];
+            role: components["schemas"]["WorkspaceRoleEnum"];
         };
+        /**
+         * @description * `pending` - Pending
+         *     * `sent` - Sent
+         *     * `failed` - Failed
+         *     * `uncertain` - Uncertain
+         * @enum {string}
+         */
+        InvitationDeliveryStatusEnum:
+            "pending" | "sent" | "failed" | "uncertain";
         InvitationInput: {
             /** Format: email */
             email: string;
@@ -1086,11 +1134,11 @@ export interface components {
             readonly email: string;
             /** Format: date-time */
             readonly expires_at: string;
-            readonly delivery_status: components["schemas"]["DeliveryStatusEnum"];
+            readonly delivery_status: components["schemas"]["InvitationDeliveryStatusEnum"];
         };
         /**
-         * @description * `en` - en
-         *     * `tr` - tr
+         * @description * `en` - English
+         *     * `tr` - Türkçe
          * @enum {string}
          */
         LanguageEnum: "en" | "tr";
@@ -1116,12 +1164,19 @@ export interface components {
             readonly longitude: number;
             readonly timezone: string;
             readonly reason: string;
-            readonly status: string;
+            readonly status: components["schemas"]["LocationChangeStatusEnum"];
             /** Format: date-time */
             readonly created_at: string;
             /** Format: date-time */
             readonly reviewed_at: string | null;
         };
+        /**
+         * @description * `pending` - Pending
+         *     * `approved` - Approved
+         *     * `rejected` - Rejected
+         * @enum {string}
+         */
+        LocationChangeStatusEnum: "pending" | "approved" | "rejected";
         /**
          * @description * `net_export` - Net export
          *     * `ac_generation` - AC generation
@@ -1460,8 +1515,14 @@ export interface components {
             readonly created_at: string;
         };
         /**
-         * @description * `set` - set
-         *     * `revert` - revert
+         * @description * `ac` - AC
+         *     * `dc` - DC
+         * @enum {string}
+         */
+        PowerBasisEnum: "ac" | "dc";
+        /**
+         * @description * `set` - Set
+         *     * `revert` - Revert
          * @enum {string}
          */
         ProductionChangeActionEnum: "set" | "revert";
@@ -1654,8 +1715,16 @@ export interface components {
             readonly longitude: number;
             readonly timezone: string;
             readonly revision: number;
-            readonly status: string;
+            readonly status: components["schemas"]["RegionStatusEnum"];
         };
+        /**
+         * @description * `pending` - Awaiting approval
+         *     * `approved` - Approved
+         *     * `suspended` - Suspended
+         *     * `rejected` - Rejected
+         * @enum {string}
+         */
+        RegionStatusEnum: "pending" | "approved" | "suspended" | "rejected";
         RejectionInput: {
             reason: string;
         };
@@ -1719,12 +1788,6 @@ export interface components {
         RevisionInput: {
             expected_revision: number;
         };
-        /**
-         * @description * `admin` - Administrator
-         *     * `viewer` - Viewer
-         * @enum {string}
-         */
-        RoleEnum: "admin" | "viewer";
         SessionOutput: {
             user: components["schemas"]["SessionUserOutput"] | null;
             csrf_token: string;
@@ -1770,7 +1833,7 @@ export interface components {
             readonly longitude: number;
             readonly timezone: string;
             readonly revision: number;
-            readonly status: string;
+            readonly status: components["schemas"]["RegionStatusEnum"];
             readonly plant: components["schemas"]["PlantOutput"] | null;
         };
         /**
@@ -1782,7 +1845,7 @@ export interface components {
         TenantOutput: {
             readonly id: number;
             readonly name: string;
-            readonly role: components["schemas"]["RoleEnum"];
+            readonly role: components["schemas"]["WorkspaceRoleEnum"];
             readonly pending_review_count: number | null;
             readonly unread_outcome_count: number;
         };
@@ -1822,11 +1885,17 @@ export interface components {
             id: number;
             /** Format: email */
             email: string;
-            role: components["schemas"]["RoleEnum"];
+            role: components["schemas"]["WorkspaceRoleEnum"];
         };
         WorkspaceMembersOutput: {
             members: components["schemas"]["WorkspaceMemberOutput"][];
         };
+        /**
+         * @description * `admin` - Administrator
+         *     * `viewer` - Viewer
+         * @enum {string}
+         */
+        WorkspaceRoleEnum: "admin" | "viewer";
     };
     responses: never;
     parameters: never;

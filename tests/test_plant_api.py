@@ -10,7 +10,7 @@ from django.test import Client
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.models import CollectionJob, ForecastSnapshot
@@ -194,7 +194,7 @@ def test_tenant_scope_and_production_input_validation() -> None:
     assert not ProductionObservation.objects.exists()
     other = Tenant.objects.create(name="Other")
     user = User.objects.create_user(username="other")
-    Membership.objects.create(tenant=other, user=user, role=Membership.Role.ADMIN)
+    Membership.objects.create(tenant=other, user=user, role=WorkspaceRole.ADMIN)
     client.force_login(user)
     assert client.get(base).status_code == 403
     assert client.post(preview, payload, content_type="application/json").status_code == 403

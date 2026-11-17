@@ -13,7 +13,7 @@ from rest_framework.test import APIRequestFactory
 from rest_framework.views import APIView
 
 from pyracast import trash
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.accounts.operations import reassign_workspace_admin
 from pyracast.api.permissions import WorkspaceWritePermission
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule
@@ -162,7 +162,7 @@ def test_application_mutations_require_current_workspace_administrator(identity:
     if identity in {"demoted", "inactive"}:
         actor = system.member
         if identity == "demoted":
-            Membership.objects.filter(user=actor).update(role=Membership.Role.VIEWER)
+            Membership.objects.filter(user=actor).update(role=WorkspaceRole.VIEWER)
         else:
             User.objects.filter(pk=actor.pk).update(is_active=False)
     else:
@@ -244,4 +244,4 @@ def test_workspace_transfer_serializes_with_mutation_and_rechecks_waiting_writer
         transfer_future.result(timeout=15)
         mutation_future.result(timeout=15)
     assert not RegionLocationChangeRequest.objects.exists()
-    assert Membership.objects.get(user=replacement).role == Membership.Role.ADMIN
+    assert Membership.objects.get(user=replacement).role == WorkspaceRole.ADMIN

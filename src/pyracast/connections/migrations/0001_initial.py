@@ -23,7 +23,12 @@ class Migration(migrations.Migration):
                         auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
                     ),
                 ),
-                ("provider", models.CharField(max_length=30)),
+                (
+                    "provider",
+                    models.CharField(
+                        choices=[("fixture", "Fixture"), ("solcast", "Solcast")], max_length=30
+                    ),
+                ),
                 ("external_account_id", models.CharField(max_length=200)),
                 ("encrypted_api_key", models.CharField(blank=True, default="", max_length=2048)),
                 ("daily_quota", models.PositiveIntegerField(default=10)),
@@ -56,7 +61,12 @@ class Migration(migrations.Migration):
                 ("site_id", models.CharField(max_length=200)),
                 ("capacity_kw", models.FloatField()),
                 ("dc_capacity_kw", models.FloatField(blank=True, null=True)),
-                ("power_basis", models.CharField(default="ac", max_length=2)),
+                (
+                    "power_basis",
+                    models.CharField(
+                        choices=[("ac", "AC"), ("dc", "DC")], default="ac", max_length=2
+                    ),
+                ),
                 ("capacity_semantics_verified", models.BooleanField(default=False)),
                 ("azimuth_degrees", models.FloatField(default=0)),
                 ("losses_percent", models.FloatField(default=0)),
@@ -67,7 +77,18 @@ class Migration(migrations.Migration):
                 ("timezone", models.CharField(max_length=100)),
                 ("validated_at", models.DateTimeField(null=True)),
                 ("validated_credential_revision", models.PositiveIntegerField(null=True)),
-                ("health", models.CharField(default="unknown", max_length=20)),
+                (
+                    "health",
+                    models.CharField(
+                        choices=[
+                            ("unknown", "Unknown"),
+                            ("healthy", "Healthy"),
+                            ("error", "Error"),
+                        ],
+                        default="unknown",
+                        max_length=20,
+                    ),
+                ),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
                 (
                     "provider_account",

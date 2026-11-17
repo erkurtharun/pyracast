@@ -10,7 +10,7 @@ from django.db.models import Max, Min
 from django.utils.translation import gettext
 
 from pyracast.accounts.authorization import tenant_membership
-from pyracast.accounts.models import Membership
+from pyracast.accounts.models import WorkspaceRole
 from pyracast.collection_window import (
     HISTORY_CLOCK,
     HISTORY_END_CLOCK,
@@ -20,7 +20,7 @@ from pyracast.collection_window import (
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule, ForecastSnapshot
 from pyracast.forecasts.timing import effective_forecast_schedule, next_forecast_slot
-from pyracast.regions.models import AuditEvent, Region
+from pyracast.regions.models import AuditAction, AuditEvent, Region
 
 MAX_COLLECTION_TIMES = 1440
 
@@ -48,7 +48,7 @@ def configure_schedule(
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
     with transaction.atomic():
-        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
+        tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
         region = (
             Region.objects.select_for_update(of=("self",))
             .select_related("approved_binding__provider_account")
@@ -96,7 +96,7 @@ def configure_schedule(
         AuditEvent.objects.create(
             actor=actor,
             region=region,
-            action="collection_schedule_updated",
+            action=AuditAction.COLLECTION_SCHEDULE_UPDATED,
             revision=region.revision,
         )
         return schedule

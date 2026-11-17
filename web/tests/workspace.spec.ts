@@ -3,7 +3,14 @@ import AxeBuilder from "@axe-core/playwright";
 import { parseProduction } from "../src/lib/production";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
-import { region, plant, user, paged, mockApi } from "./support/workspace";
+import {
+    region,
+    plant,
+    user,
+    paged,
+    mockApi,
+    tenantRow,
+} from "./support/workspace";
 
 test("mock contract: signs in with CSRF, selects region, and signs out", async ({
     page,
@@ -1470,8 +1477,8 @@ test("recycle bin ignores a prior workspace response and restores only in the se
     await page.route("**/api/tenants/", async (route) =>
         route.fulfill({
             json: paged([
-                { id: 1, name: "Sunfield Energy", role: "admin" },
-                { id: 2, name: "Second workspace", role: "admin" },
+                tenantRow({ id: 1, name: "Sunfield Energy", role: "admin" }),
+                tenantRow({ id: 2, name: "Second workspace", role: "admin" }),
             ]),
         }),
     );

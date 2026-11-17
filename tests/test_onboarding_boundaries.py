@@ -19,7 +19,7 @@ def test_revising_an_approved_plant_requires_a_current_validated_binding_and_kee
     previous_configuration = PlantConfiguration.objects.values().get(pk=configuration_id)
     events = list(PlantEvent.objects.filter(plant=plant).values_list("pk", flat=True))
     if change == "binding_removed":
-        Region.objects.filter(pk=system.region.pk).update(approved_binding=None)
+        Region.objects.filter(pk=system.region.pk).update(status="pending", approved_binding=None)
     elif change == "approval_revoked":
         Region.objects.filter(pk=system.region.pk).update(status="suspended")
     else:

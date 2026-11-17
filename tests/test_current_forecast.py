@@ -202,7 +202,7 @@ def test_live_requires_current_approved_configuration(
     elif change == "disabled":
         ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=False)
     else:
-        Region.objects.filter(pk=system.region.pk).update(approved_binding=None)
+        Region.objects.filter(pk=system.region.pk).update(status="pending", approved_binding=None)
     result = plant_outlook(
         system.member,
         system.tenant.pk,

@@ -11,12 +11,12 @@ from django.views.decorators.debug import sensitive_variables
 from pyracast.accounts.authorization import require_platform_admin
 from pyracast.connections.contracts import ProviderAdapter, ProviderError
 from pyracast.connections.identity import canonical_account_identity
-from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.connections.models import BindingHealth, Provider, ProviderAccount, SiteBinding
 from pyracast.connections.secrets import encrypt_secret
 from pyracast.forecasts.budget import remaining_forecast_requests
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.provider_retry import next_retry_at, rate_limit_retry_after
-from pyracast.regions.models import AuditEvent, Region
+from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionStatus
 
 
 class QuotaExceededError(Exception):
@@ -51,15 +51,15 @@ def create_account(
     require_platform_admin(actor)
     provider = provider.strip().casefold()
     identity = external_account_id.strip()
-    if provider not in {"fixture", "solcast"} or not identity:
+    if provider not in Provider.values or not identity:
         raise ValidationError("Invalid provider account identity.")
-    if provider == "solcast" and not api_key:
+    if provider == Provider.SOLCAST and not api_key:
         raise ValidationError({"api_key": "An API key is required for a Solcast account."})
     encrypted_api_key = encrypt_secret(api_key) if api_key else ""
     if daily_quota < 1 or daily_quota > 10:
         raise ValidationError("Account quota must be between 1 and 10.")
     authorization_reference = authorization_reference.strip()
-    if (provider == "solcast" and not authorization_reference) or (
+    if (provider == Provider.SOLCAST and not authorization_reference) or (
         len(authorization_reference) > 500
     ):
         raise ValidationError("A service authorization reference is required.")
@@ -87,7 +87,7 @@ def create_account(
             AuditEvent.objects.create(
                 actor=actor,
                 provider_account=account,
-                action="provider_account_created",
+                action=AuditAction.PROVIDER_ACCOUNT_CREATED,
                 revision=account.credential_revision,
             )
     return account
@@ -105,7 +105,7 @@ def rotate_secret(actor: User, account_id: int, api_key: str) -> None:
         AuditEvent.objects.create(
             actor=actor,
             provider_account=account,
-            action="provider_secret_rotated",
+            action=AuditAction.PROVIDER_SECRET_ROTATED,
             revision=account.credential_revision,
         )
 
@@ -185,7 +185,7 @@ def validate_binding(
     binding = SiteBinding.objects.select_related("provider_account").get(
         pk=binding_id, region__deleted_at__isnull=True
     )
-    if binding.provider_account.provider == "solcast" and (
+    if binding.provider_account.provider == Provider.SOLCAST and (
         not binding.settings_verification_reference or binding.installation_date is None
     ):
         raise ValidationError("Confirmed site settings and installation date are required.")
@@ -194,7 +194,7 @@ def validate_binding(
         adapter.validate(binding)
     except ProviderError as exc:
         RequestAttempt.objects.filter(pk=attempt.pk).update(outcome="failed")
-        SiteBinding.objects.filter(pk=binding.pk).update(health="error")
+        SiteBinding.objects.filter(pk=binding.pk).update(health=BindingHealth.ERROR)
         record_provider_failure(
             binding.provider_account, exc, now + timedelta(seconds=time.monotonic() - started)
         )
@@ -210,10 +210,10 @@ def validate_binding(
             raise ValidationError("Configuration changed during validation.")
         binding.validated_at = now
         binding.validated_credential_revision = account.credential_revision
-        binding.health = "healthy"
+        binding.health = BindingHealth.HEALTHY
         binding.save(update_fields=("validated_at", "validated_credential_revision", "health"))
         if (
-            region.status == "approved"
+            region.status == RegionStatus.APPROVED
             and region.approved_binding_id == binding.pk
             and account.enabled
             and account.authorized_at is not None
@@ -254,6 +254,9 @@ def validate_binding(
         attempt.outcome = "succeeded"
         attempt.save(update_fields=("outcome",))
         AuditEvent.objects.create(
-            actor=actor, region=region, action="connection_validated", revision=region.revision
+            actor=actor,
+            region=region,
+            action=AuditAction.CONNECTION_VALIDATED,
+            revision=region.revision,
         )
     return binding

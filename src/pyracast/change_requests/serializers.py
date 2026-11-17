@@ -3,6 +3,12 @@ from typing import Any
 from rest_framework import serializers
 
 from pyracast.api.serializers import InputSerializer
+from pyracast.change_requests.models import (
+    ChangeRequestKind,
+    ChangeRequestStatus,
+    IncidentChangeAction,
+    ProductionChangeAction,
+)
 from pyracast.incidents.api import IncidentInput
 from pyracast.plants.serializers import (
     AwareDateTime,
@@ -21,7 +27,7 @@ class ProductionRequestInput(ProductionChangesInput):
 
 
 class IncidentRequestInput(InputSerializer):
-    action = serializers.ChoiceField(choices=("create", "update", "resolve", "cancel"))
+    action = serializers.ChoiceField(choices=IncidentChangeAction.choices)
     idempotency_key = serializers.UUIDField()
     reason = serializers.CharField(max_length=500, allow_blank=True, default="")
     incident_id = serializers.IntegerField(min_value=1, required=False)
@@ -71,7 +77,7 @@ class ProductionItemOutput(serializers.Serializer[dict[str, Any]]):
     id = serializers.IntegerField()
     starts_at = serializers.DateTimeField()
     ends_at = serializers.DateTimeField()
-    action = serializers.ChoiceField(choices=("set", "revert"))
+    action = serializers.ChoiceField(choices=ProductionChangeAction.choices)
     expected_revision_id = serializers.IntegerField(allow_null=True)
     baseline_energy_mwh = serializers.FloatField(allow_null=True)
     baseline_source_kind = serializers.CharField(allow_blank=True)
@@ -92,7 +98,7 @@ class IncidentBeforeOutput(IncidentInput):
 
 
 class IncidentChangeOutput(serializers.Serializer[dict[str, Any]]):
-    action = serializers.ChoiceField(choices=("create", "update", "resolve", "cancel"))
+    action = serializers.ChoiceField(choices=IncidentChangeAction.choices)
     incident_id = serializers.IntegerField(allow_null=True)
     expected_revision = serializers.IntegerField(allow_null=True)
     values = IncidentInput(allow_null=True)
@@ -103,8 +109,8 @@ class IncidentChangeOutput(serializers.Serializer[dict[str, Any]]):
 
 class ChangeRequestSummaryOutput(serializers.Serializer[dict[str, Any]]):
     id = serializers.IntegerField()
-    kind = serializers.ChoiceField(choices=("production", "incident"))
-    status = serializers.ChoiceField(choices=("pending", "approved", "rejected", "withdrawn"))
+    kind = serializers.ChoiceField(choices=ChangeRequestKind.choices)
+    status = serializers.ChoiceField(choices=ChangeRequestStatus.choices)
     plant_id = serializers.IntegerField()
     region_id = serializers.IntegerField()
     plant_name = serializers.CharField()

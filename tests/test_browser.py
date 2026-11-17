@@ -17,7 +17,7 @@ from django.utils import timezone
 
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.mfa import MFAAdapter
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.calculation import calculate
 from pyracast.connections.operations import validate_binding
 from pyracast.forecasts.jobs import collect
@@ -108,7 +108,7 @@ def test_browser_against_live_django(
 
     outsider = User.objects.create_user(username="other")
     other_tenant = Tenant.objects.create(name="Other")
-    Membership.objects.create(user=outsider, tenant=other_tenant, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=outsider, tenant=other_tenant, role=WorkspaceRole.ADMIN)
     other_region = submit_region(
         outsider,
         other_tenant.pk,

@@ -9,7 +9,7 @@ from django.contrib.auth.models import User
 from django.db import close_old_connections, connection, connections, transaction
 
 from pyracast import runtime
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.operations import validate_binding
 from pyracast.forecasts.jobs import collect
@@ -47,7 +47,7 @@ def test_contended_region_does_not_suppress_another_tenants_due_collection(
     system = make_system(approved=True)
     member = User.objects.create(username="another-collection-member")
     tenant = Tenant.objects.create(name="Another tenant")
-    Membership.objects.create(user=member, tenant=tenant, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=member, tenant=tenant, role=WorkspaceRole.ADMIN)
     region = submit_region(
         member,
         tenant.pk,

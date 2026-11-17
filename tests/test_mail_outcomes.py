@@ -9,7 +9,7 @@ from django.template import TemplateSyntaxError
 from django.test import Client, override_settings
 
 from pyracast.accounts.invitations import invite_workspace_member
-from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation
+from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, WorkspaceRole
 from pyracast.mail.errors import (
     DeliveryUncertainError,
     MailFailure,
@@ -253,7 +253,7 @@ def test_unclassified_failure_after_the_transmit_marker_is_uncertain(
 def workspace() -> tuple[Tenant, User]:
     tenant = Tenant.objects.create(name="Solar")
     administrator = User.objects.create_user(username="administrator", email="admin@example.com")
-    Membership.objects.create(tenant=tenant, user=administrator, role=Membership.Role.ADMIN)
+    Membership.objects.create(tenant=tenant, user=administrator, role=WorkspaceRole.ADMIN)
     return tenant, administrator
 
 

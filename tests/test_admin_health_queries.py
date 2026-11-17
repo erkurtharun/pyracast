@@ -41,7 +41,6 @@ def another_region(
         latitude=40 + Region.objects.count() / 100,
         longitude=29,
         timezone="Europe/Istanbul",
-        status="approved",
     )
     binding = SiteBinding.objects.create(
         region=region,
@@ -54,8 +53,9 @@ def another_region(
         timezone=region.timezone,
         validated_credential_revision=1,
     )
+    region.status = "approved"
     region.approved_binding = binding
-    region.save(update_fields=["approved_binding"])
+    region.save(update_fields=["status", "approved_binding"])
     return region, binding
 
 

@@ -18,7 +18,7 @@ from django.test import Client, RequestFactory
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError as APIValidationError
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.admin import ReadOnlyAdmin, site
 from pyracast.api.errors import exception_handler
 from pyracast.api.serializers import RegionInput
@@ -46,7 +46,7 @@ pytestmark = pytest.mark.django_db
 def customer() -> tuple[Client, User, Tenant]:
     user = User.objects.create_user(username="customer")
     tenant = Tenant.objects.create(name="Customer")
-    Membership.objects.create(user=user, tenant=tenant, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=user, tenant=tenant, role=WorkspaceRole.ADMIN)
     client = Client()
     client.force_login(user)
     return client, user, tenant
@@ -79,7 +79,7 @@ def test_tenant_isolation_and_read_only_ownership(customer: tuple[Client, User, 
     assert client.get(f"{own}location-change-requests/").json()["count"] == 0
     other = Tenant.objects.create(name="Other")
     other_user = User.objects.create_user(username="other")
-    Membership.objects.create(user=other_user, tenant=other, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=other_user, tenant=other, role=WorkspaceRole.ADMIN)
     client.force_login(other_user)
     assert client.get(f"{own}location-change-requests/").status_code == 403
     assert client.get(own + forecast).status_code == 403

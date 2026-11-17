@@ -9,7 +9,7 @@ from django.utils import translation
 from django.utils.translation import gettext
 
 from pyracast.accounts.authorization import tenant_membership
-from pyracast.accounts.models import Membership
+from pyracast.accounts.models import WorkspaceRole
 from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.models import (
     NotificationSettings,
@@ -100,7 +100,7 @@ def configure_reminders(
     if language not in {"en", "tr"}:
         raise ValidationError(gettext("A supported reminder language is required."))
     with transaction.atomic():
-        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
+        tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
         address_limit = recipient_limit(lock=True)
         actor.refresh_from_db(fields=["email"])
         addresses = normalize_recipients(

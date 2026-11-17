@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "./support/test";
+import { tenantRow } from "./support/workspace";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
 import AxeBuilder from "@axe-core/playwright";
@@ -49,7 +50,7 @@ async function workspace(
                 csrf_token: "token",
             };
         else if (path === "/api/tenants/")
-            data = paged([{ id: 1, name: "Tenant", role: "admin" }]);
+            data = paged([tenantRow({ id: 1, name: "Tenant", role: "admin" })]);
         else if (path.endsWith("/sites/")) data = paged([region]);
         else if (path.endsWith("/plants/"))
             data = paged([

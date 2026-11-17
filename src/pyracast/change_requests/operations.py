@@ -11,8 +11,18 @@ from django.utils import timezone
 from django.utils.translation import gettext
 
 from pyracast.accounts.authorization import tenant_membership
-from pyracast.accounts.models import Membership
-from pyracast.change_requests.models import ChangeRequest, IncidentChange, ProductionChangeItem
+from pyracast.accounts.models import Membership, WorkspaceRole
+from pyracast.change_requests.models import (
+    DECIDED,
+    INCIDENT_EDITS,
+    ChangeRequest,
+    ChangeRequestKind,
+    ChangeRequestStatus,
+    IncidentChange,
+    IncidentChangeAction,
+    ProductionChangeAction,
+    ProductionChangeItem,
+)
 from pyracast.change_requests.preparation import (
     INCIDENT_FIELDS,
     decision_context,
@@ -78,7 +88,7 @@ def _create(
 ) -> ChangeRequest:
     if (
         ChangeRequest.objects.filter(
-            proposer_membership_id=membership.pk, plant=plant, status="pending"
+            proposer_membership_id=membership.pk, plant=plant, status=ChangeRequestStatus.PENDING
         ).count()
         >= 20
     ):
@@ -111,7 +121,7 @@ def submit_production(
     reason: str,
     idempotency_key: UUID,
 ) -> ChangeRequest:
-    membership = tenant_membership(actor, tenant_id, role=Membership.Role.VIEWER, lock=True)
+    membership = tenant_membership(actor, tenant_id, role=WorkspaceRole.VIEWER, lock=True)
     reason = _reason(reason, required=True)
     if not 1 <= len(changes) <= 100:
         raise ValidationError(gettext("Submit 1 to 100 production intervals."))
@@ -137,7 +147,7 @@ def submit_production(
         membership,
         configuration.plant,
         configuration_id,
-        "production",
+        ChangeRequestKind.PRODUCTION,
         reason,
         idempotency_key,
         payload_hash,
@@ -147,7 +157,7 @@ def submit_production(
             request=request,
             starts_at=row.starts_at,
             ends_at=row.ends_at,
-            action="revert" if row.reverted else "set",
+            action=ProductionChangeAction.REVERT if row.reverted else ProductionChangeAction.SET,
             energy_mwh=row.energy_mwh,
             quality=row.quality,
             source=row.source,
@@ -177,7 +187,7 @@ def submit_incident(
     values: dict[str, Any] | None = None,
     ends_at: datetime | None = None,
 ) -> ChangeRequest:
-    membership = tenant_membership(actor, tenant_id, role=Membership.Role.VIEWER, lock=True)
+    membership = tenant_membership(actor, tenant_id, role=WorkspaceRole.VIEWER, lock=True)
     reason = _reason(reason)
     payload_hash = digest(
         {
@@ -208,7 +218,7 @@ def submit_incident(
         membership,
         plant,
         prepared.declared_configuration_id,
-        "incident",
+        ChangeRequestKind.INCIDENT,
         reason,
         idempotency_key,
         payload_hash,
@@ -220,7 +230,7 @@ def submit_incident(
         expected_revision=expected_revision,
         **(
             {field: getattr(prepared, field) for field in INCIDENT_FIELDS}
-            if action in {"create", "update"}
+            if action in INCIDENT_EDITS
             else {"ends_at": ends_at}
         ),
     )
@@ -230,7 +240,7 @@ def submit_incident(
 def visible_requests(actor: User, tenant_id: int) -> QuerySet[ChangeRequest]:
     membership = tenant_membership(actor, tenant_id)
     return ChangeRequest.objects.filter(
-        Q(plant__region__tenant__membership__role=Membership.Role.ADMIN)
+        Q(plant__region__tenant__membership__role=WorkspaceRole.ADMIN)
         | Q(proposed_by_id=actor.pk, proposer_membership_id=membership.pk),
         plant__region__tenant_id=tenant_id,
         plant__region__tenant__membership__pk=membership.pk,
@@ -251,7 +261,7 @@ def _request(actor: User, tenant_id: int, request_id: int, *, lock: bool = False
 def _terminal(request: ChangeRequest, status: str) -> bool:
     if request.status == status:
         return True
-    if request.status != "pending":
+    if request.status != ChangeRequestStatus.PENDING:
         raise RequestConflictError(
             "request_already_closed", gettext("The request already has a different outcome.")
         )
@@ -270,11 +280,11 @@ def _validate(actor: User, request: ChangeRequest, plant: Plant, *, lock: bool =
 def approve_request(
     actor: User, tenant_id: int, request_id: int, *, review_fingerprint: str
 ) -> ChangeRequest:
-    tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
+    tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
     scoped = _request(actor, tenant_id, request_id)
     plant = lock_incident_plant(tenant_id, scoped.plant.region_id, scoped.plant_id)
     request = _request(actor, tenant_id, request_id, lock=True)
-    if _terminal(request, "approved"):
+    if _terminal(request, ChangeRequestStatus.APPROVED):
         return request
     _validate(actor, request, plant)
     context = decision_context(request, plant)
@@ -286,7 +296,7 @@ def approve_request(
     request.reviewed_context = context
     request.save(update_fields=("reviewed_context",))
     scope = actor, tenant_id, plant.region_id, plant.pk
-    if request.kind == "production":
+    if request.kind == ChangeRequestKind.PRODUCTION:
         result = change_production(
             *scope,
             configuration_id=request.configuration_id,
@@ -300,7 +310,7 @@ def approve_request(
             item.save(update_fields=("applied_observation",))
     else:
         change = request.incident_change
-        if change.action in {"create", "update"}:
+        if change.action in INCIDENT_EDITS:
             incident = save_incident(
                 *scope,
                 incident_id=change.incident_id,
@@ -313,13 +323,13 @@ def approve_request(
                 incident_id=cast(int, change.incident_id),
                 expected_revision=cast(int, change.expected_revision),
                 ends_at=change.ends_at,
-                cancel=change.action == "cancel",
+                cancel=change.action == IncidentChangeAction.CANCEL,
             )
         change.applied_revision = IncidentRevision.objects.get(
             incident=incident, revision=incident.revision
         )
         change.save(update_fields=("applied_revision",))
-    _close(request, "approved", actor)
+    _close(request, ChangeRequestStatus.APPROVED, actor)
     return request
 
 
@@ -335,15 +345,15 @@ def _close(request: ChangeRequest, status: str, actor: User | None, reason: str 
 
 @transaction.atomic
 def reject_request(actor: User, tenant_id: int, request_id: int, *, reason: str) -> ChangeRequest:
-    tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
+    tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
     scoped = _request(actor, tenant_id, request_id)
     plant = lock_incident_plant(tenant_id, scoped.plant.region_id, scoped.plant_id)
     request = _request(actor, tenant_id, request_id, lock=True)
-    if not _terminal(request, "rejected"):
+    if not _terminal(request, ChangeRequestStatus.REJECTED):
         reason = _reason(reason, required=True)
         request.reviewed_context = decision_context(request, plant)
         request.save(update_fields=("reviewed_context",))
-        _close(request, "rejected", actor, reason)
+        _close(request, ChangeRequestStatus.REJECTED, actor, reason)
     return request
 
 
@@ -353,8 +363,8 @@ def withdraw_request(actor: User, tenant_id: int, request_id: int) -> ChangeRequ
     request = _request(actor, tenant_id, request_id, lock=True)
     if request.proposed_by_id != actor.pk or request.proposer_membership_id != membership.pk:
         raise ChangeRequest.DoesNotExist
-    if not _terminal(request, "withdrawn"):
-        _close(request, "withdrawn", None)
+    if not _terminal(request, ChangeRequestStatus.WITHDRAWN):
+        _close(request, ChangeRequestStatus.WITHDRAWN, None)
     return request
 
 
@@ -364,7 +374,7 @@ def mark_seen(actor: User, tenant_id: int, request_id: int) -> ChangeRequest:
     request = _request(actor, tenant_id, request_id, lock=True)
     if request.proposed_by_id != actor.pk or request.proposer_membership_id != membership.pk:
         raise ChangeRequest.DoesNotExist
-    if request.status in {"approved", "rejected"} and request.outcome_seen_at is None:
+    if request.status in DECIDED and request.outcome_seen_at is None:
         request.outcome_seen_at = timezone.now()
         request.save(update_fields=("outcome_seen_at",))
     return request

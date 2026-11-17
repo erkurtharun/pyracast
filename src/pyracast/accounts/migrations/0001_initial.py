@@ -98,47 +98,6 @@ class Migration(migrations.Migration):
             ],
         ),
         migrations.CreateModel(
-            name="WorkspaceInvitation",
-            fields=[
-                (
-                    "id",
-                    models.BigAutoField(
-                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
-                    ),
-                ),
-                ("email", models.EmailField(max_length=254)),
-                ("token_hash", models.CharField(max_length=64, unique=True)),
-                ("created_at", models.DateTimeField(auto_now_add=True)),
-                ("expires_at", models.DateTimeField()),
-                ("accepted_at", models.DateTimeField(null=True)),
-                (
-                    "delivery_status",
-                    models.CharField(
-                        choices=[
-                            ("pending", "Pending"),
-                            ("accepted", "Accepted"),
-                            ("failed", "Failed"),
-                            ("uncertain", "Uncertain"),
-                        ],
-                        default="pending",
-                        max_length=9,
-                    ),
-                ),
-                (
-                    "created_by",
-                    models.ForeignKey(
-                        on_delete=django.db.models.deletion.PROTECT, to=settings.AUTH_USER_MODEL
-                    ),
-                ),
-                (
-                    "tenant",
-                    models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE, to="accounts.tenant"
-                    ),
-                ),
-            ],
-        ),
-        migrations.CreateModel(
             name="WorkspaceMemberRemoval",
             fields=[
                 (
@@ -213,7 +172,7 @@ class Migration(migrations.Migration):
                         name="one_workspace_admin",
                     ),
                     models.CheckConstraint(
-                        condition=models.Q(("role__in", ("admin", "viewer"))),
+                        condition=models.Q(("role__in", ["admin", "viewer"])),
                         name="valid_workspace_role",
                     ),
                 ],
@@ -242,8 +201,59 @@ class Migration(migrations.Migration):
             options={
                 "constraints": [
                     models.CheckConstraint(
-                        condition=models.Q(("language__in", ("en", "tr"))),
+                        condition=models.Q(("language__in", ["en", "tr"])),
                         name="supported_user_language",
+                    )
+                ],
+            },
+        ),
+        migrations.CreateModel(
+            name="WorkspaceInvitation",
+            fields=[
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("email", models.EmailField(max_length=254)),
+                ("token_hash", models.CharField(max_length=64, unique=True)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("expires_at", models.DateTimeField()),
+                ("accepted_at", models.DateTimeField(null=True)),
+                (
+                    "delivery_status",
+                    models.CharField(
+                        choices=[
+                            ("pending", "Pending"),
+                            ("sent", "Sent"),
+                            ("failed", "Failed"),
+                            ("uncertain", "Uncertain"),
+                        ],
+                        default="pending",
+                        max_length=9,
+                    ),
+                ),
+                (
+                    "created_by",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT, to=settings.AUTH_USER_MODEL
+                    ),
+                ),
+                (
+                    "tenant",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE, to="accounts.tenant"
+                    ),
+                ),
+            ],
+            options={
+                "constraints": [
+                    models.CheckConstraint(
+                        condition=models.Q(
+                            ("delivery_status__in", ["pending", "sent", "failed", "uncertain"])
+                        ),
+                        name="workspaceinvitation_delivery_status_chk",
                     )
                 ],
             },

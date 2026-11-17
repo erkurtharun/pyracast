@@ -289,7 +289,7 @@ def test_review_decisions_are_csrf_and_revision_protected(action: str, status: s
     assert client.post(url, decision_input(system.region, action)).status_code == 302
     system.region.refresh_from_db()
     assert system.region.status == status
-    assert AuditEvent.objects.filter(region=system.region, action=status).count() == 1
+    assert AuditEvent.objects.filter(region=system.region, action=f"region_{status}").count() == 1
     system.region.deleted_at = timezone.now()
     system.region.save(update_fields=("deleted_at",))
     assert client.post(url, {}).status_code == 404

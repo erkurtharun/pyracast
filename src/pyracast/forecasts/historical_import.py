@@ -17,7 +17,7 @@ from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import CollectionJob, ForecastSnapshot, HistoricalReferenceImport
 from pyracast.irradiance.pairs import PowerFile, load_power
-from pyracast.regions.models import AuditEvent, Region
+from pyracast.regions.models import AuditAction, AuditEvent, Region
 
 
 @dataclass(frozen=True)
@@ -249,7 +249,7 @@ def _archive_historical_reference(
     AuditEvent.objects.create(
         actor=actor,
         region=region,
-        action="historical_reference_imported",
+        action=AuditAction.HISTORICAL_REFERENCE_IMPORTED,
         revision=region.revision,
     )
     transaction.on_commit(lambda: _prepare_region_calibrations(region.pk))

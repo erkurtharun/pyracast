@@ -328,7 +328,6 @@ def test_shared_account_protects_slots_on_both_local_dates_within_utc_day() -> N
         latitude=41,
         longitude=29,
         timezone="Europe/Istanbul",
-        status="approved",
     )
     binding = SiteBinding.objects.create(
         region=other,
@@ -342,6 +341,7 @@ def test_shared_account_protects_slots_on_both_local_dates_within_utc_day() -> N
         validated_at=NOW,
         validated_credential_revision=1,
     )
+    other.status = "approved"
     other.approved_binding = binding
     other.save()
     CollectionJob.objects.create(
@@ -476,7 +476,6 @@ def test_inactive_collection_does_not_block_shared_account_history_budget(inacti
             latitude=41,
             longitude=29,
             timezone="Europe/Istanbul",
-            status="approved",
         )
     )
     inactive_binding = SiteBinding.objects.create(
@@ -492,8 +491,9 @@ def test_inactive_collection_does_not_block_shared_account_history_budget(inacti
         validated_credential_revision=1,
     )
     if inactive != "stale_binding":
+        region.status = "approved"
         region.approved_binding = inactive_binding
-        region.save(update_fields=("approved_binding",))
+        region.save(update_fields=("status", "approved_binding"))
     if inactive != "unbootstrapped_region":
         CollectionJob.objects.create(
             binding=inactive_binding,

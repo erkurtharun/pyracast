@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "./support/test";
 import AxeBuilder from "@axe-core/playwright";
 import type { components } from "../src/lib/schema";
-import { mockApi, paged, region, user } from "./support/workspace";
+import { mockApi, paged, region, user, tenantRow } from "./support/workspace";
 
 async function setup(page: Page) {
     await page.clock.setFixedTime(new Date("2026-01-08T12:00:00Z"));
@@ -608,7 +608,11 @@ for (const width of [320, 390, 1440]) {
             await page.route("**/api/tenants/", (route) =>
                 route.fulfill({
                     json: paged([
-                        { id: 1, name: "Sunfield Energy", role: "admin" },
+                        tenantRow({
+                            id: 1,
+                            name: "Sunfield Energy",
+                            role: "admin",
+                        }),
                         {
                             id: 2,
                             name: "A workspace with a long company name",
@@ -766,7 +770,9 @@ test("mobile viewer retains the read-only indicator and no workspace management 
     await mockApi(page);
     await page.route("**/api/tenants/", (route) =>
         route.fulfill({
-            json: paged([{ id: 1, name: "Sunfield Energy", role: "viewer" }]),
+            json: paged([
+                tenantRow({ id: 1, name: "Sunfield Energy", role: "viewer" }),
+            ]),
         }),
     );
     await page.goto("/app/");
