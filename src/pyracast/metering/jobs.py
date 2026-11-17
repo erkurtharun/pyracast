@@ -49,8 +49,9 @@ def _locked_job(job_id: int) -> EpiasCollectionJob | None:
         .exists()
     ):
         return None
-    if not Plant.objects.select_for_update().filter(pk=hint["connection__plant_id"]).exists():
-        return None
+    Plant.objects.select_for_update().values_list("pk", flat=True).get(
+        pk=hint["connection__plant_id"]
+    )
     if not EpiasConnection.objects.select_for_update().filter(pk=hint["connection_id"]).exists():
         return None
     return EpiasCollectionJob.objects.select_for_update().filter(pk=job_id).first()

@@ -87,29 +87,19 @@ async function setup(page: Page) {
     await page.route("**/outages/", (route) =>
         route.fulfill({ json: paged([]) }),
     );
-    await page.route("**/trash/**", (route) => {
-        const isPlant = new URL(route.request().url()).pathname.endsWith(
-            "/plants/",
-        );
-        return route.fulfill({
-            json: paged([
-                {
-                    id: 91,
-                    name: isPlant ? "Archived plant" : "Archived region",
+    await page.route("**/trash/regions/", (route) =>
+        route.fulfill({
+            json: paged(
+                ["Archived region", "Archived plant"].map((name, index) => ({
+                    id: 91 + index,
+                    name,
                     deleted_at: "2026-01-07T10:00:00Z",
                     purge_after: "2026-02-06T10:00:00Z",
                     can_restore: true,
-                    ...(isPlant
-                        ? {
-                              region_id: region.id,
-                              region_name: region.name,
-                              parent_deleted: false,
-                          }
-                        : {}),
-                },
-            ]),
-        });
-    });
+                })),
+            ),
+        }),
+    );
     await page.route("**/forecast/**", (route) => {
         const target =
             new URL(route.request().url()).searchParams.get("date") ??
