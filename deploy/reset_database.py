@@ -659,7 +659,7 @@ def prepare(host: Host) -> None:
             raise RefusedError(
                 f"{host.marker} exists: the site is in maintenance. After an interrupted prepare "
                 f"run {recovery}; after a failed release follow 'A release that fails during "
-                "maintenance' in docs/DEPLOYMENT.md."
+                "maintenance' in the deployment guide."
             )
         if not site_ready(host, attempts=0):
             raise RefusedError("The site does not answer /health/ready/ with ok.")
@@ -698,7 +698,7 @@ def abort(host: Host) -> None:
             raise RefusedError(
                 f"The release in {host.release} cannot serve database pyracast: migrate --check "
                 "reports unapplied migrations. Bring the data back with restore --confirm OBJECT "
-                "(see 'A release that fails during maintenance' in docs/DEPLOYMENT.md)."
+                "(see 'A release that fails during maintenance' in the deployment guide)."
             )
         start_release(host, restarted)
         end_session(host)
