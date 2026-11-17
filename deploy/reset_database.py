@@ -78,6 +78,16 @@ class RefusedError(Exception):
 
 
 @dataclasses.dataclass(frozen=True)
+class Session:
+    """One maintenance window: valid only while the marker still holds its identity."""
+
+    marker: str
+    object: str
+    release: str
+    replaced: bool
+
+
+@dataclasses.dataclass(frozen=True)
 class Host:
     config: Path
     release: Path
@@ -89,9 +99,8 @@ class Host:
     environment: Path = Path("/run/pyracast")
 
     @property
-    def replaced(self) -> Path:
-        """Exists from just before DROP DATABASE until a restore has passed its checks."""
-        return self.state / "database-replaced"
+    def session(self) -> Path:
+        return self.state / "session.json"
 
     def command(self, arguments: str) -> str:
         return f"python3 {self.release}/deploy/reset_database.py {self.config} {arguments}"
@@ -168,11 +177,22 @@ def record_path(host: Host, name: str) -> Path:
     return archive_path(host, name).with_suffix(".json")
 
 
-def save_record(host: Host, record: Record) -> None:
-    path = record_path(host, record.object)
-    temporary = path.with_suffix(".next")
-    temporary.write_text(json.dumps(dataclasses.asdict(record), indent=2, sort_keys=True))
+def sync(path: Path) -> None:
+    subprocess.run(["sync", "-f", str(path)], check=True)
+
+
+def write_synced(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".next")
+    temporary.write_text(text)
     temporary.replace(path)
+    sync(path)
+    sync(path.parent)
+
+
+def save_record(host: Host, record: Record) -> None:
+    text = json.dumps(dataclasses.asdict(record), indent=2, sort_keys=True)
+    write_synced(record_path(host, record.object), text)
 
 
 def load_record(host: Host, name: str) -> Record | None:
@@ -195,6 +215,10 @@ def verified_record(host: Host, name: str) -> tuple[Record, Path]:
         raise RefusedError(
             f"No verified archive {name} on this host. "
             "Name the object exactly as prepare printed it."
+        )
+    if record.object != name:
+        raise RefusedError(
+            f"The archive kept as {archive_path(host, name)} is {record.object}, not {name}."
         )
     archive = archive_path(host, name)
     if not archive.is_file():
@@ -258,19 +282,32 @@ def release_lock(host: Host) -> Iterator[None]:
         yield
 
 
-def sync(path: Path) -> None:
-    subprocess.run(["sync", "-f", str(path)], check=True)
+def current_session(host: Host) -> Session | None:
+    # The installer touches an existing marker and removes it after a successful release, so a
+    # session whose identity the marker no longer holds belongs to a maintenance that has ended.
+    if not host.session.is_file() or not host.marker.is_file():
+        return None
+    session = Session(**json.loads(host.session.read_text()))
+    return session if host.marker.read_text().strip() == session.marker else None
 
 
-def block_release(host: Host) -> None:
-    host.marker.parent.mkdir(parents=True, exist_ok=True)
-    host.marker.touch()
-    sync(host.marker)
-    sync(host.marker.parent)
+def save_session(host: Host, session: Session) -> None:
+    write_synced(host.session, json.dumps(dataclasses.asdict(session), indent=2, sort_keys=True))
+
+
+def marker_identity(host: Host) -> str:
+    identity = host.marker.read_text().strip()
+    if not identity:
+        identity = uuid.uuid4().hex
+        write_synced(host.marker, identity)
+    return identity
 
 
 def running_services(host: Host) -> set[str]:
-    return set(capture([*compose(host), "ps", "--services", "--status", "running"]).split())
+    command = [*compose(host), "ps", "--services"]
+    for status in ("running", "restarting", "paused"):
+        command += ["--status", status]
+    return set(capture(command).split())
 
 
 def stop_application(host: Host) -> None:
@@ -295,6 +332,17 @@ def require_maintenance(host: Host) -> None:
             f"Application containers still run: {', '.join(sorted(running))}. "
             "This step runs only while the application is stopped."
         )
+
+
+def write_runtime_secrets(host: Host) -> bool:
+    """Renders the environment files with this release; True when the host restarted."""
+    restarted = not (host.environment / "runtime.env").is_file()
+    step(f"Writing the runtime secrets with {host.release}/deploy/runtime_secrets.py")
+    subprocess.run(
+        [sys.executable, str(host.release / "deploy/runtime_secrets.py"), str(host.config)],
+        check=True,
+    )
+    return restarted
 
 
 def start_support(host: Host) -> None:
@@ -488,8 +536,7 @@ def database_bootstrap(statements: str) -> str:
     return "\n".join(line for line in lines if not line.startswith(ROLE_STATEMENTS)) + "\n"
 
 
-def recreate_database(host: Host, name: str) -> None:
-    host.replaced.write_text(name)
+def recreate_database(host: Host) -> None:
     step("Dropping and recreating database pyracast")
     psql(
         host,
@@ -540,26 +587,41 @@ def restore_live(host: Host, archive: Path) -> None:
         )
 
 
-def start_release(host: Host) -> None:
-    rearm = not (host.environment / "runtime.env").is_file()
-    if rearm:
-        step("Writing the runtime secrets again (the host restarted during maintenance)")
-        subprocess.run(
-            [sys.executable, str(host.release / "deploy/runtime_secrets.py"), str(host.config)],
-            check=True,
-        )
-    step(f"Starting the release in {host.release}")
-    subprocess.run(
-        [*compose(host), "up", "--detach", "--wait", "--wait-timeout", "180"],
-        check=True,
+def release_serves(host: Host) -> bool:
+    step(f"Checking that the release in {host.release} has every migration it needs applied")
+    result = subprocess.run(
+        [*compose(host), "run", "--rm", "--no-deps", "api", "pyracast", "migrate", "--check"],
+        capture_output=True,
+        text=True,
         timeout=300,
+        check=False,
     )
-    if not site_ready(host, attempts=18):
-        raise RuntimeError("The release started, but /health/ready/ did not answer ok.")
+    return result.returncode == 0
+
+
+def start_release(host: Host, restarted: bool) -> None:
+    step(f"Starting the release in {host.release}")
+    try:
+        subprocess.run(
+            [*compose(host), "up", "--detach", "--wait", "--wait-timeout", "180"],
+            check=True,
+            timeout=300,
+        )
+        if not site_ready(host, attempts=18):
+            raise RuntimeError("The release started, but /health/ready/ did not answer ok.")
+    except Exception:
+        step("Stopping the application again; the site stays in maintenance")
+        stop_application(host)
+        raise
     host.marker.unlink(missing_ok=True)
     sync(host.marker.parent)
-    if rearm:
+    if restarted:
+        # After a restart the unit was refused while the marker existed, so it is inactive.
         subprocess.run(["systemctl", "start", "pyracast.service"], check=True)
+
+
+def end_session(host: Host) -> None:
+    host.session.unlink(missing_ok=True)
 
 
 def print_prepared(host: Host, record: Record) -> None:
@@ -575,6 +637,11 @@ def print_prepared(host: Host, record: Record) -> None:
     print(f"  Tables: {len(record.counts)}, rows: {sum(record.counts.values())}")
     for table, count in sorted(record.counts.items()):
         print(f"    {table} {count}")
+    kept = archive_path(host, record.object).name
+    earlier = sorted(path.name for path in host.state.glob("*.dump") if path.name != kept)
+    if earlier:
+        print(f"Earlier archives in {host.state}: {', '.join(earlier)}.")
+        print("Delete each with its .json record once its off-host copy is verified.")
     print("The site is down. Copy the archive off the host, then run:")
     print(f"  {host.command(f'reset --confirm {record.object}')}")
     print("To serve the previous release again instead, run:")
@@ -584,13 +651,22 @@ def print_prepared(host: Host, record: Record) -> None:
 def prepare(host: Host) -> None:
     with release_lock(host):
         if host.marker.exists():
-            raise RefusedError(f"{host.marker} exists: a release or reset is in progress.")
+            session = current_session(host)
+            if session is not None and session.replaced:
+                recovery = host.command(f"restore --confirm {session.object}")
+            else:
+                recovery = host.command("abort")
+            raise RefusedError(
+                f"{host.marker} exists: the site is in maintenance. After an interrupted prepare "
+                f"run {recovery}; after a failed release follow 'A release that fails during "
+                "maintenance' in docs/DEPLOYMENT.md."
+            )
         if not site_ready(host, attempts=0):
             raise RefusedError("The site does not answer /health/ready/ with ok.")
         host.state.mkdir(mode=0o700, parents=True, exist_ok=True)
-        host.replaced.unlink(missing_ok=True)
         step(f"Blocking automatic starts with {host.marker}")
-        block_release(host)
+        identity = uuid.uuid4().hex
+        write_synced(host.marker, identity)
         stop_application(host)
         step("Dumping database pyracast")
         name, archive = dump_database(host)
@@ -602,18 +678,30 @@ def prepare(host: Host) -> None:
         require_equal_counts(live, verify_archive(host, archive), "Live and restored")
         record = Record(object=name, sha256=digest, counts=live)
         save_record(host, record)
+        release = host.release.resolve().name
+        save_session(host, Session(marker=identity, object=name, release=release, replaced=False))
     print_prepared(host, record)
 
 
 def abort(host: Host) -> None:
     with release_lock(host):
-        if host.replaced.exists():
-            name = host.replaced.read_text()
+        session = current_session(host)
+        if session is not None and session.replaced:
             raise RefusedError(
-                "The database was replaced after prepare; starting the previous release now would "
-                f"serve it without its data. Run {host.command(f'restore --confirm {name}')}"
+                "reset replaced the database in this maintenance; starting the previous release "
+                "now would serve it without its data. Run "
+                f"{host.command(f'restore --confirm {session.object}')}"
             )
-        start_release(host)
+        restarted = write_runtime_secrets(host)
+        start_support(host)
+        if not release_serves(host):
+            raise RefusedError(
+                f"The release in {host.release} cannot serve database pyracast: migrate --check "
+                "reports unapplied migrations. Bring the data back with restore --confirm OBJECT "
+                "(see 'A release that fails during maintenance' in docs/DEPLOYMENT.md)."
+            )
+        start_release(host, restarted)
+        end_session(host)
     print("The previous release serves again and the marker is removed. Nothing else to do.")
 
 
@@ -621,11 +709,19 @@ def reset(host: Host, name: str) -> None:
     require_object_name(name)
     with release_lock(host):
         require_maintenance(host)
+        session = current_session(host)
+        if session is None or session.object != name:
+            raise RefusedError(
+                f"{name} is not the archive that prepare verified in this maintenance. "
+                "Run prepare first and confirm the object it printed."
+            )
         verified_record(host, name)
+        write_runtime_secrets(host)
         start_support(host)
         require_roles(host)
         purge_queues(host)
-        recreate_database(host, name)
+        save_session(host, dataclasses.replace(session, replaced=True))
+        recreate_database(host)
         check_roles(host)
     print("\nDatabase pyracast is empty, provisioned and reachable by both roles.")
     print(f"The marker {host.marker} stays: the site is down until the next release.")
@@ -638,24 +734,44 @@ def restore(host: Host, name: str) -> None:
     require_object_name(name)
     with release_lock(host):
         require_maintenance(host)
+        session = current_session(host)
+        if session is not None and session.replaced and session.object != name:
+            raise RefusedError(
+                f"reset replaced the database in this maintenance; only {session.object} holds "
+                f"its data. Run {host.command(f'restore --confirm {session.object}')}"
+            )
         host.state.mkdir(mode=0o700, parents=True, exist_ok=True)
+        restarted = write_runtime_secrets(host)
         if load_record(host, name) is None:
             fetch_record(host, name)
         record, archive = verified_record(host, name)
+        if not record.counts.get("django_migrations"):
+            raise RefusedError(
+                f"{name} holds no applied migration, so no release can serve it. Name the archive "
+                "prepare printed, or the pre-release dump of a release that failed without a reset."
+            )
         start_support(host)
         require_roles(host)
         purge_queues(host)
-        recreate_database(host, name)
+        release = host.release.resolve().name
+        identity = marker_identity(host)
+        save_session(host, Session(marker=identity, object=name, release=release, replaced=True))
+        recreate_database(host)
         restore_live(host, archive)
         require_equal_counts(record.counts, table_counts(host), "Archived and restored")
         check_roles(host)
-        host.replaced.unlink()
-        start_release(host)
+        if not release_serves(host):
+            raise RuntimeError(
+                f"The release in {host.release} cannot serve the restored database: migrate "
+                "--check reports unapplied migrations. Restore an archive that this release wrote."
+            )
+        start_release(host, restarted)
+        end_session(host)
     print(f"\n{name} is restored and the previous release serves again; the marker is removed.")
 
 
 RECOVERY = {
-    "prepare": "If the marker exists the site is down: run {abort} to serve the previous release "
+    "prepare": "The marker exists and the site is down: run {abort} to serve the previous release "
     "again, then run prepare again.",
     "abort": "The marker stays and the site is down. Inspect the containers and run {abort} again.",
     "reset": "The marker stays and the site is down. Every step repeats safely: run the same reset "
@@ -663,6 +779,16 @@ RECOVERY = {
     "restore": "The marker stays and the site is down. Every step repeats safely from the verified "
     "archive: run {restore} again.",
 }
+
+
+def print_recovery(host: Host, options: argparse.Namespace) -> None:
+    confirm = getattr(options, "confirm", "OBJECT")
+    print(
+        RECOVERY[options.command].format(
+            abort=host.command("abort"), restore=host.command(f"restore --confirm {confirm}")
+        ),
+        file=sys.stderr,
+    )
 
 
 def main(arguments: list[str] | None = None) -> int:
@@ -701,18 +827,16 @@ def main(arguments: list[str] | None = None) -> int:
     except RefusedError as error:
         print(f"Refused: {error} No data was changed.", file=sys.stderr)
         return 2
+    except KeyboardInterrupt:
+        print(f"{options.command} was interrupted.", file=sys.stderr)
+        print_recovery(host, options)
+        return 130
     except Exception as error:
         print(f"{options.command} failed: {error}", file=sys.stderr)
         if isinstance(error, subprocess.CalledProcessError) and error.stderr:
             detail = error.stderr if isinstance(error.stderr, str) else error.stderr.decode()
             print(detail.strip()[-2000:], file=sys.stderr)
-        confirm = getattr(options, "confirm", "OBJECT")
-        print(
-            RECOVERY[options.command].format(
-                abort=host.command("abort"), restore=host.command(f"restore --confirm {confirm}")
-            ),
-            file=sys.stderr,
-        )
+        print_recovery(host, options)
         return 1
     return 0
 

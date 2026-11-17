@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -31,9 +32,11 @@ class FakeCommands:
     A dump carries the live row counts as JSON, so a restore reproduces them.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, environment: Path) -> None:
+        self.environment = environment
         self.calls: list[list[str]] = []
         self.inputs: list[str] = []
+        self.unservable = False
         self.running = APPLICATION | SUPPORT
         self.stuck: set[str] = set()
         self.live: dict[str, int] = {"accounts_tenant": 2, "django_migrations": 88}
@@ -53,17 +56,28 @@ class FakeCommands:
             raise BlockingIOError
 
     def __call__(self, command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[Any]:
-        self.calls.append(list(command))
-        if isinstance(kwargs.get("input"), str):
-            self.inputs.append(kwargs["input"])
+        script = kwargs.get("input")
+        self.calls.append([*command, script] if isinstance(script, str) and script else [*command])
+        if isinstance(script, str):
+            self.inputs.append(script)
         if self.fail is not None and self.fail in " ".join(command):
             raise subprocess.CalledProcessError(1, command, "", "fixture failure detail")
-        stdout = ""
+        if self.needs_missing_environment(command):
+            # Compose resolves required env_file entries for config, up and run, not for ps or exec.
+            if kwargs.get("check"):
+                raise subprocess.CalledProcessError(1, command, "", "env file not found")
+            return subprocess.CompletedProcess(command, 1, "", "env file not found")
         if command[0] == "curl":
             return subprocess.CompletedProcess(
                 command, 0 if self.ready else 22, "ok\n" if self.ready else "", ""
             )
-        if "ps" in command:
+        if "migrate" in command and "--check" in command:
+            applied = bool(self.live.get("django_migrations")) and not self.unservable
+            return subprocess.CompletedProcess(command, 0 if applied else 1, "", "")
+        stdout = ""
+        if command[1].endswith("runtime_secrets.py"):
+            (self.environment / "runtime.env").write_text("PGUSER=pyracast_app\n")
+        elif "ps" in command:
             stdout = "".join(f"{service}\n" for service in sorted(self.running))
         elif "stop" in command:
             self.running -= set(command[command.index("stop") + 3 :]) - self.stuck
@@ -87,6 +101,13 @@ class FakeCommands:
         elif "config" in command:
             stdout = json.dumps({"services": {"postgres": {"image": "postgres@sha256:fixture"}}})
         return subprocess.CompletedProcess(command, 0, stdout, "")
+
+    def needs_missing_environment(self, command: list[str]) -> bool:
+        return (
+            command[:2] == ["docker", "compose"]
+            and bool({"config", "up", "run"} & set(command))
+            and not (self.environment / "runtime.env").is_file()
+        )
 
     def psql(self, command: list[str]) -> str:
         if reset_database.COUNT_SQL in command:
@@ -145,8 +166,8 @@ def host(tmp_path: Path) -> Host:
 
 
 @pytest.fixture
-def commands(monkeypatch: pytest.MonkeyPatch) -> FakeCommands:
-    fake = FakeCommands()
+def commands(host: Host, monkeypatch: pytest.MonkeyPatch) -> FakeCommands:
+    fake = FakeCommands(host.environment)
     monkeypatch.setattr(subprocess, "run", fake)
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
     monkeypatch.setattr(
@@ -176,6 +197,31 @@ def kept_archive(host: Host, name: str) -> Path:
     return host.state / name.rsplit("/", 1)[-1]
 
 
+def secrets_call(host: Host) -> list[str]:
+    return [sys.executable, str(host.release / "deploy/runtime_secrets.py"), str(host.config)]
+
+
+def full_start(commands: FakeCommands) -> int:
+    return next(
+        position
+        for position, call in enumerate(commands.calls)
+        if "up" in call and call[-1] == "180"
+    )
+
+
+def finish_release(commands: FakeCommands, host: Host) -> None:
+    """What a successful install does: it migrates, starts and removes the marker."""
+    commands.live = {"accounts_tenant": 1, "django_migrations": 89}
+    commands.running = APPLICATION | SUPPORT
+    host.marker.unlink()
+
+
+def fail_release(commands: FakeCommands, host: Host) -> None:
+    """What a later install that fails in maintenance leaves: a new marker, stopped services."""
+    host.marker.touch()
+    commands.running = set(SUPPORT)
+
+
 def test_prepare_blocks_drains_dumps_uploads_verifies_and_keeps_the_archive(
     host: Host,
     commands: FakeCommands,
@@ -198,6 +244,8 @@ def test_prepare_blocks_drains_dumps_uploads_verifies_and_keeps_the_archive(
     ]
     assert commands.calls.index(["sync", "-f", str(host.marker)]) < commands.index(" stop ")
     assert commands.index(" stop -t 660 worker") < commands.index("pg_dump")
+    listed = commands.calls[commands.index(" ps --services")]
+    assert listed[-6:] == ["--status", "running", "--status", "restarting", "--status", "paused"]
     probe = commands.calls[0]
     assert "--resolve" in probe
     assert "example.com:443:127.0.0.1" in probe
@@ -222,10 +270,21 @@ def test_prepare_refuses_while_a_release_is_blocked(
 ) -> None:
     host.marker.parent.mkdir(parents=True)
     host.marker.touch()
-    with pytest.raises(RefusedError, match="release-blocked"):
+    expected = f"release-blocked exists.* {re.escape(str(host.config))} abort;"
+    with pytest.raises(RefusedError, match=expected):
         reset_database.prepare(host)
     assert not any("stop" in call for call in commands.calls)
     assert uploads == {}
+
+
+def test_prepare_refused_after_a_reset_names_the_restore_of_its_archive(
+    host: Host, commands: FakeCommands, uploads: dict[str, bytes]
+) -> None:
+    name = prepared(host, uploads)
+    reset_database.reset(host, name)
+    with pytest.raises(RefusedError, match=f"run .* restore --confirm {name};"):
+        reset_database.prepare(host)
+    assert len(uploads) == 1
 
 
 def test_prepare_refuses_when_the_site_is_not_ready(
@@ -238,14 +297,24 @@ def test_prepare_refuses_when_the_site_is_not_ready(
     assert commands.running == APPLICATION | SUPPORT
 
 
-def test_prepare_refuses_while_another_operation_holds_the_release_lock(
-    host: Host, commands: FakeCommands, uploads: dict[str, bytes]
+@pytest.mark.parametrize("subcommand", ["prepare", "abort", "reset", "restore"])
+def test_every_subcommand_refuses_while_another_operation_holds_the_release_lock(
+    host: Host, commands: FakeCommands, uploads: dict[str, bytes], subcommand: str
 ) -> None:
     commands.lock_held = True
+    host.marker.parent.mkdir(parents=True)
+    if subcommand != "prepare":
+        host.marker.touch()
+    run: Callable[[], None] = {
+        "prepare": lambda: reset_database.prepare(host),
+        "abort": lambda: reset_database.abort(host),
+        "reset": lambda: reset_database.reset(host, FOREIGN_OBJECT),
+        "restore": lambda: reset_database.restore(host, FOREIGN_OBJECT),
+    }[subcommand]
     with pytest.raises(RefusedError, match="release lock"):
-        reset_database.prepare(host)
+        run()
     assert commands.calls == []
-    assert not host.marker.exists()
+    assert host.marker.exists() == (subcommand != "prepare")
 
 
 def test_prepare_dumps_nothing_while_an_application_container_keeps_running(
@@ -267,7 +336,7 @@ def test_prepare_records_nothing_when_the_verification_restore_differs(
         reset_database.prepare(host)
     assert host.marker.exists()
     name = next(iter(uploads))
-    with pytest.raises(RefusedError, match="No verified archive"):
+    with pytest.raises(RefusedError, match="not the archive that prepare verified"):
         reset_database.reset(host, name)
     assert commands.destructive_calls() == []
 
@@ -327,20 +396,41 @@ def test_abort_starts_the_previous_release_and_clears_the_marker(
     reset_database.abort(host)
     assert not host.marker.exists()
     assert commands.running == APPLICATION | SUPPORT
-    start = commands.calls[commands.index("up --detach --wait --wait-timeout 180")]
-    assert start[-1] == "180"
+    # The previous release renders its own secrets: the failed release may have changed them.
+    secrets = commands.calls.index(secrets_call(host))
+    check = commands.index("api pyracast migrate --check")
+    assert secrets < check < full_start(commands)
     assert commands.calls[-1][:3] == ["sync", "-f", str(host.marker.parent)]
     assert "--retry" in commands.calls[-2]
+    assert ["systemctl", "start", "pyracast.service"] not in commands.calls
+    assert not host.session.exists()
     assert "serves again" in capsys.readouterr().out
 
 
-def test_abort_keeps_the_marker_when_readiness_fails(
+def test_abort_stops_the_application_again_and_keeps_the_marker_when_readiness_fails(
     host: Host, commands: FakeCommands, uploads: dict[str, bytes]
 ) -> None:
     prepared(host, uploads)
     commands.ready = False
     with pytest.raises(RuntimeError, match="did not answer ok"):
         reset_database.abort(host)
+    assert host.marker.exists()
+    assert commands.running == SUPPORT
+    commands.ready = True
+    reset_database.abort(host)
+    assert not host.marker.exists()
+
+
+def test_abort_refuses_when_the_release_cannot_serve_the_database(
+    host: Host, commands: FakeCommands, uploads: dict[str, bytes]
+) -> None:
+    host.marker.parent.mkdir(parents=True)
+    host.marker.touch()
+    commands.running = set(SUPPORT)
+    commands.live = {}
+    with pytest.raises(RefusedError, match="cannot serve database pyracast"):
+        reset_database.abort(host)
+    assert not any("up" in call and call[-1] == "180" for call in commands.calls)
     assert host.marker.exists()
 
 
@@ -356,16 +446,81 @@ def test_abort_refuses_once_the_database_was_replaced(
     assert host.marker.exists()
 
 
+def test_abort_stays_refused_when_the_drop_fails(
+    host: Host, commands: FakeCommands, uploads: dict[str, bytes]
+) -> None:
+    name = prepared(host, uploads)
+    commands.fail = "DROP DATABASE"
+    with pytest.raises(subprocess.CalledProcessError):
+        reset_database.reset(host, name)
+    assert commands.calls.index(["sync", "-f", str(host.session)]) < commands.index("DROP")
+    commands.fail = None
+    with pytest.raises(RefusedError, match=f"restore --confirm {name}"):
+        reset_database.abort(host)
+
+
+def test_abort_stays_refused_when_restored_counts_differ(
+    host: Host, commands: FakeCommands, uploads: dict[str, bytes]
+) -> None:
+    name = prepared(host, uploads)
+    reset_database.reset(host, name)
+    commands.restore_drops_a_table = True
+    with pytest.raises(RuntimeError, match="row counts differ"):
+        reset_database.restore(host, name)
+    with pytest.raises(RefusedError, match=f"restore --confirm {name}"):
+        reset_database.abort(host)
+    assert commands.running == SUPPORT
+
+
+def test_abort_serves_the_new_database_after_a_successful_reset_release(
+    host: Host,
+    commands: FakeCommands,
+    uploads: dict[str, bytes],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    name = prepared(host, uploads)
+    reset_database.reset(host, name)
+    finish_release(commands, host)
+    fail_release(commands, host)
+    reset_database.abort(host)
+    assert commands.live == {"accounts_tenant": 1, "django_migrations": 89}
+    assert commands.running == APPLICATION | SUPPORT
+    assert not host.marker.exists()
+    assert "restore --confirm" not in capsys.readouterr().err
+    reset_database.prepare(host)
+    earlier = f"Earlier archives in {host.state}: {kept_archive(host, name).name}."
+    assert earlier in capsys.readouterr().out
+    with pytest.raises(RefusedError, match="not the archive that prepare verified"):
+        reset_database.reset(host, name)
+    assert commands.live == {"accounts_tenant": 1, "django_migrations": 89}
+
+
 def test_abort_writes_runtime_secrets_and_rearms_the_unit_after_a_host_restart(
     host: Host, commands: FakeCommands, uploads: dict[str, bytes]
 ) -> None:
     prepared(host, uploads)
     (host.environment / "runtime.env").unlink()
     reset_database.abort(host)
-    secrets = commands.calls.index(
-        [sys.executable, str(host.release / "deploy/runtime_secrets.py"), str(host.config)]
-    )
+    secrets = commands.calls.index(secrets_call(host))
     assert secrets < commands.index("up --detach --wait --wait-timeout 180")
+    assert commands.calls[-1] == ["systemctl", "start", "pyracast.service"]
+    assert not host.marker.exists()
+
+
+def test_reset_and_restore_write_the_runtime_secrets_after_a_host_restart(
+    host: Host, commands: FakeCommands, uploads: dict[str, bytes]
+) -> None:
+    name = prepared(host, uploads)
+    (host.environment / "runtime.env").unlink()
+    reset_database.reset(host, name)
+    first = len(commands.calls)
+    assert commands.calls.index(secrets_call(host)) < commands.index(" up --detach")
+    (host.environment / "runtime.env").unlink()
+    reset_database.restore(host, name)
+    restored = commands.calls[first:]
+    assert restored.index(secrets_call(host)) < next(
+        position for position, call in enumerate(restored) if "up" in call
+    )
     assert commands.calls[-1] == ["systemctl", "start", "pyracast.service"]
     assert not host.marker.exists()
 
@@ -414,6 +569,10 @@ def test_reset_purges_every_queue_recreates_the_database_and_checks_both_roles(
         "no-marker",
         "application-running",
         "missing-roles",
+        "same-basename-elsewhere",
+        "earlier-maintenance",
+        "record-without-prepare",
+        "missing-record",
     ],
 )
 def test_reset_refuses_before_any_destructive_step(
@@ -423,6 +582,15 @@ def test_reset_refuses_before_any_destructive_step(
     match condition:
         case "unknown-object":
             name = FOREIGN_OBJECT
+        case "same-basename-elsewhere":
+            name = "postgres/elsewhere/" + kept_archive(host, name).name
+        case "earlier-maintenance":
+            reset_database.abort(host)
+            fail_release(commands, host)
+        case "record-without-prepare":
+            host.session.unlink()
+        case "missing-record":
+            kept_archive(host, name).with_suffix(".json").unlink()
         case "invalid-object":
             name = "backups/database.dump"
         case "missing-archive":
@@ -468,8 +636,22 @@ def test_restore_brings_back_the_kept_archive_with_owners_and_starts_the_previou
     )
     assert "--no-acl" not in restore
     assert {"--exit-on-error", "--single-transaction"} <= set(restore)
-    assert commands.index("DROP DATABASE") < commands.calls.index(restore)
+    restored = commands.calls.index(restore)
+    assert commands.index("DROP DATABASE") < restored
+    later = [" ".join(call) for call in commands.calls[restored:]]
+    order = [
+        next(position for position, call in enumerate(later) if predicate in call)
+        for predicate in (
+            "pyracast_reset_probe",
+            reset_database.CONNECT_CHECK,
+            "api pyracast migrate --check",
+            "up --detach --wait --wait-timeout 180",
+        )
+    ]
+    assert order == sorted(order)
+    assert order[0] > 0
     assert not host.marker.exists()
+    assert not host.session.exists()
     assert commands.running == APPLICATION | SUPPORT
     assert "serves again" in capsys.readouterr().out
     reset_database.abort(host)
@@ -486,8 +668,57 @@ def test_restore_keeps_the_site_stopped_when_restored_counts_differ(
     assert commands.running == SUPPORT
 
 
+def test_restore_refuses_another_object_once_reset_replaced_the_database(
+    host: Host, commands: FakeCommands, uploads: dict[str, bytes]
+) -> None:
+    name = prepared(host, uploads)
+    reset_database.reset(host, name)
+    calls = len(commands.calls)
+    with pytest.raises(RefusedError, match=f"only {name} holds its data"):
+        reset_database.restore(host, FOREIGN_OBJECT)
+    assert commands.destructive_calls()[-1][-1] == "CREATE DATABASE pyracast"
+    assert not any("pg_restore" in call for call in commands.calls[calls:])
+
+
+def test_restore_refuses_a_kept_archive_recorded_for_another_object(
+    host: Host, commands: FakeCommands, uploads: dict[str, bytes]
+) -> None:
+    name = prepared(host, uploads)
+    other = "postgres/elsewhere/" + kept_archive(host, name).name
+    with pytest.raises(RefusedError, match=f"is {name}, not {other}"):
+        reset_database.restore(host, other)
+    assert commands.destructive_calls() == []
+
+
+def test_restore_refuses_an_archive_without_applied_migrations(
+    host: Host, commands: FakeCommands, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_bucket(monkeypatch, json.dumps({}).encode())
+    host.marker.parent.mkdir(parents=True)
+    fail_release(commands, host)
+    with pytest.raises(RefusedError, match="holds no applied migration"):
+        reset_database.restore(host, FOREIGN_OBJECT)
+    assert commands.destructive_calls() == []
+    assert host.marker.exists()
+
+
+def test_restore_keeps_the_site_in_maintenance_when_the_release_cannot_serve_the_archive(
+    host: Host, commands: FakeCommands, uploads: dict[str, bytes]
+) -> None:
+    name = prepared(host, uploads)
+    reset_database.reset(host, name)
+    commands.unservable = True
+    with pytest.raises(RuntimeError, match="cannot serve the restored database"):
+        reset_database.restore(host, name)
+    assert host.marker.exists()
+    assert commands.running == SUPPORT
+    with pytest.raises(RefusedError, match=f"restore --confirm {name}"):
+        reset_database.abort(host)
+
+
 def fake_bucket(monkeypatch: pytest.MonkeyPatch, content: bytes, *, md5: str | None = None) -> None:
-    checksum = md5 or base64.b64encode(hashlib.md5(content).digest()).decode()  # noqa: S324
+    digest = hashlib.md5(content, usedforsecurity=False).digest()
+    checksum = md5 or base64.b64encode(digest).decode()
 
     def urlopen(request: urllib.request.Request, **_kwargs: object) -> io.BytesIO:
         assert request.get_header("Authorization") == "Bearer private-token"
@@ -594,6 +825,24 @@ def test_command_line_reports_refusals_failures_and_the_next_step(
     error = capsys.readouterr().err
     assert "restore failed: The release started, but /health/ready/ did not answer ok." in error
     assert f"reset_database.py {config} restore --confirm {name} again" in error
+    assert commands.running == SUPPORT
+    commands.ready = True
+    assert reset_database.main([config, "restore", "--confirm", name]) == 0
+    assert not host.marker.exists()
+
+
+def test_command_line_names_the_next_step_after_an_interruption(
+    host: Host, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def interrupted(_host: Host) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(reset_database, "load_host", lambda _path: host)
+    monkeypatch.setattr(reset_database, "prepare", interrupted)
+    assert reset_database.main([str(host.config), "prepare"]) == 130
+    error = capsys.readouterr().err
+    assert "prepare was interrupted." in error
+    assert f"run {host.command('abort')} to serve the previous release again" in error
 
 
 def test_script_entry_point_prints_usage(monkeypatch: pytest.MonkeyPatch) -> None:

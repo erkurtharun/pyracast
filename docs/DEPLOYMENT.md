@@ -378,17 +378,15 @@ fixtures do not establish provider access or inbox delivery.
   `/var/lib/pyracast/release-blocked`; only then does it drain workers, back up the
   existing database and upgrade support services. A first deployment initializes
   PostgreSQL under the same block before its initial backup. Any maintenance
-  failure leaves the application stopped without downgrading support images.
+  failure leaves the application stopped without downgrading support images
+  (`reset_database.py` `abort` and `restore` later start PostgreSQL and RabbitMQ
+  from the previous release's Compose file).
   The block clears only after readiness and release promotion; even
   after an abrupt host restart, systemd refuses automatic application startup
   while this marker exists. Application containers retry process failures up to
   five times; they rely on systemd for host startup so Docker cannot bypass the
-  migration block. A failure before `migrate` (drain, backup, upload, start of
-  PostgreSQL or RabbitMQ) is recovered with `reset_database.py ... abort`; a failure
-  in or after `migrate` with a forward fix released on top, or with
-  `reset_database.py ... restore --confirm OBJECT` and the pre-release dump named in
-  `/var/lib/pyracast/last-backup.json` (see "Database reset and restore" below).
-  A rerun of the verified release after remediation also clears the marker on
+  migration block. Recover with `reset_database.py` as described in "A release
+  that fails during maintenance" below. A rerun of the verified release after remediation also clears the marker on
   success. Never use `migrate --fake` or automatically reverse migrations.
 - **Rollback:** prefer a reviewed Git revert on `main`, successful CI and Release.
   This deploys the former behavior with the current database. Only do this after
@@ -433,27 +431,44 @@ fixtures do not establish provider access or inbox delivery.
 standard library. Every subcommand takes the release lock without waiting, refuses
 before it changes anything unless the step before it verifiably succeeded, prints one
 `==>` line per step and ends by printing the next command. Exit status 0 means done,
-2 means refused ("Refused: ... No data was changed."), 1 means a step failed; the
-failure message names the command to run next. Every subcommand can be run again
-after an interruption.
+2 means refused ("Refused: ... No data was changed."), 1 means a step failed and 130
+means interrupted; both of the last name the command to run next. Run the commands
+inside `tmux` so that a dropped IAP session does not interrupt them.
+
+`prepare` writes a maintenance identity into `/var/lib/pyracast/release-blocked` and
+records it in `/var/lib/pyracast/reset/session.json` with the verified object. The
+session belongs to that maintenance only: the installer keeps the marker's content
+and removes the marker after a successful release, so a later maintenance starts
+without one. `reset` runs only on the object of the current session; once it has
+replaced the database, `abort`, `prepare` and a `restore` of any other object refuse
+and name the `restore` command for that object.
 
 | Subcommand | Requires | Does |
 | --- | --- | --- |
-| `prepare` | the release lock is free, no `release-blocked` marker, the site answers `/health/ready/` | writes the marker, stops the application in the installer's order (PostgreSQL and RabbitMQ stay up), dumps the database into `/var/lib/pyracast/reset/`, uploads it as `postgres/<stamp>-prereset-<uuid>.dump`, restores it into a throwaway PostgreSQL without network, compares every table's row count with the live database, records object, SHA-256 and counts, prints them with the release commit, its image digests and the runtime secret version |
-| `abort` | the database was not replaced since `prepare` | starts the release in `/opt/pyracast/current` with `docker compose --env-file deploy/release.env -f deploy/compose.yaml up --detach --wait`, probes `/health/ready/` and removes the marker |
-| `reset --confirm OBJECT` | the marker, no application container, a recorded archive for `OBJECT` whose file still has its SHA-256, both database roles | purges every RabbitMQ queue, dead-letter queues included, and checks that none holds a message; runs `DROP DATABASE pyracast WITH (FORCE)` and `CREATE DATABASE pyracast`; applies `deploy/bootstrap.sql` without its role statements (roles survive a dropped database); checks that the owner can create a table, that the runtime role can connect and read, and that the owner lost database `CREATE`. The marker stays |
-| `restore --confirm OBJECT` | the marker, no application container, both database roles | uses the archive `prepare` kept, or downloads `OBJECT` from the backup bucket, checks it against the bucket's MD5 and size and verifies it in a throwaway PostgreSQL first; then purges the queues, recreates the database as `reset` does, restores the archive with its owners and privileges, compares every table's row count with the record, checks both roles, starts the release in `/opt/pyracast/current`, probes readiness and removes the marker |
+| `prepare` | the release lock is free, no `release-blocked` marker, the site answers `/health/ready/` | writes the marker, stops the application in the installer's order (PostgreSQL and RabbitMQ stay up), dumps the database into `/var/lib/pyracast/reset/`, uploads it as `postgres/<stamp>-prereset-<uuid>.dump`, restores it into a throwaway PostgreSQL without network, compares every table's row count with the live database, records object, SHA-256 and counts and opens the session; prints them with the release commit, its image digests, the runtime secret version and any earlier archives kept on the host |
+| `abort` | `reset` has not replaced the database in this maintenance; `migrate --check` of the release in `/opt/pyracast/current` passes on the database | writes the runtime secrets with that release, starts it with `docker compose --env-file deploy/release.env -f deploy/compose.yaml up --detach --wait`, probes `/health/ready/` and removes the marker and the session |
+| `reset --confirm OBJECT` | the marker, no running, restarting or paused application container, `OBJECT` is the session's archive and its file still has the recorded SHA-256, both database roles | writes the runtime secrets; purges every RabbitMQ queue, dead-letter queues included, and checks that none holds a message; marks the session replaced and syncs it; runs `DROP DATABASE pyracast WITH (FORCE)` and `CREATE DATABASE pyracast`; applies `deploy/bootstrap.sql` without its role statements (roles survive a dropped database); checks that the owner can create a table, that the runtime role can connect and read, and that the owner lost database `CREATE`. The marker stays |
+| `restore --confirm OBJECT` | the marker, no application container, `OBJECT` is the session's archive once `reset` replaced the database, the archive has applied migrations, both database roles | writes the runtime secrets; uses the archive `prepare` kept, or downloads `OBJECT` from the backup bucket, checks it against the bucket's MD5 and size and verifies it in a throwaway PostgreSQL first; then purges the queues, recreates the database as `reset` does, restores the archive with its owners and privileges, compares every table's row count with the record, checks both roles and `migrate --check`, starts the release in `/opt/pyracast/current`, probes readiness and removes the marker and the session |
 
-If the host restarted during maintenance, `/run/pyracast/runtime.env` is gone;
-`abort` and `restore` then write the runtime secrets again and start
-`pyracast.service` after removing the marker. `restore` starts the release that
-`/opt/pyracast/current` points to: restore an archive only under the release that
-wrote it.
+When readiness fails after a start, `abort` and `restore` stop the application again
+in the installer's order and keep the marker, so the same command can be run again.
+Both render the environment files with the release they start; if the host restarted
+during maintenance they also start `pyracast.service` after removing the marker.
 
 ### One-time reset of the production database
 
-Run each command on the VM through IAP after `sudo -i`. A dry run of steps 1 and
-2 (`prepare`, then `abort`) at any quiet moment proves the dump, upload,
+**What is gone:** every row of the database: users, second factors and sessions;
+workspaces, memberships and invitations; plants and their configurations; provider
+accounts with their encrypted keys; forecasts, the provider request ledger,
+observations, EPIAS data, calibrations, outages, change requests, reminders, audit
+events and rate-limit counters. The owner enters the provider account again and
+customers sign up again; if the provider key was used that UTC day, the first plant
+is approved the next day. **What is kept:** host configuration, Secret Manager
+secrets, certificates, and the archive of step 1, which restores only under the
+release that wrote it.
+
+Run each command on the VM through IAP after `sudo -i`, inside `tmux`. A dry run of
+steps 1 and 2 (`prepare`, then `abort`) at any quiet moment proves the dump, upload,
 verification and restart on the real host in about five minutes of downtime.
 
 1. Prepare. Type:
@@ -471,15 +486,18 @@ verification and restart on the real host in about five minutes of downtime.
    `Release commit:`, one `..._IMAGE=` line per image, `Runtime secret version:`,
    the table and row totals and one `table count` line per table. Write these down.
    The site is down from here. A refusal names its cause and changes nothing; any
-   later failure ends with the `abort` command to run.
+   later failure or an interruption ends with the `abort` command to run.
 2. To stop here instead, type the `abort` command `prepare` printed:
 
    ```bash
    python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json abort
    ```
 
-   Expect `==> Starting the release in /opt/pyracast/current` and
-   `The previous release serves again and the marker is removed.`
+   Expect `==> Writing the runtime secrets with /opt/pyracast/current/deploy/runtime_secrets.py`,
+   `==> Checking that the release in /opt/pyracast/current has every migration it needs applied`,
+   `==> Starting the release in /opt/pyracast/current` and
+   `The previous release serves again and the marker is removed.` After a dry run,
+   continue with step 9 for its archive.
 3. Copy the archive off the host and out of the bucket's seven-day lifecycle, on
    your own machine: `gcloud storage cp gs://BUCKET/OBJECT .`, then check that
    `sha256sum` (Windows: `Get-FileHash -Algorithm SHA256`) shows the printed
@@ -490,7 +508,8 @@ verification and restart on the real host in about five minutes of downtime.
    python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json reset --confirm OBJECT
    ```
 
-   Expect `==> Purged N queues: ...`, `==> Dropping and recreating database pyracast`,
+   Expect the runtime secrets line, `==> Purged N queues: ...`,
+   `==> Dropping and recreating database pyracast`,
    `==> Applying the database part of deploy/bootstrap.sql`,
    `==> Checking the owner and runtime roles`, then
    `Database pyracast is empty, provisioned and reachable by both roles.`, the note
@@ -498,25 +517,35 @@ verification and restart on the real host in about five minutes of downtime.
 5. Release: **Actions → Release → Run workflow → main**. It needs an unexpired
    image artifact of the current `main` commit's CI run (one day); otherwise run
    **Actions → CI → Run workflow → main** first. The installer migrates the empty
-   database, starts the services, probes readiness and removes the marker.
-6. Only if step 5 fails, type the `restore` command `reset` printed:
+   database, starts the services, probes readiness and removes the marker, which
+   ends the session.
+6. Only if step 5 fails, wherever it failed, type the `restore` command `reset`
+   printed (the object of step 1, never the one in `last-backup.json`, which is the
+   dump of the empty database):
 
    ```bash
    python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json restore --confirm OBJECT
    ```
 
-   Expect the purge, recreate and role lines of step 4,
-   `==> Restoring <archive> with owners and privileges`,
+   Expect the runtime secrets line, the purge, recreate and role lines of step 4,
+   `==> Restoring <archive> with owners and privileges`, the migration check line,
    `==> Starting the release in /opt/pyracast/current`, and
    `OBJECT is restored and the previous release serves again; the marker is removed.`
    Production then serves the previous release with its data.
 7. Create the first administrator as in "Create the administrator and verify the
    service" above.
+8. The watchdog may report `last_verified_backup_older_than_90_minutes` once after
+   a long maintenance, until the next hourly backup.
+9. Once your off-host copy shows the printed SHA-256, delete the archives on the
+   host; they hold every erased row:
 
-`abort` refuses once `reset` has replaced the database: use `restore`. An
-interrupted `prepare` is recovered with `abort`, then `prepare` again; an
-interrupted `reset` or `restore` is run again, and a `reset` can always be
-followed by `restore`.
+   ```bash
+   rm -rf /var/lib/pyracast/reset
+   ```
+
+An interrupted `prepare` is recovered with `abort`, then `prepare` again; running
+`prepare` while the marker exists refuses and names that `abort`. An interrupted
+`reset` or `restore` is run again, and a `reset` can always be followed by `restore`.
 
 ### A release that fails during maintenance
 
@@ -524,7 +553,9 @@ The Release run is red in "Transfer the verified release and deploy through IAP"
 and its log ends with "Release failed during maintenance. Application remains
 stopped". `/opt/pyracast/current` still points to the previous release.
 
+- During the one-time reset: step 6 above.
 - Failure before `migrate`: run `reset_database.py /etc/pyracast/host.json abort`.
+  It refuses when the previous release cannot serve the database.
 - Failure in or after `migrate`: release a forward fix, or read the pre-release
   dump's object name with `cat /var/lib/pyracast/last-backup.json` and run
   `reset_database.py /etc/pyracast/host.json restore --confirm OBJECT`. It
@@ -543,9 +574,11 @@ gateway it also checks the anonymous `/api/session/` JSON shape, that a
 wrong-password sign-in gets the normal 400 `email_password_mismatch` refusal and
 that the `/app/` workspace app shell loads.
 On those rows it runs `reset_database.py` `prepare` then `abort`; `prepare`,
-`reset`, a pre-release dump of the empty database, `migrate` from zero under the
+`reset`, a refused `abort`, a pre-release dump of the empty database, `migrate` from zero under the
 restricted owner and a start; then the stop a failed release leaves and `restore`,
-after which ownership, privileges and stored rows are back and the site is ready.
+after which ownership, privileges, stored rows and a stored password are back and
+the site is ready. `deploy/test-release.sh` runs the installer with a reset session
+already in the marker: success removes it; a migration failure keeps its content.
 `tests/test_operations_contracts.py` keeps the values that `deploy/`,
 `infra/terraform` and the workflows restate in agreement: worker queues, the
 watchdog and drain service lists, stop grace periods, alert event names,

@@ -271,7 +271,8 @@ PY
 "${compose[@]}" exec -T api pyracast dispatch
 "${compose[@]}" stop -t 30 dispatcher worker notifications
 
-# Reset tool on the loaded rows. Only the bucket upload and the public readiness address are local.
+# Reset tool on the loaded rows. Only the bucket upload, the runtime secrets (written above), the
+# public readiness address and, where fcntl is missing, the host lock are local.
 "${compose[@]}" exec -T api python - <<'PY'
 import django
 django.setup()
@@ -280,6 +281,8 @@ User.objects.create_user(username='reset-smoke', email='reset-smoke@example.com'
                          password='reset-smoke-sign-in-4c1e9a')
 PY
 cat > "$temporary/reset_tool.py" <<'PY'
+import contextlib
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -302,6 +305,9 @@ def site_ready(_host, attempts):
 
 reset_database.upload_backup = upload
 reset_database.site_ready = site_ready
+reset_database.write_runtime_secrets = lambda _host: False
+if importlib.util.find_spec('fcntl') is None:
+    reset_database.release_lock = lambda _host: contextlib.nullcontext()
 reset_database.load_host = lambda config: reset_database.Host(
     config=config, release=temporary, bucket='smoke-backups', runtime_version='smoke',
     marker=temporary / 'release-blocked', lock=temporary / 'release.lock',
@@ -325,6 +331,9 @@ object=$(sed -n 's|^  Object:  gs://smoke-backups/||p' "$temporary/prepare.log")
 cmp "$temporary/bucket/$object" "$temporary/reset/${object##*/}"
 "${reset_tool[@]}" reset --confirm "$object"
 test -f "$temporary/release-blocked"
+refused=0
+"${reset_tool[@]}" abort || refused=$?
+[[ $refused == 2 ]]
 [[ $("${compose[@]}" exec -T postgres psql -X -U postgres -d pyracast -Atc \
   "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'") == 0 ]]
 # The installer's pre-release dump and migrate run from zero under the restricted owner.
