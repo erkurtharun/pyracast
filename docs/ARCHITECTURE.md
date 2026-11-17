@@ -139,8 +139,7 @@ Mutations enforce CSRF before authentication. Allauth's account and IP rate limi
 share an atomic PostgreSQL JSON/TTL cache; ingress limits additionally protect capacity.
 Failed sign-ins are limited per address (also per day) and, under a project action
 that no sign-in success or password reset clears, per client IP; a refused account
-answers and counts exactly like a wrong password. Anonymous-triggered account notices
-share one hourly sending budget.
+answers and counts exactly like a wrong password.
 
 Google and Microsoft sign-in use backend authorization-code exchanges with PKCE
 and session-bound state. A same-origin continuation page starts provider navigation

@@ -58,7 +58,7 @@ sequenceDiagram
 ## Authorization
 
 - Anonymous by design; CSRF is enforced by `CsrfViewMiddleware` before the view; a signed-in session gets 409 (after the rate limit is consumed).
-- Rate limits in `ACCOUNT_RATE_LIMITS` (`pyracast/settings.py`): `signup` 5/h/ip, consumed by allauth's decorator on `SignupView.handle` before validation; `confirm_email` 1/1m/key and 6/h/key (the email) on every code or anti-enumeration mail, and `account_already_exists` notices share the hourly `anonymous_account_mail` budget (20 for all addresses; over it the notice is skipped, the answer is unchanged). `AccountAdapter.get_client_ip` refuses requests without a determinable IP (403).
+- Rate limits in `ACCOUNT_RATE_LIMITS` (`pyracast/settings.py`): `signup` 5/h/ip, consumed by allauth's decorator on `SignupView.handle` before validation; `confirm_email` 1/1m/key and 6/h/key (the email) on every code or anti-enumeration mail. `AccountAdapter.get_client_ip` refuses requests without a determinable IP (403).
 - `SessionRequestSerialization` takes an advisory lock per session cookie, so requests that carry one never run in parallel. The database guards `unique_workspace_name`, `one_workspace_admin` and `unique_verified_email`. Sign-in with an unverified address re-enters the code stage (`ACCOUNT_EMAIL_VERIFICATION = "mandatory"`).
 
 ## Failure paths

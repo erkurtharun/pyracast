@@ -191,7 +191,6 @@ ACCOUNT_RATE_LIMITS = {
     "reset_password_from_key": "10/h/ip",
     "confirm_email": "1/1m/key,6/h/key",
     "change_password": "5/10m/user",
-    "anonymous_account_mail": "20/h/key",
 }
 CACHES = {
     "default": {

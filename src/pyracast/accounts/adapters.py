@@ -1,14 +1,9 @@
 import logging
-from collections.abc import Callable
-from contextvars import ContextVar
-from functools import partial
 from typing import Any, cast
 
 from allauth.account import app_settings as account_settings
 from allauth.account.adapter import DefaultAccountAdapter
 from allauth.account.models import EmailAddress
-from allauth.core import context as allauth_context
-from allauth.core import ratelimit
 from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.core.internal.ratelimit import RateLimitUsage
 from allauth.headless.internal.restkit.response import ErrorResponse
@@ -23,14 +18,8 @@ from django.utils import translation
 from django.utils.translation import gettext_lazy
 
 from pyracast.accounts.audit import record_security_event
-from pyracast.accounts.authentication import email_identity
 from pyracast.accounts.language import user_language
-from pyracast.accounts.login_limits import (
-    claim_daily_lock_notice,
-    record_address_failure,
-    reserve_address_failure,
-    reserve_client_failure,
-)
+from pyracast.accounts.login_limits import reserve_address_failure, reserve_client_failure
 from pyracast.accounts.security import normalize_client_ip
 from pyracast.mail_delivery import NotSentError
 
@@ -40,41 +29,6 @@ LOGIN_LIMITED_MESSAGE = gettext_lazy(
     "Too many sign-in attempts, or a verification code was sent recently. "
     "Try again in a few minutes."
 )
-ANONYMOUS_ACCOUNT_MAIL = "anonymous_account_mail"
-ANONYMOUS_ACCOUNT_TEMPLATES = frozenset(
-    {"account/email/unknown_account", "account/email/account_already_exists"}
-)
-_held_mail: ContextVar[list[Callable[[], None]] | None] = ContextVar(
-    "held_account_mail", default=None
-)
-
-
-def hold_account_mail(**kwargs: object) -> None:
-    _held_mail.set([])
-
-
-def deliver_held_account_mail(**kwargs: object) -> None:
-    held = _held_mail.get()
-    _held_mail.set(None)
-    for deliver in held or ():
-        deliver()
-
-
-def after_response(deliver: Callable[[], None]) -> None:
-    # Inside a request, account mail work waits until the server has sent the response, so the
-    # answer never takes longer because an address belongs to an account.
-    held = _held_mail.get()
-    if held is None:
-        deliver()
-        return
-    request = allauth_context.request
-    language = translation.get_language()
-
-    def run() -> None:
-        with allauth_context.request_context(request), translation.override(language):
-            deliver()
-
-    held.append(run)
 
 
 class AccountAdapter(DefaultAccountAdapter):
@@ -116,6 +70,8 @@ class AccountAdapter(DefaultAccountAdapter):
         return message
 
     def pre_authenticate(self, request: HttpRequest, **credentials: Any) -> None:
+        # Replaces allauth's consume of `login_failed`, which keeps the 10-minute hit when the
+        # daily rate refuses; allauth's success path rolls `_login_failed_rl_usage` back.
         self._client_failure = reserve_client_failure(request)
         if self._client_failure is None:
             record_security_event("login_locked", request=request)
@@ -125,27 +81,13 @@ class AccountAdapter(DefaultAccountAdapter):
         if self._login_failed_rl_usage is None:
             self._client_failure.rollback()
             record_security_event("login_locked", request=request)
-            if claim_daily_lock_notice(request, key):
-                email = credentials.get("email", "")
-                after_response(lambda: self.send_login_locked_notice(email))
             raise self.validation_error("too_many_login_attempts")
-
-    def authentication_failed(self, request: HttpRequest, **credentials: Any) -> None:
-        if self._login_failed_rl_usage is not None:
-            key = self._get_login_attempts_cache_key(request, **credentials)
-            record_address_failure(key, self._login_failed_rl_usage)
 
     def authenticate(self, request: HttpRequest, **credentials: Any) -> User | None:
         user = cast(User | None, super().authenticate(request, **credentials))
         if user is not None and self._client_failure is not None:
             self._client_failure.rollback()
         return user
-
-    def send_login_locked_notice(self, email: str) -> None:
-        user = email_identity(email)
-        address = EmailAddress.objects.get_primary_email(user) if user is not None else None
-        if address:
-            self.send_mail("account/email/login_locked", address, {"user": user})
 
     def get_client_ip(self, request: HttpRequest) -> str:
         try:
@@ -178,11 +120,6 @@ class AccountAdapter(DefaultAccountAdapter):
         language = preference or translation.get_language()
 
         def send() -> None:
-            if template_prefix in ANONYMOUS_ACCOUNT_TEMPLATES and not ratelimit.consume(
-                allauth_context.request, action=ANONYMOUS_ACCOUNT_MAIL, key="all"
-            ):
-                logger.warning("account_mail_skipped template=%s reason=budget", template_prefix)
-                return
             with translation.override(language):
                 try:
                     super(AccountAdapter, self).send_mail(template_prefix, email, context)
@@ -197,4 +134,4 @@ class AccountAdapter(DefaultAccountAdapter):
                         error.code if isinstance(error, NotSentError) else None,
                     )
 
-        transaction.on_commit(partial(after_response, send))
+        transaction.on_commit(send)

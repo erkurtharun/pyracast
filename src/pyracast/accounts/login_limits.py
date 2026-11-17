@@ -1,11 +1,10 @@
-import hashlib
 from collections.abc import Callable
 
 from allauth.account import app_settings as account_settings
 from allauth.account.adapter import get_adapter
 from allauth.core import context
 from allauth.core.internal import ratelimit
-from django.core.cache import cache
+from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest
 
@@ -39,71 +38,31 @@ def reserve_address_failure(request: HttpRequest, key: str) -> ratelimit.RateLim
     return reserve(request, FAILED_LOGIN, key)
 
 
-def check_second_factor(check: Callable[[], str]) -> str:
-    reservation = reserve_client_failure(context.request)
-    if reservation is None:
-        raise get_adapter().validation_error("too_many_login_attempts")
+def check_second_factor(
+    user: User,
+    check: Callable[[], str],
+    *,
+    refusal: str = "too_many_login_attempts",
+    per_client: bool = True,
+) -> str:
+    # Replaces allauth's per-user code limiter (`mfa.base.internal.flows.check_rate_limit`) on the
+    # same key and rates, because its consume keeps the 10-minute hit when the daily rate refuses.
+    # A success clears the user's key, as allauth does.
+    request = context.request
+    key = f"mfa-auth-user-{user.pk}"
+    client = reserve_client_failure(request) if per_client else ratelimit.RateLimitUsage(usage=[])
+    account = reserve(request, FAILED_LOGIN, key) if client is not None else None
+    if client is None or account is None:
+        if client is not None:
+            client.rollback()
+        raise get_adapter().validation_error(refusal)
     try:
         code = check()
     except ValidationError as error:
         if error.code != "incorrect_code":
-            reservation.rollback()
+            client.rollback()
+            account.rollback()
         raise
-    reservation.rollback()
+    client.rollback()
+    ratelimit.clear(request, app=APP, action=FAILED_LOGIN, key=key)
     return code
-
-
-def _daily_rate() -> str:
-    rates: list[str] = [
-        part.strip() for part in account_settings.RATE_LIMITS[FAILED_LOGIN].split(",")
-    ]
-    return max(rates, key=lambda part: ratelimit.parse_rate(part).duration)
-
-
-def _finished_failures_key(key: str) -> str:
-    return "pyracast:login-failures:" + hashlib.sha256(key.encode()).hexdigest()
-
-
-def record_address_failure(key: str, reservation: ratelimit.RateLimitUsage) -> None:
-    # The daily slot of a check that ended as a failure; slots of checks in flight never count
-    # towards a lock notice.
-    daily = max(reservation.usage, key=lambda usage: usage.cache_duration, default=None)
-    if daily is None:
-        return
-    record = _finished_failures_key(key)
-    with ratelimit.cache_lock(record) as locked:
-        if locked:
-            recent = [
-                timestamp
-                for timestamp in cache.get(record, [])
-                if timestamp > daily.timestamp - daily.cache_duration
-            ]
-            cache.set(record, [daily.timestamp, *recent], daily.cache_duration)
-
-
-def claim_daily_lock_notice(request: HttpRequest, key: str) -> bool:
-    """Return True once per daily lock of `key` by finished failures after the last notice."""
-    daily = _daily_rate()
-    if ratelimit.consume(
-        request,
-        app=APP,
-        action=FAILED_LOGIN,
-        config={FAILED_LOGIN: daily},
-        key=key,
-        dry_run=True,
-    ):
-        return False
-    rate = ratelimit.parse_rate(daily)
-    history: list[float] = cache.get(
-        ratelimit.get_cache_key(request, app=APP, action=FAILED_LOGIN, rate=rate, key=key), []
-    )
-    finished = set(cache.get(_finished_failures_key(key), []))
-    failures = [timestamp for timestamp in history if timestamp in finished]
-    claim = "pyracast:login-locked-notice:" + hashlib.sha256(key.encode()).hexdigest()
-    with ratelimit.cache_lock(claim) as locked:
-        # The history is newest first; a claim holds the newest failure already announced.
-        announced = cache.get(claim) if locked else None
-        if not locked or len(failures) < rate.amount or (announced and failures[-1] <= announced):
-            return False
-        cache.set(claim, failures[0], rate.duration)
-        return True

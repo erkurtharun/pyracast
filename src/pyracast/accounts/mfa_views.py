@@ -3,6 +3,7 @@ from typing import Any
 
 from allauth.account import app_settings
 from allauth.account.internal.flows.login import get_authentication_records
+from allauth.headless.internal.restkit.inputs import Input
 from allauth.headless.internal.restkit.response import APIResponse
 from allauth.headless.mfa import views
 from allauth.headless.mfa.views import ManageRecoveryCodesView as AllauthRecoveryCodesView
@@ -14,7 +15,11 @@ from django.db import transaction
 from django.http import HttpRequest, HttpResponseBase
 from django.utils.translation import gettext
 
-from pyracast.accounts.inputs import SecondFactorInput, SecondFactorReauthenticateInput
+from pyracast.accounts.inputs import (
+    SecondFactorInput,
+    SecondFactorReauthenticateInput,
+    TOTPActivationInput,
+)
 
 
 def recently_reauthenticated_with_mfa(request: HttpRequest) -> bool:
@@ -76,6 +81,9 @@ class ManageRecoveryCodesView(AllauthRecoveryCodesView):
 
 
 class ManageTOTPView(AllauthTOTPView):
+    def get_input_class(self) -> type[Input] | None:
+        return TOTPActivationInput if self.request.method == "POST" else None
+
     def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
         if request.method not in {"POST", "DELETE"} or not request.user.is_authenticated:
             return super().handle(request, *args, **kwargs)

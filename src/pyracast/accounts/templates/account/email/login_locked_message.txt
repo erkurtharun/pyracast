@@ -1,8 +1,0 @@
-{% extends "account/email/base_message.txt" %}{% load i18n %}
-{% block content %}{% translate "Password sign-in to your account is paused" %}
-
-{% translate "A wrong password was entered for your account too many times today, so password sign-in is paused for up to 24 hours." %}
-
-{% translate "To sign in now, reset your password. The reset ends the pause." %}
-
-{% translate "If these attempts were not yours, reset your password as well. None of them signed anyone in." %}{% endblock %}
