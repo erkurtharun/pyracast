@@ -84,7 +84,9 @@ def test_collection_status_reports_the_plants_own_collection_only() -> None:
 
 
 @pytest.mark.parametrize("stop", ["disable_schedule", "suspend_plant"])
-def test_next_collection_is_the_earliest_queued_job_or_configured_slot(stop: str) -> None:
+def test_next_collection_is_the_earliest_queued_job_forecast_slot_or_nightly_window(
+    stop: str,
+) -> None:
     system = make_system(approved=True)
     configure_schedule(
         system.member,
@@ -104,7 +106,7 @@ def test_next_collection_is_the_earliest_queued_job_or_configured_slot(stop: str
 
     later = morning + timedelta(hours=1)
     assert next_collection(later) == morning + timedelta(hours=6)
-    assert next_collection(morning + timedelta(hours=7)) == morning + timedelta(days=1)
+    assert next_collection(morning + timedelta(hours=7)) == morning + timedelta(hours=15)
     retry_at = later + timedelta(minutes=30)
     CollectionJob.objects.filter(endpoint="forecasts", scheduled_slot=morning).update(
         status="retry", available_at=retry_at
