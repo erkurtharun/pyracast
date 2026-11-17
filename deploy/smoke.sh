@@ -185,6 +185,7 @@ import os
 import time
 import django
 django.setup()
+from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.db import connection, ProgrammingError
 from django.utils import timezone
@@ -207,6 +208,7 @@ else:
     raise SystemExit('Runtime role unexpectedly owns DDL permission')
 actor = User.objects.create_superuser(username='container-smoke', email='smoke@example.com',
                                       password='container-smoke-password')
+EmailAddress.objects.create(user=actor, email=actor.email, primary=True, verified=True)
 tenant = Tenant.objects.create(name='Container smoke')
 Membership.objects.create(user=actor, tenant=tenant, role=Membership.Role.ADMIN)
 region = submit_region(actor, tenant.pk, name='Synthetic Ankara', latitude=39.9,
@@ -267,4 +269,4 @@ restore_archive(release, release / 'database.dump', 'local-smoke')
 PY
 "${compose[@]}" exec -T api pyracast dispatch
 "${compose[@]}" stop -t 30 dispatcher worker notifications
-echo 'Production containers, TLS routing, static assets, session and sign-in API, sign-in page, database roles, fixture queue publication and graceful idle shutdown passed.'
+echo 'Production containers, TLS routing, static assets, session and sign-in API, workspace app shell, database roles, fixture queue publication and graceful idle shutdown passed.'

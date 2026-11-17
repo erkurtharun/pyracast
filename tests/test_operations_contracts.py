@@ -7,13 +7,17 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
+from allauth.account.models import EmailAddress
 from django.conf import settings
+from django.contrib.auth.models import User
 from django.urls import URLPattern, URLResolver
 from dramatiq.brokers.stub import StubBroker
 
 from deploy import authorize_gmail, watchdog
 from pyracast import gmail
+from pyracast.accounts.authentication import email_identity
 from pyracast.forecasts.historical_upload import MAX_UPLOAD_BYTES
 from pyracast.forecasts.management.commands.worker import Command as WorkerCommand
 from pyracast.metering.runtime import make_epias_actor
@@ -163,6 +167,23 @@ def test_watchdog_supervises_every_long_running_compose_service() -> None:
     assert set(watchdog.SERVICES) == long_running_services()
 
 
+@pytest.mark.django_db
+def test_smoke_sign_in_uses_a_verified_email_identity(tmp_path: Path) -> None:
+    setup = re.search(r"^actor = .*?(?=^tenant = )", text(DEPLOY / "smoke.sh"), re.M | re.S)
+    assert setup
+    fixture = tmp_path / "smoke_identity.py"
+    fixture.write_text(setup[0], encoding="utf-8")
+    actor: User = runpy.run_path(
+        str(fixture), init_globals={"User": User, "EmailAddress": EmailAddress}
+    )["actor"]
+
+    assert email_identity(actor.email) == actor
+    assert actor.has_usable_password()
+    assert EmailAddress.objects.filter(
+        user=actor, email=actor.email, primary=True, verified=True
+    ).exists()
+
+
 def test_release_drains_every_application_service_within_its_stop_grace_period() -> None:
     script = text(DEPLOY / "install-release.sh")
     drain = stop_groups(script, "old")
@@ -233,7 +254,7 @@ def test_gateway_routes_every_django_prefix_to_the_backend() -> None:
     assert top_level_route_prefixes() <= backend_router_prefixes()
 
 
-def test_gateway_waits_longer_than_gunicorn_and_gunicorn_stops_within_its_grace() -> None:
+def test_gateway_timeout_covers_gunicorn_and_grace_periods_fit_service_limits() -> None:
     gunicorn = runpy.run_path(str(DEPLOY / "gunicorn_conf.py"))
     gateway = gateway_environment()
     services = compose_services()

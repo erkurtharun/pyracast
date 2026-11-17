@@ -431,7 +431,7 @@ with a forged forwarding prefix, publishes one synthetic forecast through the
 real RabbitMQ worker, and exercises dispatcher and idle worker stop. Through the
 gateway it also checks the anonymous `/api/session/` JSON shape, that a
 wrong-password sign-in gets the normal 400 `email_password_mismatch` refusal and
-that the `/app/` sign-in page loads.
+that the `/app/` workspace app shell loads.
 `tests/test_operations_contracts.py` keeps the values that `deploy/`,
 `infra/terraform` and the workflows restate in agreement: worker queues, the
 watchdog and drain service lists, stop grace periods, alert event names,
