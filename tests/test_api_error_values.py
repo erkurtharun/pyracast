@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -22,7 +23,15 @@ def test_every_openapi_operation_declares_the_shared_error_body() -> None:
     from pyracast.api.schema import error_components
 
     result = error_components(
-        {"paths": {"/api/example/": {"get": {"responses": {"200": {"description": "OK"}}}}}}
+        {
+            "paths": {
+                "/api/example/": {
+                    "summary": "Example API",
+                    "parameters": [],
+                    "get": {"responses": {"200": {"description": "OK"}}},
+                }
+            }
+        }
     )
     responses = result["paths"]["/api/example/"]["get"]["responses"]
     assert responses["200"] == {"description": "OK"}
@@ -32,9 +41,13 @@ def test_every_openapi_operation_declares_the_shared_error_body() -> None:
     }
 
     schema = json.loads(OPENAPI.read_text(encoding="utf-8"))
+    schema["paths"]["/api/example/"] = result["paths"]["/api/example/"]
     for path in schema["paths"].values():
-        for operation in path.values():
-            assert operation["responses"]["default"] == responses["default"]
+        for method in ("get", "post", "put", "patch", "delete", "head", "options", "trace"):
+            if method in path:
+                assert path[method]["responses"]["default"] == responses["default"]
+    assert result["paths"]["/api/example/"]["summary"] == "Example API"
+    assert result["paths"]["/api/example/"]["parameters"] == []
 
 
 def test_validation_errors_identify_each_item_in_a_list() -> None:
@@ -54,17 +67,34 @@ def test_validation_errors_identify_each_item_in_a_list() -> None:
     }
 
 
-@pytest.mark.parametrize("content", [b"{", b"[]"])
-def test_non_object_error_responses_keep_their_original_content(content: bytes) -> None:
+@pytest.mark.parametrize("content", [b"{", b"[]", b"null", b'"private detail"'])
+@pytest.mark.parametrize(
+    ("language", "message"),
+    [
+        ("en", "The server could not complete this request."),
+        ("tr", "Sunucu bu isteği tamamlayamadı."),
+    ],
+)
+def test_non_object_error_responses_receive_the_localized_contract(
+    content: bytes, language: str, message: str
+) -> None:
     from django.http import HttpResponse
     from django.test import RequestFactory
 
     from pyracast.api.errors import with_error_contract
 
     response = HttpResponse(content, status=502, content_type="application/json")
-    result = with_error_contract(RequestFactory().get("/api/example/"), response)
+    request = RequestFactory().get("/api/example/", HTTP_ACCEPT_LANGUAGE=language)
+    result = with_error_contract(request, response)
     assert result is response
-    assert (result.status_code, result.content) == (502, content)
+    assert result.status_code == 502
+    body = json.loads(result.content)
+    assert re.fullmatch(r"[a-f0-9]{32}", body["request_id"])
+    assert body == {
+        "code": "server_error",
+        "message": message,
+        "request_id": body["request_id"],
+    }
 
 
 def test_unmapped_client_status_has_a_localized_contract_without_a_length_header() -> None:
