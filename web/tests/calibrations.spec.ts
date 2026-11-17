@@ -121,6 +121,62 @@ test("refresh during activation still reloads the completed selection", async ({
     await expect(page.getByRole("row", { name: /#41/ })).toBeVisible();
 });
 
+test("superseded runs are labelled in Turkish", async ({ page, baseURL }) => {
+    await mockApi(page);
+    await page
+        .context()
+        .addCookies([
+            { name: "pyracast_language", value: "tr", url: baseURL! },
+        ]);
+    await page.route("**/plants/21/calibrations/", (route) =>
+        route.fulfill({ json: paged([{ ...run(40), status: "superseded" }]) }),
+    );
+    await page.goto("/app/");
+    await page
+        .getByRole("button", { name: /East array|Antalya solar park/ })
+        .click();
+    await page
+        .getByRole("button", { name: "Kalibrasyon", exact: true })
+        .click();
+    const row = page.getByRole("row", { name: /#40/ });
+    await expect(row).toContainText("yerini yenisi aldı");
+    await expect(row).not.toContainText("superseded");
+});
+
+test("refresh clears a finished action notice", async ({ page }) => {
+    await mockApi(page);
+    await page.route("**/plants/21/calibrations/", (route) =>
+        route.fulfill({ json: paged([run(40)]) }),
+    );
+    await page.route("**/plants/21/calibrations/40/activate/", (route) =>
+        route.fulfill({ json: {} }),
+    );
+    await openCalibration(page);
+    await page.getByRole("button", { name: "Activate", exact: true }).click();
+    const notice = page.getByText(
+        "Calibration selection updated. Refresh the forecast to see the current result.",
+    );
+    await expect(notice).toBeVisible();
+    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await expect(notice).toHaveCount(0);
+});
+
+test("the selection note names the affected forecasts and estimates", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/plants/21/calibrations/", (route) =>
+        route.fulfill({ json: paged([run(40)]) }),
+    );
+    await openCalibration(page);
+    await expect(
+        page.getByText(
+            "Issued forecasts keep their calibration. New forecasts and estimated past days use the selected calibration from its first training day. Reset also turns off automatic calibration.",
+            { exact: true },
+        ),
+    ).toBeVisible();
+});
+
 test("detail and activation errors remain independent", async ({ page }) => {
     await mockApi(page);
     await page.route("**/plants/21/calibrations/", (route) =>

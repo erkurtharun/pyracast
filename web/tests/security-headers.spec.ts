@@ -51,3 +51,17 @@ test("a fresh CSP nonce permits the app and blocks injected scripts", async ({
         `'nonce-${nonce}'`,
     );
 });
+
+test("pages send the same-origin referrer policy", async ({ request }) => {
+    for (const path of ["/", "/tr/privacy/", "/app/"]) {
+        const response = await request.get(path);
+        expect(response.headers()["referrer-policy"], path).toBe("same-origin");
+    }
+});
+
+test("a spoofed language header on /app/ is ignored", async ({ request }) => {
+    const response = await request.get("/app/", {
+        headers: { "x-pyracast-public-language": "tr" },
+    });
+    expect(await response.text()).toMatch(/<html lang="en"/);
+});

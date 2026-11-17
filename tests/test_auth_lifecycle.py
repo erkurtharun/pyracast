@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 from allauth.account.models import EmailAddress
+from allauth.core.internal import ratelimit
 from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
 from allauth.mfa.totp.internal import auth as totp_auth
 from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
@@ -42,6 +43,58 @@ def member() -> User:
 def submit(client: Client, path: str, data: dict[str, Any]) -> Any:
     token = client.get("/api/session/").json()["csrf_token"]
     return client.post(AUTH + path, data, content_type="application/json", HTTP_X_CSRFTOKEN=token)
+
+
+def signup_unverified() -> Any:
+    details = {
+        "company_name": "Sunfield Energy",
+        "email": "owner@example.com",
+        "password": PASSWORD,
+    }
+    return submit(Client(enforce_csrf_checks=True), "auth/signup", details)
+
+
+@pytest.mark.parametrize(
+    ("language", "expected"),
+    [
+        (
+            "en",
+            "Too many sign-in attempts, or a verification code was sent recently. "
+            "Try again in a few minutes.",
+        ),
+        (
+            "tr",
+            "Çok fazla giriş denemesi yap\u0131ld\u0131 veya k\u0131sa süre önce bir doğrulama "
+            "kodu gönderildi. Birkaç dakika sonra tekrar deneyin.",
+        ),
+    ],
+)
+def test_login_lockout_message_also_covers_a_recent_code(language: str, expected: str) -> None:
+    assert signup_unverified().status_code == 401
+    client = Client(enforce_csrf_checks=True, HTTP_ACCEPT_LANGUAGE=language)
+    response = submit(client, "auth/login", {"email": "owner@example.com", "password": PASSWORD})
+    assert response.status_code == 400
+    assert [error["message"] for error in response.json()["errors"]] == [expected]
+
+
+def test_unverified_sign_in_can_request_a_new_code_after_one_minute(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert signup_unverified().status_code == 401
+    later = time.time() + 61
+    monkeypatch.setattr(
+        ratelimit,
+        "time",
+        SimpleNamespace(time=lambda: later, monotonic=time.monotonic, sleep=time.sleep),
+    )
+    response = submit(
+        Client(enforce_csrf_checks=True),
+        "auth/login",
+        {"email": "owner@example.com", "password": PASSWORD},
+    )
+    assert response.status_code == 401
+    assert {"id": "verify_email", "is_pending": True} in response.json()["data"]["flows"]
+    assert len(mail.outbox) == 2
 
 
 def test_session_projection_cannot_change_the_account_email() -> None:

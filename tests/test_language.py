@@ -82,7 +82,29 @@ def test_explicit_cookie_and_profile_precedence(cookie: str) -> None:
     response = client.get("/api/session/", HTTP_ACCEPT_LANGUAGE="tr")
     assert response.json()["language"] == "en"
     assert response.json()["user"]["language_preference"] == "en"
-    assert response.cookies.get(LANGUAGE_COOKIE) is None
+    if cookie == "en":
+        assert LANGUAGE_COOKIE not in response.cookies
+    else:
+        assert response.cookies[LANGUAGE_COOKIE].value == "en"
+        assert response.cookies[LANGUAGE_COOKIE]["httponly"]
+
+
+def test_language_choice_with_stale_cookie_keeps_the_new_value() -> None:
+    client = Client(enforce_csrf_checks=True)
+    user = User.objects.create_user(username="owner")
+    UserLanguagePreference.objects.create(user=user, language="en")
+    client.force_login(user)
+    token = client.get("/api/session/").json()["csrf_token"]
+    client.cookies[LANGUAGE_COOKIE] = "de"
+    response = client.post(
+        "/api/session/language/",
+        {"language": "tr"},
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=token,
+    )
+    assert response.json()["user"]["language_preference"] == "tr"
+    assert response.cookies[LANGUAGE_COOKIE].value == "tr"
+    assert UserLanguagePreference.objects.get(user=user).language == "tr"
 
 
 def test_anonymous_choice_requires_csrf_and_sets_only_explicit_cookie() -> None:
@@ -197,18 +219,14 @@ def test_direct_country_header_and_gateway_without_upstream_are_ignored(
 @override_settings(
     MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
 )
-def test_signup_copies_only_explicit_language(cookie: str | None) -> None:
+def test_signup_saves_the_form_language_as_preference(cookie: str | None) -> None:
     client = Client(enforce_csrf_checks=True, HTTP_ACCEPT_LANGUAGE="tr")
     if cookie is not None:
         client.cookies[LANGUAGE_COOKIE] = cookie
     assert signup(client).status_code == 401
     user = User.objects.get(email="owner@example.com")
-    preference = UserLanguagePreference.objects.filter(user=user).first()
-    if cookie in {"tr", "en"}:
-        assert preference is not None
-        assert preference.language == cookie
-    else:
-        assert preference is None
+    expected = cookie if cookie in {"tr", "en"} else "tr"
+    assert UserLanguagePreference.objects.get(user=user).language == expected
     assert len(mail.outbox) == 1
 
 
