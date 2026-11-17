@@ -67,6 +67,7 @@ def test_turkey_grid_daylight_is_bit_identical(latitude: float, longitude: float
         (date(2026, 5, 14), "Europe/Oslo", 69.65, 18.96),
         (date(2026, 7, 7), "Asia/Kolkata", 28.6, 77.2),
         (date(2026, 9, 25), "Etc/GMT-6", 90.0, 90.0),
+        (date(2026, 12, 25), "UTC", 67.39, 3.75),
     ],
 )
 def test_every_horizon_crossing_is_found(
@@ -251,16 +252,28 @@ def test_unexpected_calculation_failures_propagate(monkeypatch: pytest.MonkeyPat
         daylight_window(date(2026, 3, 20), "UTC", 0, 0)
 
 
-def test_night_shorter_than_the_scan_step_keeps_astral_events() -> None:
-    result = daylight_window(date(2026, 6, 17), "UTC", 65.8, 18.0)
+@pytest.mark.parametrize("day", [date(2026, 6, 17), date(2026, 6, 24)])
+def test_night_shorter_than_the_scan_step_is_found(day: date) -> None:
+    start, end = local_day_bounds(day, "UTC")
+    result = daylight_window(day, "UTC", 65.8, 18.0)
+    crossings = horizon_crossings(Observer(65.8, 18.0, elevation=0.0), start, end)
     assert result.status == "normal"
     assert result.sunrise is not None
     assert result.sunset is not None
     assert timedelta(minutes=10) < result.sunrise - result.sunset < timedelta(minutes=30)
-    assert result.windows == (
-        (datetime(2026, 6, 17, tzinfo=UTC), result.sunset),
-        (result.sunrise, datetime(2026, 6, 18, tzinfo=UTC)),
-    )
+    assert result.windows == ((start, result.sunset), (result.sunrise, end))
+    assert len(crossings) == 2
+    assert abs((result.sunset - crossings[0]).total_seconds()) < 60
+    assert abs((result.sunrise - crossings[1]).total_seconds()) < 60
+
+
+def test_sunset_at_the_start_of_the_day_is_kept() -> None:
+    start, end = local_day_bounds(date(2026, 5, 14), "UTC")
+    result = daylight_window(date(2026, 5, 14), "UTC", 0.0, -90.07784465833333)
+    assert result.status == "normal"
+    assert result.sunset == start
+    assert result.sunrise is not None
+    assert result.windows == ((result.sunrise, end),)
 
 
 def test_assembly_keeps_events_at_midnight_in_the_half_open_day() -> None:
@@ -332,14 +345,15 @@ def test_astral_events_the_scan_contradicts_are_dropped(
     assert_matches_the_sun(day, zone, latitude, longitude)
 
 
-# Beyond 65 degrees a night or daylight can be shorter than the 30-minute scan step.
 @example(date(2026, 5, 8), "America/New_York", 40.7128, -74.006)
 @example(date(2026, 8, 10), "America/New_York", 40.7128, -74.006)
 @example(date(2026, 5, 17), "Asia/Kolkata", 28.6, 77.2)
+@example(date(2026, 12, 25), "UTC", 67.39, 3.75)
+@example(date(2026, 6, 24), "UTC", 65.8, 18.0)
 @given(
     day=strategies.dates(date(2000, 1, 1), date(2100, 12, 31)),
     zone=strategies.sampled_from(ZONES),
-    latitude=strategies.floats(-65, 65),
+    latitude=strategies.floats(-90, 90),
     longitude=strategies.floats(-180, 180),
 )
 def test_daylight_window_matches_the_sun(
