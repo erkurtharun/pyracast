@@ -323,9 +323,7 @@ jobs:
       - run: npx --no-install playwright install --with-deps chromium
         working-directory: web
       - name: Verify API schema and generated types
-        run: |
-          npm --prefix web run api:generate
-          git diff --exit-code -- web/openapi.json web/src/lib/schema.d.ts
+        run: uv run --locked --no-sync --no-build python scripts/generate_api_schema.py --check
       - run: npm run check
         if: runner.os == 'Windows'
         working-directory: web

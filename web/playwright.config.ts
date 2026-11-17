@@ -10,6 +10,9 @@ export default defineConfig({
     fullyParallel: true,
     forbidOnly: !!process.env.CI,
     retries: process.env.CI ? 2 : 0,
+    failOnFlakyTests: !!process.env.CI,
+    // Below the 25 minute CI job limit, so a hung run reports its tests instead of being killed.
+    globalTimeout: 15 * 60_000,
     reporter: coverage
         ? [["list"], ["./testing/coverage-reporter.ts"]]
         : "list",

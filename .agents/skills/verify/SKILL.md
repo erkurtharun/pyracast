@@ -3,8 +3,14 @@ name: verify
 description: Verify Pyracast code or tooling changes and distinguish local checks from unverified provider and platform behavior.
 ---
 
-Use `uv run --locked python scripts/check.py` for the shared formatting, lint, type
-and test checks. Build packaging changes with `uv build --no-sources`; CI also
+Use `uv run --locked python scripts/check.py` for the shared formatting, lint, type,
+Django and test checks; after `npm ci` in `web/` it also checks the API schema, the
+generated types and the web static checks, and without `web/node_modules` it says
+`SKIPPED web`. `--static-only` skips pytest, `--tests-only` runs only pytest, and
+arguments after `--` go to pytest (`check.py --tests-only -- tests/test_api.py`).
+`PYTEST_XDIST_AUTO_NUM_WORKERS` overrides the worker cap of six. Every stage prints
+its duration. Tests use fixed `PYRACAST_*` values from `tests/settings.py`, so a local
+`.env` changes only the database connection. Build packaging changes with `uv build --no-sources`; CI also
 imports the resulting wheel outside the checkout. Settings belong in
 `pyproject.toml`, not duplicated command-line policies.
 

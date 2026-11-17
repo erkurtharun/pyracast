@@ -5,6 +5,9 @@ export default defineConfig({
     outputDir: "integration-results",
     preserveOutput: "always",
     workers: 1,
+    forbidOnly: !!process.env.CI,
+    // Below the 240 s subprocess timeout of tests/test_browser.py, so Playwright reports first.
+    globalTimeout: 200_000,
     use: {
         baseURL: "http://127.0.0.1:3101",
         browserName: "chromium",
