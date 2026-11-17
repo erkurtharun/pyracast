@@ -13,7 +13,11 @@ from django.test import override_settings
 from pyracast.notifications import jobs
 from pyracast.notifications.jobs import LEASE_DURATION, process_notification
 from pyracast.notifications.mail import NotSentError, build_message
-from pyracast.notifications.models import NotificationDelivery
+from pyracast.notifications.models import (
+    NotificationDelivery,
+    NotificationSettings,
+    ReminderSchedule,
+)
 from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.scheduler import MAX_LATENESS
 from pyracast.regions.models import Region
@@ -113,6 +117,7 @@ def test_late_smtp_response_resolves_the_original_uncertain_lease(
     [
         ("authority", "schedule_or_authority_changed"),
         ("settings", "cancelled_by_settings_change"),
+        ("limit", "recipient_limit_exceeded"),
         ("deadline", "delivery_deadline_exceeded"),
         ("deleted", ""),
         ("token", ""),
@@ -136,6 +141,11 @@ def test_open_connection_does_not_authorize_a_changed_delivery(
         elif change == "settings":
             delivery.schedule.enabled = False
             delivery.schedule.save(update_fields=("enabled",))
+        elif change == "limit":
+            NotificationSettings.objects.filter(pk=1).update(max_recipients=1)
+            ReminderSchedule.objects.filter(pk=delivery.schedule_id).update(
+                recipients=[*delivery.recipients, "other@example.com"]
+            )
         elif change == "deadline":
             clock[0] = 2
         elif change == "deleted":
