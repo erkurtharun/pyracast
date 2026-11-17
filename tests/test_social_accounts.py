@@ -389,12 +389,22 @@ def test_callback_state_is_session_bound_single_use_and_errors_are_safe(
         CALLBACK + "&next=//evil.example",
     ],
 )
-def test_unexpected_callback_destinations_are_rejected(url: str) -> None:
+def test_unexpected_callback_destinations_return_to_the_configured_callback(url: str) -> None:
     response = Client().post(
         AUTH + "auth/provider/redirect",
         {"provider": "google", "process": "login", "callback_url": url},
     )
-    assert response.status_code == 400
+    assert response.status_code == 302
+    assert response["Location"] == CALLBACK + "&error=invalid_request"
+
+
+def test_an_unknown_provider_returns_to_the_configured_callback() -> None:
+    response = Client().post(
+        AUTH + "auth/provider/redirect",
+        {"provider": "unknown", "process": "login", "callback_url": CALLBACK},
+    )
+    assert response.status_code == 302
+    assert response["Location"] == CALLBACK + "&error=invalid_request"
 
 
 def test_native_token_and_browser_login_entrypoints_are_unavailable() -> None:
