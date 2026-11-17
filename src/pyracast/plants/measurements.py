@@ -12,6 +12,7 @@ from pyracast.epias import TIMEZONE
 from pyracast.forecasts.actuals import ACTUAL_COMPOSITION_POLICY, select_archived_actual_source
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.intraday import completed_actual_intervals
+from pyracast.forecasts.models import CollectionEndpoint
 from pyracast.incidents.operations import pinned_incidents, select_incidents
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
@@ -394,7 +395,7 @@ def selection_fingerprint(
         if (
             source is not None
             and snapshot is not None
-            and snapshot.job.endpoint == "estimated_actuals"
+            and snapshot.job.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
             and snapshot.job.reference_import_id is None
         ):
             start, end = local_day_bounds(day, configuration.binding.timezone)

@@ -13,7 +13,13 @@ from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.accounts.operations import require_admin, require_workspace_admin
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.calibration_data import current_source_validation
-from pyracast.plants.models import CalibrationRun, Plant, PlantEvent, PlantEventAction
+from pyracast.plants.models import (
+    CalibrationRun,
+    CalibrationStatus,
+    Plant,
+    PlantEvent,
+    PlantEventAction,
+)
 from pyracast.plants.operations import _activate, _validate_activation, configuration_is_current
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.regions.models import Region
@@ -152,9 +158,9 @@ def set_calibration_automation(
             )
             if (
                 latest is not None
-                and latest.status == "ready"
+                and latest.status == CalibrationStatus.READY
                 and not CalibrationRun.objects.filter(
-                    plant=plant, status__in=("pending", "running")
+                    plant=plant, status__in=(CalibrationStatus.PENDING, CalibrationStatus.RUNNING)
                 ).exists()
             ):
                 promote_automatic_calibration(plant, latest, timezone.now())
@@ -256,7 +262,7 @@ def promote_automatic_calibration(plant: Plant, run: CalibrationRun, now: dateti
         reason = "authorization_revoked"
     elif not configuration_is_current(run.configuration):
         reason = "configuration_changed"
-    elif run.status != "ready":
+    elif run.status != CalibrationStatus.READY:
         reason = f"candidate_{run.status}"
     else:
         try:

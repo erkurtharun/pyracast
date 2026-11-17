@@ -10,7 +10,12 @@ from django.db.models.functions import Greatest
 from pyracast.background.failures import log_failure
 from pyracast.collection_window import nightly_window
 from pyracast.forecasts.jobs import binding_is_current
-from pyracast.forecasts.models import CollectionJob, CollectionSchedule
+from pyracast.forecasts.models import (
+    CollectionEndpoint,
+    CollectionJob,
+    CollectionJobStatus,
+    CollectionSchedule,
+)
 from pyracast.forecasts.timing import effective_forecast_schedule, latest_forecast_slot
 from pyracast.regions.models import Region
 
@@ -39,7 +44,9 @@ def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
             return jobs
         first_slot = (
             CollectionJob.objects.filter(
-                binding=binding, endpoint="forecasts", reference_import__isnull=True
+                binding=binding,
+                endpoint=CollectionEndpoint.FORECASTS,
+                reference_import__isnull=True,
             )
             .order_by("scheduled_slot")
             .values_list("scheduled_slot", flat=True)
@@ -61,7 +68,7 @@ def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
             history = (
                 CollectionJob.objects.filter(
                     binding=binding,
-                    endpoint="estimated_actuals",
+                    endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
                     reference_import__isnull=True,
                     target_date=today - timedelta(days=1),
                     scheduled_slot__gte=window[0],
@@ -74,7 +81,7 @@ def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
             if history is None:
                 history, _ = CollectionJob.objects.get_or_create(
                     binding=binding,
-                    endpoint="estimated_actuals",
+                    endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
                     scheduled_slot=window[0],
                     defaults={
                         "target_date": today - timedelta(days=1),
@@ -84,14 +91,14 @@ def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
                 )
             CollectionJob.objects.filter(
                 binding=binding,
-                endpoint="estimated_actuals",
+                endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
                 target_date=today - timedelta(days=1),
                 scheduled_slot__gte=window[0],
                 retry_until=window[1],
-                status="stale",
+                status=CollectionJobStatus.STALE,
                 forecastsnapshot__isnull=True,
             ).update(
-                status="pending",
+                status=CollectionJobStatus.PENDING,
                 available_at=Greatest("available_at", now),
                 lease_token=None,
                 lease_expires_at=None,
@@ -102,32 +109,35 @@ def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
             return jobs
         CollectionJob.objects.filter(
             binding=binding,
-            endpoint="forecasts",
+            endpoint=CollectionEndpoint.FORECASTS,
             scheduled_slot__lt=slot,
-            status__in=("pending", "retry"),
+            status__in=(CollectionJobStatus.PENDING, CollectionJobStatus.RETRY),
         ).update(
-            status="stale",
+            status=CollectionJobStatus.STALE,
             last_error="forecast_superseded",
             lease_token=None,
             lease_expires_at=None,
         )
         job, _ = CollectionJob.objects.get_or_create(
             binding=binding,
-            endpoint="forecasts",
+            endpoint=CollectionEndpoint.FORECASTS,
             scheduled_slot=slot,
             defaults={
                 "target_date": slot.astimezone(zone).date() + timedelta(days=1),
                 "available_at": now,
             },
         )
-        CollectionJob.objects.filter(pk=job.pk, status="stale").update(
-            status="pending", available_at=now, lease_token=None, lease_expires_at=None
+        CollectionJob.objects.filter(pk=job.pk, status=CollectionJobStatus.STALE).update(
+            status=CollectionJobStatus.PENDING,
+            available_at=now,
+            lease_token=None,
+            lease_expires_at=None,
         )
         jobs.append(job.pk)
         if now < slot + timedelta(minutes=15):
             history, _ = CollectionJob.objects.get_or_create(
                 binding=binding,
-                endpoint="estimated_actuals",
+                endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
                 scheduled_slot=slot,
                 defaults={
                     "target_date": slot.astimezone(zone).date(),

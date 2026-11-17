@@ -894,10 +894,24 @@ export interface components {
             can_withdraw: boolean;
             unread: boolean;
         };
+        /**
+         * @description * `forecasts` - Forecasts
+         *     * `estimated_actuals` - Estimated actuals
+         *     * `historical_import` - Historical import
+         *     * `scaled_forecasts` - Scaled forecasts
+         *     * `scaled_estimated_actuals` - Scaled estimated actuals
+         * @enum {string}
+         */
+        CollectionEndpointEnum:
+            | "forecasts"
+            | "estimated_actuals"
+            | "historical_import"
+            | "scaled_forecasts"
+            | "scaled_estimated_actuals";
         CollectionJobOutput: {
             id: number;
-            endpoint: string;
-            status: string;
+            endpoint: components["schemas"]["CollectionEndpointEnum"];
+            status: components["schemas"]["CollectionJobStatusEnum"];
             /** Format: date-time */
             scheduled_slot: string;
             /** Format: date-time */
@@ -907,6 +921,17 @@ export interface components {
             attempts: number;
             last_error: string;
         };
+        /**
+         * @description * `pending` - Pending
+         *     * `running` - Running
+         *     * `retry` - Retry
+         *     * `succeeded` - Succeeded
+         *     * `failed` - Failed
+         *     * `stale` - Stale
+         * @enum {string}
+         */
+        CollectionJobStatusEnum:
+            "pending" | "running" | "retry" | "succeeded" | "failed" | "stale";
         CollectionScheduleInput: {
             enabled: boolean;
             times: string[];

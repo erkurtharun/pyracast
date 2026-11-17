@@ -5,6 +5,7 @@ from rest_framework import serializers
 
 from pyracast.accounts.models import Tenant, WorkspaceRole
 from pyracast.connections.models import PowerBasis, Provider
+from pyracast.forecasts.models import SnapshotSourceKind
 from pyracast.regions.models import (
     REGION_TRANSITIONS,
     Region,
@@ -130,7 +131,7 @@ class IdentifierOutput(serializers.Serializer[dict[str, Any]]):
 class ForecastQuery(InputSerializer):
     date = serializers.DateField()
     data_source = serializers.ChoiceField(
-        choices=("auto", "forecast", "estimated_actuals"), default="forecast"
+        choices=("auto", *SnapshotSourceKind.values), default=SnapshotSourceKind.FORECAST
     )
 
 

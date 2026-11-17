@@ -17,7 +17,12 @@ from pyracast.forecasts.intraday import (
     completed_actual_intervals,
     native_actual_snapshots,
 )
-from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.forecasts.models import (
+    CollectionEndpoint,
+    CollectionJobStatus,
+    ForecastSnapshot,
+    SnapshotSourceKind,
+)
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_composition import (
     ForecastComposition,
@@ -80,7 +85,7 @@ def select_archived_actual_source(
     )
     if (
         legacy is not None
-        and legacy.job.endpoint != "estimated_actuals"
+        and legacy.job.endpoint != CollectionEndpoint.ESTIMATED_ACTUALS
         and history_day_complete(legacy, target_date, binding.timezone)
         and not actual_coverage_complete(
             daylight_window(target_date, binding.timezone, binding.latitude, binding.longitude),
@@ -172,10 +177,10 @@ def replay_archived_actual_source(
         .filter(
             pk__in=identifiers,
             binding=binding,
-            source_kind="estimated_actuals",
-            job__endpoint="estimated_actuals",
+            source_kind=SnapshotSourceKind.ESTIMATED_ACTUALS,
+            job__endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
             job__reference_import__isnull=True,
-            job__status="succeeded",
+            job__status=CollectionJobStatus.SUCCEEDED,
             collected_at__lte=cutoff,
             available_at__lte=cutoff,
         )

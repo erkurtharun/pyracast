@@ -6,12 +6,17 @@ from django.db.models import Count, F, OuterRef, Q, Subquery
 from pyracast.connections.models import ProviderAccount
 from pyracast.forecasts.models import (
     CollectionJob,
+    CollectionJobStatus,
     DispatcherPhase,
     DispatcherStatus,
     ForecastSnapshot,
 )
 from pyracast.metering.models import EpiasCollectionJob, EpiasJobStatus
-from pyracast.notifications.models import PAUSED_DELIVERY_ERRORS, NotificationDelivery
+from pyracast.notifications.models import (
+    PAUSED_DELIVERY_ERRORS,
+    NotificationDelivery,
+    NotificationDeliveryStatus,
+)
 from pyracast.notifications.operations import invalid_reminder_recipient_count
 from pyracast.regions.models import Region
 
@@ -58,12 +63,25 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
         or phase.last_error
     ]
     collections = CollectionJob.objects.filter(
-        Q(status__in=("pending", "retry", "running"))
-        | Q(status="failed", scheduled_slot__gte=recent),
+        Q(
+            status__in=(
+                CollectionJobStatus.PENDING,
+                CollectionJobStatus.RETRY,
+                CollectionJobStatus.RUNNING,
+            )
+        )
+        | Q(status=CollectionJobStatus.FAILED, scheduled_slot__gte=recent),
         binding__region__deleted_at__isnull=True,
     )
     deliveries = NotificationDelivery.objects.filter(
-        Q(status__in=("pending", "retry", "sending")) | Q(scheduled_for__gte=recent),
+        Q(
+            status__in=(
+                NotificationDeliveryStatus.PENDING,
+                NotificationDeliveryStatus.RETRY,
+                NotificationDeliveryStatus.SENDING,
+            )
+        )
+        | Q(scheduled_for__gte=recent),
         schedule__region__deleted_at__isnull=True,
     )
     accounts = ProviderAccount.objects.filter(
@@ -79,7 +97,7 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
         ForecastSnapshot.objects.filter(
             binding_id=OuterRef("approved_binding_id"),
             source_kind="forecast",
-            job__status="succeeded",
+            job__status=CollectionJobStatus.SUCCEEDED,
             forecastresult__isnull=False,
         )
         .order_by("-collected_at")
@@ -95,15 +113,23 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
     )
     notification_counts = deliveries.aggregate(
         overdue_notifications=Count("pk", filter=waiting_jobs & Q(available_at__lt=cutoff)),
-        interrupted_notifications=Count("pk", filter=Q(status="sending") & expired_leases),
+        interrupted_notifications=Count(
+            "pk", filter=Q(status=NotificationDeliveryStatus.SENDING) & expired_leases
+        ),
         failed_notifications=Count(
             "pk",
-            filter=Q(status__in=("failed", "uncertain"), scheduled_for__gte=recent),
+            filter=Q(
+                status__in=(
+                    NotificationDeliveryStatus.FAILED,
+                    NotificationDeliveryStatus.UNCERTAIN,
+                ),
+                scheduled_for__gte=recent,
+            ),
         ),
         missed_notifications=Count(
             "pk",
             filter=Q(
-                status__in=("skipped", "failed"),
+                status__in=(NotificationDeliveryStatus.SKIPPED, NotificationDeliveryStatus.FAILED),
                 last_error__in=("missed_schedule", "delivery_deadline_exceeded"),
                 scheduled_for__gte=recent,
             ),
@@ -127,7 +153,7 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
         paused_notifications=Count(
             "pk",
             filter=Q(
-                status="skipped",
+                status=NotificationDeliveryStatus.SKIPPED,
                 last_error__in=PAUSED_DELIVERY_ERRORS,
                 scheduled_for__gte=recent,
             ),
@@ -154,7 +180,9 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
         **collections.aggregate(
             overdue_collections=Count("pk", filter=waiting_jobs & Q(available_at__lt=cutoff)),
             interrupted_collections=Count("pk", filter=interrupted_jobs),
-            failed_collections=Count("pk", filter=Q(status="failed", scheduled_slot__gte=recent)),
+            failed_collections=Count(
+                "pk", filter=Q(status=CollectionJobStatus.FAILED, scheduled_slot__gte=recent)
+            ),
         ),
         **notification_counts,
         **metering.aggregate(

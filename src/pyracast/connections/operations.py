@@ -15,7 +15,9 @@ from pyracast.connections.models import BindingHealth, Provider, ProviderAccount
 from pyracast.connections.secrets import encrypt_secret
 from pyracast.forecasts.budget import remaining_forecast_requests
 from pyracast.forecasts.models import (
+    CollectionEndpoint,
     CollectionJob,
+    CollectionJobStatus,
     RequestAttempt,
     RequestOutcome,
     RequestPurpose,
@@ -126,6 +128,8 @@ def reserve_account_request(
     started = time.monotonic()
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
+    if purpose not in RequestPurpose.values:
+        raise ValidationError("Unknown request purpose.")
     if binding is not None and binding.provider_account_id != account.pk:
         raise ValidationError("The binding must belong to the provider account.")
     if job is not None and (binding is None or job.binding_id != binding.pk):
@@ -228,7 +232,7 @@ def validate_binding(
                 CollectionJob.objects.select_for_update()
                 .filter(
                     binding=binding,
-                    endpoint="forecasts",
+                    endpoint=CollectionEndpoint.FORECASTS,
                     reference_import__isnull=True,
                     scheduled_slot__lte=recovered_at,
                 )
@@ -237,10 +241,10 @@ def validate_binding(
             )
             if (
                 latest is not None
-                and latest.status == "failed"
+                and latest.status == CollectionJobStatus.FAILED
                 and latest.last_error == "provider_authentication_failed"
             ):
-                latest.status = "pending"
+                latest.status = CollectionJobStatus.PENDING
                 latest.available_at = recovered_at
                 latest.attempts = 0
                 latest.last_error = ""
@@ -256,7 +260,7 @@ def validate_binding(
                         "lease_expires_at",
                     )
                 )
-        attempt.outcome = "succeeded"
+        attempt.outcome = RequestOutcome.SUCCEEDED
         attempt.save(update_fields=("outcome",))
         AuditEvent.objects.create(
             actor=actor,

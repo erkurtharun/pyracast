@@ -21,7 +21,13 @@ from pyracast.forecasts.intraday import (
     preserve_forecast_weather,
 )
 from pyracast.forecasts.jobs import binding_is_current
-from pyracast.forecasts.models import ForecastResult, ForecastSnapshot
+from pyracast.forecasts.models import (
+    CollectionEndpoint,
+    CollectionJobStatus,
+    ForecastResult,
+    ForecastSnapshot,
+    SnapshotSourceKind,
+)
 from pyracast.forecasts.sources import (
     current_forecast_snapshots,
     mark_forecast_fallback,
@@ -49,8 +55,8 @@ def select_actual_snapshot(
         .defer("raw_payload", "weather_payload")
         .filter(
             binding=binding,
-            job__status="succeeded",
-            source_kind="estimated_actuals",
+            job__status=CollectionJobStatus.SUCCEEDED,
+            source_kind=SnapshotSourceKind.ESTIMATED_ACTUALS,
             coverage_start__lt=end,
             coverage_end__gt=start,
             collected_at__gte=end,
@@ -61,13 +67,13 @@ def select_actual_snapshot(
         .alias(
             source_priority=Case(
                 When(
-                    job__endpoint="estimated_actuals",
+                    job__endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
                     job__reference_import__isnull=True,
                     then=Value(0),
                 ),
                 When(
-                    job__endpoint="scaled_estimated_actuals",
-                    capacity_normalization__source_snapshot__job__endpoint="estimated_actuals",
+                    job__endpoint=CollectionEndpoint.SCALED_ESTIMATED_ACTUALS,
+                    capacity_normalization__source_snapshot__job__endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
                     then=Value(1),
                 ),
                 default=Value(2),
@@ -183,7 +189,7 @@ def regional_outlook(
         .filter(
             snapshot__job__binding__region=region,
             snapshot__job__target_date=target_date,
-            snapshot__source_kind="forecast",
+            snapshot__source_kind=SnapshotSourceKind.FORECAST,
             snapshot__collected_at__lte=now,
             published_at__lte=now,
         )
@@ -226,8 +232,8 @@ def _regional_saved_forecast(region: Region, target_date: date, now: datetime) -
         ForecastSnapshot.objects.select_related("binding__provider_account")
         .filter(
             binding__region=region,
-            job__status="succeeded",
-            source_kind="forecast",
+            job__status=CollectionJobStatus.SUCCEEDED,
+            source_kind=SnapshotSourceKind.FORECAST,
             binding__created_at__lte=cutoff,
             coverage_start__lt=end,
             coverage_end__gt=start,

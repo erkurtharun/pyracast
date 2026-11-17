@@ -20,6 +20,7 @@ from pyracast.plants.measurements import (
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
+    CalibrationStatus,
     Plant,
     PlantConfiguration,
     PlantEvent,
@@ -90,7 +91,9 @@ def prepare_calibration(plant_id: int, now: datetime | None = None) -> Calibrati
         configuration = plant.current_configuration
         if configuration is None or not binding_is_current(configuration.binding):
             return None
-        if CalibrationRun.objects.filter(plant=plant, status__in=("pending", "running")).exists():
+        if CalibrationRun.objects.filter(
+            plant=plant, status__in=(CalibrationStatus.PENDING, CalibrationStatus.RUNNING)
+        ).exists():
             return None
         moment = timezone.now() if now is None else max(now, timezone.now())
         today = moment.astimezone(ZoneInfo(configuration.binding.timezone)).date()
@@ -138,7 +141,7 @@ def prepare_calibration(plant_id: int, now: datetime | None = None) -> Calibrati
             compared |= Q(pk=comparison.calibration_id)
         previous = CalibrationRun.objects.filter(
             compared,
-            Q(status="failed") | Q(result__policy_version=POLICY_VERSION),
+            Q(status=CalibrationStatus.FAILED) | Q(result__policy_version=POLICY_VERSION),
             configuration=configuration,
             window_start__lte=days[0],
             window_end__gte=days[-1],

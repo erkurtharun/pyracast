@@ -13,10 +13,13 @@ from pyracast.calculation import calculate
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import (
+    CollectionEndpoint,
     CollectionJob,
+    CollectionJobStatus,
     ForecastResult,
     ForecastSnapshot,
     ReferenceCapacityNormalization,
+    SnapshotSourceKind,
 )
 from pyracast.forecasts.sources import snapshot_data
 from pyracast.regions.models import AuditAction, AuditEvent, Region
@@ -129,7 +132,7 @@ def _copy_snapshot(
         endpoint="scaled_" + source.job.endpoint,
         scheduled_slot=source.job.scheduled_slot,
         target_date=source.job.target_date,
-        status="succeeded",
+        status=CollectionJobStatus.SUCCEEDED,
         available_at=moment,
     )
     snapshot = ForecastSnapshot.objects.create(
@@ -198,10 +201,16 @@ def normalize_reference_capacity(
         snapshots = (
             ForecastSnapshot.objects.select_related("job__binding")
             .filter(
-                Q(job__endpoint="estimated_actuals", source_kind="estimated_actuals")
-                | Q(job__endpoint="forecasts", source_kind="forecast"),
+                Q(
+                    job__endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
+                    source_kind=SnapshotSourceKind.ESTIMATED_ACTUALS,
+                )
+                | Q(
+                    job__endpoint=CollectionEndpoint.FORECASTS,
+                    source_kind=SnapshotSourceKind.FORECAST,
+                ),
                 job__binding=source,
-                job__status="succeeded",
+                job__status=CollectionJobStatus.SUCCEEDED,
                 job__reference_import__isnull=True,
                 capacity_normalization__isnull=True,
                 collected_at__lte=moment,

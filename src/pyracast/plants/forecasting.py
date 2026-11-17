@@ -17,6 +17,7 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
+    CalibrationStatus,
     Plant,
     PlantConfiguration,
 )
@@ -85,7 +86,7 @@ def _usable(run: CalibrationRun, configuration: PlantConfiguration, as_of: datet
         run.configuration_id == configuration.pk
         and run.binding_id == configuration.binding_id
         and run.plant_id == configuration.plant_id
-        and run.status == "ready"
+        and run.status == CalibrationStatus.READY
         and run.factor is not None
         and run.completed_at is not None
         and run.completed_at <= as_of

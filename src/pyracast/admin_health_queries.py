@@ -3,11 +3,12 @@ from datetime import datetime, timedelta
 from django.core.exceptions import ValidationError
 from django.db.models import F, OuterRef, Q, QuerySet, Subquery
 
-from pyracast.forecasts.models import CollectionJob, ForecastSnapshot
+from pyracast.forecasts.models import CollectionJob, CollectionJobStatus, ForecastSnapshot
 from pyracast.metering.models import EpiasCollectionJob, EpiasJobStatus
 from pyracast.notifications.models import (
     PAUSED_DELIVERY_ERRORS,
     NotificationDelivery,
+    NotificationDeliveryStatus,
     ReminderSchedule,
 )
 from pyracast.notifications.operations import effective_recipients, validate_recipient
@@ -19,13 +20,19 @@ def collection_jobs_for_issue(
 ) -> QuerySet[CollectionJob]:
     jobs = CollectionJob.objects.filter(binding__region__deleted_at__isnull=True)
     if issue == "overdue_collections":
-        return jobs.filter(status__in=("pending", "retry"), available_at__lt=now - maximum_lag)
+        return jobs.filter(
+            status__in=(CollectionJobStatus.PENDING, CollectionJobStatus.RETRY),
+            available_at__lt=now - maximum_lag,
+        )
     if issue == "interrupted_collections":
         return jobs.filter(
-            Q(lease_expires_at__lte=now) | Q(lease_expires_at__isnull=True), status="running"
+            Q(lease_expires_at__lte=now) | Q(lease_expires_at__isnull=True),
+            status=CollectionJobStatus.RUNNING,
         )
     if issue == "failed_collections":
-        return jobs.filter(status="failed", scheduled_slot__gte=now - timedelta(days=1))
+        return jobs.filter(
+            status=CollectionJobStatus.FAILED, scheduled_slot__gte=now - timedelta(days=1)
+        )
     return jobs
 
 
@@ -36,17 +43,22 @@ def notification_deliveries_for_issue(
     recent = now - timedelta(days=1)
     if issue == "overdue_notifications":
         return deliveries.filter(
-            status__in=("pending", "retry"), available_at__lt=now - maximum_lag
+            status__in=(NotificationDeliveryStatus.PENDING, NotificationDeliveryStatus.RETRY),
+            available_at__lt=now - maximum_lag,
         )
     if issue == "interrupted_notifications":
         return deliveries.filter(
-            Q(lease_expires_at__lte=now) | Q(lease_expires_at__isnull=True), status="sending"
+            Q(lease_expires_at__lte=now) | Q(lease_expires_at__isnull=True),
+            status=NotificationDeliveryStatus.SENDING,
         )
     if issue == "failed_notifications":
-        return deliveries.filter(status__in=("failed", "uncertain"), scheduled_for__gte=recent)
+        return deliveries.filter(
+            status__in=(NotificationDeliveryStatus.FAILED, NotificationDeliveryStatus.UNCERTAIN),
+            scheduled_for__gte=recent,
+        )
     if issue == "missed_notifications":
         return deliveries.filter(
-            status__in=("skipped", "failed"),
+            status__in=(NotificationDeliveryStatus.SKIPPED, NotificationDeliveryStatus.FAILED),
             last_error__in=("missed_schedule", "delivery_deadline_exceeded"),
             scheduled_for__gte=recent,
         )
@@ -60,7 +72,9 @@ def notification_deliveries_for_issue(
         return deliveries.filter(last_error="mail_authentication_failed", scheduled_for__gte=recent)
     if issue == "paused_notifications":
         return deliveries.filter(
-            status="skipped", last_error__in=PAUSED_DELIVERY_ERRORS, scheduled_for__gte=recent
+            status=NotificationDeliveryStatus.SKIPPED,
+            last_error__in=PAUSED_DELIVERY_ERRORS,
+            scheduled_for__gte=recent,
         )
     return deliveries
 
@@ -73,10 +87,11 @@ def metering_jobs_for_issue(
         return jobs.filter(status=EpiasJobStatus.PENDING, next_attempt_at__lt=now - maximum_lag)
     if issue == "interrupted_metering":
         return jobs.filter(
-            Q(lease_expires_at__lte=now) | Q(lease_expires_at__isnull=True), status="running"
+            Q(lease_expires_at__lte=now) | Q(lease_expires_at__isnull=True),
+            status=EpiasJobStatus.RUNNING,
         )
     if issue == "failed_metering":
-        return jobs.filter(status="failed", scheduled_for__gte=now - timedelta(days=1))
+        return jobs.filter(status=EpiasJobStatus.FAILED, scheduled_for__gte=now - timedelta(days=1))
     return jobs
 
 
@@ -117,7 +132,7 @@ def regions_for_issue(issue: str, now: datetime) -> QuerySet[Region]:
             ForecastSnapshot.objects.filter(
                 binding_id=OuterRef("approved_binding_id"),
                 source_kind="forecast",
-                job__status="succeeded",
+                job__status=CollectionJobStatus.SUCCEEDED,
                 forecastresult__isnull=False,
             )
             .order_by("-collected_at")

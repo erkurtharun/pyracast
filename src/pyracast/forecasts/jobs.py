@@ -33,12 +33,14 @@ from pyracast.forecasts.acquisition import missing_actuals_window
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJob,
+    CollectionJobStatus,
     CollectionSchedule,
     ForecastResult,
     ForecastSnapshot,
     RequestAttempt,
     RequestOutcome,
     RequestPurpose,
+    SnapshotSourceKind,
 )
 from pyracast.forecasts.projections import prepare_daily_payloads
 from pyracast.forecasts.sources import snapshot_data
@@ -98,35 +100,37 @@ def claim(job_id: int, now: datetime) -> Lease | None:
             return None
         now += timedelta(seconds=time.monotonic() - started)
         cleared_cooldown = (
-            job.status == "retry"
+            job.status == CollectionJobStatus.RETRY
             and job.last_error == "provider_throttled"
             and CollectionJob.objects.filter(
                 pk=job.pk, binding__provider_account__request_blocked_until__isnull=True
             ).exists()
         )
-        if job.status in {"succeeded", "stale", "failed"} or (
-            job.available_at > now and not cleared_cooldown
-        ):
+        if job.status in {
+            CollectionJobStatus.SUCCEEDED,
+            CollectionJobStatus.STALE,
+            CollectionJobStatus.FAILED,
+        } or (job.available_at > now and not cleared_cooldown):
             return None
         if job.retry_until is not None and now >= job.retry_until:
-            job.status = "failed"
+            job.status = CollectionJobStatus.FAILED
             job.last_error = "history_window_closed"
             job.lease_token = None
             job.lease_expires_at = None
             job.save(update_fields=("status", "last_error", "lease_token", "lease_expires_at"))
             return None
         if (
-            job.status == "running"
+            job.status == CollectionJobStatus.RUNNING
             and job.lease_expires_at is not None
             and (job.lease_expires_at > now)
         ):
             return None
         if (
-            job.endpoint == "estimated_actuals"
+            job.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
             and CollectionJob.objects.filter(
                 binding_id=job.binding_id,
-                endpoint="estimated_actuals",
-                status="running",
+                endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
+                status=CollectionJobStatus.RUNNING,
                 lease_expires_at__gt=now,
             )
             .exclude(pk=job.pk)
@@ -134,7 +138,7 @@ def claim(job_id: int, now: datetime) -> Lease | None:
         ):
             return None
         if job.retry_until is None and job.attempts >= 3:
-            job.status = "failed"
+            job.status = CollectionJobStatus.FAILED
             job.last_error = "attempts_exhausted"
             job.lease_token = None
             job.lease_expires_at = None
@@ -146,7 +150,9 @@ def claim(job_id: int, now: datetime) -> Lease | None:
         schedule = CollectionSchedule.objects.filter(region_id=binding.region_id).first()
         first_slot = (
             CollectionJob.objects.filter(
-                binding=binding, endpoint="forecasts", reference_import__isnull=True
+                binding=binding,
+                endpoint=CollectionEndpoint.FORECASTS,
+                reference_import__isnull=True,
             )
             .order_by("scheduled_slot", "pk")
             .values_list("scheduled_slot", flat=True)
@@ -163,11 +169,11 @@ def claim(job_id: int, now: datetime) -> Lease | None:
             else None
         )
         if (
-            job.endpoint == "forecasts"
+            job.endpoint == CollectionEndpoint.FORECASTS
             and latest_slot is not None
             and latest_slot > job.scheduled_slot
         ):
-            job.status = "stale"
+            job.status = CollectionJobStatus.STALE
             job.last_error = "forecast_superseded"
             job.lease_token = None
             job.lease_expires_at = None
@@ -179,9 +185,9 @@ def claim(job_id: int, now: datetime) -> Lease | None:
                 not schedule.enabled
                 or (
                     (
-                        job.endpoint == "forecasts"
+                        job.endpoint == CollectionEndpoint.FORECASTS
                         or (
-                            job.endpoint == "estimated_actuals"
+                            job.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
                             and job.target_date
                             == job.scheduled_slot.astimezone(ZoneInfo(binding.timezone)).date()
                         )
@@ -192,10 +198,12 @@ def claim(job_id: int, now: datetime) -> Lease | None:
                     not in (timing.times if timing is not None else ())
                     # Approval creates one immediate acquisition outside existing clocks.
                     and (
-                        job.endpoint != "forecasts"
+                        job.endpoint != CollectionEndpoint.FORECASTS
                         or job.scheduled_slot < schedule.effective_from
                         or job.pk
-                        != CollectionJob.objects.filter(binding=binding, endpoint="forecasts")
+                        != CollectionJob.objects.filter(
+                            binding=binding, endpoint=CollectionEndpoint.FORECASTS
+                        )
                         .order_by("scheduled_slot", "pk")
                         .values_list("pk", flat=True)
                         .first()
@@ -203,11 +211,11 @@ def claim(job_id: int, now: datetime) -> Lease | None:
                 )
             )
         ):
-            job.status = "stale"
+            job.status = CollectionJobStatus.STALE
             job.save(update_fields=("status",))
             return None
         token = uuid.uuid4()
-        job.status = "running"
+        job.status = CollectionJobStatus.RUNNING
         job.lease_token = token
         job.lease_expires_at = now + LEASE_DURATION
         job.attempts += 1
@@ -238,13 +246,13 @@ def retry(
 ) -> None:
     with transaction.atomic():
         job = CollectionJob.objects.select_for_update().get(pk=lease.job_id)
-        if job.lease_token != lease.token or job.status != "running":
+        if job.lease_token != lease.token or job.status != CollectionJobStatus.RUNNING:
             return
         job.last_error = code
         if quota or waiting:
             job.attempts -= 1
         if not retryable:
-            job.status = "failed"
+            job.status = CollectionJobStatus.FAILED
         elif job.retry_until is not None:
             intraday = job.retry_until <= job.scheduled_slot + timedelta(minutes=15)
             job.available_at = next_retry_at(
@@ -259,14 +267,20 @@ def retry(
                 tomorrow = now.astimezone(UTC).date() + timedelta(days=1)
                 reset = datetime.combine(tomorrow, datetime.min.time(), tzinfo=UTC)
                 job.available_at = max(job.available_at, reset)
-            job.status = "retry" if job.available_at < job.retry_until else "failed"
+            job.status = (
+                CollectionJobStatus.RETRY
+                if job.available_at < job.retry_until
+                else CollectionJobStatus.FAILED
+            )
         elif quota:
-            job.status = "retry"
+            job.status = CollectionJobStatus.RETRY
             tomorrow = now.astimezone(UTC).date() + timedelta(days=1)
             job.available_at = datetime.combine(tomorrow, datetime.min.time(), tzinfo=UTC)
         else:
-            job.status = "retry" if job.attempts < 3 else "failed"
-            if provider_transient and job.endpoint == "forecasts":
+            job.status = (
+                CollectionJobStatus.RETRY if job.attempts < 3 else CollectionJobStatus.FAILED
+            )
+            if provider_transient and job.endpoint == CollectionEndpoint.FORECASTS:
                 retry_after_seconds = max(retry_after_seconds or 0, 120 * 2 ** min(job.attempts, 6))
             job.available_at = next_retry_at(now, job.attempts, retry_after_seconds)
         job.lease_token = None
@@ -332,7 +346,11 @@ def publish(
         if snapshot.job_id != job.pk or job.binding_id != lease.binding.pk:
             raise ValidationError("Snapshot, binding and lease must belong to the same job.")
         snapshot.refresh_from_db()
-        expected_kind = "estimated_actuals" if job.endpoint == "estimated_actuals" else "forecast"
+        expected_kind = (
+            SnapshotSourceKind.ESTIMATED_ACTUALS
+            if job.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
+            else SnapshotSourceKind.FORECAST
+        )
         if snapshot.source_kind != expected_kind:
             raise ValidationError("Snapshot source must match the collection endpoint.")
         plant = Plant.objects.select_for_update().filter(region_id=lease.binding.region_id).first()
@@ -346,9 +364,9 @@ def publish(
             return False
         binding = SiteBinding.objects.select_related("provider_account").get(pk=job.binding_id)
         if not binding_is_current(binding):
-            job.status = "stale"
+            job.status = CollectionJobStatus.STALE
         else:
-            if job.endpoint == "forecasts":
+            if job.endpoint == CollectionEndpoint.FORECASTS:
                 ForecastResult.objects.get_or_create(
                     snapshot=snapshot,
                     defaults={
@@ -361,10 +379,10 @@ def publish(
             ForecastSnapshot.objects.filter(pk=snapshot.pk, available_at__isnull=True).update(
                 available_at=now
             )
-            job.status = "succeeded"
+            job.status = CollectionJobStatus.SUCCEEDED
             job.last_error = ""
             if (
-                job.endpoint == "estimated_actuals"
+                job.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
                 and job.retry_until is not None
                 and missing_actuals_window(binding, now, acquired=snapshot) is not None
             ):
@@ -374,21 +392,24 @@ def publish(
                 if available < job.retry_until:
                     CollectionJob.objects.get_or_create(
                         binding=binding,
-                        endpoint="estimated_actuals",
+                        endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
                         scheduled_slot=available,
                         defaults={
                             "target_date": job.target_date,
                             "available_at": available,
                             "retry_until": job.retry_until,
-                            "status": "pending"
+                            "status": CollectionJobStatus.PENDING
                             if schedule is None or schedule.enabled
-                            else "stale",
+                            else CollectionJobStatus.STALE,
                         },
                     )
         job.lease_token = None
         job.lease_expires_at = None
         job.save(update_fields=("status", "last_error", "lease_token", "lease_expires_at"))
-        if job.status == "succeeded" and job.endpoint == "estimated_actuals":
+        if (
+            job.status == CollectionJobStatus.SUCCEEDED
+            and job.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
+        ):
             from pyracast.plants.preparation import prepare_calibration
 
             for plant_id in Plant.objects.filter(
@@ -396,7 +417,7 @@ def publish(
                 current_configuration__binding=binding,
             ).values_list("pk", flat=True):
                 prepare_calibration(plant_id, now)
-        return job.status == "succeeded"
+        return job.status == CollectionJobStatus.SUCCEEDED
 
 
 def fetch_history(
@@ -486,19 +507,19 @@ def collect(
     lease = claim(job_id, now)
     if lease is None:
         return False
-    weather_provider = weather_provider if lease.endpoint == "forecasts" else None
+    weather_provider = weather_provider if lease.endpoint == CollectionEndpoint.FORECASTS else None
     snapshot = ForecastSnapshot.objects.filter(job_id=job_id).first()
     if snapshot is None:
         history_window = (
             missing_actuals_window(lease.binding, now)
-            if lease.endpoint == "estimated_actuals"
+            if lease.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
             else None
         )
-        if lease.endpoint == "estimated_actuals" and history_window is None:
+        if lease.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS and history_window is None:
             CollectionJob.objects.filter(
-                pk=job_id, lease_token=lease.token, status="running"
+                pk=job_id, lease_token=lease.token, status=CollectionJobStatus.RUNNING
             ).update(
-                status="succeeded",
+                status=CollectionJobStatus.SUCCEEDED,
                 last_error="history_already_archived",
                 lease_token=None,
                 lease_expires_at=None,
@@ -549,7 +570,7 @@ def collect(
         try:
             data = (
                 fetch_history(lease, adapter, window=history_window, now=request_at)
-                if lease.endpoint == "estimated_actuals"
+                if lease.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
                 else adapter.fetch(lease.binding, lease.target_date)
             )
         except ProviderError as exc:
@@ -603,11 +624,15 @@ def collect(
             ):
                 return False
             snapshot.refresh_from_db(fields=("weather_payload", "weather_error"))
-    expected_kind = "estimated_actuals" if lease.endpoint == "estimated_actuals" else "forecast"
+    expected_kind = (
+        SnapshotSourceKind.ESTIMATED_ACTUALS
+        if lease.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
+        else SnapshotSourceKind.FORECAST
+    )
     if snapshot.source_kind != expected_kind:
         retry(lease, now + timedelta(seconds=time.monotonic() - started), "invalid_source_kind")
         return False
-    if lease.endpoint == "estimated_actuals":
+    if lease.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS:
         return publish(lease, snapshot, {}, now + timedelta(seconds=time.monotonic() - started))
     data = snapshot_data(snapshot)
     try:
@@ -637,13 +662,16 @@ def pending_job_ids(now: datetime, limit: int = 100) -> list[int]:
         CollectionJob.objects.filter(
             Q(available_at__lte=now)
             | Q(
-                status="retry",
+                status=CollectionJobStatus.RETRY,
                 last_error="provider_throttled",
                 binding__provider_account__request_blocked_until__isnull=True,
             ),
             binding__region__deleted_at__isnull=True,
         )
-        .filter(Q(status__in=("pending", "retry")) | Q(status="running", lease_expires_at__lte=now))
+        .filter(
+            Q(status__in=(CollectionJobStatus.PENDING, CollectionJobStatus.RETRY))
+            | Q(status=CollectionJobStatus.RUNNING, lease_expires_at__lte=now)
+        )
         .order_by("available_at", "pk")
         .values_list("pk", flat=True)[:limit]
     )

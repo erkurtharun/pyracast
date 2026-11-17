@@ -12,7 +12,7 @@ from dramatiq.brokers.rabbitmq import RabbitmqBroker
 from pyracast.background.failures import log_failure
 from pyracast.calculation import calculate
 from pyracast.forecasts.jobs import collect, pending_job_ids
-from pyracast.forecasts.models import CollectionJob
+from pyracast.forecasts.models import CollectionEndpoint, CollectionJob
 from pyracast.forecasts.monitoring import PhaseOutcome
 from pyracast.forecasts.scheduler import CollectionSchedulingError, enqueue_due
 from pyracast.providers import adapter_for
@@ -29,7 +29,7 @@ def deliver(job_id: int) -> None:
             OpenMeteoProvider(api_key=os.environ.get("PYRACAST_OPEN_METEO_API_KEY") or None)
             if settings.PYRACAST_WEATHER_ENABLED
             and job.binding.provider_account.provider == "solcast"
-            and job.endpoint == "forecasts"
+            and job.endpoint == CollectionEndpoint.FORECASTS
             else None
         )
         collect(

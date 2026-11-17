@@ -4,7 +4,13 @@ from zoneinfo import ZoneInfo
 
 from django.db.models import Q
 
-from pyracast.forecasts.models import CollectionJob, CollectionSchedule, ForecastSnapshot
+from pyracast.forecasts.models import (
+    CollectionEndpoint,
+    CollectionJob,
+    CollectionJobStatus,
+    CollectionSchedule,
+    ForecastSnapshot,
+)
 from pyracast.forecasts.projections import saved_day_payload
 from pyracast.forecasts.timing import effective_forecast_schedule, latest_forecast_slot
 from pyracast.notifications.mail import build_message, message_payload
@@ -22,16 +28,19 @@ def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
     jobs = list(
         CollectionJob.objects.filter(
             binding=binding,
-            endpoint__in=("forecasts", "estimated_actuals"),
+            endpoint__in=(CollectionEndpoint.FORECASTS, CollectionEndpoint.ESTIMATED_ACTUALS),
             reference_import__isnull=True,
             scheduled_slot=delivery.scheduled_for,
         )
     )
-    job = next((candidate for candidate in jobs if candidate.endpoint == "forecasts"), None)
+    job = next(
+        (candidate for candidate in jobs if candidate.endpoint == CollectionEndpoint.FORECASTS),
+        None,
+    )
     schedule = CollectionSchedule.objects.filter(region_id=binding.region_id).first()
     first_slot = (
         CollectionJob.objects.filter(
-            binding=binding, endpoint="forecasts", reference_import__isnull=True
+            binding=binding, endpoint=CollectionEndpoint.FORECASTS, reference_import__isnull=True
         )
         .order_by("scheduled_slot")
         .values_list("scheduled_slot", flat=True)
@@ -49,8 +58,9 @@ def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
     )
     if now < deadline and (
         any(
-            candidate.status in {"pending", "running", "retry"}
-            and (candidate.status != "retry" or candidate.available_at < deadline)
+            candidate.status
+            in {CollectionJobStatus.PENDING, CollectionJobStatus.RUNNING, CollectionJobStatus.RETRY}
+            and (candidate.status != CollectionJobStatus.RETRY or candidate.available_at < deadline)
             for candidate in jobs
         )
         or (job is None and due)

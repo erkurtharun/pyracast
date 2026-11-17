@@ -23,7 +23,7 @@ from pyracast.notifications.mail import (
     build_unavailable_message,
     send_message,
 )
-from pyracast.notifications.models import NotificationDelivery
+from pyracast.notifications.models import NotificationDelivery, NotificationDeliveryStatus
 from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.preparation import prepare_delivery
 from pyracast.notifications.recipients import permitted_recipients
@@ -55,12 +55,15 @@ def _skip_reason(delivery: NotificationDelivery, limit: int) -> str | None:
 
 def _recover_interrupted(delivery: NotificationDelivery, now: datetime) -> None:
     if delivery.transmit_started_at is not None:
-        delivery.status, delivery.last_error = "uncertain", "interrupted_send"
+        delivery.status, delivery.last_error = (
+            NotificationDeliveryStatus.UNCERTAIN,
+            "interrupted_send",
+        )
     else:
         delivery.status = (
-            "retry"
+            NotificationDeliveryStatus.RETRY
             if delivery.attempts < 8 and now < delivery.scheduled_for + MAX_LATENESS
-            else "failed"
+            else NotificationDeliveryStatus.FAILED
         )
         delivery.last_error = "interrupted_connection"
         delivery.available_at = now
@@ -100,7 +103,11 @@ def _mark_transmit(
         _lock_workspace(delivery_id)
         limit = recipient_limit(lock=True)
         delivery = _locked_delivery(delivery_id)
-        if delivery is None or delivery.status != "sending" or delivery.lease_token != token:
+        if (
+            delivery is None
+            or delivery.status != NotificationDeliveryStatus.SENDING
+            or delivery.lease_token != token
+        ):
             return False
         reason = _skip_reason(delivery, limit)
         now += timedelta(seconds=time.monotonic() - started)
@@ -108,7 +115,7 @@ def _mark_transmit(
             _recover_interrupted(delivery, now)
             return False
         if reason is not None or now - delivery.scheduled_for > MAX_LATENESS:
-            delivery.status = "skipped"
+            delivery.status = NotificationDeliveryStatus.SKIPPED
             delivery.last_error = reason or "delivery_deadline_exceeded"
             delivery.lease_token = None
             delivery.lease_expires_at = None
@@ -137,18 +144,25 @@ def process_notification(
         if delivery is None:
             return False
         now = entered_at + timedelta(seconds=time.monotonic() - started)
-        if delivery.status == "sending":
+        if delivery.status == NotificationDeliveryStatus.SENDING:
             if delivery.lease_expires_at is None or delivery.lease_expires_at <= now:
                 _recover_interrupted(delivery, now)
             return False
-        if delivery.status not in {"pending", "retry"} or delivery.available_at > now:
+        if (
+            delivery.status
+            not in {NotificationDeliveryStatus.PENDING, NotificationDeliveryStatus.RETRY}
+            or delivery.available_at > now
+        ):
             return False
         if (reason := _skip_reason(delivery, limit)) is not None:
-            delivery.status, delivery.last_error = "skipped", reason
+            delivery.status, delivery.last_error = NotificationDeliveryStatus.SKIPPED, reason
             delivery.save()
             return False
         if now - delivery.scheduled_for > MAX_LATENESS:
-            delivery.status, delivery.last_error = "skipped", "missed_schedule"
+            delivery.status, delivery.last_error = (
+                NotificationDeliveryStatus.SKIPPED,
+                "missed_schedule",
+            )
             delivery.save()
             return False
         frozen = cast(dict[str, object] | None, delivery.prepared_message)
@@ -199,18 +213,18 @@ def process_notification(
     except SendCancelledError:
         return False
     except PermanentlyNotSentError:
-        status, error_code = "failed", "mail_rejected"
+        status, error_code = NotificationDeliveryStatus.FAILED, "mail_rejected"
     except NotSentError as error:
         completed_at = entered_at + timedelta(seconds=time.monotonic() - started)
         retry_at = completed_at + timedelta(
             seconds=min(60 * 2 ** (delivery.attempts - 1), 1800) + secrets.randbelow(31)
         )
         status = (
-            "retry"
+            NotificationDeliveryStatus.RETRY
             if delivery.attempts < 8 and retry_at < delivery.scheduled_for + MAX_LATENESS
-            else "failed"
+            else NotificationDeliveryStatus.FAILED
         )
-        available_at = retry_at if status == "retry" else now
+        available_at = retry_at if status == NotificationDeliveryStatus.RETRY else now
         error_code = error.code
     except (
         Exception
@@ -220,20 +234,22 @@ def process_notification(
             delivery_id,
             type(error).__name__,
         )
-        status, error_code = "uncertain", "mail_outcome_uncertain"
+        status, error_code = NotificationDeliveryStatus.UNCERTAIN, "mail_outcome_uncertain"
     else:
-        status, error_code = "sent", ""
+        status, error_code = NotificationDeliveryStatus.SENT, ""
     updated = NotificationDelivery.objects.filter(
-        pk=delivery_id, lease_token=token, status__in=("sending", "uncertain")
+        pk=delivery_id,
+        lease_token=token,
+        status__in=(NotificationDeliveryStatus.SENDING, NotificationDeliveryStatus.UNCERTAIN),
     ).update(
         status=status,
         last_error=error_code,
-        sent_at=timezone.now() if status == "sent" else None,
+        sent_at=timezone.now() if status == NotificationDeliveryStatus.SENT else None,
         available_at=available_at,
         lease_token=None,
         lease_expires_at=None,
     )
-    return status == "sent" and bool(updated)
+    return status == NotificationDeliveryStatus.SENT and bool(updated)
 
 
 def pending_notification_ids(now: datetime, limit: int = 100) -> list[int]:
@@ -242,9 +258,9 @@ def pending_notification_ids(now: datetime, limit: int = 100) -> list[int]:
             available_at__lte=now, schedule__region__deleted_at__isnull=True
         )
         .filter(
-            Q(status__in=("pending", "retry"))
-            | Q(status="sending", lease_expires_at__lte=now)
-            | Q(status="sending", lease_expires_at__isnull=True)
+            Q(status__in=(NotificationDeliveryStatus.PENDING, NotificationDeliveryStatus.RETRY))
+            | Q(status=NotificationDeliveryStatus.SENDING, lease_expires_at__lte=now)
+            | Q(status=NotificationDeliveryStatus.SENDING, lease_expires_at__isnull=True)
         )
         .order_by("available_at", "pk")
         .values_list("pk", flat=True)[:limit]

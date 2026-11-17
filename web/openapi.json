@@ -3908,6 +3908,17 @@
                     "unread"
                 ]
             },
+            "CollectionEndpointEnum": {
+                "enum": [
+                    "forecasts",
+                    "estimated_actuals",
+                    "historical_import",
+                    "scaled_forecasts",
+                    "scaled_estimated_actuals"
+                ],
+                "type": "string",
+                "description": "* `forecasts` - Forecasts\n* `estimated_actuals` - Estimated actuals\n* `historical_import` - Historical import\n* `scaled_forecasts` - Scaled forecasts\n* `scaled_estimated_actuals` - Scaled estimated actuals"
+            },
             "CollectionJobOutput": {
                 "type": "object",
                 "properties": {
@@ -3915,10 +3926,10 @@
                         "type": "integer"
                     },
                     "endpoint": {
-                        "type": "string"
+                        "$ref": "#/components/schemas/CollectionEndpointEnum"
                     },
                     "status": {
-                        "type": "string"
+                        "$ref": "#/components/schemas/CollectionJobStatusEnum"
                     },
                     "scheduled_slot": {
                         "type": "string",
@@ -3950,6 +3961,18 @@
                     "scheduled_slot",
                     "status"
                 ]
+            },
+            "CollectionJobStatusEnum": {
+                "enum": [
+                    "pending",
+                    "running",
+                    "retry",
+                    "succeeded",
+                    "failed",
+                    "stale"
+                ],
+                "type": "string",
+                "description": "* `pending` - Pending\n* `running` - Running\n* `retry` - Retry\n* `succeeded` - Succeeded\n* `failed` - Failed\n* `stale` - Stale"
             },
             "CollectionScheduleInput": {
                 "type": "object",

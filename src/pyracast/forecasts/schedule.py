@@ -12,7 +12,14 @@ from django.utils.translation import gettext
 from pyracast.accounts.operations import require_member, require_workspace_admin
 from pyracast.collection_window import HISTORY_CLOCK, HISTORY_END_CLOCK, NIGHT_RETRY_DELAY
 from pyracast.forecasts.jobs import binding_is_current
-from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
+from pyracast.forecasts.models import (
+    CollectionEndpoint,
+    CollectionJob,
+    CollectionJobStatus,
+    CollectionSchedule,
+    RequestAttempt,
+    RequestOutcome,
+)
 from pyracast.regions.models import AuditAction, AuditEvent, Region
 
 MAX_COLLECTION_TIMES = 1440
@@ -72,7 +79,8 @@ def configure_schedule(
             defaults={"enabled": enabled, "times": times, "effective_from": now},
         )
         unclaimed = CollectionJob.objects.filter(
-            binding__region=region, status__in=("pending", "retry")
+            binding__region=region,
+            status__in=(CollectionJobStatus.PENDING, CollectionJobStatus.RETRY),
         )
         if enabled:
             zone = ZoneInfo(region.timezone)
@@ -81,11 +89,14 @@ def configure_schedule(
                 for pk, endpoint, slot, target in unclaimed.values_list(
                     "pk", "endpoint", "scheduled_slot", "target_date"
                 )
-                if (endpoint != "forecasts" and target != slot.astimezone(zone).date())
+                if (
+                    endpoint != CollectionEndpoint.FORECASTS
+                    and target != slot.astimezone(zone).date()
+                )
                 or slot.astimezone(zone).strftime("%H:%M") in times
             ]
             unclaimed = unclaimed.exclude(pk__in=retained)
-        unclaimed.update(status="stale", lease_token=None, lease_expires_at=None)
+        unclaimed.update(status=CollectionJobStatus.STALE, lease_token=None, lease_expires_at=None)
         AuditEvent.objects.create(
             actor=actor,
             region=region,
@@ -98,7 +109,7 @@ def configure_schedule(
 def schedule_payload(schedule: CollectionSchedule, now: datetime) -> dict[str, object]:
     binding = schedule.region.approved_binding
     limit = binding.provider_account.daily_quota if binding else 10
-    outcomes = {"succeeded": 0, "failed": 0, "uncertain": 0}
+    outcomes = dict.fromkeys(RequestOutcome.values, 0)
     utc_day = now.astimezone(UTC).date()
     if binding:
         counts = (
