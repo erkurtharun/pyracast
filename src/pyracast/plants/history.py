@@ -4,11 +4,11 @@ from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext
 
 from pyracast.accounts.operations import require_member
+from pyracast.db import read_snapshot
 from pyracast.forecasts.actuals import (
     ArchivedActualSource,
     apply_archived_actual_source,
@@ -46,14 +46,10 @@ def plant_outlook(
     from pyracast.plants.incident_forecasts import incident_scenario
     from pyracast.plants.production_diagnostics import production_diagnostic
 
-    require_member(actor, tenant_id)
-    with transaction.atomic():
-        region = Region.objects.select_for_update().get(
-            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
-        )
-        plant = Plant.objects.select_for_update().get(
-            pk=plant_id, region=region, deleted_at__isnull=True
-        )
+    with read_snapshot():
+        require_member(actor, tenant_id)
+        region = Region.objects.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
+        plant = Plant.objects.get(pk=plant_id, region=region, deleted_at__isnull=True)
         plant.region = region
         result = _plant_outlook(
             actor,
@@ -111,7 +107,6 @@ def _plant_outlook(
     as_of: datetime | None = None,
     source: str = "forecast",
 ) -> dict[str, object]:
-    require_member(actor, tenant_id)
     region = plant.region
     now = timezone.now()
     today = now.astimezone(ZoneInfo(region.timezone)).date()

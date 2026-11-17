@@ -36,6 +36,7 @@ from pyracast.api.serializers import (
 from pyracast.change_requests.models import ChangeRequest
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import create_account, rotate_secret, validate_binding
+from pyracast.db import read_snapshot
 from pyracast.forecasts.history import OutlookRequestError, regional_outlook
 from pyracast.providers import adapter_for
 from pyracast.regions.models import Region, RegionLocationChangeRequest
@@ -253,18 +254,19 @@ class TransitionView(APIView):
 class ForecastView(RegionsView):
     @extend_schema(parameters=[ForecastQuery], responses=ForecastOutput)
     def get(self, request: Request, tenant_id: int, region_id: int = 0) -> Response:
-        region = get_object_or_404(self.get_queryset(), pk=region_id)
-        query = ForecastQuery(data=request.query_params)
-        query.is_valid(raise_exception=True)
-        try:
-            result = regional_outlook(
-                region,
-                query.validated_data["date"],
-                query.validated_data["data_source"],
-                timezone.now(),
-            )
-        except OutlookRequestError as error:
-            return Response({"code": error.code}, status=400)
+        with read_snapshot():
+            region = get_object_or_404(self.get_queryset(), pk=region_id)
+            query = ForecastQuery(data=request.query_params)
+            query.is_valid(raise_exception=True)
+            try:
+                result = regional_outlook(
+                    region,
+                    query.validated_data["date"],
+                    query.validated_data["data_source"],
+                    timezone.now(),
+                )
+            except OutlookRequestError as error:
+                return Response({"code": error.code}, status=400)
         return Response(result)
 
     http_method_names = ["get", "head", "options"]  # noqa: RUF012 -- Django class setting.

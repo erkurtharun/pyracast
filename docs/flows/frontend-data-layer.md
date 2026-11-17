@@ -52,7 +52,7 @@ sequenceDiagram
 | `django_session` | R/W | `SessionLifetime` refreshes `last_activity_at` at most once a minute on any authenticated request, polls included |
 | `usersessions_usersession` | W | `USERSESSIONS_TRACK_ACTIVITY` updates `last_seen_at`, IP and user agent on every authenticated request, polls included |
 | Advisory lock | W | One per well-formed session cookie serializes that session's requests (5 s wait) |
-| Tenant, region and plant tables | R | Whatever the polled URL selects, saved rows only; the plant forecast poll holds `FOR UPDATE` on region, plant and provider account |
+| Tenant, region and plant tables | R | Whatever the polled URL selects, saved rows only; the forecast polls read one read-only snapshot and take no row lock |
 
 ## Authorization
 

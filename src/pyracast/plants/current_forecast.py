@@ -5,7 +5,6 @@ from zoneinfo import ZoneInfo
 from django.core.exceptions import ValidationError
 
 from pyracast.calculation import calculate
-from pyracast.connections.models import ProviderAccount
 from pyracast.forecasts.intraday import (
     apply_intraday_source,
     prepare_intraday_source,
@@ -46,15 +45,8 @@ def current_forecast(
         if plant.current_configuration_id is not None
         else None
     )
-    if configuration is not None:
-        # The outlook owns the surrounding transaction and region/plant locks.
-        ProviderAccount.objects.select_for_update().get(
-            pk=configuration.binding.provider_account_id
-        )
-        configuration.binding.refresh_from_db()
-        configuration.binding.provider_account.refresh_from_db()
-        if not configuration_is_current(configuration):
-            configuration = None
+    if configuration is not None and not configuration_is_current(configuration):
+        configuration = None
     return _composed_forecast(
         plant,
         target_date,
@@ -193,16 +185,8 @@ def _composed_forecast(
                 raise ValidationError("calculation_out_of_range") from exc
             if source is None:
                 cast(dict[str, object], result["provenance"])["selection_policy"] = SELECTION_POLICY
-            configuration.binding.refresh_from_db()
-            configuration.binding.provider_account.refresh_from_db()
             if historical and configuration.pk != plant.current_configuration_id:
                 cast(list[str], result["quality_flags"]).append("previous_configuration")
-            if not historical and not configuration_is_current(configuration):
-                configuration = None
-                snapshot = None
-                calibration = None
-                result = None
-                irradiance = None
     return {
         "plant_id": plant.pk,
         "date": target_date.isoformat(),
