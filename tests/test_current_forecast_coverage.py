@@ -174,7 +174,7 @@ def test_calibrated_power_is_clipped_before_aggregating_source_ownership_pieces(
 
 
 @pytest.mark.parametrize("calibrated", [False, True])
-def test_outage_scenario_and_invalidated_calibration_keep_composite_morning(
+def test_outage_scenario_and_dropped_calibration_keep_composite_morning(
     monkeypatch: pytest.MonkeyPatch, calibrated: bool
 ) -> None:
     system, plant = make_plant(monkeypatch)
@@ -231,7 +231,8 @@ def test_outage_scenario_and_invalidated_calibration_keep_composite_morning(
         assert affected["provenance"][key] == normal["provenance"][key]
     if calibrated:
         assert outlook["calibration_id"] is None
-        assert "calibration_invalidated_by_outage_history" not in normal["quality_flags"]
+        assert "uncalibrated" in normal["quality_flags"]
+        assert normal["provenance"]["calibration_assessment"] == "uncalibrated"
 
 
 def test_explicit_as_of_stays_on_day_ahead_snapshot_without_vintage_composition(

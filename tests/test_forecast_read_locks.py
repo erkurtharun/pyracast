@@ -3,7 +3,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import date, timedelta
 from threading import Event
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from django.core.exceptions import PermissionDenied
@@ -19,10 +19,10 @@ from pyracast.incidents.operations import save_incident
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import Plant
-from pyracast.plants.operations import revise_plant
+from pyracast.plants.operations import activate_calibration, revise_plant
 from pyracast.regions.models import Region
 from tests.test_domain import NOW, System
-from tests.test_plant_operations import make_plant, publish_snapshot, snapshot_for
+from tests.test_plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 10)
@@ -151,8 +151,13 @@ def _revision(system: System, plant: Plant) -> None:
     )
 
 
+def _publication(system: System, _: Plant) -> None:
+    publish_snapshot(snapshot_for(system, DAY, collected_at=NOW + timedelta(seconds=1)))
+
+
 WRITERS: dict[str, Callable[[System, Plant], object]] = {
     "incident": _incident,
+    "publication": _publication,
     "revision": _revision,
     "suspension": lambda system, _: Region.objects.filter(pk=system.region.pk).update(
         status="suspended"
@@ -192,7 +197,9 @@ def test_open_forecast_read_lets_writers_commit_and_keeps_its_snapshot(
     monkeypatch: pytest.MonkeyPatch, writer: str
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    publish_snapshot(snapshot_for(system, DAY, collected_at=NOW))
+    scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
+    activate_calibration(*scope, ready_run(system, plant).pk)
+    published = publish_snapshot(snapshot_for(system, DAY, collected_at=NOW))
     original_configuration = plant.current_configuration_id
     reached, resume = Event(), Event()
     with ThreadPoolExecutor(max_workers=1) as pool:
@@ -206,18 +213,25 @@ def test_open_forecast_read_lets_writers_commit_and_keeps_its_snapshot(
         finally:
             resume.set()
         during = reader.result(timeout=10)
+    during_result = cast(dict[str, Any], during["result"])
     assert during["configuration_id"] == original_configuration
-    assert during["result"] is not None
+    assert during_result["factor"] == 0.5
+    assert during_result["provenance"]["snapshot_id"] == published.pk
     assert during["outage_scenario"] is None
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(seconds=1))
-    scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
     if writer == "membership":
         with pytest.raises(PermissionDenied):
             plant_outlook(*scope, target_date=DAY, resolution_minutes=60)
         return
     after = plant_outlook(*scope, target_date=DAY, resolution_minutes=60)
     if writer == "incident":
+        assert cast(dict[str, Any], after["result"])["factor"] == 1
+        assert after["calibration_id"] is None
         assert after["outage_scenario"] is not None
+    elif writer == "publication":
+        after_result = cast(dict[str, Any], after["result"])
+        assert after_result["provenance"]["snapshot_id"] != published.pk
+        assert after_result["factor"] == 0.5
     elif writer == "revision":
         plant.refresh_from_db()
         assert after["configuration_id"] == plant.current_configuration_id

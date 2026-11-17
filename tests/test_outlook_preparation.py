@@ -121,6 +121,50 @@ def test_region_keeps_its_selected_coverage_when_a_source_is_revoked_during_the_
     assert after.json()["collected_at"] != during.json()["collected_at"]
 
 
+@pytest.mark.parametrize("source_kind", ["forecast", "estimated_actuals"])
+def test_selection_outside_a_snapshot_rejects_a_source_revoked_between_its_reads(
+    monkeypatch: pytest.MonkeyPatch, source_kind: str
+) -> None:
+    system, _ = make_plant(monkeypatch)
+    snapshot = snapshot_for(system, DAY, collected_at=NOW, source_kind=source_kind)
+    if source_kind == "estimated_actuals":
+        snapshot.job.endpoint = "estimated_actuals"
+        snapshot.job.save(update_fields=("endpoint",))
+    publish_snapshot(snapshot)
+    start, end = local_day_bounds(DAY, system.binding.timezone)
+
+    def revoke_before_payload_read(
+        execute: Callable[[str, Any, bool, dict[str, Any]], Any],
+        sql: str,
+        params: Any,
+        many: bool,
+        context: dict[str, Any],
+    ) -> Any:
+        if sql.startswith("SELECT") and '"normalized_intervals"' in sql:
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                pool.submit(revoke_elsewhere).result(timeout=10)
+        return execute(sql, params, many, context)
+
+    def revoke_elsewhere() -> None:
+        try:
+            CollectionJob.objects.filter(pk=snapshot.job_id).update(status="failed")
+        finally:
+            connection.close()
+
+    def select() -> object:
+        if source_kind == "forecast":
+            return current_forecast_snapshots(
+                binding_id=system.binding.pk, start=start, end=end, as_of=NOW
+            )
+        return native_actual_snapshots(system.binding, start, end, NOW)
+
+    with (
+        connection.execute_wrapper(revoke_before_payload_read),
+        pytest.raises(ValidationError, match="forecast_sources_changed"),
+    ):
+        select()
+
+
 @pytest.mark.parametrize("shadowed", [True, False])
 def test_only_contributing_forecast_rows_require_valid_native_bounds(
     monkeypatch: pytest.MonkeyPatch, shadowed: bool
