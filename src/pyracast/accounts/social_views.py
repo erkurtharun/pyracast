@@ -18,6 +18,7 @@ from allauth.headless.socialaccount.views import (
 from allauth.headless.socialaccount.views import (
     RedirectToProviderView as AllauthRedirectToProviderView,
 )
+from allauth.socialaccount.internal.flows.signup import get_pending_signup
 from allauth.socialaccount.models import SocialAccount, SocialApp
 from allauth.socialaccount.providers.google.provider import GoogleProvider
 from allauth.socialaccount.providers.google.views import oauth2_callback as google_callback
@@ -48,7 +49,7 @@ class ProviderSignupView(AllauthProviderSignupView):
     input_class = CompanySocialSignupInput
 
     def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
-        if request.method == "POST":
+        if request.method == "POST" and get_pending_signup(request) is not None:
             limited = ratelimit.consume_or_429(request, action="signup")
             if limited:
                 return limited

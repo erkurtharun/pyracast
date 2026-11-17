@@ -60,7 +60,7 @@ sequenceDiagram
 
 - Authentication: allauth `AuthenticatedAPIView` returns 401 with login flows for anonymous requests; the view works only on `request.user`. `CsrfViewMiddleware` checks `X-CSRFToken` (the browser view is not CSRF-exempt); `pyracast.accounts.middleware.SessionLifetime` enforces 12 h absolute and 30 min idle before the view.
 - Knowledge proof: `ChangePasswordInput.clean_current_password` (view input layer) when the account has a usable password; recent reauthentication (`ACCOUNT_REAUTHENTICATION_TIMEOUT` 300 s) in `ChangePasswordView.handle` when it has none.
-- Rate limit: allauth `rate_limit(action="change_password")` on `handle`, default `5/m/user` (not overridden in `ACCOUNT_RATE_LIMITS`); it runs before the reauthentication check, so reauthentication 401s also count. No tenant, role or MFA check applies to any signed-in user, staff included; the database enforces nothing here.
+- Rate limit: allauth `rate_limit(action="change_password")` on `handle`, `5/10m/user` in `ACCOUNT_RATE_LIMITS`; it runs before the reauthentication check, so reauthentication 401s also count. A wrong current password logs `password_change_failed` (user id and client IP) from `ChangePasswordInput.clean_current_password`. No tenant, role or MFA check applies to any signed-in user, staff included; the database enforces nothing here.
 
 ## Failure paths
 
