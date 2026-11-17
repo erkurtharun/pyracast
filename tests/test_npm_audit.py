@@ -7,21 +7,32 @@ from typing import Any
 
 import pytest
 
-from scripts.npm_audit import AuditException, audit_failures, main, reported_advisories
+from scripts.npm_audit import (
+    AuditException,
+    audit_failures,
+    load_exceptions,
+    main,
+    reported_advisories,
+    run_audit,
+)
 
 TODAY = date(2026, 11, 17)
+REPORT_ERRORS = (
+    "npm audit failed|Unsupported npm audit report|has no causes|unknown cause|without an identity"
+)
+EXCEPTION_ERRORS = "must be a list|Malformed audit exception|Invalid isoformat"
+PICOMATCH = {
+    "source": 1001,
+    "name": "picomatch",
+    "url": "https://github.com/advisories/GHSA-aaaa-bbbb-cccc",
+}
+NEXT = {"source": 1002, "name": "next", "url": "https://github.com/advisories/GHSA-dddd-eeee-ffff/"}
 REPORT: dict[str, Any] = {
     "auditReportVersion": 2,
     "vulnerabilities": {
-        "picomatch": {
-            "via": [
-                {"name": "picomatch", "url": "https://github.com/advisories/GHSA-aaaa-bbbb-cccc"}
-            ]
-        },
+        "picomatch": {"via": [PICOMATCH]},
         "micromatch": {"via": ["picomatch"]},
-        "next": {
-            "via": [{"name": "next", "url": "https://github.com/advisories/GHSA-dddd-eeee-ffff/"}]
-        },
+        "next": {"via": [NEXT]},
     },
 }
 
@@ -32,13 +43,44 @@ def exception(
     return {"advisory": advisory, "package": "picomatch", "reason": reason, "expires": expires}
 
 
+def report(**vulnerabilities: Any) -> dict[str, Any]:
+    return {"auditReportVersion": 2, "vulnerabilities": vulnerabilities}
+
+
 def test_every_advisory_is_read_from_direct_causes_only() -> None:
     assert reported_advisories(REPORT) == {"GHSA-aaaa-bbbb-cccc", "GHSA-dddd-eeee-ffff"}
 
 
-def test_an_npm_error_report_is_a_failure_not_an_empty_audit() -> None:
-    with pytest.raises(ValueError, match="npm audit failed"):
-        reported_advisories({"error": {"code": "ENOLOCK"}})
+def test_advisories_without_a_github_identity_keep_their_npm_source() -> None:
+    first = {"source": 7, "url": "https://example.test/one/advisory"}
+    second = {"source": 8, "url": "https://example.test/two/advisory"}
+    assert reported_advisories(report(a={"via": [first]}, b={"via": [second]})) == {
+        "npm-7",
+        "npm-8",
+    }
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        None,
+        [],
+        {"error": {"code": "ENOLOCK"}},
+        {"vulnerabilities": {}},
+        {"auditReportVersion": 1, "vulnerabilities": {}},
+        {"auditReportVersion": 2, "vulnerabilities": []},
+        report(a=None),
+        report(a={}),
+        report(a={"via": []}),
+        report(a={"via": [None]}),
+        report(a={"via": [7]}),
+        report(a={"via": [{"url": "https://example.test/advisory"}]}),
+        report(a={"via": [{"source": True, "url": "https://example.test/advisory"}]}),
+    ],
+)
+def test_a_report_npm_did_not_produce_as_expected_fails(bad: Any) -> None:
+    with pytest.raises(ValueError, match=REPORT_ERRORS):
+        reported_advisories(bad)
 
 
 def test_only_accepted_advisories_pass() -> None:
@@ -61,9 +103,8 @@ def test_an_exception_counts_until_its_expiry_day_and_fails_after_it() -> None:
 
 
 def test_an_exception_without_a_reason_accepts_nothing() -> None:
-    assert audit_failures(
-        {"GHSA-aaaa-bbbb-cccc"}, [exception("GHSA-aaaa-bbbb-cccc", reason=" ")], TODAY
-    ) == [
+    reasonless = exception("GHSA-aaaa-bbbb-cccc", reason=" ")
+    assert audit_failures({"GHSA-aaaa-bbbb-cccc"}, [reasonless], TODAY) == [
         "Audit exception GHSA-aaaa-bbbb-cccc has no reason.",
         "Advisory GHSA-aaaa-bbbb-cccc is not accepted.",
     ]
@@ -75,25 +116,63 @@ def test_an_exception_no_longer_reported_must_be_removed() -> None:
     ]
 
 
-def test_the_committed_exceptions_are_complete_records() -> None:
+@pytest.mark.parametrize(
+    "text",
+    [
+        "{}",
+        "[1]",
+        json.dumps([{"advisory": "GHSA-aaaa-bbbb-cccc", "reason": "x", "expires": "2026-12-17"}]),
+        json.dumps([{**exception("GHSA-aaaa-bbbb-cccc"), "scope": "dev"}]),
+        json.dumps([{**exception("GHSA-aaaa-bbbb-cccc"), "package": 1}]),
+        json.dumps([exception("GHSA-aaaa-bbbb-cccc", expires="next month")]),
+    ],
+)
+def test_a_malformed_exceptions_file_fails(text: str) -> None:
+    with pytest.raises(ValueError, match=EXCEPTION_ERRORS):
+        load_exceptions(text)
+
+
+def test_the_committed_exceptions_load() -> None:
     web = Path(__file__).resolve().parents[1] / "web"
-    for entry in json.loads((web / "audit-exceptions.json").read_text(encoding="utf-8")):
-        assert set(entry) == {"advisory", "package", "reason", "expires"}
+    for entry in load_exceptions((web / "audit-exceptions.json").read_text(encoding="utf-8")):
         assert entry["advisory"].startswith("GHSA-")
         assert entry["reason"].strip()
-        date.fromisoformat(entry["expires"])
 
 
 def fake_npm(
-    monkeypatch: pytest.MonkeyPatch, report: dict[str, Any], calls: list[list[str]]
+    monkeypatch: pytest.MonkeyPatch, stdout: str, calls: list[list[str]], *, status: int = 1
 ) -> None:
     monkeypatch.setattr(shutil, "which", lambda name: f"/bin/{name}")
 
     def run(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
         calls.append(command)
-        return subprocess.CompletedProcess(command, 1, stdout=json.dumps(report), stderr="")
+        return subprocess.CompletedProcess(command, status, stdout=stdout, stderr="npm broke")
 
     monkeypatch.setattr(subprocess, "run", run)
+
+
+@pytest.mark.parametrize("status", [0, 1])
+def test_npm_reports_with_its_normal_statuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    calls: list[list[str]] = []
+    fake_npm(monkeypatch, json.dumps(REPORT), calls, status=status)
+    assert run_audit(tmp_path) == REPORT
+    assert calls == [["/bin/npm", "audit", "--json"]]
+
+
+def test_any_other_npm_status_fails_even_with_a_parseable_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_npm(monkeypatch, json.dumps(REPORT), [], status=2)
+    with pytest.raises(RuntimeError, match="npm audit exited with 2: npm broke"):
+        run_audit(tmp_path)
+
+
+def test_empty_npm_output_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_npm(monkeypatch, "", [], status=0)
+    with pytest.raises(json.JSONDecodeError):
+        run_audit(tmp_path)
 
 
 @pytest.mark.parametrize(
@@ -116,7 +195,7 @@ def test_main_audits_the_web_directory_against_its_exceptions(
         encoding="utf-8",
     )
     calls: list[list[str]] = []
-    fake_npm(monkeypatch, REPORT, calls)
+    fake_npm(monkeypatch, json.dumps(REPORT), calls)
     assert main([str(tmp_path)]) == status
     assert calls == [["/bin/npm", "audit", "--json"]]
     assert capsys.readouterr().out == printed
