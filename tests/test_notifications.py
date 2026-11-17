@@ -16,8 +16,6 @@ from django.db.migrations.executor import MigrationExecutor
 from django.test import override_settings
 from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
-from pyracast.mail.errors import NotSentError, PermanentlyNotSentError
-from pyracast.mail.send import send
 from rest_framework.test import APIClient
 
 from pyracast.accounts.models import Membership, Tenant
@@ -33,6 +31,8 @@ from pyracast.forecasts.models import (
     RequestAttempt,
 )
 from pyracast.forecasts.monitoring import delivery_health
+from pyracast.mail.errors import NotSentError, PermanentlyNotSentError
+from pyracast.mail.send import send
 from pyracast.notifications.jobs import (
     LEASE_DURATION,
     pending_notification_ids,

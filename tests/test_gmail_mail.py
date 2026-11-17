@@ -318,7 +318,8 @@ def test_allauth_signup_sends_verification_using_gmail(
     raw = base64.urlsafe_b64decode(json.loads(requests[1].content)["raw"])
     mime = BytesParser(policy=policy.default).parsebytes(raw)
     assert str(mime["To"]).lower() == "owner@example.com"
-    assert "confirm your email address" in str(mime["Subject"]).lower()
+    assert mime["Subject"] == "Verify your email"
+    assert mime["X-Pyracast-Mail"] == "account/email/email_confirmation_signup"
 
 
 @pytest.mark.parametrize(

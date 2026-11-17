@@ -6,8 +6,8 @@ import pytest
 from django.core.mail import EmailMultiAlternatives
 from django.db import OperationalError
 from django.test import override_settings
-from pyracast.mail.errors import NotSentError
 
+from pyracast.mail.errors import NotSentError
 from pyracast.notifications import jobs
 from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.operations import recipient_limit

@@ -7,6 +7,7 @@ import pytest
 from django.core import mail
 from django.core.mail import EmailMultiAlternatives
 from django.test import override_settings
+
 from pyracast.mail.errors import DeliveryUncertainError, NotSentError, PermanentlyNotSentError
 from pyracast.mail.send import send
 from pyracast.mail.smtp import EmailBackend

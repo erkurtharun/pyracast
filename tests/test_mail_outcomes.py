@@ -7,6 +7,9 @@ from django.core.mail import EmailMessage
 from django.core.mail.backends.base import BaseEmailBackend
 from django.template import TemplateSyntaxError
 from django.test import override_settings
+
+from pyracast.accounts.invitations import invite_workspace_member
+from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation
 from pyracast.mail.errors import (
     DeliveryUncertainError,
     MailFailure,
@@ -14,9 +17,6 @@ from pyracast.mail.errors import (
     PermanentlyNotSentError,
 )
 from pyracast.mail.send import send
-
-from pyracast.accounts.invitations import invite_workspace_member
-from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation
 from pyracast.notifications.jobs import process_notification
 from tests.smtp_server import Script, loopback_smtp
 from tests.test_notifications import SLOT, ready

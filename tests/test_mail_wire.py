@@ -15,9 +15,9 @@ from django.core.mail import EmailMultiAlternatives
 from django.core.management import call_command
 from django.test import override_settings
 from openpyxl import load_workbook
+
 from pyracast.mail.gmail import SEND_SCOPE, TOKEN_URL
 from pyracast.mail.send import send
-
 from tests.smtp_server import Script, loopback_smtp
 
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
