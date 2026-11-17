@@ -106,7 +106,7 @@ def test_invalid_saved_recipient_records_a_skipped_slot_without_blocking_another
     assert deliveries[0].recipients == ["healthy@example.com"]
     paused = NotificationDelivery.objects.get(schedule=broken)
     assert (paused.status, paused.last_error) == ("skipped", "invalid_recipient")
-    assert paused.recipients == []
+    assert (paused.recipients, paused.recipient_memberships, paused.snapshot_id) == ([], {}, None)
     actor.send.assert_called_once_with(deliveries[0].pk)
     broken.refresh_from_db()
     assert broken.recipients == ([address] if stored == "oversized" else [None])

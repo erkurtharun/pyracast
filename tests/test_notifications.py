@@ -816,6 +816,21 @@ def test_unchanged_resave_keeps_the_queued_email() -> None:
     assert mail.outbox[0].bcc == ["default@example.com"]
 
 
+def test_unchanged_save_records_a_new_member_pin_and_keeps_a_due_slot() -> None:
+    system, schedule = configured()
+    reconfigure(system, ["joined@example.com"], now=NOW)
+    saved(system)
+    joined = User.objects.create(username="joined", email="joined@example.com")
+    member = Membership.objects.create(user=joined, tenant=system.tenant)
+    resaved = reconfigure(system, ["joined@example.com"])
+    stored = ReminderSchedule.objects.get(pk=schedule.pk)
+    assert (resaved.effective_from, stored.effective_from) == (NOW, NOW)
+    assert stored.recipient_memberships == {"joined@example.com": [member.pk]}
+    (key,) = enqueue_due(SLOT + timedelta(seconds=2))
+    assert process_notification(key, SLOT + timedelta(seconds=3))
+    assert mail.outbox[0].bcc == ["joined@example.com"]
+
+
 def test_retry_row_survives_a_recipient_addition() -> None:
     system, _ = configured()
     reconfigure(system, ["a@example.com"], now=NOW)
@@ -901,11 +916,13 @@ def test_single_setting_change_is_stored_with_a_new_effective_date(
         assert getattr(stored, field) == value
 
 
+@pytest.mark.parametrize("status", ["pending", "retry"])
 @pytest.mark.parametrize("change", ["time", "disabled"])
-def test_removed_time_cancels_with_settings_change_code(change: str) -> None:
+def test_removed_time_cancels_with_settings_change_code(change: str, status: str) -> None:
     system, _ = configured()
     saved(system)
     key = enqueue_due(SLOT)[0]
+    NotificationDelivery.objects.filter(pk=key).update(status=status)
     if change == "time":
         reconfigure(system, [], times=("11:00",))
     else:

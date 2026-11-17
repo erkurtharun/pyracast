@@ -1,6 +1,6 @@
 # Collection and delivery health report
 
-The host watchdog (60 s after each run ends), an operator running `pyracast check_delivery_health`, and a platform administrator opening the console Overview, Operations or filtered Plants pages all call the same function, `delivery_health`. It reads dispatcher progress and the state of collection, email and EPIAS jobs, provider accounts, regions and reminder schedules and returns one flat report with `healthy` true only when every counter is zero and every dispatcher phase succeeded within the allowed lag. The command prints the report as JSON and exits non-zero when unhealthy; the console renders the same counters as grouped health checks.
+The host watchdog (60 s after each run ends), an operator running `pyracast check_delivery_health`, and a platform administrator opening the console Overview, Operations or filtered Plants pages all call the same function, `delivery_health`. It reads dispatcher progress and the state of collection, email and EPIAS jobs, provider accounts, regions and reminder schedules and returns one flat report with `healthy` true only when every counter except the informational `saved_forecast_notifications` and `paused_notifications` is zero and every dispatcher phase succeeded within the allowed lag. The command prints the report as JSON and exits non-zero when unhealthy; the console renders the same counters as grouped health checks.
 
 ## Entry points
 
@@ -66,7 +66,7 @@ sequenceDiagram
 
 | Condition | Result |
 | --- | --- |
-| Any counter above zero or any phase missing, failed or older than the lag | JSON printed, `CommandError` "Collection or notification delivery needs attention.", exit 1 |
+| Any non-informational counter above zero or any phase missing, failed or older than the lag | JSON printed, `CommandError` "Collection or notification delivery needs attention.", exit 1 |
 | `--max-lag-minutes` below 1 | `CommandError` before any query |
 | Database unreachable | Unhandled exception, exit 1, no JSON (watchdog sees it as unhealthy); console page fails with a server error |
 | Command still running after 60 s | `TimeoutExpired` in `main`, event `pyracast_runtime_unhealthy` without reason, exit 1, backup-age and capacity checks skipped |

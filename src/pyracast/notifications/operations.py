@@ -67,7 +67,6 @@ def _reminder_settings(schedule: ReminderSchedule) -> tuple[object, ...]:
     return (
         schedule.enabled,
         list(schedule.recipients),
-        dict(schedule.recipient_memberships),
         schedule.include_workspace_members,
         list(schedule.times),
         schedule.language,
@@ -116,6 +115,7 @@ def configure_reminders(
             region=region, retired_at__isnull=True, defaults={"effective_from": now}
         )
         stored = _reminder_settings(schedule)
+        stored_memberships = dict(schedule.recipient_memberships)
         current_count = len(effective_recipients(schedule))
         disabling_unchanged = (
             not enabled
@@ -161,6 +161,8 @@ def configure_reminders(
         schedule.times = sorted(times)
         schedule.language = language
         if not created and _reminder_settings(schedule) == stored:
+            if schedule.recipient_memberships != stored_memberships:
+                schedule.save(update_fields=["recipient_memberships"])
             return schedule
         schedule.configured_by = actor
         schedule.effective_from = now
