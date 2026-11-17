@@ -319,6 +319,7 @@ for MODE in preflight deploy-check plan secrets units-invalid image live-artifac
         test ! -e /var/lib/pyracast/release-blocked
         test "$(grep -c ' stop -t ' /calls)" == 3
         grep -Fq "Release $revision is serving" /result
+        grep -Fq "Finish with: bash $new_release/deploy/install-units.sh install $new_release && systemctl start pyracast.service" /result
         units_installed
         ;;
       success|first-success|redeploy|lock-wait)

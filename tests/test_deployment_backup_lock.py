@@ -134,6 +134,51 @@ def test_hourly_backup_skips_a_release_that_began_while_it_waited(
     ]
 
 
+def test_hourly_backup_started_during_a_release_dumps_once_the_release_finishes(
+    backup_host: BackupHost,
+) -> None:
+    backup_host.blocked.touch()
+    backup_host.on_lock = backup_host.blocked.unlink
+
+    name = backup.create_backup(
+        backup_host.release, "private-backups", "hourly", backup_host.directory
+    )
+
+    assert name is not None
+    assert [held for _, held in backup_host.dumps] == [True]
+    assert [event for event, _, _ in backup_host.events] == ["pyracast_backup_succeeded"]
+
+
+def test_overlapping_hourly_and_prerelease_backups_both_record_their_completion(
+    backup_host: BackupHost, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    replace = Path.replace
+    second = backup_host.directory / "prerelease"
+    second.mkdir()
+    prerelease: list[str | None] = []
+
+    def overlapping(source: Path, target: Path) -> Path:
+        if not prerelease:
+            prerelease.append(None)
+            prerelease[0] = backup.create_backup(
+                backup_host.release, "private-backups", "prerelease", second
+            )
+        return replace(source, target)
+
+    monkeypatch.setattr(Path, "replace", overlapping)
+    hourly = backup.create_backup(
+        backup_host.release, "private-backups", "hourly", backup_host.directory
+    )
+
+    assert hourly is not None
+    assert prerelease[0] is not None
+    assert [details["object"] for _, _, details in backup_host.events] == [prerelease[0], hourly]
+    assert json.loads(backup_host.last_backup.read_text())["object"] == hourly
+    assert [path.name for path in backup_host.last_backup.parent.iterdir() if path.is_file()] == [
+        backup_host.last_backup.name
+    ]
+
+
 def test_prerelease_backup_never_waits_for_the_lock_its_installer_holds(
     backup_host: BackupHost,
 ) -> None:

@@ -10,6 +10,7 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, NamedTuple
 
 import pytest
@@ -119,6 +120,14 @@ class Host:
             command for command in self.commands if command[-len(arguments) :] == list(arguments)
         ]
 
+    def starts(self) -> list[list[str]]:
+        return [
+            command[index:]
+            for command in self.commands
+            for index, part in enumerate(command)
+            if part in ("restart", "up")
+        ]
+
 
 @pytest.fixture
 def watched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Host:
@@ -198,7 +207,8 @@ def test_application_services_restart_under_the_release_lock_only(watched: Host)
     assert locked[:3] == ["pyracast.service", "--quiet", "container"]
     assert watched.compose("restart", "--timeout", "60", "worker")[0] in watched.locked
     assert any(
-        command[-5:-1] == ["up", "-d", "--wait", "--wait-timeout"] for command in watched.locked
+        command[-7:-2] == ["up", "-d", "--no-deps", "--wait", "--wait-timeout"]
+        for command in watched.locked
     )
     unlocked = [command for command in watched.commands if command not in watched.locked]
     assert watched.compose("pyracast", "check_delivery_health")[0] in unlocked
@@ -250,6 +260,26 @@ def test_unhealthy_support_service_is_reported_and_left_to_docker(watched: Host)
     assert watched.details("pyracast_runtime_unhealthy") == [
         {"services": {"postgres": "unhealthy"}}
     ]
+
+
+@pytest.mark.parametrize(
+    ("failure", "restarted", "started"),
+    [
+        (states(postgres="exited", worker="exited"), ["worker"], ["worker"]),
+        (states(rabbitmq="exited", api="unhealthy"), ["api"], ["api"]),
+        (states(rabbitmq="missing", worker="exited"), ["worker"], ["rabbitmq", "worker"]),
+    ],
+)
+def test_recovery_starts_only_the_failed_services_and_never_a_stopped_support_service(
+    watched: Host, failure: dict[str, str], restarted: list[str], started: list[str]
+) -> None:
+    watched.snapshots = [failure, failure, HEALTHY]
+
+    assert watchdog.main() == 0
+    restart, start = watched.starts()
+    assert restart == ["restart", "--timeout", "60", *restarted]
+    assert start[:5] == ["up", "-d", "--no-deps", "--wait", "--wait-timeout"]
+    assert start[6:] == started
 
 
 def test_missing_containers_are_created_again(watched: Host) -> None:
@@ -457,13 +487,33 @@ def test_no_command_starts_after_the_deadline(monkeypatch: pytest.MonkeyPatch) -
     assert started == []
 
 
-def test_every_command_is_bounded_by_the_watchdog_deadline(watched: Host) -> None:
+def test_every_command_gets_only_the_time_left_before_the_shared_deadline(
+    watched: Host, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    clock = [1000.0]
+
+    def slow(command: list[str], **options: Any) -> subprocess.CompletedProcess[str]:
+        result = watched.run(command, **options)
+        clock[0] += 10
+        return result
+
+    monkeypatch.setattr(
+        watchdog, "time", SimpleNamespace(monotonic=lambda: clock[0], time=time.time)
+    )
+    monkeypatch.setattr(subprocess, "run", slow)
     watched.snapshots = [states(worker="exited"), states(worker="exited"), HEALTHY]
-    watchdog.main()
-    assert watched.timeouts
-    assert all(0 < timeout <= watchdog.DEADLINE_SECONDS for timeout in watched.timeouts)
-    (start,) = [command for command in watched.commands if "--wait-timeout" in command]
-    assert 0 < int(start[start.index("--wait-timeout") + 1]) < watchdog.DEADLINE_SECONDS
+
+    assert watchdog.main() == 0
+    assert len(watched.timeouts) > 8
+    assert watched.timeouts == [
+        watchdog.DEADLINE_SECONDS - 10 * index for index in range(len(watched.timeouts))
+    ]
+    ((index, start),) = [
+        (index, command)
+        for index, command in enumerate(watched.commands)
+        if "--wait-timeout" in command
+    ]
+    assert int(start[start.index("--wait-timeout") + 1]) == watched.timeouts[index] - 10
 
 
 @pytest.mark.parametrize(
@@ -476,11 +526,13 @@ def test_capacity_warning_covers_boot_disk_data_disk_and_memory(
     watched.free = {"/": boot_free, "/var/lib/pyracast": data_free}
     watched.meminfo.write_text(f"MemTotal: 100 kB\nMemAvailable: {memory_free} kB\n")
     watchdog.check_capacity()
-    expected = [
+    expected = (
+        "pyracast_host_capacity",
+        "WARNING",
         {
             "boot_disk_free_percent": float(boot_free),
             "data_disk_free_percent": float(data_free),
             "memory_available_percent": float(memory_free),
-        }
-    ]
-    assert watched.details("pyracast_host_capacity") == (expected if warns else [])
+        },
+    )
+    assert watched.events == ([expected] if warns else [])

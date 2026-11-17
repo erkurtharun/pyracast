@@ -466,6 +466,17 @@ def test_ci_job_names_apply_matrix_include_and_exclude() -> None:
         ci_job_names({"job": {"name": "Job ${{ matrix.missing }}"}})
 
 
+def test_ci_job_whose_matrix_excludes_every_combination_defines_no_job() -> None:
+    jobs = {
+        "required": {
+            "name": "Required test",
+            "strategy": {"matrix": {"os": ["ubuntu-latest"], "exclude": [{"os": "ubuntu-latest"}]}},
+        }
+    }
+
+    assert ci_job_names(jobs) == set()
+
+
 @pytest.mark.parametrize(
     "workflow",
     [
@@ -553,14 +564,14 @@ def test_watchdog_unit_outlasts_its_deadline_and_runs_while_a_release_is_blocked
     assert int(application["TimeoutStopSec"]) > watchdog.DEADLINE_SECONDS + drain
 
 
-def test_hourly_backup_unit_leaves_locking_to_the_backup_and_keeps_its_files_private() -> None:
+def test_hourly_backup_unit_leaves_the_release_lock_and_block_to_the_backup() -> None:
     unit = shipped_unit("pyracast-backup.service")
 
     assert unit["ExecStart"] == [
         "/usr/bin/python3 /opt/pyracast/current/deploy/backup.py /etc/pyracast/host.json"
     ]
     assert unit["PrivateTmp"] == ["true"]
-    assert f"!{host.RELEASE_BLOCKED.as_posix()}" in unit["ConditionPathExists"]
+    assert unit["ConditionPathExists"] == ["/opt/pyracast/current/deploy/backup.py"]
     budget = int(unit["TimeoutStartSec"][0])
     assert budget > backup.HOURLY_LOCK_WAIT_SECONDS + backup.DUMP_TIMEOUT_SECONDS
 
