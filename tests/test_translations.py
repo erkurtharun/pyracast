@@ -146,6 +146,35 @@ def test_catalog_check_validates_sources_without_writing_and_compile_writes_them
     assert compile_catalogs(tmp_path, check=False) == 1
 
 
+@pytest.mark.parametrize("rename", [False, True])
+def test_compilation_removes_generated_catalogs_without_a_source(
+    tmp_path: Path, rename: bool
+) -> None:
+    source = tmp_path / "src/example/locale/tr/LC_MESSAGES/django.po"
+    source.parent.mkdir(parents=True)
+    catalog = polib.POFile()
+    catalog.append(polib.POEntry(msgid="Saved", msgstr="Kaydedildi"))
+    catalog.save(str(source))
+    assert compile_catalogs(tmp_path, check=False) == 0
+    compiled = source.with_suffix(".mo")
+    assert compiled.exists()
+    renamed = source.with_name("messages.po")
+    if rename:
+        source.rename(renamed)
+    else:
+        source.unlink()
+
+    assert compile_catalogs(tmp_path, check=True) == 0
+    assert compiled.exists()
+    assert not renamed.with_suffix(".mo").exists()
+    assert compile_catalogs(tmp_path, check=False) == 0
+    assert not compiled.exists()
+    if rename:
+        assert [
+            (entry.msgid, entry.msgstr) for entry in polib.mofile(str(renamed.with_suffix(".mo")))
+        ] == [("Saved", "Kaydedildi")]
+
+
 @pytest.mark.parametrize("flags", [["fuzzy"], []])
 def test_untranslated_or_fuzzy_catalog_cannot_replace_artifact(
     tmp_path: Path, flags: list[str]
