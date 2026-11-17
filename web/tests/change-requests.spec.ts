@@ -207,6 +207,53 @@ test("member submits a native production correction with a stable retry key and 
     expect(direct).toEqual([]);
 });
 
+test("a server error shows its reference", async ({ page }) => {
+    await member(page);
+    await page.route("**/production/?*", (route) => {
+        const date = new URL(route.request().url()).searchParams.get(
+            "start_date",
+        )!;
+        return route.fulfill({
+            json: nativeProductionHistory(date, "Europe/Istanbul", [
+                {
+                    starts_at: `${date}T08:00:00+03:00`,
+                    ends_at: `${date}T08:30:00+03:00`,
+                    effective: reading,
+                    can_edit: false,
+                    can_propose: true,
+                    can_propose_revert: false,
+                    revision_id: null,
+                    observation: null,
+                },
+            ]),
+        });
+    });
+    await page.route("**/change-requests/production/", (route) =>
+        route.fulfill({
+            status: 500,
+            json: {
+                code: "server_error",
+                message: "The server could not complete this request.",
+                request_id: "0123456789abcdef0123456789abcdef",
+            },
+        }),
+    );
+    await openPlant(page, "Production");
+    await page.getByRole("button", { name: /^Suggest correction for/ }).click();
+    const editor = page.locator(".production-row-editor");
+    await editor.getByRole("textbox").first().fill("0,75");
+    await editor.getByLabel("Reason for correction").fill("Checked meter");
+    await editor
+        .getByRole("button", { name: "Send for approval", exact: true })
+        .click();
+    await expect(
+        editor.getByText(
+            "The server could not complete this request. Reference: 0123456789abcdef0123456789abcdef",
+            { exact: true },
+        ),
+    ).toBeVisible();
+});
+
 test("member outage reports remain proposals and use explicit action envelopes", async ({
     page,
 }, testInfo) => {

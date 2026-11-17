@@ -63,7 +63,7 @@ sequenceDiagram
 ## Authorization
 
 - Anonymous callers get 401 `is_authenticated: false` from allauth `AuthenticatedAPIView.dispatch`, before the Pyracast `handle`; CSRF runs before the middleware.
-- Staff enrolment: `PrivilegedAuthenticatorEnrollment` (GET and POST on the exact `totp` path, not HEAD). Staff removal: `ManageTOTPView.handle`; `MFAAdapter.can_delete_authenticator` repeats it but only allauth's HTML `DeactivateTOTPForm` calls it. Both 403s are Django's default (non-JSON) body.
+- Staff enrolment: `PrivilegedAuthenticatorEnrollment` (GET and POST on the exact `totp` path, not HEAD). Staff removal: `ManageTOTPView.handle`; `MFAAdapter.can_delete_authenticator` repeats it but only allauth's HTML `DeactivateTOTPForm` calls it. Both raise `PermissionDenied`, so `handler403` answers `{"code": "permission_denied"}` with `Cache-Control: private, no-store`.
 - Generic reauthentication (a `reauthenticated` password, emailed-code or MFA record within 300 s; a plain login does not count) sits inside the allauth flows and covers enrolment. `require_mfa_reauthentication` adds a stricter check for removal and recovery codes: an MFA record (`totp` or `recovery_codes`, `reauthenticated`, finite `at` in the window) whose authenticator still exists for that user.
 
 ## Failure paths

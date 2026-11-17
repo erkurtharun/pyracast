@@ -1,3 +1,5 @@
+import logging
+import re
 from datetime import date
 from time import time
 
@@ -24,6 +26,7 @@ from pyracast.accounts.models import Membership, Tenant
 from pyracast.admin import ReadOnlyAdmin, RegionAdmin, site
 from pyracast.api.errors import exception_handler
 from pyracast.api.serializers import RegionInput
+from pyracast.api.views import TenantsView
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import SiteBinding
@@ -251,10 +254,54 @@ def test_stable_errors(error: Exception, status: int) -> None:
     assert "secret" not in str(response.data)
 
 
-def test_unknown_error_is_not_hidden() -> None:
-    assert exception_handler(RuntimeError(), {}) is None
+def test_region_input_rejects_a_list() -> None:
     serializer = RegionInput(data=[])
     assert not serializer.is_valid()
+
+
+def test_unknown_error_answers_json_with_reference_and_logs_traceback(
+    customer: tuple[Client, User, Tenant],
+    monkeypatch: pytest.MonkeyPatch,
+    pyracast_logs: pytest.LogCaptureFixture,
+) -> None:
+    _, user, _ = customer
+
+    def fail(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("private failure detail")
+
+    monkeypatch.setattr(TenantsView, "get", fail)
+    client = Client(raise_request_exception=False)
+    client.force_login(user)
+    response = client.get("/api/tenants/")
+    assert response.status_code == 500
+    assert response["Content-Type"] == "application/json"
+    assert "no-store" in response["Cache-Control"]
+    body = response.json()
+    assert set(body) == {"code", "message", "request_id"}
+    assert body["code"] == "server_error"
+    assert body["message"] == "The server could not complete this request."
+    assert re.fullmatch(r"[0-9a-f]{32}", body["request_id"])
+    assert "private failure detail" not in response.content.decode()
+    records = [record for record in pyracast_logs.records if record.name == "pyracast.api"]
+    assert len(records) == 1
+    assert records[0].levelno == logging.ERROR
+    assert records[0].exc_info is not None
+    assert records[0].getMessage() == (
+        f"api_server_error request_id={body['request_id']} method=GET path=/api/tenants/ "
+        "view=TenantsView"
+    )
+
+
+def test_missing_object_logs_its_model_and_answers_404(
+    pyracast_logs: pytest.LogCaptureFixture,
+) -> None:
+    response = exception_handler(Region.DoesNotExist(), {})
+    assert response is not None
+    assert response.status_code == 404
+    assert response.data == {"code": "not_found"}
+    [record] = [record for record in pyracast_logs.records if record.name == "pyracast.api"]
+    assert record.levelno == logging.WARNING
+    assert record.getMessage() == "api_object_not_found model=Region"
 
 
 def test_entrypoints(monkeypatch: pytest.MonkeyPatch) -> None:

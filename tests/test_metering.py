@@ -635,3 +635,26 @@ def test_collection_tolerates_purge_after_reading_work_identifiers(
             assert enqueue_due_epias_jobs(now=NOW + timedelta(days=1)) == []
     assert not armed
     assert not EpiasCollectionJob.objects.exists()
+
+
+def test_unexpected_metering_failure_logs_type_and_origin_not_message(
+    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+) -> None:
+    connected(monkeypatch)
+    job = EpiasCollectionJob.objects.first()
+    assert job is not None
+
+    def failure(plant: EpiasPlant, day: date) -> EpiasDay:
+        raise RuntimeError("password must never be logged")
+
+    assert not run_epias_job(job.pk, fetch=failure, now=NOW)
+    [message] = [
+        record.getMessage()
+        for record in pyracast_logs.records
+        if record.getMessage().startswith("metering_job_failed")
+    ]
+    assert message.startswith(
+        f"metering_job_failed job={job.pk} attempt=1 error_type=RuntimeError "
+        "origin=pyracast.metering.jobs:"
+    )
+    assert "password" not in pyracast_logs.text

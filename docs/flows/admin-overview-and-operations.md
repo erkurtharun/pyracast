@@ -48,7 +48,7 @@ sequenceDiagram
 | `regions_region` | R | Status counts, review queue (oldest pending first, 6), plant list; soft-deleted regions excluded |
 | `connections_sitebinding`, `connections_provideraccount` | R | Newest binding of the current region revision gives the connection badge; `approved_binding` drives health counters and filters |
 | `forecasts_forecastsnapshot`, `forecasts_forecastresult`, `forecasts_collectionjob` | R | Last saved forecast: newest `forecast` snapshot of the approved binding with a succeeded job and a result; job table |
-| `forecasts_dispatcherstatus`, `forecasts_collectionschedule` | R | Per-phase attempt, success and error class name; disabled collection removes a region from stale and unvalidated checks |
+| `forecasts_dispatcherstatus`, `forecasts_collectionschedule` | R | Per-phase attempt, success and failure code; disabled collection removes a region from stale and unvalidated checks |
 | `notifications_notificationdelivery`, `notifications_reminderschedule` | R | Delivery rows and counters; saved recipients re-validated in Python for the invalid-recipient check |
 | `metering_epiascollectionjob` | R | EPİAŞ job table and counters; only deleted plants are excluded, not deleted regions |
 | `regions_regionlocationchangerequest`, `regions_auditevent` | R | Pending location-change count and queue (6); last 8 events of undeleted regions (provider-account events and events of trashed regions are excluded) |

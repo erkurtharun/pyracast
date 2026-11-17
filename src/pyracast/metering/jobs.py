@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import time
 import uuid
 from collections.abc import Callable
@@ -11,6 +12,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from pyracast.background.failures import log_failure
 from pyracast.collection_window import NIGHT_RETRY_DELAY
 from pyracast.epias import TIMEZONE, EpiasDay, EpiasError, EpiasPlant
 from pyracast.forecasts.models import CollectionSchedule
@@ -23,6 +25,8 @@ from pyracast.regions.models import Region
 
 Fetcher = Callable[[EpiasPlant, date], EpiasDay]
 LEASE_DURATION = timedelta(minutes=5)
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -293,6 +297,7 @@ def run_epias_job(
             raise EpiasError("epias_response_identity_mismatch")
         return _publish(lease, data, now + timedelta(seconds=time.monotonic() - started))
     except Exception as exc:
+        log_failure(logger, "metering_job_failed", exc, job=job_id, attempt=lease.job.attempts)
         retry_after = exc.retry_after_seconds if isinstance(exc, EpiasError) else None
         _finish_failure(
             lease,

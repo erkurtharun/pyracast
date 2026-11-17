@@ -48,7 +48,7 @@ sequenceDiagram
 
 | Table | R/W | What |
 | --- | --- | --- |
-| `forecasts_dispatcherstatus` | R (W by dispatcher) | One row per phase: attempted, succeeded, last error code |
+| `forecasts_dispatcherstatus` | R (W by dispatcher) | One row per phase: attempted, succeeded, last error code; `duration_ms` and `published` are written but not read |
 | `forecasts_collectionjob`, `metering_epiascollectionjob` | R | Waiting, running or last-24h failed jobs of non-deleted regions (collection) or plants (EPIAS) |
 | `notifications_notificationdelivery` | R | Waiting, sending or last-24h deliveries, including prepared message kind |
 | `notifications_reminderschedule`, `accounts_membership`, `account_emailaddress`, `auth_user` | R | Enabled current schedules of approved regions; recipients resolved and validated in Python, membership and address reads per schedule when needed |
@@ -60,7 +60,7 @@ sequenceDiagram
 
 - Command and watchdog: no application check. Access is shell or Docker access on the host.
 - Console views: `PlatformAdminSite.has_permission` requires an active staff superuser (Django's `is_active` and `is_staff` check plus `is_superuser`) with verified MFA (`has_verified_mfa`); each route is wrapped in `admin_view` (index through Django's own wrap). Others are redirected via the admin login to `/app/?next=/admin/`.
-- The report holds `checked_at`, counts and phase names only, no error codes, tenant data, addresses or keys (key and invalid address absence pinned by tests). The Operations page adds phase error codes (exception class names), company and plant names and recipient addresses for the administrator.
+- The report holds `checked_at`, counts and phase names only, no error codes, tenant data, addresses or keys (key and invalid address absence pinned by tests). The Operations page adds phase error codes (exception class names or `collection_regions_failed:<n>`), company and plant names and recipient addresses for the administrator.
 
 ## Failure paths
 

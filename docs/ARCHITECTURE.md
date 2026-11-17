@@ -37,7 +37,10 @@ release command using the same application version and its dedicated database ro
 API, worker and dispatcher processes retain no authoritative workflow state locally:
 PostgreSQL owns jobs, leases, results and sessions, and RabbitMQ transports deliveries.
 Application logs are an event stream on standard output for the process manager to
-collect; `PYRACAST_LOG_LEVEL` controls verbosity and defaults to `INFO`. Local launcher
+collect; `PYRACAST_LOG_LEVEL` controls verbosity and defaults to `INFO`. `django.request`
+errors and `django.security` warnings share the console handler; `DisallowedHost` is discarded.
+Caught exceptions in calibration, metering and collection scheduling use `pyracast.background.failures.log_failure`: an event key, fields, the
+error type and the innermost `pyracast` code location, never the exception message. Local launcher
 logs and process identities are development tooling.
 
 Worker and dispatcher entry points handle `SIGINT` and `SIGTERM` without raising
@@ -283,7 +286,7 @@ application and authentication-cache sessions keep their normal limits during te
 SMTP sockets and Gmail API I/O use 15-second timeouts. These are connection and individual
 operation limits; business deadlines are checked separately after database waits.
 
-`DispatcherStatus` records each phase's last attempt, success and safe error code.
+`DispatcherStatus` records each phase's last attempt, success, safe error code, duration and published count.
 `check_delivery_health --max-lag-minutes 5` emits JSON and fails for missing, stale
 or failed phases, overdue ready jobs, expired or missing active leases, recent
 failed/uncertain/unavailable or incomplete tomorrow deliveries, missed delivery

@@ -99,6 +99,7 @@ sequenceDiagram
 | Realtime day incomplete (not 24 hourly labels with totals) | Snapshot kept, `partial_data`; yesterday's nightly job retries every 30 min to 09:00, older windowed days every 30 min, backfill days after 30 then 60 min; `failed` after three attempts |
 | Settlement period empty or incomplete | Snapshots kept, job ends `awaiting_publication` with `unpublished_data` or `partial_data`; only a later nightly job refetches, and only for the last 2 (Monday 3) months |
 | `prepare_calibration` raises | Snapshots rolled back, attempt counted, `epias_provider_failure`, retried with backoff |
+| An exception while fetching, validating or publishing a claimed attempt | `metering_job_failed job=<id> attempt=<n> error_type=<class> origin=<module>:<line>:<function>` is logged at ERROR, never the exception message |
 
 ## Rules and invariants
 

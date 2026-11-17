@@ -197,6 +197,45 @@ test("a non-JSON authentication failure shows a safe error", async ({
     );
 });
 
+test("a sign-in server error shows its reference", async ({ page }) => {
+    await mockApi(page, { anonymous: true });
+    await page.route("**/api/auth/browser/v1/auth/login", (route) =>
+        route.fulfill({
+            status: 500,
+            json: {
+                code: "server_error",
+                message: "The server could not complete this request.",
+                request_id: "0123456789abcdef0123456789abcdef",
+            },
+        }),
+    );
+    await page.goto("/app/");
+    await page.getByLabel("Email", { exact: true }).fill("owner@example.test");
+    await page
+        .getByLabel("Password", { exact: true })
+        .fill("Test-only-cobalt-79!");
+    await page.locator("form").getByRole("button", { name: "Sign in" }).click();
+    await expect(page.locator("form").getByRole("alert")).toContainText(
+        "The server could not complete this request. Reference: 0123456789abcdef0123456789abcdef",
+    );
+});
+
+test("an ended session asks to sign in again", async ({ page }) => {
+    await mockApi(page, { anonymous: true });
+    await page.route("**/api/auth/browser/v1/auth/login", (route) =>
+        route.fulfill({ status: 400, json: { code: "session_ended" } }),
+    );
+    await page.goto("/app/");
+    await page.getByLabel("Email", { exact: true }).fill("owner@example.test");
+    await page
+        .getByLabel("Password", { exact: true })
+        .fill("Test-only-cobalt-79!");
+    await page.locator("form").getByRole("button", { name: "Sign in" }).click();
+    await expect(page.locator("form").getByRole("alert")).toContainText(
+        "Your session ended. Refresh the page and sign in again.",
+    );
+});
+
 test("pending verification requires the code before completing", async ({
     page,
 }) => {

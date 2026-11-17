@@ -7,6 +7,7 @@ from django.core.exceptions import ValidationError
 from django.db import close_old_connections, transaction
 from django.db.models.functions import Greatest
 
+from pyracast.background.failures import log_failure
 from pyracast.collection_window import nightly_window
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule
@@ -17,7 +18,9 @@ logger = logging.getLogger(__name__)
 
 
 class CollectionSchedulingError(RuntimeError):
-    pass
+    def __init__(self, failed_region_ids: list[int]) -> None:
+        super().__init__("Collection scheduling failed for one or more regions.")
+        self.failed_region_ids = failed_region_ids
 
 
 def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
@@ -141,20 +144,16 @@ def enqueue_due(now: datetime, cutoff_hour: int | None = None) -> list[int]:
         raise ValidationError("An aware timestamp and valid cutoff hour are required.")
     cutoff: time = settings.PYRACAST_CUTOFF_LOCAL if cutoff_hour is None else time(cutoff_hour)
     jobs: list[int] = []
-    failures = 0
+    failed_region_ids: list[int] = []
     for region_id in Region.objects.filter(status="approved", deleted_at__isnull=True).values_list(
         "pk", flat=True
     ):
         try:
             jobs.extend(_enqueue_region(region_id, now, cutoff))
         except Exception as exc:
-            failures += 1
-            logger.warning(
-                "Collection scheduling failed region_id=%s error_type=%s",
-                region_id,
-                type(exc).__name__,
-            )
+            failed_region_ids.append(region_id)
+            log_failure(logger, "collection_region_scheduling_failed", exc, region_id=region_id)
             close_old_connections()
-    if failures:
-        raise CollectionSchedulingError("Collection scheduling failed for one or more regions.")
+    if failed_region_ids:
+        raise CollectionSchedulingError(failed_region_ids)
     return jobs

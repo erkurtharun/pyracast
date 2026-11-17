@@ -66,10 +66,10 @@ sequenceDiagram
 | Condition | Result |
 |---|---|
 | Same-session request waits longer than 5 s | 429 `{"code": "session_busy", "detail": "..."}` (English, outside the DRF handler), `Retry-After: 1`; connection closed; audit event `authentication_request_throttled` for `/api/auth/` |
-| Lock connection lost or replaced, lock missing at release | `SessionInterrupted` (400), connection closed; a configured pool raises `ImproperlyConfigured` (500) |
-| Session row deleted by revocation or logout elsewhere while this request modifies the session | `SessionMiddleware` raises `SessionInterrupted` (400) on save |
+| Lock connection lost or replaced, lock missing at release | `SessionInterrupted`: 400 `{"code": "session_ended"}` from `handler400` on `/api/` (HTML elsewhere), connection closed; a configured pool raises `ImproperlyConfigured` (500) |
+| Session row deleted by revocation or logout elsewhere while this request modifies the session | `SessionMiddleware` raises `SessionInterrupted` on save: 400 `session_ended` on `/api/` |
 | Stamp missing, non-finite, in the future, older than 12 h, or idle 30 min | Session flushed, audit event `logout` (same as a sign-out), request anonymous; later mutations get 403 (DRF) or 401 (allauth) |
-| Missing or stale CSRF token on allauth or `/admin/` | Django 403 HTML page; `authRequest` shows `Errors.request` with the status |
+| Missing or stale CSRF token on allauth or `/admin/` | Django CSRF failure view (HTML 403); `authRequest` shows `Errors.request` with the status |
 | Missing or stale CSRF token on a DRF view | 403 `{"code": "http_403", "detail": {...}}` with the untranslated `CSRF Failed: ...` text |
 | Focus refresh fails in the browser | Ignored; the screen keeps its last session |
 

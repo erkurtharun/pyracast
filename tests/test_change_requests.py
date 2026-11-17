@@ -469,3 +469,39 @@ def test_detail_rechecks_ownership_when_final_membership_read_sees_admin_transfe
     response = client.get(f"/api/tenants/{case.system.tenant.pk}/change-requests/{request.pk}/")
     assert response.status_code == 404
     assert response.json() == {"code": "not_found"}
+
+
+def test_stale_production_proposal_answers_409_and_stores_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    case = make_request_case(monkeypatch)
+    approve(case, production_request(case))
+    stored = list(ChangeRequest.objects.values_list("pk", flat=True))
+    client = Client()
+    client.force_login(case.proposer)
+    response = client.post(
+        f"/api/tenants/{case.system.tenant.pk}/regions/{case.system.region.pk}/"
+        f"plants/{case.plant.pk}/change-requests/production/",
+        {
+            "idempotency_key": str(uuid4()),
+            "reason": "Verified on site",
+            "configuration_id": case.plant.current_configuration_id,
+            "unit": "kWh",
+            "changes": [
+                {
+                    "starts_at": NOW - timedelta(hours=1),
+                    "ends_at": NOW,
+                    "expected_revision_id": None,
+                    "action": "set",
+                    "energy": 1000,
+                }
+            ],
+        },
+        content_type="application/json",
+    )
+    assert response.status_code == 409, response.content
+    assert response.json() == {
+        "code": "production_revision_conflict",
+        "detail": "Production changed. Reload the latest values before saving.",
+    }
+    assert list(ChangeRequest.objects.values_list("pk", flat=True)) == stored

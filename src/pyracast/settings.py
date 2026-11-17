@@ -310,13 +310,17 @@ LOGGING = {
             "class": "logging.StreamHandler",
             "formatter": "standard",
             "stream": "ext://sys.stdout",
-        }
+        },
+        "discard": {"class": "logging.NullHandler"},
     },
     "loggers": {
         "pyracast": {
             "handlers": ["console"],
             "level": os.environ.get("PYRACAST_LOG_LEVEL", "INFO"),
             "propagate": False,
-        }
+        },
+        "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
+        "django.security": {"handlers": ["console"], "level": "WARNING", "propagate": False},
+        "django.security.DisallowedHost": {"handlers": ["discard"], "propagate": False},
     },
 }

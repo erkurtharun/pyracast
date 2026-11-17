@@ -30,9 +30,9 @@ sequenceDiagram
         G->>M: request
         M->>M: "normalize REMOTE_ADDR, strip forwarding and Cloudflare identity headers"
         alt REMOTE_ADDR invalid
-            M-->>G: "403 generic HTML page, inner chain not called"
+            M-->>G: "403 from handler403 (JSON on /api/), inner chain not called"
         else peer in TRUSTED_PROXY_CIDRS and TRUST_PROXY, proto, X-Real-IP or XFF chain invalid
-            M-->>G: "403 generic HTML page, inner chain not called"
+            M-->>G: "403 from handler403 (JSON on /api/), inner chain not called"
         else address valid and peer untrusted, or trusted headers valid
             M->>M: "trusted peer only: set proto and client IP, keep CF-IPCountry only behind Cloudflare"
             M->>D: "SecurityMiddleware, CSP, PrivateAPIResponses, rest of chain"
@@ -60,8 +60,8 @@ None. No table is read or written; the flow only reads and rewrites `request.MET
 
 | Condition | Result |
 | --- | --- |
-| `REMOTE_ADDR` empty, malformed or a list | 403 Django generic "403 Forbidden" HTML (`PermissionDenied("Invalid client address.")`, message not shown), also on `/api/` |
-| Trusted peer sends proto other than `http`/`https`, no or malformed `X-Real-IP` (without upstream ranges), no or malformed `X-Forwarded-For` (with upstream ranges), or a chain whose only entry is a Cloudflare address | Same 403 (`Invalid trusted proxy headers.`) |
+| `REMOTE_ADDR` empty, malformed or a list | 403 from `handler403` (`PermissionDenied("Invalid client address.")`, message not shown): `{"code": "permission_denied"}` on `/api/`, HTML elsewhere, both `Cache-Control: private, no-store` |
+| Trusted peer sends proto other than `http`/`https`, no or malformed `X-Real-IP` (without upstream ranges), no or malformed `X-Forwarded-For` (with upstream ranges), or a chain whose only entry is a Cloudflare address | 403 from `handler403` (`InvalidProxyHeaders`): `{"code": "invalid_proxy_headers"}` on `/api/`, HTML elsewhere, both no-store; `pyracast.security` logs `invalid_proxy_headers` with the proxy peer address |
 | Peer not trusted (or trust off) | Headers silently stripped, request continues with the socket peer as client |
 | Request not secure (untrusted peer, proto `http`, or trust off) with `DEBUG` off | `SecurityMiddleware` 301 to https, except `/health/live/` and `/health/ready/` |
 | Trust on but `PYRACAST_TRUSTED_PROXY_CIDRS` empty | `ImproperlyConfigured` at middleware load; an invalid CIDR raises `ValueError` there |
@@ -73,7 +73,7 @@ None. No table is read or written; the flow only reads and rewrites `request.MET
 
 - Client IP: with upstream ranges set, take the entry before the gateway-appended peer when that peer is a Cloudflare address; otherwise take the peer. A client inside a Cloudflare range stays the client; no hop is skipped; the `X-Real-IP` value is required but ignored. Without upstream ranges, `X-Real-IP` is used after normalisation.
 - `CF-IPCountry` survives only if the peer is trusted, upstream ranges are set and the last `X-Forwarded-For` entry is a Cloudflare address; `request_language` uses it as the last fallback.
-- `TrustedProxyHeaders` is outermost, so its 403 never receives `SecurityMiddleware`, CSP, `PrivateAPIResponses`, `Content-Language` or `X-Frame-Options` headers from Django.
+- `TrustedProxyHeaders` is outermost, so its 403 never receives `SecurityMiddleware`, CSP, `PrivateAPIResponses`, `Content-Language` or `X-Frame-Options` headers from Django; `handler403` sets `Cache-Control: private, no-store` itself.
 - Header ownership is split: Traefik sets HSTS `max-age`, nosniff and `Referrer-Policy: same-origin` on every routed response. Next sets CSP (nonce, `strict-dynamic`), `Cache-Control`, `X-Robots-Tag` and four static headers. Django sets `SECURE_CSP` (nonce only when a template reads it, as admin does), HSTS with `includeSubDomains; preload` on secure requests only, nosniff, `Referrer-Policy`, COOP and `X-Frame-Options: DENY`. `style-src-attr 'unsafe-inline'` is allowed in Next; dev adds `unsafe-eval`, `ws:` and `unsafe-inline` styles.
 - A nonce works only on dynamically rendered pages (`connection()` in `web/src/app/app/page.tsx`, `headers()` in `web/src/i18n/request.ts`); caching HTML would reuse a stale nonce.
 - `x-pyracast-public-language` is deleted from the inbound request, then set only for the six public paths, so clients cannot choose the public language.
@@ -84,4 +84,4 @@ None. No table is read or written; the flow only reads and rewrites `request.MET
 - `tests/test_account_security.py`: untrusted peers, missing CIDRs, ambiguous identity, invalid `REMOTE_ADDR`, Cloudflare chain parsing, rate-limit separation, origin validation; `tests/test_language.py` (country trust), `tests/test_api_cache.py` (`/api/` no-store, other paths untouched), `tests/test_security_audit.py` (429 audit), `tests/test_admin_mfa_bootstrap.py` (admin CSP).
 - `web/tests/security-headers.spec.ts` (fresh nonce, injected script blocked); `web/tests/public-site.spec.ts` (language header spoofing, `form-action` in CSP, `noindex` on `/app/`, none on public pages or discovery files); `security-headers.spec.ts` also pins the `same-origin` referrer policy and an ignored spoofed language header on `/app/`.
 - `deploy/smoke.sh`: Traefik HSTS `max-age` and nosniff on `/`, http to https redirect, forged and aliased headers through Traefik, simulated Cloudflare peer.
-- Gaps: no test for Django HSTS or SSL redirect, Django `Referrer-Policy` on `/api/` and `/admin/`, `X-Frame-Options`, `Permissions-Policy`, `Cache-Control` from `proxy.ts`, the 403 response, the allauth 403 for untrusted peers.
+- Gaps: no test for Django HSTS or SSL redirect, Django `Referrer-Policy` on `/api/` and `/admin/`, `X-Frame-Options`, `Permissions-Policy`, `Cache-Control` from `proxy.ts`, the allauth 403 for untrusted peers.

@@ -79,11 +79,27 @@ async function send<T>(
             : await response.json().catch(() => null);
     if (!response.ok)
         throw new ApiError(
-            errorMessage(data) ||
-                browserErrors()("request", { status: response.status }),
+            failureMessage(data, response.status),
             validationFields(data),
         );
     return data as T;
+}
+export function failureMessage(data: unknown, status: number): string {
+    const t = browserErrors();
+    if (!data || typeof data !== "object" || Array.isArray(data))
+        return errorMessage(data) || t("request", { status });
+    const reference = "request_id" in data ? data.request_id : undefined;
+    const message =
+        errorMessage(
+            Object.fromEntries(
+                Object.entries(data).filter(
+                    ([key]) => !["message", "request_id"].includes(key),
+                ),
+            ),
+        ) || t("request", { status });
+    return typeof reference === "string" && reference
+        ? `${message} ${t("reference", { reference })}`
+        : message;
 }
 function errorMessage(data: unknown): string {
     const t = browserErrors();

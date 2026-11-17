@@ -1240,6 +1240,9 @@ msgstr "Askıya alındı."
 msgid "Suspending withdraws approval. The saved connection is not changed."
 msgstr "Askıya almak onayı kaldırır. Kayıtlı bağlantı değişmez."
 
+msgid "The server could not complete this request."
+msgstr "Sunucu bu isteği tamamlayamadı."
+
 msgid "The 30-day restore period has ended."
 msgstr "30 günlük geri yükleme süresi doldu."
 

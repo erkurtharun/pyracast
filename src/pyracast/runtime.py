@@ -9,9 +9,11 @@ from django.db import close_old_connections, connections
 from dramatiq import Actor, Broker
 from dramatiq.brokers.rabbitmq import RabbitmqBroker
 
+from pyracast.background.failures import log_failure
 from pyracast.calculation import calculate
 from pyracast.forecasts.jobs import collect, pending_job_ids
 from pyracast.forecasts.models import CollectionJob
+from pyracast.forecasts.monitoring import PhaseOutcome
 from pyracast.forecasts.scheduler import CollectionSchedulingError, enqueue_due
 from pyracast.providers import adapter_for
 from pyracast.weather import OpenMeteoProvider
@@ -58,20 +60,24 @@ def make_broker() -> RabbitmqBroker:
     return RabbitmqBroker(url=";".join(urls), confirm_delivery=True)
 
 
-def dispatch(actor: Actor[[int], None]) -> int:
+def dispatch(actor: Actor[[int], None]) -> PhaseOutcome:
     now = datetime.now(UTC)
-    failed = False
+    error = ""
     try:
         enqueue_due(now)
-    except Exception as exc:
-        failed = True
-        logger.warning("Collection scheduling incomplete error_type=%s", type(exc).__name__)
+    except CollectionSchedulingError as exc:
+        error = f"collection_regions_failed:{len(exc.failed_region_ids)}"
         close_old_connections()
-    job_ids = pending_job_ids(now)
-    for job_id in job_ids:
-        actor.send(job_id)
-    if failed:
-        raise CollectionSchedulingError(
-            "Collection scheduling failed; pending jobs were dispatched."
-        )
-    return len(job_ids)
+    except Exception as exc:
+        log_failure(logger, "collection_scheduling_failed", exc)
+        error = type(exc).__name__
+        close_old_connections()
+    published = 0
+    try:
+        for job_id in pending_job_ids(now):
+            actor.send(job_id)
+            published += 1
+    except Exception as exc:
+        log_failure(logger, "collection_publish_failed", exc, published=published)
+        error = error or type(exc).__name__
+    return PhaseOutcome(published=published, error=error)

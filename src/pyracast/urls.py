@@ -17,6 +17,7 @@ from pyracast.accounts.social_views import (
     provider_callback,
 )
 from pyracast.admin import site
+from pyracast.api import error_pages
 from pyracast.api.session import SessionLanguageView, SessionView
 from pyracast.api.trash import RestoreRegionView, TrashedPlantsView, TrashedRegionsView
 from pyracast.api.views import (
@@ -41,6 +42,11 @@ from pyracast.api.workspaces import (
 )
 from pyracast.forecasts.views import CollectionScheduleView
 from pyracast.plants.site_api import SitesView, SiteView
+
+handler400 = error_pages.bad_request
+handler403 = error_pages.permission_denied
+handler404 = error_pages.page_not_found
+handler500 = error_pages.server_error
 
 urlpatterns = [
     path("health/live/", health.live),
