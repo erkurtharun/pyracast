@@ -587,7 +587,7 @@ def test_a_retried_abort_after_a_host_restart_starts_the_unit(
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize("role, readable", [("pg_read_all_data", True), ("pg_monitor", False)])
+@pytest.mark.parametrize(("role", "readable"), [("pg_read_all_data", True), ("pg_monitor", False)])
 def test_runtime_table_privilege_check_uses_each_tables_schema(role: str, readable: bool) -> None:
     query = re.search(
         r"SELECT FROM pg_tables WHERE schemaname = 'public'\s+"
@@ -732,7 +732,10 @@ def test_restore_brings_back_the_kept_archive_with_owners_and_starts_the_previou
     assert not host.session.exists()
     assert commands.running == APPLICATION | SUPPORT
     assert "serves again" in capsys.readouterr().out
-    reset_database.abort(host)
+    calls = len(commands.calls)
+    with pytest.raises(RefusedError, match="only during maintenance"):
+        reset_database.abort(host)
+    assert len(commands.calls) == calls
 
 
 def test_restore_keeps_the_site_stopped_when_restored_counts_differ(

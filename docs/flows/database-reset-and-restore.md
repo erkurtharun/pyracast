@@ -76,7 +76,8 @@ sequenceDiagram
 | `prepare` fails after the marker (stop, dump, upload, counts differ, throwaway restore) | Exit 1; the site stays down; the message names `abort`; no record is written, so `reset` refuses that object |
 | `abort` after `reset` replaced the database in this maintenance | Refused, naming the `restore` command for the session's object |
 | `abort` when `migrate --check` of the release fails on the database | Refused before the application starts |
-| `abort` or `restore` readiness fails | Exit 1; the application is stopped again, marker kept; the same command can be run again |
+| `abort` without a maintenance marker | Refused before any service command |
+| `abort` or `restore` readiness or service-unit startup fails | Exit 1; the application is stopped again, marker identity kept; the same command can be run again |
 | Interrupted (Ctrl-C) | Exit 130 with the command to run next |
 | `reset` without a current session for that object (no `prepare`, an earlier maintenance, another prefix), with no marker, an application container running, a malformed object, a missing record, a missing or changed archive, or missing roles | Refused before any purge or drop |
 | `restore` of another object once `reset` replaced the database, of an archive recorded for another object, or of an archive without applied migrations | Refused before any purge or drop |
@@ -96,7 +97,7 @@ sequenceDiagram
 
 ## Tests
 
-- `tests/test_deployment_reset.py` with a fake `subprocess`: stop order and marker before the stops, upload and kept archive, every refusal before a destructive call, the session across a successful and a failed later release, the session synced before the drop, count mismatch, lock refusal of every subcommand, verification cleanup and readiness wait, queue purge and drop order, bootstrap without role statements, restore with owners and its check order, download checksum, host restart for `abort`, `reset` and `restore` (Compose needs the environment files), the unit started after every `abort` and `restore`, readiness failure and retry, the command line's exit codes, interruption and next steps. `tests/test_deployment_helpers.py`: Python 3.12 syntax and `--help` without dependencies.
+- `tests/test_deployment_reset.py`: real PostgreSQL verifies schema-qualified table access for readable and unreadable roles. A fake `subprocess` covers stop order and marker identity, verified archives, refusals, sessions, locking, queue purge, bootstrap and restore order, checksum, host restart, readiness and service-unit failure with retry, and command-line recovery. `tests/test_deployment_helpers.py`: Python 3.12 syntax and `--help` without dependencies.
 - `deploy/smoke.sh` (CI and Release): `prepare` then `abort` serves again; `prepare`, `reset`, a pre-release dump of the empty database, `migrate` from zero under the restricted owner and a start; an `abort` that is refused after the reset; the stop of a failed release, then `restore`: row counts, table owners, the runtime role's missing DDL right and a stored password are back and the site is ready.
 - `deploy/test-release.sh`: the installer with a marker that holds a session succeeds and removes it, or fails in `migrate` and keeps its content.
 - Gaps: the real bucket upload and download, the production readiness probe, `systemctl` and the release lock on the VM run first on the host; the proof of a restored sign-in is a stored password checked in the container, not an HTTP login (email verification and MFA). `dump_database` and `verify_archive` copy about 90 lines of `deploy/backup.py` (`create_backup`, `restore_archive`) to keep this package off the S list; folding them together belongs to P109, which changes `backup.py`. No Playwright coverage applies.

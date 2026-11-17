@@ -57,7 +57,7 @@ BEGIN
     RAISE EXCEPTION 'a table in schema public is not owned by pyracast_owner';
   END IF;
   IF EXISTS (SELECT FROM pg_tables WHERE schemaname = 'public'
-             AND NOT has_table_privilege('pyracast_app', format('public.%I', tablename),
+             AND NOT has_table_privilege('pyracast_app', format('%I.%I', schemaname, tablename),
                                          'SELECT')) THEN
     RAISE EXCEPTION 'pyracast_app cannot read every table in schema public';
   END IF;
@@ -598,6 +598,7 @@ def release_serves(host: Host) -> bool:
 
 def start_release(host: Host) -> None:
     step(f"Starting the release in {host.release}")
+    identity = host.marker.read_text()
     try:
         subprocess.run(
             [*compose(host), "up", "--detach", "--wait", "--wait-timeout", "180"],
@@ -606,14 +607,15 @@ def start_release(host: Host) -> None:
         )
         if not site_ready(host, attempts=18):
             raise RuntimeError("The release started, but /health/ready/ did not answer ok.")
-    except Exception:
+        host.marker.unlink()
+        sync(host.marker.parent)
+        subprocess.run(["systemctl", "reset-failed", "pyracast.service"], check=True)
+        subprocess.run(["systemctl", "start", "pyracast.service"], check=True)
+    except BaseException:
+        write_synced(host.marker, identity)
         step("Stopping the application again; the site stays in maintenance")
         stop_application(host)
         raise
-    host.marker.unlink(missing_ok=True)
-    sync(host.marker.parent)
-    subprocess.run(["systemctl", "reset-failed", "pyracast.service"], check=True)
-    subprocess.run(["systemctl", "start", "pyracast.service"], check=True)
 
 
 def end_session(host: Host) -> None:
@@ -681,6 +683,8 @@ def prepare(host: Host) -> None:
 
 def abort(host: Host) -> None:
     with release_lock(host):
+        if not host.marker.exists():
+            raise RefusedError(f"{host.marker} does not exist; abort runs only during maintenance.")
         session = current_session(host)
         if session is not None and session.replaced:
             raise RefusedError(

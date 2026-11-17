@@ -271,8 +271,7 @@ PY
 "${compose[@]}" exec -T api pyracast dispatch
 "${compose[@]}" stop -t 30 dispatcher worker notifications
 
-# Reset tool on the loaded rows. Only the bucket upload, the runtime secrets (written above), the
-# public readiness address and, where fcntl is missing, the host lock are local.
+# The smoke substitutes bucket upload, runtime secrets, systemctl, public readiness and Windows locking.
 "${compose[@]}" exec -T api python - <<'PY'
 import django
 django.setup()
