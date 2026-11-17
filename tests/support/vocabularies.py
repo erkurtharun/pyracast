@@ -20,7 +20,7 @@ from pyracast.change_requests.models import ChangeRequest, IncidentChange, Produ
 from pyracast.change_requests.operations import submit_incident, submit_production
 from pyracast.change_requests.serializers import IncidentRequestInput
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.connections.operations import create_account
+from pyracast.connections.operations import create_account, reserve_account_request
 from pyracast.forecasts.models import (
     CollectionJob,
     DispatcherStatus,
@@ -30,10 +30,12 @@ from pyracast.forecasts.models import (
 from pyracast.incidents.api import IncidentInput
 from pyracast.incidents.models import PlantIncident
 from pyracast.incidents.operations import save_incident
+from pyracast.metering.history import read_production_day
 from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.serializers import ReminderInput
+from pyracast.plants.epias_api import EpiasDateQuery
 from pyracast.plants.models import (
     CalibrationRun,
     PlantConfiguration,
@@ -82,6 +84,7 @@ class StoredVocabulary:
     field: str
     row: Row
     retired: tuple[str, ...] = ()
+    customer_api: bool = True
 
     @property
     def id(self) -> str:
@@ -99,7 +102,7 @@ class StoredVocabulary:
 @dataclass(frozen=True)
 class InputVocabulary:
     id: str
-    serializer: type[serializers.Serializer[Any]]
+    serializer: type[serializers.Serializer[Any]] | None
     data: dict[str, object]
     field: str
     operation: Operation
@@ -125,6 +128,7 @@ def assert_database_rejects(row: models.Model, field: str, value: str) -> None:
 
 
 def assert_serializer_rejects(case: InputVocabulary, value: str) -> None:
+    assert case.serializer is not None
     accepted = case.serializer(data=case.data)
     assert accepted.is_valid(), accepted.errors
     refused = case.serializer(data={**case.data, case.field: value})
@@ -307,22 +311,27 @@ STORED_VOCABULARIES = (
         "action",
         _audit_event,
         retired=("approved", "rejected", "suspended", "binding_validated"),
+        customer_api=False,
     ),
-    StoredVocabulary(ProviderAccount, "provider", _account),
-    StoredVocabulary(SiteBinding, "power_basis", _binding),
-    StoredVocabulary(SiteBinding, "health", _binding),
+    StoredVocabulary(ProviderAccount, "provider", _account, customer_api=False),
+    StoredVocabulary(SiteBinding, "power_basis", _binding, customer_api=False),
+    StoredVocabulary(SiteBinding, "health", _binding, customer_api=False),
     StoredVocabulary(ChangeRequest, "kind", _production_request),
     StoredVocabulary(ChangeRequest, "status", _production_request),
     StoredVocabulary(ProductionChangeItem, "action", _production_item),
     StoredVocabulary(IncidentChange, "action", _incident_change),
-    StoredVocabulary(DispatcherStatus, "phase", _dispatcher_status),
+    StoredVocabulary(DispatcherStatus, "phase", _dispatcher_status, customer_api=False),
     StoredVocabulary(CollectionJob, "endpoint", _collection_job),
     StoredVocabulary(CollectionJob, "status", _collection_job),
-    StoredVocabulary(RequestAttempt, "purpose", _request_attempt, retired=("operator",)),
-    StoredVocabulary(RequestAttempt, "outcome", _request_attempt),
-    StoredVocabulary(ForecastSnapshot, "source_kind", _forecast_snapshot),
+    StoredVocabulary(
+        RequestAttempt, "purpose", _request_attempt, retired=("operator",), customer_api=False
+    ),
+    StoredVocabulary(RequestAttempt, "outcome", _request_attempt, customer_api=False),
+    StoredVocabulary(ForecastSnapshot, "source_kind", _forecast_snapshot, customer_api=False),
     StoredVocabulary(EpiasCollectionJob, "source_kind", _epias_job),
-    StoredVocabulary(EpiasCollectionJob, "status", _epias_job, retired=("retry",)),
+    StoredVocabulary(
+        EpiasCollectionJob, "status", _epias_job, retired=("retry",), customer_api=False
+    ),
     StoredVocabulary(EpiasSnapshot, "source_kind", _epias_snapshot),
     StoredVocabulary(PlantSubmission, "measurement_basis", _plant_submission),
     StoredVocabulary(PlantSubmission, "mounting_type", _plant_submission),
@@ -330,7 +339,7 @@ STORED_VOCABULARIES = (
     StoredVocabulary(PlantConfiguration, "mounting_type", _plant_configuration),
     StoredVocabulary(ProductionObservation, "quality", _observation),
     StoredVocabulary(CalibrationRun, "status", _calibration_run),
-    StoredVocabulary(PlantEvent, "action", _plant_event),
+    StoredVocabulary(PlantEvent, "action", _plant_event, customer_api=False),
     StoredVocabulary(PlantIncident, "kind", _plant_incident),
     StoredVocabulary(ReminderSchedule, "language", _reminder_schedule),
     StoredVocabulary(NotificationDelivery, "status", _notification_delivery),
@@ -453,6 +462,18 @@ def _configure_reminders(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], obj
     )
 
 
+def _reserve_request(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
+    account = make_system().account
+    return lambda purpose: reserve_account_request(account, NOW, purpose=purpose)
+
+
+def _read_production_day(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
+    system, plant, _ = connected(monkeypatch)
+    return lambda source: read_production_day(
+        plant, actor=system.admin, day=NOW.date(), source_kind=source
+    )
+
+
 PLANT_DATA: dict[str, object] = {"name": "Plant", "dc_capacity_mw": 1}
 OBSERVATION_DATA: dict[str, object] = {
     "starts_at": "2026-11-09T12:00:00Z",
@@ -537,4 +558,75 @@ INPUT_VOCABULARIES = (
         "language",
         _configure_reminders,
     ),
+    InputVocabulary(
+        "request_purpose", None, {}, "purpose", _reserve_request, rejected=(OUTSIDE, "operator")
+    ),
+    InputVocabulary(
+        "epias_data_source",
+        EpiasDateQuery,
+        {"date": "2026-11-09", "data_source": "settlement_injection"},
+        "data_source",
+        _read_production_day,
+    ),
+)
+
+FREE_TEXT = frozenset(
+    {
+        ("accounts.Tenant", "name"),
+        ("accounts.WorkspaceInvitation", "email"),
+        ("accounts.WorkspaceInvitation", "token_hash"),
+        ("accounts.AuthenticationCacheEntry", "cache_key"),
+        ("regions.Region", "name"),
+        ("regions.Region", "timezone"),
+        ("regions.RegionLocationChangeRequest", "timezone"),
+        ("regions.RegionLocationChangeRequest", "reason"),
+        ("connections.ProviderAccount", "external_account_id"),
+        ("connections.ProviderAccount", "encrypted_api_key"),
+        ("connections.ProviderAccount", "authorization_reference"),
+        ("connections.SiteBinding", "site_id"),
+        ("connections.SiteBinding", "settings_verification_reference"),
+        ("connections.SiteBinding", "timezone"),
+        ("change_requests.ChangeRequest", "reason"),
+        ("change_requests.ChangeRequest", "payload_sha256"),
+        ("change_requests.ChangeRequest", "decision_reason"),
+        ("change_requests.ProductionChangeItem", "source"),
+        ("change_requests.IncidentChange", "title"),
+        ("change_requests.IncidentChange", "notes"),
+        ("forecasts.HistoricalReferenceImport", "sha256"),
+        ("forecasts.HistoricalReferenceImport", "source_name"),
+        ("forecasts.ReferenceCapacityNormalization", "authorization_reference"),
+        ("metering.EpiasConnection", "eic"),
+        ("metering.EpiasConnection", "name"),
+        ("metering.EpiasSnapshot", "endpoint"),
+        ("metering.EpiasSnapshot", "normalization_policy"),
+        ("metering.EpiasSnapshot", "content_sha256"),
+        ("plants.Plant", "name"),
+        ("plants.ProductionObservation", "source"),
+        ("plants.CalibrationRun", "measurement_selection_policy"),
+        ("plants.CalibrationRun", "input_fingerprint"),
+        ("plants.CalibrationRun", "assessment"),
+        ("plants.CalibrationRun", "dataset_sha256"),
+        ("plants.ForecastIssuance", "model_version"),
+        ("incidents.PlantIncident", "title"),
+        ("incidents.PlantIncident", "notes"),
+    }
+)
+# Codes raised by provider, weather, EPIAS and mail adapters and exception class names: an open set.
+FAILURE_CODES = frozenset(
+    {
+        ("forecasts.DispatcherStatus", "last_error"),
+        ("forecasts.CollectionJob", "last_error"),
+        ("forecasts.ForecastSnapshot", "weather_error"),
+        ("metering.EpiasCollectionJob", "last_error"),
+        ("plants.CalibrationRun", "last_error"),
+        ("notifications.NotificationDelivery", "last_error"),
+    }
+)
+# Vocabularies of change_requests models that are not yet derived from an enumeration.
+UNCHECKED_VOCABULARIES = frozenset(
+    {
+        ("change_requests.ProductionChangeItem", "quality"),
+        ("change_requests.ProductionChangeItem", "baseline_source_kind"),
+        ("change_requests.IncidentChange", "kind"),
+    }
 )
