@@ -14,7 +14,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from pyracast import trash
-from pyracast.accounts.models import Tenant
+from pyracast.accounts.models import Tenant, WorkspaceRole
 from pyracast.accounts.operations import require_member
 from pyracast.accounts.security import has_verified_mfa
 from pyracast.api.serializers import (
@@ -33,7 +33,7 @@ from pyracast.api.serializers import (
     TenantOutput,
     TransitionInput,
 )
-from pyracast.change_requests.models import ChangeRequest
+from pyracast.change_requests.models import DECIDED, ChangeRequest, ChangeRequestStatus
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import create_account, rotate_secret, validate_binding
 from pyracast.db import read_snapshot
@@ -77,13 +77,13 @@ class TenantsView(GenericAPIView[Tenant]):
             )
             .values("plant__region__tenant_id")
             .annotate(
-                pending=Count("pk", filter=Q(status="pending")),
+                pending=Count("pk", filter=Q(status=ChangeRequestStatus.PENDING)),
                 unread=Count(
                     "pk",
                     filter=Q(
                         proposed_by_id=self.request.user.pk,
                         proposer_membership_id__in=membership_ids,
-                        status__in=("approved", "rejected"),
+                        status__in=DECIDED,
                         outcome_seen_at__isnull=True,
                     ),
                 ),
@@ -93,7 +93,9 @@ class TenantsView(GenericAPIView[Tenant]):
         for row in page:
             counts = by_tenant.get(row.pk)
             row.__dict__["pending_review_count"] = (
-                (counts["pending"] if counts else 0) if row.__dict__["role"] == "admin" else None
+                (counts["pending"] if counts else 0)
+                if row.__dict__["role"] == WorkspaceRole.ADMIN
+                else None
             )
             row.__dict__["unread_outcome_count"] = counts["unread"] if counts else 0
         return self.get_paginated_response(TenantOutput(page, many=True).data)

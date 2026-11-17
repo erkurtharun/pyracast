@@ -9,7 +9,7 @@ from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, transaction
 from django.test import Client
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.accounts.operations import reassign_workspace_admin, remove_workspace_member
 from pyracast.change_requests.models import ChangeRequest, IncidentChange
 from pyracast.change_requests.operations import (
@@ -395,7 +395,7 @@ def test_tenant_poll_counters_follow_live_roles_and_personal_read_receipts(
     production = production_request(case)
     incident = incident_request(case)
     other = Tenant.objects.create(name="Other workspace")
-    Membership.objects.create(user=case.system.member, tenant=other, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=case.system.member, tenant=other, role=WorkspaceRole.ADMIN)
     administrator, member = Client(), Client()
     administrator.force_login(case.system.member)
     member.force_login(case.proposer)
@@ -431,7 +431,7 @@ def test_other_tenant_cannot_read_or_mutate_request_by_known_id(
     proposal = production_request(case)
     other = Tenant.objects.create(name="Other tenant")
     outsider = User.objects.create_user(username="outsider")
-    Membership.objects.create(user=outsider, tenant=other, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=outsider, tenant=other, role=WorkspaceRole.ADMIN)
     client = Client()
     client.force_login(outsider)
     path = f"/api/tenants/{other.pk}/change-requests/{proposal.pk}/" + suffix

@@ -6,7 +6,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.utils import timezone
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.calculation import calculate
 from pyracast.connections.models import SiteBinding
 from pyracast.connections.operations import QuotaExceededError, create_account, validate_binding
@@ -64,7 +64,7 @@ def _binding(actor: User, region: Region) -> SiteBinding:
 def run_demo(actor: User) -> str:
     tenant, _ = Tenant.objects.get_or_create(name=f"Fixture demonstration (user {actor.pk})")
     Membership.objects.get_or_create(
-        user=actor, tenant=tenant, defaults={"role": Membership.Role.ADMIN}
+        user=actor, tenant=tenant, defaults={"role": WorkspaceRole.ADMIN}
     )
     region = _region(actor, tenant)
     plant = _plant(actor, region)

@@ -63,7 +63,7 @@ from pyracast.plants.models import (
 )
 from pyracast.plants.operations import configuration_is_current
 from pyracast.providers import adapter_for
-from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest
+from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest, RegionStatus
 from pyracast.regions.operations import approve_region, review_location_change, transition_region
 
 
@@ -624,12 +624,12 @@ class RegionAdmin(ReadOnlyAdmin):
     @admin.action(description=gettext_lazy("Reject region"), permissions=["view"])
     def reject(self, request: HttpRequest, queryset: QuerySet[Region]) -> None:
         for region in queryset.filter(deleted_at__isnull=True):
-            transition_region(cast(User, request.user), region.pk, "rejected")
+            transition_region(cast(User, request.user), region.pk, RegionStatus.REJECTED)
 
     @admin.action(description=gettext_lazy("Suspend region"), permissions=["view"])
     def suspend(self, request: HttpRequest, queryset: QuerySet[Region]) -> None:
         for region in queryset.filter(deleted_at__isnull=True):
-            transition_region(cast(User, request.user), region.pk, "suspended")
+            transition_region(cast(User, request.user), region.pk, RegionStatus.SUSPENDED)
 
 
 @admin.register(RegionLocationChangeRequest, site=site)

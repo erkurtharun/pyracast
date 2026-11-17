@@ -12,7 +12,7 @@ from pyracast.connections.models import ProviderAccount
 from pyracast.connections.operations import create_account, rotate_secret
 from pyracast.connections.secrets import decrypt_api_key
 from pyracast.forecasts.models import RequestAttempt
-from pyracast.regions.models import AuditEvent
+from pyracast.regions.models import AuditAction, AuditEvent
 from pyracast.regions.operations import approve_region
 from tests.support.api import verified_admin
 from tests.support.domain import NOW, make_system
@@ -243,12 +243,12 @@ def test_concurrent_rotations_have_serial_credential_revisions_and_audits() -> N
 def test_audit_event_database_constraint_requires_exactly_one_target(targets: str) -> None:
     system = make_system()
 
-    with pytest.raises(IntegrityError), transaction.atomic():
+    with pytest.raises(IntegrityError, match="audit_exactly_one_target"), transaction.atomic():
         AuditEvent.objects.create(
             actor=system.admin,
             region=system.region if targets == "both" else None,
             provider_account=system.account if targets == "both" else None,
-            action="invalid_target",
+            action=AuditAction.REGION_RENAMED,
             revision=1,
         )
 

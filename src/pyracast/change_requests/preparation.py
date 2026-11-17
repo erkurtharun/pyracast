@@ -9,7 +9,15 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext
 
-from pyracast.change_requests.models import ChangeRequest, IncidentChange
+from pyracast.change_requests.models import (
+    DECIDED,
+    INCIDENT_EDITS,
+    ChangeRequest,
+    ChangeRequestKind,
+    IncidentChange,
+    IncidentChangeAction,
+    ProductionChangeAction,
+)
 from pyracast.incidents.models import PlantIncident
 from pyracast.incidents.operations import prepare_incident, prepare_incident_finish
 from pyracast.plants.measurements import select_measurements, select_provider_measurements
@@ -75,15 +83,18 @@ def prepare_incident_change(
     ends_at: datetime | None,
     lock: bool = True,
 ) -> PlantIncident:
-    if action not in {"create", "update", "resolve", "cancel"}:
+    if action not in IncidentChangeAction.values:
         raise ValidationError(gettext("Unknown incident request action."))
-    if (action == "create" and (incident_id is not None or expected_revision is not None)) or (
-        action != "create" and (incident_id is None or expected_revision is None)
+    if (
+        action == IncidentChangeAction.CREATE
+        and (incident_id is not None or expected_revision is not None)
+    ) or (
+        action != IncidentChangeAction.CREATE and (incident_id is None or expected_revision is None)
     ):
         raise ValidationError(
             gettext("Incident identity and expected revision are required for existing incidents.")
         )
-    if action in {"create", "update"}:
+    if action in INCIDENT_EDITS:
         if values is None or ends_at is not None:
             raise ValidationError(gettext("Incident values are required for create and update."))
         return prepare_incident(
@@ -98,7 +109,7 @@ def prepare_incident_change(
         values is not None
         or incident_id is None
         or expected_revision is None
-        or (action == "cancel" and ends_at is not None)
+        or (action == IncidentChangeAction.CANCEL and ends_at is not None)
     ):
         raise ValidationError(gettext("Unsupported incident request fields."))
     return prepare_incident_finish(
@@ -107,7 +118,7 @@ def prepare_incident_change(
         incident_id=incident_id,
         expected_revision=expected_revision,
         ends_at=ends_at,
-        cancel=action == "cancel",
+        cancel=action == IncidentChangeAction.CANCEL,
         lock=lock,
     )
 
@@ -115,14 +126,14 @@ def prepare_incident_change(
 def validate_request(
     actor: User, request: ChangeRequest, plant: Plant, *, lock: bool = True
 ) -> None:
-    if request.kind == "production":
+    if request.kind == ChangeRequestKind.PRODUCTION:
         configuration = lock_production_configuration(
             plant.region.tenant_id, plant.region_id, plant.pk, request.configuration_id, lock=lock
         )
         prepare_production_changes(configuration, "MWh", production_changes(request))
         return
     change = request.incident_change
-    if change.action in {"create", "update"}:
+    if change.action in INCIDENT_EDITS:
         target = (
             PlantIncident.objects.filter(pk=change.incident_id, plant=plant).first()
             if change.incident_id is not None
@@ -141,16 +152,14 @@ def validate_request(
         action=change.action,
         incident_id=change.incident_id,
         expected_revision=change.expected_revision,
-        values=incident_values(change) if change.action in {"create", "update"} else None,
-        ends_at=change.ends_at if change.action == "resolve" else None,
+        values=incident_values(change) if change.action in INCIDENT_EDITS else None,
+        ends_at=change.ends_at if change.action == IncidentChangeAction.RESOLVE else None,
         lock=lock,
     )
 
 
 def production_context(request: ChangeRequest) -> list[dict[str, Any]]:
-    if request.status in {"approved", "rejected"} and request.reviewed_context.get(
-        "production_items"
-    ):
+    if request.status in DECIDED and request.reviewed_context.get("production_items"):
         items_by_id = {row.pk: row.applied_observation_id for row in request.production_items.all()}
         return [
             {**row, "applied_observation_id": items_by_id[row["id"]]}
@@ -175,7 +184,7 @@ def production_context(request: ChangeRequest) -> list[dict[str, Any]]:
                 row.energy_mwh,
                 row.quality,
                 row.source,
-                row.action == "revert",
+                row.action == ProductionChangeAction.REVERT,
                 row.expected_head,
             )
             for row in items
@@ -208,7 +217,7 @@ def production_context(request: ChangeRequest) -> list[dict[str, Any]]:
                 for warning in warnings
                 if warning["starts_at"] < row.ends_at and warning["ends_at"] > row.starts_at
             ],
-            "energy_mwh": row.energy_mwh if row.action == "set" else None,
+            "energy_mwh": row.energy_mwh if row.action == ProductionChangeAction.SET else None,
             "quality": row.quality,
             "source": row.source,
             "applied_observation_id": row.applied_observation_id,
@@ -225,7 +234,7 @@ def production_context(request: ChangeRequest) -> list[dict[str, Any]]:
                 "provisional": False,
                 "aggregated": False,
             }
-            if row["action"] == "set"
+            if row["action"] == ProductionChangeAction.SET
             else row["automatic"]
         )
     return result
@@ -239,7 +248,7 @@ def review_context(
         "payload": request.payload_sha256,
         "configuration_id": plant.current_configuration_id,
     }
-    if request.kind == "production":
+    if request.kind == ChangeRequestKind.PRODUCTION:
         context["items"] = [
             {
                 key: row[key]
@@ -265,7 +274,7 @@ def review_context(
     else:
         change = request.incident_change
         relevant = Q(pk=change.incident_id)
-        if change.action in {"create", "update"}:
+        if change.action in INCIDENT_EDITS:
             overlap = Q(cancelled_at__isnull=True) & (
                 Q(ends_at__isnull=True) | Q(ends_at__gt=change.starts_at)
             )
@@ -281,7 +290,7 @@ def review_context(
 
 
 def decision_context(request: ChangeRequest, plant: Plant) -> dict[str, Any]:
-    items = production_context(request) if request.kind == "production" else []
+    items = production_context(request) if request.kind == ChangeRequestKind.PRODUCTION else []
     return {
         "version": 1,
         "context": review_context(request, plant, production_items=items),

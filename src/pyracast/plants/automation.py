@@ -9,7 +9,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.accounts.operations import require_admin, require_workspace_admin
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.calibration_data import current_source_validation
@@ -38,7 +38,7 @@ def _authorized(plant: Plant, *, lock: bool = False) -> bool:
         user_id=actor_id,
         user__is_active=True,
         tenant_id=plant.region.tenant_id,
-        role=Membership.Role.ADMIN,
+        role=WorkspaceRole.ADMIN,
     )
     if lock:
         if not User.objects.select_for_update().filter(pk=actor_id, is_active=True).exists():

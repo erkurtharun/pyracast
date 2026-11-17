@@ -9,7 +9,7 @@ from django.utils.translation import gettext_lazy
 from django.views.decorators.debug import sensitive_variables
 
 from pyracast.api.serializers import BindingInput
-from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.connections.models import PowerBasis, Provider, ProviderAccount, SiteBinding
 from pyracast.connections.operations import create_account, rotate_secret
 from pyracast.regions.models import Region
 from pyracast.regions.operations import configure_binding
@@ -80,7 +80,7 @@ class ProviderSetupForm(forms.Form):
         min_value=0, required=False, label=gettext_lazy("Reference DC capacity (kW, optional)")
     )
     power_basis = forms.ChoiceField(
-        choices=(("ac", "AC"), ("dc", "DC")),
+        choices=PowerBasis.choices,
         label=gettext_lazy("Reference power and capacity basis"),
     )
     installation_date = forms.DateField(
@@ -108,7 +108,7 @@ class ProviderSetupForm(forms.Form):
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        accounts = ProviderAccount.objects.filter(provider="solcast", enabled=True).order_by(
+        accounts = ProviderAccount.objects.filter(provider=Provider.SOLCAST, enabled=True).order_by(
             "provider", "external_account_id"
         )
         cast(forms.ChoiceField, self.fields["existing_account"]).choices = [
@@ -165,7 +165,7 @@ class ProviderSetupForm(forms.Form):
             if data["account_mode"] == "new":
                 account = create_account(
                     actor,
-                    provider="solcast",
+                    provider=Provider.SOLCAST,
                     external_account_id=data["external_account_id"],
                     api_key=data["api_key"],
                     daily_quota=data["daily_quota"],
@@ -175,7 +175,7 @@ class ProviderSetupForm(forms.Form):
             else:
                 account_id, revision = data["existing_account"].split(":")
                 account = ProviderAccount.objects.select_for_update().get(
-                    pk=account_id, provider="solcast", enabled=True
+                    pk=account_id, provider=Provider.SOLCAST, enabled=True
                 )
                 if account.credential_revision != int(revision):
                     raise ValidationError(_("The account changed. Reload this page before saving."))

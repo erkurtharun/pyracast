@@ -11,7 +11,7 @@ from django.db import connection
 from django.db.models import QuerySet
 from rest_framework.test import APIClient
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import ProviderAccount
 from pyracast.connections.operations import validate_binding
 from pyracast.notifications import runtime
@@ -31,7 +31,7 @@ pytestmark = pytest.mark.django_db(transaction=True)
 def another_tenant_schedule(system: System) -> ReminderSchedule:
     user = User.objects.create(username="healthy", email="healthy@example.com")
     tenant = Tenant.objects.create(name="Healthy tenant")
-    Membership.objects.create(user=user, tenant=tenant, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=user, tenant=tenant, role=WorkspaceRole.ADMIN)
     region = submit_region(
         user, tenant.pk, name="Healthy site", latitude=41, longitude=30, timezone="Europe/Istanbul"
     )
@@ -164,7 +164,7 @@ def test_invalid_recipient_health_count_only_includes_current_approved_schedules
     User.objects.filter(pk=system.member.pk).update(is_active=True)
     Membership.objects.filter(user=system.member, tenant=system.tenant).delete()
     assert invalid_reminder_recipient_count() == 1
-    Membership.objects.create(user=system.member, tenant=system.tenant, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=system.member, tenant=system.tenant, role=WorkspaceRole.ADMIN)
     ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=False)
     assert invalid_reminder_recipient_count() == 0
     ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=True)

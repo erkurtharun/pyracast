@@ -31,7 +31,7 @@ from pyracast.plants.models import (
 from pyracast.plants.numerics import POLICY_VERSION, PowerInterval
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.plants.transfer import calibration_matches_transfer
-from pyracast.regions.models import AuditEvent, Region
+from pyracast.regions.models import AuditAction, AuditEvent, Region
 
 
 @dataclass(frozen=True)
@@ -164,7 +164,7 @@ def _rename(actor: User, plant: Plant, region: Region, name: str) -> None:
         region.name = name
         region.save(update_fields=("name",))
         AuditEvent.objects.create(
-            actor=actor, region=region, action="region_renamed", revision=region.revision
+            actor=actor, region=region, action=AuditAction.REGION_RENAMED, revision=region.revision
         )
 
 

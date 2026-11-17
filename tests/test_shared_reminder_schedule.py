@@ -7,7 +7,7 @@ from django.core.mail import EmailMultiAlternatives
 from django.test import Client
 from django.utils import timezone
 
-from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference
+from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference, WorkspaceRole
 from pyracast.accounts.operations import reassign_workspace_admin
 from pyracast.forecasts.models import RequestAttempt
 from pyracast.notifications.jobs import process_notification
@@ -112,7 +112,7 @@ def test_schedule_survives_configurer_departure_and_other_workspaces_are_isolate
     assert process_notification(delivery.pk, SLOT, sender=lambda message: None)
     other = Tenant.objects.create(name="Other shared workspace")
     actor = User.objects.create_user(username="other-admin", email="other@example.com")
-    Membership.objects.create(user=actor, tenant=other, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=actor, tenant=other, role=WorkspaceRole.ADMIN)
     region = Region.objects.create(
         tenant=other, name="Other site", latitude=41, longitude=30, timezone="UTC"
     )

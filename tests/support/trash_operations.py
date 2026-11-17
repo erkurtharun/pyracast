@@ -1,5 +1,5 @@
 from pyracast.connections.models import SiteBinding
-from pyracast.regions.models import Region
+from pyracast.regions.models import Region, RegionStatus
 from tests.support.domain import System
 
 
@@ -10,7 +10,6 @@ def sibling(system: System) -> tuple[Region, SiteBinding]:
         latitude=41 + Region.objects.filter(tenant=system.tenant).count(),
         longitude=29,
         timezone=system.region.timezone,
-        status="approved",
     )
     binding = SiteBinding.objects.get(pk=system.binding.pk)
     binding.pk = None
@@ -19,6 +18,7 @@ def sibling(system: System) -> tuple[Region, SiteBinding]:
     binding.longitude = region.longitude
     binding.timezone = region.timezone
     binding.save()
+    region.status = RegionStatus.APPROVED
     region.approved_binding = binding
     region.save()
     return region, binding

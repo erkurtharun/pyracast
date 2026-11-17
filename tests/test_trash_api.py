@@ -5,7 +5,7 @@ from django.contrib.auth.models import User
 from django.test import Client, RequestFactory
 from django.utils import timezone
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.admin import RegionAdmin, site
 from pyracast.plants.models import Plant, PlantEvent
 from pyracast.regions.models import Region
@@ -95,7 +95,7 @@ def test_trash_and_restore_keep_tenant_boundaries_and_session_csrf(
     assert protected.post(region + "restore/", {}).status_code == 403
     other = Tenant.objects.create(name="Other")
     outsider = User.objects.create_user("trash-outsider")
-    Membership.objects.create(tenant=other, user=outsider, role=Membership.Role.ADMIN)
+    Membership.objects.create(tenant=other, user=outsider, role=WorkspaceRole.ADMIN)
     client.force_login(outsider)
     assert client.delete(region).status_code == 403
     assert client.post(region + "restore/", {}, content_type="application/json").status_code == 403

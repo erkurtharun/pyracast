@@ -11,7 +11,7 @@ from django.http import HttpRequest
 from django.test import Client, override_settings
 
 from pyracast.accounts.adapters import AccountAdapter
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.accounts.signup import CompanySignupInput
 from tests.support.auth_lifecycle import submit
 from tests.support.company_registration import AUTH, DETAILS, PASSWORD, mailed_code, signup
@@ -37,7 +37,7 @@ def test_signup_requires_verification_before_tenant_access() -> None:
     membership = Membership.objects.get(user=user)
     assert membership.tenant.name == DETAILS["company_name"]
     assert membership.tenant_id != other.pk
-    assert membership.role == Membership.Role.ADMIN
+    assert membership.role == WorkspaceRole.ADMIN
     assert not EmailAddress.objects.get(user=user).verified
     assert client.get("/api/session/").json()["user"] is None
     assert client.get("/api/tenants/").status_code in {401, 403}

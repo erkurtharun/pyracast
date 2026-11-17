@@ -13,7 +13,7 @@ from django.db import close_old_connections, connection
 from django.db.models import QuerySet
 from django.utils import timezone
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.historical_import import import_historical_reference
 from pyracast.forecasts.models import (
@@ -350,7 +350,7 @@ def test_lifecycle_requires_membership_and_exact_tenant_scope(
     system, _ = make_plant(monkeypatch)
     other = Tenant.objects.create(name="Other")
     user = User.objects.create_user(username="outsider")
-    Membership.objects.create(user=user, tenant=other, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=user, tenant=other, role=WorkspaceRole.ADMIN)
     with pytest.raises(PermissionDenied):
         operation(user, system.tenant.pk, system.region.pk)
     with pytest.raises(Region.DoesNotExist):

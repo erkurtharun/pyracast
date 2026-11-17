@@ -5,6 +5,7 @@ from django.utils.translation import gettext
 from rest_framework import serializers
 
 from pyracast.api.serializers import InputSerializer
+from pyracast.change_requests.models import ProductionChangeAction
 from pyracast.plants.models import (
     MEASUREMENT_BASES,
     MOUNTING_TYPES,
@@ -129,7 +130,7 @@ class ProductionChangeRow(InputSerializer):
     starts_at = AwareDateTime()
     ends_at = AwareDateTime()
     expected_revision_id = serializers.IntegerField(min_value=1, allow_null=True)
-    action = serializers.ChoiceField(choices=("set", "revert"))
+    action = serializers.ChoiceField(choices=ProductionChangeAction.choices)
     energy = FiniteFloat(min_value=0, required=False)
     quality = serializers.ChoiceField(choices=OBSERVATION_QUALITIES, default="valid")
     source = serializers.CharField(max_length=200, default="operator")  # type: ignore[assignment]

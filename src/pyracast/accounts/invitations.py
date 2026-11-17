@@ -15,7 +15,13 @@ from django.utils import timezone, translation
 from django.utils.translation import gettext as _
 
 from pyracast.accounts.language import user_language
-from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation
+from pyracast.accounts.models import (
+    InvitationDeliveryStatus,
+    Membership,
+    Tenant,
+    WorkspaceInvitation,
+    WorkspaceRole,
+)
 from pyracast.accounts.operations import require_workspace_admin
 
 logger = logging.getLogger(__name__)
@@ -84,7 +90,9 @@ def invite_workspace_member(actor: User, tenant_id: int, email: str) -> Workspac
                 "Workspace invitation mail outcome is unknown; invitation_id=%s", invitation.pk
             )
             sent = 0
-        invitation.delivery_status = "accepted" if sent == 1 else "uncertain"
+        invitation.delivery_status = (
+            InvitationDeliveryStatus.SENT if sent == 1 else InvitationDeliveryStatus.UNCERTAIN
+        )
         WorkspaceInvitation.objects.filter(pk=invitation.pk).update(
             delivery_status=invitation.delivery_status
         )
@@ -110,7 +118,7 @@ def accept_workspace_invitation(actor: User, token: str) -> Membership:
     ):
         raise PermissionDenied(_("Verify the invited email address before accepting."))
     membership, _created = Membership.objects.get_or_create(
-        tenant_id=invitation.tenant_id, user=actor, defaults={"role": Membership.Role.VIEWER}
+        tenant_id=invitation.tenant_id, user=actor, defaults={"role": WorkspaceRole.VIEWER}
     )
     invitation.accepted_at = timezone.now()
     invitation.save(update_fields=["accepted_at"])

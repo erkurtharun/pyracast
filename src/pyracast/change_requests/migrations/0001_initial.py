@@ -39,10 +39,10 @@ class Migration(migrations.Migration):
                     "status",
                     models.CharField(
                         choices=[
-                            ("pending", "pending"),
-                            ("approved", "approved"),
-                            ("rejected", "rejected"),
-                            ("withdrawn", "withdrawn"),
+                            ("pending", "Pending"),
+                            ("approved", "Approved"),
+                            ("rejected", "Rejected"),
+                            ("withdrawn", "Withdrawn"),
                         ],
                         default="pending",
                         max_length=20,
@@ -102,7 +102,18 @@ class Migration(migrations.Migration):
                         auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
                     ),
                 ),
-                ("action", models.CharField(max_length=10)),
+                (
+                    "action",
+                    models.CharField(
+                        choices=[
+                            ("create", "Create"),
+                            ("update", "Update"),
+                            ("resolve", "Resolve"),
+                            ("cancel", "Cancel"),
+                        ],
+                        max_length=10,
+                    ),
+                ),
                 ("expected_revision", models.PositiveIntegerField(null=True)),
                 ("kind", models.CharField(blank=True, max_length=20)),
                 ("title", models.CharField(blank=True, max_length=200)),
@@ -149,7 +160,10 @@ class Migration(migrations.Migration):
                 ),
                 ("starts_at", models.DateTimeField()),
                 ("ends_at", models.DateTimeField()),
-                ("action", models.CharField(max_length=10)),
+                (
+                    "action",
+                    models.CharField(choices=[("set", "Set"), ("revert", "Revert")], max_length=10),
+                ),
                 ("energy_mwh", models.FloatField()),
                 ("quality", models.CharField(max_length=20)),
                 ("source", models.CharField(max_length=200)),
@@ -199,8 +213,17 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="changerequest",
             constraint=models.CheckConstraint(
-                condition=models.Q(("kind__in", ("production", "incident"))),
+                condition=models.Q(("kind__in", ["production", "incident"])),
                 name="change_request_kind_valid",
+            ),
+        ),
+        migrations.AddConstraint(
+            model_name="changerequest",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    ("status__in", ["pending", "approved", "rejected", "withdrawn"])
+                ),
+                name="changerequest_status_chk",
             ),
         ),
         migrations.AddConstraint(
@@ -280,6 +303,13 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="incidentchange",
             constraint=models.CheckConstraint(
+                condition=models.Q(("action__in", ["create", "update", "resolve", "cancel"])),
+                name="incidentchange_action_chk",
+            ),
+        ),
+        migrations.AddConstraint(
+            model_name="incidentchange",
+            constraint=models.CheckConstraint(
                 condition=models.Q(
                     ("available_dc_mw__isnull", True),
                     models.Q(("available_dc_mw__gte", 0), ("available_dc_mw__lt", float("inf"))),
@@ -318,7 +348,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="productionchangeitem",
             constraint=models.CheckConstraint(
-                condition=models.Q(("action__in", ("set", "revert"))),
+                condition=models.Q(("action__in", ["set", "revert"])),
                 name="proposal_production_action_valid",
             ),
         ),

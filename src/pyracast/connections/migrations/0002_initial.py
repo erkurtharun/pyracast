@@ -71,6 +71,13 @@ class Migration(migrations.Migration):
             ),
         ),
         migrations.AddConstraint(
+            model_name="provideraccount",
+            constraint=models.CheckConstraint(
+                condition=models.Q(("provider__in", ["fixture", "solcast"])),
+                name="provideraccount_provider_chk",
+            ),
+        ),
+        migrations.AddConstraint(
             model_name="sitebinding",
             constraint=models.UniqueConstraint(
                 fields=("id", "region"), name="binding_region_identity"
@@ -123,7 +130,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="sitebinding",
             constraint=models.CheckConstraint(
-                condition=models.Q(("power_basis__in", ("ac", "dc"))), name="binding_power_basis"
+                condition=models.Q(("power_basis__in", ["ac", "dc"])), name="binding_power_basis"
             ),
         ),
         migrations.AddConstraint(
@@ -143,7 +150,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="sitebinding",
             constraint=models.CheckConstraint(
-                condition=models.Q(("health__in", ("unknown", "healthy", "error"))),
+                condition=models.Q(("health__in", ["unknown", "healthy", "error"])),
                 name="binding_health",
             ),
         ),

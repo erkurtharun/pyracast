@@ -13,7 +13,7 @@ from pyracast.accounts.operations import require_member, require_workspace_admin
 from pyracast.collection_window import HISTORY_CLOCK, HISTORY_END_CLOCK, NIGHT_RETRY_DELAY
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
-from pyracast.regions.models import AuditEvent, Region
+from pyracast.regions.models import AuditAction, AuditEvent, Region
 
 MAX_COLLECTION_TIMES = 1440
 
@@ -89,7 +89,7 @@ def configure_schedule(
         AuditEvent.objects.create(
             actor=actor,
             region=region,
-            action="collection_schedule_updated",
+            action=AuditAction.COLLECTION_SCHEDULE_UPDATED,
             revision=region.revision,
         )
         return schedule

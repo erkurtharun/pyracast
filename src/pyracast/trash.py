@@ -30,7 +30,7 @@ from pyracast.plants.models import (
     PlantEvent,
     ProductionObservation,
 )
-from pyracast.regions.models import AuditEvent, Region
+from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionStatus
 from pyracast.regions.operations import require_available_location
 
 RETENTION = timedelta(days=30)
@@ -76,7 +76,7 @@ def trash_region(actor: User, tenant_id: int, region_id: int) -> Region:
             lease_expires_at=None,
         )
         AuditEvent.objects.create(
-            actor=actor, region=region, action="region_trashed", revision=region.revision
+            actor=actor, region=region, action=AuditAction.REGION_TRASHED, revision=region.revision
         )
         return region
 
@@ -106,7 +106,7 @@ def restore_region(actor: User, tenant_id: int, region_id: int) -> Region:
         CollectionSchedule.objects.filter(region=region).update(effective_from=now)
         ReminderSchedule.objects.filter(region=region).update(effective_from=now)
         AuditEvent.objects.create(
-            actor=actor, region=region, action="region_restored", revision=region.revision
+            actor=actor, region=region, action=AuditAction.REGION_RESTORED, revision=region.revision
         )
         return region
 
@@ -156,8 +156,9 @@ def _purge_region(region: Region, plants: list[Plant]) -> None:
     ForecastSnapshot.objects.filter(job__binding__region=region).delete()
     CollectionJob.objects.filter(binding__region=region).delete()
     HistoricalReferenceImport.objects.filter(binding__region=region).delete()
+    region.status = RegionStatus.PENDING
     region.approved_binding = None
-    region.save(update_fields=("approved_binding",))
+    region.save(update_fields=("status", "approved_binding"))
     SiteBinding.objects.filter(region=region).delete()
     AuditEvent.objects.filter(region=region).delete()
     region.delete()

@@ -23,6 +23,7 @@ from pyracast.accounts.models import (
     UserLanguagePreference,
     WorkspaceAdminChange,
     WorkspaceInvitation,
+    WorkspaceRole,
 )
 from pyracast.accounts.operations import reassign_workspace_admin, require_workspace_admin
 from tests.support.company_registration import mailed_code, signup
@@ -36,7 +37,7 @@ def workspace() -> tuple[Tenant, User, User]:
     tenant = Tenant.objects.create(name="Solar workspace")
     administrator = User.objects.create_user(username="workspace-admin", email="admin@example.com")
     viewer = User.objects.create_user(username="viewer", email="viewer@example.com")
-    Membership.objects.create(tenant=tenant, user=administrator, role=Membership.Role.ADMIN)
+    Membership.objects.create(tenant=tenant, user=administrator, role=WorkspaceRole.ADMIN)
     Membership.objects.create(tenant=tenant, user=viewer)
     return tenant, administrator, viewer
 

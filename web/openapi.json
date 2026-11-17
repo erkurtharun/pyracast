@@ -3701,7 +3701,7 @@
             "ChangeRequestKindEnum": {
                 "enum": ["production", "incident"],
                 "type": "string",
-                "description": "* `production` - production\n* `incident` - incident"
+                "description": "* `production` - Production\n* `incident` - Incident"
             },
             "ChangeRequestOutput": {
                 "type": "object",
@@ -3823,7 +3823,7 @@
             "ChangeRequestStatusEnum": {
                 "enum": ["pending", "approved", "rejected", "withdrawn"],
                 "type": "string",
-                "description": "* `pending` - pending\n* `approved` - approved\n* `rejected` - rejected\n* `withdrawn` - withdrawn"
+                "description": "* `pending` - Pending\n* `approved` - Approved\n* `rejected` - Rejected\n* `withdrawn` - Withdrawn"
             },
             "ChangeRequestSummaryOutput": {
                 "type": "object",
@@ -4162,11 +4162,6 @@
                     }
                 },
                 "required": ["ends_at", "starts_at"]
-            },
-            "DeliveryStatusEnum": {
-                "enum": ["pending", "accepted", "uncertain"],
-                "type": "string",
-                "description": "* `pending` - Pending\n* `accepted` - Accepted\n* `uncertain` - Uncertain"
             },
             "EpiasConnectionInput": {
                 "type": "object",
@@ -4561,7 +4556,7 @@
             "IncidentChangeActionEnum": {
                 "enum": ["create", "update", "resolve", "cancel"],
                 "type": "string",
-                "description": "* `create` - create\n* `update` - update\n* `resolve` - resolve\n* `cancel` - cancel"
+                "description": "* `create` - Create\n* `update` - Update\n* `resolve` - Resolve\n* `cancel` - Cancel"
             },
             "IncidentChangeOutput": {
                 "type": "object",
@@ -4849,10 +4844,15 @@
                         "type": "integer"
                     },
                     "role": {
-                        "$ref": "#/components/schemas/RoleEnum"
+                        "$ref": "#/components/schemas/WorkspaceRoleEnum"
                     }
                 },
                 "required": ["role", "tenant_id"]
+            },
+            "InvitationDeliveryStatusEnum": {
+                "enum": ["pending", "sent", "uncertain"],
+                "type": "string",
+                "description": "* `pending` - Pending\n* `sent` - Sent\n* `uncertain` - Uncertain"
             },
             "InvitationInput": {
                 "type": "object",
@@ -4884,7 +4884,7 @@
                     "delivery_status": {
                         "allOf": [
                             {
-                                "$ref": "#/components/schemas/DeliveryStatusEnum"
+                                "$ref": "#/components/schemas/InvitationDeliveryStatusEnum"
                             }
                         ],
                         "readOnly": true
@@ -4895,7 +4895,7 @@
             "LanguageEnum": {
                 "enum": ["en", "tr"],
                 "type": "string",
-                "description": "* `en` - en\n* `tr` - tr"
+                "description": "* `en` - English\n* `tr` - Türkçe"
             },
             "LanguageInput": {
                 "type": "object",
@@ -4972,7 +4972,11 @@
                         "readOnly": true
                     },
                     "status": {
-                        "type": "string",
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/LocationChangeStatusEnum"
+                            }
+                        ],
                         "readOnly": true
                     },
                     "created_at": {
@@ -4998,6 +5002,11 @@
                     "status",
                     "timezone"
                 ]
+            },
+            "LocationChangeStatusEnum": {
+                "enum": ["pending", "approved", "rejected"],
+                "type": "string",
+                "description": "* `pending` - Pending\n* `approved` - Approved\n* `rejected` - Rejected"
             },
             "MeasurementBasisEnum": {
                 "enum": ["net_export", "ac_generation"],
@@ -6001,7 +6010,7 @@
             "ProductionChangeActionEnum": {
                 "enum": ["set", "revert"],
                 "type": "string",
-                "description": "* `set` - set\n* `revert` - revert"
+                "description": "* `set` - Set\n* `revert` - Revert"
             },
             "ProductionChangeRow": {
                 "type": "object",
@@ -6699,7 +6708,11 @@
                         "readOnly": true
                     },
                     "status": {
-                        "type": "string",
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/RegionStatusEnum"
+                            }
+                        ],
                         "readOnly": true
                     }
                 },
@@ -6722,6 +6735,11 @@
                     }
                 },
                 "required": ["name"]
+            },
+            "RegionStatusEnum": {
+                "enum": ["pending", "approved", "suspended", "rejected"],
+                "type": "string",
+                "description": "* `pending` - Awaiting approval\n* `approved` - Approved\n* `suspended` - Suspended\n* `rejected` - Rejected"
             },
             "RejectionInput": {
                 "type": "object",
@@ -6961,11 +6979,6 @@
                 },
                 "required": ["expected_revision"]
             },
-            "RoleEnum": {
-                "enum": ["admin", "viewer"],
-                "type": "string",
-                "description": "* `admin` - Administrator\n* `viewer` - Viewer"
-            },
             "SessionOutput": {
                 "type": "object",
                 "properties": {
@@ -7143,7 +7156,11 @@
                         "readOnly": true
                     },
                     "status": {
-                        "type": "string",
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/RegionStatusEnum"
+                            }
+                        ],
                         "readOnly": true
                     },
                     "plant": {
@@ -7186,7 +7203,7 @@
                     "role": {
                         "allOf": [
                             {
-                                "$ref": "#/components/schemas/RoleEnum"
+                                "$ref": "#/components/schemas/WorkspaceRoleEnum"
                             }
                         ],
                         "readOnly": true
@@ -7291,7 +7308,7 @@
                         "format": "email"
                     },
                     "role": {
-                        "$ref": "#/components/schemas/RoleEnum"
+                        "$ref": "#/components/schemas/WorkspaceRoleEnum"
                     }
                 },
                 "required": ["email", "id", "role"]
@@ -7307,6 +7324,11 @@
                     }
                 },
                 "required": ["members"]
+            },
+            "WorkspaceRoleEnum": {
+                "enum": ["admin", "viewer"],
+                "type": "string",
+                "description": "* `admin` - Administrator\n* `viewer` - Viewer"
             }
         },
         "securitySchemes": {

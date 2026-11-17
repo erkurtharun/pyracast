@@ -6,7 +6,7 @@ from django.utils.translation import gettext_lazy
 from rest_framework.permissions import SAFE_METHODS, BasePermission
 from rest_framework.request import Request
 
-from pyracast.accounts.models import Membership
+from pyracast.accounts.models import Membership, WorkspaceRole
 
 if TYPE_CHECKING:
     from rest_framework.views import APIView
@@ -25,7 +25,7 @@ class WorkspaceWritePermission(BasePermission):
             tenant_id=tenant_id,
             user_id=request.user.pk,
             user__is_active=True,
-            role=Membership.Role.ADMIN,
+            role=WorkspaceRole.ADMIN,
         ).exists()
 
 

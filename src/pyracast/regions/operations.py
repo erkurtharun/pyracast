@@ -11,12 +11,16 @@ from django.utils.translation import gettext
 
 from pyracast.accounts.models import Tenant
 from pyracast.accounts.operations import require_admin, require_workspace_admin
-from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.connections.models import PowerBasis, Provider, ProviderAccount, SiteBinding
 from pyracast.forecasts.models import CollectionJob
 from pyracast.regions.models import (
+    REGION_TRANSITIONS,
+    AuditAction,
     AuditEvent,
+    LocationChangeStatus,
     Region,
     RegionLocationChangeRequest,
+    RegionStatus,
     location_coordinate,
 )
 
@@ -96,7 +100,7 @@ def update_region(
         region.name = name.strip()
         region.save(update_fields=("name",))
         AuditEvent.objects.create(
-            actor=actor, region=region, action="region_renamed", revision=region.revision
+            actor=actor, region=region, action=AuditAction.REGION_RENAMED, revision=region.revision
         )
     return region
 
@@ -125,7 +129,7 @@ def request_location_change(
             raise ValidationError("region_revision_changed")
         desired = (latitude, longitude, timezone, reason.strip())
         pending = RegionLocationChangeRequest.objects.filter(
-            region=region, status="pending"
+            region=region, status=LocationChangeStatus.PENDING
         ).first()
         if pending is not None:
             if (
@@ -147,7 +151,10 @@ def request_location_change(
             reason=reason.strip(),
         )
         AuditEvent.objects.create(
-            actor=actor, region=region, action="location_change_requested", revision=region.revision
+            actor=actor,
+            region=region,
+            action=AuditAction.LOCATION_CHANGE_REQUESTED,
+            revision=region.revision,
         )
         return change
 
@@ -167,10 +174,10 @@ def review_location_change(
             pk=change.region_id, deleted_at__isnull=True
         )
         change.refresh_from_db()
-        status = "approved" if approve else "rejected"
+        status = LocationChangeStatus.APPROVED if approve else LocationChangeStatus.REJECTED
         if change.status == status:
             return change
-        if change.status != "pending":
+        if change.status != LocationChangeStatus.PENDING:
             raise ValidationError("location_change_already_reviewed")
         if approve:
             if change.base_revision != region.revision:
@@ -179,7 +186,7 @@ def review_location_change(
             region.longitude = change.longitude
             region.timezone = change.timezone
             region.revision += 1
-            region.status = "pending"
+            region.status = RegionStatus.PENDING
             region.approved_binding = None
             region.save(
                 update_fields=(
@@ -198,7 +205,11 @@ def review_location_change(
         AuditEvent.objects.create(
             actor=actor,
             region=region,
-            action="location_change_approved" if approve else "location_change_rejected",
+            action=(
+                AuditAction.LOCATION_CHANGE_APPROVED
+                if approve
+                else AuditAction.LOCATION_CHANGE_REJECTED
+            ),
             revision=region.revision,
         )
         return change
@@ -206,14 +217,17 @@ def review_location_change(
 
 def _start_revision(actor: User, region: Region) -> None:
     region.revision += 1
-    region.status = "pending"
+    region.status = RegionStatus.PENDING
     region.approved_binding = None
     region.save(update_fields=("revision", "status", "approved_binding"))
-    if RegionLocationChangeRequest.objects.filter(region=region, status="pending").update(
-        base_revision=region.revision
-    ):
+    if RegionLocationChangeRequest.objects.filter(
+        region=region, status=LocationChangeStatus.PENDING
+    ).update(base_revision=region.revision):
         AuditEvent.objects.create(
-            actor=actor, region=region, action="location_change_rebased", revision=region.revision
+            actor=actor,
+            region=region,
+            action=AuditAction.LOCATION_CHANGE_REBASED,
+            revision=region.revision,
         )
 
 
@@ -225,7 +239,7 @@ def configure_binding(
     site_id: str,
     capacity_kw: float,
     dc_capacity_kw: float | None = None,
-    power_basis: str = "ac",
+    power_basis: str = PowerBasis.AC,
     capacity_semantics_verified: bool = False,
     azimuth_degrees: float = 0,
     losses_percent: float = 0,
@@ -241,7 +255,7 @@ def configure_binding(
         isinstance(dc_capacity_kw, bool) or not math.isfinite(dc_capacity_kw) or dc_capacity_kw <= 0
     ):
         raise ValidationError("DC capacity must be finite and positive when specified.")
-    if power_basis not in {"ac", "dc"}:
+    if power_basis not in PowerBasis.values:
         raise ValidationError("An AC or DC power basis is required.")
     if not capacity_semantics_verified:
         raise ValidationError("A verified horizontal reference configuration is required.")
@@ -254,7 +268,7 @@ def configure_binding(
         account = ProviderAccount.objects.get(pk=provider_account_id, enabled=True)
         reference = settings_verification_reference.strip()
         if len(reference) > 500 or (
-            account.provider == "solcast" and (not reference or installation_date is None)
+            account.provider == Provider.SOLCAST and (not reference or installation_date is None)
         ):
             raise ValidationError("Confirmed site settings and installation date are required.")
         values = {
@@ -286,7 +300,10 @@ def configure_binding(
             region=region, region_revision=region.revision, **values
         )
         AuditEvent.objects.create(
-            actor=actor, region=region, action="binding_configured", revision=region.revision
+            actor=actor,
+            region=region,
+            action=AuditAction.BINDING_CONFIGURED,
+            revision=region.revision,
         )
     return binding
 
@@ -307,23 +324,23 @@ def approve_region(actor: User, region_id: int, binding_id: int, now: datetime) 
             or not account.enabled
             or account.authorized_at is None
             or (
-                account.provider == "solcast"
+                account.provider == Provider.SOLCAST
                 and (
                     not binding.settings_verification_reference or binding.installation_date is None
                 )
             )
         ):
             raise ValidationError("The current configuration must be validated first.")
-        if region.status == "approved" and region.approved_binding_id == binding.pk:
+        if region.status == RegionStatus.APPROVED and region.approved_binding_id == binding.pk:
             return CollectionJob.objects.filter(binding=binding).earliest("created_at")
-        region.status = "approved"
+        region.status = RegionStatus.APPROVED
         region.approved_binding = binding
         region.save(update_fields=("status", "approved_binding"))
         from pyracast.plants.operations import activate_submitted_plants
 
         activate_submitted_plants(actor, region, binding)
         AuditEvent.objects.create(
-            actor=actor, region=region, action="approved", revision=region.revision
+            actor=actor, region=region, action=AuditAction.REGION_APPROVED, revision=region.revision
         )
         job, _ = CollectionJob.objects.get_or_create(
             binding=binding,
@@ -339,13 +356,14 @@ def approve_region(actor: User, region_id: int, binding_id: int, now: datetime) 
 
 def transition_region(actor: User, region_id: int, status: str) -> Region:
     require_admin(actor)
-    if status not in {"rejected", "suspended"}:
+    action = REGION_TRANSITIONS.get(status)
+    if action is None:
         raise ValidationError("Use approval for approval transitions.")
     with transaction.atomic():
         region = Region.objects.select_for_update().get(pk=region_id, deleted_at__isnull=True)
         region.status = status
         region.save(update_fields=("status",))
         AuditEvent.objects.create(
-            actor=actor, region=region, action=status, revision=region.revision
+            actor=actor, region=region, action=action, revision=region.revision
         )
     return region

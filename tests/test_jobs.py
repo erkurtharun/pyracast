@@ -316,9 +316,9 @@ def test_scheduler_deduplicates_local_cutoff_and_recovers_missed_slot() -> None:
 
 def test_scheduler_ignores_unvalidated_or_not_yet_valid_slots() -> None:
     system = make_system()
-    Region.objects.filter(pk=system.region.pk).update(status="approved")
-    assert enqueue_due(NOW) == []
     Region.objects.filter(pk=system.region.pk).update(approved_binding=system.binding)
+    assert enqueue_due(NOW) == []
+    Region.objects.filter(pk=system.region.pk).update(status="approved")
     assert enqueue_due(NOW) == []
     SiteBinding.objects.filter(pk=system.binding.pk).update(validated_at=NOW + timedelta(seconds=1))
     assert enqueue_due(NOW) == []

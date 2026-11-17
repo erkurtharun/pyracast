@@ -2,6 +2,24 @@ from django.conf import settings
 from django.db import models
 from django.db.models.functions import Lower, Trim
 
+from pyracast.db import choices_check
+
+
+class Language(models.TextChoices):
+    EN = "en", "English"
+    TR = "tr", "Türkçe"
+
+
+class WorkspaceRole(models.TextChoices):
+    ADMIN = "admin", "Administrator"
+    VIEWER = "viewer", "Viewer"
+
+
+class InvitationDeliveryStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    SENT = "sent", "Sent"
+    UNCERTAIN = "uncertain", "Uncertain"
+
 
 class Tenant(models.Model):
     name = models.CharField(max_length=200)
@@ -16,23 +34,19 @@ class Tenant(models.Model):
 
 
 class Membership(models.Model):
-    class Role(models.TextChoices):
-        ADMIN = "admin", "Administrator"
-        VIEWER = "viewer", "Viewer"
-
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    role = models.CharField(max_length=6, choices=Role, default=Role.VIEWER)
+    role = models.CharField(max_length=6, choices=WorkspaceRole, default=WorkspaceRole.VIEWER)
 
     class Meta:
         constraints = (
             models.UniqueConstraint(fields=("tenant", "user"), name="unique_tenant_membership"),
             models.UniqueConstraint(
-                fields=("tenant",), condition=models.Q(role="admin"), name="one_workspace_admin"
+                fields=("tenant",),
+                condition=models.Q(role=WorkspaceRole.ADMIN),
+                name="one_workspace_admin",
             ),
-            models.CheckConstraint(
-                condition=models.Q(role__in=("admin", "viewer")), name="valid_workspace_role"
-            ),
+            choices_check("role", WorkspaceRole, name="valid_workspace_role"),
         )
 
 
@@ -45,10 +59,11 @@ class WorkspaceInvitation(models.Model):
     expires_at = models.DateTimeField()
     accepted_at = models.DateTimeField(null=True)
     delivery_status = models.CharField(
-        max_length=9,
-        choices=(("pending", "Pending"), ("accepted", "Accepted"), ("uncertain", "Uncertain")),
-        default="pending",
+        max_length=9, choices=InvitationDeliveryStatus, default=InvitationDeliveryStatus.PENDING
     )
+
+    class Meta:
+        constraints = (choices_check("delivery_status", InvitationDeliveryStatus),)
 
 
 class WorkspaceAdminChange(models.Model):
@@ -92,11 +107,7 @@ class AuthenticationCacheEntry(models.Model):
 
 class UserLanguagePreference(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    language = models.CharField(max_length=2, choices=(("en", "English"), ("tr", "Türkçe")))
+    language = models.CharField(max_length=2, choices=Language)
 
     class Meta:
-        constraints = (
-            models.CheckConstraint(
-                condition=models.Q(language__in=("en", "tr")), name="supported_user_language"
-            ),
-        )
+        constraints = (choices_check("language", Language, name="supported_user_language"),)

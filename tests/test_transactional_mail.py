@@ -9,7 +9,7 @@ from django.utils import translation
 
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.invitations import invite_workspace_member
-from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference
+from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference, WorkspaceRole
 
 
 @pytest.mark.parametrize("language", ["en", "tr"])
@@ -93,7 +93,7 @@ def test_authentication_link_mail_has_real_action_and_preserves_token(
 def test_invitation_mail_has_private_action_and_escaped_workspace(language: str) -> None:
     tenant = Tenant.objects.create(name='<img src=x onerror="unsafe"> & Solar')
     actor = User.objects.create_user(username="administrator", email="admin@example.com")
-    Membership.objects.create(tenant=tenant, user=actor, role=Membership.Role.ADMIN)
+    Membership.objects.create(tenant=tenant, user=actor, role=WorkspaceRole.ADMIN)
     UserLanguagePreference.objects.create(user=actor, language=language)
 
     invitation = invite_workspace_member(actor, tenant.pk, "guest@example.com")

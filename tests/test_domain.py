@@ -5,7 +5,7 @@ import pytest
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.accounts.operations import require_admin, require_member
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
@@ -47,7 +47,7 @@ def test_tenant_and_platform_authorization() -> None:
     with pytest.raises(PermissionDenied):
         require_member(system.member, system.tenant.pk)
     system.member.is_active = True
-    Membership.objects.create(user=system.member, tenant=other, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=system.member, tenant=other, role=WorkspaceRole.ADMIN)
     with pytest.raises(Region.DoesNotExist):
         update_region(
             system.member,

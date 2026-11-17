@@ -289,7 +289,7 @@ def test_worker_checks_resource_policy_independently_of_configurer(change: str) 
         NotificationDelivery.objects.filter(pk=delivery.pk).update(recipients=[""])
         ReminderSchedule.objects.filter(pk=schedule.pk).update(recipients=[""])
     elif change == "binding":
-        Region.objects.filter(pk=schedule.region_id).update(approved_binding=None)
+        Region.objects.filter(pk=schedule.region_id).update(status="pending", approved_binding=None)
     elif change == "wrong_region":
         region = Region.objects.create(
             tenant=schedule.region.tenant, name="Other", latitude=0, longitude=0, timezone="UTC"
@@ -459,7 +459,7 @@ def test_scheduler_checks_binding_independently_of_configurer(change: str) -> No
     if change == "inactive":
         User.objects.filter(pk=system.member.pk).update(is_active=False)
     elif change == "unbound":
-        Region.objects.filter(pk=system.region.pk).update(approved_binding=None)
+        Region.objects.filter(pk=system.region.pk).update(status="pending", approved_binding=None)
     elif change == "suspended":
         Region.objects.filter(pk=system.region.pk).update(status="suspended")
     else:

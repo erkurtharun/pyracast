@@ -1,12 +1,13 @@
 from rest_framework import serializers
 
+from pyracast.accounts.models import Language
 from pyracast.notifications.operations import RECIPIENT_MAX_LENGTH
 
 
 class ReminderInput(serializers.Serializer[dict[str, object]]):
     enabled = serializers.BooleanField()
     include_workspace_members = serializers.BooleanField(default=False)
-    language = serializers.ChoiceField(choices=("en", "tr"))
+    language = serializers.ChoiceField(choices=Language.choices)
     recipients = serializers.ListField(
         child=serializers.EmailField(max_length=RECIPIENT_MAX_LENGTH)
     )
@@ -39,7 +40,7 @@ class ReminderOutput(serializers.Serializer[dict[str, object]]):
     enabled = serializers.BooleanField()
     include_workspace_members = serializers.BooleanField()
     workspace_recipients = serializers.ListField(child=serializers.EmailField())
-    language = serializers.ChoiceField(choices=("en", "tr"))
+    language = serializers.ChoiceField(choices=Language.choices)
     times = serializers.ListField(child=serializers.CharField())
     recipients = serializers.ListField(child=serializers.EmailField())
     effective_recipients = serializers.ListField(child=serializers.CharField())

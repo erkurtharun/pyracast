@@ -12,6 +12,7 @@ from pyracast.accounts.models import (
     WorkspaceAdminChange,
     WorkspaceInvitation,
     WorkspaceMemberRemoval,
+    WorkspaceRole,
 )
 
 
@@ -34,7 +35,7 @@ def require_workspace_admin(actor: User, tenant_id: int) -> None:
     if (
         tenant is None
         or not Membership.objects.filter(
-            user_id=actor.pk, user__is_active=True, tenant_id=tenant_id, role=Membership.Role.ADMIN
+            user_id=actor.pk, user__is_active=True, tenant_id=tenant_id, role=WorkspaceRole.ADMIN
         ).exists()
     ):
         raise PermissionDenied(_("Workspace administrator required."))
@@ -53,7 +54,7 @@ def workspace_membership(actor: User, tenant_id: int, *, lock: bool = False) -> 
 
 def require_workspace_member(actor: User, tenant_id: int) -> Membership:
     membership = workspace_membership(actor, tenant_id, lock=True)
-    if membership.role != Membership.Role.VIEWER:
+    if membership.role != WorkspaceRole.VIEWER:
         raise PermissionDenied(
             _("Workspace members submit requests; administrators edit directly.")
         )
@@ -66,7 +67,7 @@ def remove_workspace_member(actor: User, tenant_id: int, user_id: int) -> None:
     membership = Membership.objects.filter(tenant_id=tenant_id, user_id=user_id).first()
     if membership is None:
         return
-    if membership.role == Membership.Role.ADMIN or user_id == actor.pk:
+    if membership.role == WorkspaceRole.ADMIN or user_id == actor.pk:
         raise ValidationError(_("The workspace administrator cannot be removed."))
     emails = set(EmailAddress.objects.filter(user_id=user_id).values_list("email", flat=True))
     emails.add(membership.user.email)
@@ -94,7 +95,7 @@ def reassign_workspace_admin(
     require_admin(actor)
     Tenant.objects.select_for_update().get(pk=tenant_id)
     current_admin_id = (
-        Membership.objects.filter(tenant_id=tenant_id, role=Membership.Role.ADMIN)
+        Membership.objects.filter(tenant_id=tenant_id, role=WorkspaceRole.ADMIN)
         .values_list("user_id", flat=True)
         .first()
     )
@@ -105,14 +106,14 @@ def reassign_workspace_admin(
     ).first()
     if membership is None:
         raise ValidationError(_("Choose an active member of this workspace."))
-    if membership.role != Membership.Role.ADMIN:
+    if membership.role != WorkspaceRole.ADMIN:
         from pyracast.plants.automation import disable_workspace_automation
 
         disable_workspace_automation(actor, tenant_id)
-        Membership.objects.filter(tenant_id=tenant_id, role=Membership.Role.ADMIN).update(
-            role=Membership.Role.VIEWER
+        Membership.objects.filter(tenant_id=tenant_id, role=WorkspaceRole.ADMIN).update(
+            role=WorkspaceRole.VIEWER
         )
-        membership.role = Membership.Role.ADMIN
+        membership.role = WorkspaceRole.ADMIN
         membership.save(update_fields=["role"])
         WorkspaceInvitation.objects.filter(
             tenant_id=tenant_id, accepted_at__isnull=True, expires_at__gt=timezone.now()

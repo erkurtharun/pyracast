@@ -9,7 +9,7 @@ from django.db import IntegrityError, close_old_connections, connection, transac
 from django.test import Client
 from django.utils import timezone
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.operations import validate_binding
 from pyracast.forecasts.models import CollectionJob
 from pyracast.plants.models import Plant, PlantConfiguration, PlantSubmission
@@ -224,7 +224,7 @@ def test_duplicate_locations_use_six_decimal_tenant_scoped_identity() -> None:
     with pytest.raises(ValidationError, match="location_already_exists"):
         submit_site(system.member, system.tenant.pk, **site_values(latitude=41.1234562))
     other = Tenant.objects.create(name="Other")
-    Membership.objects.create(user=system.member, tenant=other, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=system.member, tenant=other, role=WorkspaceRole.ADMIN)
     assert submit_site(system.member, other.pk, **site_values()).pk != site.pk
     with pytest.raises(IntegrityError), transaction.atomic():
         Region.objects.create(

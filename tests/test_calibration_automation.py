@@ -10,7 +10,7 @@ from django.db import close_old_connections, connections
 from django.test import Client
 from django.utils import timezone
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.accounts.operations import reassign_workspace_admin
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.automation import (
@@ -379,7 +379,7 @@ def test_revoked_enabler_cannot_promote_or_prepare_daily_work(
         system.member.is_active = False
         system.member.save(update_fields=("is_active",))
     elif revocation == "demoted":
-        Membership.objects.filter(user=system.member).update(role=Membership.Role.VIEWER)
+        Membership.objects.filter(user=system.member).update(role=WorkspaceRole.VIEWER)
     else:
         Membership.objects.filter(user=system.member).delete()
     assert not promote(plant.pk, candidate)
@@ -436,7 +436,7 @@ def test_returning_administrator_cannot_revive_revoked_automation(
     scope = (system.tenant.pk, system.region.pk, plant.pk)
     set_calibration_automation(system.member, *scope, enabled=True)
     other = Tenant.objects.create(name="Unaffected")
-    Membership.objects.create(user=system.member, tenant=other, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=system.member, tenant=other, role=WorkspaceRole.ADMIN)
     other_region = Region.objects.create(
         tenant=other, name="Other site", latitude=41, longitude=30, timezone="UTC"
     )
@@ -477,7 +477,7 @@ def test_automation_endpoint_scopes_read_and_write_to_the_plant_tenant(
 ) -> None:
     system, plant = make_plant(monkeypatch)
     other = Tenant.objects.create(name="Other")
-    Membership.objects.create(user=system.member, tenant=other, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=system.member, tenant=other, role=WorkspaceRole.ADMIN)
     client = Client()
     client.force_login(system.member)
     wrong = (

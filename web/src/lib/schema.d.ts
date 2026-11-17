@@ -833,8 +833,8 @@ export interface components {
             readonly dataset_sha256: string;
         };
         /**
-         * @description * `production` - production
-         *     * `incident` - incident
+         * @description * `production` - Production
+         *     * `incident` - Incident
          * @enum {string}
          */
         ChangeRequestKindEnum: "production" | "incident";
@@ -865,10 +865,10 @@ export interface components {
             incident: components["schemas"]["IncidentChangeOutput"] | null;
         };
         /**
-         * @description * `pending` - pending
-         *     * `approved` - approved
-         *     * `rejected` - rejected
-         *     * `withdrawn` - withdrawn
+         * @description * `pending` - Pending
+         *     * `approved` - Approved
+         *     * `rejected` - Rejected
+         *     * `withdrawn` - Withdrawn
          * @enum {string}
          */
         ChangeRequestStatusEnum:
@@ -974,13 +974,6 @@ export interface components {
             /** Format: date-time */
             ends_at: string;
         };
-        /**
-         * @description * `pending` - Pending
-         *     * `accepted` - Accepted
-         *     * `uncertain` - Uncertain
-         * @enum {string}
-         */
-        DeliveryStatusEnum: "pending" | "accepted" | "uncertain";
         EpiasConnectionInput: {
             provider_plant_id: number;
             expected_eic: string;
@@ -1113,10 +1106,10 @@ export interface components {
             revision: number;
         };
         /**
-         * @description * `create` - create
-         *     * `update` - update
-         *     * `resolve` - resolve
-         *     * `cancel` - cancel
+         * @description * `create` - Create
+         *     * `update` - Update
+         *     * `resolve` - Resolve
+         *     * `cancel` - Cancel
          * @enum {string}
          */
         IncidentChangeActionEnum: "create" | "update" | "resolve" | "cancel";
@@ -1212,8 +1205,15 @@ export interface components {
         };
         InvitationAcceptanceOutput: {
             tenant_id: number;
-            role: components["schemas"]["RoleEnum"];
+            role: components["schemas"]["WorkspaceRoleEnum"];
         };
+        /**
+         * @description * `pending` - Pending
+         *     * `sent` - Sent
+         *     * `uncertain` - Uncertain
+         * @enum {string}
+         */
+        InvitationDeliveryStatusEnum: "pending" | "sent" | "uncertain";
         InvitationInput: {
             /** Format: email */
             email: string;
@@ -1224,11 +1224,11 @@ export interface components {
             readonly email: string;
             /** Format: date-time */
             readonly expires_at: string;
-            readonly delivery_status: components["schemas"]["DeliveryStatusEnum"];
+            readonly delivery_status: components["schemas"]["InvitationDeliveryStatusEnum"];
         };
         /**
-         * @description * `en` - en
-         *     * `tr` - tr
+         * @description * `en` - English
+         *     * `tr` - Türkçe
          * @enum {string}
          */
         LanguageEnum: "en" | "tr";
@@ -1254,12 +1254,19 @@ export interface components {
             readonly longitude: number;
             readonly timezone: string;
             readonly reason: string;
-            readonly status: string;
+            readonly status: components["schemas"]["LocationChangeStatusEnum"];
             /** Format: date-time */
             readonly created_at: string;
             /** Format: date-time */
             readonly reviewed_at: string | null;
         };
+        /**
+         * @description * `pending` - Pending
+         *     * `approved` - Approved
+         *     * `rejected` - Rejected
+         * @enum {string}
+         */
+        LocationChangeStatusEnum: "pending" | "approved" | "rejected";
         /**
          * @description * `net_export` - Net export
          *     * `ac_generation` - AC generation
@@ -1631,8 +1638,8 @@ export interface components {
             readonly created_at: string;
         };
         /**
-         * @description * `set` - set
-         *     * `revert` - revert
+         * @description * `set` - Set
+         *     * `revert` - Revert
          * @enum {string}
          */
         ProductionChangeActionEnum: "set" | "revert";
@@ -1833,11 +1840,19 @@ export interface components {
             readonly longitude: number;
             readonly timezone: string;
             readonly revision: number;
-            readonly status: string;
+            readonly status: components["schemas"]["RegionStatusEnum"];
         };
         RegionRenameInput: {
             name: string;
         };
+        /**
+         * @description * `pending` - Awaiting approval
+         *     * `approved` - Approved
+         *     * `suspended` - Suspended
+         *     * `rejected` - Rejected
+         * @enum {string}
+         */
+        RegionStatusEnum: "pending" | "approved" | "suspended" | "rejected";
         RejectionInput: {
             reason: string;
         };
@@ -1901,12 +1916,6 @@ export interface components {
         RevisionInput: {
             expected_revision: number;
         };
-        /**
-         * @description * `admin` - Administrator
-         *     * `viewer` - Viewer
-         * @enum {string}
-         */
-        RoleEnum: "admin" | "viewer";
         SessionOutput: {
             user: components["schemas"]["SessionUserOutput"] | null;
             csrf_token: string;
@@ -1952,7 +1961,7 @@ export interface components {
             readonly longitude: number;
             readonly timezone: string;
             readonly revision: number;
-            readonly status: string;
+            readonly status: components["schemas"]["RegionStatusEnum"];
             readonly plant: components["schemas"]["PlantOutput"] | null;
         };
         /**
@@ -1964,7 +1973,7 @@ export interface components {
         TenantOutput: {
             readonly id: number;
             readonly name: string;
-            readonly role: components["schemas"]["RoleEnum"];
+            readonly role: components["schemas"]["WorkspaceRoleEnum"];
             readonly pending_review_count: number | null;
             readonly unread_outcome_count: number;
         };
@@ -2004,11 +2013,17 @@ export interface components {
             id: number;
             /** Format: email */
             email: string;
-            role: components["schemas"]["RoleEnum"];
+            role: components["schemas"]["WorkspaceRoleEnum"];
         };
         WorkspaceMembersOutput: {
             members: components["schemas"]["WorkspaceMemberOutput"][];
         };
+        /**
+         * @description * `admin` - Administrator
+         *     * `viewer` - Viewer
+         * @enum {string}
+         */
+        WorkspaceRoleEnum: "admin" | "viewer";
     };
     responses: never;
     parameters: never;
