@@ -5,7 +5,7 @@ import shutil
 import subprocess
 from datetime import date
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, NamedTuple, TypedDict
 
 GITHUB_ADVISORY = re.compile(r"https://github\.com/advisories/(GHSA(?:-[0-9a-z]{4}){3})")
 EXCEPTION_KEYS = {"advisory", "package", "reason", "expires"}
@@ -20,6 +20,14 @@ class AuditException(TypedDict):
     expires: str
 
 
+class Advisory(NamedTuple):
+    package: str
+    advisory: str
+
+    def __str__(self) -> str:
+        return f"{self.advisory} in {self.package}"
+
+
 def advisory_id(cause: dict[str, Any]) -> str:
     match = GITHUB_ADVISORY.fullmatch(str(cause.get("url", "")).rstrip("/"))
     if match:
@@ -30,8 +38,15 @@ def advisory_id(cause: dict[str, Any]) -> str:
     raise ValueError(f"Advisory without an identity: {cause!r}")
 
 
+def reported_advisory(cause: dict[str, Any]) -> Advisory:
+    package = cause.get("name")
+    if not isinstance(package, str) or not package.strip():
+        raise ValueError(f"Advisory without a package: {cause!r}")
+    return Advisory(package, advisory_id(cause))
+
+
 def leads_to_advisory(
-    name: str, direct: dict[str, set[str]], references: dict[str, set[str]]
+    name: str, direct: dict[str, set[Advisory]], references: dict[str, set[str]]
 ) -> bool:
     pending, seen = [name], set[str]()
     while pending:
@@ -44,13 +59,13 @@ def leads_to_advisory(
     return False
 
 
-def reported_advisories(report: Any) -> set[str]:
+def reported_advisories(report: Any) -> set[Advisory]:
     if not isinstance(report, dict) or "error" in report:
         raise ValueError(f"npm audit failed: {report!r}")
     vulnerabilities = report.get("vulnerabilities")
     if report.get("auditReportVersion") != 2 or not isinstance(vulnerabilities, dict):
         raise ValueError("Unsupported npm audit report.")
-    direct: dict[str, set[str]] = {}
+    direct: dict[str, set[Advisory]] = {}
     references: dict[str, set[str]] = {}
     for name, package in vulnerabilities.items():
         causes = package.get("via") if isinstance(package, dict) else None
@@ -59,7 +74,7 @@ def reported_advisories(report: Any) -> set[str]:
         direct[name], references[name] = set(), set()
         for cause in causes:
             if isinstance(cause, dict):
-                direct[name].add(advisory_id(cause))
+                direct[name].add(reported_advisory(cause))
             elif isinstance(cause, str) and cause in vulnerabilities:
                 references[name].add(cause)
             else:
@@ -86,16 +101,19 @@ def load_exceptions(text: str) -> list[AuditException]:
     return exceptions
 
 
-def audit_failures(found: set[str], exceptions: list[AuditException], today: date) -> list[str]:
+def audit_failures(
+    found: set[Advisory], exceptions: list[AuditException], today: date
+) -> list[str]:
     failures: list[str] = []
-    accepted: set[str] = set()
+    accepted: set[Advisory] = set()
     for entry in exceptions:
+        advisory = Advisory(entry["package"], entry["advisory"])
         if not entry["reason"].strip():
-            failures.append(f"Audit exception {entry['advisory']} has no reason.")
+            failures.append(f"Audit exception {advisory} has no reason.")
         elif date.fromisoformat(entry["expires"]) < today:
-            failures.append(f"Audit exception {entry['advisory']} expired on {entry['expires']}.")
+            failures.append(f"Audit exception {advisory} expired on {entry['expires']}.")
         else:
-            accepted.add(entry["advisory"])
+            accepted.add(advisory)
     failures += [f"Advisory {advisory} is not accepted." for advisory in sorted(found - accepted)]
     failures += [
         f"Audit exception {advisory} is no longer reported; remove it."
@@ -113,6 +131,10 @@ def run_audit(web: Path) -> Any:
     )
     if result.returncode not in AUDIT_STATUSES:
         raise RuntimeError(f"npm audit exited with {result.returncode}: {result.stderr.strip()}")
+    if not result.stdout.strip():
+        raise RuntimeError(
+            f"npm audit exited with {result.returncode} without a report: {result.stderr.strip()}"
+        )
     report = json.loads(result.stdout)
     if (
         result.returncode == 1
