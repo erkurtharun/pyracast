@@ -285,7 +285,7 @@ def test_workspace_invitation_api_is_scoped_and_never_returns_secrets(
     )
     assert invited.status_code == 201
     assert set(invited.json()) == {"id", "email", "expires_at", "delivery_status"}
-    assert invited.json()["delivery_status"] == "accepted"
+    assert invited.json()["delivery_status"] == "sent"
     token = invitation_token()
     assert token not in invited.content.decode()
     assert client.get(invitations_url).json() == {"invitations": [invited.json()]}

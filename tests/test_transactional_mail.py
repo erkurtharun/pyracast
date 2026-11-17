@@ -100,7 +100,7 @@ def test_invitation_mail_has_private_action_and_escaped_workspace(language: str)
 
     message = mail.outbox[-1]
     assert isinstance(message, EmailMultiAlternatives)
-    assert invitation.delivery_status == "accepted"
+    assert invitation.delivery_status == "sent"
     assert message.to == ["guest@example.com"]
     assert tenant.name in str(message.body)
     html = message.alternatives[0][0]

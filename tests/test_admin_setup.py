@@ -95,7 +95,7 @@ def test_admin_can_review_configure_validate_and_approve_without_exposing_key(
     assert plant.current_configuration is not None
     assert plant.current_configuration.dc_capacity_mw == 4.2
     assert CollectionJob.objects.filter(binding=system.binding, endpoint="forecasts").count() == 1
-    assert AuditEvent.objects.filter(region=system.region, action="approved").count() == 1
+    assert AuditEvent.objects.filter(region=system.region, action="region_approved").count() == 1
 
 
 @pytest.mark.parametrize("identity", ["anonymous", "member", "staff", "unverified_admin"])
