@@ -655,19 +655,19 @@ def test_nested_serializer_errors_name_the_item_path() -> None:
 def test_django_validation_errors_keep_their_field_keys_and_translated_text() -> None:
     from django.core.exceptions import ValidationError
     from django.utils import translation
+    from django.utils.translation import gettext_lazy
 
     from pyracast.api.errors import api_error
 
+    required = gettext_lazy("An IANA timezone is required.")
     with translation.override("tr"):
-        error = api_error(
-            ValidationError({"timezone": ["An IANA timezone is required."]}), None, "-"
-        )
+        error = api_error(ValidationError({"timezone": [required]}), None, "-")
         assert error.body() == {
             "code": "invalid_request",
             "message": "İşaretli değerleri kontrol edip tekrar deneyin.",
             "fields": {"timezone": "Geçerli bir IANA saat dilimi girin."},
         }
-        sentence = api_error(ValidationError("An IANA timezone is required."), None, "-")
+        sentence = api_error(ValidationError(required), None, "-")
         assert sentence.body() == {
             "code": "invalid_request",
             "message": "Geçerli bir IANA saat dilimi girin.",
@@ -716,6 +716,8 @@ def test_busy_session_navigation_reloads_once_then_explains() -> None:
         patch.setattr(session_lock, "serialize_session", busy)
         first = client.get("/admin/", HTTP_SEC_FETCH_MODE="navigate")
         second = client.get("/admin/?session_retry=1", HTTP_SEC_FETCH_MODE="navigate")
+        filtered = client.get("/admin/?q=solar", HTTP_SEC_FETCH_MODE="navigate")
+        reload = client.post("/admin/", HTTP_SEC_FETCH_MODE="navigate")
     assert first.status_code == 503
     assert first["Content-Type"].startswith("text/html")
     assert "no-store" in first["Cache-Control"]
@@ -723,6 +725,75 @@ def test_busy_session_navigation_reloads_once_then_explains() -> None:
     assert second.status_code == 503
     assert "Refresh" not in second
     assert second["Content-Type"].startswith("text/html")
+    assert filtered["Refresh"] == "1; url=/admin/?q=solar&session_retry=1"
+    assert reload.status_code == 429
+    assert reload.json()["code"] == "session_busy"
+
+
+def test_drf_permission_classes_answer_coded_refusals() -> None:
+    client, tenant = signed_in(Membership.Role.VIEWER)
+    viewer = client.post(
+        f"/api/tenants/{tenant.pk}/invitations/",
+        {"email": "new@example.com"},
+        content_type="application/json",
+    )
+    assert viewer.status_code == 403
+    assert viewer.json()["code"] == "workspace_admin_required"
+    outsider = Client()
+    outsider.force_login(User.objects.create_user(username="outsider"))
+    refused = outsider.post(
+        f"/api/tenants/{tenant.pk}/regions/1/plants/1/change-requests/production/",
+        {},
+        content_type="application/json",
+    )
+    assert refused.status_code == 403
+    assert refused.json()["code"] == "membership_required"
+
+
+def test_malformed_json_is_a_bad_request() -> None:
+    response = Client().post("/api/session/language/", "{", content_type="application/json")
+    assert response.status_code == 400
+    assert response.json() == {
+        "code": "bad_request",
+        "message": "The request could not be processed.",
+    }
+
+
+def test_framework_errors_without_a_mapping_are_logged_server_errors(
+    pyracast_logs: pytest.LogCaptureFixture,
+) -> None:
+    from rest_framework.exceptions import APIException
+
+    from pyracast.api.errors import api_error
+
+    error = api_error(APIException(), None, "-")
+    assert (error.status, error.code) == (500, "server_error")
+    assert [record.levelname for record in pyracast_logs.records] == ["ERROR"]
+    unhinted = api_error(Throttled(), None, "-")
+    assert (unhinted.status, unhinted.retry_after) == (429, None)
+
+
+def test_django_form_errors_become_the_message() -> None:
+    from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
+    from django.utils.translation import gettext_lazy
+
+    from pyracast.api.errors import api_error
+
+    error = api_error(
+        ValidationError(
+            {
+                NON_FIELD_ERRORS: [gettext_lazy("Unsupported outage kind.")],
+                "title": [gettext_lazy("A title of at most 200 characters is required.")],
+            }
+        ),
+        None,
+        "-",
+    )
+    assert error.body() == {
+        "code": "invalid_request",
+        "message": "Unsupported outage kind.",
+        "fields": {"title": "A title of at most 200 characters is required."},
+    }
 
 
 def test_error_vocabulary_and_body_are_exported_to_openapi() -> None:

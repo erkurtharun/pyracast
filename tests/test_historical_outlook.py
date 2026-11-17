@@ -17,6 +17,7 @@ from pyracast.plants.models import ForecastIssuance, PlantConfiguration, PlantFo
 from pyracast.plants.operations import revise_plant
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, System
+from tests.support.errors import raises_code
 from tests.support.plant_operations import make_plant, publish_snapshot, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -422,7 +423,7 @@ def test_corrupt_history_cannot_return_a_fabricated_estimate(
     snapshot = actuals(system)
     snapshot.normalized_intervals[0]["power_kw"] = -1
     snapshot.save()
-    with pytest.raises(ValidationError, match="calculation_out_of_range"):
+    with raises_code("calculation_out_of_range"):
         plant_outlook(
             system.member,
             system.tenant.pk,

@@ -407,11 +407,11 @@ def test_finite_capacity_overflow_returns_validation_without_saving_forecast(
         return
     assert response.status_code == 400
     assert response.json() == {
-        "code": "invalid_request",
-        "detail": [
+        "code": "calculation_out_of_range",
+        "message": (
             "This forecast could not be calculated. "
             "Choose another day or contact your administrator."
-        ],
+        ),
     }
     assert not PlantForecast.objects.exists()
 

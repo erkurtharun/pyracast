@@ -62,7 +62,8 @@ def test_tenant_list_is_empty_without_memberships() -> None:
 def test_anonymous_tenant_listing_is_denied() -> None:
     response = Client().get("/api/tenants/")
 
-    assert response.status_code == 403
+    assert response.status_code == 401
+    assert response["WWW-Authenticate"] == "Session"
 
 
 @pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])

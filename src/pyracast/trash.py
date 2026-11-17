@@ -10,6 +10,7 @@ from django.utils import timezone
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import Membership
 from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.errors import DomainError, ErrorCode
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import (
     CollectionJob,
@@ -43,7 +44,7 @@ PURGE_BATCH_SIZE = 100
 
 def _restore_deadline(deleted_at: datetime | None, now: datetime) -> None:
     if deleted_at is not None and now >= deleted_at + RETENTION:
-        raise ValidationError("trash_retention_expired")
+        raise DomainError(ErrorCode.TRASH_RETENTION_EXPIRED)
 
 
 def _cancel_calibrations(plants: list[int], now: datetime) -> None:
@@ -125,7 +126,7 @@ def trash_plant(actor: User, tenant_id: int, region_id: int, plant_id: int) -> P
         if plant.deleted_at is not None:
             return plant
         if region.deleted_at is not None:
-            raise ValidationError("parent_region_trashed")
+            raise DomainError(ErrorCode.PARENT_REGION_TRASHED)
         now = timezone.now()
         plant.deleted_at = now
         plant.save(update_fields=("deleted_at",))
@@ -149,7 +150,7 @@ def restore_plant(actor: User, tenant_id: int, region_id: int, plant_id: int) ->
                 )
         plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
         if region.deleted_at is not None:
-            raise ValidationError("parent_region_trashed")
+            raise DomainError(ErrorCode.PARENT_REGION_TRASHED)
         _restore_deadline(plant.deleted_at, timezone.now())
         if plant.deleted_at is None:
             return plant
@@ -158,7 +159,7 @@ def restore_plant(actor: User, tenant_id: int, region_id: int, plant_id: int) ->
             .exclude(pk=plant.pk)
             .exists()
         ):
-            raise ValidationError("location_already_has_plant")
+            raise DomainError(ErrorCode.LOCATION_ALREADY_HAS_PLANT)
         plant.deleted_at = None
         plant.save(update_fields=("deleted_at",))
         if (

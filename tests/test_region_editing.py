@@ -22,6 +22,7 @@ from pyracast.regions.operations import (
 )
 from pyracast.trash import purge_expired, trash_region
 from tests.support.domain import NOW, FakeAdapter, System, make_system
+from tests.support.errors import raises_code
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -56,7 +57,7 @@ def test_location_request_api_tenant_boundary_validation_and_soft_deletion() -> 
     assert client.get(path).json()["count"] == 1
     assert (
         client.post(path, {**data, "latitude": 42}, content_type="application/json").status_code
-        == 400
+        == 409
     )
     system.region.refresh_from_db()
     assert (system.region.latitude, system.region.status, system.region.approved_binding_id) == (
@@ -100,7 +101,7 @@ def test_location_review_requires_new_binding_and_follows_binding_revisions() ->
     assert reviewed.reviewed_by_id == system.admin.pk
     assert reviewed.reviewed_at is not None
     assert review_location_change(system.admin, change.pk, approve=True).pk == change.pk
-    with pytest.raises(ValidationError, match="already_reviewed"):
+    with raises_code("location_change_already_reviewed"):
         review_location_change(system.admin, change.pk, approve=False)
     system.region.refresh_from_db()
     assert (system.region.latitude, system.region.longitude, system.region.timezone) == (
@@ -199,7 +200,7 @@ def test_request_operation_validation_permissions_and_rejection_keep_active_regi
             longitude=30,
             timezone="UTC",
         )
-    with pytest.raises(ValidationError, match="region_revision_changed"):
+    with raises_code("region_revision_changed"):
         request_location_change(
             system.member,
             system.region.pk,
@@ -209,7 +210,7 @@ def test_request_operation_validation_permissions_and_rejection_keep_active_regi
             longitude=30,
             timezone="UTC",
         )
-    with pytest.raises(ValidationError, match="location_unchanged"):
+    with raises_code("location_unchanged"):
         request_location_change(
             system.member,
             system.region.pk,
@@ -478,7 +479,7 @@ def test_binding_replacement_rebases_pending_location_request() -> None:
         labels = [row["action_label"] for row in recent_activity_context(system.region.pk)]
     assert any(label.startswith("Konum değişikliği talebi yeni revizyona") for label in labels)
     assert _pending_location_request(system).pk == change.pk
-    with pytest.raises(ValidationError, match="location_change_already_pending"):
+    with raises_code("location_change_already_pending"):
         request_location_change(
             system.member,
             system.region.pk,
@@ -504,7 +505,7 @@ def test_concurrent_location_request_and_binding_replacement_leave_no_stale_requ
             _pending_location_request(system)
             return "requested"
         except ValidationError as error:
-            return str(error.messages[0])
+            return str(error.code)
         finally:
             connection.close()
 
@@ -533,5 +534,5 @@ def test_approval_requires_the_request_to_match_the_region_revision() -> None:
     system = make_system(approved=True)
     change = _pending_location_request(system)
     Region.objects.filter(pk=system.region.pk).update(revision=2)
-    with pytest.raises(ValidationError, match="region_revision_changed"):
+    with raises_code("region_revision_changed"):
         review_location_change(system.admin, change.pk, approve=True)

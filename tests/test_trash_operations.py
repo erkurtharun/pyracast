@@ -46,6 +46,7 @@ from pyracast.trash import (
     trash_region,
 )
 from tests.support.domain import NOW, System
+from tests.support.errors import raises_code
 from tests.support.historical_reference_import import power_file, source_settings, system_for_import
 from tests.support.plant_operations import make_plant, request_run, snapshot_for
 from tests.support.trash_operations import sibling
@@ -235,7 +236,7 @@ def test_restore_parent_preserves_individual_plant_trash_and_restarts_future_sch
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=1))
     assert trash_plant(*args, plant.pk).deleted_at == NOW
     trash_region(*args)
-    with pytest.raises(ValidationError, match="parent_region_trashed"):
+    with raises_code("parent_region_trashed"):
         restore_plant(*args, plant.pk)
     restored_at = NOW + timedelta(days=2)
     monkeypatch.setattr(timezone, "now", lambda: restored_at)
@@ -247,7 +248,7 @@ def test_restore_parent_preserves_individual_plant_trash_and_restarts_future_sch
     schedule.refresh_from_db()
     assert schedule.effective_from == restored_at
     assert schedule.times == ["16:00"]
-    with pytest.raises(ValidationError, match="location_already_has_plant"):
+    with raises_code("location_already_has_plant"):
         restore_plant(*args, plant.pk)
     trash_plant(*args, active.pk)
     assert restore_plant(*args, plant.pk).deleted_at is None
@@ -281,7 +282,7 @@ def test_inherited_plant_trash_cannot_start_an_independent_deadline(
     system, plant = make_plant(monkeypatch)
     args = (system.member, system.tenant.pk, system.region.pk)
     trash_region(*args)
-    with pytest.raises(ValidationError, match="parent_region_trashed"):
+    with raises_code("parent_region_trashed"):
         trash_plant(*args, plant.pk)
     plant.refresh_from_db()
     assert plant.deleted_at is None
@@ -301,10 +302,10 @@ def test_restore_deadline_is_strict_and_purge_boundary_is_inclusive(
     assert purge_expired(NOW + RETENTION - timedelta(microseconds=1)) == {"regions": 0, "plants": 0}
     monkeypatch.setattr(timezone, "now", lambda: NOW + RETENTION)
     if kind == "region":
-        with pytest.raises(ValidationError, match="trash_retention_expired"):
+        with raises_code("trash_retention_expired"):
             restore_region(*args)
     else:
-        with pytest.raises(ValidationError, match="trash_retention_expired"):
+        with raises_code("trash_retention_expired"):
             restore_plant(*args, plant.pk)
     assert purge_expired() == {"regions": int(kind == "region"), "plants": 1}
     assert not Plant.objects.filter(pk=plant.pk).exists()

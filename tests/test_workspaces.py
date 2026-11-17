@@ -13,7 +13,6 @@ from django.utils import timezone
 
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.invitations import (
-    InvitationRateLimitError,
     accept_workspace_invitation,
     invitation_digest,
     invite_workspace_member,
@@ -26,6 +25,7 @@ from pyracast.accounts.models import (
     WorkspaceInvitation,
 )
 from pyracast.accounts.operations import reassign_workspace_admin
+from pyracast.errors import DomainError
 from tests.support.company_registration import mailed_code, signup
 from tests.support.workspaces import invitation_token
 
@@ -426,7 +426,7 @@ def test_workspace_invitation_hourly_limit_is_durable(
             for number in range(20)
         ]
     )
-    with pytest.raises(InvitationRateLimitError):
+    with pytest.raises(DomainError):
         invite_workspace_member(administrator, tenant.pk, "another@example.com")
     assert WorkspaceInvitation.objects.count() == 20
 

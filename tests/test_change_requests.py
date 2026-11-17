@@ -17,12 +17,12 @@ from pyracast.accounts.operations import reassign_workspace_admin
 from pyracast.change_requests import operations, queries
 from pyracast.change_requests.models import ChangeRequest, IncidentChange, ProductionChangeItem
 from pyracast.change_requests.operations import (
-    RequestConflictError,
     approve_request,
     submit_incident,
     submit_production,
 )
 from pyracast.change_requests.queries import request_detail
+from pyracast.errors import ConflictError
 from pyracast.incidents.models import IncidentRevision, PlantIncident
 from pyracast.incidents.operations import save_incident
 from pyracast.irradiance import local_day_bounds
@@ -84,7 +84,7 @@ def test_provider_review_tracks_semantic_values_and_freezes_approval(
     identical = request_detail(case.system.member, case.system.tenant.pk, request.pk)
     assert identical["review_fingerprint"] == before["review_fingerprint"]
     acquisition(source, minute=2, values=["30"] * 24)
-    with pytest.raises(RequestConflictError, match="review context changed"):
+    with pytest.raises(ConflictError, match="review context changed"):
         approve_request(
             case.system.member,
             case.system.tenant.pk,
@@ -161,7 +161,7 @@ def test_half_hour_review_preserves_native_provider_evidence_and_coverage_warnin
         }
     ]
     acquisition(source, minute=1, values=["27"] * 24)
-    with pytest.raises(RequestConflictError, match="review context changed"):
+    with pytest.raises(ConflictError, match="review context changed"):
         approve_request(
             case.system.member,
             case.system.tenant.pk,
@@ -305,7 +305,7 @@ def test_incident_overlap_and_configuration_change_are_derived_conflicts(
         values=incident_values(),
     )
     save_incident(*case.scope(case.system.member), **incident_values())
-    with pytest.raises(RequestConflictError):
+    with pytest.raises(ConflictError):
         approve(case, request)
     request.refresh_from_db()
     assert request.status == "pending"
@@ -314,7 +314,7 @@ def test_incident_overlap_and_configuration_change_are_derived_conflicts(
         is not None
     )
     revise_plant(*case.scope(case.system.member), name="Plant", dc_capacity_mw=150)
-    with pytest.raises(RequestConflictError, match="configuration changed"):
+    with pytest.raises(ConflictError, match="configuration changed"):
         approve(case, request)
     detail = request_detail(case.system.member, case.system.tenant.pk, request.pk)
     assert detail["can_review"]
@@ -469,7 +469,7 @@ def test_detail_rechecks_ownership_when_final_membership_read_sees_admin_transfe
     monkeypatch.setattr(queries, "tenant_membership", transferred_membership)
     response = client.get(f"/api/tenants/{case.system.tenant.pk}/change-requests/{request.pk}/")
     assert response.status_code == 404
-    assert response.json() == {"code": "not_found"}
+    assert response.json() == {"code": "not_found", "message": "The requested item was not found."}
 
 
 def test_stale_production_proposal_answers_409_and_stores_nothing(
@@ -502,7 +502,7 @@ def test_stale_production_proposal_answers_409_and_stores_nothing(
     )
     assert response.status_code == 409, response.content
     assert response.json() == {
-        "code": "production_revision_conflict",
-        "detail": "Production changed. Reload the latest values before saving.",
+        "code": "production_revision_changed",
+        "message": "Production changed. Reload the latest values before saving.",
     }
     assert list(ChangeRequest.objects.values_list("pk", flat=True)) == stored

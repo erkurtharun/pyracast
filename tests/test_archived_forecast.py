@@ -20,6 +20,7 @@ from pyracast.plants.models import (
 )
 from pyracast.plants.operations import activate_calibration, reset_calibration
 from tests.support.domain import NOW
+from tests.support.errors import raises_code
 from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -118,7 +119,7 @@ def test_archive_does_not_backdate_a_later_configuration(
 
 def test_archive_rejects_future_days(monkeypatch: pytest.MonkeyPatch) -> None:
     _, plant = make_plant(monkeypatch)
-    with pytest.raises(ValidationError, match="date_out_of_range"):
+    with raises_code("date_out_of_range"):
         archived_forecast(plant, NOW.date() + timedelta(days=1), 30, NOW)
 
 

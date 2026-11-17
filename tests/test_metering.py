@@ -31,6 +31,7 @@ from pyracast.plants.models import Plant, PlantEvent
 from pyracast.regions.models import Region
 from pyracast.trash import purge_expired
 from tests.support.domain import NOW
+from tests.support.errors import raises_code
 from tests.support.metering import (
     NEXT_NIGHT,
     PROVIDER_PLANT,
@@ -68,7 +69,7 @@ def test_connection_scope_identity_and_missing_configuration(
     ):
         values: dict[str, object] = {"provider_plant_id": 7, "expected_eic": PROVIDER_PLANT.eic}
         values.update(kwargs)
-        with pytest.raises(ValidationError, match=error):
+        with raises_code(error):
             connect_epias(
                 plant.pk,
                 actor=system.admin,
@@ -77,7 +78,7 @@ def test_connection_scope_identity_and_missing_configuration(
                 expected_eic=cast(str, values["expected_eic"]),
             )
     Plant.objects.filter(pk=plant.pk).update(current_configuration=None)
-    with pytest.raises(ValidationError, match="configuration_unavailable"):
+    with raises_code("configuration_unavailable"):
         connect(plant, system.admin)
     Plant.objects.filter(pk=plant.pk).update(deleted_at=NOW)
     with pytest.raises(Plant.DoesNotExist):
@@ -106,7 +107,7 @@ def test_connection_rechecks_changes_after_validation(
         with pytest.raises(PermissionDenied):
             connect(plant, system.admin, FixtureClient(revoke))
     else:
-        with pytest.raises(ValidationError, match="configuration_unavailable"):
+        with raises_code("configuration_unavailable"):
             connect(plant, system.admin, FixtureClient(revoke))
     assert not EpiasConnection.objects.exists()
 

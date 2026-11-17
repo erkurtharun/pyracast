@@ -22,7 +22,6 @@ from pyracast.plants.performance import forecast_performance
 from pyracast.plants.production import production_history
 from pyracast.plants.production_changes import (
     ProductionChange,
-    ProductionRevisionConflictError,
     change_production,
     preview_production,
 )
@@ -141,17 +140,12 @@ class ProductionChangesView(ScopedView[Plant]):
         data = ProductionChangesInput(data=request.data)
         data.is_valid(raise_exception=True)
         values = data.validated_data
-        try:
-            result = change_production(
-                *scope,
-                configuration_id=values["configuration_id"],
-                unit=values["unit"],
-                changes=[ProductionChange(**row) for row in values["changes"]],
-            )
-        except ProductionRevisionConflictError as error:
-            return Response(
-                {"code": "production_revision_conflict", "detail": str(error)}, status=409
-            )
+        result = change_production(
+            *scope,
+            configuration_id=values["configuration_id"],
+            unit=values["unit"],
+            changes=[ProductionChange(**row) for row in values["changes"]],
+        )
         return Response(result)
 
 

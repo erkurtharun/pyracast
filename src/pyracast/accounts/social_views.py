@@ -5,7 +5,6 @@ from allauth.account.internal.flows import reauthentication
 from allauth.core import ratelimit
 from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.headless.base.response import AuthenticationResponse
-from allauth.headless.internal.restkit.response import ErrorResponse
 from allauth.headless.socialaccount.forms import RedirectToProviderForm
 from allauth.headless.socialaccount.inputs import SignupInput
 from allauth.headless.socialaccount.response import SocialAccountsResponse
@@ -35,7 +34,7 @@ from django.template.loader import render_to_string
 from django.views.decorators.http import require_GET
 
 from pyracast.accounts.signup import workspace_signup_transaction
-from pyracast.accounts.social import locked_social_user
+from pyracast.accounts.social import locked_social_user, social_callback_url
 
 
 class CompanySocialSignupInput(SignupInput):
@@ -65,9 +64,10 @@ class ProviderSignupView(AllauthProviderSignupView):
 
 class RedirectToProviderView(AllauthRedirectToProviderView):
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
-        callback = f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/?social_callback=1"
+        callback = social_callback_url()
+        refused = HttpResponseRedirect(f"{callback}&error=invalid_request")
         if request.POST.get("callback_url") != callback:
-            return ErrorResponse(request, status=400)
+            return refused
         if request.POST.get(
             "process"
         ) == "connect" and reauthentication.is_reauthentication_required(
@@ -78,7 +78,7 @@ class RedirectToProviderView(AllauthRedirectToProviderView):
             )
         form = RedirectToProviderForm(request.POST)
         if not form.is_valid():
-            return super().post(request, *args, **kwargs)
+            return refused
         response = cast(
             HttpResponse,
             form.cleaned_data["provider"].redirect(
@@ -148,8 +148,6 @@ class ManageProvidersView(AllauthManageProvidersView):
 @require_GET
 def provider_callback(request: HttpRequest, provider: str) -> HttpResponseBase:
     if provider not in settings.SOCIALACCOUNT_PROVIDERS:
-        return HttpResponseRedirect(
-            f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/?social_callback=1&error=provider_unavailable"
-        )
+        return HttpResponseRedirect(f"{social_callback_url()}&error=provider_unavailable")
     callback = google_callback if provider == "google" else microsoft_callback
     return cast(HttpResponseBase, callback(request))

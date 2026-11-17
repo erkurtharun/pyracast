@@ -8,7 +8,14 @@ from django.conf import settings
 from django.contrib.sessions.exceptions import SessionInterrupted
 from django.core.exceptions import ImproperlyConfigured
 from django.db import OperationalError, connections, transaction
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import HttpRequest, HttpResponse
+from django.utils import translation
+from django.utils.cache import patch_cache_control
+from django.utils.html import format_html
+
+from pyracast.accounts.language import request_language
+from pyracast.api.errors import coded, error_json
+from pyracast.errors import MESSAGES, ErrorCode
 
 _LOCK_TIMEOUT = "5s"
 
@@ -79,8 +86,22 @@ class SessionRequestSerialization:
             with serialize_session(session_key):
                 return self.get_response(request)
         except SessionBusyError:
-            return JsonResponse(
-                {"code": "session_busy", "detail": "Another session request is still running."},
-                status=429,
-                headers={"Retry-After": "1"},
-            )
+            if request.method == "GET" and request.headers.get("Sec-Fetch-Mode") == "navigate":
+                return _busy_page(request)
+            return error_json(request, lambda: coded(ErrorCode.SESSION_BUSY, 429, retry_after=1))
+
+
+def _busy_page(request: HttpRequest) -> HttpResponse:
+    with translation.override(request_language(request, None)):
+        page = format_html(
+            '<!doctype html><html lang="{}"><title>Pyracast</title><p>{}</p></html>',
+            translation.get_language(),
+            MESSAGES[ErrorCode.SESSION_BUSY],
+        )
+    response = HttpResponse(page, status=503)
+    if "session_retry" not in request.GET:
+        path = request.get_full_path()
+        # One automatic reload: the marker stops a refresh loop while the session stays busy.
+        response["Refresh"] = f"1; url={path}{'&' if '?' in path else '?'}session_retry=1"
+    patch_cache_control(response, private=True, no_store=True)
+    return response

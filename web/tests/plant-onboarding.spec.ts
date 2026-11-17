@@ -1,5 +1,6 @@
 import { test, expect } from "./support/test";
 import { mockApi, paged, plant, region } from "./support/workspace";
+import { errorBody } from "./support/errors";
 
 for (const endpoint of ["sites", "plants"] as const) {
     test(`a temporary ${endpoint} refresh failure preserves an open technical draft`, async ({
@@ -13,7 +14,10 @@ for (const endpoint of ["sites", "plants"] as const) {
         const message = `${endpoint} refresh temporarily failed.`;
         await page.route(url, (route) =>
             fail
-                ? route.fulfill({ status: 503, json: { detail: message } })
+                ? route.fulfill({
+                      status: 503,
+                      json: errorBody("busy", message),
+                  })
                 : route.fallback(),
         );
         await page.goto("/app/");
@@ -286,10 +290,10 @@ test("plant submission errors preserve review and every field for retry", async 
         if (attempts === 1)
             return route.fulfill({
                 status: 400,
-                json: {
-                    code: "invalid_request",
-                    detail: ["location_already_exists"],
-                },
+                json: errorBody(
+                    "location_already_exists",
+                    "This location is already in your company's portfolio. Open the existing plant.",
+                ),
             });
         return route.fallback();
     });
@@ -305,7 +309,7 @@ test("plant submission errors preserve review and every field for retry", async 
         .getByRole("button", { name: "Submit plant for approval" })
         .click();
     await expect(page.locator("main").getByRole("alert")).toContainText(
-        "already in your company’s portfolio",
+        "already in your company's portfolio",
     );
     await expect(
         page.getByRole("heading", { name: "Check your plant details" }),

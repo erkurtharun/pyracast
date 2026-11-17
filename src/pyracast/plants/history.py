@@ -9,6 +9,7 @@ from django.utils.translation import gettext
 
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.db import read_snapshot
+from pyracast.errors import DomainError, ErrorCode
 from pyracast.forecasts.actuals import (
     ArchivedActualSource,
     apply_archived_actual_source,
@@ -181,7 +182,7 @@ def _plant_outlook(
                 else historical_irradiance(snapshot, target_date)
             )
         except (ValueError, ArithmeticError) as exc:
-            raise ValidationError("calculation_out_of_range") from exc
+            raise DomainError(ErrorCode.CALCULATION_OUT_OF_RANGE) from exc
     if (
         source == "auto"
         and as_of is None
@@ -216,7 +217,7 @@ def _plant_outlook(
             )
             apply_archived_actual_source(result, actual_source)
         except (ValueError, ArithmeticError) as exc:
-            raise ValidationError("calculation_out_of_range") from exc
+            raise DomainError(ErrorCode.CALCULATION_OUT_OF_RANGE) from exc
         if calibration is not None:
             cast(list[str], result["quality_flags"]).append("retrospective_calibration")
     return {

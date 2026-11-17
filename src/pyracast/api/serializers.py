@@ -16,6 +16,28 @@ class InputSerializer(serializers.Serializer[dict[str, Any]]):
         return cast(dict[str, Any], super().to_internal_value(data))
 
 
+class FiniteFloat(serializers.FloatField):
+    def __init__(
+        self, *, above: float | None = None, below: float | None = None, **kwargs: Any
+    ) -> None:
+        self.above, self.below = above, below
+        super().__init__(**kwargs)
+
+    def to_internal_value(self, data: Any) -> float:
+        if isinstance(data, bool):
+            self.fail("invalid")
+        value = super().to_internal_value(data)
+        if self.above is not None and value <= self.above:
+            raise serializers.ValidationError(
+                gettext("Enter a number greater than %(limit)s.") % {"limit": self.above}
+            )
+        if self.below is not None and value >= self.below:
+            raise serializers.ValidationError(
+                gettext("Enter a number less than %(limit)s.") % {"limit": self.below}
+            )
+        return value
+
+
 class TenantOutput(serializers.ModelSerializer[Tenant]):
     role = serializers.ChoiceField(choices=Membership.Role.choices, read_only=True)
     pending_review_count = serializers.IntegerField(allow_null=True, read_only=True)
@@ -29,8 +51,8 @@ class TenantOutput(serializers.ModelSerializer[Tenant]):
 
 class RegionInput(InputSerializer):
     name = serializers.CharField(max_length=200)
-    latitude = serializers.FloatField(min_value=-90, max_value=90)
-    longitude = serializers.FloatField(min_value=-180, max_value=180)
+    latitude = FiniteFloat(min_value=-90, max_value=90)
+    longitude = FiniteFloat(min_value=-180, max_value=180)
     timezone = serializers.CharField(max_length=100)
 
 
@@ -51,8 +73,8 @@ class RegionOutput(serializers.ModelSerializer[Region]):
 
 class LocationChangeInput(InputSerializer):
     expected_revision = serializers.IntegerField(min_value=1)
-    latitude = serializers.FloatField(min_value=-90, max_value=90)
-    longitude = serializers.FloatField(min_value=-180, max_value=180)
+    latitude = FiniteFloat(min_value=-90, max_value=90)
+    longitude = FiniteFloat(min_value=-180, max_value=180)
     timezone = serializers.CharField(max_length=100)
     reason = serializers.CharField(max_length=1000, required=False, default="", allow_blank=True)
 

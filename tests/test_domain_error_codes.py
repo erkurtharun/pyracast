@@ -8,6 +8,8 @@ from django.test import Client
 from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant
+from pyracast.errors import DomainError
+from pyracast.incidents.operations import finish_incident, save_incident
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.operations import create_plant
 from tests.support.domain import make_system
@@ -225,3 +227,35 @@ def test_workspace_refusals_answer_their_own_codes() -> None:
         "code": "invitation_unavailable",
         "message": "The invitation is invalid or expired.",
     }
+
+
+def test_outage_operations_key_each_invalid_value_by_field() -> None:
+    system = make_system(approved=True)
+    plant = create_plant(
+        system.member, system.tenant.pk, system.region.pk, name="PV", dc_capacity_mw=1
+    )
+    scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
+    start = timezone.now() - timedelta(hours=2)
+    values: dict[str, Any] = {
+        "kind": "other",
+        "title": "Loss",
+        "notes": "",
+        "starts_at": start,
+        "ends_at": None,
+        "available_dc_mw": None,
+        "available_inverter_mw": None,
+        "available_export_mw": None,
+    }
+    for invalid, field in (
+        ({"starts_at": start.replace(tzinfo=None)}, "starts_at"),
+        ({"ends_at": (start + timedelta(hours=1)).replace(tzinfo=None)}, "ends_at"),
+        ({"notes": "x" * 2001}, "notes"),
+        ({"available_dc_mw": -1}, "available_dc_mw"),
+    ):
+        with pytest.raises(DomainError) as refused:
+            save_incident(*scope, **(values | invalid))
+        assert (refused.value.code, refused.value.field) == ("invalid_request", field)
+    incident = save_incident(*scope, **values)
+    with pytest.raises(DomainError) as unfinished:
+        finish_incident(*scope, incident_id=incident.pk, expected_revision=1)
+    assert (unfinished.value.code, unfinished.value.field) == ("invalid_request", "ends_at")

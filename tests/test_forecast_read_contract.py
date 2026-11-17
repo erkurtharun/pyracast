@@ -95,10 +95,10 @@ def test_forecast_reads_answer_not_found_outside_the_url_scope(
     params = {"date": DAY.isoformat()}
     foreign_plant = client.get(plant_path(system, sibling), params)
     assert foreign_plant.status_code == 404
-    assert foreign_plant.json()["code"] == "http_404"
+    assert foreign_plant.json()["code"] == "not_found"
     foreign = client.get(region_path(system, foreign_region), params)
     assert foreign.status_code == 404
-    assert foreign.json()["code"] == "http_404"
+    assert foreign.json()["code"] == "not_found"
     foreign_plants = plant_path(system, plant).replace(
         f"regions/{system.region.pk}/", f"regions/{foreign_region.pk}/"
     )
@@ -109,20 +109,20 @@ def test_forecast_reads_answer_not_found_outside_the_url_scope(
 @pytest.mark.parametrize(
     ("params", "field"),
     [
-        ({"date": DAY.isoformat(), "unknown": "1"}, "non_field_errors"),
+        ({"date": DAY.isoformat(), "unknown": "1"}, None),
         ({"date": ""}, "date"),
     ],
 )
 def test_forecast_reads_reject_unknown_keys_and_empty_dates_by_code(
-    monkeypatch: pytest.MonkeyPatch, scope: str, params: dict[str, str], field: str
+    monkeypatch: pytest.MonkeyPatch, scope: str, params: dict[str, str], field: str | None
 ) -> None:
     system, plant = make_plant(monkeypatch)
     path = plant_path(system, plant) if scope == "plant" else region_path(system)
     response = client_for(system.member).get(path, params)
     assert response.status_code == 400
     body = response.json()
-    assert body["code"] == "http_400"
-    assert list(body["detail"]) == [field]
+    assert body["code"] == "invalid_request"
+    assert list(body.get("fields", {})) == ([field] if field else [])
 
 
 def test_region_forecast_rejects_the_plant_only_archive_source(
@@ -133,8 +133,8 @@ def test_region_forecast_rejects_the_plant_only_archive_source(
         region_path(system), {"date": DAY.isoformat(), "data_source": "archived_forecast"}
     )
     assert response.status_code == 400
-    assert response.json()["code"] == "http_400"
-    assert list(response.json()["detail"]) == ["data_source"]
+    assert response.json()["code"] == "invalid_request"
+    assert list(response.json()["fields"]) == ["data_source"]
 
 
 def test_past_day_plant_forecast_is_the_archived_forecast(

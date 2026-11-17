@@ -495,7 +495,7 @@ def test_totp_and_recovery_codes_gate_login_and_cannot_be_replayed(
     pending = submit(client, "auth/login", credentials)
     assert pending.status_code == 401
     assert any(flow["id"] == "mfa_authenticate" for flow in pending.json()["data"]["flows"])
-    assert client.get("/api/tenants/").status_code == 403
+    assert client.get("/api/tenants/").status_code == 401
     monkeypatch.setattr(totp_auth, "time", SimpleNamespace(time=lambda: now + 62))
     assert (
         submit(

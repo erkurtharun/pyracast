@@ -2,6 +2,7 @@ import { expect, test, type Page } from "./support/test";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
 import AxeBuilder from "@axe-core/playwright";
+import { errorBody } from "./support/errors";
 
 test.use({ timezoneId: "Europe/Istanbul" });
 
@@ -77,9 +78,10 @@ async function workspace(
             if (conflict) {
                 await route.fulfill({
                     status: 409,
-                    json: {
-                        detail: "This outage changed. Reload before editing.",
-                    },
+                    json: errorBody(
+                        "incident_revision_changed",
+                        "This outage changed. Reload before editing.",
+                    ),
                 });
                 return;
             }

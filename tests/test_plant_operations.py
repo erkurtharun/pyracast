@@ -36,6 +36,7 @@ from pyracast.plants.operations import (
 )
 from pyracast.regions.models import AuditEvent, Region
 from tests.support.domain import NOW, System, make_system
+from tests.support.errors import raises_code
 from tests.support.plant_operations import make_plant, ready_run, request_run, saved_actuals
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -491,7 +492,7 @@ def test_configless_plant_cannot_activate_and_historical_imports_keep_revision(
         tenant=system.tenant, name="Unfinished", latitude=41, longitude=29, timezone="UTC"
     )
     unfinished = Plant.objects.create(region=other_region, name="Unfinished")
-    with pytest.raises(ValidationError, match="configuration_unavailable"):
+    with raises_code("configuration_unavailable"):
         reset_calibration(system.member, system.tenant.pk, other_region.pk, unfinished.pk)
     old_id = plant.current_configuration_id
     assert old_id is not None

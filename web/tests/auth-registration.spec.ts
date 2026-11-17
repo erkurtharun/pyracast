@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { test, expect, type Page } from "./support/test";
 import { mockApi, user } from "./support/workspace";
+import { errorBody } from "./support/errors";
 
 test("signup entry opens registration with public information links", async ({
     page,
@@ -202,11 +203,11 @@ test("a sign-in server error shows its reference", async ({ page }) => {
     await page.route("**/api/auth/browser/v1/auth/login", (route) =>
         route.fulfill({
             status: 500,
-            json: {
-                code: "server_error",
-                message: "The server could not complete this request.",
-                request_id: "0123456789abcdef0123456789abcdef",
-            },
+            json: errorBody(
+                "server_error",
+                "The server could not complete this request.",
+                { request_id: "0123456789abcdef0123456789abcdef" },
+            ),
         }),
     );
     await page.goto("/app/");
@@ -223,7 +224,13 @@ test("a sign-in server error shows its reference", async ({ page }) => {
 test("an ended session asks to sign in again", async ({ page }) => {
     await mockApi(page, { anonymous: true });
     await page.route("**/api/auth/browser/v1/auth/login", (route) =>
-        route.fulfill({ status: 400, json: { code: "session_ended" } }),
+        route.fulfill({
+            status: 400,
+            json: errorBody(
+                "session_ended",
+                "Your session ended. Sign in again.",
+            ),
+        }),
     );
     await page.goto("/app/");
     await page.getByLabel("Email", { exact: true }).fill("owner@example.test");
@@ -232,7 +239,7 @@ test("an ended session asks to sign in again", async ({ page }) => {
         .fill("Test-only-cobalt-79!");
     await page.locator("form").getByRole("button", { name: "Sign in" }).click();
     await expect(page.locator("form").getByRole("alert")).toContainText(
-        "Your session ended. Refresh the page and sign in again.",
+        "Your session ended. Sign in again.",
     );
 });
 

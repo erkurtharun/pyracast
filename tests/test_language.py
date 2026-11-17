@@ -136,7 +136,7 @@ def test_anonymous_choice_requires_csrf_and_sets_only_explicit_cookie() -> None:
 def test_unsupported_language_does_not_write(language: object) -> None:
     response = choose(Client(enforce_csrf_checks=True), language)
     assert response.status_code == 400
-    assert response.json()["code"] == "http_400"
+    assert response.json()["code"] == "invalid_request"
     assert LANGUAGE_COOKIE not in response.cookies
     assert not UserLanguagePreference.objects.exists()
 

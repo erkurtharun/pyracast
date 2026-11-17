@@ -8,6 +8,7 @@ import { test, expect, type Page } from "./support/test";
 import { mockApi, user, region, plant, paged } from "./support/workspace";
 import { messages } from "../src/i18n/messages";
 import { parseProduction } from "../src/lib/production";
+import { errorBody } from "./support/errors";
 
 type Language = "en" | "tr";
 
@@ -420,12 +421,18 @@ test("coded forecast errors are explained in the selected language", async ({
     page,
 }) => {
     await mockLanguage(page, "tr");
-    await page.route("**/plants/21/forecast/**", (route) =>
-        route.fulfill({
+    await page.route("**/plants/21/forecast/**", async (route) => {
+        const cookie = (await route.request().headerValue("cookie")) ?? "";
+        await route.fulfill({
             status: 400,
-            json: { code: "completed_day_required" },
-        }),
-    );
+            json: errorBody(
+                "completed_day_required",
+                cookie.includes("pyracast_language=en")
+                    ? "Choose a completed local day for historical estimates."
+                    : "Geçmiş tahminleri için tamamlanmış bir yerel gün seçin.",
+            ),
+        });
+    });
     await page.goto("/app/");
     await page.getByRole("button", { name: /East array/ }).click();
     await expect(page.getByRole("main").getByRole("alert")).toHaveText(

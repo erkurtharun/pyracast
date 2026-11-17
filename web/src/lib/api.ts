@@ -1,5 +1,5 @@
 import type { components } from "./schema";
-import { browserErrors } from "@/i18n/browser";
+import { errorFromResponse } from "./api/errors";
 export type Session = components["schemas"]["SessionOutput"];
 export type Tenant = components["schemas"]["TenantOutput"];
 export type Region = components["schemas"]["RegionOutput"];
@@ -22,14 +22,6 @@ export type Page<T> = {
     previous: string | null;
     count: number;
 };
-export class ApiError extends Error {
-    constructor(
-        message: string,
-        readonly fields: Record<string, string> = {},
-    ) {
-        super(message);
-    }
-}
 let sessionQueue: Promise<unknown> = Promise.resolve();
 let sessionFlight: Promise<Session> | undefined;
 export function request<T>(
@@ -77,72 +69,6 @@ async function send<T>(
         response.status === 204
             ? null
             : await response.json().catch(() => null);
-    if (!response.ok)
-        throw new ApiError(
-            failureMessage(data, response.status),
-            validationFields(data),
-        );
+    if (!response.ok) throw errorFromResponse(response.status, data);
     return data as T;
-}
-export function failureMessage(data: unknown, status: number): string {
-    const t = browserErrors();
-    if (!data || typeof data !== "object" || Array.isArray(data))
-        return errorMessage(data) || t("request", { status });
-    const reference = "request_id" in data ? data.request_id : undefined;
-    const message =
-        errorMessage(
-            Object.fromEntries(
-                Object.entries(data).filter(
-                    ([key]) => !["message", "request_id"].includes(key),
-                ),
-            ),
-        ) || t("request", { status });
-    return typeof reference === "string" && reference
-        ? `${message} ${t("reference", { reference })}`
-        : message;
-}
-function errorMessage(data: unknown): string {
-    const t = browserErrors();
-    if (typeof data === "string") {
-        const messages: Record<string, string> = {
-            location_already_exists: t("duplicateLocation"),
-            location_already_has_plant: t("activePlant"),
-        };
-        if (messages[data]) return messages[data];
-        const key = `codes.${data}` as Parameters<typeof t>[0];
-        if (t.has(key)) return t(key);
-        return /^[a-z][a-z0-9_]*$/.test(data) ? "" : data;
-    }
-    if (Array.isArray(data))
-        return data.map(errorMessage).filter(Boolean).join(" ");
-    if (data && typeof data === "object") {
-        const detail = Object.entries(data)
-            .filter(([key]) => key !== "code")
-            .map(([key, value]) => {
-                const message = errorMessage(value);
-                return message
-                    ? `${["detail", "non_field_errors"].includes(key) ? "" : `${key}: `}${message}`
-                    : "";
-            })
-            .filter(Boolean)
-            .join(" ");
-        if (detail) return detail;
-        if ("code" in data && typeof data.code === "string") {
-            const key = `codes.${data.code}` as Parameters<typeof t>[0];
-            return t.has(key) ? t(key) : "";
-        }
-    }
-    return "";
-}
-
-function validationFields(data: unknown): Record<string, string> {
-    if (!data || typeof data !== "object" || !("detail" in data)) return {};
-    const detail = data.detail;
-    if (!detail || typeof detail !== "object" || Array.isArray(detail))
-        return {};
-    return Object.fromEntries(
-        Object.entries(detail)
-            .filter(([key]) => !["detail", "non_field_errors"].includes(key))
-            .map(([key, value]) => [key, errorMessage(value)]),
-    );
 }

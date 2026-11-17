@@ -48,7 +48,7 @@ pytestmark = pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize(
     ("language", "expected"),
     [
-        ("en", "Incident periods must not overlap."),
+        ("en", "Outage periods must not overlap."),
         ("tr", "Kesinti d\u00f6nemleri birbiriyle \u00e7ak\u0131\u015fmamal\u0131d\u0131r."),
     ],
 )
@@ -76,7 +76,7 @@ def test_approval_validation_detail_is_plain_localized_text(
     assert response.status_code == 409
     assert response.json() == {
         "code": "request_conflict",
-        "detail": expected,
+        "message": expected,
     }
 
 
@@ -259,7 +259,7 @@ def test_compiled_turkish_review_conflict_text_is_exact(monkeypatch: pytest.Monk
     assert response.status_code == 409
     assert response.json() == {
         "code": "review_context_changed",
-        "detail": (
+        "message": (
             "\u0130nceleme verileri de\u011fi\u015fti. Sayfay\u0131 yenileyip yeniden inceleyin."
         ),
     }

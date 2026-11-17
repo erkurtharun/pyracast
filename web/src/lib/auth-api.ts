@@ -1,15 +1,5 @@
-import { ApiError, failureMessage } from "./api";
+import { ApiError, errorFromResponse } from "./api/errors";
 import { browserErrors } from "@/i18n/browser";
-
-export class AuthResponseError extends ApiError {
-    constructor(
-        message: string,
-        readonly status: number,
-        fields: Record<string, string> = {},
-    ) {
-        super(message, fields);
-    }
-}
 
 export type AuthData = {
     flows?: { id: string; is_pending?: boolean }[];
@@ -60,11 +50,11 @@ export async function authRequest<TData = AuthData>(
     });
     const data: unknown = await response.json().catch(() => null);
     if (!data || typeof data !== "object" || Array.isArray(data))
-        throw new AuthResponseError(
+        throw new ApiError(
             response.ok
                 ? t("invalidResponse")
                 : t("request", { status: response.status }),
-            response.status,
+            { status: response.status },
         );
     const result = data as AuthResult<TData>;
     if (
@@ -77,15 +67,17 @@ export async function authRequest<TData = AuthData>(
         )
     ) {
         const errors = result.errors ?? [];
-        throw new AuthResponseError(
+        throw new ApiError(
             errors.map((error) => error.message).join(" ") ||
-                failureMessage(data, response.status),
-            response.status,
-            Object.fromEntries(
-                errors
-                    .filter((error) => error.param)
-                    .map((error) => [error.param!, error.message]),
-            ),
+                errorFromResponse(response.status, data).message,
+            {
+                status: response.status,
+                fields: Object.fromEntries(
+                    errors
+                        .filter((error) => error.param)
+                        .map((error) => [error.param!, error.message]),
+                ),
+            },
         );
     }
     return result;

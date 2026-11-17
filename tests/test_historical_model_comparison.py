@@ -219,7 +219,7 @@ def test_historical_comparison_keeps_tenant_access_and_rejects_unknown_modes(
     url = (
         f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/performance/"
     )
-    assert client.get(url, {"comparison": "historical_model"}).status_code == 403
+    assert client.get(url, {"comparison": "historical_model"}).status_code == 401
     outsider = User.objects.create_user("outsider")
     Membership.objects.create(user=outsider, tenant=Tenant.objects.create(name="Other"))
     client.force_login(outsider)

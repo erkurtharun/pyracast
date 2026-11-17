@@ -2,7 +2,6 @@ from datetime import date, datetime, timedelta
 from typing import Any, cast
 
 import pytest
-from django.core.exceptions import ValidationError
 from django.test import Client
 from django.utils import timezone
 
@@ -25,6 +24,7 @@ from pyracast.regions.models import Region
 from pyracast.solar import daylight_window
 from pyracast.weather import serialize_weather
 from tests.support.domain import System
+from tests.support.errors import raises_code
 from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
 from tests.support.weather_collection import WeatherFixture
 
@@ -683,7 +683,7 @@ def test_intraday_rejects_damaged_original_native_bounds(
         row["original_end"] = row["start"]
     actual.save(update_fields=("normalized_intervals",))
     monkeypatch.setattr(timezone, "now", lambda: now)
-    with pytest.raises(ValidationError, match="calculation_out_of_range"):
+    with raises_code("calculation_out_of_range"):
         plant_outlook(
             system.member,
             system.tenant.pk,
@@ -694,7 +694,7 @@ def test_intraday_rejects_damaged_original_native_bounds(
             source="auto",
         )
     system.region.refresh_from_db()
-    with pytest.raises(ValidationError, match="calculation_out_of_range"):
+    with raises_code("calculation_out_of_range"):
         regional_outlook(system.region, DAY, "auto", now)
 
 

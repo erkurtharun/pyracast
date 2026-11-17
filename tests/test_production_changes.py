@@ -11,6 +11,7 @@ from django.test import Client
 from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant
+from pyracast.errors import ConflictError
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.measurements import latest_measurement_day, select_measurements
 from pyracast.plants.models import ProductionObservation
@@ -18,7 +19,6 @@ from pyracast.plants.operations import ObservationInput, revise_plant
 from pyracast.plants.production import production_history
 from pyracast.plants.production_changes import (
     ProductionChange,
-    ProductionRevisionConflictError,
     change_production,
     preview_production,
 )
@@ -103,7 +103,7 @@ def test_batch_rejects_stale_and_overlap_without_partial_changes(
     system, plant = make_plant(monkeypatch)
     start, _ = local_day_bounds(DAY, system.binding.timezone)
     first = write(system, plant, [edit(start, 2)])["ids"][0]
-    with pytest.raises(ProductionRevisionConflictError):
+    with pytest.raises(ConflictError):
         write(system, plant, [edit(start + timedelta(hours=1)), edit(start, 3)])
     assert ProductionObservation.objects.count() == 1
     with pytest.raises(ValidationError, match="overlapping"):
@@ -164,7 +164,7 @@ def test_preview_units_stale_token_and_missing_are_explicit(
     assert result["preview"][0]["current_energy_mwh"] == 0
     assert result["preview"][0]["new_energy_mwh"] == 1.5
     write(system, plant, [edit(start, 2)])
-    with pytest.raises(ProductionRevisionConflictError):
+    with pytest.raises(ConflictError):
         write(system, plant, [ProductionChange(**result["changes"][0])], unit="kWh")
     history = production_history(plant, start_date=DAY, end_date=DAY)
     assert history["intervals"][1]["effective"] is None
@@ -306,7 +306,7 @@ def test_concurrent_corrections_have_one_winner(monkeypatch: pytest.MonkeyPatch)
             barrier.wait(timeout=10)
             write(system, plant, [edit(start, value, revision_id=first)])
             return "saved"
-        except ProductionRevisionConflictError:
+        except ConflictError:
             return "conflict"
         finally:
             connection.close()

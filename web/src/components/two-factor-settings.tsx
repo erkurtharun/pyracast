@@ -8,11 +8,11 @@ import {
     useRef,
     useState,
 } from "react";
-import { ApiError, request, type Session } from "@/lib/api";
+import { request, type Session } from "@/lib/api";
+import { ApiError } from "@/lib/api/errors";
 import { browserErrors } from "@/i18n/browser";
 import {
     authRequest,
-    AuthResponseError,
     type AuthenticatorRecord,
     type AuthResult,
 } from "@/lib/auth-api";
@@ -250,7 +250,7 @@ export function TwoFactorSettings({
             await refreshExpiredSession(onSession, t("sessionExpired"));
         }
         if (isReplay) {
-            throw new AuthResponseError(t("reauthStillRequired"), 401);
+            throw new ApiError(t("reauthStillRequired"), { status: 401 });
         }
         if (afterActivation) {
             setStatusNotice(undefined);
@@ -518,7 +518,7 @@ export function TwoFactorSettings({
                 setView(options.fallbackView);
             }
             if (
-                (!(err instanceof AuthResponseError) ||
+                (!(err instanceof ApiError) ||
                     err.status >= 500 ||
                     err.status < 400) &&
                 (operation.type === "activateTotp" ||

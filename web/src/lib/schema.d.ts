@@ -923,7 +923,7 @@ export interface components {
         };
         ConflictOutput: {
             code: string;
-            detail: string;
+            message: string;
         };
         /**
          * @description * `normal` - normal
@@ -1884,6 +1884,84 @@ export interface components {
         };
         WorkspaceMembersOutput: {
             members: components["schemas"]["WorkspaceMemberOutput"][];
+        };
+        /** @enum {string} */
+        ErrorCode:
+            | "invalid_request"
+            | "bad_request"
+            | "session_ended"
+            | "not_authenticated"
+            | "csrf_failed"
+            | "permission_denied"
+            | "invalid_proxy_headers"
+            | "membership_required"
+            | "workspace_admin_required"
+            | "admin_edits_directly"
+            | "platform_admin_required"
+            | "invitation_email_unverified"
+            | "not_found"
+            | "method_not_allowed"
+            | "not_acceptable"
+            | "unsupported_media_type"
+            | "throttled"
+            | "session_busy"
+            | "invitation_rate_limited"
+            | "provider_throttled"
+            | "quota_exhausted"
+            | "server_error"
+            | "provider_unavailable"
+            | "busy"
+            | "database_conflict"
+            | "request_timeout"
+            | "provider_authentication_failed"
+            | "forecast_sources_changed"
+            | "configuration_unavailable"
+            | "location_already_has_plant"
+            | "plant_submission_required"
+            | "estimated_actuals_unavailable"
+            | "location_unchanged"
+            | "location_already_exists"
+            | "calculation_out_of_range"
+            | "trash_retention_expired"
+            | "parent_region_trashed"
+            | "date_out_of_range"
+            | "completed_day_required"
+            | "invalid_epias_plant"
+            | "epias_plant_identity_mismatch"
+            | "incident_closed"
+            | "incident_overlap"
+            | "incident_starts_in_future"
+            | "incident_ends_before_start"
+            | "incident_ends_in_future"
+            | "incident_capacity_exceeded"
+            | "invitation_unavailable"
+            | "invitation_member_exists"
+            | "workspace_admin_not_removable"
+            | "member_unavailable"
+            | "region_revision_changed"
+            | "location_change_already_pending"
+            | "location_change_already_reviewed"
+            | "incident_revision_changed"
+            | "idempotency_key_reused"
+            | "pending_request_limit"
+            | "production_revision_changed"
+            | "request_already_closed"
+            | "request_conflict"
+            | "review_context_changed"
+            | "workspace_admin_changed";
+        /** @description Body of every failed /api/ response. */
+        Error: {
+            code: components["schemas"]["ErrorCode"];
+            /** @description Localized text for the user. */
+            message: string;
+            /** @description Localized text per dotted input path. */
+            fields?: {
+                [key: string]: string;
+            };
+            /** @description Seconds. */
+            retry_after?: number;
+            /** @description Reference to the server log. */
+            request_id?: string;
         };
     };
     responses: never;

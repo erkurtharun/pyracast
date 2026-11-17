@@ -8,10 +8,12 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone as django_timezone
 from django.utils.translation import gettext
+from django.utils.translation import gettext_lazy as _
 
 from pyracast.accounts.authorization import require_platform_admin, tenant_membership
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.errors import ConflictError, DomainError, ErrorCode
 from pyracast.forecasts.models import CollectionJob
 from pyracast.regions.models import (
     AuditEvent,
@@ -39,18 +41,28 @@ def require_available_location(
         location_latitude=Decimal(str(canonical_coordinate(latitude))),
         location_longitude=Decimal(str(canonical_coordinate(longitude))),
     ).exists():
-        raise ValidationError("location_already_exists")
+        raise DomainError(ErrorCode.LOCATION_ALREADY_EXISTS)
 
 
 def validate_location(latitude: float, longitude: float, timezone: str) -> None:
     if not math.isfinite(latitude) or not -90 <= latitude <= 90:
-        raise ValidationError(gettext("Latitude must be between -90 and 90 degrees."))
+        raise DomainError(
+            ErrorCode.INVALID_REQUEST,
+            _("Latitude must be between -90 and 90 degrees."),
+            field="latitude",
+        )
     if not math.isfinite(longitude) or not -180 <= longitude <= 180:
-        raise ValidationError(gettext("Longitude must be between -180 and 180 degrees."))
+        raise DomainError(
+            ErrorCode.INVALID_REQUEST,
+            _("Longitude must be between -180 and 180 degrees."),
+            field="longitude",
+        )
     try:
         ZoneInfo(timezone)
     except (ZoneInfoNotFoundError, ValueError) as exc:
-        raise ValidationError(gettext("An IANA timezone is required.")) from exc
+        raise DomainError(
+            ErrorCode.INVALID_REQUEST, _("An IANA timezone is required."), field="timezone"
+        ) from exc
 
 
 def submit_region(
@@ -64,7 +76,11 @@ def submit_region(
 ) -> Region:
     validate_location(latitude, longitude, timezone)
     if not name.strip() or len(name) > 200:
-        raise ValidationError(gettext("A region name of at most 200 characters is required."))
+        raise DomainError(
+            ErrorCode.INVALID_REQUEST,
+            _("A region name of at most 200 characters is required."),
+            field="name",
+        )
     with transaction.atomic():
         tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
         require_available_location(tenant_id, latitude, longitude)
@@ -98,7 +114,7 @@ def request_location_change(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
         if region.revision != expected_revision:
-            raise ValidationError("region_revision_changed")
+            raise ConflictError(ErrorCode.REGION_REVISION_CHANGED)
         desired = (latitude, longitude, timezone, reason.strip())
         pending = RegionLocationChangeRequest.objects.filter(
             region=region, status="pending"
@@ -110,9 +126,9 @@ def request_location_change(
                 == desired
             ):
                 return pending
-            raise ValidationError("location_change_already_pending")
+            raise ConflictError(ErrorCode.LOCATION_CHANGE_ALREADY_PENDING)
         if (region.latitude, region.longitude, region.timezone) == desired[:3]:
-            raise ValidationError("location_unchanged")
+            raise DomainError(ErrorCode.LOCATION_UNCHANGED)
         change = RegionLocationChangeRequest.objects.create(
             region=region,
             requested_by=actor,
@@ -147,10 +163,10 @@ def review_location_change(
         if change.status == status:
             return change
         if change.status != "pending":
-            raise ValidationError("location_change_already_reviewed")
+            raise ConflictError(ErrorCode.LOCATION_CHANGE_ALREADY_REVIEWED)
         if approve:
             if change.base_revision != region.revision:
-                raise ValidationError("region_revision_changed")
+                raise ConflictError(ErrorCode.REGION_REVISION_CHANGED)
             region.latitude = change.latitude
             region.longitude = change.longitude
             region.timezone = change.timezone

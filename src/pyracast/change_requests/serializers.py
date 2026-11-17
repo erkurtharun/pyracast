@@ -50,7 +50,7 @@ class UserOutput(serializers.Serializer[dict[str, Any]]):
 
 class ConflictOutput(serializers.Serializer[dict[str, Any]]):
     code = serializers.CharField()
-    detail = serializers.CharField()
+    message = serializers.CharField()
 
 
 class ProviderIntervalOutput(serializers.Serializer[dict[str, Any]]):

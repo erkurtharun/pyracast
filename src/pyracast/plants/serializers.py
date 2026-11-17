@@ -4,7 +4,7 @@ from django.utils.dateparse import parse_datetime
 from django.utils.translation import gettext
 from rest_framework import serializers
 
-from pyracast.api.serializers import InputSerializer
+from pyracast.api.serializers import FiniteFloat, InputSerializer
 from pyracast.plants.models import (
     MEASUREMENT_BASES,
     MOUNTING_TYPES,
@@ -16,13 +16,6 @@ from pyracast.plants.models import (
     PlantSubmission,
     ProductionObservation,
 )
-
-
-class FiniteFloat(serializers.FloatField):
-    def to_internal_value(self, data: Any) -> float:
-        if isinstance(data, bool):
-            self.fail("invalid")
-        return super().to_internal_value(data)
 
 
 class AwareDateTime(serializers.DateTimeField):
@@ -42,15 +35,29 @@ class AwareDateTime(serializers.DateTimeField):
 
 class PlantInput(InputSerializer):
     name = serializers.CharField(max_length=200)
-    dc_capacity_mw = FiniteFloat(min_value=0)
-    inverter_capacity_mw = FiniteFloat(min_value=0, allow_null=True, required=False, default=None)
-    export_limit_mw = FiniteFloat(min_value=0, allow_null=True, required=False, default=None)
+    dc_capacity_mw = FiniteFloat(min_value=0, above=0)
+    inverter_capacity_mw = FiniteFloat(
+        min_value=0, above=0, allow_null=True, required=False, default=None
+    )
+    export_limit_mw = FiniteFloat(
+        min_value=0, above=0, allow_null=True, required=False, default=None
+    )
     measurement_basis = serializers.ChoiceField(choices=MEASUREMENT_BASES, default="net_export")
     mounting_type = serializers.ChoiceField(choices=MOUNTING_TYPES, default="unknown")
     surface_tilt = FiniteFloat(
         min_value=0, max_value=90, allow_null=True, required=False, default=None
     )
-    surface_azimuth = FiniteFloat(min_value=0, allow_null=True, required=False, default=None)
+    surface_azimuth = FiniteFloat(
+        min_value=0, below=360, allow_null=True, required=False, default=None
+    )
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        angles = attrs.get("surface_tilt") is not None or attrs.get("surface_azimuth") is not None
+        if angles and attrs.get("mounting_type") != "fixed":
+            raise serializers.ValidationError(
+                {"mounting_type": [gettext("Only fixed mounting permits surface angles.")]}
+            )
+        return attrs
 
 
 class ConfigurationOutput(serializers.ModelSerializer[PlantConfiguration]):

@@ -42,6 +42,7 @@ from pyracast.connections.operations import (
 )
 from pyracast.connections.recovery import clear_provider_cooldown
 from pyracast.epias import EpiasError
+from pyracast.errors import DomainError, ErrorCode
 from pyracast.forecasts.models import (
     CollectionJob,
     DispatcherStatus,
@@ -394,7 +395,7 @@ class RegionAdmin(ReadOnlyAdmin):
         if epias_action and (action == "epias_disconnect" or epias_form.is_valid()):
             try:
                 if plant is None:
-                    raise ValidationError("configuration_unavailable")
+                    raise DomainError(ErrorCode.CONFIGURATION_UNAVAILABLE)
                 actor = cast(User, request.user)
                 if action == "epias_disconnect":
                     disconnect_epias(plant.pk, actor=actor)
@@ -415,8 +416,8 @@ class RegionAdmin(ReadOnlyAdmin):
                 epias_form.add_error(
                     None,
                     _("The EPİAŞ plant ID and EIC did not match. Check both identifiers.")
-                    if isinstance(error, ValidationError)
-                    and "epias_plant_identity_mismatch" in error.messages
+                    if isinstance(error, DomainError)
+                    and error.code == ErrorCode.EPIAS_PLANT_IDENTITY_MISMATCH
                     else _(
                         "The plant configuration is unavailable or changed. "
                         "Approve its current setup and reload before connecting."

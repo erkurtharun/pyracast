@@ -278,7 +278,7 @@ def test_form_encoded_body_answers_415() -> None:
     client = Client()
     response = client.post("/api/session/language/", {"language": "tr"})
     assert response.status_code == 415
-    assert response.json()["code"] == "http_415"
+    assert response.json()["code"] == "unsupported_media_type"
 
 
 @pytest.mark.django_db
