@@ -1,4 +1,7 @@
 import logging
+from collections.abc import Callable
+from contextvars import ContextVar
+from functools import partial
 from typing import Any, cast
 
 from allauth.account import app_settings as account_settings
@@ -22,7 +25,12 @@ from django.utils.translation import gettext_lazy
 from pyracast.accounts.audit import record_security_event
 from pyracast.accounts.authentication import email_identity
 from pyracast.accounts.language import user_language
-from pyracast.accounts.login_limits import claim_daily_lock_notice, reserve_client_failure
+from pyracast.accounts.login_limits import (
+    claim_daily_lock_notice,
+    record_address_failure,
+    reserve_address_failure,
+    reserve_client_failure,
+)
 from pyracast.accounts.security import normalize_client_ip
 from pyracast.mail_delivery import NotSentError
 
@@ -36,10 +44,42 @@ ANONYMOUS_ACCOUNT_MAIL = "anonymous_account_mail"
 ANONYMOUS_ACCOUNT_TEMPLATES = frozenset(
     {"account/email/unknown_account", "account/email/account_already_exists"}
 )
+_held_mail: ContextVar[list[Callable[[], None]] | None] = ContextVar(
+    "held_account_mail", default=None
+)
+
+
+def hold_account_mail(**kwargs: object) -> None:
+    _held_mail.set([])
+
+
+def deliver_held_account_mail(**kwargs: object) -> None:
+    held = _held_mail.get()
+    _held_mail.set(None)
+    for deliver in held or ():
+        deliver()
+
+
+def after_response(deliver: Callable[[], None]) -> None:
+    # Inside a request, account mail work waits until the server has sent the response, so the
+    # answer never takes longer because an address belongs to an account.
+    held = _held_mail.get()
+    if held is None:
+        deliver()
+        return
+    request = allauth_context.request
+    language = translation.get_language()
+
+    def run() -> None:
+        with allauth_context.request_context(request), translation.override(language):
+            deliver()
+
+    held.append(run)
 
 
 class AccountAdapter(DefaultAccountAdapter):
     _client_failure: RateLimitUsage | None = None
+    _login_failed_rl_usage: RateLimitUsage | None = None
 
     def validation_error(self, code: str, *args: Any) -> ValidationError:
         # allauth also answers a sign-in within the confirm_email window with this code.
@@ -80,15 +120,20 @@ class AccountAdapter(DefaultAccountAdapter):
         if self._client_failure is None:
             record_security_event("login_locked", request=request)
             raise self.validation_error("too_many_login_attempts")
-        try:
-            super().pre_authenticate(request, **credentials)
-        except ValidationError:
+        key = self._get_login_attempts_cache_key(request, **credentials)
+        self._login_failed_rl_usage = reserve_address_failure(request, key)
+        if self._login_failed_rl_usage is None:
             self._client_failure.rollback()
             record_security_event("login_locked", request=request)
-            key = self._get_login_attempts_cache_key(request, **credentials)
             if claim_daily_lock_notice(request, key):
-                self.send_login_locked_notice(credentials.get("email", ""))
-            raise
+                email = credentials.get("email", "")
+                after_response(lambda: self.send_login_locked_notice(email))
+            raise self.validation_error("too_many_login_attempts")
+
+    def authentication_failed(self, request: HttpRequest, **credentials: Any) -> None:
+        if self._login_failed_rl_usage is not None:
+            key = self._get_login_attempts_cache_key(request, **credentials)
+            record_address_failure(key, self._login_failed_rl_usage)
 
     def authenticate(self, request: HttpRequest, **credentials: Any) -> User | None:
         user = cast(User | None, super().authenticate(request, **credentials))
@@ -128,16 +173,16 @@ class AccountAdapter(DefaultAccountAdapter):
         return True
 
     def send_mail(self, template_prefix: str, email: str, context: dict[str, Any]) -> None:
-        if template_prefix in ANONYMOUS_ACCOUNT_TEMPLATES and not ratelimit.consume(
-            allauth_context.request, action=ANONYMOUS_ACCOUNT_MAIL, key="all"
-        ):
-            logger.warning("account_mail_skipped template=%s reason=budget", template_prefix)
-            return
         user = context.get("user")
         preference = user_language(user) if isinstance(user, User) else None
         language = preference or translation.get_language()
 
         def send() -> None:
+            if template_prefix in ANONYMOUS_ACCOUNT_TEMPLATES and not ratelimit.consume(
+                allauth_context.request, action=ANONYMOUS_ACCOUNT_MAIL, key="all"
+            ):
+                logger.warning("account_mail_skipped template=%s reason=budget", template_prefix)
+                return
             with translation.override(language):
                 try:
                     super(AccountAdapter, self).send_mail(template_prefix, email, context)
@@ -152,4 +197,4 @@ class AccountAdapter(DefaultAccountAdapter):
                         error.code if isinstance(error, NotSentError) else None,
                     )
 
-        transaction.on_commit(send)
+        transaction.on_commit(partial(after_response, send))
