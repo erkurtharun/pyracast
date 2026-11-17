@@ -16,7 +16,7 @@ from django.contrib.auth.models import User
 from django.urls import URLPattern, URLResolver
 from dramatiq.brokers.stub import StubBroker
 
-from deploy import authorize_gmail, backup, host, watchdog
+from deploy import authorize_gmail, backup, host, reset_database, watchdog
 from pyracast import gmail
 from pyracast.accounts.authentication import email_identity
 from pyracast.forecasts.historical_upload import MAX_UPLOAD_BYTES
@@ -724,3 +724,22 @@ def test_release_drains_producers_and_workers_while_the_site_still_serves() -> N
         ("worker", "notifications"),
         ("gateway", "api", "web"),
     ]
+
+
+def test_reset_tool_stops_the_application_in_the_installers_drain_order() -> None:
+    drain = stop_groups(text(DEPLOY / "install-release.sh"), "old")
+
+    assert [(int(timeout), group) for timeout, group in reset_database.STOP_ORDER] == drain
+
+
+def test_failed_maintenance_names_the_reset_tool_commands_that_recover_it() -> None:
+    script = text(DEPLOY / "install-release.sh")
+    message = re.search(r"^\s*echo '(Release failed during maintenance\..*)' >&2$", script, re.M)
+    tool = "python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json"
+    deployment = text(ROOT / "docs" / "DEPLOYMENT.md")
+
+    assert message
+    for command in (f"{tool} abort", f"{tool} restore --confirm OBJECT"):
+        assert command in message[1]
+        assert command in deployment
+    assert "A release that fails during maintenance" in message[1]
