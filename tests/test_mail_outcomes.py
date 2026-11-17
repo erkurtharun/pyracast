@@ -6,7 +6,7 @@ from django.contrib.auth.models import User
 from django.core.mail import EmailMessage
 from django.core.mail.backends.base import BaseEmailBackend
 from django.template import TemplateSyntaxError
-from django.test import override_settings
+from django.test import Client, override_settings
 
 from pyracast.accounts.invitations import invite_workspace_member
 from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation
@@ -19,6 +19,7 @@ from pyracast.mail.errors import (
 from pyracast.mail.send import send
 from pyracast.notifications.jobs import process_notification
 from tests.smtp_server import Script, loopback_smtp
+from tests.test_auth_lifecycle import submit
 from tests.test_notifications import SLOT, ready
 
 SMTP_BACKEND = "pyracast.mail.smtp.EmailBackend"
@@ -302,3 +303,95 @@ def test_invitation_template_error_leaves_no_invitation(
 
     assert not WorkspaceInvitation.objects.exists()
     assert scripted.sent == []
+
+
+class ClosingBackend(BaseEmailBackend):
+    delivered: ClassVar[int] = 1
+    close_failure: ClassVar[OSError | None] = None
+    sent: ClassVar[list[EmailMessage]] = []
+    connected = False
+
+    def open(self) -> bool:
+        if self.connected:
+            return False
+        self.connected = True
+        return True
+
+    def close(self) -> None:
+        self.connected = False
+        if self.close_failure is not None:
+            raise self.close_failure
+
+    def send_messages(self, email_messages: Sequence[EmailMessage] | None) -> int:
+        assert email_messages is not None
+        created = self.open()
+        try:
+            self.sent.extend(email_messages)
+            return self.delivered
+        finally:
+            if created:
+                self.close()
+
+
+@pytest.fixture
+def closing() -> Iterator[type[ClosingBackend]]:
+    ClosingBackend.delivered, ClosingBackend.close_failure = 1, None
+    ClosingBackend.sent = []
+    with override_settings(
+        MAILERS={"default": {"BACKEND": "tests.test_mail_outcomes.ClosingBackend"}}
+    ):
+        yield ClosingBackend
+
+
+ACCOUNT_MAIL = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+
+
+def request_unknown_account_notice() -> None:
+    response = submit(
+        Client(enforce_csrf_checks=True), "auth/password/request", {"email": "missing@example.com"}
+    )
+    assert response.status_code == 401
+
+
+def account_mail_failures(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("account_mail_failed ")
+    ]
+
+
+@ACCOUNT_MAIL
+def test_account_mail_reports_an_invalid_mailer_configuration(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    options = {"host": "127.0.0.1", "use_tls": True, "use_ssl": True}
+    with override_settings(MAILERS={"default": {"BACKEND": SMTP_BACKEND, "OPTIONS": options}}):
+        request_unknown_account_notice()
+
+    (failure,) = account_mail_failures(caplog)
+    assert failure.endswith(" error_type=NotSentError error_code=mail_configuration_invalid")
+
+
+@ACCOUNT_MAIL
+def test_account_mail_reports_a_backend_that_sent_nothing(
+    closing: type[ClosingBackend], caplog: pytest.LogCaptureFixture
+) -> None:
+    closing.delivered = 0
+
+    request_unknown_account_notice()
+
+    (failure,) = account_mail_failures(caplog)
+    assert failure.endswith(" error_type=NotSentError error_code=mail_not_sent")
+
+
+@ACCOUNT_MAIL
+def test_account_mail_accepted_before_a_failed_close_is_delivered(
+    closing: type[ClosingBackend], caplog: pytest.LogCaptureFixture
+) -> None:
+    closing.close_failure = ConnectionResetError("relay closed the connection")
+
+    request_unknown_account_notice()
+
+    assert [message.to for message in closing.sent] == [["missing@example.com"]]
+    assert account_mail_failures(caplog) == []

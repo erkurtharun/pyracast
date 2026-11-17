@@ -25,6 +25,8 @@ class SMTP(smtplib.SMTP):
         self.sender_response = (250, b"ok")
         self.data_response = (250, b"accepted")
         self.data_error: Exception | None = None
+        self.helo_error: Exception | None = None
+        self.sender_error: Exception | None = None
         self.reset_error: Exception | None = None
         self.reset_response = (250, b"reset")
         self.envelope: list[str] = []
@@ -34,9 +36,12 @@ class SMTP(smtplib.SMTP):
         self.closed = False
 
     def ehlo_or_helo_if_needed(self) -> None:
-        pass
+        if self.helo_error is not None:
+            raise self.helo_error
 
     def mail(self, sender: str, options: Sequence[str] = ()) -> tuple[int, bytes]:
+        if self.sender_error is not None:
+            raise self.sender_error
         self.options = options
         return self.sender_response
 
@@ -181,6 +186,34 @@ def test_reset_failure_preserves_known_nonacceptance(smtp: SMTP, reset_failure: 
         send(message())
     assert smtp.content == []
     assert smtp.closed
+
+
+@pytest.mark.parametrize(("code", "failure"), [(451, NotSentError), (554, PermanentlyNotSentError)])
+def test_refused_data_command_is_classified_by_its_reply(
+    smtp: SMTP, code: int, failure: type[Exception]
+) -> None:
+    smtp.data_error = smtplib.SMTPDataError(code, b"refused")
+    with pytest.raises(failure) as caught:
+        send(message())
+    assert type(caught.value) is failure
+
+
+@pytest.mark.parametrize(
+    ("phase", "error", "failure"),
+    [
+        ("helo", smtplib.SMTPHeloError(501, b"refused"), NotSentError),
+        ("sender", smtplib.SMTPNotSupportedError(), PermanentlyNotSentError),
+    ],
+)
+def test_refused_greeting_or_unsupported_transaction_sends_nothing(
+    smtp: SMTP, phase: str, error: Exception, failure: type[Exception]
+) -> None:
+    setattr(smtp, phase + "_error", error)
+    with pytest.raises(failure) as caught:
+        send(message())
+    assert type(caught.value) is failure
+    assert smtp.envelope == []
+    assert smtp.content == []
 
 
 @pytest.mark.parametrize("failure", [TimeoutError(), smtplib.SMTPServerDisconnected()])

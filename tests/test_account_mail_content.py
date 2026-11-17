@@ -1,6 +1,7 @@
 import json
 import re
 from collections.abc import Iterator
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -12,7 +13,6 @@ from django.contrib.auth.models import User
 from django.core import mail
 from django.core.mail import EmailMultiAlternatives
 from django.test import Client, override_settings
-from django.utils import timezone
 
 from pyracast.accounts.account_mail import device_label
 from pyracast.accounts.adapters import AccountAdapter
@@ -321,7 +321,7 @@ def test_remaining_security_notices_render_the_product_copy(
         user.email,
         {
             "user": user,
-            "timestamp": timezone.now(),
+            "timestamp": datetime(2026, 11, 15, 15, 0, tzinfo=timezone(timedelta(hours=3))),
             "ip": "192.0.2.4",
             "user_agent": '<script>alert("unsafe")</script>',
             **context,
@@ -333,7 +333,9 @@ def test_remaining_security_notices_render_the_product_copy(
     assert message.extra_headers["X-Pyracast-Mail"] == prefix
     assert sentence in str(message.body)
     assert "<script>" not in html(message)
-    assert "UTC" in html(message)
+    for content in (str(message.body), html(message)):
+        assert "15 November 2026 12:00 UTC" in content
+        assert "192.0.2.4" in content
 
 
 @pytest.mark.parametrize(

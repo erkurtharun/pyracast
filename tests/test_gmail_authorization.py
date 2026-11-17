@@ -18,7 +18,6 @@ import pytest
 from deploy.authorize_gmail import (
     AUTHORIZATION_URL,
     GMAIL_SCOPE,
-    GMAIL_SEND_ENDPOINT,
     OAUTH_EXCHANGE_ENDPOINT,
     Grant,
     OAuthClient,
@@ -290,7 +289,9 @@ def test_credentials_are_saved_only_after_the_sender_mails_itself(
             main()
         assert runtime.read_bytes() == before
     (request,) = requests
-    assert request.full_url == GMAIL_SEND_ENDPOINT
+    assert request.full_url == (
+        "https://gmail.googleapis.com/gmail/v1/users/info%40pyracast.app/messages/send"
+    )
     assert request.get_header("Authorization") == "Bearer private-access"
     assert isinstance(request.data, bytes)
     raw = base64.urlsafe_b64decode(json.loads(request.data)["raw"])

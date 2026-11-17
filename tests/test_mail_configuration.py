@@ -90,6 +90,24 @@ def test_invalid_smtp_port_names_the_variable(monkeypatch: pytest.MonkeyPatch) -
         configuration(monkeypatch, PYRACAST_EMAIL_PORT="smtp")
 
 
+@pytest.mark.parametrize("port", ["0", "65536", "70000"])
+def test_smtp_port_outside_the_tcp_range_fails_the_deploy_check(
+    monkeypatch: pytest.MonkeyPatch, port: str
+) -> None:
+    mailers = configuration(monkeypatch, PYRACAST_EMAIL_PORT=port)["MAILERS"]
+
+    assert deploy_errors(mailers) == ["accounts.E001"]
+
+
+@pytest.mark.parametrize("sender", ["Pyracast <ops@invalid>", "Pyracast <ops@pyracast>"])
+def test_smtp_sender_without_a_valid_mailbox_fails_the_deploy_check(
+    monkeypatch: pytest.MonkeyPatch, sender: str
+) -> None:
+    mailers = configuration(monkeypatch)["MAILERS"]
+
+    assert deploy_errors(mailers, sender=sender) == ["accounts.E001"]
+
+
 def test_gmail_options_carry_no_separate_sender(monkeypatch: pytest.MonkeyPatch) -> None:
     mailers = configuration(
         monkeypatch,
