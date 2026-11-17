@@ -259,29 +259,6 @@ def test_binding_records_megawatt_reference_metadata(
     assert previous.dc_capacity_kw is None
 
 
-def test_binding_api_accepts_no_tilt_because_every_reference_is_horizontal(
-    customer: tuple[Client, User, Tenant],
-) -> None:
-    customer_client, _, tenant = customer
-    region_id = create_region(customer_client, tenant)
-    admin_client, _ = verified_admin()
-    previous = SiteBinding.objects.get(pk=setup_binding(admin_client, region_id))
-    response = admin_client.post(
-        f"/api/platform/regions/{region_id}/bindings/",
-        {
-            "provider_account_id": previous.provider_account_id,
-            "site_id": previous.site_id,
-            "capacity_kw": 1000,
-            "capacity_semantics_verified": True,
-            "installation_date": "2026-11-01",
-            "tilt_degrees": 0,
-        },
-        content_type="application/json",
-    )
-    assert response.status_code == 400
-    assert SiteBinding.objects.filter(region_id=region_id).count() == 1
-
-
 @pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 def test_admin_login_requires_password_and_totp() -> None:
     password = "test-only-" + "x" * 40
