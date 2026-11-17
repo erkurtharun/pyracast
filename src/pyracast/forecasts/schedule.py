@@ -14,6 +14,7 @@ from pyracast.accounts.models import Membership
 from pyracast.collection_window import HISTORY_CLOCK, HISTORY_END_CLOCK, NIGHT_RETRY_DELAY
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule, ForecastSnapshot
+from pyracast.forecasts.timing import effective_forecast_schedule, next_forecast_slot
 from pyracast.regions.models import AuditEvent, Region
 
 MAX_COLLECTION_TIMES = 1440
@@ -96,7 +97,27 @@ def configure_schedule(
         return schedule
 
 
-def schedule_payload(schedule: CollectionSchedule) -> dict[str, object]:
+def _next_collection_at(schedule: CollectionSchedule, now: datetime) -> datetime | None:
+    binding = schedule.region.approved_binding
+    if binding is None or binding.validated_at is None or not binding_is_current(binding):
+        return None
+    jobs = CollectionJob.objects.filter(binding=binding)
+    timing = effective_forecast_schedule(
+        first_slot=jobs.filter(endpoint="forecasts", reference_import__isnull=True)
+        .order_by("scheduled_slot")
+        .values_list("scheduled_slot", flat=True)
+        .first(),
+        schedule=schedule,
+        daily_quota=binding.provider_account.daily_quota,
+    )
+    if timing is None:
+        return None
+    queued = jobs.filter(status__in=("pending", "retry")).aggregate(next=Min("available_at"))
+    planned = next_forecast_slot(now, schedule.region.timezone, timing.times, timing.effective_from)
+    return min((moment for moment in (queued["next"], planned) if moment is not None), default=None)
+
+
+def schedule_payload(schedule: CollectionSchedule, now: datetime) -> dict[str, object]:
     binding = schedule.region.approved_binding
     limit = binding.provider_account.daily_quota if binding else 10
     jobs = CollectionJob.objects.filter(binding=binding)
@@ -110,11 +131,7 @@ def schedule_payload(schedule: CollectionSchedule) -> dict[str, object]:
         )["last"]
         if binding
         else None,
-        "next_collection_at": jobs.filter(status__in=("pending", "retry")).aggregate(
-            next=Min("available_at")
-        )["next"]
-        if binding
-        else None,
+        "next_collection_at": _next_collection_at(schedule, now),
         "recent_jobs": list(
             jobs.order_by("-scheduled_slot", "-pk").values(
                 "id",

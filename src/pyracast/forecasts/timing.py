@@ -46,3 +46,21 @@ def latest_forecast_slot(
         ),
         default=None,
     )
+
+
+def next_forecast_slot(
+    now: datetime, timezone: str, times: Sequence[str], effective_from: datetime
+) -> datetime | None:
+    zone = ZoneInfo(timezone)
+    today = now.astimezone(zone).date()
+    return min(
+        (
+            slot
+            for day in (today, today + timedelta(days=1))
+            for clock in times
+            if (slot := local_slot(day, clock, zone)) is not None
+            and now < slot
+            and effective_from <= slot
+        ),
+        default=None,
+    )

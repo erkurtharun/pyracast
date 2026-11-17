@@ -290,6 +290,11 @@ else:
 
 
 class ReadOnlyAdmin(AdminBase):
+    def get_urls(self) -> list[URLPattern]:
+        prefix = f"{self.opts.app_label}_{self.opts.model_name}_"
+        kept = {prefix + view for view in ("changelist", "history", "change")}
+        return [url for url in super().get_urls() if url.name in kept]
+
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False
 

@@ -51,18 +51,16 @@ class CollectionScheduleOutput(CollectionScheduleInput):
 class CollectionScheduleView(APIView):
     @extend_schema(responses=CollectionScheduleOutput)
     def get(self, request: Request, tenant_id: int, region_id: int) -> Response:
-        schedule = get_schedule(cast(User, request.user), tenant_id, region_id, timezone.now())
-        return Response(schedule_payload(schedule))
+        now = timezone.now()
+        schedule = get_schedule(cast(User, request.user), tenant_id, region_id, now)
+        return Response(schedule_payload(schedule, now))
 
     @extend_schema(request=CollectionScheduleInput, responses=CollectionScheduleOutput)
     def put(self, request: Request, tenant_id: int, region_id: int) -> Response:
         data = CollectionScheduleInput(data=request.data)
         data.is_valid(raise_exception=True)
+        now = timezone.now()
         schedule = configure_schedule(
-            cast(User, request.user),
-            tenant_id,
-            region_id,
-            now=timezone.now(),
-            **data.validated_data,
+            cast(User, request.user), tenant_id, region_id, now=now, **data.validated_data
         )
-        return Response(schedule_payload(schedule))
+        return Response(schedule_payload(schedule, now))
