@@ -26,20 +26,21 @@ sequenceDiagram
     alt "sitemap, robots, image, icon or identity/ file"
         V->>N: "matcher skips proxy.ts"
         N-->>V: "file without CSP, noindex or private no-store"
-    end
-    P->>P: "drop inbound language header, set nonce CSP and private no-store"
-    alt "public page path without trailing slash"
-        P-->>V: "308 to the slash form, query kept"
-    else public page path
-        P->>N: "set x-pyracast-public-language from URL"
-        alt "path is / with a legacy query key"
-            N-->>V: "307 to /app/ with the same query"
-        else render
-            N-->>V: "HTML with lang and metadata, JSON-LD under nonce on home pages"
+    else "any other path"
+        P->>P: "drop inbound language header, set nonce CSP and private no-store"
+        alt "public page path without trailing slash"
+            P-->>V: "308 to the slash form, query kept"
+        else public page path
+            P->>N: "set x-pyracast-public-language from URL"
+            alt "path is / with a legacy query key"
+                N-->>V: "307 to /app/ with the same query"
+            else render
+                N-->>V: "HTML with lang and metadata, JSON-LD under nonce on home pages"
+            end
+        else "other path"
+            P->>N: "no language header"
+            N-->>V: "response plus X-Robots-Tag noindex; unknown path renders the bilingual not-found page"
         end
-    else "other path"
-        P->>N: "no language header"
-        N-->>V: "response plus X-Robots-Tag noindex; unknown path renders the bilingual not-found page"
     end
     V->>D: "click sign-up or sign-in, GET /app/"
     D->>A: "GET /api/session/"
@@ -80,7 +81,8 @@ sequenceDiagram
 
 ## Rules and invariants
 
-- A new page needs an entry in `publicPages` and `descriptions`; the sitemap, the proxy and the `Auth` links read it.
+- A new page needs an entry in `publicPages` and `descriptions`; the sitemap and the proxy read `publicPages`. The `Auth`
+  footer links name their pages explicitly and build each path with `publicPath`.
 - Sitemap, robots and JSON-LD use the literal `siteOrigin` (`https://pyracast.app`); canonical and hreflang are relative
   paths resolved against a second literal, `metadataBase` in `layout.tsx`. Public paths end in `/`.
 - HTML renders per request (`getLocale`; `headers()` nonce on home); proxy sets `private, no-store` (dev shows `no-store`).

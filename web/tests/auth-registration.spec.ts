@@ -339,6 +339,61 @@ for (const [status, text] of [
     });
 }
 
+test("a resend that ends the pending sign-in asks to sign in again", async ({
+    page,
+}) => {
+    await pendingVerification(page);
+    await page.route(
+        "**/api/auth/browser/v1/auth/email/verify/resend",
+        (route) =>
+            route.fulfill({
+                status: 401,
+                json: {
+                    status: 401,
+                    data: { flows: [{ id: "login" }] },
+                    meta: { is_authenticated: false },
+                },
+            }),
+    );
+    await page.goto("/app/");
+    const resend = page.getByRole("button", {
+        name: "Resend verification code",
+        exact: true,
+    });
+    await resend.click();
+    await expect(page.locator("form").getByRole("alert")).toContainText(
+        "No more codes can be sent for this sign-in. Sign in again to receive a new code.",
+    );
+    await expect(resend).toBeDisabled();
+});
+
+test("a failed resend shows the server message and can be retried", async ({
+    page,
+}) => {
+    await pendingVerification(page);
+    await page.route(
+        "**/api/auth/browser/v1/auth/email/verify/resend",
+        (route) =>
+            route.fulfill({
+                status: 500,
+                json: {
+                    status: 500,
+                    errors: [{ message: "Mail is unavailable." }],
+                },
+            }),
+    );
+    await page.goto("/app/");
+    const resend = page.getByRole("button", {
+        name: "Resend verification code",
+        exact: true,
+    });
+    await resend.click();
+    await expect(page.locator("form").getByRole("alert")).toContainText(
+        "Mail is unavailable.",
+    );
+    await expect(resend).toBeEnabled();
+});
+
 test("an unexplained 429 on sign-in offers a password reset", async ({
     page,
 }) => {

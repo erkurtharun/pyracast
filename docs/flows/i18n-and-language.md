@@ -78,7 +78,7 @@ sequenceDiagram
 ## Rules and invariants
 
 - Precedence is account preference, cookie, `Accept-Language` best q, `CF-IPCountry` `TR`, `en`. `tr;q=0` or `*;q=0` suppresses the Turkish country fallback. `TrustedProxyHeaders` pops `CF-IPCountry` and restores it only when the peer is a trusted proxy, upstream CIDRs are configured and the last `X-Forwarded-For` hop is in them.
-- Only the dropdown, the guest `?language=` hand-off (skipped for signed-in users and matching sessions), the console switcher and signup write. Signup saves the language the form was shown in, so a detected language becomes the new account's preference.
+- Only the dropdown, the guest `?language=` hand-off (skipped for signed-in users and matching sessions), the console switcher and signup write the account preference. Signup saves the language the form was shown in, so a detected language becomes the new account's preference.
 - API and console writes lock the `auth_user` row first so concurrent devices serialize on one preference row; `update_or_create` is last-write-wins. Signup inserts without the lock.
 - `RequestLanguage` reads the preference once before the view; after it, when the preference differs from the request cookie and the response sets no language cookie, it writes the preference as the cookie, so the next full load renders the saved language on the server.
 - Cookie: one year, `Secure` unless DEBUG, `HttpOnly`, `SameSite=Lax`, so only server code (Django and `request.ts`) reads it. The SPA learns the language from `Session.language`.
