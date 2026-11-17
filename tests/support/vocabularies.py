@@ -46,6 +46,7 @@ class StoredVocabulary:
     field: str
     row: Row
     retired: tuple[str, ...] = ()
+    published: bool = True
 
     @property
     def id(self) -> str:
@@ -187,7 +188,7 @@ STORED_VOCABULARIES = (
         _audit_event,
         retired=("approved", "rejected", "suspended", "binding_validated"),
     ),
-    StoredVocabulary(ProviderAccount, "provider", _account),
+    StoredVocabulary(ProviderAccount, "provider", _account, published=False),
     StoredVocabulary(SiteBinding, "power_basis", _binding),
     StoredVocabulary(SiteBinding, "health", _binding),
     StoredVocabulary(ChangeRequest, "kind", _production_request),

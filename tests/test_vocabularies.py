@@ -81,7 +81,10 @@ def test_stored_vocabulary_is_checked_by_a_constraint_derived_from_its_enumerati
     assert derived_check(vocabulary) is not None
 
 
-@pytest.mark.parametrize("vocabulary", [_stored(vocabulary) for vocabulary in STORED_VOCABULARIES])
+@pytest.mark.parametrize(
+    "vocabulary",
+    [_stored(vocabulary) for vocabulary in STORED_VOCABULARIES if vocabulary.published],
+)
 def test_stored_vocabulary_is_exported_by_name_to_the_api_schema(
     vocabulary: StoredVocabulary,
 ) -> None:
@@ -95,6 +98,16 @@ def test_stored_vocabulary_is_exported_by_name_to_the_api_schema(
     union = re.search(rf"\b{exported[0]}:([^;]+);", TYPESCRIPT.read_text(encoding="utf-8"))
     assert union is not None
     assert re.findall(r'"([^"]*)"', union[1]) == values
+
+
+@pytest.mark.parametrize(
+    "vocabulary",
+    [_stored(vocabulary) for vocabulary in STORED_VOCABULARIES if not vocabulary.published],
+)
+def test_operator_vocabulary_stays_out_of_the_customer_schema(
+    vocabulary: StoredVocabulary,
+) -> None:
+    assert all(choices.choices != vocabulary.choices for choices in _exported().values())
 
 
 @pytest.mark.parametrize(("vocabulary", "value"), _stored_values())

@@ -739,6 +739,46 @@ export interface components {
         ApprovalInput: {
             review_fingerprint: string;
         };
+        /**
+         * @description * `region_renamed` - Plant location renamed
+         *     * `location_change_requested` - Location change requested
+         *     * `location_change_approved` - Location change approved
+         *     * `location_change_rejected` - Location change rejected
+         *     * `location_change_rebased` - Location change request moved to the new revision
+         *     * `binding_configured` - Provider connection configured
+         *     * `connection_validated` - Provider connection validated
+         *     * `region_approved` - Plant approved
+         *     * `region_rejected` - Plant rejected
+         *     * `region_suspended` - Plant suspended
+         *     * `region_trashed` - Plant location moved to trash
+         *     * `region_restored` - Plant location restored
+         *     * `collection_schedule_updated` - Collection schedule updated
+         *     * `historical_reference_imported` - Historical reference imported
+         *     * `reference_capacity_normalized` - Reference capacity normalized
+         *     * `provider_account_created` - Provider account created
+         *     * `provider_secret_rotated` - Provider key rotated
+         *     * `provider_cooldown_cleared` - Provider request pause cleared
+         * @enum {string}
+         */
+        AuditActionEnum:
+            | "region_renamed"
+            | "location_change_requested"
+            | "location_change_approved"
+            | "location_change_rejected"
+            | "location_change_rebased"
+            | "binding_configured"
+            | "connection_validated"
+            | "region_approved"
+            | "region_rejected"
+            | "region_suspended"
+            | "region_trashed"
+            | "region_restored"
+            | "collection_schedule_updated"
+            | "historical_reference_imported"
+            | "reference_capacity_normalized"
+            | "provider_account_created"
+            | "provider_secret_rotated"
+            | "provider_cooldown_cleared";
         AutomaticCalibrationAttemptOutput: {
             calibration_id: number | null;
             status: components["schemas"]["AutomaticCalibrationAttemptOutputStatusEnum"];
@@ -752,6 +792,13 @@ export interface components {
          * @enum {string}
          */
         AutomaticCalibrationAttemptOutputStatusEnum: "activated" | "skipped";
+        /**
+         * @description * `unknown` - Unknown
+         *     * `healthy` - Healthy
+         *     * `error` - Error
+         * @enum {string}
+         */
+        BindingHealthEnum: "unknown" | "healthy" | "error";
         CalibrationAutomationOutput: {
             enabled: boolean;
             authorized: boolean;
@@ -1637,6 +1684,12 @@ export interface components {
             /** Format: date-time */
             readonly created_at: string;
         };
+        /**
+         * @description * `ac` - AC
+         *     * `dc` - DC
+         * @enum {string}
+         */
+        PowerBasisEnum: "ac" | "dc";
         /**
          * @description * `set` - Set
          *     * `revert` - Revert

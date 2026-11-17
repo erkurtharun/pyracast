@@ -210,6 +210,10 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
     "PREPROCESSING_HOOKS": ["pyracast.api.schema.customer_endpoints"],
+    "POSTPROCESSING_HOOKS": [
+        "drf_spectacular.hooks.postprocess_schema_enums",
+        "pyracast.api.schema.stored_vocabularies",
+    ],
     "ENUM_NAME_OVERRIDES": {
         "LanguageEnum": "pyracast.accounts.models.Language",
         "WorkspaceRoleEnum": "pyracast.accounts.models.WorkspaceRole",
@@ -217,7 +221,6 @@ SPECTACULAR_SETTINGS = {
         "RegionStatusEnum": "pyracast.regions.models.RegionStatus",
         "LocationChangeStatusEnum": "pyracast.regions.models.LocationChangeStatus",
         "AuditActionEnum": "pyracast.regions.models.AuditAction",
-        "ProviderEnum": "pyracast.connections.models.Provider",
         "PowerBasisEnum": "pyracast.connections.models.PowerBasis",
         "BindingHealthEnum": "pyracast.connections.models.BindingHealth",
         "ChangeRequestKindEnum": "pyracast.change_requests.models.ChangeRequestKind",

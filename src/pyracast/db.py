@@ -8,8 +8,6 @@ from django.db.transaction import TransactionManagementError
 def choices_check(
     field: str, choices: type[models.TextChoices], *, name: str = ""
 ) -> models.CheckConstraint:
-    """The CHECK that limits a stored vocabulary to its enumeration. The default name follows
-    the `<model>_<column>_chk` convention."""
     return models.CheckConstraint(
         condition=models.Q(**{f"{field}__in": choices.values}),
         name=name or f"%(class)s_{field}_chk",
