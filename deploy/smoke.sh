@@ -332,7 +332,6 @@ ready
 object=$(sed -n 's|^  Object:  gs://smoke-backups/||p' "$temporary/prepare.log")
 [[ $object == postgres/*-prereset-*.dump ]]
 cmp "$temporary/bucket/$object" "$temporary/reset/${object##*/}"
-# The fixture forecast is the only snapshot, so the Solcast export is empty.
 solcast=${object%.dump}.solcast.jsonl.gz
 grep -qxF "  Solcast export: gs://smoke-backups/$solcast" "$temporary/prepare.log"
 grep -qxF '  Solcast snapshots: 0' "$temporary/prepare.log"

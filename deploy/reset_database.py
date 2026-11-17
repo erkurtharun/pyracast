@@ -536,7 +536,8 @@ def wait_until_ready(container: str) -> None:
     raise RuntimeError("The throwaway PostgreSQL did not become ready.")
 
 
-def verify_archive(host: Host, archive: Path) -> dict[str, int]:
+@contextmanager
+def throwaway_copy(host: Host, archive: Path) -> Iterator[Callable[[str], str]]:
     configuration = json.loads(capture([*compose(host), "config", "--format", "json"]))
     image = configuration["services"]["postgres"]["image"]
     container = "pyracast-reset-" + uuid.uuid4().hex
@@ -591,15 +592,27 @@ def verify_archive(host: Host, archive: Path) -> dict[str, int]:
                 timeout=1200,
             )
         query = ["docker", "exec", container, "psql", "-X", "-v", "ON_ERROR_STOP=1", *connection]
-        return parse_counts(capture([*query, "-At", "-c", COUNT_SQL]))
+        yield lambda sql: capture([*query, "-At", "-c", sql])
     finally:
         subprocess.run(["docker", "rm", "--force", container], capture_output=True, check=False)
         subprocess.run(["docker", "volume", "rm", volume], capture_output=True, check=False)
 
 
-def exported_rows(path: Path) -> int:
+def verify_archive(host: Host, archive: Path) -> dict[str, int]:
+    with throwaway_copy(host, archive) as query:
+        return parse_counts(query(COUNT_SQL))
+
+
+def export_name(archive: str) -> str:
+    return archive.removesuffix(".dump") + ".solcast.jsonl.gz"
+
+
+def exported_rows(path: Path, counted: int) -> int:
     rows = 0
     try:
+        # A zero-byte file reads as an empty gzip stream.
+        if path.stat().st_size == 0:
+            raise ValueError("the file holds no gzip member")
         with gzip.open(path, "rb") as lines:
             for line in lines:
                 if not isinstance(json.loads(line), dict):
@@ -607,11 +620,15 @@ def exported_rows(path: Path) -> int:
                 rows += 1
     except (OSError, EOFError, ValueError, zlib.error) as error:
         raise RuntimeError(f"{path} is not gzip-compressed JSON lines: {error}") from error
+    if rows != counted:
+        raise RuntimeError(
+            f"The Solcast export holds {rows} snapshots; the database counts {counted}."
+        )
     return rows
 
 
 def export_solcast(host: Host, archive: str) -> SolcastExport:
-    name = archive.removesuffix(".dump") + ".solcast.jsonl.gz"
+    name = export_name(archive)
     packed = archive_path(host, name)
     lines = packed.with_suffix("")
     step("Exporting the Solcast snapshots")
@@ -640,12 +657,8 @@ def export_solcast(host: Host, archive: str) -> SolcastExport:
             timeout=1200,
         )
     subprocess.run(["gzip", "--force", str(lines)], check=True, timeout=1200)
-    rows = exported_rows(packed)
     counted = int(psql(host, "pyracast", "-At", "-c", SOLCAST_COUNT_SQL))
-    if rows != counted:
-        raise RuntimeError(
-            f"The Solcast export holds {rows} snapshots; the database counts {counted}."
-        )
+    rows = exported_rows(packed, counted)
     step(f"Uploading gs://{host.bucket}/{name}")
     upload_backup(host.bucket, name, packed)
     return SolcastExport(object=name, sha256=file_sha256(packed), rows=rows)
@@ -680,12 +693,24 @@ def download_archive(host: Host, name: str) -> Path:
     return archive
 
 
+def fetch_export(host: Host, archive: str, counted: int) -> SolcastExport:
+    name = export_name(archive)
+    step(f"Downloading gs://{host.bucket}/{name}")
+    path = download_archive(host, name)
+    rows = exported_rows(path, counted)
+    return SolcastExport(object=name, sha256=file_sha256(path), rows=rows)
+
+
 def fetch_record(host: Host, name: str) -> None:
     step(f"Downloading gs://{host.bucket}/{name}")
     archive = download_archive(host, name)
     step("Restoring it into a throwaway PostgreSQL")
-    counts = verify_archive(host, archive)
-    save_record(host, Record(object=name, sha256=file_sha256(archive), counts=counts))
+    with throwaway_copy(host, archive) as query:
+        counts = parse_counts(query(COUNT_SQL))
+        snapshots = int(query(SOLCAST_COUNT_SQL)) if PRERESET in name else None
+    solcast = None if snapshots is None else fetch_export(host, name, snapshots)
+    record = Record(object=name, sha256=file_sha256(archive), counts=counts, solcast=solcast)
+    save_record(host, record)
 
 
 def queue_messages(host: Host) -> dict[str, int]:
