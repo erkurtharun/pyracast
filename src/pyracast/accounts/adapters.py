@@ -1,27 +1,33 @@
 import logging
 from typing import Any, cast
 
-from allauth.account import app_settings as account_settings
 from allauth.account.adapter import DefaultAccountAdapter
 from allauth.account.models import EmailAddress
 from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.headless.internal.restkit.response import ErrorResponse
 from allauth.mfa.models import Authenticator
 from django.conf import settings
+from django.contrib.auth.base_user import AbstractBaseUser
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.mail import EmailMultiAlternatives
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest
-from django.template.loader import render_to_string
 from django.utils import translation
 from django.utils.translation import gettext_lazy
 
+from pyracast.accounts.account_mail import NOTICES, render_notice
 from pyracast.accounts.language import user_language
 from pyracast.accounts.security import normalize_client_ip
 from pyracast.mail.errors import NotSentError
 
 logger = logging.getLogger(__name__)
+CODE_TIMEOUTS = {
+    "account/email/email_confirmation": "ACCOUNT_EMAIL_VERIFICATION_BY_CODE_TIMEOUT",
+    "account/email/email_confirmation_signup": "ACCOUNT_EMAIL_VERIFICATION_BY_CODE_TIMEOUT",
+    "account/email/password_reset_code": "ACCOUNT_PASSWORD_RESET_BY_CODE_TIMEOUT",
+    "account/email/login_code": "ACCOUNT_LOGIN_BY_CODE_TIMEOUT",
+}
 
 LOGIN_LIMITED_MESSAGE = gettext_lazy(
     "Too many sign-in attempts, or a verification code was sent recently. "
@@ -43,26 +49,24 @@ class AccountAdapter(DefaultAccountAdapter):
         context: dict[str, Any],
         headers: dict[str, str] | None = None,
     ) -> EmailMultiAlternatives:
-        if template_prefix.startswith("account/email/email_confirmation"):
-            timeout = settings.ACCOUNT_EMAIL_VERIFICATION_BY_CODE_TIMEOUT
-        elif template_prefix == "account/email/login_code":
-            timeout = account_settings.LOGIN_BY_CODE_TIMEOUT
-        else:
-            timeout = settings.ACCOUNT_PASSWORD_RESET_BY_CODE_TIMEOUT
-        context = {**context, "code_timeout_minutes": timeout / 60}
-        message = cast(
+        headers = {**(headers or {}), "X-Pyracast-Mail": template_prefix}
+        if (notice := NOTICES.get(template_prefix)) is not None:
+            subject, body, html = render_notice(notice, context)
+            message = EmailMultiAlternatives(
+                subject,
+                body,
+                self.get_from_email(),
+                [email] if isinstance(email, str) else email,
+                headers=headers,
+            )
+            message.attach_alternative(html, "text/html")
+            return message
+        if (timeout := CODE_TIMEOUTS.get(template_prefix)) is not None:
+            context = {**context, "code_timeout_minutes": getattr(settings, timeout) // 60}
+        return cast(
             EmailMultiAlternatives,
             super().render_mail(template_prefix, email, context, headers=headers),
         )
-        if not message.alternatives:
-            message.attach_alternative(
-                render_to_string(
-                    "mail/transactional.html",
-                    {"mail_title": message.subject, "mail_body": message.body},
-                ),
-                "text/html",
-            )
-        return message
 
     def authenticate(self, request: HttpRequest, **credentials: Any) -> User | None:
         user = cast(User | None, super().authenticate(request, **credentials))
@@ -99,8 +103,26 @@ class AccountAdapter(DefaultAccountAdapter):
             )
         return True
 
+    def send_notification_mail(
+        self,
+        template_prefix: str,
+        user: AbstractBaseUser,
+        context: dict[str, Any] | None = None,
+        email: str | None = None,
+    ) -> None:
+        super().send_notification_mail(
+            template_prefix, user, {**(context or {}), "user": user}, email
+        )
+
     def send_mail(self, template_prefix: str, email: str, context: dict[str, Any]) -> None:
         user = context.get("user")
+        if not isinstance(user, User):
+            address = (
+                EmailAddress.objects.filter(email__iexact=email, verified=True)
+                .select_related("user")
+                .first()
+            )
+            user = address.user if address is not None else None
         preference = user_language(user) if isinstance(user, User) else None
         language = preference or translation.get_language()
 

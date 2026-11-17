@@ -194,6 +194,13 @@ def mailed_code() -> str:
     raise AssertionError("No authentication code was delivered.")
 
 
+def reset_code_mailed() -> bool:
+    return any(
+        message.extra_headers.get("X-Pyracast-Mail") == "account/email/password_reset_code"
+        for message in mail.outbox
+    )
+
+
 def test_password_reset_is_generic_session_bound_single_use_and_revokes_sessions() -> None:
     user = member()
     client, reset = Client(enforce_csrf_checks=True), Client(enforce_csrf_checks=True)
@@ -307,7 +314,7 @@ def test_pending_email_change_cannot_be_used_for_login_or_recovery() -> None:
     assert client.get("/api/session/").json()["user"] is None
     response = submit(client, "auth/password/request", {"email": pending})
     assert response.status_code in {200, 401}
-    assert not any("Password Reset" in str(message.subject) for message in mail.outbox)
+    assert not reset_code_mailed()
 
 
 def test_legacy_unverified_email_is_not_an_account_recovery_channel() -> None:
@@ -319,7 +326,7 @@ def test_legacy_unverified_email_is_not_an_account_recovery_channel() -> None:
         Client(enforce_csrf_checks=True), "auth/password/request", {"email": "legacy@example.com"}
     )
     assert response.status_code in {200, 401}
-    assert not any("Password Reset" in str(message.subject) for message in mail.outbox)
+    assert not reset_code_mailed()
 
 
 def test_ambiguous_unverified_addresses_are_recoverable_but_not_login_identities() -> None:
@@ -338,7 +345,7 @@ def test_ambiguous_unverified_addresses_are_recoverable_but_not_login_identities
     assert (
         submit(client, "auth/password/request", {"email": "shared@example.com"}).status_code == 401
     )
-    assert any("Password Reset" in str(message.subject) for message in mail.outbox)
+    assert reset_code_mailed()
 
 
 @pytest.mark.parametrize("state", ["duplicate_verified", "multiple_unverified", "inactive"])
@@ -360,7 +367,7 @@ def test_unsafe_email_identity_states_do_not_receive_reset_codes(state: str) -> 
     client = Client(enforce_csrf_checks=True)
     response = submit(client, "auth/password/request", {"email": user.email})
     assert response.status_code == 401
-    assert not any("Password Reset" in str(message.subject) for message in mail.outbox)
+    assert not reset_code_mailed()
 
 
 def test_reset_of_initial_signup_address_proves_ownership_and_replaces_attacker_password() -> None:

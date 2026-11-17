@@ -14,6 +14,7 @@ from django.core.mail import EmailMultiAlternatives
 from django.test import Client, override_settings
 from django.utils import timezone
 
+from pyracast.accounts.account_mail import device_label
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.models import UserLanguagePreference
 from tests.test_admin_recovery_security import RECOVERY, authenticated_account
@@ -152,6 +153,22 @@ def test_unknown_address_receives_the_product_notice() -> None:
         subject="Pyracast account not found",
     )
     assert settings.HEADLESS_FRONTEND_URLS["account_signup"] in html(message)
+
+
+def test_signup_with_a_taken_address_notifies_the_owner_in_their_language() -> None:
+    user = turkish_member()
+
+    signup(browser("en"), {"email": user.email})
+
+    message = only_mail()
+    assert_account_mail(
+        message,
+        prefix="account/email/account_already_exists",
+        to=user.email,
+        language="tr",
+        subject="Pyracast hesab\u0131n\u0131z zaten var",
+    )
+    assert settings.HEADLESS_FRONTEND_URLS["account_reset_password"] in html(message)
 
 
 def test_password_change_notice_uses_the_account_language() -> None:
@@ -317,3 +334,34 @@ def test_remaining_security_notices_render_the_product_copy(
     assert sentence in str(message.body)
     assert "<script>" not in html(message)
     assert "UTC" in html(message)
+
+
+@pytest.mark.parametrize(
+    ("user_agent", "label"),
+    [
+        (FIREFOX, "Firefox on Windows"),
+        (
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/137.0 Safari/537.36",
+            "Chrome on Linux",
+        ),
+        ("curl/8.0 (Android)", "Android"),
+        ("Mozilla/5.0 Gecko/20100101 Firefox/139.0", "Firefox"),
+        ("", "an unknown device"),
+    ],
+)
+def test_device_label_names_browser_and_system_without_the_raw_agent(
+    user_agent: str, label: str
+) -> None:
+    assert device_label(user_agent) == label
+
+
+def test_notice_to_several_addresses_keeps_every_recipient() -> None:
+    message = AccountAdapter().render_mail(
+        "account/email/account_already_exists",
+        ["first@example.com", "second@example.com"],
+        {"email": "first@example.com", "password_reset_url": "https://testserver/app/"},
+    )
+
+    assert message.to == ["first@example.com", "second@example.com"]
+    assert message.subject == "Your Pyracast account already exists"
+    assert "https://testserver/app/" in str(message.body)
