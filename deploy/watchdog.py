@@ -24,7 +24,6 @@ HEALTHY = ("running", "healthy")
 # The unit's TimeoutStartSec leaves 90 s after this deadline for the reports.
 DEADLINE_SECONDS = 210
 DELIVERY_INTERVAL_SECONDS = 300
-BACKUP_CLOCK_TOLERANCE_SECONDS = 300
 DELIVERY_CHECKED = Path("/var/lib/pyracast/delivery-checked")
 MEMINFO = Path("/proc/meminfo")
 # Traefik renews at one third of the lifetime; below a quarter its renewal has failed for days.
@@ -120,9 +119,7 @@ def last_backup_time(release: Path) -> float:
 
 
 def check_backup_age(release: Path) -> None:
-    age = time.time() - last_backup_time(release)
-    # A completion time ahead of the clock was written by a clock that ran ahead; it proves nothing.
-    if age > host.BACKUP_MAX_AGE_SECONDS or age < -BACKUP_CLOCK_TOLERANCE_SECONDS:
+    if time.time() - last_backup_time(release) > host.BACKUP_MAX_AGE_SECONDS:
         report(
             "pyracast_backup_failed", "ERROR", reason="last_verified_backup_older_than_90_minutes"
         )

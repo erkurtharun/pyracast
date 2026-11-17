@@ -766,7 +766,7 @@ def test_installer_takes_the_recorded_object_only_from_the_validating_reader() -
     assert reader in script
     assert script.index(reader) < script.index("prerelease_object=$candidate")
     assert script.count(release_record.RECORD) == script.count(f"$release/{release_record.RECORD}")
-    assert "json.load" not in script
+    assert '["object"]' not in script
 
 
 def test_a_release_that_cannot_get_the_lock_says_nothing_changed() -> None:

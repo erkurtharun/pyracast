@@ -22,13 +22,12 @@ from urllib.parse import quote, urlencode
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from deploy import host
+from deploy import host, release_record
 from deploy.operations_log import access_token, report
 
 HOURLY_LOCK_WAIT_SECONDS = 600
 DUMP_TIMEOUT_SECONDS = 1200
 SKIPPED_EXIT_STATUS = 75
-PRERELEASE_RECORD = "prerelease-backup.json"
 
 
 def compose_command(release: Path) -> list[str]:
@@ -151,44 +150,6 @@ def dump_database(release: Path, archive: Path) -> None:
             raise
 
 
-type Snapshot = tuple[int, float]
-
-
-def pointer_sequence() -> int:
-    try:
-        return int(json.loads(host.LAST_BACKUP.read_text())["sequence"])
-    except (OSError, ValueError, KeyError, TypeError):
-        return 0
-
-
-def file_sequence(path: Path) -> int:
-    try:
-        return int(path.read_text())
-    except (OSError, ValueError):
-        return 0
-
-
-def take_snapshot() -> Snapshot:
-    # Caller holds the release lock. A lost sequence file must not restart below the pointer.
-    sequence_file = host.LAST_BACKUP.with_name("backup-sequence")
-    sequence = max(file_sequence(sequence_file), pointer_sequence()) + 1
-    write_atomically(sequence_file, str(sequence))
-    return sequence, time.time()
-
-
-def locked_dump(release: Path, archive: Path) -> Snapshot | None:
-    with host.release_lock(HOURLY_LOCK_WAIT_SECONDS) as locked:
-        if not locked:
-            report("pyracast_backup_skipped", "WARNING", reason="lock_timeout")
-            return None
-        if host.RELEASE_BLOCKED.exists():
-            report("pyracast_backup_skipped", "WARNING", reason="release_blocked")
-            return None
-        snapshot = take_snapshot()
-        dump_database(release, archive)
-    return snapshot
-
-
 def write_atomically(path: Path, content: str) -> None:
     temporary = path.with_name(f"{path.name}.{uuid.uuid4().hex}")
     with temporary.open("w") as stream:
@@ -198,18 +159,15 @@ def write_atomically(path: Path, content: str) -> None:
     temporary.replace(path)
 
 
-def record_backup(name: str, snapshot: Snapshot) -> None:
-    # Uploads finish out of order: the pointer keeps the highest sequence, not the last upload.
-    sequence, snapshot_at = snapshot
-    with host.pointer_lock():
-        if sequence >= pointer_sequence():
-            pointer = {
-                "object": name,
-                "sequence": sequence,
-                "snapshot_at": snapshot_at,
-                "completed_at": time.time(),
-            }
-            write_atomically(host.LAST_BACKUP, json.dumps(pointer))
+def store_backup(release: Path, bucket: str, kind: str, archive: Path) -> str:
+    dump_database(release, archive)
+    stamp = datetime.datetime.now(datetime.UTC).strftime("%Y/%m/%d/%Y%m%dT%H%M%SZ")
+    name = f"postgres/{stamp}-{kind}-{uuid.uuid4().hex}.dump"
+    upload_backup(bucket, name, archive)
+    if kind == "prerelease":
+        write_atomically(release / release_record.RECORD, json.dumps({"object": name}))
+    write_atomically(host.LAST_BACKUP, json.dumps({"object": name, "completed_at": time.time()}))
+    return name
 
 
 def create_backup(release: Path, bucket: str, kind: str, directory: Path) -> str | None:
@@ -217,18 +175,17 @@ def create_backup(release: Path, bucket: str, kind: str, directory: Path) -> str
     archive = directory / "database.dump"
     if kind == "prerelease":
         # The installer already holds the release lock; a second lock request would wait forever.
-        snapshot: Snapshot | None = take_snapshot()
-        dump_database(release, archive)
+        name = store_backup(release, bucket, kind, archive)
     else:
-        snapshot = locked_dump(release, archive)
-    if snapshot is None:
-        return None
-    stamp = datetime.datetime.now(datetime.UTC).strftime("%Y/%m/%d/%Y%m%dT%H%M%SZ")
-    name = f"postgres/{stamp}-{kind}-{uuid.uuid4().hex}.dump"
-    upload_backup(bucket, name, archive)
-    if kind == "prerelease":
-        write_atomically(release / PRERELEASE_RECORD, json.dumps({"object": name}))
-    record_backup(name, snapshot)
+        # Dump, upload and pointer stay under one lock, so the pointer always names the newest dump.
+        with host.release_lock(HOURLY_LOCK_WAIT_SECONDS) as locked:
+            if not locked:
+                report("pyracast_backup_skipped", "WARNING", reason="lock_timeout")
+                return None
+            if host.RELEASE_BLOCKED.exists():
+                report("pyracast_backup_skipped", "WARNING", reason="release_blocked")
+                return None
+            name = store_backup(release, bucket, kind, archive)
     report(
         "pyracast_backup_succeeded",
         "INFO",
@@ -403,9 +360,7 @@ def run(arguments: list[str] | None = None) -> int:
     try:
         return main(arguments)
     except SystemExit as stopped:
-        if stopped.code == 143 and host.RELEASE_BLOCKED.exists():
-            report("pyracast_backup_skipped", "WARNING", reason="stopped_for_release")
-        elif stopped.code == 143:
+        if stopped.code == 143:
             report("pyracast_backup_failed", "ERROR", reason="terminated")
         raise
     except Exception:

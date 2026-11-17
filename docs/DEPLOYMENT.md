@@ -372,8 +372,7 @@ fixtures do not establish provider access or inbox delivery.
   A worker that exhausts its five automatic retries stays stopped until restarted.
   Do not automatically resend an email marked `uncertain`.
 - **Host supervision:** `pyracast-watchdog.timer` runs independent checks (capacity,
-  backup age, where a completion time over five minutes ahead of the clock counts
-  as stale, containers, delivery at most every five minutes, origin certificate)
+  backup age, containers, delivery at most every five minutes, origin certificate)
   within one deadline and ends each run with a `pyracast_watchdog_heartbeat` whose
   `state` is `ok`, `blocked`, `unit_failed` or `lock_busy`; a missing heartbeat
   alerts. It restarts application containers only under the release lock and never
@@ -409,14 +408,12 @@ fixtures do not establish provider access or inbox delivery.
   fix or explicit database restore; moving an image tag does not undo a database.
 - **Backups:** the host's hourly timer uploads a custom-format PostgreSQL dump to
   the private backup bucket; each release requires another successful dump before
-  migration. The hourly dump waits up to ten minutes for the release lock, holds it
-  only while dumping and reports `pyracast_backup_skipped` when a release keeps the
-  lock or stays blocked. Each dump takes the next number from
-  `/var/lib/pyracast/backup-sequence` under the release lock, and
-  `last-backup.json` names the highest number uploaded, so an hourly upload that
-  finishes after a newer pre-release dump does not replace it, whatever the clock
-  did. A release stops a running hourly backup before its own dump; that run
-  reports `pyracast_backup_skipped`. Cloud Storage lifecycle cleanup expires objects after
+  migration. The hourly backup waits up to ten minutes for the release lock and
+  reports `pyracast_backup_skipped` when a release keeps the lock or stays blocked.
+  Hourly backups and releases exclude each other through that lock from the dump to
+  the replacement of `/var/lib/pyracast/last-backup.json`, so the pointer always
+  names the newest snapshot; a release waits up to its 300-second lock timeout for a
+  running backup and otherwise stops without changing anything. Cloud Storage lifecycle cleanup expires objects after
   seven days; deletion is asynchronous. Check the last successful upload, not just timer
   activation. A one-hour recovery point depends on successful hourly backups;
   failures increase possible data loss, and there is no WAL/PITR recovery. Keep

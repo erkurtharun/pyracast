@@ -23,7 +23,7 @@ done
 [[ -f "$bundle/deploy/compose.yaml" && -f "$migration" ]] || refuse 'Missing release bundle or migration secret.'
 exec 9>/run/lock/pyracast-release.lock
 # systemd stop takes the same lock; releases must drain containers directly.
-flock --timeout 300 9 || { echo 'Timed out waiting for another release, backup or watchdog operation.' >&2; exit 1; }
+flock --timeout 300 9 || { echo 'Timed out waiting for another release, backup or watchdog operation; nothing was changed.' >&2; exit 1; }
 mkdir -p /run/pyracast
 chmod 700 /run/pyracast
 session=$(mktemp -d /run/pyracast/release.XXXXXX)
@@ -33,13 +33,6 @@ promoted=0
 prerelease_object=
 record_unreadable=0
 recovery='python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json'
-prerelease_record() {
-  local object
-  object=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["object"])' "$1") \
-    || return 1
-  [[ $object =~ ^postgres/[A-Za-z0-9/_.-]+\.dump$ ]] || return 1
-  printf '%s\n' "$object"
-}
 begin_maintenance() {
   maintenance_started=1
   touch /var/lib/pyracast/release-blocked && sync -f /var/lib/pyracast/release-blocked \
@@ -163,19 +156,11 @@ if [[ -L /opt/pyracast/current ]]; then
   "${old[@]}" stop -t 660 worker notifications
   "${old[@]}" stop -t 100 gateway api web
 fi
-# An hourly backup that is already past the lock would finish after this release's dump.
-if [[ $(systemctl show --property=LoadState --value pyracast-backup.service) == loaded ]]; then
-  systemctl stop pyracast-backup.service
-fi
-if systemctl is-active --quiet pyracast-backup.service; then
-  echo 'pyracast-backup.service is still active; the pre-release backup was not taken.' >&2
-  exit 1
-fi
 # Back up the running database before a new support image can modify its data directory.
 rm -f "$release/prerelease-backup.json"
 python3 "$release/deploy/backup.py" /etc/pyracast/host.json --release-dir "$release" --kind prerelease
 sync -f "$release"
-if ! candidate=$(prerelease_record "$release/prerelease-backup.json"); then
+if ! candidate=$(python3 "$release/deploy/release_record.py" "$release/prerelease-backup.json"); then
   record_unreadable=1
   exit 1
 fi
