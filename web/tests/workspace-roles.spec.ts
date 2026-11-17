@@ -1,6 +1,6 @@
 import { test, expect } from "./support/test";
 import { mockApi, paged, user } from "./support/workspace";
-import { allauthErrorBody } from "./support/errors";
+import { allauthErrorBody, errorBody } from "./support/errors";
 
 test("Turkish workspace roles and invitation labels preserve readable characters", async ({
     page,
@@ -150,7 +150,10 @@ test("workspace administrator invites a viewer and sees invitation errors", asyn
             if (email)
                 return route.fulfill({
                     status: 400,
-                    json: { detail: "An invitation is already pending." },
+                    json: errorBody(
+                        "invalid_request",
+                        "An invitation is already pending.",
+                    ),
                 });
             email = route.request().postDataJSON().email;
             return route.fulfill({
@@ -308,7 +311,10 @@ test("signed in member explicitly accepts invitation and sees actionable errors"
             return route.fulfill({ json: { tenant_id: 1, role: "viewer" } });
         return route.fulfill({
             status: 400,
-            json: { detail: "Sign in with the invited email address." },
+            json: errorBody(
+                "invitation_email_unverified",
+                "Sign in with the invited email address.",
+            ),
         });
     });
     await page.goto("/app/#token=invite-secret&section=members");
@@ -338,7 +344,10 @@ for (const detail of [
         await mockApi(page);
         await page.setViewportSize({ width: 320, height: 740 });
         await page.route("**/api/invitations/accept/", (route) =>
-            route.fulfill({ status: 400, json: { detail } }),
+            route.fulfill({
+                status: 400,
+                json: errorBody("invalid_request", detail),
+            }),
         );
         await page.goto("/app/?token=invite-secret");
         await page.getByRole("button", { name: "Accept invitation" }).click();
