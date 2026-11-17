@@ -23,12 +23,13 @@ def record_security_event(
     request: HttpRequest | None = None,
     user: AbstractBaseUser | None = None,
     email_address: EmailAddress | None = None,
+    client_ip: str | None = None,
     **_kwargs: Any,
 ) -> None:
     user_id = user.pk if user is not None else None
     if user_id is None and email_address is not None:
         user_id = email_address.user_id
-    address = None
+    address = client_ip
     if request is not None:
         with suppress(ValueError, PermissionDenied):
             address = str(ip_address(get_adapter().get_client_ip(request)))

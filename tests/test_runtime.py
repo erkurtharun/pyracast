@@ -10,6 +10,7 @@ from dramatiq.brokers.stub import StubBroker
 
 from pyracast import runtime
 from pyracast.forecasts.models import CollectionJob, ForecastResult, RequestAttempt
+from pyracast.forecasts.monitoring import PhaseOutcome
 from pyracast.shutdown import ShutdownRequest
 from tests.test_domain import make_system
 
@@ -55,8 +56,8 @@ def test_dispatch_schedules_before_sending_and_repeats_pending(
     monkeypatch.setattr(runtime, "pending_job_ids", pending)
     broker = StubBroker()
     actor = runtime.make_actor(broker)
-    assert runtime.dispatch(actor) == 2
-    assert runtime.dispatch(actor) == 2
+    assert runtime.dispatch(actor) == PhaseOutcome(published=2)
+    assert runtime.dispatch(actor) == PhaseOutcome(published=2)
     assert broker.queues[actor.queue_name].qsize() == 4
     assert scheduled.call_count == 2
     assert pending.call_args.args == scheduled.call_args.args
@@ -102,7 +103,8 @@ def test_rabbitmq_failover_urls_preserve_explicit_parameters(
 def test_dispatch_command_modes(monkeypatch: pytest.MonkeyPatch) -> None:
     from pyracast.forecasts.management.commands import dispatch as command
 
-    broker, actor, send, purge = MagicMock(), MagicMock(), MagicMock(), MagicMock()
+    broker, actor, purge = MagicMock(), MagicMock(), MagicMock()
+    send = MagicMock(return_value=PhaseOutcome())
     monkeypatch.setattr(command, "purge_expired", purge)
     monkeypatch.setattr(command, "make_broker", lambda: broker)
     monkeypatch.setattr(command, "make_actor", lambda _: actor)

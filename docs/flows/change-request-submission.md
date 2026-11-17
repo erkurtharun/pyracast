@@ -73,7 +73,7 @@ sequenceDiagram
 | Region, plant, configuration or incident missing, trashed or elsewhere; request not own or plant trashed | 404 `not_found` |
 | Same key with another payload / 20 pending on this plant / withdraw after a decision | 409 `idempotency_key_reused` / `pending_request_limit` / `request_already_closed` |
 | Stale incident `expected_revision` | 409 `http_409` |
-| Stale production `expected_revision_id` | `ProductionRevisionConflictError` is unmapped, so 500 (static reading) |
+| Stale production `expected_revision_id` | 409 `production_revision_conflict` with localized `detail`; no request row is stored |
 | Lock wait over 5 s | 503 `workspace_busy`, `Retry-After: 1` |
 
 ## Rules and invariants
@@ -87,4 +87,4 @@ sequenceDiagram
 
 - `tests/test_change_request_boundaries.py` (API submit and withdraw, seen receipt, replay, removed proposer, tenant isolation, operation-level admin refusal), `tests/test_change_request_concurrency.py` (shared key, last pending slot, membership removed while waiting), `tests/test_change_request_contracts.py` (reason and interval limits, incident fields, incident replay, admin cannot withdraw or mark another's request, withdraw retry, anonymous permission), `tests/test_change_requests.py` (invalid numbers, pending requests absent from measurements, capability flags, trash and purge, calculation isolation).
 - `web/tests/change-requests.spec.ts`: viewer production proposals with 503 retry and stable key at 320 px, outage proposal envelopes, withdraw and mark-read in Turkish; every API call is mocked with `page.route`.
-- Gaps: no test for stale production revision on submit (500), nor for the HTTP mapping of administrator refusal, `idempotency_key_reused`, `pending_request_limit`, `request_already_closed` or a stale incident revision; no Playwright run against the real backend.
+- Gaps: no test for the HTTP mapping of administrator refusal, `idempotency_key_reused`, `pending_request_limit`, `request_already_closed` or a stale incident revision; no Playwright run against the real backend.

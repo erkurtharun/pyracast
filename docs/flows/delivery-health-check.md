@@ -48,7 +48,7 @@ sequenceDiagram
 
 | Table | R/W | What |
 | --- | --- | --- |
-| `forecasts_dispatcherstatus` | R (W by dispatcher) | One row per phase: attempted, succeeded, last error code |
+| `forecasts_dispatcherstatus` | R (W by dispatcher) | One row per phase: attempted, succeeded, last error code; `duration_ms` and `published` are written but not read |
 | `forecasts_collectionjob`, `metering_epiascollectionjob` | R | Waiting, running or last-24h failed jobs of non-deleted regions (collection) or plants (EPIAS) |
 | `notifications_notificationdelivery` | R | Waiting, sending or last-24h deliveries, including prepared message kind |
 | `notifications_reminderschedule`, `accounts_membership`, `account_emailaddress`, `auth_user` | R | Enabled current schedules of approved regions; recipients resolved and validated in Python, membership and address reads per schedule when needed |

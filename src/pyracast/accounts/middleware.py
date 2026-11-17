@@ -1,14 +1,15 @@
 import math
 import time
 from collections.abc import Callable
-from ipaddress import ip_address, ip_network
-from typing import cast
+from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
+from typing import NoReturn, cast
 
 from django.conf import settings
 from django.contrib.auth import logout
 from django.core.exceptions import ImproperlyConfigured, PermissionDenied
 from django.http import HttpRequest, HttpResponse
 
+from pyracast.accounts.audit import record_security_event
 from pyracast.accounts.checks import validate_public_origin
 from pyracast.accounts.security import normalize_client_ip
 
@@ -50,7 +51,7 @@ class TrustedProxyHeaders:
                 del request.META[name]
         if trusted:
             if forwarded_proto not in {"http", "https"} or not client_ip:
-                raise PermissionDenied("Invalid trusted proxy headers.")
+                self._refuse(remote)
             try:
                 client_ip = (
                     self._forwarded_client_ip(forwarded_for)
@@ -58,7 +59,7 @@ class TrustedProxyHeaders:
                     else normalize_client_ip(client_ip)
                 )
             except ValueError:
-                raise PermissionDenied("Invalid trusted proxy headers.") from None
+                self._refuse(remote)
             request.META["HTTP_X_FORWARDED_PROTO"] = forwarded_proto
             request.META["HTTP_X_REAL_IP"] = client_ip
             if country and self.upstream_networks and forwarded_for:
@@ -66,6 +67,12 @@ class TrustedProxyHeaders:
                 if any(upstream in network for network in self.upstream_networks):
                     request.META["HTTP_CF_IPCOUNTRY"] = country
         return self.get_response(request)
+
+    @staticmethod
+    def _refuse(peer: IPv4Address | IPv6Address) -> NoReturn:
+        # The allauth adapter cannot resolve the client here: it would refuse the same headers.
+        record_security_event("invalid_proxy_headers", client_ip=str(peer))
+        raise PermissionDenied("Invalid trusted proxy headers.")
 
     def _forwarded_client_ip(self, forwarded_for: str | None) -> str:
         if not forwarded_for:

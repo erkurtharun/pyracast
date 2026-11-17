@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import time
 import uuid
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
+from pyracast.background.failures import log_failure
 from pyracast.connections.models import ProviderAccount
 from pyracast.plants.calibration_data import build_calibration_dataset, current_source_validation
 from pyracast.plants.forecasting import power_limit
@@ -35,6 +37,8 @@ from pyracast.regions.models import Region
 
 LEASE_DURATION = timedelta(minutes=5)
 MAX_ATTEMPTS = 3
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -86,6 +90,7 @@ def _claim(run_id: int, now: datetime) -> _Lease | None:
         elif run.attempts >= MAX_ATTEMPTS or run.cutoff_at > now:
             run.status = "failed"
             run.last_error = "attempt_limit" if run.attempts >= MAX_ATTEMPTS else "invalid_cutoff"
+            logger.warning("calibration_run_failed run=%s reason=%s", run.pk, run.last_error)
         else:
             token = uuid.uuid4()
             run.status = "running"
@@ -132,6 +137,7 @@ def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now:
             or run.lease_expires_at is None
             or run.lease_expires_at <= now
         ):
+            logger.warning("calibration_lease_lost run=%s", run.pk)
             return False
         configuration = PlantConfiguration.objects.select_related("binding__provider_account").get(
             pk=run.configuration_id
@@ -182,6 +188,7 @@ def _fail(lease: _Lease, now: datetime) -> None:
             or run.lease_expires_at is None
             or run.lease_expires_at <= now
         ):
+            logger.warning("calibration_lease_lost run=%s", run.pk)
             return
         run.status = "failed" if run.attempts >= MAX_ATTEMPTS else "pending"
         run.completed_at = now if run.status == "failed" else None
@@ -211,6 +218,7 @@ def run_calibration(run_id: int, now: datetime | None = None) -> bool:
         return False
     try:
         dataset = build_calibration_dataset(lease.run, lease.configuration)
+        fit_started = time.monotonic()
         result = fit_calibration(
             dataset.samples,
             timezone=lease.configuration.binding.timezone,
@@ -219,6 +227,11 @@ def run_calibration(run_id: int, now: datetime | None = None) -> bool:
             incumbent_factor=dataset.incumbent_factor,
             incumbent_is_active=dataset.incumbent_is_active,
             required_windows=dataset.required_windows,
+        )
+        logger.info(
+            "calibration_fit_completed run=%s seconds=%.3f",
+            run_id,
+            time.monotonic() - fit_started,
         )
         result.report["comparison_activation_id"] = lease.run.comparison_activation_id
         result.report["transfer_model"] = transfer_model(lease.configuration)
@@ -242,7 +255,14 @@ def run_calibration(run_id: int, now: datetime | None = None) -> bool:
         return _publish(
             lease, result, dataset.manifest, now + timedelta(seconds=time.monotonic() - start)
         )
-    except ValueError, ArithmeticError, TypeError, KeyError:
+    except (ValueError, ArithmeticError, TypeError, KeyError) as error:
+        log_failure(
+            logger,
+            "calibration_attempt_failed",
+            error,
+            run=run_id,
+            attempt=lease.run.attempts,
+        )
         _fail(lease, now + timedelta(seconds=time.monotonic() - start))
         return False
 

@@ -1,9 +1,9 @@
 import logging
 
 import pytest
-from pyracast.background.failures import log_failure
 
 from pyracast.accounts.security import normalize_client_ip
+from pyracast.background.failures import log_failure
 
 logger = logging.getLogger("pyracast.tests")
 
@@ -40,4 +40,25 @@ def test_log_failure_without_pyracast_frame_names_no_origin(
     log_failure(logger, "calibration_attempt_failed", KeyError("secret"))
     assert [record.getMessage() for record in pyracast_logs.records] == [
         "calibration_attempt_failed error_type=KeyError origin=unknown"
+    ]
+
+
+def test_log_failure_follows_implicit_context_and_stops_at_cycles(
+    pyracast_logs: pytest.LogCaptureFixture,
+) -> None:
+    hidden = wrapped_failure()
+    try:
+        try:
+            raise hidden
+        except RuntimeError:
+            raise KeyError("secret") from None
+    except KeyError as error:
+        suppressed = error
+    first, second = LookupError("secret"), LookupError("secret")
+    first.__context__, second.__context__ = second, first
+    log_failure(logger, "suppressed_context", suppressed)
+    log_failure(logger, "cyclic_context", first)
+    assert [record.getMessage() for record in pyracast_logs.records] == [
+        "suppressed_context error_type=KeyError origin=unknown",
+        "cyclic_context error_type=LookupError origin=unknown",
     ]

@@ -1,19 +1,22 @@
 import json
 import logging
 import re
-import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from functools import partial
 from typing import Any
 
 import pytest
 from django.conf import LazySettings
 from django.contrib.auth.models import User
 from django.contrib.sessions.exceptions import SessionInterrupted
-from django.test import Client
+from django.core.exceptions import BadRequest, PermissionDenied
+from django.http import HttpRequest, HttpResponse
+from django.test import Client, RequestFactory
 
 from pyracast.accounts import headless, session_lock
 from pyracast.accounts.audit import logger as security_logger
+from pyracast.api import error_pages
 
 pytestmark = pytest.mark.django_db
 
@@ -22,7 +25,7 @@ def assert_private_json(response: Any, status: int, body: dict[str, object]) -> 
     assert response.status_code == status
     assert response["Content-Type"] == "application/json"
     assert "no-store" in response["Cache-Control"]
-    assert response.json() == body
+    assert json.loads(response.content) == body
 
 
 def test_unknown_api_path_answers_json_404() -> None:
@@ -41,6 +44,7 @@ def test_invalid_trusted_proxy_headers_answer_json_403_without_caching(
     settings.PYRACAST_TRUST_PROXY = True
     settings.PYRACAST_TRUSTED_PROXY_CIDRS = ["10.0.0.0/24"]
     monkeypatch.setattr(security_logger, "handlers", [caplog.handler])
+    monkeypatch.setattr(security_logger, "propagate", False)
     caplog.set_level(logging.INFO, logger="pyracast.security")
     response = Client(REMOTE_ADDR="10.0.0.7").get(
         "/api/session/", HTTP_X_FORWARDED_PROTO="https", HTTP_X_REAL_IP="not-an-address"
@@ -95,15 +99,42 @@ def test_unhandled_error_in_allauth_view_answers_json_500(
     )
 
 
+def configured_handlers(name: str) -> list[logging.Handler]:
+    # pytest attaches its own capture handlers to non-propagating loggers.
+    return [
+        handler
+        for handler in logging.getLogger(name).handlers
+        if not type(handler).__module__.startswith("_pytest")
+    ]
+
+
 def test_django_request_errors_reach_the_console_handler() -> None:
-    request_logger = logging.getLogger("django.request")
-    assert request_logger.level == logging.ERROR
-    assert [
-        handler.stream
-        for handler in request_logger.handlers
-        if isinstance(handler, logging.StreamHandler)
-    ] == [sys.stdout]
+    assert logging.getLogger("django.request").level == logging.ERROR
+    assert configured_handlers("django.request") == configured_handlers("pyracast")
     assert logging.getLogger("django.security").level == logging.WARNING
-    assert logging.getLogger("django.security.DisallowedHost").disabled is False
-    assert logging.getLogger("django.security.DisallowedHost").handlers == []
+    assert [type(handler) for handler in configured_handlers("django.security.DisallowedHost")] == [
+        logging.NullHandler
+    ]
     assert not logging.getLogger("django.security.DisallowedHost").propagate
+
+
+@pytest.mark.parametrize(
+    ("handler", "status"),
+    [
+        (partial(error_pages.bad_request, exception=BadRequest()), 400),
+        (partial(error_pages.permission_denied, exception=PermissionDenied()), 403),
+        (error_pages.server_error, 500),
+    ],
+)
+def test_error_handlers_answer_html_outside_the_api(
+    handler: Callable[[HttpRequest], HttpResponse], status: int
+) -> None:
+    response = handler(RequestFactory().get("/admin/"))
+    assert response.status_code == status
+    assert response["Content-Type"].startswith("text/html")
+    assert "no-store" in response["Cache-Control"]
+
+
+def test_other_api_bad_requests_answer_bad_request() -> None:
+    response = error_pages.bad_request(RequestFactory().get("/api/session/"), BadRequest())
+    assert_private_json(response, 400, {"code": "bad_request"})

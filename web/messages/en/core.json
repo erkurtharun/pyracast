@@ -225,6 +225,7 @@
         "invalidResponse": "The server returned an invalid response. Please try again.",
         "duplicateLocation": "This location is already in your company’s portfolio. Open the existing plant.",
         "activePlant": "This location already has an active plant.",
+        "reference": "Reference: {reference}",
         "codes": {
             "configuration_unavailable": "Plant configuration is unavailable. Complete setup and wait for administrator approval.",
             "location_already_has_plant": "This location already has an active plant. Open the existing plant.",
@@ -245,7 +246,13 @@
             "provider_throttled": "The data provider is limiting requests. Please try again later.",
             "quota_exhausted": "The daily data request budget is exhausted. Try again after it resets.",
             "provider_unavailable": "The data provider is unavailable. Please try again later.",
-            "workspace_busy": "Another update is in progress. Try again shortly."
+            "workspace_busy": "Another update is in progress. Try again shortly.",
+            "server_error": "The server could not complete this request.",
+            "request_timeout": "The request took too long. Please try again.",
+            "database_conflict": "Another update conflicted with this one. Try again shortly.",
+            "session_ended": "Your session ended. Refresh the page and sign in again.",
+            "permission_denied": "You do not have permission for this action.",
+            "bad_request": "The request was not valid. Refresh the page and try again."
         }
     },
     "ProductionCsv": {

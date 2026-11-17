@@ -225,6 +225,7 @@
         "invalidResponse": "Sunucu geçersiz bir yanıt döndürdü. Tekrar deneyin.",
         "duplicateLocation": "Bu konum şirketinizin portföyünde zaten var. Mevcut santrali açın.",
         "activePlant": "Bu konumda zaten etkin bir santral var.",
+        "reference": "Referans: {reference}",
         "codes": {
             "configuration_unavailable": "Santral yapılandırması kullanılamıyor. Kurulumu tamamlayıp yönetici onayını bekleyin.",
             "location_already_has_plant": "Bu konumda zaten etkin bir santral var. Mevcut santrali açın.",
@@ -245,7 +246,13 @@
             "provider_throttled": "Veri sağlayıcısı istekleri sınırlıyor. Lütfen daha sonra tekrar deneyin.",
             "quota_exhausted": "Günlük veri isteği kotası tükendi. Sıfırlandıktan sonra tekrar deneyin.",
             "provider_unavailable": "Veri sağlayıcısına ulaşılamıyor. Lütfen daha sonra tekrar deneyin.",
-            "workspace_busy": "Başka bir güncelleme sürüyor. Birazdan yeniden deneyin."
+            "workspace_busy": "Başka bir güncelleme sürüyor. Birazdan yeniden deneyin.",
+            "server_error": "Sunucu bu isteği tamamlayamadı.",
+            "request_timeout": "İstek çok uzun sürdü. Lütfen yeniden deneyin.",
+            "database_conflict": "Başka bir güncelleme bu işlemle çakıştı. Birazdan yeniden deneyin.",
+            "session_ended": "Oturumunuz sona erdi. Sayfayı yenileyip yeniden giriş yapın.",
+            "permission_denied": "Bu işlem için yetkiniz yok.",
+            "bad_request": "İstek geçersiz. Sayfayı yenileyip yeniden deneyin."
         }
     },
     "ProductionCsv": {

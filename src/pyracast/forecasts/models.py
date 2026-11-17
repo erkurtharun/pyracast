@@ -19,6 +19,8 @@ class DispatcherStatus(models.Model):
     attempted_at = models.DateTimeField()
     succeeded_at = models.DateTimeField(null=True)
     last_error = models.CharField(max_length=100, blank=True, default="")
+    duration_ms = models.PositiveIntegerField(null=True)
+    published = models.PositiveIntegerField(null=True)
 
     class Meta:
         constraints = (

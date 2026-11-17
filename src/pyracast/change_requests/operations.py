@@ -133,7 +133,10 @@ def submit_production(
     if previous is not None:
         return previous
     configuration = lock_production_configuration(tenant_id, region_id, plant_id, configuration_id)
-    prepared = prepare_production_changes(configuration, unit, changes)
+    try:
+        prepared = prepare_production_changes(configuration, unit, changes)
+    except ProductionRevisionConflictError as error:
+        raise RequestConflictError("production_revision_conflict", str(error)) from None
     request = _create(
         membership,
         configuration.plant,

@@ -1,6 +1,6 @@
 # Dispatcher scheduling and publishing cycle
 
-A single long-running `pyracast dispatch --loop` process, started by Docker Compose in production and by the local launcher in development, repeats one cycle of five isolated phases: notifications, collection, calibration, retention and metering. Four phases create due rows in PostgreSQL and publish the ids of ready or lease-expired rows to RabbitMQ; retention only purges. Each phase's attempt, success and exception class is upserted into `DispatcherStatus`, which the health check and the admin Overview and Operations screens read.
+A single long-running `pyracast dispatch --loop` process, started by Docker Compose in production and by the local launcher in development, repeats one cycle of five isolated phases: notifications, collection, calibration, retention and metering. Four phases create due rows in PostgreSQL and publish the ids of ready or lease-expired rows to RabbitMQ; retention only purges. Each phase's attempt, success, failure code, duration and published count is upserted into `DispatcherStatus` and logged as `dispatch_phase_finished`, which the health check and the admin Overview and Operations screens read.
 
 ## Entry points
 
@@ -54,7 +54,7 @@ flowchart TD
 
 | Table | R/W | What |
 | --- | --- | --- |
-| `forecasts_dispatcherstatus` | W | One row per phase, upserted after the phase: `attempted_at`, `succeeded_at` only on success, `last_error` = exception class or empty |
+| `forecasts_dispatcherstatus` | W | One row per phase, upserted after the phase: `attempted_at`, `succeeded_at` only on success, `last_error` = failure code or empty, `duration_ms`, `published` (ids sent; null for retention or a raising phase) |
 | `notifications_reminderschedule`, `connections_sitebinding`, `connections_provideraccount`, `accounts_membership`, `account_emailaddress`, `forecasts_forecastsnapshot` | R | Enabled schedules, binding eligibility, effective recipients, latest published snapshot pinned to a new delivery |
 | `accounts_tenant`, `notifications_notificationsettings`, `regions_region` | lock | Per slot: tenant, recipient-limit row (pk 1, created if missing), region |
 | `notifications_notificationdelivery` | R/W | One delivery per schedule slot created (`skipped`/`missed_schedule` when over 2 h late); ready ids selected |
@@ -80,8 +80,8 @@ flowchart TD
 | `--poll-seconds` not finite or <= 0 | `CommandError` "--poll-seconds must be positive and finite", exit non-zero, no broker created |
 | Stop requested before start | Returns immediately; nothing scheduled or published |
 | SIGINT, SIGTERM or stop file during a cycle | Flag only; the cycle finishes its remaining phases, then the loop ends, the broker is closed and the process exits 0 |
-| Any phase raises | Log `dispatch_phase_failed phase=<name> error_type=<class>`; `last_error=<class>`, `succeeded_at` kept; later phases still run |
-| One region or reminder schedule fails to schedule | Other regions or schedules continue; pending ids still sent; phase records `CollectionSchedulingError` or `NotificationSchedulingError` |
+| Any phase raises | Log `dispatch_phase_failed phase=<name> error_type=<class> origin=<module>:<line>:<function>`; `last_error=<class>`, `succeeded_at` kept; later phases still run |
+| One region or reminder schedule fails to schedule | Other regions or schedules continue; pending ids still sent; the collection phase records `collection_regions_failed:<count>` with its published count, the notification phase `NotificationSchedulingError` |
 | Calibration or metering scheduling raises | Nothing is published to that queue this cycle; the first failing plant or connection also stops the rest |
 | EPIAS lookup fails, EIC unknown or ambiguous, or EPIAS credentials missing | `EpiasError` swallowed without a log; `settlement_checked_at` is still stamped, so the next lookup is a day later; phase succeeds |
 | RabbitMQ unreachable | Startup still succeeds (connection opens on first send). A phase with ids to send records `ConnectionClosed`; a phase with nothing to send records success |

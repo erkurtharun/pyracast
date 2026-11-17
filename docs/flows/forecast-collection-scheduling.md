@@ -36,13 +36,13 @@ sequenceDiagram
             end
             S->>D: "COMMIT"
         end
-        Note over S: "a region that raises is logged and counted, the loop continues"
+        Note over S: "a region that raises is logged with its origin and remembered, the loop continues"
     end
-    S-->>R: "ids (discarded), or CollectionSchedulingError after the loop"
+    S-->>R: "ids (discarded), or CollectionSchedulingError with the failed region ids after the loop"
     R->>D: "pending_job_ids(now), max 100, oldest first"
     R->>Q: "actor.send(job_id) for each id"
-    R-->>C: "count, or CollectionSchedulingError after publishing"
-    C->>D: "record DispatcherStatus for the phase (a failed write is only logged)"
+    R-->>C: "PhaseOutcome: published count and failure code"
+    C->>D: "record DispatcherStatus with duration and published count (a failed write is only logged)"
 ```
 
 ## Data
@@ -66,10 +66,10 @@ None. A system process with direct database access and no tenant context. Scope 
 | Condition | Result |
 | --- | --- |
 | Naive `now` or `cutoff_hour` outside 0-23 | `ValidationError` for direct callers; `dispatch` always passes an aware `now` and no `cutoff_hour` |
-| One region raises (lock wait over 5 s, DB error) | That region rolls back, others continue; after the loop `CollectionSchedulingError` |
-| `enqueue_due` raised | `dispatch` logs only the class, closes unusable connections, still sends pending ids, then raises `CollectionSchedulingError` |
-| Broker or `pending_job_ids` fails | Exception propagates (and replaces a pending `CollectionSchedulingError`); ids already sent stay sent, the rest stay due |
-| Phase raised | Command logs `dispatch_phase_failed`, stores the class name in `DispatcherStatus.last_error` (unhealthy in `delivery_health`), runs the remaining phases; one-shot mode ends with `CommandError`. If recording the status itself fails, the row stays unchanged, `dispatch_monitoring_failed` is logged, later phases still run and one-shot mode also ends with `CommandError` |
+| One region raises (lock wait over 5 s, DB error) | That region rolls back and `collection_region_scheduling_failed region_id=<id> error_type=<class> origin=<location>` is logged; others continue; after the loop `CollectionSchedulingError` carries the failed region ids |
+| `enqueue_due` raised | `dispatch` closes unusable connections, still sends pending ids and returns the published count with `collection_regions_failed:<count>` (or the class name of any other error, logged as `collection_scheduling_failed`) |
+| Broker or `pending_job_ids` fails | `collection_publish_failed` is logged with the ids sent so far; the outcome keeps an earlier scheduling code, otherwise records the class name; ids already sent stay sent, the rest stay due |
+| Phase failed | Command logs `dispatch_phase_failed` for a raising phase, stores the failure code in `DispatcherStatus.last_error` (unhealthy in `delivery_health`), runs the remaining phases; one-shot mode ends with `CommandError`. If recording the status itself fails, the row stays unchanged, `dispatch_monitoring_failed` is logged, later phases still run and one-shot mode also ends with `CommandError` |
 | No approval job, stale binding, disabled schedule | Region skipped silently; leftover jobs are still published and closed by `claim` |
 
 ## Rules and invariants

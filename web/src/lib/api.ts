@@ -77,13 +77,25 @@ async function send<T>(
         response.status === 204
             ? null
             : await response.json().catch(() => null);
-    if (!response.ok)
+    if (!response.ok) {
+        const t = browserErrors();
+        const message =
+            errorMessage(data) || t("request", { status: response.status });
+        const reference = requestReference(data);
         throw new ApiError(
-            errorMessage(data) ||
-                browserErrors()("request", { status: response.status }),
+            reference ? `${message} ${t("reference", { reference })}` : message,
             validationFields(data),
         );
+    }
     return data as T;
+}
+function requestReference(data: unknown): string {
+    return data &&
+        typeof data === "object" &&
+        "request_id" in data &&
+        typeof data.request_id === "string"
+        ? data.request_id
+        : "";
 }
 function errorMessage(data: unknown): string {
     const t = browserErrors();
@@ -101,7 +113,7 @@ function errorMessage(data: unknown): string {
         return data.map(errorMessage).filter(Boolean).join(" ");
     if (data && typeof data === "object") {
         const detail = Object.entries(data)
-            .filter(([key]) => key !== "code")
+            .filter(([key]) => !["code", "message", "request_id"].includes(key))
             .map(([key, value]) => {
                 const message = errorMessage(value);
                 return message
