@@ -37,7 +37,10 @@
         "showPassword": "Şifreyi göster",
         "authenticatorCode": "Doğrulama veya kurtarma kodu",
         "resendCode": "Doğrulama kodunu tekrar gönder",
-        "verificationExpired": "Doğrulama oturumunun süresi doldu. Tekrar başlayın.",
+        "resendIn": "{seconds} sn sonra kodu tekrar gönder",
+        "resendWait": "Yeni bir kod istemeden önce bir dakika bekleyin.",
+        "resendLimit": "Bu oturum açma için daha fazla kod gönderilemez. Yeni bir kod almak için tekrar oturum açın.",
+        "tooManyAttempts": "Çok fazla deneme yapıldı. Birkaç dakika bekleyip tekrar deneyin veya parolanızı sıfırlayın.",
         "codeRequested": "Yeni bir kod istendi.",
         "forgotPassword": "Şifrenizi mi unuttunuz?",
         "passwordChanged": "Parolanız kaydedildi. Yeni parolanızla giriş yapın."
@@ -202,8 +205,14 @@
             "sent": "gönderildi",
             "cancelled": "iptal edildi",
             "skipped": "atlandı",
-            "uncertain": "belirsiz"
+            "uncertain": "belirsiz",
+            "superseded": "yerini yenisi aldı"
         }
+    },
+    "AppError": {
+        "title": "Bu sayfa görüntülenemedi",
+        "description": "Bu sayfa gösterilirken bir sorun oluştu. Tekrar deneyin; sorun sürerse sayfayı yenileyin.",
+        "retry": "Tekrar dene"
     },
     "Language": {
         "label": "Dil",

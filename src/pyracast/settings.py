@@ -185,7 +185,7 @@ ACCOUNT_RATE_LIMITS = {
     "signup": "5/h/ip",
     "reset_password": "5/h/ip,3/h/key",
     "reset_password_from_key": "10/h/ip",
-    "confirm_email": "1/3m/key",
+    "confirm_email": "1/1m/key",
 }
 CACHES = {
     "default": {

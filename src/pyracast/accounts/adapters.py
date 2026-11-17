@@ -9,12 +9,13 @@ from allauth.headless.internal.restkit.response import ErrorResponse
 from allauth.mfa.models import Authenticator
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.mail import EmailMultiAlternatives
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest
 from django.template.loader import render_to_string
 from django.utils import translation
+from django.utils.translation import gettext_lazy
 
 from pyracast.accounts.language import user_language
 from pyracast.accounts.security import normalize_client_ip
@@ -22,8 +23,19 @@ from pyracast.mail_delivery import NotSentError
 
 logger = logging.getLogger(__name__)
 
+LOGIN_LIMITED_MESSAGE = gettext_lazy(
+    "Too many sign-in attempts, or a verification code was sent recently. "
+    "Try again in a few minutes."
+)
+
 
 class AccountAdapter(DefaultAccountAdapter):
+    def validation_error(self, code: str, *args: Any) -> ValidationError:
+        # allauth also answers a sign-in within the confirm_email window with this code.
+        if code == "too_many_login_attempts":
+            return ValidationError(LOGIN_LIMITED_MESSAGE, code=code)
+        return super().validation_error(code, *args)
+
     def render_mail(
         self,
         template_prefix: str,

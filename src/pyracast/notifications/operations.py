@@ -5,6 +5,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import transaction
+from django.utils import translation
 from django.utils.translation import gettext
 
 from pyracast.accounts.operations import require_member, require_workspace_admin
@@ -74,7 +75,9 @@ def get_reminder_schedule(
     region = Region.objects.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
     return ReminderSchedule.objects.filter(
         region=region, retired_at__isnull=True
-    ).first() or ReminderSchedule(region=region, effective_from=now)
+    ).first() or ReminderSchedule(
+        region=region, effective_from=now, language=translation.get_language()
+    )
 
 
 def configure_reminders(

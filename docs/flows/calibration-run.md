@@ -4,7 +4,7 @@ New evidence (production writes, EPİAŞ and estimated-actual acquisitions, hist
 
 ## Entry points
 
-- Screen: none creates a run. `Calibrations` (`web/src/components/calibrations.tsx`) polls `GET .../calibrations/` every 30 s and shows each run's raw `status`; it posts only activate and reset.
+- Screen: none creates a run. `Calibrations` (`web/src/components/calibrations.tsx`) polls `GET .../calibrations/` every 30 s and shows each run's status through `Common.statuses`; it posts only activate and reset.
 - `POST /api/tenants/{t}/regions/{r}/plants/{p}/calibrations/` -> `CalibrationsView.post` (`src/pyracast/plants/api.py`) with `CalibrationInput` (`plants/serializers.py`) -> `request_calibration` (`plants/operations.py`); 202 `CalibrationOutput`. No caller in `web/`.
 - Command `calibrate_plant --username --plant-id --configuration-id --start-date --end-date [--run]` (`plants/management/commands/calibrate_plant.py`): same operation; `--run` calls `run_calibration` in-process, without RabbitMQ.
 - `prepare_calibration` (`plants/preparation.py`) callers: `import_observations` (`plants/operations.py`), `change_production` (`plants/production_changes.py`), EPİAŞ `_publish` unless the job was superseded (`metering/jobs.py`), `publish` of a succeeded `estimated_actuals` job (`forecasts/jobs.py`), `_prepare_region_calibrations` after the import commits (`forecasts/historical_import.py`), `incidents_changed` (`plants/incident_policy.py`), `set_calibration_automation` and `prepare_due_calibrations` (`plants/automation.py`, flow `calibration-automation`), and `_prepare_followup` (`plants/training.py`).

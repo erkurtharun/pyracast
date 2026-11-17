@@ -3,7 +3,13 @@ import { useLocale, useTranslations } from "next-intl";
 
 import { useEffect, useRef, useState } from "react";
 import { ApiError, request, type Session } from "@/lib/api";
-import { authRequest, type AuthResult } from "@/lib/auth-api";
+import {
+    AuthResponseError,
+    authRequest,
+    type AuthResult,
+} from "@/lib/auth-api";
+import { isLanguage } from "@/i18n/language";
+import { publicPath } from "@/lib/public-metadata";
 import { ActionForm, Field } from "./ui";
 import { SocialProviderButtons } from "./social-provider-buttons";
 import { LanguageSelect } from "./language-select";
@@ -39,7 +45,7 @@ export function Auth({
 }) {
     const t = useTranslations("Auth");
     const locale = useLocale();
-    const publicPath = locale === "tr" ? "/tr/" : "/";
+    const language = isLanguage(locale) ? locale : "en";
     const invitationLabels = useTranslations("WorkspaceMembers");
     const [mode, setMode] = useState<Mode>(initialMode);
     const [message, setMessage] = useState<AuthMessage>("");
@@ -48,6 +54,7 @@ export function Auth({
     const [socialEmail, setSocialEmail] = useState("");
     const [socialError, setSocialError] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
+    const [codeSentAt, setCodeSentAt] = useState(0);
 
     async function finish(result: AuthResult) {
         if (result.meta?.is_authenticated) {
@@ -61,6 +68,7 @@ export function Auth({
         } else if (pending === "verify_email") {
             setMode("verify");
             setMessage("codeSent");
+            setCodeSentAt(Date.now());
         } else if (pending === "mfa_authenticate") {
             setMode("mfa");
             setMessage("");
@@ -289,7 +297,17 @@ export function Auth({
                                     "POST",
                                     session.csrf_token,
                                     payload,
-                                );
+                                ).catch((error: unknown) => {
+                                    if (
+                                        mode === "login" &&
+                                        error instanceof AuthResponseError &&
+                                        error.status === 429
+                                    )
+                                        throw new ApiError(
+                                            t("tooManyAttempts"),
+                                        );
+                                    throw error;
+                                });
                                 if (
                                     mode === "verify" &&
                                     !result.meta?.is_authenticated &&
@@ -387,24 +405,15 @@ export function Auth({
                         )}
                     </ActionForm>
                     {mode === "verify" && (
-                        <ActionForm
-                            submit={t("resendCode")}
-                            onSubmit={async () => {
-                                const result = await authRequest(
-                                    "auth/email/verify/resend",
-                                    "POST",
-                                    session.csrf_token,
-                                    {},
-                                );
-                                if (result.status !== 200)
-                                    throw new ApiError(
-                                        t("verificationExpired"),
-                                    );
+                        <ResendCode
+                            key={codeSentAt}
+                            token={session.csrf_token}
+                            sentAt={codeSentAt}
+                            onSent={() => {
+                                setCodeSentAt(Date.now());
                                 setMessage("codeRequested");
                             }}
-                        >
-                            {null}
-                        </ActionForm>
+                        />
                     )}
                     {invitationToken && (
                         <button
@@ -436,12 +445,118 @@ export function Auth({
                         aria-label={t("publicLinks")}
                         className="auth-public-links"
                     >
-                        <a href={publicPath}>{t("homepage")}</a>{" "}
-                        <a href={`${publicPath}privacy/`}>{t("privacy")}</a>{" "}
-                        <a href={`${publicPath}terms/`}>{t("terms")}</a>
+                        <a href={publicPath(language, "home")}>
+                            {t("homepage")}
+                        </a>{" "}
+                        <a href={publicPath(language, "privacy")}>
+                            {t("privacy")}
+                        </a>{" "}
+                        <a href={publicPath(language, "terms")}>{t("terms")}</a>
                     </nav>
                 </section>
             </div>
         </main>
+    );
+}
+
+// Matches the confirm_email rate limit of one code per minute.
+const RESEND_SECONDS = 60;
+const RESEND_MILLISECONDS = RESEND_SECONDS * 1000;
+
+function ResendCode({
+    token,
+    sentAt,
+    onSent,
+}: {
+    token: string;
+    sentAt: number;
+    onSent: () => void;
+}) {
+    const t = useTranslations("Auth");
+    const [availableAt, setAvailableAt] = useState(
+        sentAt && sentAt + RESEND_MILLISECONDS,
+    );
+    const [seconds, setSeconds] = useState(sentAt ? RESEND_SECONDS : 0);
+    const [state, setState] = useState<
+        | { status: "idle" | "pending" }
+        | { status: "error"; message: string; final: boolean }
+    >({ status: "idle" });
+    useEffect(() => {
+        if (!availableAt) return;
+        const timer = window.setInterval(() => {
+            const remaining = Math.max(
+                0,
+                Math.ceil((availableAt - Date.now()) / 1000),
+            );
+            setSeconds(remaining);
+            if (!remaining) window.clearInterval(timer);
+        }, 1000);
+        return () => window.clearInterval(timer);
+    }, [availableAt]);
+
+    async function resend() {
+        setState({ status: "pending" });
+        try {
+            const result = await authRequest(
+                "auth/email/verify/resend",
+                "POST",
+                token,
+                {},
+            );
+            if (result.status === 200) {
+                onSent();
+                return;
+            }
+            setState({
+                status: "error",
+                message: t("resendLimit"),
+                final: true,
+            });
+        } catch (error) {
+            const status =
+                error instanceof AuthResponseError ? error.status : undefined;
+            if (status === 429) {
+                setAvailableAt(Date.now() + RESEND_MILLISECONDS);
+                setSeconds(RESEND_SECONDS);
+            }
+            setState({
+                status: "error",
+                message:
+                    status === 429
+                        ? t("resendWait")
+                        : status === 409
+                          ? t("resendLimit")
+                          : (error as Error).message,
+                final: status === 409,
+            });
+        }
+    }
+
+    return (
+        <form
+            onSubmit={(event) => {
+                event.preventDefault();
+                void resend();
+            }}
+        >
+            {state.status === "error" && (
+                <p className="notice error" role="alert">
+                    {state.message}
+                </p>
+            )}
+            <div className="form-footer">
+                <button
+                    className="button"
+                    type="submit"
+                    disabled={
+                        seconds > 0 ||
+                        state.status === "pending" ||
+                        (state.status === "error" && state.final)
+                    }
+                >
+                    {seconds > 0 ? t("resendIn", { seconds }) : t("resendCode")}
+                </button>
+            </div>
+        </form>
     );
 }

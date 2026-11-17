@@ -195,7 +195,7 @@
     },
     "Calibrations": {
         "calibration_history": "Kalibrasyon geçmişi",
-        "future_forecasts_only_reset_also_turns_off": "Yalnızca gelecekteki tahminlere uygulanır. Sıfırlama, otomatik kalibrasyonu da kapatır.",
+        "selection_effect": "Yayımlanmış tahminler kalibrasyonlarını korur. Yeni tahminler ve tahmini geçmiş günler, seçilen kalibrasyonu ilk eğitim gününden itibaren kullanır. Sıfırlama otomatik kalibrasyonu da kapatır.",
         "download_calibration_csv": "Kalibrasyonu CSV olarak indir",
         "refresh": "Yenile",
         "reset_to_baseline": "Temel modele dön",

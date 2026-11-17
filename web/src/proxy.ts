@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { publicPath, publicRoute } from "@/lib/public-metadata";
 
 export function proxy(request: NextRequest) {
     const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
@@ -17,32 +18,31 @@ export function proxy(request: NextRequest) {
         "form-action 'self'",
         "frame-ancestors 'none'",
     ].join("; ");
-    const headers = new Headers(request.headers);
-    const publicPath = [
-        "/",
-        "/tr",
-        "/privacy",
-        "/terms",
-        "/tr/privacy",
-        "/tr/terms",
-    ].includes(request.nextUrl.pathname.replace(/\/$/, "") || "/");
-    headers.delete("x-pyracast-public-language");
-    if (publicPath)
-        headers.set(
-            "x-pyracast-public-language",
-            request.nextUrl.pathname.startsWith("/tr") ? "tr" : "en",
+    const route = publicRoute(request.nextUrl.pathname);
+    // Read the slash from the raw URL: nextUrl may normalize it under trailingSlash.
+    const requested = new URL(request.url);
+    if (route && !requested.pathname.endsWith("/"))
+        return NextResponse.redirect(
+            new URL(
+                `${publicPath(route.language, route.page)}${requested.search}`,
+                request.url,
+            ),
+            308,
         );
+    const headers = new Headers(request.headers);
+    headers.delete("x-pyracast-public-language");
+    if (route) headers.set("x-pyracast-public-language", route.language);
     headers.set("Content-Security-Policy", policy);
     headers.set("x-nonce", nonce);
     const response = NextResponse.next({ request: { headers } });
     response.headers.set("Content-Security-Policy", policy);
     response.headers.set("Cache-Control", "private, no-store");
-    if (!publicPath) response.headers.set("X-Robots-Tag", "noindex, nofollow");
+    if (!route) response.headers.set("X-Robots-Tag", "noindex, nofollow");
     return response;
 }
 
 export const config = {
     matcher: [
-        "/((?!api/|admin(?:/|$)|static/|_next/static|_next/image|favicon.ico).*)",
+        "/((?!api/|admin(?:/|$)|static/|_next/static|_next/image|favicon.ico|robots\\.txt$|sitemap\\.xml$|icon\\.svg$|(?:tr/)?opengraph-image|identity/).*)",
     ],
 };

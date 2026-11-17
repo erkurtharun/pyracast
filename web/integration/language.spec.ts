@@ -63,6 +63,9 @@ test("account language survives sign-in from another browser without a preferenc
             language: "tr",
             user: { language_preference: "tr" },
         });
+        expect(await (await fresh.request.get("/app/")).text()).toMatch(
+            /<html lang="tr"/,
+        );
         await fresh.reload();
         await expect(fresh.getByLabel("Dil", { exact: true })).toHaveValue(
             "tr",

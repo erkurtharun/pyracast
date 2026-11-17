@@ -68,7 +68,7 @@ def invite_workspace_member(actor: User, tenant_id: int, email: str) -> Workspac
     )
     tenant = Tenant.objects.get(pk=tenant_id)
     link = f"{settings.PYRACAST_PUBLIC_ORIGIN}/app/#token={token}"
-    language = user_language(actor) or "en"
+    language = user_language(actor) or translation.get_language()
 
     def deliver() -> None:
         with translation.override(language):

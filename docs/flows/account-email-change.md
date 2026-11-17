@@ -73,7 +73,7 @@ sequenceDiagram
 | Address belongs to another account | 200 (enumeration prevention) and a code is mailed to it; at verify 400 `email_taken` only if the other account holds it verified, otherwise the change succeeds |
 | No reauthentication in the last 300 s | 401 `is_authenticated=true`; UI shows `confirmIdentity`, no inline reauthentication form |
 | Session expired while sending | 409 (anonymous POST); UI shows "Request failed (409)"; the `sessionExpired` branch is not reached |
-| Any send to the same address (by any user) within 3 minutes, more than 10 email requests a minute, or a session request running for 5 s | 429 (`session_busy` for the latter); UI shows "Request failed (429)" |
+| Any send to the same address (by any user) within 1 minute, more than 10 email requests a minute, or a session request running for 5 s | 429 (`session_busy` for the latter); UI shows "Request failed (429)" |
 | Verify without pending process, after 600 s, after abort or with an expired session | 409; UI shows "Request failed (409)" |
 | Wrong code | 400 `incorrect_code`; the third failure deletes the pending process |
 | Address verified elsewhere meanwhile | 400 `email_taken` (the pre-check keeps the code but counts an attempt; a race at confirmation consumes it) |
@@ -83,7 +83,7 @@ sequenceDiagram
 
 - Lock order at confirmation: session advisory lock (whole request) -> `auth_user` row (`AccountAdapter.confirm_email`) -> `account_emailaddress` writes. Concurrent confirmations of one user serialize; the constraint admits one owner across users.
 - `ACCOUNT_CHANGE_EMAIL=True`: confirmation replaces the old address; mail is deferred with `transaction.on_commit`, so a rolled-back confirmation sends no notice.
-- Code policy: 600 s lifetime, 3 attempts, one send per target address every 3 minutes across all users (`ACCOUNT_RATE_LIMITS["confirm_email"]` overrides allauth's 10 s default). A new POST replaces the pending process and its code. A pending address cannot sign in or recover (`email_identity`).
+- Code policy: 600 s lifetime, 3 attempts, one send per target address per minute across all users (`ACCOUNT_RATE_LIMITS["confirm_email"]` overrides allauth's 10 s default). A new POST replaces the pending process and its code. A pending address cannot sign in or recover (`email_identity`).
 
 ## Tests
 

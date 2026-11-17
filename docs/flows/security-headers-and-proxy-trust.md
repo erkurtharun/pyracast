@@ -82,6 +82,6 @@ None. No table is read or written; the flow only reads and rewrites `request.MET
 ## Tests
 
 - `tests/test_account_security.py`: untrusted peers, missing CIDRs, ambiguous identity, invalid `REMOTE_ADDR`, Cloudflare chain parsing, rate-limit separation, origin validation; `tests/test_language.py` (country trust), `tests/test_api_cache.py` (`/api/` no-store, other paths untouched), `tests/test_security_audit.py` (429 audit), `tests/test_admin_mfa_bootstrap.py` (admin CSP).
-- `web/tests/security-headers.spec.ts` (fresh nonce, injected script blocked); `web/tests/public-site.spec.ts` (language header spoofing, `form-action` in CSP, `noindex` on `/app/`, none on public pages).
+- `web/tests/security-headers.spec.ts` (fresh nonce, injected script blocked); `web/tests/public-site.spec.ts` (language header spoofing, `form-action` in CSP, `noindex` on `/app/`, none on public pages or discovery files); `security-headers.spec.ts` also pins the `same-origin` referrer policy and an ignored spoofed language header on `/app/`.
 - `deploy/smoke.sh`: Traefik HSTS `max-age` and nosniff on `/`, http to https redirect, forged and aliased headers through Traefik, simulated Cloudflare peer.
-- Gaps: no test for Django HSTS or SSL redirect, `X-Frame-Options`, `Permissions-Policy`, `Referrer-Policy`, `Cache-Control` from `proxy.ts`, the 403 response, the allauth 403 for untrusted peers or the `proxy.ts` matcher.
+- Gaps: no test for Django HSTS or SSL redirect, `X-Frame-Options`, `Permissions-Policy`, `Cache-Control` from `proxy.ts`, the 403 response, the allauth 403 for untrusted peers.

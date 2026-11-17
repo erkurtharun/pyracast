@@ -66,7 +66,7 @@ sequenceDiagram
 
 | Condition | Result |
 |---|---|
-| `login` 20/min per IP, `signup` 5/h per IP (password and social share it), `reset_password` 5/h per IP or 3/h per email, `reset_password_from_key` 10/h per IP, `confirm_email` 1 per 3 min per address on resend or email change, allauth per-user defaults | 429, body `{"status": 429}`, no `Retry-After`; UI shows "Request failed (429). Please try again." |
+| `login` 20/min per IP, `signup` 5/h per IP (password and social share it), `reset_password` 5/h per IP or 3/h per email, `reset_password_from_key` 10/h per IP, `confirm_email` 1 per min per address on resend or email change, allauth per-user defaults | 429, body `{"status": 429}`, no `Retry-After`; the sign-in form asks the user to wait or reset the password, the verification resend asks to wait a minute, other screens show "Request failed (429). Please try again." |
 | `login_failed` 10 per 10 min per IP or 5 per 10 min per email, or MFA code key; correct password for an unverified address within 3 min of the last code | 400 with allauth code `too_many_login_attempts` (`rate_limited` when enrolling TOTP) |
 | Cache database error, or `auth_cache` inside a transaction | Exception, HTTP 500 (`ImproperlyConfigured` for the latter) |
 | Unparsable client address, or proxy bypassed while trust is on | 403 `PermissionDenied` |
@@ -78,7 +78,7 @@ sequenceDiagram
 
 - The cache connection must be in autocommit, so application rollbacks never reset limits or used TOTP codes. `add` has exactly one winner (`ON CONFLICT ... WHERE NOT add OR expired`), which is allauth's lock primitive; a lock not won within 1 s counts as limited (fail closed).
 - Expired rows are deleted only by writes, at most 100 per write (`SKIP LOCKED`); reads never purge, and `clear()` wipes limits and code markers alike.
-- Unlisted allauth actions keep their defaults: `change_password` 5/min, `manage_email` 10/min, `reauthenticate` 10/min (all per user). GET requests are not limited, except `confirm_email`. Email resends are limited to 1 per 3 minutes per address while a code lives 10 minutes and 3 resends are allowed.
+- Unlisted allauth actions keep their defaults: `change_password` 5/min, `manage_email` 10/min, `reauthenticate` 10/min (all per user). GET requests are not limited, except `confirm_email`. Email resends are limited to 1 per minute per address while a code lives 10 minutes and 3 resends are allowed.
 - Login consumes `login_failed` before checking credentials and rolls the hit back on success, so only failures count. Password reauthentication goes through the same `authenticate` and also consumes `login_failed`.
 - A completed MFA check or password reset clears `login_failed` for its key and the caller's whole per-IP bucket (`clear` ignores the key for IP rates).
 - Invitation counts include revoked, replaced, accepted and expired rows, so revoke and re-invite within a minute is limited. The check runs before the earlier pending invitation is expired.
