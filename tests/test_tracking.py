@@ -72,7 +72,6 @@ def _configuration(**binding: object) -> PlantConfiguration:
     values: dict[str, object] = {
         "capacity_kw": 1000.0,
         "dc_capacity_kw": 1000.0,
-        "tilt_degrees": 0.0,
         "losses_percent": 0.0,
         "latitude": LATITUDE,
         "longitude": LONGITUDE,
@@ -86,13 +85,12 @@ def _configuration(**binding: object) -> PlantConfiguration:
 @pytest.mark.parametrize(
     "binding",
     [
-        {"tilt_degrees": 20.0},
         {"dc_capacity_kw": None},
         {"dc_capacity_kw": 0.0},
         {"losses_percent": 100.0},
     ],
 )
-def test_geometry_requires_a_horizontal_reference_with_known_dc_capacity(
+def test_geometry_requires_known_dc_capacity_and_bounded_losses(
     binding: dict[str, object],
 ) -> None:
     configuration = _configuration(**binding)

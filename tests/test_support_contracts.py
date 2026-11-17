@@ -6,12 +6,10 @@ import pytest
 from pyracast.forecasts.intraday import native_actual_snapshots
 from pyracast.forecasts.models import CollectionJob
 from pyracast.irradiance import local_day_bounds
-from pyracast.plants.models import ForecastIssuance, Plant, PlantConfiguration
-from pyracast.plants.operations import create_plant
 from tests.support.delivery_health import recent_forecast
 from tests.support.domain import NOW, make_system
 from tests.support.epias_api import archive_source, connected_source
-from tests.support.plant_operations import make_plant, publish_snapshot, saved_actuals, snapshot_for
+from tests.support.plant_operations import saved_actuals
 from tests.support.trash_operations import sibling
 from tests.support.weather_collection import WeatherFixture
 
@@ -81,26 +79,6 @@ def test_sibling_binding_records_its_region_location() -> None:
         region.timezone,
     )
     assert system.binding.latitude == 40
-
-
-def test_publication_archives_for_the_active_replacement_plant(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    system, deleted = make_plant(monkeypatch)
-    Plant.objects.filter(pk=deleted.pk).update(deleted_at=NOW)
-    active = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="Replacement", dc_capacity_mw=130
-    )
-    assert active.current_configuration_id is not None
-    PlantConfiguration.objects.filter(pk=active.current_configuration_id).update(
-        created_at=NOW - timedelta(days=100)
-    )
-
-    source = publish_snapshot(snapshot_for(system, NOW.date() - timedelta(days=1)))
-
-    assert list(
-        ForecastIssuance.objects.filter(snapshot=source).values_list("plant_id", flat=True)
-    ) == [active.pk]
 
 
 def test_saved_actuals_are_available_to_native_actual_consumers() -> None:

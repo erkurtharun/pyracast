@@ -85,7 +85,7 @@ class HistoricalUploadForm(forms.Form):
 
 def _configuration_identity(region: Region, binding: SiteBinding) -> dict[str, Any]:
     configurations = list(
-        Plant.objects.filter(region=region, deleted_at__isnull=True)
+        Plant.objects.filter(region=region)
         .order_by("pk")
         .values_list("pk", "current_configuration_id")
     )
@@ -104,7 +104,6 @@ def _configuration_identity(region: Region, binding: SiteBinding) -> dict[str, A
                 "longitude",
                 "capacity_kw",
                 "dc_capacity_kw",
-                "tilt_degrees",
                 "azimuth_degrees",
                 "losses_percent",
                 "power_basis",

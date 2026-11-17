@@ -1,11 +1,16 @@
+from collections.abc import Iterator
+from contextlib import contextmanager
 from io import StringIO
 from typing import Any, cast
 
 import psycopg
 import pytest
+from django.apps import apps
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import DatabaseError, connection, transaction
+from django.db.migrations.loader import MigrationLoader
+from django.db.models.signals import pre_migrate
 
 from pyracast.accounts.management.commands.migrate import MIGRATION_LOCK, migration_session
 
@@ -35,6 +40,64 @@ def test_standard_migrate_command_remains_idempotent() -> None:
     assert "No migrations to apply" in output.getvalue()
     call_command("migrate", check_unapplied=True, verbosity=0)
     call_command("migrate", plan=True, verbosity=0)
+
+
+def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
+    disk = MigrationLoader(None).disk_migrations
+    project = {
+        config.label for config in apps.get_app_configs() if config.name.startswith("pyracast.")
+    }
+    baseline = {app: {"0001_initial"} for app in project}
+    # Regions and connections reference each other; Django breaks that cycle in a second file.
+    baseline["connections"].add("0002_initial")
+    assert {app: {name for label, name in disk if label == app} for app in project} == baseline
+
+
+@contextmanager
+def ledger_rows(*rows: tuple[str, str]) -> Iterator[None]:
+    with connection.cursor() as cursor:
+        cursor.executemany(
+            "INSERT INTO django_migrations (app, name, applied) VALUES (%s, %s, now())", rows
+        )
+    try:
+        yield
+    finally:
+        with connection.cursor() as cursor:
+            cursor.executemany("DELETE FROM django_migrations WHERE app = %s AND name = %s", rows)
+
+
+@pytest.mark.parametrize(
+    "options", [{"plan": True}, {"check_unapplied": True}, {"interactive": False}]
+)
+def test_migrate_refuses_a_ledger_that_names_project_migrations_missing_from_disk(
+    options: dict[str, bool],
+) -> None:
+    started: list[object] = []
+
+    def record(**kwargs: object) -> None:
+        started.append(kwargs)
+
+    pre_migrate.connect(record, dispatch_uid="fence-test")
+    try:
+        with (
+            ledger_rows(("plants", "0099_replaced_history"), ("accounts", "0099_replaced")),
+            pytest.raises(CommandError) as refusal,
+        ):
+            call_command("migrate", verbosity=0, **options)
+    finally:
+        pre_migrate.disconnect(dispatch_uid="fence-test")
+    message = str(refusal.value)
+    assert "accounts.0099_replaced, plants.0099_replaced_history" in message
+    assert "deploy/reset_database.py" in message
+    assert started == []
+    assert_migration_lock_released_after_close()
+    call_command("migrate", check_unapplied=True, verbosity=0)
+
+
+def test_migrate_ignores_ledger_rows_of_other_apps_missing_from_disk() -> None:
+    with ledger_rows(("auth", "9999_removed_upstream")):
+        call_command("migrate", plan=True, verbosity=0)
+        call_command("migrate", check_unapplied=True, verbosity=0)
 
 
 def test_migration_lock_survives_transaction_commits_and_restores_timeouts() -> None:

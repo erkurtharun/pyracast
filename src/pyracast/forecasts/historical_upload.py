@@ -47,6 +47,12 @@ _SETTINGS = (
     "site_id",
     "power_basis",
 )
+_FIXED_SETTINGS: dict[str, object] = {
+    "tilt_degrees": 0.0,
+    "mounting_type": "fixed",
+    "unit": "kW",
+    "timestamp_convention": "period_end",
+}
 _ALIASES = {
     re.sub("[^a-z0-9]", "", key): key
     for key in (
@@ -326,6 +332,12 @@ def _metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _reference_setting(binding: SiteBinding, name: str) -> object:
+    if name in _FIXED_SETTINGS:
+        return _FIXED_SETTINGS[name]
+    return binding.timezone if name == "site_timezone" else getattr(binding, name)
+
+
 def preview_historical_upload(
     binding: SiteBinding, upload: HistoricalUpload
 ) -> HistoricalUploadPreview:
@@ -334,17 +346,7 @@ def preview_historical_upload(
     conflicts = []
     missing = []
     for name in _SETTINGS:
-        expected = (
-            "kW"
-            if name == "unit"
-            else "period_end"
-            if name == "timestamp_convention"
-            else "fixed"
-            if name == "mounting_type"
-            else binding.timezone
-            if name == "site_timezone"
-            else getattr(binding, name)
-        )
+        expected = _reference_setting(binding, name)
         value = metadata.get(name)
         if value is None or value == "":
             missing.append(name)
@@ -430,7 +432,7 @@ def import_historical_upload(
         if expected_configuration_ids is not None:
             configurations = tuple(
                 Plant.objects.select_for_update()
-                .filter(region=region, deleted_at__isnull=True)
+                .filter(region=region)
                 .order_by("pk")
                 .values_list("pk", "current_configuration_id")
             )
@@ -444,16 +446,9 @@ def import_historical_upload(
         preview = preview_historical_upload(binding, upload)
         if preview.conflicts:
             raise ValidationError(list(preview.conflicts))
-        manifest = {
-            key: binding.timezone if key == "site_timezone" else getattr(binding, key)
-            for key in _SETTINGS
-            if key not in {"unit", "timestamp_convention", "mounting_type"}
-        } | {
+        manifest = {key: _reference_setting(binding, key) for key in _SETTINGS} | {
             "product": "historical_rooftop_pv",
             "settings_matched": binding.dc_capacity_kw is not None,
-            "unit": "kW",
-            "timestamp_convention": "period_end",
-            "mounting_type": "fixed",
             "period": upload.period,
             "source_reference": source_reference.strip(),
             "upload_provenance": {

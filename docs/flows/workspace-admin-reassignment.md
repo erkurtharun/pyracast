@@ -81,7 +81,7 @@ sequenceDiagram
 - Lock order: Tenant, then Regions by pk, then Plants by pk, in one `transaction.atomic` (`ATOMIC_REQUESTS` is off; `disable_workspace_automation` re-locks the Tenant in a savepoint). Memberships are not locked; the tenant lock and the partial index guard them. Demote precedes promote so the index never trips. Workspace-scoped writers take the same tenant lock first (`require_workspace_admin`), so they serialize with a transfer.
 - `expected_admin_id` is an optimistic check read from a hidden field; a 400 re-render keeps the stale value, so retrying fails until the page is reloaded. A tenant with no administrator expects `None`, which a blank field satisfies.
 - Reassigning to the current administrator is a no-op: no automation change, no invitation expiry, no audit row, yet the view reports success.
-- Disabling covers every enabled plant including soft-deleted ones (no `deleted_at` filter). `automation._authorized` separately requires the enabling user to be the current active admin, so a returning administrator cannot revive old authorization. No session is ended and nobody is notified; effects apply per request.
+- Disabling covers every enabled plant of the tenant, trashed locations included. `automation._authorized` separately requires the enabling user to be the current active admin, so a returning administrator cannot revive old authorization. No session is ended and nobody is notified; effects apply per request.
 
 ## Tests
 

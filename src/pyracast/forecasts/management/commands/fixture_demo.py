@@ -7,7 +7,7 @@ from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.utils import timezone
 
 from pyracast.accounts.authorization import is_platform_admin
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.calculation import calculate
 from pyracast.connections.models import SiteBinding
 from pyracast.connections.operations import QuotaExceededError, create_account, validate_binding
@@ -34,7 +34,7 @@ def _region(actor: User, tenant: Tenant) -> Region:
 
 
 def _plant(actor: User, region: Region) -> Plant:
-    existing = Plant.objects.filter(region=region, deleted_at__isnull=True).first()
+    existing = Plant.objects.filter(region=region).first()
     return existing or create_plant(
         actor, region.tenant_id, region.pk, name="Synthetic plant", dc_capacity_mw=1
     )
@@ -65,7 +65,7 @@ def _binding(actor: User, region: Region) -> SiteBinding:
 def run_demo(actor: User) -> str:
     tenant, _ = Tenant.objects.get_or_create(name=f"Fixture demonstration (user {actor.pk})")
     Membership.objects.get_or_create(
-        user=actor, tenant=tenant, defaults={"role": Membership.Role.ADMIN}
+        user=actor, tenant=tenant, defaults={"role": WorkspaceRole.ADMIN}
     )
     region = _region(actor, tenant)
     plant = _plant(actor, region)

@@ -16,9 +16,7 @@ def site_queryset(actor: User, tenant_id: int) -> QuerySet[Region]:
         .prefetch_related(
             Prefetch(
                 "plant_set",
-                queryset=Plant.objects.filter(deleted_at__isnull=True).select_related(
-                    "current_configuration", "submission"
-                ),
+                queryset=Plant.objects.select_related("current_configuration", "submission"),
                 to_attr="active_plants",
             )
         )

@@ -16,7 +16,6 @@ from pyracast.plants.models import (
     CalibrationRun,
     ForecastIssuance,
     PlantConfiguration,
-    PlantForecast,
 )
 from pyracast.plants.operations import activate_calibration, reset_calibration
 from tests.support.domain import NOW
@@ -56,7 +55,6 @@ def test_archive_replays_previous_binding_without_writing_cache(
     assert result["provenance"]["binding_id"] == old.binding_id
     assert "archived_forecast" in result["quality_flags"]
     assert "previous_configuration" in result["quality_flags"]
-    assert not PlantForecast.objects.exists()
     strict = plant_forecast(
         system.member,
         system.tenant.pk,
@@ -71,13 +69,13 @@ def test_archive_replays_previous_binding_without_writing_cache(
     assert ForecastIssuance.objects.count() == 1
 
 
-@pytest.mark.parametrize("legacy", ["none", "regional", "electrical_cache"])
+@pytest.mark.parametrize("regional", [False, True])
 def test_archive_requires_a_saved_electrical_issuance(
-    monkeypatch: pytest.MonkeyPatch, legacy: str
+    monkeypatch: pytest.MonkeyPatch, regional: bool
 ) -> None:
     system, plant = make_plant(monkeypatch)
     snapshot = snapshot_for(system, DAY)
-    if legacy != "none":
+    if regional:
         snapshot.job.status = "succeeded"
         snapshot.job.save(update_fields=["status"])
         snapshot.available_at = snapshot.collected_at
@@ -85,22 +83,10 @@ def test_archive_requires_a_saved_electrical_issuance(
         ForecastResult.objects.create(
             snapshot=snapshot, payload={}, published_at=snapshot.collected_at
         )
-    if legacy == "electrical_cache":
-        configuration = plant.current_configuration
-        assert configuration is not None
-        PlantForecast.objects.create(
-            configuration=configuration,
-            snapshot=snapshot,
-            calibration=None,
-            target_date=DAY,
-            resolution_minutes=30,
-            payload={"energy_mwh": 999},
-        )
     replay = archived_forecast(plant, DAY, 30, NOW)
     assert replay["result"] is None
     assert replay["unavailable_reason"] == "forecast_unavailable"
     assert not ForecastIssuance.objects.exists()
-    assert PlantForecast.objects.count() == (1 if legacy == "electrical_cache" else 0)
 
 
 def test_archive_does_not_backdate_a_later_configuration(
@@ -145,7 +131,6 @@ def test_archive_reuses_frozen_issuance_without_changing_it(
     cached.refresh_from_db()
     assert cached.payloads == before
     assert "archived_forecast" not in cached.payloads["60"]["quality_flags"]
-    assert not PlantForecast.objects.exists()
 
 
 @pytest.mark.parametrize("resolution", [True, 15])
@@ -303,7 +288,6 @@ def test_archive_irradiance_uses_target_day_instead_of_collection_job_day(
     assert cast(dict[str, Any], archive["regional_irradiance"])["energy_kwh_m2"] == pytest.approx(
         4.8
     )
-    assert not PlantForecast.objects.exists()
 
 
 def test_archive_returns_outage_scenario_saved_at_collection_time(

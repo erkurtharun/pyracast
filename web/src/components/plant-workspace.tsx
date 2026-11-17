@@ -328,7 +328,6 @@ export function PlantWorkspace({
                             <h2>{t("deletePlant")}</h2>
                             <p>{t("deletionHelp")}</p>
                             <MoveToRecycleBin
-                                kind="plant"
                                 name={currentPlant.name}
                                 url={regionBase}
                                 token={token}

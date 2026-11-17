@@ -8,7 +8,7 @@ from django.utils import translation
 
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.invitations import invite_workspace_member
-from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference
+from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference, WorkspaceRole
 
 
 def test_unknown_account_mail_template_is_not_rendered_as_a_code_message() -> None:
@@ -74,14 +74,14 @@ def test_code_mail_expiry_matches_the_configured_flow(kind: str, minutes: int) -
 def test_invitation_mail_has_private_action_and_escaped_workspace(language: str) -> None:
     tenant = Tenant.objects.create(name='<img src=x onerror="unsafe"> & Solar')
     actor = User.objects.create_user(username="administrator", email="admin@example.com")
-    Membership.objects.create(tenant=tenant, user=actor, role=Membership.Role.ADMIN)
+    Membership.objects.create(tenant=tenant, user=actor, role=WorkspaceRole.ADMIN)
     UserLanguagePreference.objects.create(user=actor, language=language)
 
     invitation = invite_workspace_member(actor, tenant.pk, "guest@example.com")
 
     message = mail.outbox[-1]
     assert isinstance(message, EmailMultiAlternatives)
-    assert invitation.delivery_status == "accepted"
+    assert invitation.delivery_status == "sent"
     assert message.to == ["guest@example.com"]
     assert tenant.name in str(message.body)
     html = message.alternatives[0][0]

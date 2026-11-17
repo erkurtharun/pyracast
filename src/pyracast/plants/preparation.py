@@ -87,11 +87,7 @@ def prepare_calibration(plant_id: int, now: datetime | None = None) -> Calibrati
             .get(pk=plant_id)
         )
         configuration = plant.current_configuration
-        if (
-            plant.deleted_at is not None
-            or configuration is None
-            or not binding_is_current(configuration.binding)
-        ):
+        if configuration is None or not binding_is_current(configuration.binding):
             return None
         if CalibrationRun.objects.filter(plant=plant, status__in=("pending", "running")).exists():
             return None

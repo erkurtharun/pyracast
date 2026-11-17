@@ -140,7 +140,7 @@ def test_region_current_forecast_never_reads_a_superseded_binding(
     if change != "no_snapshot":
         publish_snapshot(snapshot_for(system, day))
     if change == "no_binding":
-        Region.objects.filter(pk=system.region.pk).update(approved_binding=None)
+        Region.objects.filter(pk=system.region.pk).update(status="pending", approved_binding=None)
     elif change == "replacement_binding":
         replacement = SiteBinding.objects.create(
             region=system.region,

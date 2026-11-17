@@ -10,7 +10,6 @@ from django.core import mail
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.mail import EmailMultiAlternatives
 from django.db import IntegrityError, close_old_connections, connection, connections, transaction
-from django.db.migrations.executor import MigrationExecutor
 from rest_framework.test import APIClient
 
 from pyracast.accounts.models import Membership, Tenant
@@ -291,7 +290,7 @@ def test_worker_checks_resource_policy_independently_of_configurer(change: str) 
         NotificationDelivery.objects.filter(pk=delivery.pk).update(recipients=[""])
         ReminderSchedule.objects.filter(pk=schedule.pk).update(recipients=[""])
     elif change == "binding":
-        NotificationDelivery.objects.filter(pk=delivery.pk).update(binding=None)
+        Region.objects.filter(pk=schedule.region_id).update(status="pending", approved_binding=None)
     elif change == "wrong_region":
         region = Region.objects.create(
             tenant=schedule.region.tenant, name="Other", latitude=0, longitude=0, timezone="UTC"
@@ -342,10 +341,13 @@ def test_delivery_failure_and_retry_policy(mode: str, monkeypatch: pytest.Monkey
         assert delivery.attempts == 8
 
 
-def test_interrupted_sending_never_retries_ambiguous_delivery() -> None:
+def test_interrupted_transmission_never_retries_ambiguous_delivery() -> None:
     delivery = ready()
     NotificationDelivery.objects.filter(pk=delivery.pk).update(
-        status="sending", lease_expires_at=SLOT + LEASE_DURATION
+        status="sending",
+        prepared_message={"kind": "unavailable"},
+        transmit_started_at=SLOT,
+        lease_expires_at=SLOT + LEASE_DURATION,
     )
     assert not process_notification(delivery.pk, SLOT)
     assert not pending_notification_ids(SLOT)
@@ -358,6 +360,33 @@ def test_interrupted_sending_never_retries_ambiguous_delivery() -> None:
     )
     assert pending_notification_ids(SLOT) == [delivery.pk]
     assert not process_notification(delivery.pk, SLOT)
+
+
+def test_a_delivery_is_sending_only_with_prepared_content_in_a_known_state() -> None:
+    delivery = ready()
+    rows = NotificationDelivery.objects.filter(pk=delivery.pk)
+    with (
+        pytest.raises(IntegrityError, match="notification_delivery_status_valid"),
+        transaction.atomic(),
+    ):
+        rows.update(status="unavailable")
+    with (
+        pytest.raises(IntegrityError, match="notification_delivery_sending_prepared"),
+        transaction.atomic(),
+    ):
+        rows.update(status="sending", prepared_message=None)
+    rows.update(status="sending", prepared_message={"kind": "unavailable"})
+    assert rows.get().status == "sending"
+
+
+@pytest.mark.parametrize("field", ["binding", "preparation_deadline"])
+def test_a_delivery_always_pins_its_binding_and_preparation_deadline(field: str) -> None:
+    rows = NotificationDelivery.objects.filter(pk=ready().pk)
+    with (
+        pytest.raises(IntegrityError, match="violates not-null constraint"),
+        transaction.atomic(),
+    ):
+        rows.update(**{field: None})
 
 
 def test_locmem_adapter_zero_return_is_known_not_sent() -> None:
@@ -431,7 +460,7 @@ def test_scheduler_checks_binding_independently_of_configurer(change: str) -> No
     if change == "inactive":
         User.objects.filter(pk=system.member.pk).update(is_active=False)
     elif change == "unbound":
-        Region.objects.filter(pk=system.region.pk).update(approved_binding=None)
+        Region.objects.filter(pk=system.region.pk).update(status="pending", approved_binding=None)
     elif change == "suspended":
         Region.objects.filter(pk=system.region.pk).update(status="suspended")
     else:
@@ -872,7 +901,6 @@ def test_multiple_recipients_share_one_private_message_and_delivery_outcome(outc
     assert process_notification(delivery_id, SLOT, sender=sender) is (outcome == "sent")
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     assert delivery.recipients == addresses
-    assert delivery.grouped
     assert delivery.status == outcome
     assert pending_notification_ids(delivery.available_at) == (
         [delivery_id] if outcome == "retry" else []
@@ -951,7 +979,6 @@ def test_multiple_recipient_concurrent_dispatch_pins_one_grouped_delivery() -> N
     assert first == second
     assert len(first) == NotificationDelivery.objects.count() == 1
     delivery = NotificationDelivery.objects.get()
-    assert delivery.grouped
     assert delivery.recipients == ["a@example.com", "b@example.com"]
 
 
@@ -961,43 +988,6 @@ def test_notification_settings_database_constraints() -> None:
         NotificationSettings.objects.filter(pk=1).update(max_recipients=0)
     with pytest.raises(IntegrityError), transaction.atomic():
         NotificationSettings.objects.create(pk=2)
-
-
-def test_notification_migration_preserves_legacy_recipients_and_delivery_history() -> None:
-    system, _ = configured()
-    saved(system)
-    old_target = [("notifications", "0001_initial")]
-    executor = MigrationExecutor(connection)
-    current_targets = executor.loader.graph.leaf_nodes()
-    try:
-        executor.migrate(old_target)
-        apps = executor.loader.project_state(old_target).apps
-        preference_model = apps.get_model("notifications", "ReminderPreference")
-        delivery_model = apps.get_model("notifications", "NotificationDelivery")
-        schedule = preference_model.objects.get(user_id=system.member.pk)
-        schedule.email = "legacy@example.com"
-        schedule.save()
-        delivery = delivery_model.objects.create(
-            preference=schedule,
-            scheduled_for=SLOT,
-            available_at=SLOT,
-            recipient="historic@example.com",
-            status="sent",
-            sent_at=SLOT,
-            attempts=1,
-        )
-    finally:
-        MigrationExecutor(connection).migrate(current_targets)
-    restored = ReminderSchedule.objects.get(pk=schedule.pk)
-    assert restored.recipients == ["legacy@example.com"]
-    history = NotificationDelivery.objects.get(pk=delivery.pk)
-    assert (history.recipients, history.status, history.sent_at, history.attempts) == (
-        ["historic@example.com"],
-        "sent",
-        SLOT,
-        1,
-    )
-    assert NotificationSettings.objects.get(pk=1).max_recipients == 5
 
 
 def test_new_administrator_replaces_one_shared_recipient_list_within_the_cap() -> None:
@@ -1049,9 +1039,7 @@ def test_new_administrator_replaces_one_shared_recipient_list_within_the_cap() -
     assert payload["recipients"] == ["PERSON0@example.com"]
     assert payload["language"] == "tr"
     assert "person1@example.com" not in str(payload)
-    assert (
-        ReminderSchedule.objects.filter(region=system.region, retired_at__isnull=True).count() == 1
-    )
+    assert ReminderSchedule.objects.filter(region=system.region).count() == 1
     with pytest.raises(PermissionDenied):
         configure_reminders(
             system.member,
@@ -1188,20 +1176,10 @@ def test_configurer_inactivity_or_departure_keeps_the_shared_recipient_list(chan
     assert reminder_schedule_payload(schedule, NOW)["recipients"] == ["external@example.com"]
 
 
-def test_email_changes_and_retired_lists_do_not_expand_current_recipient_cap() -> None:
+def test_email_changes_do_not_expand_current_recipient_cap() -> None:
     system, current = configured()
     other = User.objects.create(username="other", email="default@example.com")
     Membership.objects.create(user=other, tenant=system.tenant)
-    ReminderSchedule.objects.create(
-        configured_by=other,
-        region=system.region,
-        enabled=False,
-        recipients=["historical@example.com"],
-        times=["10:00"],
-        language="en",
-        effective_from=NOW,
-        retired_at=NOW,
-    )
     NotificationSettings.objects.filter(pk=1).update(max_recipients=1)
     saved(system)
     ids = enqueue_due(SLOT)
@@ -1299,77 +1277,3 @@ def test_reminder_api_requires_an_explicit_recipient_list() -> None:
         "code": "http_400",
         "detail": {"non_field_errors": ["Unknown fields are not accepted."]},
     }
-
-
-def test_email_column_removal_preserves_recipients_and_pinned_deliveries() -> None:
-    system, original = configured()
-    saved(system)
-    old_target = [("notifications", "0004_validate_delivery_status")]
-    executor = MigrationExecutor(connection)
-    current_targets = executor.loader.graph.leaf_nodes()
-    expected = [
-        ("legacy@example.com", [], ["legacy@example.com"]),
-        ("single@example.com", ["single@example.com"], ["single@example.com"]),
-        (
-            "obsolete@example.com",
-            ["one@example.com", "two@example.com"],
-            ["one@example.com", "two@example.com"],
-        ),
-        ("", [], []),
-    ]
-    ids: list[int] = []
-    try:
-        executor.migrate(old_target)
-        old_apps = executor.loader.project_state(old_target).apps
-        preference_model = old_apps.get_model("notifications", "ReminderPreference")
-        delivery_model = old_apps.get_model("notifications", "NotificationDelivery")
-        preference_model.objects.filter(pk=original.pk).delete()
-        for index, (email, recipients, _) in enumerate(expected):
-            user = User.objects.create(username=f"legacy-{index}")
-            schedule = preference_model.objects.create(
-                user_id=user.pk,
-                region_id=system.region.pk,
-                email=email,
-                recipients=recipients,
-                effective_from=NOW,
-                times=["10:00"],
-                enabled=False,
-            )
-            ids.append(schedule.pk)
-        delivery = delivery_model.objects.create(
-            preference_id=ids[0],
-            scheduled_for=SLOT,
-            available_at=SLOT,
-            recipient="pinned@example.com",
-            status="uncertain",
-            attempts=1,
-        )
-        MigrationExecutor(connection).migrate(current_targets)
-        assert list(
-            ReminderSchedule.objects.filter(pk__in=ids)
-            .order_by("pk")
-            .values_list("recipients", flat=True)
-        ) == [recipients for _, _, recipients in expected]
-        history = NotificationDelivery.objects.get(pk=delivery.pk)
-        assert (history.schedule_id, history.recipients, history.status, history.attempts) == (
-            ids[0],
-            ["pinned@example.com"],
-            "uncertain",
-            1,
-        )
-        executor = MigrationExecutor(connection)
-        executor.migrate(old_target)
-        old_apps = executor.loader.project_state(old_target).apps
-        preference_model = old_apps.get_model("notifications", "ReminderPreference")
-        assert list(
-            preference_model.objects.filter(pk__in=ids)
-            .order_by("pk")
-            .values_list("email", "recipients")
-        ) == [
-            ("legacy@example.com", ["legacy@example.com"]),
-            ("single@example.com", ["single@example.com"]),
-            ("", ["one@example.com", "two@example.com"]),
-            ("", []),
-        ]
-    finally:
-        MigrationExecutor(connection).migrate(current_targets)

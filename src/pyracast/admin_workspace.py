@@ -33,18 +33,18 @@ from pyracast.forecasts.monitoring import delivery_health
 from pyracast.notifications.models import NotificationSettings
 from pyracast.notifications.operations import recipient_limit
 from pyracast.plants.models import Plant
-from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest
+from pyracast.regions.models import (
+    AuditAction,
+    AuditEvent,
+    LocationChangeStatus,
+    Region,
+    RegionLocationChangeRequest,
+    RegionStatus,
+)
 from pyracast.regions.operations import review_location_change, transition_region
 
 if TYPE_CHECKING:
     from django_stubs_ext import WithAnnotations
-
-STATUS_CHOICES = (
-    ("pending", gettext_lazy("Awaiting approval")),
-    ("approved", gettext_lazy("Approved")),
-    ("suspended", gettext_lazy("Suspended")),
-    ("rejected", gettext_lazy("Rejected")),
-)
 
 
 @dataclass(frozen=True)
@@ -93,9 +93,7 @@ def workspace_regions() -> QuerySet[WithAnnotations[Region, WorkspaceAnnotations
         .select_related("tenant")
         .annotate(
             workspace_plant_name=Subquery(
-                Plant.objects.filter(region_id=OuterRef("pk"), deleted_at__isnull=True)
-                .order_by("pk")
-                .values("name")[:1]
+                Plant.objects.filter(region_id=OuterRef("pk")).order_by("pk").values("name")[:1]
             ),
             workspace_binding_id=Subquery(binding.values("pk")[:1]),
             workspace_binding_health=Subquery(binding.values("health")[:1]),
@@ -171,9 +169,9 @@ def plant_list_context(query: str, status: str, page: str, issue: str = "") -> d
         regions = regions.filter(
             Q(name__icontains=query)
             | Q(tenant__name__icontains=query)
-            | Q(plant__name__icontains=query, plant__deleted_at__isnull=True)
+            | Q(plant__name__icontains=query)
         ).distinct()
-    if status in dict(STATUS_CHOICES):
+    if status in RegionStatus.values:
         regions = regions.filter(status=status)
     else:
         status = ""
@@ -183,7 +181,7 @@ def plant_list_context(query: str, status: str, page: str, issue: str = "") -> d
         "page_obj": page_obj,
         "q": query,
         "status": status,
-        "status_choices": STATUS_CHOICES,
+        "status_choices": RegionStatus.choices,
         "health_filter": health_filter,
     }
 
@@ -191,7 +189,7 @@ def plant_list_context(query: str, status: str, page: str, issue: str = "") -> d
 def overview_context() -> dict[str, Any]:
     regions = workspace_regions()
     health = delivery_health(timezone.now(), timedelta(minutes=5))
-    counts = {status: 0 for status, _ in STATUS_CHOICES}
+    counts = dict.fromkeys(RegionStatus.values, 0)
     counts.update(
         {
             row["status"]: row["count"]
@@ -200,13 +198,15 @@ def overview_context() -> dict[str, Any]:
     )
     counts["total"] = sum(counts.values())
     counts["location_changes"] = RegionLocationChangeRequest.objects.filter(
-        status="pending", region__deleted_at__isnull=True
+        status=LocationChangeStatus.PENDING, region__deleted_at__isnull=True
     ).count()
     return {
         "counts": counts,
         "review_plants": [
             summarize_plant(region)
-            for region in regions.filter(status="pending").order_by("created_at", "pk")[:6]
+            for region in regions.filter(status=RegionStatus.PENDING).order_by("created_at", "pk")[
+                :6
+            ]
         ],
         "health": health,
         "health_summary": summarize_health(health),
@@ -219,7 +219,7 @@ def overview_context() -> dict[str, Any]:
                 "review_url": reverse("admin:workspace_plant", args=(change.region_id,)),
             }
             for change in RegionLocationChangeRequest.objects.filter(
-                status="pending", region__deleted_at__isnull=True
+                status=LocationChangeStatus.PENDING, region__deleted_at__isnull=True
             )
             .select_related("region__tenant")
             .order_by("created_at", "pk")[:6]
@@ -234,29 +234,8 @@ def recent_activity_context(
     events = AuditEvent.objects.filter(region__deleted_at__isnull=True, region__isnull=False)
     if region_id is not None:
         events = events.filter(region_id=region_id)
-    labels = {
-        "approved": _("Plant approved"),
-        "rejected": _("Plant rejected"),
-        "suspended": _("Plant suspended"),
-        "binding_configured": _("Provider connection configured"),
-        "binding_validated": _("Provider connection validated"),
-        "connection_validated": _("Provider connection validated"),
-        "location_change_requested": _("Location change requested"),
-        "location_change_approved": _("Location change approved"),
-        "location_change_rejected": _("Location change rejected"),
-        "location_change_rebased": _("Location change request moved to the new revision"),
-        "region_renamed": _("Plant location renamed"),
-        "collection_schedule_updated": _("Collection schedule updated"),
-        "historical_reference_imported": _("Historical reference imported"),
-        "reference_capacity_normalized": _("Reference capacity normalized"),
-        "region_trashed": _("Plant location moved to trash"),
-        "region_restored": _("Plant location restored"),
-    }
     return [
-        {
-            **row,
-            "action_label": labels.get(row["action"], row["action"].replace("_", " ").capitalize()),
-        }
+        {**row, "action_label": str(AuditAction(row["action"]).label)}
         for row in events.order_by("-created_at", "-pk").values(
             "action", "created_at", "region__name", "actor__username"
         )[:limit]
@@ -274,9 +253,7 @@ def recent_work_context(
     collection_rows = collection_jobs_for_issue(issue, now).annotate(
         display_plant_name=Coalesce(
             Subquery(
-                Plant.objects.filter(
-                    region_id=OuterRef("binding__region_id"), deleted_at__isnull=True
-                )
+                Plant.objects.filter(region_id=OuterRef("binding__region_id"))
                 .order_by("pk")
                 .values("name")[:1]
             ),
@@ -286,9 +263,7 @@ def recent_work_context(
     delivery_rows = notification_deliveries_for_issue(issue, now).annotate(
         display_plant_name=Coalesce(
             Subquery(
-                Plant.objects.filter(
-                    region_id=OuterRef("schedule__region_id"), deleted_at__isnull=True
-                )
+                Plant.objects.filter(region_id=OuterRef("schedule__region_id"))
                 .order_by("pk")
                 .values("name")[:1]
             ),
@@ -449,7 +424,7 @@ class WorkspaceSettingsForm(forms.Form):
 
 class ReviewDecisionForm(forms.Form):
     expected_revision = forms.IntegerField(min_value=1, widget=forms.HiddenInput)
-    expected_status = forms.ChoiceField(choices=STATUS_CHOICES, widget=forms.HiddenInput)
+    expected_status = forms.ChoiceField(choices=RegionStatus.choices, widget=forms.HiddenInput)
     location_change_id = forms.IntegerField(min_value=1, required=False, widget=forms.HiddenInput)
     action = forms.ChoiceField(
         choices=tuple(
@@ -474,17 +449,23 @@ class ReviewDecisionForm(forms.Form):
             ):
                 raise ValidationError(_("The plant changed. Reload before reviewing it."))
             if data["action"] in {"reject", "suspend"}:
-                required_status = "pending" if data["action"] == "reject" else "approved"
+                required_status = (
+                    RegionStatus.PENDING if data["action"] == "reject" else RegionStatus.APPROVED
+                )
                 if region.status != required_status:
                     raise ValidationError(
                         _("This decision is unavailable for the current review status.")
                     )
                 transition_region(
-                    actor, region.pk, "rejected" if data["action"] == "reject" else "suspended"
+                    actor,
+                    region.pk,
+                    RegionStatus.REJECTED if data["action"] == "reject" else RegionStatus.SUSPENDED,
                 )
             else:
                 change = RegionLocationChangeRequest.objects.get(
-                    pk=data["location_change_id"], region=region, status="pending"
+                    pk=data["location_change_id"],
+                    region=region,
+                    status=LocationChangeStatus.PENDING,
                 )
                 review_location_change(
                     actor, change.pk, approve=data["action"] == "approve_location"
@@ -516,7 +497,7 @@ def review_context(region_id: int) -> dict[str, Any]:
                 "requested_by": change.requested_by.username,
             }
             for change in RegionLocationChangeRequest.objects.filter(
-                region=region, status="pending"
+                region=region, status=LocationChangeStatus.PENDING
             )
             .select_related("requested_by")
             .order_by("created_at", "pk")

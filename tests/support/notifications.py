@@ -75,6 +75,7 @@ def saved(system: System, when: datetime = NOW) -> ForecastSnapshot:
             for offset in (0, 1)
         ],
         collected_at=when,
+        available_at=when,
         source_kind="forecast",
     )
     cache_saved_days(snapshot, when)

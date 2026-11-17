@@ -1,20 +1,24 @@
 from typing import ClassVar
 
+import django.core.serializers.json
 import django.db.models.deletion
 from django.conf import settings
 from django.db import migrations, models
+from django.db.migrations.operations.base import Operation
+
+from pyracast import schema_objects
 
 
 class Migration(migrations.Migration):
     initial = True
 
     dependencies: ClassVar = [
-        ("incidents", "0003_validate_lineage"),
-        ("plants", "0018_forecast_issuance"),
+        ("incidents", "0001_initial"),
+        ("plants", "0001_initial"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
-    operations: ClassVar = [
+    operations: ClassVar[list[Operation]] = [
         migrations.CreateModel(
             name="ChangeRequest",
             fields=[
@@ -35,10 +39,10 @@ class Migration(migrations.Migration):
                     "status",
                     models.CharField(
                         choices=[
-                            ("pending", "pending"),
-                            ("approved", "approved"),
-                            ("rejected", "rejected"),
-                            ("withdrawn", "withdrawn"),
+                            ("pending", "Pending"),
+                            ("approved", "Approved"),
+                            ("rejected", "Rejected"),
+                            ("withdrawn", "Withdrawn"),
                         ],
                         default="pending",
                         max_length=20,
@@ -52,6 +56,12 @@ class Migration(migrations.Migration):
                 ("closed_at", models.DateTimeField(null=True)),
                 ("decision_reason", models.CharField(blank=True, max_length=500)),
                 ("outcome_seen_at", models.DateTimeField(null=True)),
+                (
+                    "reviewed_context",
+                    models.JSONField(
+                        default=dict, encoder=django.core.serializers.json.DjangoJSONEncoder
+                    ),
+                ),
                 (
                     "configuration",
                     models.ForeignKey(
@@ -92,7 +102,18 @@ class Migration(migrations.Migration):
                         auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
                     ),
                 ),
-                ("action", models.CharField(max_length=10)),
+                (
+                    "action",
+                    models.CharField(
+                        choices=[
+                            ("create", "Create"),
+                            ("update", "Update"),
+                            ("resolve", "Resolve"),
+                            ("cancel", "Cancel"),
+                        ],
+                        max_length=10,
+                    ),
+                ),
                 ("expected_revision", models.PositiveIntegerField(null=True)),
                 ("kind", models.CharField(blank=True, max_length=20)),
                 ("title", models.CharField(blank=True, max_length=200)),
@@ -139,7 +160,10 @@ class Migration(migrations.Migration):
                 ),
                 ("starts_at", models.DateTimeField()),
                 ("ends_at", models.DateTimeField()),
-                ("action", models.CharField(max_length=10)),
+                (
+                    "action",
+                    models.CharField(choices=[("set", "Set"), ("revert", "Revert")], max_length=10),
+                ),
                 ("energy_mwh", models.FloatField()),
                 ("quality", models.CharField(max_length=20)),
                 ("source", models.CharField(max_length=200)),
@@ -189,8 +213,17 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="changerequest",
             constraint=models.CheckConstraint(
-                condition=models.Q(("kind__in", ("production", "incident"))),
+                condition=models.Q(("kind__in", ["production", "incident"])),
                 name="change_request_kind_valid",
+            ),
+        ),
+        migrations.AddConstraint(
+            model_name="changerequest",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    ("status__in", ["pending", "approved", "rejected", "withdrawn"])
+                ),
+                name="changerequest_status_chk",
             ),
         ),
         migrations.AddConstraint(
@@ -232,11 +265,46 @@ class Migration(migrations.Migration):
                     models.Q(
                         ("action__in", ("update", "resolve", "cancel")),
                         ("expected_revision__gte", 1),
+                        ("expected_revision__isnull", False),
                         ("incident__isnull", False),
                     ),
                     _connector="OR",
                 ),
                 name="proposal_incident_target_valid",
+            ),
+        ),
+        migrations.AddConstraint(
+            model_name="incidentchange",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    ("action__in", ("resolve", "cancel")),
+                    models.Q(
+                        ("action__in", ("create", "update")),
+                        ("kind__in", ("inverter", "panels", "grid", "other", "multiple")),
+                        ("starts_at__isnull", False),
+                        models.Q(("title", ""), _negated=True),
+                    ),
+                    _connector="OR",
+                ),
+                name="proposal_incident_values_valid",
+            ),
+        ),
+        migrations.AddConstraint(
+            model_name="incidentchange",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    models.Q(("action", "resolve"), _negated=True),
+                    ("ends_at__isnull", False),
+                    _connector="OR",
+                ),
+                name="proposal_incident_end_required",
+            ),
+        ),
+        migrations.AddConstraint(
+            model_name="incidentchange",
+            constraint=models.CheckConstraint(
+                condition=models.Q(("action__in", ["create", "update", "resolve", "cancel"])),
+                name="incidentchange_action_chk",
             ),
         ),
         migrations.AddConstraint(
@@ -280,7 +348,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="productionchangeitem",
             constraint=models.CheckConstraint(
-                condition=models.Q(("action__in", ("set", "revert"))),
+                condition=models.Q(("action__in", ["set", "revert"])),
                 name="proposal_production_action_valid",
             ),
         ),
@@ -325,4 +393,5 @@ class Migration(migrations.Migration):
                 name="proposal_production_interval_unique",
             ),
         ),
+        *schema_objects.operations("change_requests", "0001_initial"),
     ]

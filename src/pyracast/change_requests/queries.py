@@ -6,8 +6,15 @@ from django.db import transaction
 from django.db.models import QuerySet
 
 from pyracast.accounts.authorization import tenant_membership
-from pyracast.accounts.models import Membership
-from pyracast.change_requests.models import ChangeRequest
+from pyracast.accounts.models import Membership, WorkspaceRole
+from pyracast.change_requests.models import (
+    DECIDED,
+    INCIDENT_EDITS,
+    ChangeRequest,
+    ChangeRequestKind,
+    ChangeRequestStatus,
+    IncidentChangeAction,
+)
 from pyracast.change_requests.operations import (
     RequestConflictError,
     _request,
@@ -29,12 +36,12 @@ def inbox(
 ) -> QuerySet[ChangeRequest]:
     membership = tenant_membership(actor, tenant_id)
     rows = visible_requests(actor, tenant_id)
-    if membership.role != Membership.Role.ADMIN or scope == "mine":
+    if membership.role != WorkspaceRole.ADMIN or scope == "mine":
         rows = rows.filter(proposed_by=actor, proposer_membership_id=membership.pk)
     if scope == "pending":
-        rows = rows.filter(status="pending")
+        rows = rows.filter(status=ChangeRequestStatus.PENDING)
     elif scope == "history":
-        rows = rows.exclude(status="pending")
+        rows = rows.exclude(status=ChangeRequestStatus.PENDING)
     if plant_id is not None:
         rows = rows.filter(plant_id=plant_id)
     return rows.select_related("plant__region", "proposed_by", "reviewed_by").order_by(
@@ -57,19 +64,19 @@ def request_detail(actor: User, tenant_id: int, request_id: int) -> dict[str, An
     request = _request(actor, tenant_id, request_id)
     membership = tenant_membership(actor, tenant_id)
     own = request.proposed_by_id == actor.pk and request.proposer_membership_id == membership.pk
-    if membership.role != Membership.Role.ADMIN and not own:
+    if membership.role != WorkspaceRole.ADMIN and not own:
         raise ChangeRequest.DoesNotExist
-    items = production_context(request) if request.kind == "production" else []
+    items = production_context(request) if request.kind == ChangeRequestKind.PRODUCTION else []
     conflict = None
     fingerprint = None
-    if request.status == "pending":
+    if request.status == ChangeRequestStatus.PENDING:
         try:
             _validate(actor, request, plant, lock=False)
         except (RequestConflictError, ObjectDoesNotExist) as error:
             conflict = {"code": "request_conflict", "detail": str(error)}
         fingerprint = "v1:" + digest(review_context(request, plant, production_items=items))
     incident = None
-    if request.kind == "incident":
+    if request.kind == ChangeRequestKind.INCIDENT:
         change = request.incident_change
         baseline = (
             IncidentRevision.objects.filter(
@@ -82,8 +89,8 @@ def request_detail(actor: User, tenant_id: int, request_id: int) -> dict[str, An
             "action": change.action,
             "incident_id": change.incident_id,
             "expected_revision": change.expected_revision,
-            "values": incident_values(change) if change.action in {"create", "update"} else None,
-            "ends_at": change.ends_at if change.action == "resolve" else None,
+            "values": incident_values(change) if change.action in INCIDENT_EDITS else None,
+            "ends_at": change.ends_at if change.action == IncidentChangeAction.RESOLVE else None,
             "before": (
                 {"id": baseline.incident_id, "revision": baseline.revision, **baseline.snapshot}
                 if baseline
@@ -113,11 +120,10 @@ def request_detail(actor: User, tenant_id: int, request_id: int) -> dict[str, An
         "closed_at": request.closed_at,
         "decision_reason": request.decision_reason,
         "former_member": former,
-        "can_review": membership.role == Membership.Role.ADMIN and request.status == "pending",
-        "can_withdraw": own and request.status == "pending",
-        "unread": own
-        and request.status in {"approved", "rejected"}
-        and request.outcome_seen_at is None,
+        "can_review": membership.role == WorkspaceRole.ADMIN
+        and request.status == ChangeRequestStatus.PENDING,
+        "can_withdraw": own and request.status == ChangeRequestStatus.PENDING,
+        "unread": own and request.status in DECIDED and request.outcome_seen_at is None,
         "conflict": conflict,
         "review_fingerprint": fingerprint,
         "production_items": items,
@@ -129,7 +135,7 @@ def request_summaries(
     actor: User, tenant_id: int, rows: list[ChangeRequest]
 ) -> list[dict[str, Any]]:
     membership = tenant_membership(actor, tenant_id)
-    if membership.role != Membership.Role.ADMIN:
+    if membership.role != WorkspaceRole.ADMIN:
         rows = [
             row
             for row in rows
@@ -158,13 +164,14 @@ def request_summaries(
             "closed_at": row.closed_at,
             "decision_reason": row.decision_reason,
             "former_member": row.proposer_membership_id not in active,
-            "can_review": membership.role == Membership.Role.ADMIN and row.status == "pending",
+            "can_review": membership.role == WorkspaceRole.ADMIN
+            and row.status == ChangeRequestStatus.PENDING,
             "can_withdraw": row.proposed_by_id == actor.pk
             and row.proposer_membership_id == membership.pk
-            and row.status == "pending",
+            and row.status == ChangeRequestStatus.PENDING,
             "unread": row.proposed_by_id == actor.pk
             and row.proposer_membership_id == membership.pk
-            and row.status in {"approved", "rejected"}
+            and row.status in DECIDED
             and row.outcome_seen_at is None,
         }
         for row in rows

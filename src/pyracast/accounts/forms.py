@@ -5,7 +5,7 @@ from django.http import HttpRequest
 from django.utils.translation import gettext as _
 
 from pyracast.accounts.invitations import pending_invitation
-from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference
+from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference, WorkspaceRole
 
 
 class CompanySignupForm(forms.Form):
@@ -35,5 +35,5 @@ class CompanySignupForm(forms.Form):
     def signup(self, request: HttpRequest, user: User) -> None:
         if not self.cleaned_data.get("invitation_token"):
             tenant = Tenant.objects.create(name=self.cleaned_data["company_name"])
-            Membership.objects.create(user=user, tenant=tenant, role=Membership.Role.ADMIN)
+            Membership.objects.create(user=user, tenant=tenant, role=WorkspaceRole.ADMIN)
         UserLanguagePreference.objects.create(user=user, language=request.LANGUAGE_CODE)

@@ -13,7 +13,6 @@ from pyracast.forecasts.models import (
     RequestAttempt,
 )
 from pyracast.metering.models import EpiasConnection
-from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.preparation import prepare_delivery
 from pyracast.notifications.report_data import saved_report_context
 from pyracast.plants.models import CalibrationActivation, Plant, PlantConfiguration
@@ -247,7 +246,7 @@ def test_unknown_reported_outage_keeps_normal_estimate_and_missing_scenario(
     assert all(row["energy_mwh"] is None for row in tomorrow["outage"]["report_intervals"])
 
 
-def test_frozen_report_survives_later_input_changes_new_language_and_retry(
+def test_frozen_report_survives_later_input_changes_and_retry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant, delivery = report_delivery(monkeypatch)
@@ -260,22 +259,8 @@ def test_frozen_report_survives_later_input_changes_new_language_and_retry(
     ForecastResult.objects.filter(snapshot=delivery.snapshot).update(daily_payloads={})
     assert delivery.snapshot is not None
     ForecastSnapshot.objects.filter(pk=delivery.snapshot.pk).update(normalized_intervals=[])
-    new_language = NotificationDelivery.objects.create(
-        schedule=delivery.schedule,
-        binding=delivery.binding,
-        recipients=["turkish@example.com"],
-        grouped=False,
-        language="tr",
-        scheduled_for=SLOT,
-        available_at=SLOT,
-        preparation_deadline=delivery.preparation_deadline,
-    )
-    assert prepare_delivery(new_language, SLOT + timedelta(minutes=3))
-    assert new_language.prepared_message is not None
-    assert new_language.prepared_message["report_context"] == original
-    assert new_language.prepared_message["results"] == delivery.prepared_message["results"]
-    prepared = new_language.prepared_message
-    assert prepare_delivery(new_language, SLOT + timedelta(minutes=4))
-    assert new_language.prepared_message == prepared
+    prepared = delivery.prepared_message
+    assert prepare_delivery(delivery, SLOT + timedelta(minutes=3))
+    assert delivery.prepared_message == prepared
     assert cast(dict[str, Any], original)["plant_name"] == "Electrical plant"
     assert system.binding.pk == delivery.binding_id

@@ -8,7 +8,7 @@ from rest_framework.permissions import SAFE_METHODS, BasePermission
 from rest_framework.request import Request
 
 from pyracast.accounts.authorization import active_membership
-from pyracast.accounts.models import Membership
+from pyracast.accounts.models import WorkspaceRole
 
 if TYPE_CHECKING:
     from rest_framework.views import APIView
@@ -22,7 +22,7 @@ class WorkspaceWritePermission(BasePermission):
         if request.method in SAFE_METHODS or tenant_id is None:
             return True
         membership = active_membership(cast(User, request.user), tenant_id)
-        return membership is not None and membership.role == Membership.Role.ADMIN
+        return membership is not None and membership.role == WorkspaceRole.ADMIN
 
 
 class WorkspaceMemberWritePermission(BasePermission):

@@ -9,7 +9,7 @@ from pyracast.forecasts.models import RequestAttempt
 from pyracast.incidents.operations import save_incident
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.history import plant_outlook
-from pyracast.plants.models import PlantConfiguration, PlantForecast
+from pyracast.plants.models import PlantConfiguration
 from pyracast.plants.operations import activate_calibration
 from tests.support.domain import NOW
 from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
@@ -80,7 +80,6 @@ def test_intraday_update_keeps_archived_morning_in_current_outlook_and_api(
         {"snapshot_id": latest.pk, "start": boundary.isoformat(), "end": end.isoformat()},
     ]
     assert "mixed_forecast_vintages" in payload["quality_flags"]
-    assert not PlantForecast.objects.exists()
     client = Client()
     client.force_login(system.member)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/forecast/"
@@ -300,4 +299,3 @@ def test_explicit_as_of_stays_on_day_ahead_snapshot_without_vintage_composition(
     assert payload["provenance"]["snapshot_id"] == first.pk
     assert payload["provenance"]["selection_policy"] == "latest-published-pre-daylight-issuance-v1"
     assert "mixed_forecast_vintages" not in payload["quality_flags"]
-    assert not PlantForecast.objects.exists()

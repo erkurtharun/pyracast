@@ -4,7 +4,6 @@ from threading import Barrier
 import pytest
 from django.contrib.auth.models import User
 from django.db import IntegrityError, connection, connections, transaction
-from django.db.migrations.executor import MigrationExecutor
 
 from pyracast.connections.models import ProviderAccount
 from pyracast.connections.operations import (
@@ -35,7 +34,7 @@ def test_raw_provider_variants_share_one_account_and_quota(
 ) -> None:
     admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
     existing = ProviderAccount.objects.create(
-        provider="\xa0FIXTURE\t",
+        provider="fixture",
         external_account_id=original,
         encrypted_api_key=encrypt_secret(provider_key()),
         daily_quota=1,
@@ -44,12 +43,13 @@ def test_raw_provider_variants_share_one_account_and_quota(
     )
     duplicate = create_account(
         admin,
-        provider="fixture",
+        provider="\xa0FIXTURE\t",
         external_account_id=equivalent,
         api_key=provider_key("OTHER"),
         daily_quota=10,
     )
     assert duplicate.pk == existing.pk
+    assert duplicate.provider == "fixture"
     assert decrypt_api_key(duplicate.encrypted_api_key) == provider_key()
     assert duplicate.daily_quota == 1
     assert not AuditEvent.objects.filter(action="provider_account_created").exists()
@@ -134,29 +134,3 @@ def test_account_index_uses_builtin_unicode_collation() -> None:
             ("pg_unicode_fast", "b", True, True),
             ("pg_unicode_fast", "b", True, True),
         ]
-
-
-def test_canonical_index_migration_refuses_legacy_duplicate_accounts() -> None:
-    previous = [("connections", "0010_remove_sitebinding_binding_matching_power_basis_and_more")]
-    executor = MigrationExecutor(connection)
-    current = executor.loader.graph.leaf_nodes()
-    try:
-        executor.migrate(previous)
-        accounts = executor.loader.project_state(previous).apps.get_model(
-            "connections", "ProviderAccount"
-        )
-        first = accounts.objects.create(
-            provider="fixture", external_account_id="Stra\u00dfe", secret_reference=provider_key()
-        )
-        second = accounts.objects.create(
-            provider="fixture",
-            external_account_id="STRASSE",
-            secret_reference=provider_key("OTHER"),
-        )
-        with pytest.raises(IntegrityError, match="canonical_provider_account"):
-            MigrationExecutor(connection).migrate(current)
-        assert accounts.objects.filter(pk__in=[first.pk, second.pk]).count() == 2
-        second.external_account_id = "separate-account"
-        second.save(update_fields=["external_account_id"])
-    finally:
-        MigrationExecutor(connection).migrate(current)

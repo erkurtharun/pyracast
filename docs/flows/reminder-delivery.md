@@ -70,9 +70,9 @@ sequenceDiagram
 
 | Table | R/W | What |
 | --- | --- | --- |
-| `notifications_reminderschedule` | R | Current (`retired_at` null) schedule: `enabled`, sorted `times`, `recipients`, `include_workspace_members`, `recipient_memberships`, `language`, `effective_from` |
+| `notifications_reminderschedule` | R | The region's schedule: `enabled`, sorted `times`, `recipients`, `include_workspace_members`, `recipient_memberships`, `language`, `effective_from` |
 | `notifications_notificationdelivery` | R/W | One row per schedule slot; status, lease, attempts, pinned recipients and memberships, `revoked_recipients`, language, binding, snapshot, `preparation_deadline`, `prepared_message` (frozen payload with `kind`, `tomorrow_complete`), `transmit_started_at`, `sent_at`, `last_error` |
-| `notifications_notificationsettings` | R/W (locked) | Singleton global recipient limit (seeded by migration), read `FOR UPDATE` in every scheduling slot and every claim and transmit transaction; `operations.py` `recipient_limit` inserts row `pk=1` if it is missing |
+| `notifications_notificationsettings` | R/W (locked) | Singleton global recipient limit, read `FOR UPDATE` in every scheduling slot and every claim and transmit transaction; `operations.py` `recipient_limit` inserts row `pk=1` if it is missing |
 | `accounts_tenant`, `regions_region` | R (locked) | Serialization with membership and admin changes; approval, revision, timezone, `deleted_at` |
 | `connections_sitebinding`, `connections_provideraccount` | R | Pinned binding; `daily_quota` caps reminder times; account enabled and authorized |
 | `accounts_membership`, `auth_user`, `account_emailaddress` | R | Effective recipients (active members, verified addresses) and pinned membership ids |
@@ -87,7 +87,7 @@ No user acts in this flow; authority is the state of the plant at each step and 
 - Scheduling (`scheduler.py` `_enqueue_schedule`, under Tenant, settings and Region locks): `eligibility.py` `binding_can_notify` (region not deleted, approved, current revision, binding is the approved one, provider account enabled and authorized), schedule enabled and current, slot not before `effective_from`, clock within `times[:daily_quota]`. A due slot whose effective recipients are empty, above the global limit or fail `validate_recipient` gets a `skipped` row with the reason and no recipients.
 - Claim (`jobs.py` `process_notification` -> `_skip_reason`, same locks plus the delivery row): the same checks against the pinned binding, except `effective_from`; the schedule's effective recipients pass the scheduler's recipient check again (`scheduler.slot_recipients`), then the row's recipients shrink to `recipients.py` `permitted_recipients` (still effective, not revoked, a pinned member still active) and must not be empty.
 - Transmit (`jobs.py` `_mark_transmit` inside `send`'s `before_send`): repeats the recipient shrink and `_skip_reason`, checks the lease token and expiry and the 2 h deadline, then writes `transmit_started_at` and the final BCC list.
-- Database: unique `unique_reminder_group_slot` (schedule, scheduled_for, where `grouped`); check constraints on status and language. The history is readable by any active workspace member of a non-trashed region (`operations.py` `get_reminder_schedule` -> `require_member`): the region's 20 newest rows, recipient addresses included.
+- Database: unique `unique_reminder_group_slot` (one delivery per schedule and `scheduled_for`); check constraints on status, language and `notification_delivery_sending_prepared` (a `sending` row holds its prepared message). The history is readable by any active workspace member of a non-trashed region (`operations.py` `get_reminder_schedule` -> `require_member`): the region's 20 newest rows, recipient addresses included.
 
 ## Failure paths
 
@@ -98,7 +98,7 @@ No user acts in this flow; authority is the state of the plant at each step and 
 | Slot older than 2 h when first scheduled | Row created `skipped`, `missed_schedule` |
 | Due slot with no effective recipient, more than the global limit, or a stored address that fails `validate_recipient` or is not a string | Row created `skipped` with `no_recipients`, `recipient_limit_exceeded` or `invalid_recipient`, `recipients` empty, no snapshot; logged with the schedule id and reason, never the address; the slot is not retried when the cause clears, the next slot is created normally; counted in `paused_notifications` (informational) |
 | Unknown or purged delivery id, or its region row is gone | Worker returns without any change |
-| Schedule disabled or retired, or the slot's local time removed from `times`, before claim or transmit | `skipped`, `cancelled_by_settings_change` |
+| Schedule disabled, or the slot's local time removed from `times`, before claim or transmit | `skipped`, `cancelled_by_settings_change` |
 | Before claim or transmit, the schedule's effective recipients are above the limit or fail `validate_recipient`, or no permitted recipient of the row is left | `skipped`, `recipient_limit_exceeded`, `invalid_recipient` or `no_recipients` (the scheduler's check, shared as `scheduler.slot_recipients`); counted in `paused_notifications` |
 | Binding, region or quota changed before claim or transmit | `skipped`, `schedule_or_authority_changed` |
 | Claimed or transmitted after 2 h | `skipped`, `missed_schedule` (claim) or `delivery_deadline_exceeded` (transmit) |
@@ -106,11 +106,11 @@ No user acts in this flow; authority is the state of the plant at each step and 
 | Preparation or rendering raises a non-database error | Plain-text "forecast unavailable" notice frozen and sent, `kind` `unavailable` |
 | Database error during claim or preparation | Transaction rolls back; the actor fails without a Dramatiq retry; row stays ready for the next cycle |
 | Lease expired before transmission marker | `retry`, `interrupted_connection` (or `failed` after 8 attempts or past 2 h) |
-| Lease expired after marker, or legacy row without prepared content | `uncertain`, `interrupted_send`; never retried |
+| Lease expired after the transmit marker | `uncertain`, `interrupted_send`; never retried |
 | `NotSentError` (connection, credentials, SMTP 4xx, Gmail 401, 429 or quota 403, invalid mailer configuration, marker raised) or an unclassified error before the marker | `retry` with backoff and the `MailFailure` code; `failed` when budget is exhausted. `PermanentlyNotSentError` is `failed` at once with its code |
 | SMTP 5xx or unsupported transaction, any other Gmail 4xx except 408, invalid Gmail headers | `failed`, `mail_rejected` |
 | `DeliveryUncertainError` (SMTP disconnect or invalid reply after DATA began, Gmail 5xx, 408, read timeout, unconfirmed response) or an unclassified error after the marker | `uncertain`, `mail_outcome_uncertain`; never retried |
-| Site (region) moved to trash | `pending`/`retry` -> `cancelled`, `sending` -> `uncertain`, both `definition_trashed` (`trash.py` `trash_region`). Trashing only the plant (`trash_plant`) changes no delivery and does not block sending (eligibility checks region and binding only): a slot already frozen still sends its electrical report, a slot first prepared after the trash gets an irradiance-only report |
+| Site (region) moved to trash | `pending`/`retry` -> `cancelled`, `sending` -> `uncertain`, both `definition_trashed` (`trash.py` `trash_region`). |
 
 ## Rules and invariants
 

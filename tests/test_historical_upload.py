@@ -314,13 +314,13 @@ def test_file_metadata_verifies_only_present_settings_and_csv_product_is_checked
             "longitude",
             "capacity_kw",
             "dc_capacity_kw",
-            "tilt_degrees",
             "azimuth_degrees",
             "losses_percent",
             "site_id",
             "power_basis",
         )
     } | {
+        "tilt_degrees": 0,
         "unit": "kW",
         "mounting_type": "fixed",
         "timestamp_convention": "period_end",

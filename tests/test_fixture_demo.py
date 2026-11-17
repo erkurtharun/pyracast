@@ -30,7 +30,7 @@ def test_fixture_demo(settings: LazySettings) -> None:
     assert ForecastResult.objects.get().payload["complete"] is True
     reference = SiteBinding.objects.get()
     assert reference.capacity_kw == reference.dc_capacity_kw == 1000
-    assert reference.azimuth_degrees == reference.tilt_degrees == reference.losses_percent == 0
+    assert reference.azimuth_degrees == reference.losses_percent == 0
 
 
 @pytest.fixture
