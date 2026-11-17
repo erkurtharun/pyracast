@@ -9,6 +9,8 @@ import pytest
 from django.core.management import call_command
 from django.test import override_settings
 
+from scripts import generate_api_schema
+
 
 @pytest.mark.parametrize("debug", ["0", "1"])
 def test_schema_generation_ignores_local_runtime_configuration(tmp_path: Path, debug: str) -> None:
@@ -54,3 +56,19 @@ def test_runtime_schema_uses_its_actual_session_cookie(cookie_name: str) -> None
 
     schema = json.loads(output.getvalue())
     assert schema["components"]["securitySchemes"]["cookieAuth"]["name"] == cookie_name
+
+
+def test_check_mode_reports_a_stale_schema(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = Path(__file__).resolve().parents[1]
+    schema = json.loads((root / "web/openapi.json").read_text(encoding="utf-8"))
+    schema["info"]["title"] = "Stale"
+    (tmp_path / "openapi.json").write_text(json.dumps(schema), encoding="utf-8")
+    monkeypatch.setattr(generate_api_schema, "WEB", tmp_path)
+
+    assert generate_api_schema.main(["--check"]) == 1
+
+    output = capsys.readouterr().out
+    assert "web/openapi.json is stale" in output
+    assert "npm --prefix web run api:generate" in output
