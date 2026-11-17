@@ -18,6 +18,7 @@ from dramatiq.brokers.stub import StubBroker
 
 from deploy import authorize_gmail, backup, host, release_record, reset_database, watchdog
 from pyracast.accounts.authentication import email_identity
+from pyracast.accounts.models import Membership, WorkspaceRole
 from pyracast.forecasts.historical_upload import MAX_UPLOAD_BYTES
 from pyracast.forecasts.management.commands.check_delivery_health import (
     Command as DeliveryHealthCommand,
@@ -300,10 +301,13 @@ def test_watchdog_supervises_every_long_running_compose_service() -> None:
 
 @pytest.mark.django_db
 def test_smoke_sign_in_uses_a_verified_email_identity(tmp_path: Path) -> None:
-    setup = re.search(r"^actor = .*?(?=^tenant = )", text(DEPLOY / "smoke.sh"), re.M | re.S)
+    script = text(DEPLOY / "smoke.sh")
+    imports = re.search(r"^from pyracast.accounts.models import .*$", script, re.M)
+    assert imports
+    setup = re.search(r"^actor = .*?(?=^region = )", script, re.M | re.S)
     assert setup
     fixture = tmp_path / "smoke_identity.py"
-    fixture.write_text(setup[0], encoding="utf-8")
+    fixture.write_text(imports[0] + "\n" + setup[0], encoding="utf-8")
     actor: User = runpy.run_path(
         str(fixture), init_globals={"User": User, "EmailAddress": EmailAddress}
     )["actor"]
@@ -313,6 +317,9 @@ def test_smoke_sign_in_uses_a_verified_email_identity(tmp_path: Path) -> None:
     assert EmailAddress.objects.filter(
         user=actor, email=actor.email, primary=True, verified=True
     ).exists()
+    membership = Membership.objects.get(user=actor)
+    assert membership.role == WorkspaceRole.ADMIN
+    assert membership.tenant.name == "Container smoke"
 
 
 def test_release_drains_every_application_service_within_its_stop_grace_period() -> None:

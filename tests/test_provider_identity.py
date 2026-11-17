@@ -34,7 +34,7 @@ def test_raw_provider_variants_share_one_account_and_quota(
 ) -> None:
     admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
     existing = ProviderAccount.objects.create(
-        provider="\xa0FIXTURE\t",
+        provider="fixture",
         external_account_id=original,
         encrypted_api_key=encrypt_secret(provider_key()),
         daily_quota=1,
@@ -43,12 +43,13 @@ def test_raw_provider_variants_share_one_account_and_quota(
     )
     duplicate = create_account(
         admin,
-        provider="fixture",
+        provider="\xa0FIXTURE\t",
         external_account_id=equivalent,
         api_key=provider_key("OTHER"),
         daily_quota=10,
     )
     assert duplicate.pk == existing.pk
+    assert duplicate.provider == "fixture"
     assert decrypt_api_key(duplicate.encrypted_api_key) == provider_key()
     assert duplicate.daily_quota == 1
     assert not AuditEvent.objects.filter(action="provider_account_created").exists()
