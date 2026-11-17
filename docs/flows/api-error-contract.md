@@ -1,6 +1,6 @@
 # API response contract: errors, conflicts and pagination
 
-Every DRF view under `/api/` answers failures with a machine `code` plus optional `detail`, rendered as JSON except by `GET /api/schema/` (spectacular renderers: YAML unless JSON is requested), and list endpoints as DRF page-number pages of 50. One DRF exception handler maps domain exceptions to codes; four views and one middleware build their own failure bodies; the web client turns bodies into one translated message plus per-field errors. Allauth (`/api/auth/browser/v1/`) keeps its own `{status, data, errors}` envelope, read by a separate client function that falls back to the project body when `errors` is absent. Failures outside DRF under `/api/` (middleware `PermissionDenied`, unknown paths, interrupted sessions, Django client errors such as too many form fields, unhandled errors in allauth views) are answered by project error handlers as private JSON; every server failure answers `{code, message, request_id}` and logs its traceback with the same request id.
+Every DRF view under `/api/` answers failures with a machine `code` plus optional `detail`, rendered as JSON except by `GET /api/schema/` (spectacular renderers: YAML unless JSON is requested), and list endpoints as DRF page-number pages of 50. One DRF exception handler maps domain exceptions to codes; four views and one middleware build their own failure bodies; the web client turns bodies into one translated message plus per-field errors. Allauth (`/api/auth/browser/v1/`) keeps its own `{status, data, errors}` envelope, read by a separate client function that falls back to the project body when `errors` is absent. Failures outside DRF under `/api/` (middleware `PermissionDenied`, unknown paths, interrupted sessions, Django client errors such as too many form fields, unhandled errors in allauth views) are answered by project error handlers as private JSON; 500 `server_error` responses include `{code, message, request_id}` and log the traceback with the same request id. A 503 `request_timeout` includes `{code, request_id}` and a corresponding `api_request_timeout` traceback; other mapped failures carry no reference.
 
 ## Entry points
 
@@ -39,7 +39,10 @@ sequenceDiagram
         alt exception is mapped
             H-->>V: Response with code and optional detail
             V-->>C: 400, 403, 404, 409, 429, 502 or 503 JSON
-        else exception is unmapped
+        else BadRequest or SuspiciousOperation
+            H-->>V: None, exception re-raised to Django
+            V-->>C: handler400 answers session_ended or bad_request JSON
+        else unhandled server exception
             H->>H: log api_server_error with request id and traceback, roll back
             H-->>V: 500 server_error with message and request_id
         end
@@ -67,7 +70,7 @@ sequenceDiagram
 | --- | --- |
 | Lock wait over `lock_timeout` 5 s inside a view (database error caused by `LockNotAvailable`) | 503 `workspace_busy`, `Retry-After: 1` |
 | Deadlock (`DeadlockDetected`) | 503 `database_conflict`, `Retry-After: 1` |
-| Statement over `statement_timeout` 60 s (`QueryCanceled`) | 503 `request_timeout` with `request_id`; logged at ERROR with traceback |
+| Database request canceled (`QueryCanceled`, SQLSTATE `57014`), including `statement_timeout` 60 s | 503 `request_timeout` with `request_id`; logged at ERROR with traceback |
 | Session advisory lock not granted in 5 s | 429 `session_busy`, English `detail`, `Retry-After: 1`; under `/api/auth/` also logged as `authentication_request_throttled` |
 | `ObjectDoesNotExist` (model name logged at WARNING) / `Http404` from `get_object_or_404` / invalid `?page` | 404 `not_found` / 404 `http_404`, `detail.detail` "No Plant matches the given query." / 404 `http_404`, `detail.detail` "Invalid page." |
 | Django `ValidationError` from operations / DRF `ValidationError` (serializers, four workspace views that re-wrap Django errors) | 400 `invalid_request`, `VALIDATION_DETAILS` localized / 400 `http_400`; `detail` is a list or per-field dict |

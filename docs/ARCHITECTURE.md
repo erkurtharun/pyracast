@@ -39,7 +39,7 @@ PostgreSQL owns jobs, leases, results and sessions, and RabbitMQ transports deli
 Application logs are an event stream on standard output for the process manager to
 collect; `PYRACAST_LOG_LEVEL` controls verbosity and defaults to `INFO`. `django.request`
 errors and `django.security` warnings share the console handler; `DisallowedHost` is discarded.
-Background failures use `pyracast.background.failures.log_failure`: an event key, fields, the
+Caught exceptions in calibration, metering and collection scheduling use `pyracast.background.failures.log_failure`: an event key, fields, the
 error type and the innermost `pyracast` code location, never the exception message. Local launcher
 logs and process identities are development tooling.
 

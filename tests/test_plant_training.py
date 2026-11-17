@@ -528,7 +528,7 @@ def test_terminal_claim_failure_is_logged(
     run = request_run(system, plant)
     run.attempts = attempts
     if reason == "invalid_cutoff":
-        run.cutoff_at = NOW + timedelta(seconds=1)
+        run.cutoff_at = NOW + timedelta(hours=1)
     run.save()
     assert not run_calibration(run.pk, NOW)
     assert f"calibration_run_failed run={run.pk} reason={reason}" in [

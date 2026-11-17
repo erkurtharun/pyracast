@@ -42,7 +42,7 @@ def permission_denied(request: HttpRequest, exception: Exception) -> HttpRespons
 
 def page_not_found(request: HttpRequest, exception: Exception) -> HttpResponse:
     if not _api(request):
-        return _private(defaults.page_not_found(request, exception))
+        return defaults.page_not_found(request, exception)
     return _json(404, {"code": "not_found"})
 
 

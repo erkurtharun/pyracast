@@ -356,8 +356,9 @@ fixtures do not establish provider access or inbox delivery.
   failure. Container stdout/stderr goes to Cloud Logging with a bounded local
   cache. Nonblocking logging can drop entries during overload/network failure;
   durable job/audit records remain in PostgreSQL. API logs omit query strings and
-  referrers. A 5xx answer carries a `request_id`; search the logs for it to find the
-  `api_server_error` line with its traceback (database error detail can appear there).
+  referrers. A 500 `server_error` answer carries a `request_id`; search the logs for its
+  `api_server_error` traceback. A 503 `request_timeout` reference identifies an
+  `api_request_timeout` traceback. Database error detail can appear in either log.
   Inspect `docker compose ... ps`, `logs --tail 100` and
   `journalctl -u pyracast.service`. Never run `compose config` without `--quiet`
   or export container environment diagnostics: they can disclose secrets.

@@ -68,7 +68,7 @@ None. A system process with direct database access and no tenant context. Scope 
 | Naive `now` or `cutoff_hour` outside 0-23 | `ValidationError` for direct callers; `dispatch` always passes an aware `now` and no `cutoff_hour` |
 | One region raises (lock wait over 5 s, DB error) | That region rolls back and `collection_region_scheduling_failed region_id=<id> error_type=<class> origin=<location>` is logged; others continue; after the loop `CollectionSchedulingError` carries the failed region ids |
 | `enqueue_due` raised | `dispatch` closes unusable connections, still sends pending ids and returns the published count with `collection_regions_failed:<count>` (or the class name of any other error, logged as `collection_scheduling_failed`) |
-| Broker or `pending_job_ids` fails | `collection_publish_failed` is logged with the ids sent so far; the outcome keeps an earlier scheduling code, otherwise records the class name; ids already sent stay sent, the rest stay due |
+| Broker or `pending_job_ids` fails | `collection_publish_failed` is logged with the count sent so far; the outcome keeps an earlier scheduling code, otherwise records the class name; ids already sent stay sent, the rest stay due |
 | Phase failed | Command logs `dispatch_phase_failed` for a raising phase, stores the failure code in `DispatcherStatus.last_error` (unhealthy in `delivery_health`), runs the remaining phases; one-shot mode ends with `CommandError`. If recording the status itself fails, the row stays unchanged, `dispatch_monitoring_failed` is logged, later phases still run and one-shot mode also ends with `CommandError` |
 | No approval job, stale binding, disabled schedule | Region skipped silently; leftover jobs are still published and closed by `claim` |
 
