@@ -328,16 +328,28 @@ def test_unsafe_reminder_rollback_keeps_latest_schema_and_data(
         schedules.objects.create(region_id=region.pk, effective_from=now)
 
 
-def test_compatible_reminder_rollback_preserves_all_rows_and_never_reenables_archives() -> None:
+@pytest.fixture
+def grouped_reminders_schema() -> Iterator[Apps]:
     executor = MigrationExecutor(connection)
     latest = executor.loader.graph.leaf_nodes()
     grouped = [node for node in latest if node[0] != "notifications"] + [
         ("notifications", "0009_grouped_reminders")
     ]
-    executor.migrate(grouped)
-    deliveries = cast(Any, executor.loader.project_state(grouped).apps).get_model(
+    try:
+        executor.migrate(grouped)
+        yield executor.loader.project_state(grouped).apps
+    finally:
+        MigrationExecutor(connection).migrate(latest)
+
+
+def test_compatible_reminder_rollback_preserves_all_rows_and_never_reenables_archives(
+    grouped_reminders_schema: Apps,
+) -> None:
+    deliveries = cast(Any, grouped_reminders_schema).get_model(
         "notifications", "NotificationDelivery"
     )
+    executor = MigrationExecutor(connection)
+    latest = executor.loader.graph.leaf_nodes()
     now = timezone.now()
     tenant = Tenant.objects.create(name="Compatible reminder rollback")
     administrator = User.objects.create(username="admin", email="admin@example.com")
