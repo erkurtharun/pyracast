@@ -7,7 +7,7 @@ from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.current_forecast import current_forecast
 from pyracast.plants.forecasting import archived_forecast
-from pyracast.plants.models import Plant, PlantConfiguration
+from pyracast.plants.models import CONFIGURATION_PARAMETERS, Plant, PlantConfiguration
 
 
 def automatic_forecast(
@@ -57,15 +57,6 @@ def reference_transition_forecast(
     )
     if previous is None:
         return latest
-    physical_fields = (
-        "dc_capacity_mw",
-        "inverter_capacity_mw",
-        "export_limit_mw",
-        "measurement_basis",
-        "mounting_type",
-        "surface_tilt",
-        "surface_azimuth",
-    )
     reference_fields = (
         "region_id",
         "provider_account_id",
@@ -82,7 +73,10 @@ def reference_transition_forecast(
         previous.binding.capacity_kw == current.binding.capacity_kw
         or not previous.binding.capacity_semantics_verified
         or previous.binding.health != "healthy"
-        or any(getattr(previous, field) != getattr(current, field) for field in physical_fields)
+        or any(
+            getattr(previous, field) != getattr(current, field)
+            for field in CONFIGURATION_PARAMETERS
+        )
         or any(
             getattr(previous.binding, field) != getattr(current.binding, field)
             for field in reference_fields

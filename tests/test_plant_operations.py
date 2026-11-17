@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from threading import Barrier
@@ -8,9 +9,11 @@ import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import close_old_connections, connection, transaction
+from django.test import Client
 from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant
+from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.models import CollectionJob, ForecastResult, ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
@@ -20,6 +23,7 @@ from pyracast.plants.models import (
     Plant,
     PlantConfiguration,
     PlantEvent,
+    PlantSubmission,
     ProductionObservation,
 )
 from pyracast.plants.numerics import POLICY_VERSION
@@ -33,7 +37,7 @@ from pyracast.plants.operations import (
     reset_calibration,
     revise_plant,
 )
-from pyracast.regions.models import Region
+from pyracast.regions.models import AuditEvent, Region
 from tests.test_domain import NOW, System, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -693,3 +697,236 @@ def test_concurrent_calibration_requests_share_one_durable_run(
         ids = list(pool.map(lambda _: enqueue(), range(2)))
     assert len(set(ids)) == 1
     assert CalibrationRun.objects.count() == 1
+
+
+def test_identical_save_keeps_configuration_calibration_and_jobs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pyracast.metering.models import EpiasCollectionJob
+    from tests.test_metering import connected
+
+    system, plant, _ = connected(monkeypatch)
+    configuration_id = plant.current_configuration_id
+    Plant.objects.filter(pk=plant.pk).update(
+        automatic_calibration_enabled=True,
+        automatic_calibration_enabled_by=system.member,
+        next_calibration_check_at=NOW,
+    )
+    pending = request_run(system, plant)
+    jobs = EpiasCollectionJob.objects.count()
+    events = PlantEvent.objects.count()
+    saved = revise_plant(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        name=" Plant ",
+        dc_capacity_mw=130.0,
+        export_limit_mw=100,
+    )
+    plant.refresh_from_db()
+    pending.refresh_from_db()
+    assert saved.current_configuration_id == plant.current_configuration_id == configuration_id
+    assert (
+        plant.automatic_calibration_enabled,
+        plant.automatic_calibration_enabled_by_id,
+        plant.next_calibration_check_at,
+    ) == (True, system.member.pk, NOW)
+    assert pending.status == "pending"
+    assert PlantConfiguration.objects.count() == 1
+    assert EpiasCollectionJob.objects.count() == jobs
+    assert PlantEvent.objects.count() == events
+
+
+def test_rename_only_updates_plant_and_region_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    system, plant = make_plant(monkeypatch)
+    configuration_id = plant.current_configuration_id
+    renamed = revise_plant(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        name=" Renamed ",
+        dc_capacity_mw=130,
+        export_limit_mw=100,
+    )
+    system.region.refresh_from_db()
+    assert (renamed.name, system.region.name) == ("Renamed", "Renamed")
+    assert renamed.current_configuration_id == configuration_id
+    assert PlantConfiguration.objects.count() == 1
+    assert PlantEvent.objects.filter(action="configuration_created").count() == 1
+    event = PlantEvent.objects.get(action="plant_renamed")
+    assert (event.actor_id, event.details) == (system.member.pk, {"old": "Plant", "new": "Renamed"})
+    renamed_region = AuditEvent.objects.get(action="region_renamed")
+    assert (renamed_region.actor_id, renamed_region.region_id, renamed_region.revision) == (
+        system.member.pk,
+        system.region.pk,
+        system.region.revision,
+    )
+
+
+def test_plant_put_unchanged_returns_same_configuration(monkeypatch: pytest.MonkeyPatch) -> None:
+    system, plant = make_plant(monkeypatch)
+    client = Client()
+    client.force_login(system.member)
+    path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/"
+    response = client.put(
+        path,
+        {"name": "Plant", "dc_capacity_mw": 130, "export_limit_mw": 100},
+        content_type="application/json",
+    )
+    assert response.status_code == 200
+    assert response.json()["current_configuration"]["id"] == plant.current_configuration_id
+    assert response.json()["current_configuration"]["revision"] == 1
+    assert PlantConfiguration.objects.count() == 1
+
+
+def _rebind_to_stale_binding(system: System, plant: Plant) -> dict[str, Any]:
+    stale = SiteBinding.objects.get(pk=system.binding.pk)
+    stale.pk = None
+    stale.save()
+    assert plant.current_configuration_id is not None
+    PlantConfiguration.objects.filter(pk=plant.current_configuration_id).update(binding=stale)
+    return {}
+
+
+CONFIGURATION_FIELDS_OUTSIDE_SAVE = {
+    "id",
+    "plant",
+    "region",
+    "revision",
+    "created_by",
+    "created_at",
+}
+CONFIGURATION_FIELD_CHANGES: dict[str, Callable[[System, Plant], dict[str, Any]]] = {
+    "binding": _rebind_to_stale_binding,
+    "dc_capacity_mw": lambda system, plant: {"dc_capacity_mw": 131},
+    "inverter_capacity_mw": lambda system, plant: {"inverter_capacity_mw": 120},
+    "export_limit_mw": lambda system, plant: {"export_limit_mw": None},
+    "mounting_type": lambda system, plant: {"mounting_type": "tracking"},
+    "surface_tilt": lambda system, plant: {"surface_tilt": 20},
+    "surface_azimuth": lambda system, plant: {"surface_azimuth": 180},
+    "measurement_basis": lambda system, plant: {"measurement_basis": "ac_generation"},
+}
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        field.name
+        for field in PlantConfiguration._meta.concrete_fields
+        if field.name not in CONFIGURATION_FIELDS_OUTSIDE_SAVE
+    ],
+)
+def test_a_change_of_any_saved_configuration_field_creates_a_revision(
+    monkeypatch: pytest.MonkeyPatch, field: str
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    submission: dict[str, Any] = {
+        "name": "Plant",
+        "dc_capacity_mw": 130,
+        "export_limit_mw": 100,
+        "mounting_type": "fixed",
+    }
+    base = revise_plant(system.member, system.tenant.pk, system.region.pk, plant.pk, **submission)
+    assert base.current_configuration is not None
+    submission.update(CONFIGURATION_FIELD_CHANGES[field](system, base))
+    revised = revise_plant(
+        system.member, system.tenant.pk, system.region.pk, plant.pk, **submission
+    )
+    configuration = revised.current_configuration
+    assert configuration is not None
+    assert configuration.revision == base.current_configuration.revision + 1
+    assert configuration.binding_id == system.binding.pk
+    for name, value in submission.items():
+        if name != "name":
+            assert getattr(configuration, name) == value
+
+
+def test_rename_to_the_region_name_leaves_the_region_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    renamed = revise_plant(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        name="Site",
+        dc_capacity_mw=130,
+        export_limit_mw=100,
+    )
+    assert renamed.name == "Site"
+    assert PlantEvent.objects.get(action="plant_renamed").details == {"old": "Plant", "new": "Site"}
+    assert not AuditEvent.objects.filter(action="region_renamed").exists()
+
+
+SUBMISSION_FIELDS_OUTSIDE_SAVE = {"id", "plant", "submitted_by", "created_at"}
+
+
+def pending_submission(system: System) -> tuple[Plant, dict[str, Any]]:
+    submission: dict[str, Any] = {
+        "name": "Plant",
+        "dc_capacity_mw": 130,
+        "export_limit_mw": 100,
+        "mounting_type": "fixed",
+    }
+    plant = create_plant(system.member, system.tenant.pk, system.region.pk, **submission)
+    assert plant.current_configuration_id is None
+    return plant, submission
+
+
+def second_workspace_admin(system: System) -> User:
+    user = User.objects.create(username="second")
+    Membership.objects.filter(tenant=system.tenant, role=Membership.Role.ADMIN).update(user=user)
+    return user
+
+
+def test_identical_pending_save_keeps_submission_attribution_and_events() -> None:
+    system = make_system()
+    plant, submission = pending_submission(system)
+    other = second_workspace_admin(system)
+    events = PlantEvent.objects.count()
+    revise_plant(other, system.tenant.pk, system.region.pk, plant.pk, **submission)
+    saved = PlantSubmission.objects.get(plant=plant)
+    assert saved.submitted_by_id == system.member.pk
+    assert PlantEvent.objects.count() == events
+
+
+def test_rename_only_pending_save_renames_plant_and_region_without_resubmitting() -> None:
+    system = make_system()
+    plant, submission = pending_submission(system)
+    other = second_workspace_admin(system)
+    revise_plant(
+        other, system.tenant.pk, system.region.pk, plant.pk, **{**submission, "name": " New "}
+    )
+    plant.refresh_from_db()
+    system.region.refresh_from_db()
+    assert (plant.name, system.region.name) == ("New", "New")
+    assert PlantSubmission.objects.get(plant=plant).submitted_by_id == system.member.pk
+    assert not PlantEvent.objects.filter(action="submission_saved", actor=other).exists()
+    event = PlantEvent.objects.get(action="plant_renamed")
+    assert (event.actor_id, event.details) == (other.pk, {"old": "Plant", "new": "New"})
+    assert AuditEvent.objects.get(action="region_renamed").actor_id == other.pk
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        field.name
+        for field in PlantSubmission._meta.concrete_fields
+        if field.name not in SUBMISSION_FIELDS_OUTSIDE_SAVE
+    ],
+)
+def test_a_change_of_any_submitted_field_resubmits(field: str) -> None:
+    system = make_system()
+    plant, submission = pending_submission(system)
+    other = second_workspace_admin(system)
+    submission.update(CONFIGURATION_FIELD_CHANGES[field](system, plant))
+    revise_plant(other, system.tenant.pk, system.region.pk, plant.pk, **submission)
+    saved = PlantSubmission.objects.get(plant=plant)
+    assert saved.submitted_by_id == other.pk
+    assert PlantEvent.objects.filter(action="submission_saved", actor=other).count() == 1
+    for name, value in submission.items():
+        if name != "name":
+            assert getattr(saved, name) == value

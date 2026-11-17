@@ -1,6 +1,6 @@
 # Edit a plant's name and technical configuration
 
-A workspace administrator saves the plant name and electrical or geometry parameters from the Settings tab (or the `configure_plant` command). While the region is pending and the plant has no configuration, the save overwrites the customer's `PlantSubmission`; otherwise it needs a current approved binding and appends an immutable `PlantConfiguration` revision, switches the plant to it, turns automatic calibration off, supersedes unfinished calibration runs and inserts fresh history jobs for a connected EPİAŞ plant. Viewers see the form read-only.
+A workspace administrator saves the plant name and electrical or geometry parameters from the Settings tab (or the `configure_plant` command). While the region is pending and the plant has no configuration, the save overwrites the customer's `PlantSubmission`; otherwise it needs a current approved binding. A save whose parameters and binding equal the current configuration changes nothing but the name; any other save appends an immutable `PlantConfiguration` revision, switches the plant to it, turns automatic calibration off, supersedes unfinished calibration runs and inserts fresh history jobs for a connected EPİAŞ plant. A new name renames the plant and its region. Viewers see the form read-only.
 
 ## Entry points
 
@@ -36,9 +36,11 @@ sequenceDiagram
         O-->>V: "OperationalError (LockNotAvailable)"
         V-->>UI: "503 workspace_busy, Retry-After 1"
     else region pending and no configuration
-        O->>DB: "upsert PlantSubmission, plant name, event submission_saved"
-    else binding current
-        O->>DB: "insert revision n+1, repoint plant, automation off, supersede runs"
+        O->>DB: "rename when the name differs; upsert PlantSubmission and event submission_saved when a parameter differs"
+    else binding current, parameters and binding unchanged
+        O->>DB: "rename only when the name differs: plant_renamed, and region_renamed when the region name differs"
+    else binding current, parameters or binding changed
+        O->>DB: "rename, insert revision n+1, repoint plant, automation off, supersede runs"
         O->>DB: "event configuration_created, EpiasCollectionJob rows if connected"
     end
     O-->>V: "Plant (success branches)"
@@ -54,9 +56,9 @@ sequenceDiagram
 | `connections_sitebinding`, `connections_provideraccount` | R | `_binding`, `binding_is_current` (region approved at the binding's revision, account enabled and authorized, credential revision) |
 | `plants_plant` | R/W | Locked; `name`, `current_configuration`, automation flags and `next_calibration_check_at` |
 | `plants_plantsubmission` | W | Upserted only while region is pending and plant has no configuration; kept after approval |
-| `plants_plantconfiguration`, `plants_plantevent`, `plants_calibrationrun` | R/W, W, W | New row per save, `revision` = previous + 1; events `submission_saved`, `configuration_created`; `pending` and `running` runs become `superseded` |
+| `plants_plantconfiguration`, `plants_plantevent`, `plants_calibrationrun` | R/W, W, W | New row per changed save, `revision` = previous + 1; events `submission_saved`, `configuration_created`, `plant_renamed` (old and new name); `pending` and `running` runs become `superseded` |
 | `metering_epiasconnection`, `metering_epiascollectionjob`, `forecasts_collectionschedule` | R, W, R | Enabled connection: 90 realtime jobs and, with a settlement plant, 12 settlement months for the new configuration; rows only, dispatched later |
-| `regions_auditevent` | W | Rename only: `region_renamed` |
+| `regions_region`, `regions_auditevent` | W | A new plant name also renames the region: `region_renamed` |
 
 ## Authorization
 
@@ -79,7 +81,7 @@ sequenceDiagram
 ## Rules and invariants
 
 - Lock order is tenant, region, plant; `connect_epias` locks region then plant, so the region lock serializes it with a revision. The submission branch needs `region.status == "pending"` and no configuration.
-- `PUT` is a full replace: omitted optional fields fall back to null, `net_export` and `unknown`. On the configuration branch every save, even identical or name-only, makes a revision and resets automatic calibration; the new revision starts uncalibrated because activations are per configuration (`forecasting.calibration_at`).
+- `PUT` is a full replace: omitted optional fields fall back to null, `net_export` and `unknown`. On the configuration branch a save makes a revision only when a saved column differs (the seven parameters or the binding, compared after `_binding` succeeds); an identical or name-only save keeps the configuration, calibration, automation and EPİAŞ jobs. A revision starts uncalibrated because activations are per configuration (`forecasting.calibration_at`). A plant rename (`_rename`, on both branches) also renames the region unless it already has that name; `create_plant` and `update_region` do not synchronize names. On the submission branch an unchanged submission is kept with its `submitted_by` and no `submission_saved` event.
 - Only `pending` and `running` runs are superseded; earlier activations stay on their revision. Old EPİAŞ jobs are superseded lazily when claimed (`metering/jobs.py` `_current`).
 - No expected-revision check: concurrent admins overwrite each other. `update_region` is idempotent and keeps region revision and approval.
 - Validation exists in `PlantInput`, `_validate_configuration`, constraints and the browser; the operation is authoritative. Angles do not enter power calculations (only tracking mounting does, `plants/transfer.py`); `automatic_forecast.py` compares them only across a binding change.

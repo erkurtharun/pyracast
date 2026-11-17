@@ -204,6 +204,19 @@ def review_location_change(
         return change
 
 
+def _start_revision(actor: User, region: Region) -> None:
+    region.revision += 1
+    region.status = "pending"
+    region.approved_binding = None
+    region.save(update_fields=("revision", "status", "approved_binding"))
+    if RegionLocationChangeRequest.objects.filter(region=region, status="pending").update(
+        base_revision=region.revision
+    ):
+        AuditEvent.objects.create(
+            actor=actor, region=region, action="location_change_rebased", revision=region.revision
+        )
+
+
 def configure_binding(
     actor: User,
     region_id: int,
@@ -245,28 +258,34 @@ def configure_binding(
             account.provider == "solcast" and (not reference or installation_date is None)
         ):
             raise ValidationError("Confirmed site settings and installation date are required.")
-        if SiteBinding.objects.filter(region=region, region_revision=region.revision).exists():
-            region.revision += 1
-            region.status = "pending"
-            region.approved_binding = None
-            region.save(update_fields=("revision", "status", "approved_binding"))
+        values = {
+            "provider_account": account,
+            "site_id": site_id.strip(),
+            "capacity_kw": capacity_kw,
+            "dc_capacity_kw": dc_capacity_kw,
+            "power_basis": power_basis,
+            "capacity_semantics_verified": capacity_semantics_verified,
+            "tilt_degrees": tilt_degrees,
+            "azimuth_degrees": azimuth_degrees,
+            "losses_percent": losses_percent,
+            "installation_date": installation_date,
+            "settings_verification_reference": reference or "fixture-development-only",
+            "latitude": region.latitude,
+            "longitude": region.longitude,
+            "timezone": region.timezone,
+        }
+        current = (
+            SiteBinding.objects.filter(region=region, region_revision=region.revision)
+            .order_by("-created_at", "-pk")
+            .first()
+        )
+        if current is not None:
+            # `values` holds every setup column, so a match on all of them is a no-op.
+            if SiteBinding.objects.filter(pk=current.pk, **values).exists():
+                return current
+            _start_revision(actor, region)
         binding = SiteBinding.objects.create(
-            region=region,
-            region_revision=region.revision,
-            provider_account=account,
-            site_id=site_id.strip(),
-            capacity_kw=capacity_kw,
-            dc_capacity_kw=dc_capacity_kw,
-            power_basis=power_basis,
-            capacity_semantics_verified=capacity_semantics_verified,
-            tilt_degrees=tilt_degrees,
-            azimuth_degrees=azimuth_degrees,
-            losses_percent=losses_percent,
-            installation_date=installation_date,
-            settings_verification_reference=reference or "fixture-development-only",
-            latitude=region.latitude,
-            longitude=region.longitude,
-            timezone=region.timezone,
+            region=region, region_revision=region.revision, **values
         )
         AuditEvent.objects.create(
             actor=actor, region=region, action="binding_configured", revision=region.revision

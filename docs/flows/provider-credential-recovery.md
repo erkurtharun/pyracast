@@ -1,6 +1,6 @@
 # Rotate a provider API key or clear a provider cooldown
 
-A platform administrator recovers a shared Solcast account in two separate actions. Saving the plant's setup with a replacement key and an explicit confirmation rotates the encrypted key and bumps `credential_revision`, which lifts a 401 block but makes every plant on the account need a new validation. After the provider confirms recovery, a second confirmed action clears the 429 delay. Both are audited per account.
+A platform administrator recovers a shared Solcast account in two separate actions. Saving the plant's setup with a replacement key and an explicit confirmation rotates the encrypted key and bumps `credential_revision`, which lifts a 401 block but makes every plant on the account need a new validation; with otherwise unchanged setup values the binding and approval stay. After the provider confirms recovery, a second confirmed action clears the 429 delay. Both are audited per account.
 
 ## Entry points
 
@@ -24,7 +24,7 @@ sequenceDiagram
     V->>O: "rotate_secret"
     O->>DB: "encrypted_api_key replaced, credential_revision + 1, audit provider_secret_rotated"
     V->>O: "configure_binding"
-    O->>DB: "region revision + 1 and pending when a binding exists, new SiteBinding, audit, COMMIT"
+    O->>DB: "unchanged setup: existing SiteBinding; changed with a binding of the revision: region revision + 1 and pending, pending location request moved to the new revision (location_change_rebased), new SiteBinding, audit; first binding: new SiteBinding at the current revision, audit; COMMIT"
     alt stale revision, invalid key or binding rule
         V-->>A: "400 field or generic setup error, rotation rolled back"
     else saved
@@ -52,8 +52,8 @@ sequenceDiagram
 | Table | R/W | What |
 | --- | --- | --- |
 | `connections_provideraccount` | R/W | Locked `FOR UPDATE`; rotation writes `encrypted_api_key` and `credential_revision`, clearing writes `request_blocked_until`; `authentication_failed_revision` and `daily_quota` are never touched |
-| `connections_sitebinding` | R/W | Form rotation inserts a new binding (full `configure` write); other bindings are only compared via `validated_credential_revision` |
-| `regions_region` | R/W | Locked by `configure`; `revision`, `status` and `approved_binding` change when the region already has a binding for its current revision |
+| `connections_sitebinding` | R/W | Form rotation with unchanged setup keeps the binding; with changed setup it inserts a new one (full `configure` write); other bindings are only compared via `validated_credential_revision` |
+| `regions_region` | R/W | Locked by `configure`; `revision`, `status` and `approved_binding` change only when the setup changed and the region already has a binding for its current revision |
 | `regions_auditevent` | W | `provider_secret_rotated` and `provider_cooldown_cleared` (account target, `revision` = `credential_revision`); `binding_configured` (region target) |
 | `forecasts_collectionjob` | R | `claim` and `pending_job_ids` read the account delay; rotation and clearing write no job (only `validate_binding` re-arms, see `provider-connection-setup`) |
 
@@ -80,7 +80,7 @@ sequenceDiagram
 
 - Rotation never touches `request_blocked_until` or `RequestAttempt`: a 429 delay survives a new key and the daily budget is unchanged. The 401 block lifts only because `authentication_failed_revision` no longer equals `credential_revision`; `record_provider_failure` ignores errors from an older revision.
 - Every binding of the account stops being current (`binding_is_current` compares `validated_credential_revision`). `claim` turns their jobs `stale`, `approve_region` refuses them, `remaining_forecast_requests` skips them and customers see `freshness: "stale"`. Each plant needs one counted `validate_binding`; only an approved current binding re-arms its failed `provider_authentication_failed` job.
-- Through the form a rotation is also a reconfiguration: it needs the full site attestation and drops this plant's approval (new pending revision, first binding of a revision excepted). Lock order Region then ProviderAccount; the API rotation and clearing lock only the account. Concurrent rotations get serial revisions.
+- Through the form a rotation goes with a reconfiguration: it needs the full site attestation. A key-only save keeps the binding, region revision, approval and plant configurations ("API key replaced. Validate the connection to resume collection."); collection still waits for validation of each binding of the account. Changed setup values drop this plant's approval (new pending revision, first binding of a revision excepted). Lock order Region then ProviderAccount; the API rotation and clearing lock only the account. Concurrent rotations get serial revisions.
 - Clearing is optimistic: the page carries `expected_cooldown_until` (microseconds kept) and `credential_revision`, and a NULL expectation cannot clear a delay recorded later. The callout shows only for a current-revision binding with a future delay. It leaves the 401 block and the ledger alone. Natural expiry never nulls `request_blocked_until`, so only a manual clear lets throttled jobs run before their `available_at`.
 - Keys: `encrypt_secret` accepts 1..1024 printable ASCII and encrypts with `MultiFernet` (HKDF-SHA256 of `SECRET_KEY`, context `pyracast-provider-credentials-v1`); fallbacks only decrypt. `reencrypt_secrets` reuses `encrypt_secret` without changing `credential_revision`.
 

@@ -160,7 +160,7 @@
       <input type="hidden" name="action" value="configure">
       {% for field in setup_form.hidden_fields %}{{ field }}{{ field.errors }}{% endfor %}
       {{ setup_form.non_field_errors }}
-      <p class="callout">{% translate "Saving always creates a new pending revision that must be validated and approved again." %}{% if binding %} {% translate "The selected account's key and daily quota are shared by every plant using that account." %}{% endif %}</p>
+      <p class="callout">{% if binding %}{% translate "Saving a changed setup creates a new pending revision that must be validated and approved again. Saving the same setup changes nothing; a new API key must be validated again." %} {% translate "The selected account's key and daily quota are shared by every plant using that account." %}{% else %}{% translate "Saving creates a pending revision that must be validated and approved." %}{% endif %}</p>
 
       <fieldset class="group">
         <legend>{% translate "Solcast account" %}</legend>

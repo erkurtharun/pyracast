@@ -244,6 +244,7 @@ def recent_activity_context(
         "location_change_requested": _("Location change requested"),
         "location_change_approved": _("Location change approved"),
         "location_change_rejected": _("Location change rejected"),
+        "location_change_rebased": _("Location change request moved to the new revision"),
         "region_renamed": _("Plant location renamed"),
         "collection_schedule_updated": _("Collection schedule updated"),
         "historical_reference_imported": _("Historical reference imported"),
