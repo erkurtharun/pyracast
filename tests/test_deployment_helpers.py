@@ -13,6 +13,7 @@ import pytest
         "bootstrap_database.py",
         "operations_log.py",
         "pin_release_images.py",
+        "release_scope.py",
         "runtime_secrets.py",
         "watchdog.py",
     ],
