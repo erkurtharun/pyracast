@@ -153,17 +153,38 @@ def test_static_only_runs_every_check_except_pytest(monkeypatch: pytest.MonkeyPa
     assert check.main(["--static-only"]) == 0
 
     assert full_run[-1][1:3] == ["-m", "pytest"]
-    assert commands == full_run[:-1]
+    assert full_run[-2][1:] == ["scripts/translations.py"]
+    assert commands == full_run[:-2]
     assert ["npm", "--prefix", "web", "run", "check:static"] in commands
 
 
-def test_tests_only_runs_only_pytest(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tests_only_compiles_the_catalogs_and_runs_pytest(monkeypatch: pytest.MonkeyPatch) -> None:
     commands = record_runs(monkeypatch, "npm")
 
     assert check.main(["--tests-only"]) == 0
 
-    assert len(commands) == 1
-    assert commands[0][1:3] == ["-m", "pytest"]
+    assert len(commands) == 2
+    assert commands[0][1:] == ["scripts/translations.py"]
+    assert commands[1][1:3] == ["-m", "pytest"]
+
+
+@pytest.mark.parametrize("mode", ["full", "tests-only", "shard"])
+def test_every_pytest_run_compiles_the_catalogs_first(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, mode: str
+) -> None:
+    commands = record_runs(monkeypatch, None)
+    monkeypatch.setattr(check, "finish_shard", lambda output: None)
+    argv = {
+        "full": [],
+        "tests-only": ["--tests-only"],
+        "shard": ["--shard", "1/4", "--shard-output", str(tmp_path / "shard")],
+    }[mode]
+
+    assert check.main(argv) == 0
+
+    assert commands[-2][1:] == ["scripts/translations.py"]
+    assert commands[-1][1:3] == ["-m", "pytest"]
+    assert [command[1:] for command in commands].count(["scripts/translations.py"]) == 1
 
 
 @pytest.mark.parametrize(
