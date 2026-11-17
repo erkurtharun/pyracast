@@ -450,10 +450,14 @@ and name the `restore` command for that object.
 | `reset --confirm OBJECT` | the marker, no running, restarting or paused application container, `OBJECT` is the session's archive and its file still has the recorded SHA-256, both database roles | writes the runtime secrets; purges every RabbitMQ queue, dead-letter queues included, and checks that none holds a message; marks the session replaced and syncs it; runs `DROP DATABASE pyracast WITH (FORCE)` and `CREATE DATABASE pyracast`; applies `deploy/bootstrap.sql` without its role statements (roles survive a dropped database); checks that the owner can create a table, that the runtime role can connect and read, and that the owner lost database `CREATE`. The marker stays |
 | `restore --confirm OBJECT` | the marker, no application container, `OBJECT` is the session's archive once `reset` replaced the database, the archive has applied migrations, both database roles | writes the runtime secrets; uses the archive `prepare` kept, or downloads `OBJECT` from the backup bucket, checks it against the bucket's MD5 and size and verifies it in a throwaway PostgreSQL first; then purges the queues, recreates the database as `reset` does, restores the archive with its owners and privileges, compares every table's row count with the record, checks both roles and `migrate --check`, starts the release in `/opt/pyracast/current`, probes readiness and removes the marker and the session |
 
-When readiness or the service unit fails after a start, `abort` and `restore` stop
-the application again in the installer's order and keep the marker, so the same
-command can be run again. If the marker cannot be written back, they still stop the
-application and print its identity to write back first.
+When the start, readiness or the service unit fails or is interrupted, `abort` and
+`restore` write the marker back and attempt to stop the application in the
+installer's order, each step even after an earlier one failed or was interrupted
+(a second Ctrl-C ends the shutdown early). They then print every error with its
+captured output, the state they observe (whether the marker holds the session
+identity, which application containers still run) and the next step: the same
+command once no application container runs and the marker holds the identity,
+otherwise first the stop command or the identity to write back.
 Both render the environment files with the release they start, and after removing the
 marker they reset and start `pyracast.service`, which refused to start while it existed.
 

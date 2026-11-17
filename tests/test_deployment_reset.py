@@ -4,6 +4,7 @@ import io
 import json
 import re
 import runpy
+import shlex
 import subprocess
 import sys
 import time
@@ -468,8 +469,9 @@ def test_service_unit_failure_preserves_maintenance_for_retry(
         else:
             reset_database.restore(host, name)
 
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(reset_database.StartFailedError) as failed:
         action()
+    assert isinstance(failed.value.failure, subprocess.CalledProcessError)
     assert host.marker.read_text() == identity
     assert reset_database.current_session(host) is not None
     assert commands.running == SUPPORT
@@ -912,46 +914,240 @@ def test_command_line_reports_refusals_failures_and_the_next_step(
     assert not host.marker.exists()
 
 
+FAULT_POINTS: dict[str, Callable[[list[str], Host], bool]] = {
+    "start": lambda call, _host: "up" in call and call[-1] == "180",
+    "readiness": lambda call, _host: call[0] == "curl",
+    "unit": lambda call, _host: call[:2] == ["systemctl", "start"],
+    "marker sync": lambda call, host: call == ["sync", "-f", str(host.marker)],
+    "shutdown": lambda call, _host: "stop" in call,
+    "status": lambda call, _host: "ps" in call,
+}
+
+
+def inject_faults(
+    monkeypatch: pytest.MonkeyPatch, host: Host, commands: FakeCommands, faults: dict[str, str]
+) -> list[list[str]]:
+    """Arms each fault at its point once the release start begins; returns every command tried.
+
+    "error" fails before the command or file operation runs, "interrupt" and "failure" (non-zero
+    exit with captured stderr) after the command ran, and "stuck" lets the worker survive its stop.
+    """
+    attempted: list[list[str]] = []
+    started = [False]
+
+    def kind(point: str) -> str | None:
+        return faults.get(point) if started[0] else None
+
+    def run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[Any]:
+        attempted.append(command)
+        started[0] = started[0] or FAULT_POINTS["start"](command, host)
+        point = next((name for name, hit in FAULT_POINTS.items() if hit(command, host)), "")
+        fault = kind(point)
+        if fault == "error":
+            raise OSError(5, "Input/output error")
+        if fault == "stuck":
+            commands.stuck = {"worker"}
+        result = commands(command, **kwargs)
+        if fault == "interrupt":
+            raise KeyboardInterrupt
+        if fault == "failure":
+            raise subprocess.CalledProcessError(1, command, "", f"{point} failure detail")
+        return result
+
+    def file_fault(point: str) -> None:
+        if kind(point) == "error":
+            raise OSError(5, "Input/output error")
+        if kind(point) == "interrupt":
+            raise KeyboardInterrupt
+
+    write_text, read_text = Path.write_text, Path.read_text
+
+    def guarded_write(path: Path, data: str, *args: Any, **kwargs: Any) -> int:
+        if path == host.marker.with_name(host.marker.name + ".next"):
+            file_fault("marker write")
+        return write_text(path, data, *args, **kwargs)
+
+    def guarded_read(path: Path, *args: Any, **kwargs: Any) -> str:
+        if path == host.marker:
+            file_fault("marker read")
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(Path, "write_text", guarded_write)
+    monkeypatch.setattr(Path, "read_text", guarded_read)
+    return attempted
+
+
 @pytest.mark.parametrize(
-    ("command", "stuck"), [("restore", set()), ("restore", {"worker"}), ("abort", set())]
+    ("operation", "faults", "marker", "running", "code"),
+    [
+        pytest.param("abort", {"start": "error"}, "held", set(), 1, id="start-error"),
+        pytest.param("abort", {"start": "interrupt"}, "held", set(), 130, id="start-interrupt"),
+        pytest.param("abort", {"readiness": "error"}, "held", set(), 1, id="readiness-error"),
+        pytest.param(
+            "abort", {"readiness": "interrupt"}, "held", set(), 130, id="readiness-interrupt"
+        ),
+        pytest.param(
+            "abort",
+            {"readiness": "error", "marker write": "error"},
+            "held",
+            set(),
+            1,
+            id="marker-write-error-before-removal",
+        ),
+        pytest.param(
+            "abort",
+            {"unit": "failure", "marker write": "error"},
+            "missing",
+            set(),
+            1,
+            id="marker-write-error",
+        ),
+        pytest.param(
+            "abort",
+            {"unit": "failure", "marker write": "interrupt"},
+            "missing",
+            set(),
+            130,
+            id="marker-write-interrupt",
+        ),
+        pytest.param(
+            "abort",
+            {"unit": "failure", "marker sync": "error"},
+            "held",
+            set(),
+            1,
+            id="marker-sync-error",
+        ),
+        pytest.param(
+            "abort",
+            {"unit": "failure", "marker sync": "interrupt"},
+            "held",
+            set(),
+            130,
+            id="marker-sync-interrupt",
+        ),
+        pytest.param(
+            "abort",
+            {"unit": "failure", "shutdown": "error"},
+            "held",
+            APPLICATION,
+            1,
+            id="shutdown-error",
+        ),
+        pytest.param(
+            "abort",
+            {"readiness": "interrupt", "shutdown": "interrupt"},
+            "held",
+            {"dispatcher", "notifications", "worker"},
+            130,
+            id="shutdown-interrupt-after-readiness-interrupt",
+        ),
+        pytest.param(
+            "abort", {"unit": "failure", "status": "error"}, "held", None, 1, id="status-error"
+        ),
+        pytest.param(
+            "abort",
+            {"unit": "failure", "status": "interrupt"},
+            "held",
+            None,
+            130,
+            id="status-interrupt",
+        ),
+        pytest.param(
+            "abort",
+            {"unit": "failure", "marker write": "error", "status": "failure"},
+            "missing",
+            None,
+            1,
+            id="status-failure-without-marker",
+        ),
+        pytest.param(
+            "abort",
+            {"unit": "failure", "marker read": "error"},
+            "unknown",
+            set(),
+            1,
+            id="marker-read-error",
+        ),
+        pytest.param(
+            "restore",
+            {"unit": "failure", "marker write": "error", "shutdown": "stuck"},
+            "missing",
+            {"worker"},
+            1,
+            id="restore-stuck-worker-without-marker",
+        ),
+        pytest.param(
+            "abort without session",
+            {"unit": "failure", "marker write": "interrupt"},
+            "missing",
+            set(),
+            130,
+            id="empty-marker-lost",
+        ),
+    ],
 )
-def test_a_failed_start_stops_the_application_even_when_the_marker_cannot_be_restored(
+def test_a_failed_start_attempts_the_shutdown_and_reports_the_state_it_observed(
     host: Host,
     commands: FakeCommands,
     uploads: dict[str, bytes],
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    command: str,
-    stuck: set[str],
+    operation: str,
+    faults: dict[str, str],
+    marker: str,
+    running: set[str] | None,
+    code: int,
 ) -> None:
     monkeypatch.setattr(reset_database, "load_host", lambda _path: host)
-    name = prepared(host, uploads)
-    if command == "restore":
+    arguments = ["abort"]
+    if operation == "abort without session":
+        host.marker.parent.mkdir(parents=True)
+        host.marker.touch()
+        commands.running = set(SUPPORT)
+    elif operation == "restore":
+        name = prepared(host, uploads)
         reset_database.reset(host, name)
         arguments = ["restore", "--confirm", name]
     else:
-        arguments = ["abort"]
+        prepared(host, uploads)
     identity = host.marker.read_text()
     capsys.readouterr()
-    write_synced = reset_database.write_synced
-
-    def full_disk(path: Path, text: str) -> None:
-        if path == host.marker:
-            raise OSError(28, "No space left on device")
-        write_synced(path, text)
-
-    monkeypatch.setattr(reset_database, "write_synced", full_disk)
-    commands.ready = False
-    commands.stuck = stuck
-    assert reset_database.main([str(host.config), *arguments]) == 1
-    assert commands.running == SUPPORT | stuck
+    attempted = inject_faults(monkeypatch, host, commands, faults)
+    assert reset_database.main([str(host.config), *arguments]) == code
+    assert any("stop" in call for call in attempted)
+    assert commands.running & APPLICATION == (running or set())
+    assert host.marker.is_file() == (marker != "missing")
+    if host.marker.is_file():
+        assert host.marker.read_bytes().decode() == identity
     error = capsys.readouterr().err
-    assert f"{command} failed: The release started, but /health/ready/ did not answer ok." in error
-    assert "No space left on device" in error
-    assert ("Application containers still run: worker" in error) == bool(stuck)
-    assert f"write {identity} into {host.marker}" in error
-    assert f"{host.command(' '.join(arguments))} again" in error
-    assert "The marker stays" not in error
+    kinds = list(faults.values())
+    first = "was interrupted." if kinds[0] == "interrupt" else "failed: "
+    assert error.startswith(f"{arguments[0]} {first}")
+    assert error.count("was interrupted.") == kinds.count("interrupt")
+    assert error.count("Input/output error") == kinds.count("error")
+    for point, fault in faults.items():
+        assert (f"{point} failure detail" in error) == (fault == "failure")
+    shown = shlex.quote(identity)
+    assert {
+        "held": f"The maintenance marker {host.marker} is present and holds {shown}.",
+        "missing": f"The maintenance marker {host.marker} is missing.",
+        "unknown": f"The maintenance marker {host.marker} could not be read.",
+    }[marker] in error
+    if running is None:
+        assert "Whether application containers run is unknown." in error
+    elif running:
+        assert f"Application containers still run: {', '.join(sorted(running))}." in error
+    else:
+        assert "No application container runs: the site is down." in error
+    rerun = host.command(" ".join(arguments))
+    write_back = f"write the identity back with printf %s {shown} > {host.marker} && sync"
+    assert (write_back in error) == (marker != "held")
+    assert (f"stop -t 660 {' '.join(sorted(running or ()))};" in error) == bool(running)
+    assert (" ps --services --status running" in error) == (running is None)
+    assert (f"Next: run {rerun} again." in error) == (marker == "held" and running == set())
+    assert error.rstrip().endswith(f"run {rerun} again.")
 
 
 def test_command_line_names_the_next_step_after_an_interruption(

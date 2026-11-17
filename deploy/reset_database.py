@@ -7,14 +7,16 @@ import hashlib
 import importlib
 import json
 import re
+import shlex
 import subprocess
 import sys
 import time
 import urllib.request
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote
 
 if __package__ in (None, ""):
@@ -77,10 +79,50 @@ class RefusedError(Exception):
     pass
 
 
-class MarkerLostError(RuntimeError):
-    def __init__(self, message: str, identity: str) -> None:
-        super().__init__(message)
+type MarkerState = Literal["held", "foreign", "missing", "unknown"]
+
+MARKER_REPORT: dict[MarkerState, str] = {
+    "held": "The maintenance marker {marker} is present and holds {identity}.",
+    "foreign": "The maintenance marker {marker} is present but does not hold {identity}.",
+    "missing": "The maintenance marker {marker} is missing.",
+    "unknown": "The maintenance marker {marker} could not be read.",
+}
+
+
+def describe(error: BaseException) -> str:
+    text = str(error) or type(error).__name__
+    if isinstance(error, subprocess.CalledProcessError) and error.stderr:
+        detail = error.stderr if isinstance(error.stderr, str) else error.stderr.decode()
+        text += "\n" + detail.strip()[-2000:]
+    return text
+
+
+def outcome(what: str, error: BaseException) -> str:
+    if isinstance(error, KeyboardInterrupt):
+        return f"{what} was interrupted."
+    return f"{what} failed: {describe(error)}"
+
+
+class StartFailedError(RuntimeError):
+    def __init__(
+        self,
+        failure: BaseException,
+        problems: list[tuple[str, BaseException]],
+        identity: str,
+        marker: MarkerState,
+        running: set[str] | None,
+    ) -> None:
+        super().__init__(describe(failure))
+        self.failure = failure
+        self.problems = problems
         self.identity = identity
+        self.marker = marker
+        self.running = running
+
+    @property
+    def interrupted(self) -> bool:
+        errors = [self.failure, *(error for _, error in self.problems)]
+        return any(isinstance(error, KeyboardInterrupt) for error in errors)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -309,14 +351,18 @@ def marker_identity(host: Host) -> str:
     return identity
 
 
-def running_services(host: Host) -> set[str]:
+def status_command(host: Host) -> list[str]:
     command = [*compose(host), "ps", "--services"]
     for status in ("running", "restarting", "paused"):
         command += ["--status", status]
-    return set(capture(command).split())
+    return command
 
 
-def stop_application(host: Host) -> None:
+def running_services(host: Host) -> set[str]:
+    return set(capture(status_command(host)).split())
+
+
+def stop_in_order(host: Host) -> None:
     for timeout, services in STOP_ORDER:
         step(f"Stopping {', '.join(services)}")
         subprocess.run(
@@ -324,6 +370,10 @@ def stop_application(host: Host) -> None:
             check=True,
             timeout=int(timeout) + 60,
         )
+
+
+def stop_application(host: Host) -> None:
+    stop_in_order(host)
     running = running_services(host) & APPLICATION_SERVICES
     if running:
         raise RuntimeError(f"Application containers still run: {', '.join(sorted(running))}.")
@@ -618,22 +668,43 @@ def start_release(host: Host) -> None:
         subprocess.run(["systemctl", "reset-failed", "pyracast.service"], check=True)
         subprocess.run(["systemctl", "start", "pyracast.service"], check=True)
     except BaseException as failure:
-        try:
-            write_synced(host.marker, identity)
-        except Exception as error:
-            step("Stopping the application again although the maintenance marker is not restored")
-            problems = [
-                str(failure) or type(failure).__name__,
-                f"The maintenance marker could not be restored: {error}.",
-            ]
-            try:
-                stop_application(host)
-            except Exception as stopped:
-                problems.append(f"Stopping the application failed: {stopped}")
-            raise MarkerLostError(" ".join(problems), identity) from failure
-        step("Stopping the application again; the site stays in maintenance")
-        stop_application(host)
-        raise
+        raise stop_after_failed_start(host, identity, failure) from failure
+
+
+def attempt[T](
+    problems: list[tuple[str, BaseException]], what: str, action: Callable[[], T]
+) -> T | None:
+    try:
+        return action()
+    except BaseException as error:  # Ctrl-C included: every cleanup step still runs.
+        problems.append((what, error))
+        return None
+
+
+def marker_state(host: Host, identity: str) -> MarkerState:
+    try:
+        content = host.marker.read_text()
+    except FileNotFoundError:
+        return "missing"
+    return "held" if content.strip() == identity.strip() else "foreign"
+
+
+def stop_after_failed_start(host: Host, identity: str, failure: BaseException) -> StartFailedError:
+    step("Writing the maintenance marker back and stopping the application again")
+    problems: list[tuple[str, BaseException]] = []
+    attempt(
+        problems, "Writing the maintenance marker back", lambda: write_synced(host.marker, identity)
+    )
+    attempt(problems, "Stopping the application", lambda: stop_in_order(host))
+    running = attempt(
+        problems,
+        "Listing the running containers",
+        lambda: running_services(host) & APPLICATION_SERVICES,
+    )
+    marker = attempt(
+        problems, "Reading the maintenance marker", lambda: marker_state(host, identity)
+    )
+    return StartFailedError(failure, problems, identity, marker or "unknown", running)
 
 
 def end_session(host: Host) -> None:
@@ -809,6 +880,30 @@ def print_recovery(host: Host, options: argparse.Namespace) -> None:
     )
 
 
+def print_failed_start(host: Host, options: argparse.Namespace, error: StartFailedError) -> None:
+    rerun = "abort" if options.command == "abort" else f"restore --confirm {options.confirm}"
+    shown = shlex.quote(error.identity.strip())
+    lines = [outcome(options.command, error.failure)]
+    lines += [outcome(what, problem) for what, problem in error.problems]
+    lines.append(MARKER_REPORT[error.marker].format(marker=host.marker, identity=shown))
+    steps = []
+    if error.running is None:
+        lines.append("Whether application containers run is unknown.")
+        status = " ".join(status_command(host))
+        steps.append(f"make sure {status} lists no application service")
+    elif error.running:
+        names = sorted(error.running)
+        lines.append(f"Application containers still run: {', '.join(names)}.")
+        steps.append(f"stop them with {' '.join(compose(host))} stop -t 660 {' '.join(names)}")
+    else:
+        lines.append("No application container runs: the site is down.")
+    if error.marker != "held":
+        steps.append(f"write the identity back with printf %s {shown} > {host.marker} && sync")
+    steps.append(f"run {host.command(rerun)} again")
+    lines.append("Next: " + "; then ".join(steps) + ".")
+    print("\n".join(lines), file=sys.stderr)
+
+
 def main(arguments: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Reset or restore the production database during a planned maintenance."
@@ -845,25 +940,15 @@ def main(arguments: list[str] | None = None) -> int:
     except RefusedError as error:
         print(f"Refused: {error} No data was changed.", file=sys.stderr)
         return 2
-    except MarkerLostError as error:
-        rerun = "abort" if options.command == "abort" else f"restore --confirm {options.confirm}"
-        print(f"{options.command} failed: {error}", file=sys.stderr)
-        print(
-            "The site is down without its maintenance marker. Check that no application "
-            f"container runs, write {error.identity} into {host.marker}, then run "
-            f"{host.command(rerun)} again.",
-            file=sys.stderr,
-        )
-        return 1
+    except StartFailedError as error:
+        print_failed_start(host, options, error)
+        return 130 if error.interrupted else 1
     except KeyboardInterrupt:
         print(f"{options.command} was interrupted.", file=sys.stderr)
         print_recovery(host, options)
         return 130
     except Exception as error:
-        print(f"{options.command} failed: {error}", file=sys.stderr)
-        if isinstance(error, subprocess.CalledProcessError) and error.stderr:
-            detail = error.stderr if isinstance(error.stderr, str) else error.stderr.decode()
-            print(detail.strip()[-2000:], file=sys.stderr)
+        print(outcome(options.command, error), file=sys.stderr)
         print_recovery(host, options)
         return 1
     return 0
