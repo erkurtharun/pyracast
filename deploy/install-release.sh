@@ -178,6 +178,10 @@ readiness=$(curl --fail --silent --show-error --noproxy '*' \
   --connect-timeout 5 --max-time 10 --retry 18 --retry-delay 5 --retry-max-time 180 \
   --retry-all-errors --resolve "$site_address:443:127.0.0.1" "https://$site_address/health/ready/")
 [[ $readiness == ok ]]
+# A mail failure must not undo a healthy release; the warning reaches the release log.
+if ! "${compose[@]}" exec -T api pyracast check_mail; then
+  echo "WARNING: the mail probe failed; run pyracast check_mail and fix mail before customers need it." >&2
+fi
 ln -sfn "$release" /opt/pyracast/current.next
 mv -Tf /opt/pyracast/current.next /opt/pyracast/current
 promoted=1

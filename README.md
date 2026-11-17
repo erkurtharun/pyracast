@@ -71,8 +71,9 @@ the `PYRACAST_GMAIL_CLIENT_ID`, `PYRACAST_GMAIL_CLIENT_SECRET` and
 `PYRACAST_GMAIL_REFRESH_TOKEN` credentials; follow the local authorization steps in
 the [deployment guide](docs/DEPLOYMENT.md#2-add-secrets). For SMTP, configure the
 `PYRACAST_EMAIL_*` connection values and `PYRACAST_FROM_EMAIL` from your authorized
-provider. STARTTLS defaults to port 587; implicit TLS uses port 465,
-`PYRACAST_EMAIL_TLS=0` and `PYRACAST_EMAIL_SSL=1`.
+provider. STARTTLS defaults to port 587; implicit TLS uses port 465 and
+`PYRACAST_EMAIL_SSL=1` with `PYRACAST_EMAIL_TLS=0`. `pyracast check_mail` opens the
+configured transport without sending.
 
 Open-Meteo's free service is for evaluation/non-commercial use; commercial operation
 needs the [appropriate subscription](https://open-meteo.com/en/pricing) or disabled

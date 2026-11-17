@@ -180,9 +180,10 @@ def test_notification_filters_match_counter_boundaries_and_include_historical_sc
         ),
         "complete": delivery(schedule, "sent", message={"tomorrow_complete": True}),
         "missing": delivery(schedule, "sent", message={"kind": "unavailable"}),
-        "auth": delivery(schedule, "retry", error="mail_authentication_failed"),
+        "auth": delivery(schedule, "retry", error="mail_credentials_rejected"),
+        "revoked": delivery(schedule, "failed", error="mail_authorization_revoked"),
         "old_auth": delivery(
-            schedule, "retry", scheduled=RECENT - BEFORE, error="mail_authentication_failed"
+            schedule, "retry", scheduled=RECENT - BEFORE, error="mail_credentials_rejected"
         ),
         "old_missing": delivery(
             schedule,
@@ -209,11 +210,11 @@ def test_notification_filters_match_counter_boundaries_and_include_historical_sc
     names = {
         "overdue_notifications": ("pending", "retry"),
         "interrupted_notifications": ("null_lease", "expired_lease"),
-        "failed_notifications": ("failed", "uncertain", "unavailable", "deadline"),
+        "failed_notifications": ("failed", "uncertain", "unavailable", "deadline", "revoked"),
         "missed_notifications": ("missed", "deadline"),
         "unavailable_forecasts": ("missing",),
         "partial_forecasts": ("partial",),
-        "mail_authentication_failures": ("auth",),
+        "mail_authentication_failures": ("auth", "revoked"),
         "paused_notifications": ("over_limit", "no_recipients", "invalid"),
     }[issue]
     assert set(

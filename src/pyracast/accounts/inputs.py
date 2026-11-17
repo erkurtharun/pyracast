@@ -1,6 +1,7 @@
 from typing import Any
 
 from allauth.account.adapter import get_adapter
+from allauth.account.models import EmailAddress
 from allauth.core import context
 from allauth.headless.account.inputs import (
     ChangePasswordInput as AllauthChangePasswordInput,
@@ -13,6 +14,9 @@ from allauth.headless.account.inputs import (
 )
 from allauth.headless.account.inputs import (
     RequestPasswordResetInput as AllauthRequestPasswordResetInput,
+)
+from allauth.headless.account.inputs import (
+    ResendEmailVerificationInput as AllauthResendEmailVerificationInput,
 )
 from allauth.headless.account.inputs import (
     ResetPasswordInput as AllauthResetPasswordInput,
@@ -74,6 +78,16 @@ class ChangePasswordInput(PasswordInput, AllauthChangePasswordInput):
 
 class ReauthenticateInput(PasswordInput, AllauthReauthenticateInput):
     pass
+
+
+class ResendEmailVerificationInput(AllauthResendEmailVerificationInput):
+    def clean(self) -> dict[str, Any] | None:
+        cleaned_data = super().clean()
+        address = self.cleaned_data.get("email")
+        # allauth would mail a code for it that its verify view then answers with 500.
+        if isinstance(address, EmailAddress) and address.verified:
+            self.add_error("email", get_adapter().validation_error("email_already_verified"))
+        return cleaned_data
 
 
 class SecondFactorCode(BaseAuthenticateForm):

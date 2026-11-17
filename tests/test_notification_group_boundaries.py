@@ -4,7 +4,7 @@ import pytest
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.core import mail
-from django.db import connection
+from django.db import connection, transaction
 from django.db.migrations.exceptions import IrreversibleError
 from django.db.migrations.executor import MigrationExecutor
 
@@ -129,7 +129,7 @@ def test_rollback_rejects_duplicate_legacy_envelopes_without_altering_history() 
             prepared_message={"body": status},
         )
     original = list(NotificationDelivery.objects.order_by("pk").values())
-    with pytest.raises(IrreversibleError, match="cannot be represented"):
+    with pytest.raises(IrreversibleError, match="cannot be represented"), transaction.atomic():
         MigrationExecutor(connection).migrate([("notifications", "0008_shared_reminder_schedules")])
     assert list(NotificationDelivery.objects.order_by("pk").values()) == original
 

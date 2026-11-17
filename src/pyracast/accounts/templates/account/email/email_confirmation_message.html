@@ -3,13 +3,8 @@
 {% block preheader %}{% translate "Confirm your email address to continue to Pyracast." %}{% endblock %}
 {% block content %}
 <h1 style="margin:0 0 16px;font-size:22px;line-height:1.3;">{% translate "Verify your email" %}</h1>
-{% if code %}
 <p style="margin:0;">{% translate "Enter this code in the Pyracast window where you requested it." %}</p>
 {% include "mail/code.html" %}
-<p style="margin:0;color:#526370;font-size:14px;">{% blocktranslate with minutes=code_timeout_minutes|floatformat:"-2" %}This code expires in {{ minutes }} minutes. Do not share it.{% endblocktranslate %}</p>
-{% else %}
-<p style="margin:0;">{% translate "Confirm your email address to continue to Pyracast." %}</p>
-{% translate "Verify email" as label %}{% include "mail/action_link.html" with action_url=activate_url action_label=label %}
-{% endif %}
+<p style="margin:0;color:#526370;font-size:14px;">{% include "account/email/code_expiry.txt" %}</p>
 <p style="margin:20px 0 0;color:#526370;font-size:14px;">{% translate "If you did not request this, you can ignore this email." %}</p>
 {% endblock %}
