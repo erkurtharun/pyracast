@@ -553,9 +553,14 @@ test("region collection schedule validates and saves distinct local times", asyn
     await expect(page.getByText(/Daily account budget exhausted/)).toHaveCount(
         0,
     );
-    await expect(
-        page.getByText(/remaining requests are not guaranteed/),
-    ).toBeVisible();
+    for (const accountDetail of [
+        "Requests used",
+        "Usage details",
+        "Tracked attempts:",
+        "remaining requests are not guaranteed",
+    ]) {
+        await expect(page.getByText(accountDetail)).toHaveCount(0);
+    }
     await page
         .getByRole("button", { name: "Save collection schedule" })
         .click();
