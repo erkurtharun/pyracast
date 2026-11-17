@@ -13,6 +13,7 @@ __pycache__/
 build/
 dist/
 .pdm-python
+*.mo
 
 # Test, type checker and formatter caches
 .pytest_cache/

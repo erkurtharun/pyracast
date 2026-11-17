@@ -337,6 +337,8 @@ def start(root: Path, state: dict[str, Any]) -> None:
         ],
         "dispatcher": [sys.executable, "-m", "django", "dispatch", "--loop"],
     }
+    print("Compiling translation catalogs...", flush=True)
+    run_setup(root, [sys.executable, "scripts/translations.py"])
     print("Applying database migrations...", flush=True)
     run_setup(root, [sys.executable, "-m", "django", "migrate", "--noinput"])
     launched: list[tuple[str, psutil.Process, subprocess.Popen[bytes]]] = []

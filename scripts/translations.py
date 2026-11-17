@@ -20,13 +20,8 @@ def compile_catalogs(root: Path, *, check: bool) -> int:
                 print(f"Translation placeholders differ: {source}: {entry.msgid}")
                 return 1
         compiled = catalog.to_binary()
-        target = source.with_suffix(".mo")
-        if check:
-            if not target.exists() or target.read_bytes() != compiled:
-                print(f"Recompile translations: uv run python scripts/translations.py ({source})")
-                return 1
-        else:
-            target.write_bytes(compiled)
+        if not check:
+            source.with_suffix(".mo").write_bytes(compiled)
     return 0
 
 
