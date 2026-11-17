@@ -452,11 +452,13 @@ and name the `restore` command for that object.
 
 When the start, readiness or the service unit fails or is interrupted, `abort` and
 `restore` write the marker back and attempt to stop the application in the
-installer's order, each step even after an earlier one failed or was interrupted
-(a second Ctrl-C ends the shutdown early). They then print every error with its
-captured output, the state they observe (whether the marker holds the session
-identity, which application containers still run) and the next step: the same
-command once no application container runs and the marker holds the identity,
+installer's order, each step even after an earlier one failed. Ctrl-C and SIGTERM
+wait until every step was attempted (the command running at that moment still
+receives a terminal Ctrl-C and may fail), and a broken or closed console skips
+nothing. They then print every error with its captured output, any signal that
+arrived (exit status 130), the state they observe (whether the marker holds the
+session identity, which application containers still run) and the next step: the
+same command once no application container runs and the marker holds the identity,
 otherwise first the stop command or the identity to write back.
 Both render the environment files with the release they start, and after removing the
 marker they reset and start `pyracast.service`, which refused to start while it existed.

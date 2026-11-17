@@ -8,14 +8,16 @@ import importlib
 import json
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import time
 import urllib.request
 import uuid
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
+from types import FrameType
 from typing import Literal
 from urllib.parse import quote
 
@@ -91,8 +93,13 @@ MARKER_REPORT: dict[MarkerState, str] = {
 
 def describe(error: BaseException) -> str:
     text = str(error) or type(error).__name__
-    if isinstance(error, subprocess.CalledProcessError) and error.stderr:
-        detail = error.stderr if isinstance(error.stderr, str) else error.stderr.decode()
+    if (
+        isinstance(error, subprocess.CalledProcessError | subprocess.TimeoutExpired)
+        and error.stderr
+    ):
+        detail = error.stderr
+        if isinstance(detail, bytes):  # TimeoutExpired keeps raw bytes even with text=True.
+            detail = detail.decode(errors="replace")
         text += "\n" + detail.strip()[-2000:]
     return text
 
@@ -111,6 +118,7 @@ class StartFailedError(RuntimeError):
         identity: str,
         marker: MarkerState,
         running: set[str] | None,
+        signals: list[str],
     ) -> None:
         super().__init__(describe(failure))
         self.failure = failure
@@ -118,11 +126,12 @@ class StartFailedError(RuntimeError):
         self.identity = identity
         self.marker = marker
         self.running = running
+        self.signals = signals
 
     @property
     def interrupted(self) -> bool:
         errors = [self.failure, *(error for _, error in self.problems)]
-        return any(isinstance(error, KeyboardInterrupt) for error in errors)
+        return bool(self.signals) or any(isinstance(error, KeyboardInterrupt) for error in errors)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -176,6 +185,15 @@ def load_host(config_path: Path) -> Host:
 
 def step(message: str) -> None:
     print(f"==> {message}", flush=True)
+
+
+def print_safely(text: str, *, error: bool = False) -> None:
+    with suppress(OSError, ValueError):
+        print(text, file=sys.stderr if error else sys.stdout, flush=True)
+
+
+def cleanup_step(message: str) -> None:
+    print_safely(f"==> {message}")
 
 
 def compose(host: Host) -> list[str]:
@@ -362,9 +380,9 @@ def running_services(host: Host) -> set[str]:
     return set(capture(status_command(host)).split())
 
 
-def stop_in_order(host: Host) -> None:
+def stop_in_order(host: Host, progress: Callable[[str], None] = step) -> None:
     for timeout, services in STOP_ORDER:
-        step(f"Stopping {', '.join(services)}")
+        progress(f"Stopping {', '.join(services)}")
         subprocess.run(
             [*compose(host), "stop", "-t", timeout, *services],
             check=True,
@@ -689,22 +707,43 @@ def marker_state(host: Host, identity: str) -> MarkerState:
     return "held" if content.strip() == identity.strip() else "foreign"
 
 
+@contextmanager
+def deferred_signals() -> Iterator[list[str]]:
+    received: list[str] = []
+
+    def record(number: int, _frame: FrameType | None) -> None:
+        received.append(signal.Signals(number).name)
+
+    # Main thread only. A raising handler (Python's Ctrl-C default) could skip a cleanup step.
+    previous = [
+        (number, signal.signal(number, record)) for number in (signal.SIGINT, signal.SIGTERM)
+    ]
+    try:
+        yield received
+    finally:
+        for number, handler in previous:
+            signal.signal(number, handler)
+
+
 def stop_after_failed_start(host: Host, identity: str, failure: BaseException) -> StartFailedError:
-    step("Writing the maintenance marker back and stopping the application again")
-    problems: list[tuple[str, BaseException]] = []
-    attempt(
-        problems, "Writing the maintenance marker back", lambda: write_synced(host.marker, identity)
-    )
-    attempt(problems, "Stopping the application", lambda: stop_in_order(host))
-    running = attempt(
-        problems,
-        "Listing the running containers",
-        lambda: running_services(host) & APPLICATION_SERVICES,
-    )
-    marker = attempt(
-        problems, "Reading the maintenance marker", lambda: marker_state(host, identity)
-    )
-    return StartFailedError(failure, problems, identity, marker or "unknown", running)
+    with deferred_signals() as received:
+        cleanup_step("Writing the maintenance marker back and stopping the application again")
+        problems: list[tuple[str, BaseException]] = []
+        attempt(
+            problems,
+            "Writing the maintenance marker back",
+            lambda: write_synced(host.marker, identity),
+        )
+        attempt(problems, "Stopping the application", lambda: stop_in_order(host, cleanup_step))
+        running = attempt(
+            problems,
+            "Listing the running containers",
+            lambda: running_services(host) & APPLICATION_SERVICES,
+        )
+        marker = attempt(
+            problems, "Reading the maintenance marker", lambda: marker_state(host, identity)
+        )
+        return StartFailedError(failure, problems, identity, marker or "unknown", running, received)
 
 
 def end_session(host: Host) -> None:
@@ -885,6 +924,10 @@ def print_failed_start(host: Host, options: argparse.Namespace, error: StartFail
     shown = shlex.quote(error.identity.strip())
     lines = [outcome(options.command, error.failure)]
     lines += [outcome(what, problem) for what, problem in error.problems]
+    lines += [
+        f"{name} arrived during the cleanup; every step was still attempted."
+        for name in dict.fromkeys(error.signals)
+    ]
     lines.append(MARKER_REPORT[error.marker].format(marker=host.marker, identity=shown))
     steps = []
     if error.running is None:
@@ -901,7 +944,7 @@ def print_failed_start(host: Host, options: argparse.Namespace, error: StartFail
         steps.append(f"write the identity back with printf %s {shown} > {host.marker} && sync")
     steps.append(f"run {host.command(rerun)} again")
     lines.append("Next: " + "; then ".join(steps) + ".")
-    print("\n".join(lines), file=sys.stderr)
+    print_safely("\n".join(lines), error=True)
 
 
 def main(arguments: list[str] | None = None) -> int:
