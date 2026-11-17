@@ -1903,6 +1903,7 @@ export interface components {
             | "method_not_allowed"
             | "not_acceptable"
             | "unsupported_media_type"
+            | "conflict"
             | "throttled"
             | "session_busy"
             | "invitation_rate_limited"

@@ -47,6 +47,7 @@ const ERROR_CODES: Record<ErrorCode, true> = {
     method_not_allowed: true,
     not_acceptable: true,
     unsupported_media_type: true,
+    conflict: true,
     throttled: true,
     session_busy: true,
     invitation_rate_limited: true,

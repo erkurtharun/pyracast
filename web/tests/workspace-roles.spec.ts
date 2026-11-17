@@ -1,5 +1,6 @@
 import { test, expect } from "./support/test";
 import { mockApi, paged, user } from "./support/workspace";
+import { allauthErrorBody } from "./support/errors";
 
 test("Turkish workspace roles and invitation labels preserve readable characters", async ({
     page,
@@ -424,10 +425,9 @@ test("anonymous expired invitation can be dismissed to restore company registrat
     await page.route("**/api/auth/browser/v1/auth/signup", (route) =>
         route.fulfill({
             status: 400,
-            json: {
-                status: 400,
-                errors: [{ message: "This invitation has expired." }],
-            },
+            json: allauthErrorBody(400, "invalid_request", [
+                { message: "This invitation has expired." },
+            ]),
         }),
     );
     await page.goto("/app/?token=expired-secret");

@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { test, expect, type Page } from "./support/test";
 import { mockApi, user } from "./support/workspace";
-import { errorBody } from "./support/errors";
+import { allauthErrorBody, errorBody } from "./support/errors";
 
 test("signup entry opens registration with public information links", async ({
     page,
@@ -138,15 +138,12 @@ test("registration errors identify the field and move keyboard focus to the summ
     await page.route("**/api/auth/browser/v1/auth/signup", async (route) =>
         route.fulfill({
             status: 400,
-            json: {
-                status: 400,
-                errors: [
-                    {
-                        param: "email",
-                        message: "This email is already in use.",
-                    },
-                ],
-            },
+            json: allauthErrorBody(400, "invalid_request", [
+                {
+                    param: "email",
+                    message: "This email is already in use.",
+                },
+            ]),
         }),
     );
     await page.goto("/app/");
@@ -422,10 +419,9 @@ test("a failed resend shows the server message and can be retried", async ({
         (route) =>
             route.fulfill({
                 status: 500,
-                json: {
-                    status: 500,
-                    errors: [{ message: "Mail is unavailable." }],
-                },
+                json: allauthErrorBody(500, "server_error", [
+                    { message: "Mail is unavailable." },
+                ]),
             }),
     );
     await page.goto("/app/");

@@ -8,6 +8,9 @@ from pyracast.accounts.social import social_callback_url
 from pyracast.api.errors import api_error, coded, error_json
 from pyracast.errors import ErrorCode
 
+# Routes a browser reaches by a top-level form navigation, where a JSON body would strand the user.
+PROVIDER_NAVIGATIONS = frozenset({"provider_redirect", "google_callback", "microsoft_callback"})
+
 
 def _api(request: HttpRequest) -> bool:
     return request.path.startswith("/api/")
@@ -47,6 +50,7 @@ def server_error(request: HttpRequest) -> HttpResponse:
 def csrf_failure(request: HttpRequest, reason: str = "") -> HttpResponse:
     if not _api(request):
         return _private(csrf.csrf_failure(request, reason))
-    if request.headers.get("Sec-Fetch-Mode") == "navigate":
+    route = request.resolver_match.url_name if request.resolver_match else None
+    if route in PROVIDER_NAVIGATIONS and request.headers.get("Sec-Fetch-Mode") == "navigate":
         return _private(HttpResponseRedirect(f"{social_callback_url()}&error=expired_form"))
     return error_json(request, lambda: coded(ErrorCode.CSRF_FAILED, 403))

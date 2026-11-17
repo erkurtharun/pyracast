@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "./support/test";
 import { mockApi, user } from "./support/workspace";
+import { allauthErrorBody } from "./support/errors";
 
 test("enabled providers submit a CSRF protected native redirect form on mobile", async ({
     page,
@@ -443,16 +444,13 @@ test("a rejected social signup email keeps an explicit sign-in and link path", a
               })
             : route.fulfill({
                   status: 400,
-                  json: {
-                      status: 400,
-                      errors: [
-                          {
-                              param: "email",
-                              code: "email_taken",
-                              message: "This email is already in use.",
-                          },
-                      ],
-                  },
+                  json: allauthErrorBody(400, "invalid_request", [
+                      {
+                          param: "email",
+                          code: "email_taken",
+                          message: "This email is already in use.",
+                      },
+                  ]),
               }),
     );
     await page.goto("/app/?social_callback=1");

@@ -1,3 +1,4 @@
+import json
 import logging
 import math
 from collections.abc import Callable, Iterator, Mapping
@@ -170,13 +171,24 @@ def _database(error: DatabaseError, request: HttpRequest | None, view: str) -> A
     return None
 
 
-_FRAMEWORK_CODES: tuple[tuple[type[exceptions.APIException], ErrorCode], ...] = (
-    (exceptions.NotFound, ErrorCode.NOT_FOUND),
-    (exceptions.MethodNotAllowed, ErrorCode.METHOD_NOT_ALLOWED),
-    (exceptions.NotAcceptable, ErrorCode.NOT_ACCEPTABLE),
-    (exceptions.UnsupportedMediaType, ErrorCode.UNSUPPORTED_MEDIA_TYPE),
-    (exceptions.ParseError, ErrorCode.BAD_REQUEST),
-)
+_STATUS_CODES: Mapping[int, ErrorCode] = {
+    400: ErrorCode.INVALID_REQUEST,
+    401: ErrorCode.NOT_AUTHENTICATED,
+    403: ErrorCode.PERMISSION_DENIED,
+    404: ErrorCode.NOT_FOUND,
+    405: ErrorCode.METHOD_NOT_ALLOWED,
+    406: ErrorCode.NOT_ACCEPTABLE,
+    409: ErrorCode.CONFLICT,
+    410: ErrorCode.SESSION_ENDED,
+    415: ErrorCode.UNSUPPORTED_MEDIA_TYPE,
+    429: ErrorCode.THROTTLED,
+}
+
+
+def status_code(status: int) -> ErrorCode:
+    if status >= 500:
+        return ErrorCode.SERVER_ERROR
+    return _STATUS_CODES.get(status, ErrorCode.BAD_REQUEST)
 
 
 def _framework(error: exceptions.APIException) -> ApiError | None:
@@ -195,9 +207,10 @@ def _framework(error: exceptions.APIException) -> ApiError | None:
         return coded(
             ErrorCode.THROTTLED, 429, retry_after=None if wait is None else math.ceil(wait)
         )
-    for kind, code in _FRAMEWORK_CODES:
-        if isinstance(error, kind):
-            return coded(code, error.status_code)
+    if isinstance(error, exceptions.ParseError):
+        return coded(ErrorCode.BAD_REQUEST, 400)
+    if error.status_code < 500:
+        return coded(status_code(error.status_code), error.status_code)
     return None
 
 
@@ -251,10 +264,57 @@ def exception_handler(exc: Exception, context: dict[str, Any]) -> Response | Non
     return Response(error.body(), status=error.status, headers=error.headers())
 
 
+def _language(request: HttpRequest) -> str:
+    return getattr(request, "LANGUAGE_CODE", None) or request_language(request, None)
+
+
 def error_json(request: HttpRequest, build: Callable[[], ApiError]) -> HttpResponse:
-    language = getattr(request, "LANGUAGE_CODE", None) or request_language(request, None)
-    with translation.override(language):
+    with translation.override(_language(request)):
         error = build()
     response = JsonResponse(error.body(), status=error.status, headers=error.headers())
     patch_cache_control(response, private=True, no_store=True)
+    return response
+
+
+def _status_error(
+    request: HttpRequest, status: int, body: Mapping[str, Any], retry_after: str | None
+) -> ApiError:
+    listed = body.get("errors")
+    errors = [
+        error
+        for error in (listed if isinstance(listed, list) else [])
+        if isinstance(error, dict) and isinstance(error.get("message"), str) and error["message"]
+    ]
+    fields: dict[str, str] = {}
+    for error in errors:
+        param = error.get("param")
+        if isinstance(param, str):
+            fields[param] = _joined([fields.get(param, ""), error["message"]])
+    code = status_code(status)
+    return ApiError(
+        status,
+        code,
+        errors[0]["message"] if errors else str(MESSAGES[code]),
+        fields or None,
+        int(retry_after) if retry_after and retry_after.isdecimal() else None,
+        log_server_error(request, "-", None) if status >= 500 else None,
+    )
+
+
+def with_error_contract(request: HttpRequest, response: HttpResponse) -> HttpResponse:
+    """Add the contract keys to a JSON error body that lacks them, keeping its own keys."""
+    content_type = response.get("Content-Type", "").partition(";")[0].strip()
+    if response.status_code < 400 or response.streaming or content_type != "application/json":
+        return response
+    try:
+        body = json.loads(response.content)
+    except ValueError:
+        return response
+    if not isinstance(body, dict) or {"code", "message"} <= body.keys():
+        return response
+    with translation.override(_language(request)):
+        error = _status_error(request, response.status_code, body, response.get("Retry-After"))
+    response.content = json.dumps({**body, **error.body()}).encode()
+    if response.has_header("Content-Length"):
+        response["Content-Length"] = str(len(response.content))
     return response

@@ -26,6 +26,7 @@ class ErrorCode(StrEnum):
     METHOD_NOT_ALLOWED = "method_not_allowed"
     NOT_ACCEPTABLE = "not_acceptable"
     UNSUPPORTED_MEDIA_TYPE = "unsupported_media_type"
+    CONFLICT = "conflict"
     THROTTLED = "throttled"
     SESSION_BUSY = "session_busy"
     INVITATION_RATE_LIMITED = "invitation_rate_limited"
@@ -93,6 +94,7 @@ MESSAGES: Mapping[ErrorCode, StrPromise] = {
     ErrorCode.METHOD_NOT_ALLOWED: _("This action is not available here."),
     ErrorCode.NOT_ACCEPTABLE: _("The requested response format is not available."),
     ErrorCode.UNSUPPORTED_MEDIA_TYPE: _("Send the request as JSON."),
+    ErrorCode.CONFLICT: _("The request conflicts with the current state. Reload and try again."),
     ErrorCode.THROTTLED: _("Too many requests. Wait a moment and try again."),
     ErrorCode.SESSION_BUSY: _("Another request from this session is still running. Try again."),
     ErrorCode.INVITATION_RATE_LIMITED: _(

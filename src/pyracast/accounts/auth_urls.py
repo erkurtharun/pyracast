@@ -49,7 +49,11 @@ urlpatterns = [
     path(
         "auth/2fa/reauthenticate", mfa_views.ReauthenticateView.as_api_view(client=Client.BROWSER)
     ),
-    path("auth/provider/redirect", RedirectToProviderView.as_api_view(client=Client.BROWSER)),
+    path(
+        "auth/provider/redirect",
+        RedirectToProviderView.as_api_view(client=Client.BROWSER),
+        name="provider_redirect",
+    ),
     path("auth/provider/signup", ProviderSignupView.as_api_view(client=Client.BROWSER)),
     path("account/email", account_views.ManageEmailView.as_api_view(client=Client.BROWSER)),
     path("account/password/change", headless.ChangePasswordView.as_api_view(client=Client.BROWSER)),

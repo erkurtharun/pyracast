@@ -2063,6 +2063,9 @@ msgstr "Kesinti başlangıcı gelecekte olamaz."
 msgid "The page expired. Reload it and try again."
 msgstr "Sayfanın süresi doldu. Sayfayı yenileyip tekrar deneyin."
 
+msgid "The request conflicts with the current state. Reload and try again."
+msgstr "İstek mevcut durumla çakışıyor. Sayfayı yenileyip tekrar deneyin."
+
 msgid "The request could not be processed."
 msgstr "İstek işlenemedi."
 

@@ -1,4 +1,4 @@
-import { ApiError, errorFromResponse, isContractBody } from "./api/errors";
+import { ApiError, errorFromResponse } from "./api/errors";
 import { browserErrors } from "@/i18n/browser";
 
 export type AuthData = {
@@ -56,7 +56,7 @@ export async function authRequest<TData = AuthData>(
                 : t("request", { status: response.status }),
             { status: response.status },
         );
-    const result = data as AuthResult<TData>;
+    // A 401 carries allauth's flows and the 404 means no authenticator yet: callers read both.
     if (
         !response.ok &&
         response.status !== 401 &&
@@ -65,22 +65,7 @@ export async function authRequest<TData = AuthData>(
             method === "GET" &&
             path === "account/authenticators/totp"
         )
-    ) {
-        if (isContractBody(data))
-            throw errorFromResponse(response.status, data);
-        const errors = result.errors ?? [];
-        throw new ApiError(
-            errors.map((error) => error.message).join(" ") ||
-                t("request", { status: response.status }),
-            {
-                status: response.status,
-                fields: Object.fromEntries(
-                    errors
-                        .filter((error) => error.param)
-                        .map((error) => [error.param!, error.message]),
-                ),
-            },
-        );
-    }
-    return result;
+    )
+        throw errorFromResponse(response.status, data);
+    return data as AuthResult<TData>;
 }
