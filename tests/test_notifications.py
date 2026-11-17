@@ -23,12 +23,13 @@ from pyracast.forecasts.models import (
     RequestAttempt,
 )
 from pyracast.forecasts.monitoring import delivery_health
+from pyracast.mail.errors import NotSentError, PermanentlyNotSentError
+from pyracast.mail.send import send
 from pyracast.notifications.jobs import (
     LEASE_DURATION,
     pending_notification_ids,
     process_notification,
 )
-from pyracast.notifications.mail import NotSentError, PermanentlyNotSentError, send_message
 from pyracast.notifications.models import (
     NotificationDelivery,
     NotificationSettings,
@@ -361,7 +362,7 @@ def test_interrupted_sending_never_retries_ambiguous_delivery() -> None:
 
 def test_locmem_adapter_zero_return_is_known_not_sent() -> None:
     with pytest.raises(NotSentError):
-        send_message(EmailMultiAlternatives(subject="Empty", body="No recipient", to=[]))
+        send(EmailMultiAlternatives(subject="Empty", body="No recipient", to=[]))
 
 
 def test_full_summary_preserves_units_and_escapes_html() -> None:
@@ -866,7 +867,7 @@ def test_multiple_recipients_share_one_private_message_and_delivery_outcome(outc
             raise NotSentError
         if outcome == "uncertain":
             raise TimeoutError
-        send_message(message)
+        send(message)
 
     assert process_notification(delivery_id, SLOT, sender=sender) is (outcome == "sent")
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
@@ -1282,6 +1283,22 @@ def test_reminder_api_requires_an_explicit_recipient_list() -> None:
         "code": "invalid_request",
         "message": "Check the highlighted values and try again.",
         "fields": {"recipients": "This field is required."},
+    }
+    response = client.put(
+        f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/reminders/",
+        {
+            "enabled": True,
+            "email": "obsolete@example.com",
+            "recipients": [system.member.email],
+            "times": ["10:00"],
+            "language": "en",
+        },
+        format="json",
+    )
+    assert response.status_code == 400
+    assert response.json() == {
+        "code": "http_400",
+        "detail": {"non_field_errors": ["Unknown fields are not accepted."]},
     }
 
 

@@ -7,6 +7,7 @@ test("a customer manages one plant site through the real API", async ({
     page,
 }, testInfo) => {
     test.setTimeout(60_000);
+    await page.clock.setFixedTime(new Date(process.env.BROWSER_NOW!));
     await page.goto("/app/");
     await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
     await page.screenshot({
@@ -26,7 +27,7 @@ test("a customer manages one plant site through the real API", async ({
     const forbidden = await page.evaluate(
         async ({ tenant, region }) => {
             const response = await fetch(
-                `/api/tenants/${tenant}/regions/${region}/`,
+                `/api/tenants/${tenant}/regions/${region}/forecast/`,
                 {
                     credentials: "same-origin",
                     cache: "no-store",
@@ -39,7 +40,7 @@ test("a customer manages one plant site through the real API", async ({
             region: process.env.BROWSER_OTHER_REGION,
         },
     );
-    expect([403, 404]).toContain(forbidden);
+    expect(forbidden).toBe(403);
 
     await page.getByRole("button", { name: /Site/ }).click();
     await expect(

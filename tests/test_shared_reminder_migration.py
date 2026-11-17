@@ -11,7 +11,7 @@ from django.db.migrations.recorder import MigrationRecorder
 from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant
-from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
+from pyracast.notifications.models import ReminderSchedule
 from pyracast.regions.models import Region
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -154,7 +154,13 @@ def test_shared_reminder_migration_preserves_schedules_and_frozen_delivery_histo
     original_preferences = set(old_preference.objects.values_list("pk", flat=True))
     original_deliveries = list(old_delivery.objects.order_by("pk").values())
     executor = MigrationExecutor(connection)
-    executor.migrate(executor.loader.graph.leaf_nodes())
+    grouped = [
+        node for node in executor.loader.graph.leaf_nodes() if node[0] != "notifications"
+    ] + [("notifications", "0009_grouped_reminders")]
+    executor.migrate(grouped)
+    migrated_deliveries = cast(Any, executor.loader.project_state(grouped).apps).get_model(
+        "notifications", "NotificationDelivery"
+    )
     assert connection.vendor == "postgresql"
     assert set(ReminderSchedule.objects.values_list("pk", flat=True)) == original_preferences
     chosen = ReminderSchedule.objects.get(pk=admin_setting.pk)
@@ -199,7 +205,7 @@ def test_shared_reminder_migration_preserves_schedules_and_frozen_delivery_histo
         expected["recipient_memberships"] = {}
         expected["revoked_recipients"] = []
         expected["grouped"] = False
-        assert NotificationDelivery.objects.values().get(pk=original["id"]) == expected
+        assert migrated_deliveries.objects.values().get(pk=original["id"]) == expected
     User.objects.filter(pk=administrator.pk).update(email="replacement@example.com")
     chosen.refresh_from_db()
     assert chosen.recipients == ["old-admin@example.com"]
@@ -207,21 +213,21 @@ def test_shared_reminder_migration_preserves_schedules_and_frozen_delivery_histo
     chosen.refresh_from_db()
     assert ReminderSchedule.objects.get(pk=chosen.pk).configured_by_id is None
     assert chosen.recipients == ["old-admin@example.com"]
-    assert NotificationDelivery.objects.count() == 2
+    assert migrated_deliveries.objects.count() == 2
     with pytest.raises(IntegrityError), transaction.atomic():
         ReminderSchedule.objects.create(region_id=regions[0].pk, effective_from=now)
     with pytest.raises(IntegrityError), transaction.atomic():
         ReminderSchedule.objects.filter(pk=chosen.pk).update(language="fr")
-    delivery = NotificationDelivery.objects.first()
+    delivery = migrated_deliveries.objects.first()
     assert delivery is not None
-    NotificationDelivery.objects.create(
+    migrated_deliveries.objects.create(
         schedule_id=delivery.schedule_id,
         scheduled_for=delivery.scheduled_for,
         recipients=delivery.recipients,
         available_at=now,
     )
     with pytest.raises(IntegrityError), transaction.atomic():
-        NotificationDelivery.objects.create(
+        migrated_deliveries.objects.create(
             schedule_id=delivery.schedule_id,
             scheduled_for=delivery.scheduled_for,
             recipients=delivery.recipients,
@@ -322,7 +328,28 @@ def test_unsafe_reminder_rollback_keeps_latest_schema_and_data(
         schedules.objects.create(region_id=region.pk, effective_from=now)
 
 
-def test_compatible_reminder_rollback_preserves_all_rows_and_never_reenables_archives() -> None:
+@pytest.fixture
+def grouped_reminders_schema() -> Iterator[Apps]:
+    executor = MigrationExecutor(connection)
+    latest = executor.loader.graph.leaf_nodes()
+    grouped = [node for node in latest if node[0] != "notifications"] + [
+        ("notifications", "0009_grouped_reminders")
+    ]
+    try:
+        executor.migrate(grouped)
+        yield executor.loader.project_state(grouped).apps
+    finally:
+        MigrationExecutor(connection).migrate(latest)
+
+
+def test_compatible_reminder_rollback_preserves_all_rows_and_never_reenables_archives(
+    grouped_reminders_schema: Apps,
+) -> None:
+    deliveries = cast(Any, grouped_reminders_schema).get_model(
+        "notifications", "NotificationDelivery"
+    )
+    executor = MigrationExecutor(connection)
+    latest = executor.loader.graph.leaf_nodes()
     now = timezone.now()
     tenant = Tenant.objects.create(name="Compatible reminder rollback")
     administrator = User.objects.create(username="admin", email="admin@example.com")
@@ -350,8 +377,8 @@ def test_compatible_reminder_rollback_preserves_all_rows_and_never_reenables_arc
         retired_at=now,
     )
     for schedule in (current, archived):
-        NotificationDelivery.objects.create(
-            schedule=schedule,
+        deliveries.objects.create(
+            schedule_id=schedule.pk,
             scheduled_for=now,
             available_at=now,
             recipients=list(schedule.recipients),
@@ -363,7 +390,7 @@ def test_compatible_reminder_rollback_preserves_all_rows_and_never_reenables_arc
             transmit_started_at=now,
             sent_at=now,
         )
-    original_deliveries = list(NotificationDelivery.objects.order_by("pk").values())
+    original_deliveries = list(deliveries.objects.order_by("pk").values())
     original_preferences = [
         {
             "id": schedule.pk,
@@ -376,16 +403,15 @@ def test_compatible_reminder_rollback_preserves_all_rows_and_never_reenables_arc
         }
         for schedule in (current, archived)
     ]
-    executor = MigrationExecutor(connection)
-    latest = executor.loader.graph.leaf_nodes()
     before = [node for node in latest if node[0] != "notifications"] + [
         ("notifications", "0007_notificationdelivery_language")
     ]
     try:
+        executor = MigrationExecutor(connection)
         executor.migrate(before)
         historical = executor.loader.project_state(before).apps
         preferences = cast(Any, historical).get_model("notifications", "ReminderPreference")
-        deliveries = cast(Any, historical).get_model("notifications", "NotificationDelivery")
+        legacy_deliveries = cast(Any, historical).get_model("notifications", "NotificationDelivery")
         assert list(preferences.objects.order_by("pk").values()) == original_preferences
         for original in original_deliveries:
             expected: dict[str, object] = dict(original)
@@ -395,7 +421,7 @@ def test_compatible_reminder_rollback_preserves_all_rows_and_never_reenables_arc
             expected.pop("recipient_memberships")
             assert expected.pop("revoked_recipients") == []
             expected.pop("grouped")
-            assert deliveries.objects.values().get(pk=original["id"]) == expected
+            assert legacy_deliveries.objects.values().get(pk=original["id"]) == expected
     finally:
         MigrationExecutor(connection).migrate(latest)
     assert ReminderSchedule.objects.count() == 2
@@ -403,4 +429,4 @@ def test_compatible_reminder_rollback_preserves_all_rows_and_never_reenables_arc
     assert ReminderSchedule.objects.get(pk=current.pk).enabled
     assert ReminderSchedule.objects.get(pk=archived.pk).retired_at is not None
     assert not ReminderSchedule.objects.get(pk=archived.pk).enabled
-    assert list(NotificationDelivery.objects.order_by("pk").values()) == original_deliveries
+    assert list(deliveries.objects.order_by("pk").values()) == original_deliveries

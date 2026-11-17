@@ -71,8 +71,9 @@ the `PYRACAST_GMAIL_CLIENT_ID`, `PYRACAST_GMAIL_CLIENT_SECRET` and
 `PYRACAST_GMAIL_REFRESH_TOKEN` credentials; follow the local authorization steps in
 the [deployment guide](docs/DEPLOYMENT.md#2-add-secrets). For SMTP, configure the
 `PYRACAST_EMAIL_*` connection values and `PYRACAST_FROM_EMAIL` from your authorized
-provider. STARTTLS defaults to port 587; implicit TLS uses port 465,
-`PYRACAST_EMAIL_TLS=0` and `PYRACAST_EMAIL_SSL=1`.
+provider. STARTTLS defaults to port 587; implicit TLS uses port 465 and
+`PYRACAST_EMAIL_SSL=1` with `PYRACAST_EMAIL_TLS=0`. `pyracast check_mail` opens the
+configured transport without sending.
 
 Open-Meteo's free service is for evaluation/non-commercial use; commercial operation
 needs the [appropriate subscription](https://open-meteo.com/en/pricing) or disabled
@@ -81,8 +82,8 @@ weather. EP?A? plant IDs/EIC and weather coordinates remain database records.
 ## Run locally
 
 On the configured Windows development machine, double-click `start.cmd`.
-It checks dependencies, syncs locked packages, migrates the database, starts the
-API, frontend, collection worker, mailer and dispatcher, then opens
+It checks dependencies, syncs locked packages, compiles the gettext catalogs, migrates
+the database, starts the API, frontend, collection worker, mailer and dispatcher, then opens
 `http://127.0.0.1:3000`. Use `start.cmd --no-browser` to suppress the browser.
 Overlapping launcher commands wait up to ten minutes for the current operation;
 the first dependency installation can take a few minutes.
@@ -105,7 +106,9 @@ uv run --locked python -m scripts.dev stop
 from saved native paths is Windows-only; on Ubuntu or with remote dependencies,
 provide running PostgreSQL/RabbitMQ yourself.
 
-For manual startup, run these in separate terminals after migrations:
+For manual startup, compile the gettext catalogs with
+`uv run --locked python scripts/translations.py` and apply migrations, then run these in
+separate terminals:
 
 ```text
 uv run --locked pyracast runserver --noreload
@@ -237,8 +240,10 @@ migration and Django checks, then parallel pytest with the 100% branch-coverage 
 configured in `pyproject.toml`. With `web/node_modules` installed it also runs
 `scripts/generate_api_schema.py --check` and `npm --prefix web run check:static`;
 without it, it prints one `SKIPPED web` line; with it but no `npm` on PATH, it exits 2.
-`--static-only` skips pytest, `--tests-only` runs only pytest and arguments after `--` are
-passed to pytest (add `--no-cov` when selecting tests: the floor applies to the whole suite). It runs as many pytest
+`--static-only` skips pytest, `--tests-only` compiles the gettext catalogs and runs pytest, and
+arguments after `--` are passed to pytest (add `--no-cov` when selecting tests: the floor applies
+to the whole suite); a direct `pytest` call needs `uv run --locked python scripts/translations.py`
+first. It runs as many pytest
 workers as physical cores, at most six, unless `PYTEST_XDIST_AUTO_NUM_WORKERS` is
 set, and a test that runs longer than 300 seconds prints every thread's stack. Use
 `uv run --locked ruff format .` for formatting. Deliberate dependency upgrades

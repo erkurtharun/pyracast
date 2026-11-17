@@ -1,7 +1,6 @@
 import base64
 from collections.abc import Sequence
 from contextlib import suppress
-from email import policy
 from email.utils import parseaddr
 from typing import Any
 from urllib.parse import quote
@@ -13,7 +12,13 @@ from django.core.mail import EmailMessage
 from django.core.mail.backends.base import BaseEmailBackend
 from django.core.validators import validate_email
 
-from pyracast.mail_delivery import DeliveryUncertainError, NotSentError, PermanentlyNotSentError
+from pyracast.mail.errors import (
+    DeliveryUncertainError,
+    MailFailure,
+    NotSentError,
+    PermanentlyNotSentError,
+)
+from pyracast.mail.policy import wire_policy
 
 SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 TOKEN_URL = "https://oauth2.googleapis.com/token"  # noqa: S105
@@ -26,7 +31,6 @@ class EmailBackend(BaseEmailBackend):
         client_id: str,
         client_secret: str,
         refresh_token: str,
-        sender: str = "",
         timeout: float = 15,
         fail_silently: bool = False,
         **kwargs: Any,
@@ -38,7 +42,7 @@ class EmailBackend(BaseEmailBackend):
             client_secret,
             refresh_token,
         )
-        self.sender = parseaddr(sender or settings.DEFAULT_FROM_EMAIL)[1]
+        self.sender = parseaddr(settings.DEFAULT_FROM_EMAIL)[1]
         try:
             validate_email(self.sender)
         except ValidationError:
@@ -58,6 +62,18 @@ class EmailBackend(BaseEmailBackend):
             return False
         client = httpx.Client(timeout=self.timeout, trust_env=False, follow_redirects=False)
         try:
+            access_token = self._refresh(client)
+        except NotSentError:
+            with suppress(httpx.HTTPError, OSError):
+                client.close()
+            if not self.fail_silently:
+                raise
+            return False
+        self._client, self._access_token = client, access_token
+        return True
+
+    def _refresh(self, client: httpx.Client) -> str:
+        try:
             response = client.post(
                 TOKEN_URL,
                 data={
@@ -67,29 +83,44 @@ class EmailBackend(BaseEmailBackend):
                     "grant_type": "refresh_token",
                 },
             )
-            if response.status_code != 200:
-                raise ValueError
+        except httpx.HTTPError:
+            raise NotSentError("The Gmail OAuth token endpoint could not be reached.") from None
+        if response.status_code == 429:
+            raise NotSentError(
+                "The Gmail OAuth token endpoint rejected the request due to quota.",
+                code=MailFailure.RATE_LIMITED,
+            )
+        if 500 <= response.status_code < 600:
+            raise NotSentError("The Gmail OAuth token endpoint is temporarily unavailable.")
+        try:
             token = response.json()
-            if (
-                not isinstance(token, dict)
-                or not isinstance(token.get("access_token"), str)
-                or not token["access_token"]
-                or token.get("token_type", "").lower() != "bearer"
-                or not isinstance(token.get("scope"), str)
-                or set(token["scope"].split()) != {SEND_SCOPE}
-            ):
-                raise ValueError
-        except httpx.HTTPError, ValueError, TypeError, AttributeError:
-            with suppress(httpx.HTTPError, OSError):
-                client.close()
-            if not self.fail_silently:
-                raise NotSentError(
-                    "Gmail OAuth authentication failed before transmission.",
-                    code="mail_authentication_failed",
-                ) from None
-            return False
-        self._client, self._access_token = client, token["access_token"]
-        return True
+        except ValueError:
+            token = None
+        if (
+            response.status_code == 400
+            and isinstance(token, dict)
+            and token.get("error") == "invalid_grant"
+        ):
+            # Google answers invalid_grant for a revoked, expired or rotated refresh token.
+            raise PermanentlyNotSentError(
+                "Gmail OAuth authorization was revoked; authorize the sender again.",
+                code=MailFailure.AUTHORIZATION_REVOKED,
+            )
+        if (
+            response.status_code != 200
+            or not isinstance(token, dict)
+            or not isinstance(token.get("access_token"), str)
+            or not token["access_token"]
+            or not isinstance(token.get("token_type"), str)
+            or token["token_type"].lower() != "bearer"
+            or not isinstance(token.get("scope"), str)
+            or set(token["scope"].split()) != {SEND_SCOPE}
+        ):
+            raise NotSentError(
+                "Gmail OAuth authentication failed before transmission.",
+                code=MailFailure.CREDENTIALS_REJECTED,
+            )
+        return str(token["access_token"])
 
     def close(self) -> None:
         client, self._client = self._client, None
@@ -123,7 +154,7 @@ class EmailBackend(BaseEmailBackend):
 
     def _send(self, message: EmailMessage) -> None:
         try:
-            mime = message.message(policy=policy.SMTP)
+            mime = message.message(policy=wire_policy(eight_bit=True))
             if parseaddr(str(mime["From"]))[1].casefold() != self.sender.casefold():
                 raise ValueError
             # Gmail routes using MIME headers; Django normally omits envelope-only Bcc recipients.
@@ -145,9 +176,17 @@ class EmailBackend(BaseEmailBackend):
         except httpx.HTTPError:
             raise DeliveryUncertainError("Gmail acceptance could not be confirmed.") from None
         if response.status_code == 401:
-            raise NotSentError("Gmail rejected authentication.", code="mail_authentication_failed")
+            raise NotSentError(
+                "Gmail rejected authentication.", code=MailFailure.CREDENTIALS_REJECTED
+            )
         if response.status_code == 429 or self._quota_rejection(response):
-            raise NotSentError("Gmail rejected the request due to quota.", code="mail_rate_limited")
+            raise NotSentError(
+                "Gmail rejected the request due to quota.", code=MailFailure.RATE_LIMITED
+            )
+        if response.status_code == 403:
+            raise PermanentlyNotSentError(
+                "Gmail does not permit this sender.", code=MailFailure.SENDER_FORBIDDEN
+            )
         if 400 <= response.status_code < 500 and response.status_code != 408:
             raise PermanentlyNotSentError("Gmail rejected the message.")
         try:

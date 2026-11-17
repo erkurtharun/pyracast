@@ -3,7 +3,12 @@ import hashlib
 import http.client
 import json
 import sys
+import urllib.error
 from concurrent.futures import ThreadPoolExecutor
+from email import policy
+from email.message import Message
+from email.parser import BytesParser
+from email.utils import parsedate_to_datetime
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
@@ -15,6 +20,7 @@ from deploy.authorize_gmail import (
     AUTHORIZATION_URL,
     GMAIL_SCOPE,
     OAUTH_EXCHANGE_ENDPOINT,
+    Grant,
     OAuthClient,
     authorize,
     exchange_code,
@@ -180,15 +186,12 @@ def test_oauth_loopback_rejects_forged_state_and_exchanges_pkce_offline_code(
 
     monkeypatch.setattr("deploy.authorize_gmail.urllib.request.urlopen", respond)
     with ThreadPoolExecutor(max_workers=1) as executor:
-        assert (
-            authorize(
-                OAuthClient("client", "private-client"),
-                "info@pyracast.app",
-                timeout_seconds=5,
-                open_browser=lambda url: executor.submit(complete, url),
-            )
-            == "private-refresh"
-        )
+        assert authorize(
+            OAuthClient("client", "private-client"),
+            "info@pyracast.app",
+            timeout_seconds=5,
+            open_browser=lambda url: executor.submit(complete, url),
+        ) == Grant("private-access", "private-refresh")
     assert parameters["scope"] == [GMAIL_SCOPE]
     assert parameters["access_type"] == ["offline"]
     assert parameters["prompt"] == ["consent"]
@@ -245,3 +248,62 @@ def test_oauth_main_redacts_failures_and_preserves_existing_runtime(
     assert "private" not in str(error.value)
     assert "private" not in str(capsys.readouterr())
     assert runtime.read_bytes() == before
+
+
+@pytest.mark.parametrize("accepted", [True, False])
+@pytest.mark.parametrize("header", ["Date", "MIME-Version"])
+def test_credentials_are_saved_only_after_the_sender_mails_itself(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    accepted: bool,
+    header: str,
+) -> None:
+    runtime = tmp_path / "runtime.json"
+    runtime.write_text('{"PYRACAST_SECRET_KEY":"preserved"}')
+    before = runtime.read_bytes()
+    client = client_file(tmp_path / "client.json")
+    requests: list[Request] = []
+    refusal = urllib.error.HTTPError(
+        "https://gmail.googleapis.com", 403, "Forbidden", Message(), BytesIO(b"private")
+    )
+
+    def respond(request: Request, *, timeout: int) -> BytesIO:
+        requests.append(request)
+        if not accepted:
+            raise refusal
+        return BytesIO(b'{"id": "sent"}')
+
+    grant = Grant("private-access", "private-refresh")
+    monkeypatch.setattr("deploy.authorize_gmail.authorize", lambda *_args, **_kwargs: grant)
+    monkeypatch.setattr("deploy.authorize_gmail.urllib.request.urlopen", respond)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["authorize_gmail", "--client", str(client), "--runtime", str(runtime), "--no-browser"],
+    )
+
+    with refusal:
+        if accepted:
+            main()
+            saved = json.loads(runtime.read_text())
+            assert saved["PYRACAST_GMAIL_REFRESH_TOKEN"] == grant.refresh_token
+        else:
+            with pytest.raises(SystemExit):
+                main()
+            assert runtime.read_bytes() == before
+    (request,) = requests
+    assert request.full_url == (
+        "https://gmail.googleapis.com/gmail/v1/users/info%40pyracast.app/messages/send"
+    )
+    assert request.get_header("Authorization") == "Bearer private-access"
+    assert isinstance(request.data, bytes)
+    raw = base64.urlsafe_b64decode(json.loads(request.data)["raw"])
+    mail = BytesParser(policy=policy.default).parsebytes(raw)
+    assert str(mail["From"]) == str(mail["To"]) == "info@pyracast.app"
+    assert mail[header] is not None
+    if header == "Date":
+        assert parsedate_to_datetime(str(mail[header])).utcoffset() is not None
+    else:
+        assert str(mail[header]) == "1.0"
+    assert "private" not in str(capsys.readouterr())

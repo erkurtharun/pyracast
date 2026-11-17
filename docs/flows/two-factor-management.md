@@ -70,7 +70,7 @@ sequenceDiagram
 
 | Condition | Result |
 |---|---|
-| Wrong code, or rate limited (`login_failed`: 5 per user key and 10 per IP per 10 min, shared with MFA and password login) | 400, message on `code`; checked before reauthentication |
+| Wrong code, or rate limited (`login_failed`: 5 per user key per 10 min) | 400, message on `code`; checked before reauthentication |
 | No generic reauthentication on POST totp | 401 with flows, UI shows password or email-code form and does not replay |
 | No MFA reauthentication on DELETE totp or recovery-codes (also with no factor at all) | 401 `mfa_reauthentication_required`, UI shows authenticator form |
 | Staff GET/POST totp (middleware) or DELETE totp (view) | 403 |
@@ -88,4 +88,4 @@ sequenceDiagram
 
 ## Tests
 
-- `tests/test_admin_recovery_security.py` (MFA window, forged timestamps, HEAD, 405, staff versus customer removal, cross-session row-lock serialization) and `tests/test_auth_lifecycle.py` `test_totp_and_recovery_codes_gate_login_and_cannot_be_replayed` (enrolment over HTTP, 401 before reauthentication, first recovery view needs MFA). Also `tests/test_admin_mfa_bootstrap.py`, `test_mfa_secrets.py`, `test_account_session_revocation.py` (signal sent by hand), `test_transactional_mail.py`; Playwright `web/tests/two-factor-settings.spec.ts`, `account-security.spec.ts` (fully mocked API). Gaps: no HTTP-level proof of session revocation or mail after activation, staff HEAD, wrong code before reauthentication, or first view without recovery codes; no Playwright run on a real backend.
+- `tests/test_admin_recovery_security.py` (MFA window, forged timestamps, HEAD, 405, staff versus customer removal, cross-session row-lock serialization) and `tests/test_auth_lifecycle.py` `test_totp_and_recovery_codes_gate_login_and_cannot_be_replayed` (enrolment over HTTP, 401 before reauthentication, first recovery view needs MFA). Also `tests/test_admin_mfa_bootstrap.py`, `test_mfa_secrets.py`, `test_account_session_revocation.py` (signal sent by hand), `test_account_mail_content.py` (recovery-code notice through the view, TOTP notices rendered); Playwright `web/tests/two-factor-settings.spec.ts`, `account-security.spec.ts` (fully mocked API). Gaps: no HTTP-level proof of session revocation or of the TOTP activation mail through the view, staff HEAD, wrong code before reauthentication, or first view without recovery codes; no Playwright run on a real backend.

@@ -8,6 +8,7 @@ from django.contrib.auth.models import User
 from django.test import Client
 from django.urls import NoReverseMatch, URLPattern, URLResolver, get_resolver, reverse
 
+from pyracast.accounts.headless import ManageEmailView
 from pyracast.admin import site
 from pyracast.admin_forms import ProviderSetupForm
 from pyracast.connections.models import ProviderAccount
@@ -180,6 +181,13 @@ def test_api_routes_equal_the_product_surface() -> None:
 
 def test_sign_in_routes_are_the_listed_allauth_views() -> None:
     assert sorted(route for route, _ in _routes("api/auth/")) == AUTH_ROUTES
+
+
+def test_email_management_is_routed_once_to_the_project_view() -> None:
+    (callback,) = [
+        callback for route, callback in _routes("api/auth/") if route == AUTH + "account/email"
+    ]
+    assert getattr(callback, "view_class", None) is ManageEmailView
 
 
 def test_console_routes_equal_the_operator_workspace() -> None:

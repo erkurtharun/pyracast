@@ -536,11 +536,12 @@ test("region collection schedule validates and saves distinct local times", asyn
             /Historical estimate retries preserve requests for scheduled forecasts/,
         ),
     ).toBeVisible();
-    await expect(page.getByText("Requests used")).toBeVisible();
-    await page.getByText("Usage details", { exact: true }).click();
     await expect(
-        page.getByText(/Tracked attempts: 1 succeeded, 1 failed, 0 uncertain/),
-    ).toBeVisible();
+        page.getByText("Last successful collection").locator(".."),
+    ).toContainText("Not yet");
+    await expect(page.getByText("Next collection").locator("..")).toContainText(
+        "Jan 1, 2026, 10:00 AM",
+    );
     await page.getByText("Recent collection jobs", { exact: true }).click();
     await expect(page.getByText(/Provider request failed/)).toBeVisible();
     await expect(
@@ -552,9 +553,14 @@ test("region collection schedule validates and saves distinct local times", asyn
     await expect(page.getByText(/Daily account budget exhausted/)).toHaveCount(
         0,
     );
-    await expect(
-        page.getByText(/remaining requests are not guaranteed/),
-    ).toBeVisible();
+    for (const accountDetail of [
+        "Requests used",
+        "Usage details",
+        "Tracked attempts:",
+        "remaining requests are not guaranteed",
+    ]) {
+        await expect(page.getByText(accountDetail)).toHaveCount(0);
+    }
     await page
         .getByRole("button", { name: "Save collection schedule" })
         .click();
@@ -588,7 +594,7 @@ test("region collection schedule validates and saves distinct local times", asyn
     ).toHaveValue("11:00");
     await expect(
         page.getByText("Last successful collection").locator(".."),
-    ).not.toContainText("Not yet");
+    ).toContainText("Jan 1, 2026, 9:00 AM");
     await page.getByRole("button", { name: "+ Add time" }).click();
     await page.getByLabel("Collection time 3 (Europe/Istanbul)").fill("10:00");
     await page

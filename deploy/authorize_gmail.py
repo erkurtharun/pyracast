@@ -11,9 +11,10 @@ import urllib.request
 import webbrowser
 from collections.abc import Callable
 from dataclasses import dataclass
+from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 OAUTH_EXCHANGE_ENDPOINT = "https://oauth2.googleapis.com/token"
@@ -29,6 +30,12 @@ GMAIL_KEYS = {
 class OAuthClient:
     client_id: str
     client_secret: str
+
+
+@dataclass(frozen=True)
+class Grant:
+    access_token: str
+    refresh_token: str
 
 
 def credential_string(value: object) -> str:
@@ -98,7 +105,12 @@ def merge_runtime(
         Path(temporary).unlink(missing_ok=True)
 
 
-def exchange_code(client: OAuthClient, code: str, verifier: str, redirect_uri: str) -> str:
+def google_json(request: urllib.request.Request) -> object:
+    with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310 -- Fixed Google HTTPS endpoint.
+        return json.load(response)
+
+
+def exchange_code(client: OAuthClient, code: str, verifier: str, redirect_uri: str) -> Grant:
     request = urllib.request.Request(
         OAUTH_EXCHANGE_ENDPOINT,
         data=urlencode(
@@ -113,22 +125,44 @@ def exchange_code(client: OAuthClient, code: str, verifier: str, redirect_uri: s
         ).encode(),
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
-    with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310 -- Fixed Google HTTPS endpoint.
-        payload = json.load(response)
+    payload = google_json(request)
     if (
         not isinstance(payload, dict)
         or not isinstance(payload.get("scope"), str)
         or payload["scope"].split() != [GMAIL_SCOPE]
     ):
         raise ValueError("Gmail authorization must grant only gmail.send.")
-    credential_string(payload.get("access_token"))
+    access_token = credential_string(payload.get("access_token"))
     if payload.get("token_type") != "Bearer":
         raise ValueError("Invalid OAuth token response.")
     if not payload.get("refresh_token"):
         raise ValueError(
             "Google did not issue an offline refresh token; authorize with consent again."
         )
-    return credential_string(payload["refresh_token"])
+    return Grant(access_token, credential_string(payload["refresh_token"]))
+
+
+def send_check_mail(access_token: str, sender: str) -> None:
+    message = (
+        f"From: {sender}\r\nTo: {sender}\r\nSubject: Pyracast sender check\r\n"
+        f"Date: {formatdate(usegmt=True)}\r\n"
+        "MIME-Version: 1.0\r\n"
+        "Content-Type: text/plain; charset=utf-8\r\n\r\n"
+        "This account is authorized to send Pyracast mail as this address.\r\n"
+    )
+    accepted = google_json(
+        urllib.request.Request(
+            # Production sends as this mailbox, so "me" or a send-as alias would prove nothing.
+            f"https://gmail.googleapis.com/gmail/v1/users/{quote(sender, safe='')}/messages/send",
+            data=json.dumps({"raw": base64.urlsafe_b64encode(message.encode()).decode()}).encode(),
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            },
+        )
+    )
+    if not isinstance(accepted, dict) or not accepted.get("id"):
+        raise ValueError("Gmail did not accept the sender check mail.")
 
 
 def authorize(
@@ -137,7 +171,7 @@ def authorize(
     *,
     timeout_seconds: float = 180,
     open_browser: Callable[[str], object] = webbrowser.open,
-) -> str:
+) -> Grant:
     state = secrets.token_urlsafe(32)
     verifier = secrets.token_urlsafe(64)
     challenge = (
@@ -243,16 +277,22 @@ def main() -> None:
         client = load_client(arguments.client)
         load_runtime(arguments.runtime, replace=arguments.replace)
         print("Approve Gmail send access using the configured sender account.")
-        refresh_token = authorize(
+        grant = authorize(
             client, sender, open_browser=print if arguments.no_browser else webbrowser.open
         )
-        merge_runtime(arguments.runtime, client, refresh_token, sender, replace=arguments.replace)
+        send_check_mail(grant.access_token, sender)
+        merge_runtime(
+            arguments.runtime, client, grant.refresh_token, sender, replace=arguments.replace
+        )
     except OSError, ValueError, urllib.error.URLError:
         raise SystemExit(
             "Gmail authorization failed. Check the Desktop client, consent, sender "
             "and local secret files."
         ) from None
-    print("Gmail credentials saved locally. Upload the updated runtime secret to activate them.")
+    print(
+        "Gmail sent a check mail to the sender and the credentials are saved locally. "
+        "Upload the updated runtime secret to activate them."
+    )
 
 
 if __name__ == "__main__":

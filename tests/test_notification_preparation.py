@@ -15,8 +15,8 @@ from pyracast.forecasts.models import (
     ForecastResult,
     ForecastSnapshot,
 )
+from pyracast.mail.errors import NotSentError
 from pyracast.notifications.jobs import process_notification
-from pyracast.notifications.mail import NotSentError
 from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.scheduler import PREPARATION_GRACE, enqueue_due

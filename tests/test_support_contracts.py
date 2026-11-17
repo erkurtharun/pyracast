@@ -1,4 +1,5 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -27,7 +28,13 @@ def test_archived_metering_fixture_records_completion_from_its_readings(missing:
     snapshot = archive_source(connection, "realtime_generation", values)
 
     snapshot.refresh_from_db()
-    assert snapshot.complete is (not missing)
+    midnight = datetime(2020, 1, 1, tzinfo=ZoneInfo("Europe/Istanbul"))
+    hours = {datetime.fromisoformat(row["period_start"]) for row in snapshot.readings}
+    absent = [row for row in snapshot.readings if row["total_mwh"] is None]
+    assert hours == {midnight + timedelta(hours=hour) for hour in range(24)}
+    assert len(snapshot.readings) == 24
+    assert len(absent) == int(missing)
+    assert snapshot.complete is (not absent)
 
 
 @pytest.mark.parametrize(

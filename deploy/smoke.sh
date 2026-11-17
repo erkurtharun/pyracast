@@ -102,6 +102,7 @@ mkdir -p "$temporary/deploy"
 : > "$temporary/deploy/release.env"
 cp "$root/deploy/bootstrap.sql" "$temporary/deploy/bootstrap.sql"
 uv run --no-project --python 3.15.2 python "$root/deploy/bootstrap_database.py" "$temporary" --environment-directory "$temporary"
+# Bootstrap must also succeed on an initialized database.
 uv run --no-project --python 3.15.2 python "$root/deploy/bootstrap_database.py" "$temporary" --environment-directory "$temporary"
 "${compose[@]}" run --rm --no-deps migrate
 "${compose[@]}" run --rm --no-deps migrate pyracast check --deploy --fail-level WARNING
@@ -181,6 +182,13 @@ assert request.META["HTTP_X_REAL_IP"] == "198.51.100.7", request.META
 assert "HTTP_CF_CONNECTING_IP" not in request.META
 '
 [[ $(docker inspect --format '{{.Config.User}}' "$("${compose[@]}" ps -q gateway)") == 10001:10001 ]]
+"${compose[@]}" exec -T api python -c '
+import django
+django.setup()
+from django.utils import translation
+with translation.override("tr"):
+    assert translation.gettext("Continue to sign in") == "Oturum a\u00e7maya devam et"
+'
 "${compose[@]}" exec -T api python - <<'PY'
 import os
 import time
@@ -259,13 +267,13 @@ errors = json.load(sys.stdin)["errors"]
 assert [error["code"] for error in errors] == ["email_password_mismatch"], errors
 ' < "$temporary/sign-in.json"
 [[ $("${secure_curl[@]}" https://localhost:18443/app/) == *'<title>Pyracast workspace'* ]]
-"${compose[@]}" exec -T postgres pg_dump -U postgres -d pyracast --format=custom --compress=zstd:3 > "$temporary/database.dump"
 uv run --no-project --python 3.15.2 python - "$temporary" "$root" <<'PY'
 import sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[2])
-from deploy.backup import restore_archive
+from deploy.backup import dump_database, restore_archive
 release = Path(sys.argv[1])
+dump_database(release, release / 'database.dump')
 restore_archive(release, release / 'database.dump', 'local-smoke')
 PY
 "${compose[@]}" exec -T api pyracast dispatch
@@ -366,9 +374,9 @@ else:
     raise SystemExit('Runtime role unexpectedly owns DDL permission after the reset')
 PY
 # A release that fails after maintenance began leaves the application stopped; restore recovers it.
-"${compose[@]}" stop -t 100 gateway api web
 "${compose[@]}" stop -t 660 dispatcher
 "${compose[@]}" stop -t 660 worker notifications
+"${compose[@]}" stop -t 100 gateway api web
 "${reset_tool[@]}" restore --confirm "$object"
 test ! -e "$temporary/release-blocked"
 ready
@@ -392,4 +400,4 @@ except ProgrammingError:
 else:
     raise SystemExit('Runtime role unexpectedly owns DDL permission after the restore')
 PY
-echo 'Production containers, TLS routing, static assets, session and sign-in API, workspace app shell, database roles, fixture queue publication, graceful idle shutdown, and database reset and restore passed.'
+echo 'Production containers, TLS routing, static assets, Turkish catalogs, session and sign-in API, workspace app shell, database roles, fixture queue publication, graceful idle shutdown, and database reset and restore passed.'

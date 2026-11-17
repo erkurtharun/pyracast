@@ -907,6 +907,7 @@ erDiagram
         jsonb recipient_memberships
         jsonb recipients
         jsonb revoked_recipients
+        uuid message_token UK
     }
     notifications_notificationsettings {
         smallint id PK

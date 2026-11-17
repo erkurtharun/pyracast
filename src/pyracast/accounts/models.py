@@ -46,7 +46,12 @@ class WorkspaceInvitation(models.Model):
     accepted_at = models.DateTimeField(null=True)
     delivery_status = models.CharField(
         max_length=9,
-        choices=(("pending", "Pending"), ("accepted", "Accepted"), ("uncertain", "Uncertain")),
+        choices=(
+            ("pending", "Pending"),
+            ("accepted", "Accepted"),
+            ("failed", "Failed"),
+            ("uncertain", "Uncertain"),
+        ),
         default="pending",
     )
 

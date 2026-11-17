@@ -1,0 +1,11 @@
+{% load i18n tz %}{% autoescape off %}Pyracast
+
+{{ sentence }}
+{% if security %}
+{% translate "Time" %}: {{ time|utc|date:"j F Y H:i" }} UTC
+{% translate "Device" %}: {{ device }}
+{% translate "IP address" %}: {{ ip }}
+
+{% translate "If you did not make this change, secure your account now:" %}
+{{ secure_url }}{% elif action_url %}
+{{ action_label }}: {{ action_url }}{% endif %}{% endautoescape %}

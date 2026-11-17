@@ -21,7 +21,9 @@ TOOLING = frozenset(
         "test_api_schema_generation",
         "test_ci_images",
         "test_deployment_backup",
+        "test_deployment_backup_lock",
         "test_deployment_helpers",
+        "test_deployment_host",
         "test_deployment_reset",
         "test_deployment_secrets",
         "test_deployment_watchdog",
@@ -29,7 +31,6 @@ TOOLING = frozenset(
         "test_dev_launcher",
         "test_er_diagram",
         "test_hooks",
-        "test_move_test_support",
         "test_postgres_workspace",
         "test_pytest_shard",
         "test_quality_gate",
@@ -68,6 +69,7 @@ SUBPROCESS = frozenset(
 )
 MIGRATION = frozenset(
     {
+        "test_delivery_health",
         "test_derived_metadata",
         "test_epias_meter_basis_migration",
         "test_location_change_rebase_migration",
@@ -83,6 +85,7 @@ MIGRATION = frozenset(
         "test_provider_identity",
         "test_provisional_migration",
         "test_quota_wait_migration",
+        "test_reminder_message_id",
         "test_shared_reminder_migration",
         "test_snapshot_lineage",
         "test_workspace_migration",

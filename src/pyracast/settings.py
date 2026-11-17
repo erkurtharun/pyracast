@@ -129,6 +129,8 @@ ACCOUNT_EMAIL_VERIFICATION_BY_CODE_MAX_ATTEMPTS = 3
 ACCOUNT_PASSWORD_RESET_BY_CODE_ENABLED = True
 ACCOUNT_PASSWORD_RESET_BY_CODE_TIMEOUT = 600
 ACCOUNT_PASSWORD_RESET_BY_CODE_MAX_ATTEMPTS = 3
+ACCOUNT_LOGIN_BY_CODE_TIMEOUT = 180
+ACCOUNT_EMAIL_SUBJECT_PREFIX = ""
 ACCOUNT_UNIQUE_EMAIL = True
 ACCOUNT_CHANGE_EMAIL = True
 ACCOUNT_PREVENT_ENUMERATION = True
@@ -159,6 +161,7 @@ ACCOUNT_SESSION_REMEMBER = False
 ACCOUNT_LOGOUT_ON_PASSWORD_CHANGE = True
 ACCOUNT_LOGIN_ON_EMAIL_CONFIRMATION = False
 ACCOUNT_LOGIN_ON_PASSWORD_RESET = False
+ACCOUNT_LOGIN_TIMEOUT = 900
 PASSWORD_RESET_TIMEOUT = 3600
 HEADLESS_ONLY = True
 HEADLESS_CLIENTS = ("browser",)
@@ -179,13 +182,19 @@ MFA_REAUTHENTICATION_REQUIRED = True
 MFA_RECOVERY_CODES_SHOW_ONCE = True
 MFA_TOTP_ISSUER = "Pyracast"
 USERSESSIONS_TRACK_ACTIVITY = True
+PASSWORD_CHANGE_MAX_ATTEMPTS = 5
+PASSWORD_CHANGE_WINDOW_MINUTES = 10
+# allauth clears every rate of `login_failed` after a second-factor success or a password reset,
+# so that action stays per address and the per-IP failure count is a project action of its own.
 ACCOUNT_RATE_LIMITS = {
     "login": "20/m/ip",
-    "login_failed": "10/10m/ip,5/10m/key",
+    "login_failed": "5/10m/key,100/d/key",
+    "login_failed_ip": "10/10m/ip",
     "signup": "5/h/ip",
     "reset_password": "5/h/ip,3/h/key",
     "reset_password_from_key": "10/h/ip",
-    "confirm_email": "1/1m/key",
+    "confirm_email": "1/1m/key,6/h/key",
+    "change_password": f"{PASSWORD_CHANGE_MAX_ATTEMPTS}/{PASSWORD_CHANGE_WINDOW_MINUTES}m/user",
 }
 CACHES = {
     "default": {
@@ -277,34 +286,37 @@ if _email_backend not in {"smtp", "console", "gmail"}:
 if _email_backend == "console" and not DEBUG:
     raise ImproperlyConfigured("PYRACAST_EMAIL_BACKEND=console requires PYRACAST_DEBUG=1.")
 DEFAULT_FROM_EMAIL = os.environ.get("PYRACAST_FROM_EMAIL", "Pyracast <noreply@localhost>")
-MAILERS = {
-    "default": {
-        "BACKEND": "pyracast.gmail.EmailBackend"
-        if _email_backend == "gmail"
-        else "pyracast.smtp.EmailBackend"
-        if _email_backend == "smtp"
-        else "django.core.mail.backends.console.EmailBackend",
+if _email_backend == "smtp":
+    _email_ssl = os.environ.get("PYRACAST_EMAIL_SSL", "0") == "1"
+    try:
+        _email_port = int(os.environ.get("PYRACAST_EMAIL_PORT", "465" if _email_ssl else "587"))
+    except ValueError:
+        raise ImproperlyConfigured("PYRACAST_EMAIL_PORT must be an integer.") from None
+    _mailer: dict[str, object] = {
+        "BACKEND": "pyracast.mail.smtp.EmailBackend",
         "OPTIONS": {
-            "host": os.environ.get("PYRACAST_EMAIL_HOST", "localhost"),
-            "port": int(os.environ.get("PYRACAST_EMAIL_PORT", "587")),
+            "host": os.environ.get("PYRACAST_EMAIL_HOST", ""),
+            "port": _email_port,
             "username": os.environ.get("PYRACAST_EMAIL_USER", ""),
             "password": os.environ.get("PYRACAST_EMAIL_PASSWORD", ""),
-            "use_tls": os.environ.get("PYRACAST_EMAIL_TLS", "1") == "1",
-            "use_ssl": os.environ.get("PYRACAST_EMAIL_SSL", "0") == "1",
+            "use_tls": os.environ.get("PYRACAST_EMAIL_TLS", "0" if _email_ssl else "1") == "1",
+            "use_ssl": _email_ssl,
             "timeout": 15,
-        }
-        if _email_backend == "smtp"
-        else {
+        },
+    }
+elif _email_backend == "gmail":
+    _mailer = {
+        "BACKEND": "pyracast.mail.gmail.EmailBackend",
+        "OPTIONS": {
             "client_id": os.environ.get("PYRACAST_GMAIL_CLIENT_ID", ""),
             "client_secret": os.environ.get("PYRACAST_GMAIL_CLIENT_SECRET", ""),
             "refresh_token": os.environ.get("PYRACAST_GMAIL_REFRESH_TOKEN", ""),
-            "sender": DEFAULT_FROM_EMAIL,
             "timeout": 15,
-        }
-        if _email_backend == "gmail"
-        else {},
-    },
-}
+        },
+    }
+else:
+    _mailer = {"BACKEND": "django.core.mail.backends.console.EmailBackend"}
+MAILERS = {"default": _mailer}
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

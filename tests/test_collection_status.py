@@ -52,12 +52,19 @@ def test_collection_status_reports_the_plants_own_collection_only() -> None:
             available_at=moment,
         )
     for job, binding in ((original, system.binding), (other_job, other_binding)):
+        collected_job = CollectionJob.objects.create(
+            binding=binding,
+            target_date=job.target_date,
+            scheduled_slot=job.scheduled_slot - timedelta(days=1),
+            available_at=moment - timedelta(days=1),
+            status="succeeded",
+        )
         ForecastSnapshot.objects.create(
-            job=job,
+            job=collected_job,
             binding=binding,
             raw_payload={},
             normalized_intervals=[],
-            collected_at=moment - timedelta(minutes=job.pk),
+            collected_at=moment - timedelta(minutes=job.pk) if job is original else moment,
             source_kind="forecast",
         )
     payload = schedule_payload(schedule, moment)
@@ -81,6 +88,48 @@ def test_collection_status_reports_the_plants_own_collection_only() -> None:
     assert response.status_code == 200
     assert "next_collection_at" in response.json()
     assert "recent_jobs" in response.json()
+
+
+@pytest.mark.parametrize("native", [True, False])
+@pytest.mark.parametrize(
+    "endpoint", ["historical_import", "scaled_forecasts", "scaled_estimated_actuals"]
+)
+def test_last_success_reports_native_collection_independently_of_operator_imports(
+    endpoint: str,
+    native: bool,
+) -> None:
+    system = make_system(approved=True)
+    if native:
+        job = CollectionJob.objects.get(binding=system.binding)
+        CollectionJob.objects.filter(pk=job.pk).update(status="succeeded")
+        ForecastSnapshot.objects.create(
+            job=job,
+            binding=system.binding,
+            raw_payload={},
+            normalized_intervals=[],
+            collected_at=NOW,
+            source_kind="forecast",
+        )
+    imported = CollectionJob.objects.create(
+        binding=system.binding,
+        endpoint=endpoint,
+        target_date=NOW.date(),
+        scheduled_slot=NOW + timedelta(hours=1),
+        available_at=NOW + timedelta(hours=1),
+        status="succeeded",
+    )
+    ForecastSnapshot.objects.create(
+        job=imported,
+        binding=system.binding,
+        raw_payload={},
+        normalized_intervals=[],
+        collected_at=NOW + timedelta(hours=1),
+        source_kind="estimated_actuals" if endpoint != "scaled_forecasts" else "forecast",
+    )
+    schedule = get_schedule(system.member, system.tenant.pk, system.region.pk, NOW)
+
+    assert schedule_payload(schedule, NOW)["last_success_at"] == (NOW if native else None)
+    assert ForecastSnapshot.objects.filter(binding=system.binding).count() == (2 if native else 1)
 
 
 @pytest.mark.parametrize("stop", ["disable_schedule", "suspend_plant"])

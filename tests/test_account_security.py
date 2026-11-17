@@ -9,7 +9,7 @@ from threading import Barrier
 import pytest
 from allauth.account.internal.flows.login import record_authentication
 from allauth.account.models import EmailAddress
-from allauth.core.internal.ratelimit import consume
+from allauth.core.internal.ratelimit import consume, get_cache_key, parse_rate
 from allauth.mfa.models import Authenticator
 from django.conf import LazySettings
 from django.contrib.auth.models import User
@@ -31,7 +31,7 @@ from pyracast.accounts.checks import (
 from pyracast.accounts.middleware import TrustedProxyHeaders
 from pyracast.accounts.security import has_verified_mfa, normalize_client_ip
 from pyracast.api.middleware import PrivateAPIResponses
-from pyracast.smtp import EmailBackend as SMTPEmailBackend
+from pyracast.mail.smtp import EmailBackend as SMTPEmailBackend
 
 
 @pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
@@ -127,6 +127,51 @@ def test_allauth_rate_limit_cannot_be_exceeded_by_concurrent_writers() -> None:
     assert results.count(True) == 3
 
 
+@pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
+def test_authentication_cache_purges_at_most_one_hundred_expired_rows_per_write() -> None:
+    with connections["auth_cache"].cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO pyracast_authentication_cache (cache_key, value, expires) "
+            "SELECT 'expired-' || n, 'true'::jsonb, clock_timestamp() - interval '1 second' "
+            "FROM generate_series(1, 150) AS n"
+        )
+        cursor.execute(
+            "INSERT INTO pyracast_authentication_cache (cache_key, value, expires) "
+            "VALUES ('permanent', 'true'::jsonb, NULL)"
+        )
+
+        def remaining() -> tuple[int, int]:
+            cursor.execute(
+                "SELECT count(*) FILTER (WHERE cache_key LIKE 'expired-%%'), "
+                "count(*) FILTER (WHERE expires IS NULL) FROM pyracast_authentication_cache"
+            )
+            row = cursor.fetchone()
+            return row[0], row[1]
+
+        cache.set("first-write", True)
+        assert remaining() == (50, 1)
+        cache.set("second-write", True)
+        assert remaining() == (0, 1)
+
+
+@pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
+def test_a_held_rate_limit_lock_refuses_after_about_one_second() -> None:
+    request = RequestFactory().post("/api/auth/browser/v1/auth/login")
+    config = {"login_failed": "3/m/key"}
+    assert consume(request, app="allauth.account", action="login_failed", key="held", config=config)
+    rate = parse_rate(config["login_failed"])
+    lock = get_cache_key(
+        request, app="allauth.account", action="login_failed", rate=rate, key="held"
+    )
+    assert cache.add(f"{lock}:lock", True, timeout=10)
+    started = time.monotonic()
+    assert (
+        consume(request, app="allauth.account", action="login_failed", key="held", config=config)
+        is None
+    )
+    assert 0.9 <= time.monotonic() - started < 3
+
+
 def proxy_response(request: HttpRequest) -> HttpResponse:
     return HttpResponse()
 
@@ -196,8 +241,8 @@ def test_deployment_requires_production_mail_configuration(settings: LazySetting
     settings.DEFAULT_FROM_EMAIL = "Pyracast <accounts@example.com>"
     settings.MAILERS = {
         "default": {
-            "BACKEND": "pyracast.smtp.EmailBackend",
-            "OPTIONS": {"host": "smtp.example.com"},
+            "BACKEND": "pyracast.mail.smtp.EmailBackend",
+            "OPTIONS": {"host": "smtp.example.com", "use_tls": True},
         }
     }
     assert check_authentication_mail_delivery() == []
@@ -236,8 +281,8 @@ def test_configured_smtp_passes_registered_production_mail_check(
 @pytest.mark.parametrize(
     ("backend", "options"),
     [
-        ("pyracast.smtp.EmailBackend", {}),
-        ("pyracast.smtp.EmailBackend", {"host": ""}),
+        ("pyracast.mail.smtp.EmailBackend", {}),
+        ("pyracast.mail.smtp.EmailBackend", {"host": ""}),
         ("django.core.mail.backends.smtp.EmailBackend", {"host": "smtp.example.com"}),
         ("django.core.mail.backends.console.EmailBackend", {"host": "smtp.example.com"}),
         ("django.core.mail.backends.locmem.EmailBackend", {"host": "smtp.example.com"}),

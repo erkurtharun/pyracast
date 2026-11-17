@@ -576,6 +576,32 @@ def test_foreign_port_collision_fails_before_setup_or_dependency_work(
     assert not (root / ".dev").exists()
 
 
+def test_start_compiles_the_translation_catalogs_before_migrating(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path.resolve()
+    (root / ".dev").mkdir()
+    monkeypatch.setattr(launcher, "PORTS", {})
+    monkeypatch.setattr(launcher, "ensure_dependencies", lambda: None)
+    monkeypatch.setattr(launcher, "frontend_command", lambda *args, **kwargs: [])
+    setups: list[list[str]] = []
+
+    def setup(root: Path, args: list[str]) -> None:
+        setups.append(args)
+        if "migrate" in args:
+            raise RuntimeError("stopped after migrating")
+
+    monkeypatch.setattr(launcher, "run_setup", setup)
+
+    with pytest.raises(RuntimeError, match="stopped after migrating"):
+        launcher.start(root, {"root": str(root), "processes": {}})
+
+    assert setups == [
+        [sys.executable, "scripts/translations.py"],
+        [sys.executable, "-m", "django", "migrate", "--noinput"],
+    ]
+
+
 def test_failed_frontend_start_rolls_back_new_api_and_preserves_existing_worker(
     tmp_path: Path,
     fake_processes: Callable[[Path, str], subprocess.Popen[bytes]],

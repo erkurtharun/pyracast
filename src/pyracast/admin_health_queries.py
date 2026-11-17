@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError
 from django.db.models import F, OuterRef, Q, QuerySet, Subquery
 
 from pyracast.forecasts.models import CollectionJob, ForecastSnapshot
+from pyracast.mail.errors import CREDENTIAL_FAILURES
 from pyracast.metering.models import EpiasCollectionJob
 from pyracast.notifications.models import (
     PAUSED_DELIVERY_ERRORS,
@@ -59,7 +60,7 @@ def notification_deliveries_for_issue(
             prepared_message__tomorrow_complete=False, scheduled_for__gte=recent
         )
     if issue == "mail_authentication_failures":
-        return deliveries.filter(last_error="mail_authentication_failed", scheduled_for__gte=recent)
+        return deliveries.filter(last_error__in=CREDENTIAL_FAILURES, scheduled_for__gte=recent)
     if issue == "paused_notifications":
         return deliveries.filter(
             status="skipped", last_error__in=PAUSED_DELIVERY_ERRORS, scheduled_for__gte=recent

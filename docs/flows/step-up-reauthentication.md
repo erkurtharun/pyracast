@@ -6,7 +6,7 @@ A signed-in user attempts a sensitive account operation (set a first password, e
 
 - UI: `web/src/components/security-reauthentication.tsx` `ReauthenticationForm`, hosted by `account-security.tsx` (`changePassword`), `two-factor-settings.tsx` (`handleAuthenticated401`, `executeOperation`) and `linked-accounts.tsx` (`disconnect`, connect button). Email change in `dashboard.tsx` shows a message and has no form.
 - `POST /api/auth/browser/v1/auth/reauthenticate` -> `pyracast.accounts.headless.ReauthenticateView` (allauth view with `inputs.ReauthenticateInput`: password not stripped, max 1024); the explicit route precedes the allauth include in `pyracast/urls.py`.
-- `POST .../auth/2fa/reauthenticate` -> allauth MFA `ReauthenticateView` (unmodified; TOTP or recovery code).
+- `POST .../auth/2fa/reauthenticate` -> `pyracast.accounts.mfa_views.ReauthenticateView` (`inputs.SecondFactorReauthenticateInput`; TOTP or recovery code).
 - `POST .../auth/reauthenticate/code/request`, `.../code/confirm` and `.../code/resend` -> allauth `RequestReauthenticationCodeView`, `ConfirmReauthenticationCodeView`, `ResendReauthenticationCodeView` (resend: no web caller, always 409).
 - Gates that produce the 401: `pyracast.accounts.mfa_views` (`ManageTOTPView`, `ManageRecoveryCodesView`, `require_mfa_reauthentication`) and allauth flows calling `raise_if_reauthentication_required`; config in `pyracast/settings.py` (`ACCOUNT_REAUTHENTICATION_*`, `MFA_REAUTHENTICATION_REQUIRED`, `SOCIALACCOUNT_REAUTHENTICATION_REQUIRED`).
 
@@ -68,7 +68,7 @@ sequenceDiagram
 | No session | 401, `meta.is_authenticated` false; `refreshExpiredSession` reloads `/api/session/`, message `sessionExpired` |
 | No fresh proof | 401, `is_authenticated` true; `data.flows` or error code `mfa_reauthentication_required`; form opens (email change: message only). Linking with a lapsed proof: redirect with `error=reauthentication_required` before the provider, `error=permission_denied` at the callback |
 | Wrong password or code, or code requested for an address not verified for the user | 400 with `param` `password`, `code` or `email` (`unknown_email`); field error plus alert |
-| `login_failed` (password: IP and primary email; MFA: `mfa-auth-user-<pk>`) or `request_login_code` exceeded | 400 `too_many_login_attempts` |
+| `login_failed` (password: primary email; MFA: `mfa-auth-user-<pk>`), `login_failed_ip` (password and MFA failures per IP) or `request_login_code` exceeded | 400 `too_many_login_attempts` |
 | `reauthenticate` limit (10/min per user, shared by password and code request), or the same session's lock busy for 5 s | 429 (lock: `session_busy`, `Retry-After: 1`); generic request-failed message |
 | Email code expired, exhausted (3 attempts) or never requested | 409; generic request-failed message, no resend control |
 | Mail backend error on code request | Contained and logged by the account mail adapter (`account-mail-notifications`); 200 with the code state saved as on success, so the form asks for a code that did not arrive and offers no resend; the user closes and reopens the form to request a new code, which the API accepts. A failed recovery-code notification after regeneration is contained the same way; the new codes are returned |
@@ -78,8 +78,8 @@ sequenceDiagram
 ## Rules and invariants
 
 - Window: 300 s from the latest `reauthenticated` record, not extended by use. Session idle (30 min) and age (12 h) limits still apply; logout drops the records with the session.
-- Email code: 3 minutes (`LOGIN_BY_CODE_TIMEOUT` default), 3 attempts (the third wrong code ends the state), no resends (`LOGIN_BY_CODE_SUPPORTS_RESEND` unset). `AccountAdapter.send_mail` defers to `transaction.on_commit`, which runs at once because no request transaction is open; no queue.
-- Limits stack: a password check also consumes `login_failed` (10/10m per IP, 5/10m per key); MFA proof consumes `login_failed` under `mfa-auth-user-<pk>`; `2fa/reauthenticate` and `code/confirm` have no `reauthenticate` decorator.
+- Email code: 3 minutes (`ACCOUNT_LOGIN_BY_CODE_TIMEOUT`), 3 attempts (the third wrong code ends the state), no resends (`LOGIN_BY_CODE_SUPPORTS_RESEND` unset). `AccountAdapter.send_mail` defers to `transaction.on_commit`, which runs at once because no request transaction is open; no queue.
+- Limits stack: a password check also consumes `login_failed` (5/10m and 100/d per key) and keeps a `login_failed_ip` slot (10/10m per IP) when it fails; MFA proof consumes `login_failed` under `mfa-auth-user-<pk>` and keeps a `login_failed_ip` slot for a wrong code; `2fa/reauthenticate` and `code/confirm` have no `reauthenticate` decorator.
 - Lock order: requests of one session serialize on an advisory lock (`session_lock` middleware) before `mfa_views` takes the `auth_user` row lock.
 - TOTP activation never replays: after proof the form returns to enrolment and a fresh code must be entered; showing the new recovery codes then needs a separate MFA proof. Other operations get exactly one replay.
 

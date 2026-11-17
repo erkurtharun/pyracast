@@ -1,43 +1,45 @@
 # Email transport: SMTP and Gmail backends
 
-Every outgoing mail is built by a caller and handed to one Django mailer, `MAILERS["default"]`, selected by `PYRACAST_EMAIL_BACKEND` at settings import. The API process sends account mail (allauth codes, security notices) and workspace invitations synchronously after the database commit; the notifications worker sends reminders. The outcome is a transport result (accepted, known not sent, permanently rejected, uncertain) that only the reminder path classifies and persists in full; invitations store only accepted or uncertain. Nothing verifies delivery after the fact.
+Every outgoing mail is built by a caller and handed to one entry point, `pyracast.mail.send.send`, which opens the mailer `MAILERS["default"]` selected by `PYRACAST_EMAIL_BACKEND` at settings import. The API process sends account mail (allauth codes, security notices) and workspace invitations synchronously after the database commit; the notifications worker sends reminders. The outcome is typed: accepted, `NotSentError` (known not sent, retryable), `PermanentlyNotSentError`, or `DeliveryUncertainError`, each with one `MailFailure` code. Reminders persist the code; invitations store accepted, failed or uncertain. Nothing verifies delivery after the fact.
 
 ## Entry points
 
-- Settings `src/pyracast/settings.py` (`_email_backend`, `MAILERS`, `DEFAULT_FROM_EMAIL`): `smtp` (default), `gmail`, or `console` (needs `PYRACAST_DEBUG=1`, otherwise `ImproperlyConfigured` at import).
-- Backends `pyracast.smtp.EmailBackend` (Django SMTP backend with a hand-written `_send`) and `pyracast.gmail.EmailBackend` (OAuth refresh plus `users.messages.send` over httpx); error classes in `pyracast.mail_delivery`: `NotSentError` (has `code`, default `mail_not_sent`), its subclass `PermanentlyNotSentError`, and the separate `DeliveryUncertainError`.
-- Account mail: `pyracast.accounts.adapters.AccountAdapter.send_mail` (`transaction.on_commit`, then allauth `msg.send()` through Django's deprecated `get_connection`).
-- Invitation mail: `pyracast.accounts.invitations.invite_workspace_member` inner `deliver` (`on_commit`, `django.core.mail.send_mail`), reached by `POST /api/tenants/{tenant_id}/invitations/` (`WorkspaceInvitationsView.post`).
-- Reminder mail: `pyracast.notifications.runtime.deliver_notification` (actor `send_forecast_reminder`, queue `notifications`, `max_retries=0`) to `process_notification` to `pyracast.notifications.mail.send_message`.
-- Deploy check `pyracast.accounts.checks.check_authentication_mail_delivery` (`accounts.E001`), run by `pyracast check --deploy --fail-level WARNING` in `deploy/install-release.sh` and `deploy/smoke.sh`. Django's stock `sendtestemail` command is available but nothing calls or documents it; outcomes are shown in `web/src/components/workspace-members.tsx` (invitation `deliveryUncertain` hint) and on the admin Operations page (`operations_context` in `src/pyracast/admin_workspace.py`, "Email delivery" table: latest 20 reminder deliveries with status, accepted time, attempts and last error).
+- Settings `src/pyracast/settings.py` (`_email_backend`, `MAILERS`, `DEFAULT_FROM_EMAIL`): `smtp` (default), `gmail`, or `console` (needs `PYRACAST_DEBUG=1`, otherwise `ImproperlyConfigured` at import). `PYRACAST_EMAIL_SSL=1` alone selects implicit TLS; a non-integer `PYRACAST_EMAIL_PORT` is `ImproperlyConfigured`. The Gmail sender is `PYRACAST_FROM_EMAIL`.
+- Package `src/pyracast/mail/`: entry point, outcome types, wire policy, SMTP and Gmail backends.
+- Account mail: `pyracast.accounts.adapters.AccountAdapter.send_mail` (`transaction.on_commit`, then `send`; flow `account-mail-notifications`).
+- Invitation mail: `pyracast.accounts.invitations.invite_workspace_member` inner `deliver` (`on_commit`, `send`), reached by `POST /api/tenants/{tenant_id}/invitations/`.
+- Reminder mail: `pyracast.notifications.runtime.deliver_notification` (actor `send_forecast_reminder`, queue `notifications`, `max_retries=0`) to `process_notification` to `send(message, before_send=...)`.
+- Command `pyracast check_mail`: without arguments opens and closes the transport without sending; `--send-to ADDRESS` sends one reminder-shaped test mail (HTML, text and an XLSX attachment). Exit code per `MailFailure` (`docs/DEPLOYMENT.md`). `deploy/install-release.sh` runs the probe after a healthy release and prints a warning on failure.
+- Deploy check `pyracast.accounts.checks.check_authentication_mail_delivery` (`accounts.E001`), run by `check --deploy` in `deploy/install-release.sh` and `deploy/smoke.sh`. Outcomes are shown in `web/src/components/workspace-members.tsx` (invitation failed or uncertain hint) and on the admin Operations page ("Email delivery" table).
 
 ## Sequence
 
 ```mermaid
 sequenceDiagram
     participant C as Caller
-    participant M as Send path
+    participant M as send
     participant B as Backend
     participant X as SMTP or Gmail
     participant D as Database
-    C->>M: "account, invitation: msg.send or send_mail in on_commit / reminder: send_message"
+    C->>M: "send(message): account, invitation, reminder, check_mail"
     M->>B: "MAILERS default builds a new backend instance"
+    alt configuration invalid
+        M-->>C: "NotSentError mail_configuration_invalid"
+    end
     B->>X: "open: connect, STARTTLS, login if configured / OAuth token refresh"
     alt open fails
-        B-->>M: "SMTP: OSError or SMTPException / Gmail: NotSentError mail_authentication_failed"
-        M-->>C: "raise, nothing sent"
+        B-->>C: "NotSentError: credentials rejected, not sent / PermanentlyNotSent: authorization revoked"
     else reminder: before_send raises or returns False
         M->>D: "before_send (_mark_transmit): lock tenant, settings, region, delivery, recheck"
-        M-->>C: "raises: NotSentError mail_preparation_failed / False (authority, lease or deadline lost): SendCancelledError, delivery skipped or recovered, nothing sent"
+        M-->>C: "NotSentError mail_preparation_failed / SendCancelledError, nothing sent"
     else open succeeds and, for a reminder, before_send set transmit_started_at
-        B->>X: "SMTP: MAIL, every RCPT, then DATA / Gmail: one POST with raw MIME"
+        B->>X: "SMTP: EHLO, MAIL with BODY=8BITMIME if offered, every RCPT, then DATA / Gmail: one POST with raw MIME"
         alt known refusal
-            X-->>B: "SMTP 4xx, Gmail 401, 429 or quota 403 = NotSent / SMTP 5xx, other Gmail 4xx = PermanentlyNotSent"
-        else lost or unconfirmed reply
-            X--xB: "timeout, disconnect, Gmail 408 or 5xx, no message id = uncertain"
+            X-->>B: "4xx or Gmail 401, 429, quota 403 = NotSent / 5xx or other Gmail 4xx = PermanentlyNotSent"
+        else lost or unconfirmed reply after DATA began
+            X--xB: "timeout, disconnect, Gmail 408 or 5xx, no message id = DeliveryUncertain"
         end
-        B-->>M: "count or exception (reminder: send_message classifies SMTP errors)"
-        M-->>C: "return or raise"
+        B-->>C: "return or typed error"
     end
     C->>D: "reminder: status sent, retry, failed or uncertain / invitation: delivery_status"
 ```
@@ -46,43 +48,44 @@ sequenceDiagram
 
 | Table | R/W | What |
 |---|---|---|
-| `accounts_workspaceinvitation` | W | `delivery_status` set to `accepted` or `uncertain` in the `on_commit` hook (default `pending`) |
-| `notifications_notificationdelivery` | R/W | Reminder only: `recipients`, `transmit_started_at`, `status`, `last_error`, `sent_at`, `available_at`, `attempts`, lease fields (owned by `reminder-delivery`) |
+| `accounts_workspaceinvitation` | W | `delivery_status` set to `accepted`, `failed` or `uncertain` in the `on_commit` hook (default `pending`) |
+| `notifications_notificationdelivery` | R/W | Reminder only: `recipients`, `message_token` (stable `Message-ID`), `transmit_started_at`, `status`, `last_error`, `sent_at`, `available_at`, `attempts`, lease fields (owned by `reminder-delivery`) |
 | `accounts_tenant`, `notifications_notificationsettings`, `regions_region` | R (row lock) | `_mark_transmit` locks them before writing the transmit marker |
 
 ## Authorization
 
 - The transport has no caller check: it sends whatever the caller built. Authorization is the caller's: `require_workspace_admin` in `invite_workspace_member`, allauth flows for account mail, the tenant and region lock plus recipient recheck in `_mark_transmit` for reminders.
-- Gmail enforces one sender: `_send` refuses a message whose `From` differs from the configured sender and the token response must carry exactly the `gmail.send` scope. Console backend is refused unless `DEBUG` is on; the deploy check refuses non-production mail when `DEBUG` is off.
+- Gmail enforces one sender: `_send` refuses a message whose `From` differs from `DEFAULT_FROM_EMAIL` and the token response must carry exactly the `gmail.send` scope. Console backend is refused unless `DEBUG` is on.
 
 ## Failure paths
 
 | Condition | Result |
 |---|---|
-| Unknown backend name, or `console` without `PYRACAST_DEBUG=1` | `ImproperlyConfigured` at settings import, process does not start |
-| Production check: not SMTP with a host or complete Gmail OAuth with sender equal to `DEFAULT_FROM_EMAIL`, or sender without `@` or at `localhost` | `accounts.E001`, `check --deploy` fails, release stops |
-| Gmail options invalid (sender, empty credential, timeout at or below 0) or SMTP `use_tls` with `use_ssl` | Raised on first mailer construction, not at startup; reminder: outside the open guard, so delivery `uncertain` `mail_outcome_uncertain` and never resent |
-| Open fails: any `SMTPException`, `OSError` or Gmail token failure | Reminder: `NotSentError`, `mail_authentication_failed` for SMTP auth error or any Gmail open failure, else `mail_not_sent`; retried |
-| SMTP 4xx on MAIL, DATA or HELO, or RCPT refusals with at least one 4xx | `NotSentError`, retry |
-| SMTP 5xx on the same steps (all RCPT codes 5xx), or `SMTPNotSupportedError` after open | `PermanentlyNotSentError`, delivery `failed` with `mail_rejected` |
-| SMTP reply outside 400-599, timeout or disconnect during transaction | Plain exception, delivery `uncertain` with `mail_outcome_uncertain` |
-| Gmail 401 / 429 or quota 403 / connect, connect-timeout or pool-timeout error | `NotSentError` with `mail_authentication_failed` / `mail_rate_limited` / `mail_not_sent` |
-| Gmail other 4xx except 408, or a `From` other than the sender | `PermanentlyNotSentError` |
-| Gmail 408, 5xx, other non-200, read or write timeout, 200 without message id | `DeliveryUncertainError`, delivery `uncertain` |
-| Backend returns count other than 1, or message has no recipient | `NotSentError` |
-| `before_send` raises / returns False | `NotSentError` `mail_preparation_failed` / `SendCancelledError`, nothing sent |
-| Account mail raises inside `on_commit` | Caught in the deferred send: ERROR log `account_mail_failed` with template prefix, user id, error class and `NotSentError` code only; the allauth view answers as on success, no retry (`account-mail-notifications`) |
-| Invitation mail raises / returns other than 1 | Warning log with invitation id only, then `delivery_status` `uncertain` / `delivery_status` `uncertain` without a log; response still 201 |
+| Unknown backend name, `console` without `PYRACAST_DEBUG=1`, or a non-integer port | `ImproperlyConfigured` at settings import, process does not start |
+| Production check: no SMTP or Gmail backend, sender not a valid mailbox or at `localhost`, SMTP host empty or loopback, SMTP port outside 1 to 65535, SMTP without TLS or SSL, or options the backend refuses (both TLS modes, invalid Gmail sender, timeout at or below 0) | `accounts.E001`, `check --deploy` fails, release stops |
+| Backend construction fails at send time | `NotSentError` `mail_configuration_invalid`; reminder retried |
+| SMTP connect or TLS error / authentication 4xx / authentication 5xx | `NotSentError` `mail_not_sent` / `mail_not_sent` / `mail_credentials_rejected` |
+| Gmail token endpoint unreachable / `invalid_grant` / other token failure or wrong scope | `NotSentError` `mail_not_sent` / `PermanentlyNotSentError` `mail_authorization_revoked` / `NotSentError` `mail_credentials_rejected` |
+| SMTP 4xx on MAIL, any RCPT or DATA; disconnect before DATA | `NotSentError`, retry; DATA is never sent after a refused recipient |
+| SMTP 5xx on MAIL, all RCPT or DATA, invalid address or header, unsupported command | `PermanentlyNotSentError` `mail_rejected` |
+| SMTP disconnect or timeout after DATA began, or a final reply outside 400-599 | `DeliveryUncertainError` `mail_outcome_uncertain` |
+| Gmail 401 / 429 or quota 403 / other 403 / other 4xx except 408 | `mail_credentials_rejected` / `mail_rate_limited` (both retryable) / `mail_sender_forbidden` / `mail_rejected` (both permanent) |
+| Gmail connect error; 408, 5xx, read or write timeout, 200 without message id | `NotSentError`; `DeliveryUncertainError` |
+| Message without recipient, or backend count other than 1 | `NotSentError` |
+| Reminder: unclassified exception before / after the transmit marker | Retry with `mail_not_sent` / `uncertain` with `mail_outcome_uncertain`; warning `notification_send_failed` |
+| Account mail raises inside `on_commit` | ERROR log `account_mail_failed` with template, user id, error class and code only; the view answers as on success, no retry |
+| Invitation: `NotSentError` / any other exception | `delivery_status` `failed` / `uncertain` with a warning naming the invitation and code or class; response still 201 |
 
 ## Rules and invariants
 
-- `mail.mailers["default"]` (and the deprecated `get_connection`) returns a fresh backend every call, so no connection or OAuth token is shared between threads or messages. Gmail therefore refreshes a token for every mail (two HTTP calls).
+- `send` builds a fresh backend for every message, so no connection or OAuth token is shared between threads or messages; Gmail refreshes a token for every mail (two HTTP calls).
+- Wire bytes: CRLF line ends; `Content-Type` is never folded into encoded-words (RFC 2047 section 5); non-ASCII subjects use encoded-words of at most 75 characters and attachment names keep RFC 2231. SMTP sends an 8-bit body only to a server that advertises 8BITMIME and declares `BODY=8BITMIME`, else 7-bit transfer encodings. Reminders carry `Message-ID: <reminder.{message_token}@{sender domain}>`.
 - Reminder open-before-authorize: the connection is opened outside any database transaction, then `_mark_transmit` rechecks authority under locks and writes `transmit_started_at`. After that marker an interruption is `uncertain` and never resent.
-- SMTP `_send` sends DATA only if every RCPT is accepted, so a rejected recipient cannot cause a partial send; a 421 closes the connection instead of `RSET`. Reminder recipients travel as BCC: SMTP puts them in the envelope only, Gmail adds a `Bcc` header because it routes by headers.
-- Retry budget for known non-sends: at most 8 attempts, delay `60 * 2^(attempt-1)` seconds capped at 1800 plus 0-30 s jitter, and only while the retry time is before `scheduled_for + 2 hours`. The delivery health check counts recent `failed` or `uncertain` reminders and, by name, only the `mail_authentication_failed` code. Account mail leaves no record, only the `account_mail_failed` log line on failure; invitation mail stores only `delivery_status` (`accepted` or `uncertain`), which the health check does not count.
+- Reminder recipients travel as BCC: SMTP puts them in the envelope only, Gmail adds a `Bcc` header because it routes by headers.
+- Retry budget for known non-sends: at most 8 attempts, delay `60 * 2^(attempt-1)` seconds capped at 1800 plus 0-30 s jitter, and only while the retry time is before `scheduled_for + 2 hours`. The delivery health check counts recent `failed` or `uncertain` reminders and `mail_credentials_rejected` or `mail_authorization_revoked` as mail authentication failures.
 - All timeouts are 15 s (SMTP socket, httpx per operation). Account and invitation sends block the HTTP request for that long per step.
 
 ## Tests
 
-- `tests/test_smtp_mail.py` (SMTP envelope, reset, 421, silent rejection), `tests/test_gmail_mail.py` (scope, retry classes, fail_silently, signup through Gmail, deploy check), `tests/test_notification_mail.py` (`send_message` classification at the real Django backend, independent backends), `tests/test_notification_transmission.py` (authority at transmission, through the `sender` seam), `tests/test_account_security.py` (`accounts.E001`), `tests/test_environment.py` (backend selection, console and unknown backend refused), `tests/test_workspaces.py` (invitation `accepted` and `uncertain`), `tests/test_transactional_mail.py` (templates), `tests/test_account_mail_failures.py` (account mail failing inside the API request, SMTP and Gmail error classes).
-- Gaps: SMTP tests patch `smtplib.SMTP`, no real or local SMTP server; no live Gmail; no test for the default `localhost` SMTP host passing the deploy check; no test for a construction error in the reminder path; no Playwright test touches mail (browser tests mock the API).
+- `tests/test_mail_wire.py` (bytes on both transports through a loopback SMTP server and a recorded Gmail request: unfolded attachment type, encoded-word length, RFC 2231 name, 8BITMIME negotiation, `check_mail --send-to`), `tests/test_mail_outcomes.py` (outcome per error class and SMTP phase; reminder, invitation and account mail outcomes), `tests/test_mail_configuration.py` (deploy check, settings parsing, `check_mail` exit codes), `tests/test_smtp_mail.py`, `tests/test_gmail_mail.py`, `tests/test_reminder_message_id.py`, `tests/test_notification_transmission.py`, `tests/test_account_mail_failures.py`, `tests/test_environment.py`.
+- Gaps: no live Gmail or provider SMTP; no Playwright test touches mail (browser tests mock the API).

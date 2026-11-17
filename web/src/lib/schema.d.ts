@@ -941,10 +941,11 @@ export interface components {
         /**
          * @description * `pending` - Pending
          *     * `accepted` - Accepted
+         *     * `failed` - Failed
          *     * `uncertain` - Uncertain
          * @enum {string}
          */
-        DeliveryStatusEnum: "pending" | "accepted" | "uncertain";
+        DeliveryStatusEnum: "pending" | "accepted" | "failed" | "uncertain";
         EpiasConnectionOutput: {
             connected: boolean;
             provider_plant_id: number | null;
