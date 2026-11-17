@@ -1,7 +1,6 @@
 import base64
 from collections.abc import Sequence
 from contextlib import suppress
-from email import policy
 from email.utils import parseaddr
 from typing import Any
 from urllib.parse import quote
@@ -13,7 +12,12 @@ from django.core.mail import EmailMessage
 from django.core.mail.backends.base import BaseEmailBackend
 from django.core.validators import validate_email
 
-from pyracast.mail_delivery import DeliveryUncertainError, NotSentError, PermanentlyNotSentError
+from pyracast.mail_delivery import (
+    DeliveryUncertainError,
+    NotSentError,
+    PermanentlyNotSentError,
+    wire_policy,
+)
 
 SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
 TOKEN_URL = "https://oauth2.googleapis.com/token"  # noqa: S105
@@ -123,7 +127,7 @@ class EmailBackend(BaseEmailBackend):
 
     def _send(self, message: EmailMessage) -> None:
         try:
-            mime = message.message(policy=policy.SMTP)
+            mime = message.message(policy=wire_policy(eight_bit=True))
             if parseaddr(str(mime["From"]))[1].casefold() != self.sender.casefold():
                 raise ValueError
             # Gmail routes using MIME headers; Django normally omits envelope-only Bcc recipients.

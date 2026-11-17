@@ -1,9 +1,10 @@
 import smtplib
-from email import policy
 from typing import cast
 
 from django.core.mail import EmailMessage
 from django.core.mail.backends.smtp import EmailBackend as SMTPEmailBackend
+
+from pyracast.mail_delivery import wire_policy
 
 
 class EmailBackend(SMTPEmailBackend):
@@ -12,11 +13,14 @@ class EmailBackend(SMTPEmailBackend):
             return False
         sender = self.prep_address(email_message.from_email)
         recipients = [self.prep_address(address) for address in email_message.recipients()]
-        content = email_message.message(policy=policy.SMTP).as_bytes()
         connection = cast(smtplib.SMTP, self.connection)
         try:
             connection.ehlo_or_helo_if_needed()
+            eight_bit = connection.has_extn("8bitmime")
+            content = email_message.message(policy=wire_policy(eight_bit=eight_bit)).as_bytes()
             options = [f"size={len(content)}"] if connection.has_extn("size") else []
+            if eight_bit:
+                options.append("BODY=8BITMIME")
             code, response = connection.mail(sender, options)
             if code != 250:
                 self._reset_transaction(connection, code)
