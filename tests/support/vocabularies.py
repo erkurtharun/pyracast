@@ -21,8 +21,29 @@ from pyracast.change_requests.operations import submit_incident, submit_producti
 from pyracast.change_requests.serializers import IncidentRequestInput
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import create_account
+from pyracast.forecasts.models import (
+    CollectionJob,
+    DispatcherStatus,
+    ForecastSnapshot,
+    RequestAttempt,
+)
+from pyracast.incidents.api import IncidentInput
+from pyracast.incidents.models import PlantIncident
+from pyracast.incidents.operations import save_incident
+from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
+from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
+from pyracast.notifications.operations import configure_reminders
+from pyracast.notifications.serializers import ReminderInput
+from pyracast.plants.models import (
+    CalibrationRun,
+    PlantConfiguration,
+    PlantEvent,
+    PlantSubmission,
+    ProductionObservation,
+)
+from pyracast.plants.operations import ObservationInput, create_plant, import_observations
 from pyracast.plants.production_changes import ProductionChange
-from pyracast.plants.serializers import ProductionChangeRow
+from pyracast.plants.serializers import ObservationRow, PlantInput, ProductionChangeRow
 from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest
 from pyracast.regions.operations import configure_binding, transition_region
 from tests.support.change_request_boundaries import (
@@ -32,9 +53,24 @@ from tests.support.change_request_boundaries import (
     production_request,
 )
 from tests.support.domain import NOW, make_system, provider_key
+from tests.support.epias_api import archive_source
+from tests.support.incident_calibration import incident
+from tests.support.metering import connected
+from tests.support.notifications import configured, ready
+from tests.support.plant_operations import make_plant, snapshot_for
 
 OUTSIDE = "xx"
-COVERED_APPS = ("accounts", "regions", "connections", "change_requests")
+COVERED_APPS = (
+    "accounts",
+    "regions",
+    "connections",
+    "change_requests",
+    "forecasts",
+    "metering",
+    "plants",
+    "incidents",
+    "notifications",
+)
 
 type Row = Callable[[pytest.MonkeyPatch], models.Model]
 type Operation = Callable[[pytest.MonkeyPatch], Callable[[str], object]]
@@ -169,6 +205,97 @@ def _incident_change(monkeypatch: pytest.MonkeyPatch) -> models.Model:
     return IncidentChange.objects.get(request=incident_request(make_request_case(monkeypatch)))
 
 
+def _dispatcher_status(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    return DispatcherStatus.objects.create(phase="collection", attempted_at=NOW)
+
+
+def _collection_job(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    return CollectionJob.objects.create(
+        binding=make_system().binding,
+        scheduled_slot=NOW,
+        target_date=NOW.date(),
+        available_at=NOW,
+    )
+
+
+def _request_attempt(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    system = make_system()
+    return RequestAttempt.objects.create(
+        provider_account=system.account,
+        binding=system.binding,
+        utc_day=NOW.date(),
+        created_at=NOW,
+        purpose="validation",
+    )
+
+
+def _forecast_snapshot(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    return snapshot_for(make_system(), NOW.date())
+
+
+def _epias_snapshot(monkeypatch: pytest.MonkeyPatch) -> EpiasSnapshot:
+    return archive_source(connected(monkeypatch)[2], "realtime_generation", {0: "1"})
+
+
+def _epias_job(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    return _epias_snapshot(monkeypatch).job
+
+
+def _plant_submission(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    system = make_system()
+    plant = create_plant(
+        system.member, system.tenant.pk, system.region.pk, name="Plant", dc_capacity_mw=1
+    )
+    return PlantSubmission.objects.get(plant=plant)
+
+
+def _plant_configuration(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    return PlantConfiguration.objects.get(plant=make_plant(monkeypatch)[1])
+
+
+def _observation(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    system, plant = make_plant(monkeypatch)
+    return ProductionObservation.objects.create(
+        plant=plant,
+        configuration_id=plant.current_configuration_id,
+        starts_at=NOW - timedelta(hours=1),
+        ends_at=NOW,
+        energy_mwh=1,
+        source="meter",
+        recorded_by=system.member,
+    )
+
+
+def _calibration_run(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    system, plant = make_plant(monkeypatch)
+    return CalibrationRun.objects.create(
+        plant=plant,
+        configuration_id=plant.current_configuration_id,
+        binding=system.binding,
+        requested_by=system.member,
+        window_start=NOW.date() - timedelta(days=7),
+        window_end=NOW.date() - timedelta(days=1),
+        cutoff_at=NOW,
+    )
+
+
+def _plant_event(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    return PlantEvent.objects.filter(plant=make_plant(monkeypatch)[1]).earliest("pk")
+
+
+def _plant_incident(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    system, plant = make_plant(monkeypatch)
+    return incident(system, plant, NOW - timedelta(hours=2), None)
+
+
+def _reminder_schedule(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    return configured()[1]
+
+
+def _notification_delivery(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    return ready()
+
+
 STORED_VOCABULARIES = (
     StoredVocabulary(Membership, "role", _membership),
     StoredVocabulary(WorkspaceInvitation, "delivery_status", _invitation, retired=("accepted",)),
@@ -188,6 +315,26 @@ STORED_VOCABULARIES = (
     StoredVocabulary(ChangeRequest, "status", _production_request),
     StoredVocabulary(ProductionChangeItem, "action", _production_item),
     StoredVocabulary(IncidentChange, "action", _incident_change),
+    StoredVocabulary(DispatcherStatus, "phase", _dispatcher_status),
+    StoredVocabulary(CollectionJob, "endpoint", _collection_job),
+    StoredVocabulary(CollectionJob, "status", _collection_job),
+    StoredVocabulary(RequestAttempt, "purpose", _request_attempt, retired=("operator",)),
+    StoredVocabulary(RequestAttempt, "outcome", _request_attempt),
+    StoredVocabulary(ForecastSnapshot, "source_kind", _forecast_snapshot),
+    StoredVocabulary(EpiasCollectionJob, "source_kind", _epias_job),
+    StoredVocabulary(EpiasCollectionJob, "status", _epias_job, retired=("retry",)),
+    StoredVocabulary(EpiasSnapshot, "source_kind", _epias_snapshot),
+    StoredVocabulary(PlantSubmission, "measurement_basis", _plant_submission),
+    StoredVocabulary(PlantSubmission, "mounting_type", _plant_submission),
+    StoredVocabulary(PlantConfiguration, "measurement_basis", _plant_configuration),
+    StoredVocabulary(PlantConfiguration, "mounting_type", _plant_configuration),
+    StoredVocabulary(ProductionObservation, "quality", _observation),
+    StoredVocabulary(CalibrationRun, "status", _calibration_run),
+    StoredVocabulary(PlantEvent, "action", _plant_event),
+    StoredVocabulary(PlantIncident, "kind", _plant_incident),
+    StoredVocabulary(ReminderSchedule, "language", _reminder_schedule),
+    StoredVocabulary(NotificationDelivery, "status", _notification_delivery),
+    StoredVocabulary(NotificationDelivery, "language", _notification_delivery),
 )
 
 
@@ -249,6 +396,70 @@ def _submit_production(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], objec
     )
 
 
+def _create_plant(field: str) -> Operation:
+    def operation(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
+        system = make_system()
+        return lambda value: create_plant(
+            system.member,
+            system.tenant.pk,
+            system.region.pk,
+            name="Plant",
+            dc_capacity_mw=1,
+            **{field: value},
+        )
+
+    return operation
+
+
+def _import_observation(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
+    system, plant = make_plant(monkeypatch)
+    configuration = plant.current_configuration_id
+    assert configuration is not None
+    return lambda quality: import_observations(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        configuration_id=configuration,
+        unit="MWh",
+        observations=[ObservationInput(NOW - timedelta(hours=1), NOW, 1, quality, "meter")],
+    )
+
+
+def _save_incident(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
+    system, plant = make_plant(monkeypatch)
+    return lambda kind: save_incident(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        **{**incident_values(), "kind": kind},
+    )
+
+
+def _configure_reminders(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
+    system = make_system(approved=True)
+    return lambda language: configure_reminders(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        enabled=True,
+        recipients=[],
+        times=["10:00"],
+        language=language,
+        now=NOW,
+    )
+
+
+PLANT_DATA: dict[str, object] = {"name": "Plant", "dc_capacity_mw": 1}
+OBSERVATION_DATA: dict[str, object] = {
+    "starts_at": "2026-11-09T12:00:00Z",
+    "ends_at": "2026-11-09T13:00:00Z",
+    "energy": 1,
+    "quality": "valid",
+    "source": "meter",
+}
+
 INPUT_VOCABULARIES = (
     InputVocabulary(
         "provider",
@@ -298,5 +509,32 @@ INPUT_VOCABULARIES = (
         },
         "action",
         _submit_production,
+    ),
+    InputVocabulary(
+        "measurement_basis",
+        PlantInput,
+        PLANT_DATA,
+        "measurement_basis",
+        _create_plant("measurement_basis"),
+    ),
+    InputVocabulary(
+        "mounting_type", PlantInput, PLANT_DATA, "mounting_type", _create_plant("mounting_type")
+    ),
+    InputVocabulary(
+        "observation_quality", ObservationRow, OBSERVATION_DATA, "quality", _import_observation
+    ),
+    InputVocabulary(
+        "incident_kind",
+        IncidentInput,
+        {"kind": "inverter", "title": "Inverter outage", "starts_at": "2026-11-09T11:00:00Z"},
+        "kind",
+        _save_incident,
+    ),
+    InputVocabulary(
+        "reminder_language",
+        ReminderInput,
+        {"enabled": True, "language": "en", "recipients": [], "times": ["10:00"]},
+        "language",
+        _configure_reminders,
     ),
 )

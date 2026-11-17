@@ -24,7 +24,9 @@ from tests.support.vocabularies import (
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
-OPENAPI = Path(__file__).resolve().parents[1] / "web" / "openapi.json"
+WEB = Path(__file__).resolve().parents[1] / "web"
+OPENAPI = WEB / "openapi.json"
+TYPESCRIPT = WEB / "src" / "lib" / "schema.d.ts"
 
 
 def _stored(vocabulary: StoredVocabulary) -> object:
@@ -87,8 +89,11 @@ def test_stored_vocabulary_is_exported_by_name_to_the_api_schema(
     ]
     assert len(exported) == 1
     components = json.loads(OPENAPI.read_text(encoding="utf-8"))["components"]["schemas"]
+    values = [value for value, _ in vocabulary.choices]
     if exported[0] in components:
-        assert components[exported[0]]["enum"] == [value for value, _ in vocabulary.choices]
+        assert components[exported[0]]["enum"] == values
+        union = " | ".join(json.dumps(value) for value in values)
+        assert f" {exported[0]}: {union};" in " ".join(TYPESCRIPT.read_text("utf-8").split())
 
 
 @pytest.mark.parametrize(("vocabulary", "value"), _stored_values())
