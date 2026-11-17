@@ -19,6 +19,7 @@ from pyracast.forecasts.jobs import binding_is_current
 from pyracast.plants.availability import interval_is_covered, reference_intervals
 from pyracast.plants.measurement_policy import MEASUREMENT_POLICY
 from pyracast.plants.models import (
+    CONFIGURATION_PARAMETERS,
     CalibrationActivation,
     CalibrationRun,
     Plant,
@@ -113,17 +114,6 @@ def _validate_configuration(
             )
     if mounting_type != "fixed" and (surface_tilt is not None or surface_azimuth is not None):
         raise ValidationError(gettext("Only fixed mounting permits surface angles."))
-
-
-CONFIGURATION_PARAMETERS = (
-    "dc_capacity_mw",
-    "inverter_capacity_mw",
-    "export_limit_mw",
-    "measurement_basis",
-    "mounting_type",
-    "surface_tilt",
-    "surface_azimuth",
-)
 
 
 def _save_configuration(actor: User, plant: Plant, values: dict[str, object]) -> None:
@@ -300,10 +290,12 @@ def _save_plant_parameters(
         "surface_azimuth": surface_azimuth,
     }
     if region.status == "pending" and plant.current_configuration_id is None:
+        _rename(actor, plant, region, name)
+        if PlantSubmission.objects.filter(plant=plant, **parameters).exists():
+            return
         PlantSubmission.objects.update_or_create(
             plant=plant, defaults={**parameters, "submitted_by": actor}
         )
-        _rename(actor, plant, region, name)
         PlantEvent.objects.create(plant=plant, actor=actor, action="submission_saved")
         return
     values = {"binding": _binding(region), **parameters}

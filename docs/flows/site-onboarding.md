@@ -77,7 +77,7 @@ sequenceDiagram
 - Lock order: tenant row, then (new) region insert, then tenant again (already held) and region row `FOR UPDATE`, then plant insert. The tenant lock serializes concurrent submits; the unique indexes are the backstop (an `IntegrityError` is not mapped and would be a 500).
 - Location identity is the tenant plus latitude and longitude rounded half away from zero to six decimals, ignoring trashed regions. Stored coordinates are the rounded values.
 - `_save_plant_parameters` decides the shape: a pending region with a plant that has no configuration stores a `PlantSubmission` and no configuration. Any other region must be approved with a current binding and gets configuration revision 1 at once, with no plant-approval step.
-- Through `sites/` one `name` names both region and plant; through the scoped endpoint the plant takes the form's name. Later plant edits do not rename the region.
+- Through `sites/` one `name` names both region and plant; through the scoped endpoint the plant takes the form's name. A later plant rename also renames the region and records `plant_renamed` and `region_renamed`; a save that changes no submitted value keeps the submission, its `submitted_by` and writes no `submission_saved`.
 - Plant fields are validated after the region insert, inside the transaction, so a bad plant never leaves a region.
 - No idempotency key: a retried POST after a lost response fails with the duplicate-location error instead of duplicating.
 - The wizard keeps every step mounted (hidden) so one `FormData` spans all steps. It is read before the fieldset is disabled, because disabled controls drop out of `FormData`.

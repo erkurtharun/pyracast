@@ -550,7 +550,24 @@ def test_binding_replacement_rebases_pending_location_request() -> None:
         system.region.pk,
         2,
     )
+    from django.utils import translation
+
+    from pyracast.admin_workspace import recent_activity_context
+
+    with translation.override("tr"):
+        labels = [row["action_label"] for row in recent_activity_context(system.region.pk)]
+    assert any(label.startswith("Konum değişikliği talebi yeni revizyona") for label in labels)
     assert _pending_location_request(system).pk == change.pk
+    with pytest.raises(ValidationError, match="location_change_already_pending"):
+        request_location_change(
+            system.member,
+            system.region.pk,
+            system.tenant.pk,
+            expected_revision=system.region.revision,
+            latitude=42,
+            longitude=31,
+            timezone="UTC",
+        )
     assert review_location_change(system.admin, change.pk, approve=True).status == "approved"
     system.region.refresh_from_db()
     assert (system.region.latitude, system.region.revision) == (41, 3)

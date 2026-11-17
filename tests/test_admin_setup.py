@@ -449,6 +449,7 @@ def approved_admin_system() -> tuple[System, list[int]]:
     system.binding.settings_verification_reference = "Verified synthetic site settings"
     system.binding.save(update_fields=("installation_date", "settings_verification_reference"))
     create_plant(system.member, system.tenant.pk, system.region.pk, name="Plant", dc_capacity_mw=1)
+    Plant.objects.update(automatic_calibration_enabled=True)
     return system, list(PlantConfiguration.objects.order_by("pk").values_list("pk", flat=True))
 
 
@@ -474,7 +475,11 @@ def assert_setup_kept(system: System, configurations: list[int]) -> None:
         list(PlantConfiguration.objects.order_by("pk").values_list("pk", flat=True))
         == configurations
     )
-    assert Plant.objects.get().current_configuration_id == configurations[-1]
+    plant = Plant.objects.get()
+    assert (plant.current_configuration_id, plant.automatic_calibration_enabled) == (
+        configurations[-1],
+        True,
+    )
     assert not AuditEvent.objects.filter(action="binding_configured", revision=2).exists()
 
 

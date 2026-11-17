@@ -23,6 +23,7 @@ from pyracast.plants.models import (
     Plant,
     PlantConfiguration,
     PlantEvent,
+    PlantSubmission,
     ProductionObservation,
 )
 from pyracast.plants.numerics import POLICY_VERSION
@@ -858,3 +859,74 @@ def test_rename_to_the_region_name_leaves_the_region_unchanged(
     assert renamed.name == "Site"
     assert PlantEvent.objects.get(action="plant_renamed").details == {"old": "Plant", "new": "Site"}
     assert not AuditEvent.objects.filter(action="region_renamed").exists()
+
+
+SUBMISSION_FIELDS_OUTSIDE_SAVE = {"id", "plant", "submitted_by", "created_at"}
+
+
+def pending_submission(system: System) -> tuple[Plant, dict[str, Any]]:
+    submission: dict[str, Any] = {
+        "name": "Plant",
+        "dc_capacity_mw": 130,
+        "export_limit_mw": 100,
+        "mounting_type": "fixed",
+    }
+    plant = create_plant(system.member, system.tenant.pk, system.region.pk, **submission)
+    assert plant.current_configuration_id is None
+    return plant, submission
+
+
+def second_workspace_admin(system: System) -> User:
+    user = User.objects.create(username="second")
+    Membership.objects.filter(tenant=system.tenant, role=Membership.Role.ADMIN).update(user=user)
+    return user
+
+
+def test_identical_pending_save_keeps_submission_attribution_and_events() -> None:
+    system = make_system()
+    plant, submission = pending_submission(system)
+    other = second_workspace_admin(system)
+    events = PlantEvent.objects.count()
+    revise_plant(other, system.tenant.pk, system.region.pk, plant.pk, **submission)
+    saved = PlantSubmission.objects.get(plant=plant)
+    assert saved.submitted_by_id == system.member.pk
+    assert PlantEvent.objects.count() == events
+
+
+def test_rename_only_pending_save_renames_plant_and_region_without_resubmitting() -> None:
+    system = make_system()
+    plant, submission = pending_submission(system)
+    other = second_workspace_admin(system)
+    revise_plant(
+        other, system.tenant.pk, system.region.pk, plant.pk, **{**submission, "name": " New "}
+    )
+    plant.refresh_from_db()
+    system.region.refresh_from_db()
+    assert (plant.name, system.region.name) == ("New", "New")
+    assert PlantSubmission.objects.get(plant=plant).submitted_by_id == system.member.pk
+    assert not PlantEvent.objects.filter(action="submission_saved", actor=other).exists()
+    event = PlantEvent.objects.get(action="plant_renamed")
+    assert (event.actor_id, event.details) == (other.pk, {"old": "Plant", "new": "New"})
+    assert AuditEvent.objects.get(action="region_renamed").actor_id == other.pk
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        field.name
+        for field in PlantSubmission._meta.concrete_fields
+        if field.name not in SUBMISSION_FIELDS_OUTSIDE_SAVE
+    ],
+)
+def test_a_change_of_any_submitted_field_resubmits(field: str) -> None:
+    system = make_system()
+    plant, submission = pending_submission(system)
+    other = second_workspace_admin(system)
+    submission.update(CONFIGURATION_FIELD_CHANGES[field](system, plant))
+    revise_plant(other, system.tenant.pk, system.region.pk, plant.pk, **submission)
+    saved = PlantSubmission.objects.get(plant=plant)
+    assert saved.submitted_by_id == other.pk
+    assert PlantEvent.objects.filter(action="submission_saved", actor=other).count() == 1
+    for name, value in submission.items():
+        if name != "name":
+            assert getattr(saved, name) == value

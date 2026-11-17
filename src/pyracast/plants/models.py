@@ -16,6 +16,15 @@ OBSERVATION_QUALITIES = (
     ("curtailed", "Curtailed"),
     ("invalid", "Invalid"),
 )
+CONFIGURATION_PARAMETERS = (
+    "dc_capacity_mw",
+    "inverter_capacity_mw",
+    "export_limit_mw",
+    "measurement_basis",
+    "mounting_type",
+    "surface_tilt",
+    "surface_azimuth",
+)
 
 
 class TsTzRange(models.Func):
