@@ -242,6 +242,7 @@ def test_database_rejects_calibration_from_another_configuration(
                     raw_payload={},
                     normalized_intervals=[],
                     collected_at=NOW,
+                    source_kind="forecast",
                 )
                 PlantForecast.objects.create(
                     configuration=first,

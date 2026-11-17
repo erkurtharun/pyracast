@@ -128,7 +128,12 @@ def test_database_rejects_invalid_values_and_duplicate_baseline_forecast() -> No
         )
     job = CollectionJob.objects.get()
     snapshot = ForecastSnapshot.objects.create(
-        job=job, binding=job.binding, raw_payload={}, normalized_intervals=[], collected_at=NOW
+        job=job,
+        binding=job.binding,
+        raw_payload={},
+        normalized_intervals=[],
+        collected_at=NOW,
+        source_kind="forecast",
     )
     forecast: dict[str, Any] = dict(
         configuration=config,

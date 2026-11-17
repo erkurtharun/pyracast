@@ -21,6 +21,7 @@ from pyracast.notifications.mail import NotSentError
 from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.scheduler import PREPARATION_GRACE, enqueue_due
+from pyracast.notifications.sources import eligible_saved_forecasts
 from pyracast.notifications.views import reminder_schedule_payload
 from pyracast.regions.models import Region
 from tests.test_domain import NOW, System
@@ -395,6 +396,7 @@ def test_candidate_loading_excludes_unrelated_history_and_defers_provider_json(
                 binding=system.binding,
                 job=job,
                 collected_at=job.scheduled_slot,
+                available_at=job.scheduled_slot,
                 source_kind="forecast",
                 raw_payload={"unused": "history"},
                 normalized_intervals=[],
@@ -551,3 +553,13 @@ def test_legacy_history_with_invalid_preparation_metadata_uses_sent_time(
     assert isinstance(payload, list)
     assert payload[0]["source_age_seconds"] == (SLOT - NOW).total_seconds()
     assert payload[0]["stale"] is False
+
+
+def test_a_saved_forecast_is_eligible_only_once_its_snapshot_is_available() -> None:
+    system, _ = configured()
+    snapshot = saved(system)
+    delivery = NotificationDelivery.objects.get(pk=enqueue_due(SLOT)[0])
+    ForecastSnapshot.objects.filter(pk=snapshot.pk).update(available_at=NOW)
+    assert list(eligible_saved_forecasts(delivery, SLOT)) == [snapshot]
+    ForecastSnapshot.objects.filter(pk=snapshot.pk).update(available_at=None)
+    assert not eligible_saved_forecasts(delivery, SLOT).exists()

@@ -24,6 +24,7 @@ def test_snapshot_and_normalization_share_the_target_job_binding() -> None:
         raw_payload={},
         normalized_intervals=[],
         collected_at=NOW,
+        source_kind="forecast",
     )
     target = SiteBinding.objects.get(pk=system.binding.pk)
     target.pk = None
@@ -44,9 +45,15 @@ def test_snapshot_and_normalization_share_the_target_job_binding() -> None:
             raw_payload={},
             normalized_intervals=[],
             collected_at=NOW,
+            source_kind="forecast",
         )
     snapshot = ForecastSnapshot.objects.create(
-        job=job, binding=target, raw_payload={}, normalized_intervals=[], collected_at=NOW
+        job=job,
+        binding=target,
+        raw_payload={},
+        normalized_intervals=[],
+        collected_at=NOW,
+        source_kind="forecast",
     )
     values = dict(
         source_snapshot=source,
@@ -76,7 +83,12 @@ def test_snapshot_and_normalization_share_the_target_job_binding() -> None:
         available_at=NOW,
     )
     other_snapshot = ForecastSnapshot.objects.create(
-        job=other_job, binding=target, raw_payload={}, normalized_intervals=[], collected_at=NOW
+        job=other_job,
+        binding=target,
+        raw_payload={},
+        normalized_intervals=[],
+        collected_at=NOW,
+        source_kind="forecast",
     )
     values["snapshot"] = other_snapshot
     with (
@@ -109,6 +121,7 @@ def test_normalization_preserves_finite_positive_capacity_provenance(
         raw_payload={},
         normalized_intervals=[],
         collected_at=NOW,
+        source_kind="forecast",
     )
     job = CollectionJob.objects.create(
         binding=system.binding,
@@ -118,7 +131,12 @@ def test_normalization_preserves_finite_positive_capacity_provenance(
         available_at=NOW,
     )
     snapshot = ForecastSnapshot.objects.create(
-        job=job, binding=system.binding, raw_payload={}, normalized_intervals=[], collected_at=NOW
+        job=job,
+        binding=system.binding,
+        raw_payload={},
+        normalized_intervals=[],
+        collected_at=NOW,
+        source_kind="forecast",
     )
     values: dict[str, Any] = dict(
         source_snapshot=source,

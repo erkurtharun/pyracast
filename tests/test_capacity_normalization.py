@@ -205,6 +205,16 @@ def test_regional_composition_preserves_primary_normalization_and_each_source_id
         assert normalization is None
 
 
+def test_scale_change_copies_only_snapshots_that_were_made_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, target = scaled_system(monkeypatch)
+    original = publish_snapshot(snapshot_for(system, date(2026, 11, 9), power_kw=0.6))
+    ForecastSnapshot.objects.filter(pk=original.pk).update(available_at=None)
+    assert normalize(system, target) == ()
+    assert not ReferenceCapacityNormalization.objects.exists()
+
+
 @pytest.mark.parametrize("reference", ["", " " * 3, "x" * 1001])
 def test_scale_change_requires_an_explicit_bounded_authorization(
     monkeypatch: pytest.MonkeyPatch, reference: str

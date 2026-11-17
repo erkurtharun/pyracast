@@ -128,6 +128,24 @@ def test_triggers_and_their_functions_equal_the_declared_schema_objects() -> Non
     assert functions == {item[3] for item in declared}
 
 
+def table_columns(table: str) -> set[str]:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema = current_schema() AND table_name = %s
+            """,
+            (table,),
+        )
+        return {name for (name,) in cursor.fetchall()}
+
+
+def test_forecasts_are_archived_only_as_issuances_for_horizontal_bindings() -> None:
+    assert table_columns("plants_forecastissuance")
+    assert not table_columns("plants_plantforecast")
+    assert "tilt_degrees" not in table_columns("connections_sitebinding")
+
+
 def test_extensions_equal_the_declared_schema_objects() -> None:
     with connection.cursor() as cursor:
         cursor.execute("SELECT extname FROM pg_extension WHERE extname <> 'plpgsql'")
