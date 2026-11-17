@@ -2,7 +2,6 @@ from typing import cast
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import transaction
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
 from rest_framework import serializers
@@ -11,6 +10,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.invitations import (
     InvitationRateLimitError,
     accept_workspace_invitation,
@@ -18,7 +18,7 @@ from pyracast.accounts.invitations import (
     revoke_workspace_invitation,
 )
 from pyracast.accounts.models import Membership, WorkspaceInvitation
-from pyracast.accounts.operations import remove_workspace_member, require_workspace_admin
+from pyracast.accounts.operations import remove_workspace_member
 from pyracast.api.serializers import InputSerializer
 
 
@@ -58,9 +58,8 @@ class InvitationAcceptanceOutput(serializers.Serializer[dict[str, object]]):
 
 class WorkspaceMembersView(APIView):
     @extend_schema(responses=WorkspaceMembersOutput)
-    @transaction.atomic
     def get(self, request: Request, tenant_id: int) -> Response:
-        require_workspace_admin(cast(User, request.user), tenant_id)
+        tenant_membership(cast(User, request.user), tenant_id, role=Membership.Role.ADMIN)
         memberships = (
             Membership.objects.filter(tenant_id=tenant_id, user__is_active=True)
             .select_related("user")
@@ -88,9 +87,8 @@ class WorkspaceMemberView(APIView):
 
 class WorkspaceInvitationsView(APIView):
     @extend_schema(responses=WorkspaceInvitationsOutput)
-    @transaction.atomic
     def get(self, request: Request, tenant_id: int) -> Response:
-        require_workspace_admin(cast(User, request.user), tenant_id)
+        tenant_membership(cast(User, request.user), tenant_id, role=Membership.Role.ADMIN)
         invitations = WorkspaceInvitation.objects.filter(
             tenant_id=tenant_id, accepted_at__isnull=True, expires_at__gt=timezone.now()
         ).order_by("id")

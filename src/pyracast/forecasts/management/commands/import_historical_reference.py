@@ -22,9 +22,7 @@ class Command(BaseCommand):
 
     def handle(self, *args: Any, **options: Any) -> str:
         try:
-            actor = User.objects.get(
-                username=options["username"], is_active=True, is_superuser=True
-            )
+            actor = User.objects.get(username=options["username"])
             declaration, _ = load_json_file(options["manifest"])
             record = import_historical_reference(
                 actor,

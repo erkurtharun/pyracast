@@ -1,4 +1,5 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -18,21 +19,22 @@ pytestmark = pytest.mark.django_db(transaction=True)
 
 
 @pytest.mark.parametrize("missing", [False, True])
-def test_archived_metering_fixture_exposes_matching_completion(missing: bool) -> None:
-    client, path, connection = connected_source()
+def test_archived_metering_fixture_records_completion_from_its_readings(missing: bool) -> None:
+    connection = connected_source()
     values: dict[int, str | None] = dict.fromkeys(range(24), "1")
     if missing:
         values[12] = None
+
     snapshot = archive_source(connection, "realtime_generation", values)
 
-    response = client.get(path, {"date": "2020-01-01", "data_source": "realtime_generation"})
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["complete"] is (not missing)
-    assert data["snapshot"]["complete"] is (not missing)
     snapshot.refresh_from_db()
-    assert snapshot.complete is (not missing)
+    midnight = datetime(2020, 1, 1, tzinfo=ZoneInfo("Europe/Istanbul"))
+    hours = {datetime.fromisoformat(row["period_start"]) for row in snapshot.readings}
+    absent = [row for row in snapshot.readings if row["total_mwh"] is None]
+    assert hours == {midnight + timedelta(hours=hour) for hour in range(24)}
+    assert len(snapshot.readings) == 24
+    assert len(absent) == int(missing)
+    assert snapshot.complete is (not absent)
 
 
 @pytest.mark.parametrize(

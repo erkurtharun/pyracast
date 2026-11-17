@@ -38,11 +38,8 @@ class CollectionJobOutput(serializers.Serializer[dict[str, object]]):
 class CollectionScheduleOutput(CollectionScheduleInput):
     timezone = serializers.CharField()
     effective_from = serializers.DateTimeField()
-    daily_request_limit = serializers.IntegerField()
-    used_today = serializers.IntegerField()
-    remaining_today = serializers.IntegerField()
-    quota_utc_day = serializers.DateField()
-    requests_by_outcome = serializers.DictField(child=serializers.IntegerField())
+    last_success_at = serializers.DateTimeField(allow_null=True)
+    next_collection_at = serializers.DateTimeField(allow_null=True)
     recent_jobs = CollectionJobOutput(many=True)
     history_requests_reserved_per_day = serializers.IntegerField()
     history_local_time = serializers.CharField()

@@ -89,7 +89,7 @@ def test_too_many_form_fields_answer_bad_request(
 ) -> None:
     settings.DATA_UPLOAD_MAX_NUMBER_FIELDS = 3
     response = Client(raise_request_exception=False).post(
-        "/api/session/language/", {f"field{index}": "x" for index in range(4)}
+        "/api/auth/browser/v1/auth/provider/redirect", {f"field{index}": "x" for index in range(4)}
     )
     assert_private_json(response, 400, {"code": "bad_request"})
     assert api_errors(pyracast_logs) == []

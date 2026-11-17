@@ -17,7 +17,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from pyracast.accounts.operations import require_admin
+from pyracast.accounts.authorization import require_platform_admin
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.historical_import import (
     _archive_historical_reference,
@@ -411,7 +411,7 @@ def import_historical_upload(
     source_reference: str = "Administrator-confirmed historical export for the selected binding",
     expected_configuration_ids: tuple[tuple[int, int | None], ...] | None = None,
 ) -> HistoricalReferenceImport:
-    require_admin(actor)
+    require_platform_admin(actor)
     if (
         settings_confirmed is not True
         or not source_reference.strip()
