@@ -19,7 +19,7 @@ from django.utils.translation import gettext_lazy
 
 from pyracast.accounts.language import user_language
 from pyracast.accounts.security import normalize_client_ip
-from pyracast.mail_delivery import NotSentError
+from pyracast.mail.errors import NotSentError
 
 logger = logging.getLogger(__name__)
 

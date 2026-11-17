@@ -9,8 +9,8 @@ from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.core.mail.backends.base import BaseEmailBackend
 from django.db import OperationalError, connection
 from django.test import override_settings
-from pyracast.mail.errors import NotSentError
 
+from pyracast.mail.errors import MailFailure, NotSentError
 from pyracast.notifications import jobs
 from pyracast.notifications.jobs import LEASE_DURATION, process_notification
 from pyracast.notifications.mail import build_message
@@ -224,12 +224,12 @@ def test_mail_authentication_failure_remains_retryable_and_visible() -> None:
     delivery = ready()
 
     def fail(message: EmailMultiAlternatives) -> None:
-        raise NotSentError("Authentication failed.", code="mail_authentication_failed")
+        raise NotSentError("Authentication failed.", code=MailFailure.CREDENTIALS_REJECTED)
 
     assert not process_notification(delivery.pk, SLOT, sender=fail)
     delivery.refresh_from_db()
     assert delivery.status == "retry"
-    assert delivery.last_error == "mail_authentication_failed"
+    assert delivery.last_error == "mail_credentials_rejected"
 
 
 def test_authority_lock_wait_cannot_move_transmission_past_its_deadline(

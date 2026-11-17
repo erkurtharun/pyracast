@@ -20,7 +20,8 @@ def test_message_id_is_unique_per_delivery_and_stable_across_attempts() -> None:
         available_at=delivery.available_at,
         grouped=False,
         recipients=delivery.recipients,
-        prepared_message=delivery.prepared_message,
+        binding=delivery.binding,
+        snapshot=delivery.snapshot,
     )
 
     first = build_message(delivery).extra_headers["Message-ID"]

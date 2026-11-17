@@ -1009,10 +1009,11 @@ export interface components {
         /**
          * @description * `pending` - Pending
          *     * `accepted` - Accepted
+         *     * `failed` - Failed
          *     * `uncertain` - Uncertain
          * @enum {string}
          */
-        DeliveryStatusEnum: "pending" | "accepted" | "uncertain";
+        DeliveryStatusEnum: "pending" | "accepted" | "failed" | "uncertain";
         EpiasConnectionInput: {
             provider_plant_id: number;
             expected_eic: string;

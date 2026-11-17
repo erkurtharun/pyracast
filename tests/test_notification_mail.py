@@ -8,11 +8,11 @@ import pytest
 from django.core import mail
 from django.core.mail import EmailMultiAlternatives
 from django.test import override_settings
+
+from pyracast import settings as project_settings
 from pyracast.mail.errors import NotSentError, SendCancelledError
 from pyracast.mail.send import send
 from pyracast.mail.smtp import EmailBackend
-
-from pyracast import settings as project_settings
 from pyracast.notifications.mail import build_message
 from pyracast.notifications.models import NotificationDelivery
 

@@ -10,7 +10,8 @@ from django.template.loader import render_to_string
 from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
-from pyracast.notifications.mail import XLSX_MIME, send_message
+from pyracast.mail.send import send
+from pyracast.notifications.mail import XLSX_MIME
 
 
 def sample_workbook() -> bytes:
@@ -45,5 +46,5 @@ class Command(BaseCommand):
             validate_email(recipient)
         except ValidationError:
             raise CommandError("--send-to must be a valid email address.") from None
-        send_message(sample_message(recipient))
+        send(sample_message(recipient))
         self.stdout.write("The mail service accepted the test mail.")

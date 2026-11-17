@@ -275,9 +275,9 @@ if _email_backend == "console" and not DEBUG:
 DEFAULT_FROM_EMAIL = os.environ.get("PYRACAST_FROM_EMAIL", "Pyracast <noreply@localhost>")
 MAILERS = {
     "default": {
-        "BACKEND": "pyracast.gmail.EmailBackend"
+        "BACKEND": "pyracast.mail.gmail.EmailBackend"
         if _email_backend == "gmail"
-        else "pyracast.smtp.EmailBackend"
+        else "pyracast.mail.smtp.EmailBackend"
         if _email_backend == "smtp"
         else "django.core.mail.backends.console.EmailBackend",
         "OPTIONS": {
