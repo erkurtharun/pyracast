@@ -25,9 +25,9 @@ from django.utils.html import escape
 from pyracast.accounts.account_mail import device_label
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.models import UserLanguagePreference
-from tests.test_auth_lifecycle import PASSWORD, member, submit, totp_code
-from tests.test_company_registration import signup
-from tests.test_social_accounts import CALLBACK, PROVIDERS, begin, complete
+from tests.support.auth_lifecycle import PASSWORD, member, submit, totp_code
+from tests.support.company_registration import signup
+from tests.support.social_accounts import CALLBACK, PROVIDERS, begin, complete
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 AUTH = "/api/auth/browser/v1/"

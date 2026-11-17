@@ -6,7 +6,7 @@ from django.db.migrations.executor import MigrationExecutor
 
 from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.models import NotificationDelivery
-from tests.test_notifications import SLOT, ready
+from tests.support.notifications import SLOT, ready
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

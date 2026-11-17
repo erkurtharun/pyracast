@@ -10,7 +10,7 @@ import pytest
 
 from pyracast.epias import AUTH_URL, EpiasClient
 from pyracast.metering.client import get_epias_client
-from tests.test_epias import PASSWORD, PLANT, USERNAME
+from tests.support.epias import PASSWORD, PLANT, USERNAME
 
 
 def test_sanitized_live_capture_retains_all_provider_hours_and_energy() -> None:

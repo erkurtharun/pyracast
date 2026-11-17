@@ -10,8 +10,8 @@ from pyracast.metering.jobs import EpiasLease, claim_epias_job, pending_epias_id
 from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
 from pyracast.metering.scheduler import enqueue_due_epias_jobs
 from pyracast.plants.models import CalibrationRun
-from tests.test_metering import NEXT_NIGHT, connect, connected, day_data
-from tests.test_metering_settlement import SettlementClient
+from tests.support.metering import NEXT_NIGHT, connect, connected, day_data
+from tests.support.metering_settlement import SettlementClient
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

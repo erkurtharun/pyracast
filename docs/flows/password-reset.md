@@ -54,13 +54,13 @@ sequenceDiagram
 | `account_emailaddress` | R/W | `email_identity` lookup; a confirmed code marks an unverified matching address verified and primary. |
 | `auth_user` | R/W | Resume reads the user; success writes the hash with a full `save`; verifying an address also rewrites `email`. |
 | `usersessions_usersession` | R/W | Rows of the user's other sessions are ended only when the reset verified an address (`email_changed` signal). |
-| `pyracast_authentication_cache` | R/W | Rate-limit histories via the autocommit `auth_cache` connection; success clears `login_failed` counters for all the user's addresses. |
+| `pyracast_authentication_cache` | R/W | Rate-limit histories via the autocommit `auth_cache` connection; success clears the per-address `login_failed` counters (10 minute and daily) for all the user's addresses; the per-IP `login_failed_ip` count is kept. |
 
 ## Authorization
 
 - No authentication. CSRF is enforced on both POSTs by `CsrfViewMiddleware` (token from `/api/session/`). The code exists only in the requesting session, so another browser gets 409.
 - Eligibility is decided at request time in `RequestPasswordResetInput.clean_email` via `pyracast.accounts.authentication.email_identity(for_recovery=True)`: either exactly one account owns the verified address and it is active, or none does and the lowest-id active account whose only address is this primary is chosen.
-- `ACCOUNT_RATE_LIMITS` `reset_password` (after input validation) and `reset_password_from_key` (before anything else), consumed inside the allauth views. `SessionRequestSerialization` holds a per-session advisory lock whenever a session cookie exists, so parallel attempts cannot lose counts. No MFA at reset; TOTP is still required at the next login, and staff without TOTP cannot sign in (`AccountAdapter.authenticate`).
+- `ACCOUNT_RATE_LIMITS` `reset_password` (after input validation) and `reset_password_from_key` (before anything else), consumed inside the allauth views. `SessionRequestSerialization` holds a per-session advisory lock whenever a session cookie exists, so parallel attempts cannot lose counts. No MFA at reset; TOTP is still required at the next login, and staff without TOTP cannot sign in (`AuthenticationBackend`).
 
 ## Failure paths
 

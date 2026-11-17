@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from pyracast.epias import AUTH_URL, BASE_URL, EpiasClient, EpiasError, EpiasPlant
-from tests.test_epias import PASSWORD, PLANT, TICKET, USERNAME
+from tests.support.epias import PASSWORD, PLANT, TICKET, USERNAME
 
 SETTLEMENT = EpiasPlant(5011621, PLANT.eic, PLANT.name, PLANT.short_name)
 DAY = date(2026, 9, 1)

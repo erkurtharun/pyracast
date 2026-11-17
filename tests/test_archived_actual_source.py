@@ -15,9 +15,9 @@ from pyracast.forecasts.actuals import (
 )
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
-from tests.test_archived_actual_composition_api import DAY, acquired_actuals
-from tests.test_domain import NOW, System, make_system
-from tests.test_historical_reference_import import archive, power_file, system_for_import
+from tests.support.archived_actual_composition_api import DAY, acquired_actuals
+from tests.support.domain import NOW, System, make_system
+from tests.support.historical_reference_import import archive, power_file, system_for_import
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

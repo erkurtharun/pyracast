@@ -6,8 +6,7 @@ from drf_spectacular.views import SpectacularAPIView
 from rest_framework.permissions import IsAuthenticated
 
 from pyracast import health
-from pyracast.accounts import headless
-from pyracast.accounts.mfa_views import ManageRecoveryCodesView, ManageTOTPView
+from pyracast.accounts import headless, mfa_views
 from pyracast.accounts.signup import CompanySignupView
 from pyracast.accounts.social_views import (
     ManageProvidersView,
@@ -71,12 +70,20 @@ urlpatterns = [
         require_POST(VerifyEmailView.as_api_view(client=Client.BROWSER)),
     ),
     path(
+        "api/auth/browser/v1/auth/2fa/authenticate",
+        mfa_views.AuthenticateView.as_api_view(client=Client.BROWSER),
+    ),
+    path(
+        "api/auth/browser/v1/auth/2fa/reauthenticate",
+        mfa_views.ReauthenticateView.as_api_view(client=Client.BROWSER),
+    ),
+    path(
         "api/auth/browser/v1/account/authenticators/totp",
-        ManageTOTPView.as_api_view(client=Client.BROWSER),
+        mfa_views.ManageTOTPView.as_api_view(client=Client.BROWSER),
     ),
     path(
         "api/auth/browser/v1/account/authenticators/recovery-codes",
-        ManageRecoveryCodesView.as_api_view(client=Client.BROWSER),
+        mfa_views.ManageRecoveryCodesView.as_api_view(client=Client.BROWSER),
     ),
     path(
         "api/auth/browser/v1/auth/password/request",

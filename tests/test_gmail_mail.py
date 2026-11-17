@@ -26,8 +26,8 @@ from pyracast.mail.errors import (
 from pyracast.mail.gmail import SEND_SCOPE, TOKEN_URL, EmailBackend
 from pyracast.mail.send import send
 from pyracast.notifications.jobs import process_notification
-from tests.test_company_registration import signup
-from tests.test_notifications import SLOT, ready
+from tests.support.company_registration import signup
+from tests.support.notifications import SLOT, ready
 
 SENDER = "Pyracast <info@pyracast.app>"
 OPTIONS = {

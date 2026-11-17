@@ -1,11 +1,9 @@
-from collections.abc import Iterator
 from datetime import timedelta
 from types import SimpleNamespace
 
 import pytest
 from django.core.mail import EmailMultiAlternatives
 from django.db import OperationalError
-from django.test import override_settings
 
 from pyracast.mail.errors import NotSentError
 from pyracast.notifications import jobs
@@ -13,17 +11,9 @@ from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.preparation import prepare_delivery
 from pyracast.notifications.scheduler import enqueue_due
-from tests.test_notifications import SLOT, configured, ready, saved
+from tests.support.notifications import SLOT, configured, ready, saved
 
 pytestmark = pytest.mark.django_db(transaction=True)
-
-
-@pytest.fixture(autouse=True)
-def memory_mail() -> Iterator[None]:
-    with override_settings(
-        MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
-    ):
-        yield
 
 
 @pytest.mark.parametrize(

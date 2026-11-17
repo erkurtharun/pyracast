@@ -5,7 +5,7 @@ from django.test import override_settings
 
 from pyracast.notifications.mail import build_message
 from pyracast.notifications.models import NotificationDelivery
-from tests.test_notifications import SLOT, configured, ready, saved
+from tests.support.notifications import SLOT, configured, ready, saved
 
 pytestmark = pytest.mark.django_db(transaction=True)
 SENDER = "Pyracast <info@pyracast.app>"

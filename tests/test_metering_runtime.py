@@ -17,8 +17,8 @@ from pyracast.metering import client
 from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
 from pyracast.metering.runtime import dispatch_epias, make_epias_actor
 from pyracast.runtime import make_broker
-from tests.test_domain import NOW
-from tests.test_metering import FixtureClient, connected
+from tests.support.domain import NOW
+from tests.support.metering import FixtureClient, connected
 
 
 def test_runtime_factory_requires_credentials_and_caches_once(

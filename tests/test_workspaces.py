@@ -1,4 +1,3 @@
-import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from threading import Barrier
@@ -26,7 +25,8 @@ from pyracast.accounts.models import (
     WorkspaceInvitation,
 )
 from pyracast.accounts.operations import reassign_workspace_admin, require_workspace_admin
-from tests.test_company_registration import mailed_code, signup
+from tests.support.company_registration import mailed_code, signup
+from tests.support.workspaces import invitation_token
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 
@@ -93,12 +93,6 @@ def test_platform_reassignment_requires_active_existing_member_and_current_selec
             require_workspace_admin(rejected, tenant.pk)
     with transaction.atomic():
         require_workspace_admin(viewer, tenant.pk)
-
-
-def invitation_token() -> str:
-    match = re.search(r"token=([A-Za-z0-9_-]+)", str(mail.outbox[-1].body))
-    assert match is not None
-    return match.group(1)
 
 
 @override_settings(

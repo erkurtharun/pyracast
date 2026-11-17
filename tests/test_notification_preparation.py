@@ -15,7 +15,6 @@ from pyracast.forecasts.models import (
     ForecastResult,
     ForecastSnapshot,
 )
-from pyracast.irradiance import local_day_bounds
 from pyracast.mail.errors import NotSentError
 from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.models import NotificationDelivery
@@ -23,43 +22,22 @@ from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.scheduler import PREPARATION_GRACE, enqueue_due
 from pyracast.notifications.views import reminder_schedule_payload
 from pyracast.regions.models import Region
-from tests.test_domain import NOW, System
-from tests.test_notifications import (
+from tests.support.domain import NOW
+from tests.support.notification_preparation import complete_saved
+from tests.support.notifications import (
     SLOT,
     attached_sheet,
-    cache_saved_days,
     configured,
-    memory_mail,
     saved,
 )
 
 pytestmark = pytest.mark.django_db(transaction=True)
-__all__ = ["memory_mail"]
 
 
 def _summary_row(sheet: Worksheet, day: int) -> int:
     return next(
         row for row, cell in enumerate(sheet["A"], 1) if cell.value == datetime(2026, 11, day)
     )
-
-
-def complete_saved(system: System, when: datetime = NOW) -> ForecastSnapshot:
-    snapshot = saved(system, when)
-    start, _ = local_day_bounds(
-        SLOT.astimezone(ZoneInfo(system.region.timezone)).date(), system.binding.timezone
-    )
-    snapshot.normalized_intervals = [
-        {
-            "start": (start + timedelta(hours=hour)).isoformat(),
-            "end": (start + timedelta(hours=hour + 1)).isoformat(),
-            "power_kw": 0.3,
-            "sunlight": "day",
-        }
-        for hour in range(48)
-    ]
-    snapshot.save()
-    cache_saved_days(snapshot, when)
-    return snapshot
 
 
 @pytest.mark.parametrize("state", ["pending", "running", "retry", "missing"])

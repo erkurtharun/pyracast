@@ -23,9 +23,9 @@ from pyracast.accounts.language import (
 from pyracast.accounts.models import UserLanguagePreference
 from pyracast.admin_workspace import recent_activity_context
 from pyracast.regions.models import AuditEvent
-from tests.test_admin_setup import admin_system
-from tests.test_api import verified_admin
-from tests.test_company_registration import signup
+from tests.support.admin_setup import admin_system
+from tests.support.api import verified_admin
+from tests.support.company_registration import signup
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 

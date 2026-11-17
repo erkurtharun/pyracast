@@ -7,9 +7,9 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import CalibrationRun, Plant, ProductionObservation
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.plants.training import run_calibration
-from tests.test_domain import NOW, System
-from tests.test_plant_operations import make_plant
-from tests.test_plant_training import actual_snapshot_for
+from tests.support.domain import NOW, System
+from tests.support.plant_operations import make_plant
+from tests.support.plant_training import actual_snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

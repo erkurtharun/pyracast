@@ -19,8 +19,8 @@ from pyracast.mail.errors import (
 from pyracast.mail.send import send
 from pyracast.notifications.jobs import process_notification
 from tests.smtp_server import Script, loopback_smtp
-from tests.test_auth_lifecycle import submit
-from tests.test_notifications import SLOT, ready
+from tests.support.auth_lifecycle import submit
+from tests.support.notifications import SLOT, ready
 
 SMTP_BACKEND = "pyracast.mail.smtp.EmailBackend"
 

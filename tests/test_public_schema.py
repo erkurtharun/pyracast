@@ -5,7 +5,7 @@ import pytest
 from django.core.management import call_command
 from django.test import Client
 
-from tests.test_domain import make_system
+from tests.support.domain import make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

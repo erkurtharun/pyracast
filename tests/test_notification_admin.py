@@ -4,8 +4,8 @@ from django.test import Client
 from django.urls import reverse
 
 from pyracast.notifications.models import NotificationSettings
-from tests.test_api import verified_admin
-from tests.test_domain import make_system
+from tests.support.api import verified_admin
+from tests.support.domain import make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

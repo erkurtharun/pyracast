@@ -171,7 +171,7 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path(".codex/solcast"),
+        default=Path(".dev/solcast"),
         help="Output directory within the current working directory.",
     )
     args = parser.parse_args()

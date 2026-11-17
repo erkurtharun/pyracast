@@ -1,6 +1,6 @@
 import io
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from django.core.management import CommandError, call_command
@@ -13,17 +13,15 @@ from pyracast.forecasts.models import (
     CollectionJob,
     CollectionSchedule,
     DispatcherStatus,
-    ForecastResult,
     ForecastSnapshot,
 )
 from pyracast.forecasts.monitoring import delivery_health, record_dispatch_phase
 from pyracast.metering.models import EpiasCollectionJob
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.regions.models import Region
-from tests.test_domain import FakeAdapter, System, make_system
-from tests.test_metering import connected
-
-NOW = datetime(2026, 11, 12, 13, tzinfo=UTC)
+from tests.support.delivery_health import NOW, recent_forecast
+from tests.support.domain import FakeAdapter, System, make_system
+from tests.support.metering import connected
 
 
 @pytest.mark.django_db(transaction=True)
@@ -53,23 +51,6 @@ def test_health_report_keeps_a_bounded_query_budget(delivery_count: int) -> None
     assert report["healthy"] is True
     assert report["saved_forecast_notifications"] == delivery_count
     assert len(queries) <= 8
-
-
-def recent_forecast(system: System) -> ForecastSnapshot:
-    job = CollectionJob.objects.get()
-    job.status = "succeeded"
-    job.save(update_fields=("status",))
-    snapshot = ForecastSnapshot.objects.create(
-        job=job,
-        binding=system.binding,
-        raw_payload={},
-        normalized_intervals=[],
-        source_kind="forecast",
-        collected_at=NOW,
-        available_at=NOW,
-    )
-    ForecastResult.objects.create(snapshot=snapshot, payload={}, published_at=NOW)
-    return snapshot
 
 
 @pytest.mark.django_db

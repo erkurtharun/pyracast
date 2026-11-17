@@ -71,6 +71,7 @@ line-length = 100
 "deploy/operations_log.py" = "py312"
 "deploy/pin_release_images.py" = "py312"
 "deploy/release_scope.py" = "py312"
+"deploy/reset_database.py" = "py312"
 "deploy/runtime_secrets.py" = "py312"
 "deploy/watchdog.py" = "py312"
 
@@ -105,6 +106,13 @@ testpaths = ["tests"]
 strict = true
 addopts = ["-q", "--tb=short", "-ra", "--cov", "--cov-report=term-missing", "--cov-report=xml"]
 filterwarnings = ["error"]
+markers = [
+    "tooling: tests of repository tooling, agents, CI and deployment scripts",
+    "subprocess: tests that start processes",
+    "migration: tests that migrate the database to an earlier state",
+    "browser: tests that drive a browser",
+    "live: tests that need a live broker or provider",
+]
 faulthandler_timeout = 300
 
 [tool.coverage.run]

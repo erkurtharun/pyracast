@@ -36,8 +36,8 @@ from pyracast.regions.operations import (
     request_location_change,
     submit_region,
 )
-from tests.test_domain import FakeAdapter, make_system
-from tests.test_plant_operations import publish_snapshot, snapshot_for
+from tests.support.domain import FakeAdapter, make_system
+from tests.support.plant_operations import publish_snapshot, snapshot_for
 
 pytestmark = [
     pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"]),

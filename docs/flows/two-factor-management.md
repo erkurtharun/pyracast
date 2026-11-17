@@ -70,7 +70,7 @@ sequenceDiagram
 
 | Condition | Result |
 |---|---|
-| Wrong code, or rate limited (`login_failed`: 5 per user key and 10 per IP per 10 min, shared with MFA and password login) | 400, message on `code`; checked before reauthentication |
+| Wrong code, or rate limited (`login_failed`: 5 per user key per 10 min) | 400, message on `code`; checked before reauthentication |
 | No generic reauthentication on POST totp | 401 with flows, UI shows password or email-code form and does not replay |
 | No MFA reauthentication on DELETE totp or recovery-codes (also with no factor at all) | 401 `mfa_reauthentication_required`, UI shows authenticator form |
 | Staff GET/POST totp (middleware) or DELETE totp (view) | 403 |

@@ -1,13 +1,11 @@
 import uuid
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Iterator
 from datetime import timedelta
 from types import SimpleNamespace
-from typing import ClassVar
 
 import pytest
-from django.core.mail import EmailMessage, EmailMultiAlternatives
-from django.core.mail.backends.base import BaseEmailBackend
-from django.db import OperationalError, connection
+from django.core.mail import EmailMultiAlternatives
+from django.db import OperationalError
 from django.test import override_settings
 
 from pyracast.mail.errors import MailFailure, NotSentError
@@ -22,34 +20,17 @@ from pyracast.notifications.models import (
 from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.scheduler import MAX_LATENESS
 from pyracast.regions.models import Region
-from tests.test_notifications import SLOT, ready
+from tests.support.notification_transmission import OpeningBackend
+from tests.support.notifications import SLOT, ready
 
 pytestmark = pytest.mark.django_db(transaction=True)
-
-
-class OpeningBackend(BaseEmailBackend):
-    action: ClassVar[Callable[[], None] | None] = None
-    sent: ClassVar[list[EmailMessage]] = []
-
-    def open(self) -> bool:
-        assert not connection.in_atomic_block
-        action = type(self).action
-        if action is not None:
-            action()
-        return True
-
-    def send_messages(self, email_messages: Sequence[EmailMessage] | None) -> int:
-        assert not connection.in_atomic_block
-        assert email_messages is not None
-        self.sent.extend(email_messages)
-        return len(email_messages)
 
 
 @pytest.fixture(autouse=True)
 def opening_backend() -> Iterator[None]:
     OpeningBackend.action, OpeningBackend.sent = None, []
     with override_settings(
-        MAILERS={"default": {"BACKEND": "tests.test_notification_transmission.OpeningBackend"}}
+        MAILERS={"default": {"BACKEND": "tests.support.notification_transmission.OpeningBackend"}}
     ):
         yield
 
