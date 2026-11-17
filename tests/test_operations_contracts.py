@@ -4,6 +4,7 @@ import itertools
 import re
 import runpy
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -98,30 +99,54 @@ def reported_events() -> dict[str, set[str]]:
     return events
 
 
-def ci_job_names() -> set[str]:
-    jobs = yaml.safe_load(text(WORKFLOWS / "ci.yml"))["jobs"]
+def matrix_combinations(matrix: dict[str, Any]) -> list[dict[str, Any]]:
+    axes = {key: values for key, values in matrix.items() if key not in {"include", "exclude"}}
+    original: list[dict[str, Any]] = []
+    for values in itertools.product(*axes.values()) if axes else ():
+        combination = dict(zip(axes, values, strict=True))
+        if not any(
+            all(combination.get(key) == value for key, value in rule.items())
+            for rule in matrix.get("exclude", [])
+        ):
+            original.append(combination)
+    added: list[dict[str, Any]] = []
+    for included in matrix.get("include", []):
+        extended = [
+            combination
+            for combination in original
+            if all(combination[key] == value for key, value in included.items() if key in axes)
+        ]
+        for combination in extended:
+            combination.update(included)
+        if not extended:
+            added.append(dict(included))
+    return [*original, *added] or [{}]
+
+
+def ci_job_names(jobs: dict[str, Any]) -> set[str]:
     names: set[str] = set()
-    for job in jobs.values():
-        matrix = {
-            key: values
-            for key, values in job.get("strategy", {}).get("matrix", {}).items()
-            if key not in {"include", "exclude"}
-        }
-        for combination in itertools.product(*matrix.values()):
-            name = job["name"]
-            for key, value in zip(matrix, combination, strict=True):
+    for identifier, job in jobs.items():
+        for combination in matrix_combinations(job.get("strategy", {}).get("matrix", {})):
+            name = str(job.get("name", identifier))
+            for key, value in combination.items():
                 name = name.replace(f"${{{{ matrix.{key} }}}}", str(value))
+            if "${{" in name:
+                raise ValueError(f"Unsupported expression in CI job name: {name}")
             names.add(name)
     return names
 
 
-def release_required_jobs() -> set[str]:
-    workflow = text(WORKFLOWS / "release.yml")
+def release_required_jobs(workflow: str) -> set[str]:
     listed = re.search(r"const required = \[(.*?)\];", workflow, re.S)
-    assert listed
-    names = set(re.findall(r"'([^']+)'", listed[1]))
-    names.update(re.findall(r"required\.push\('([^']+)'\)", workflow))
-    assert names
+    if listed is None:
+        raise ValueError("The release workflow lists no required CI job.")
+    entries = [entry.strip() for entry in listed[1].split(",")]
+    names = set()
+    for entry in [*entries, *re.findall(r"required\.push\((.*?)\)", workflow)]:
+        literal = re.fullmatch(r"'([^'\\]+)'", entry)
+        if literal is None:
+            raise ValueError(f"Unsupported required CI job entry: {entry}")
+        names.add(literal[1])
     return names
 
 
@@ -134,10 +159,90 @@ def top_level_route_prefixes() -> set[str]:
     return prefixes
 
 
-def backend_router_prefixes() -> set[str]:
+Route = Callable[[str, str], bool]
+Token = str | tuple[str, str]
+RULE_TOKEN = re.compile(r"\s*(?:(\|\||&&|!|\(|\))|(Host|Path|PathPrefix)\(`([^`]*)`\))")
+MATCHERS: dict[str, Callable[[str], Route]] = {
+    "Host": lambda value: lambda host, _path: host == value,
+    "Path": lambda value: lambda _host, path: path == value,
+    "PathPrefix": lambda value: lambda _host, path: path.startswith(value),
+}
+
+
+def either(left: Route, right: Route) -> Route:
+    return lambda host, path: left(host, path) or right(host, path)
+
+
+def both(left: Route, right: Route) -> Route:
+    return lambda host, path: left(host, path) and right(host, path)
+
+
+def negated(route: Route) -> Route:
+    return lambda host, path: not route(host, path)
+
+
+def rule_disjunction(tokens: list[Token]) -> tuple[Route, list[Token]]:
+    route, tokens = rule_conjunction(tokens)
+    while tokens[:1] == ["||"]:
+        right, tokens = rule_conjunction(tokens[1:])
+        route = either(route, right)
+    return route, tokens
+
+
+def rule_conjunction(tokens: list[Token]) -> tuple[Route, list[Token]]:
+    route, tokens = rule_term(tokens)
+    while tokens[:1] == ["&&"]:
+        right, tokens = rule_term(tokens[1:])
+        route = both(route, right)
+    return route, tokens
+
+
+def rule_term(tokens: list[Token]) -> tuple[Route, list[Token]]:
+    if not tokens:
+        raise ValueError("Incomplete router rule.")
+    head, rest = tokens[0], tokens[1:]
+    if head == "!":
+        route, rest = rule_term(rest)
+        return negated(route), rest
+    if head == "(":
+        route, rest = rule_disjunction(rest)
+        if rest[:1] != [")"]:
+            raise ValueError("Unbalanced router rule.")
+        return route, rest[1:]
+    if isinstance(head, tuple):
+        return MATCHERS[head[0]](head[1]), rest
+    raise ValueError(f"Unexpected router rule token: {head}")
+
+
+def router_rule(rule: str) -> Route:
+    tokens: list[Token] = []
+    rule = rule.strip()
+    position = 0
+    while position < len(rule):
+        match = RULE_TOKEN.match(rule, position)
+        if match is None:
+            raise ValueError(f"Unsupported router rule syntax: {rule[position:]}")
+        tokens.append(match[1] or (match[2], match[3]))
+        position = match.end()
+    route, rest = rule_disjunction(tokens)
+    if rest:
+        raise ValueError("Unbalanced router rule.")
+    return route
+
+
+def backend_route() -> Route:
     routes = yaml.safe_load(text(DEPLOY / "routes.yml"))
     rule: str = routes["http"]["routers"]["backend"]["rule"]
-    return set(re.findall(r"PathPrefix\(`([^`]+)`\)", rule))
+    return router_rule(rule.replace('{{ env "SITE_ADDRESS" }}', "pyracast.example"))
+
+
+def yaml_scalar(document: str, *keys: str) -> str:
+    node = yaml.compose(document, Loader=yaml.SafeLoader)
+    for key in keys:
+        assert isinstance(node, yaml.MappingNode), key
+        node = next(value for name, value in node.value if name.value == key)
+    assert isinstance(node, yaml.ScalarNode)
+    return str(node.value)
 
 
 def test_every_actor_queue_is_consumed_by_exactly_one_compose_worker() -> None:
@@ -244,14 +349,59 @@ def test_trusted_proxy_is_the_gateway_static_address_outside_the_dynamic_range()
     (allocation,) = network["ipam"]["config"]
     address = ipaddress.ip_address(gateway)
 
+    smoke = yaml_scalar(
+        text(DEPLOY / "compose.smoke.yaml"),
+        "services",
+        "gateway",
+        "networks",
+        "application",
+        "ipv4_address",
+    )
+
     assert compose_environment()["PYRACAST_TRUSTED_PROXY_CIDRS"] == f"{gateway}/32"
     assert address in ipaddress.ip_network(allocation["subnet"])
     assert address not in ipaddress.ip_network(allocation["ip_range"])
     assert f'REMOTE_ADDR="{gateway}"' in text(DEPLOY / "smoke.sh")
+    assert smoke == gateway
 
 
-def test_gateway_routes_every_django_prefix_to_the_backend() -> None:
-    assert top_level_route_prefixes() <= backend_router_prefixes()
+def test_gateway_routes_every_django_prefix_and_nothing_else_to_the_backend() -> None:
+    routed = backend_route()
+
+    for prefix in top_level_route_prefixes():
+        assert routed("pyracast.example", prefix + "probe"), prefix
+    assert routed("pyracast.example", "/api")
+    assert routed("pyracast.example", "/admin")
+    assert not routed("pyracast.example", "/")
+    assert not routed("pyracast.example", "/app/")
+    assert not routed("pyracast.example", "/apiary")
+    assert not routed("other.example", "/api/session/")
+
+
+def test_router_rule_evaluation_catches_a_branch_that_can_never_match() -> None:
+    routed = router_rule(
+        "Host(`pyracast.example`) && "
+        "(Path(`/admin`) && PathPrefix(`/admin/`) || PathPrefix(`/api/`))"
+    )
+
+    assert routed("pyracast.example", "/api/session/")
+    assert not routed("pyracast.example", "/admin/login/")
+    assert not router_rule("!PathPrefix(`/api/`)")("pyracast.example", "/api/session/")
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        "Host(`a`) && Query(`x=1`)",
+        "Host(`a`) && (PathPrefix(`/api/`)",
+        "Host(`a`) &&",
+        "Host(`a`) )",
+        "( )",
+    ],
+)
+def test_router_rule_evaluation_refuses_syntax_it_cannot_read(rule: str) -> None:
+    with pytest.raises(ValueError, match="router rule"):
+        router_rule(rule)
 
 
 def test_gateway_timeout_covers_gunicorn_and_grace_periods_fit_service_limits() -> None:
@@ -277,7 +427,60 @@ def test_gateway_body_limit_admits_the_largest_upload_and_smoke_probes_one_byte_
 
 
 def test_release_waits_only_for_jobs_that_ci_defines() -> None:
-    assert release_required_jobs() <= ci_job_names()
+    required = release_required_jobs(text(WORKFLOWS / "release.yml"))
+
+    assert required
+    assert required <= ci_job_names(yaml.safe_load(text(WORKFLOWS / "ci.yml"))["jobs"])
+
+
+def test_ci_job_names_apply_matrix_include_and_exclude() -> None:
+    jobs = {
+        "scientific": {
+            "name": "Scientific (${{ matrix.os }})",
+            "strategy": {
+                "matrix": {
+                    "os": ["ubuntu-latest", "windows-latest"],
+                    "exclude": [{"os": "windows-latest"}],
+                    "include": [{"os": "macos-latest"}, {"os": "ubuntu-latest", "extra": "x"}],
+                }
+            },
+        },
+        "shards": {
+            "name": "Shard ${{ matrix.shard }}",
+            "strategy": {"matrix": {"include": [{"shard": 1}, {"shard": 2}]}},
+        },
+        "lint": {},
+    }
+
+    assert ci_job_names(jobs) == {
+        "Scientific (ubuntu-latest)",
+        "Scientific (macos-latest)",
+        "Shard 1",
+        "Shard 2",
+        "lint",
+    }
+    with pytest.raises(ValueError, match="Unsupported expression"):
+        ci_job_names({"job": {"name": "Job ${{ matrix.missing }}"}})
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    [
+        "const required = ['A', \"Missing CI job\"];",
+        "const required = ['A', NAME];",
+        "const required = ['A'];\nrequired.push(name);",
+        "const jobs = ['A'];",
+    ],
+)
+def test_required_job_parser_refuses_entries_it_cannot_read(workflow: str) -> None:
+    with pytest.raises(ValueError, match="required CI job"):
+        release_required_jobs(workflow)
+
+
+def test_required_job_parser_reads_conditional_additions() -> None:
+    workflow = "const required = ['A',\n  'B'];\nif (x) required.push('C');"
+
+    assert release_required_jobs(workflow) == {"A", "B", "C"}
 
 
 def test_gmail_authorization_helper_matches_the_backend_configuration() -> None:
