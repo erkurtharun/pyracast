@@ -6,6 +6,8 @@ from pyracast.notifications.schedule import local_slot
 HISTORY_CLOCK = "00:00"
 HISTORY_END_CLOCK = "09:00"
 NIGHT_RETRY_DELAY = timedelta(minutes=30)
+# A clock change or skipped calendar day removes at most one local day's slots.
+SLOT_SEARCH_DAYS = 3
 
 
 def nightly_window(day: date, timezone_name: str) -> tuple[datetime, datetime] | None:
@@ -24,4 +26,13 @@ def nightly_window(day: date, timezone_name: str) -> tuple[datetime, datetime] |
         start = local_slot(day, clock, zone)
         if start is not None:
             return start, end
+    return None
+
+
+def next_nightly_start(now: datetime, timezone_name: str) -> datetime | None:
+    today = now.astimezone(ZoneInfo(timezone_name)).date()
+    for offset in range(SLOT_SEARCH_DAYS):
+        window = nightly_window(today + timedelta(days=offset), timezone_name)
+        if window is not None and now < window[0]:
+            return window[0]
     return None

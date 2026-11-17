@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 from django.conf import settings
 
+from pyracast.collection_window import SLOT_SEARCH_DAYS
 from pyracast.forecasts.models import CollectionSchedule
 from pyracast.notifications.schedule import local_slot
 
@@ -53,14 +54,14 @@ def next_forecast_slot(
 ) -> datetime | None:
     zone = ZoneInfo(timezone)
     today = now.astimezone(zone).date()
-    return min(
-        (
+    for offset in range(SLOT_SEARCH_DAYS):
+        slots = [
             slot
-            for day in (today, today + timedelta(days=1))
             for clock in times
-            if (slot := local_slot(day, clock, zone)) is not None
+            if (slot := local_slot(today + timedelta(days=offset), clock, zone)) is not None
             and now < slot
             and effective_from <= slot
-        ),
-        default=None,
-    )
+        ]
+        if slots:
+            return min(slots)
+    return None

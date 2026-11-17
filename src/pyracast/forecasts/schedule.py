@@ -11,7 +11,12 @@ from django.utils.translation import gettext
 
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import Membership
-from pyracast.collection_window import HISTORY_CLOCK, HISTORY_END_CLOCK, NIGHT_RETRY_DELAY
+from pyracast.collection_window import (
+    HISTORY_CLOCK,
+    HISTORY_END_CLOCK,
+    NIGHT_RETRY_DELAY,
+    next_nightly_start,
+)
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule, ForecastSnapshot
 from pyracast.forecasts.timing import effective_forecast_schedule, next_forecast_slot
@@ -113,8 +118,10 @@ def _next_collection_at(schedule: CollectionSchedule, now: datetime) -> datetime
     if timing is None:
         return None
     queued = jobs.filter(status__in=("pending", "retry")).aggregate(next=Min("available_at"))
-    planned = next_forecast_slot(now, schedule.region.timezone, timing.times, timing.effective_from)
-    return min((moment for moment in (queued["next"], planned) if moment is not None), default=None)
+    zone = schedule.region.timezone
+    planned = next_forecast_slot(now, zone, timing.times, timing.effective_from)
+    moments = (queued["next"], planned, next_nightly_start(now, zone))
+    return min((moment for moment in moments if moment is not None), default=None)
 
 
 def schedule_payload(schedule: CollectionSchedule, now: datetime) -> dict[str, object]:
