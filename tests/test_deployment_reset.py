@@ -1,5 +1,6 @@
 import base64
 import contextlib
+import gzip
 import hashlib
 import io
 import json
@@ -13,15 +14,23 @@ import sys
 import time
 import urllib.request
 from collections.abc import Callable, Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import FrameType, SimpleNamespace
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from django.contrib.auth.models import User
 from django.db import connection
 
-from deploy import reset_database
+from deploy import backup, reset_database
 from deploy.reset_database import Host, RefusedError
+from pyracast.accounts.models import Tenant
+from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.forecasts.models import CollectionJob, ForecastSnapshot
+from pyracast.plants.models import Plant, PlantConfiguration
+from pyracast.regions.models import Region
 
 ROOT = Path(__file__).resolve().parents[1]
 REVISION = "a" * 40
@@ -33,7 +42,7 @@ DEFERRED = (signal.SIGINT, signal.SIGTERM)
 
 
 class FakeCommands:
-    """Answers the Docker, PostgreSQL, RabbitMQ and curl commands of one host.
+    """Answers the Docker, PostgreSQL, RabbitMQ, gzip and curl commands of one host.
 
     A dump carries the live row counts as JSON, so a restore reproduces them.
     """
@@ -49,6 +58,12 @@ class FakeCommands:
         self.throwaway: dict[str, int] = {}
         self.verification_counts: dict[str, int] | None = None
         self.restore_drops_a_table = False
+        self.solcast: list[object] = [
+            {"id": 11, "provider": "solcast", "raw_payload": {"forecasts": []}},
+            {"id": 12, "provider": "solcast", "raw_payload": {"estimated_actuals": []}},
+        ]
+        self.solcast_count: int | None = None
+        self.gzip_damage: str | None = None
         self.queues = {"default": 3, "default.DQ": 1, "notifications.XQ": 2}
         self.queues_refill = False
         self.ready = True
@@ -83,6 +98,8 @@ class FakeCommands:
         stdout = ""
         if command[1].endswith("runtime_secrets.py"):
             (self.environment / "runtime.env").write_text("PGUSER=pyracast_app\n")
+        elif command[0] == "gzip":
+            self.compress(Path(command[-1]))
         elif "ps" in command:
             stdout = "".join(f"{service}\n" for service in sorted(self.running))
         elif "stop" in command:
@@ -100,6 +117,9 @@ class FakeCommands:
                 if self.restore_drops_a_table:
                     restored.popitem()
                 self.live = restored
+        elif any(argument.startswith("COPY (") for argument in command):
+            rows = "".join(json.dumps(row) + "\n" for row in self.solcast)
+            kwargs["stdout"].write(rows.encode())
         elif "psql" in command:
             stdout = self.psql(command)
         elif "rabbitmqctl" in command:
@@ -124,9 +144,20 @@ class FakeCommands:
             return "".join(f"{name} {count}\n" for name, count in sorted(counts.items()))
         if any("pg_roles" in argument for argument in command):
             return self.roles + "\n"
+        if any(argument.startswith("SELECT count(*) FROM forecasts_") for argument in command):
+            return f"{len(self.solcast) if self.solcast_count is None else self.solcast_count}\n"
         if "DROP DATABASE IF EXISTS pyracast WITH (FORCE)" in command:
             self.live = {}
         return ""
+
+    def compress(self, source: Path) -> None:
+        packed = gzip.compress(source.read_bytes())
+        if self.gzip_damage == "truncated":
+            packed = packed[: len(packed) // 2]
+        elif self.gzip_damage == "corrupt":
+            packed = b"PK" + packed[2:]
+        source.with_name(source.name + ".gz").write_bytes(packed)
+        source.unlink()
 
     def rabbitmq(self, command: list[str]) -> str:
         if "purge_queue" in command and not self.queues_refill:
@@ -210,6 +241,19 @@ def prepared(host: Host, uploads: dict[str, bytes]) -> str:
 
 def kept_archive(host: Host, name: str) -> Path:
     return host.state / name.rsplit("/", 1)[-1]
+
+
+def solcast_object(name: str) -> str:
+    return name.removesuffix(".dump") + ".solcast.jsonl.gz"
+
+
+def kept_export(host: Host, name: str) -> Path:
+    return kept_archive(host, solcast_object(name))
+
+
+def saved_record(host: Host, name: str) -> dict[str, Any]:
+    record: dict[str, Any] = json.loads(kept_archive(host, name).with_suffix(".json").read_text())
+    return record
 
 
 START_UNIT = [
@@ -303,9 +347,10 @@ def test_prepare_refused_after_a_reset_names_the_restore_of_its_archive(
 ) -> None:
     name = prepared(host, uploads)
     reset_database.reset(host, name)
+    uploaded = dict(uploads)
     with pytest.raises(RefusedError, match=f"run .* restore --confirm {name};"):
         reset_database.prepare(host)
-    assert len(uploads) == 1
+    assert uploads == uploaded
 
 
 def test_prepare_refuses_when_the_site_is_not_ready(
@@ -405,6 +450,118 @@ def test_verification_restore_gives_up_when_the_throwaway_server_never_starts(
     monkeypatch.setattr(subprocess, "run", never_ready)
     with pytest.raises(RuntimeError, match="did not become ready"):
         reset_database.prepare(host)
+
+
+def exported(path: Path) -> list[object]:
+    return [json.loads(line) for line in gzip.decompress(path.read_bytes()).split(b"\n")[:-1]]
+
+
+def test_prepare_exports_the_solcast_snapshots_beside_the_archive_and_abort_keeps_them(
+    host: Host,
+    commands: FakeCommands,
+    uploads: dict[str, bytes],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    name = prepared(host, uploads)
+    export = solcast_object(name)
+    path = kept_export(host, name)
+    assert exported(path) == commands.solcast
+    assert list(uploads) == [name, export]
+    assert uploads[export] == path.read_bytes()
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    assert saved_record(host, name)["solcast"] == {"object": export, "sha256": digest, "rows": 2}
+    copy = commands.calls[commands.index("COPY (")]
+    assert copy[copy.index("exec") : copy.index("psql") + 1] == [
+        "exec",
+        "-T",
+        "--env",
+        "PGTZ=UTC",
+        "postgres",
+        "psql",
+    ]
+    assert commands.index("--no-owner") < commands.index("COPY (")
+    assert commands.index("COPY (") < commands.index("SELECT count(*) FROM forecasts_")
+    assert not path.with_suffix("").exists()
+    output = capsys.readouterr().out
+    for expected in (
+        f"Solcast export: gs://private-backups/{export}",
+        f"Solcast SHA-256: {digest}",
+        "Solcast snapshots: 2",
+        "Copy the archive and the Solcast export off the host",
+    ):
+        assert expected in output
+    reset_database.abort(host)
+    assert path.read_bytes() == uploads[export]
+
+
+def test_prepare_records_an_empty_solcast_export_that_reset_accepts(
+    host: Host,
+    commands: FakeCommands,
+    uploads: dict[str, bytes],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    commands.solcast = []
+    name = prepared(host, uploads)
+    path = kept_export(host, name)
+    assert gzip.decompress(path.read_bytes()) == b""
+    assert uploads[solcast_object(name)] == path.read_bytes()
+    assert saved_record(host, name)["solcast"]["rows"] == 0
+    assert "Solcast snapshots: 0" in capsys.readouterr().out
+    reset_database.reset(host, name)
+    assert commands.live == {}
+
+
+@pytest.mark.parametrize(
+    ("fault", "message"),
+    [
+        ("count-mismatch", "holds 2 snapshots; the database counts 3"),
+        ("truncated", "is not gzip-compressed JSON lines"),
+        ("corrupt", "is not gzip-compressed JSON lines"),
+        ("not-an-object", "is not gzip-compressed JSON lines"),
+    ],
+)
+def test_prepare_records_nothing_when_the_solcast_export_does_not_verify(
+    host: Host, commands: FakeCommands, uploads: dict[str, bytes], fault: str, message: str
+) -> None:
+    match fault:
+        case "count-mismatch":
+            commands.solcast_count = 3
+        case "not-an-object":
+            commands.solcast.append([13])
+        case _:
+            commands.gzip_damage = fault
+    with pytest.raises(RuntimeError, match=message):
+        reset_database.prepare(host)
+    name = next(iter(uploads))
+    assert list(uploads) == [name]
+    assert host.marker.exists()
+    with pytest.raises(RefusedError, match="not the archive that prepare verified"):
+        reset_database.reset(host, name)
+    assert commands.destructive_calls() == []
+
+
+def test_prepare_records_nothing_when_the_bucket_reports_another_hash_for_the_export(
+    host: Host, commands: FakeCommands, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stored: dict[str, bytes] = {}
+
+    def urlopen(request: urllib.request.Request, **_kwargs: object) -> io.BytesIO:
+        name = parse_qs(urlsplit(request.full_url).query)["name"][0]
+        assert isinstance(request.data, io.BufferedReader)
+        stored[name] = request.data.read()
+        reported = stored[name] if name.endswith(".dump") else b"another object"
+        digest = base64.b64encode(hashlib.md5(reported, usedforsecurity=False).digest()).decode()
+        return io.BytesIO(json.dumps({"md5Hash": digest, "size": str(len(stored[name]))}).encode())
+
+    monkeypatch.setattr(backup, "access_token", lambda: "private-token")
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    with pytest.raises(ValueError, match="checksum does not match"):
+        reset_database.prepare(host)
+    name = next(iter(stored))
+    assert list(stored) == [name, solcast_object(name)]
+    with pytest.raises(RefusedError, match="not the archive that prepare verified"):
+        reset_database.reset(host, name)
+    assert commands.destructive_calls() == []
 
 
 def test_abort_starts_the_previous_release_and_clears_the_marker(
@@ -618,6 +775,147 @@ def test_runtime_table_privilege_check_uses_each_tables_schema(role: str, readab
     assert (missing == []) is readable
 
 
+@pytest.mark.django_db
+def test_solcast_export_copies_each_solcast_snapshot_with_its_binding_and_plants() -> None:
+    creator = User.objects.create(username="exporter")
+    tenant = Tenant.objects.create(name="Export tenant")
+    collected = datetime(2026, 11, 9, 13, tzinfo=UTC)
+    payload = {
+        "forecasts": [{"period": "PT30M", "pv_estimate": 0.5}],
+        "note": 'quote " backslash \\ newline \n tab \t separators \x01\x02 '
+        + chr(0x15F)
+        + chr(0x2028),
+    }
+    intervals = [{"start": "2026-11-09T12:30:00+00:00", "power_kw": 0.5}]
+    snapshots: list[ForecastSnapshot] = []
+    plants: list[Plant] = []
+    for provider, key, latitude in (("solcast", "encrypted:v1:fixture", 40), ("fixture", "", 41)):
+        region = Region.objects.create(
+            tenant=tenant,
+            name=provider,
+            latitude=latitude,
+            longitude=29,
+            timezone="Europe/Istanbul",
+        )
+        account = ProviderAccount.objects.create(
+            provider=provider, external_account_id=provider, encrypted_api_key=key
+        )
+        binding = SiteBinding.objects.create(
+            region=region,
+            region_revision=1,
+            provider_account=account,
+            site_id=f"{provider}-site",
+            capacity_kw=1000,
+            azimuth_degrees=180,
+            losses_percent=7,
+            latitude=latitude,
+            longitude=29,
+            timezone="Europe/Istanbul",
+        )
+        plants.append(Plant.objects.create(region=region, name=provider))
+        PlantConfiguration.objects.create(
+            plant=plants[-1],
+            region=region,
+            binding=binding,
+            revision=1,
+            dc_capacity_mw=1.2,
+            created_by=creator,
+        )
+        for endpoint in ("forecasts", "scaled_forecasts"):
+            job = CollectionJob.objects.create(
+                binding=binding,
+                endpoint=endpoint,
+                scheduled_slot=collected,
+                target_date=collected.date(),
+                available_at=collected,
+            )
+            snapshots.append(
+                ForecastSnapshot.objects.create(
+                    job=job,
+                    binding=binding,
+                    raw_payload=payload,
+                    normalized_intervals=intervals,
+                    collected_at=collected,
+                    issued_at=collected if endpoint == "forecasts" else None,
+                    source_kind="forecast",
+                    coverage_start=collected,
+                    coverage_end=collected + timedelta(days=3),
+                    weather_payload={"source": "open-meteo"} if endpoint == "forecasts" else None,
+                )
+            )
+    with connection.cursor() as cursor:
+        cursor.execute(reset_database.SOLCAST_COUNT_SQL)
+        assert cursor.fetchone() == (2,)
+        with cursor.cursor.copy(reset_database.SOLCAST_EXPORT_SQL) as copy:
+            output = b"".join(copy)
+    rows = [json.loads(line) for line in output.split(b"\n")[:-1]]
+    assert output.count(b"\n") == 2
+    sites = [row.pop("binding") for row in rows]
+    assert rows == [
+        {
+            "id": snapshots[0].pk,
+            "provider": "solcast",
+            "source_kind": "forecast",
+            "endpoint": "forecasts",
+            "issued_at": "2026-11-09T13:00:00+00:00",
+            "collected_at": "2026-11-09T13:00:00+00:00",
+            "coverage_start": "2026-11-09T13:00:00+00:00",
+            "coverage_end": "2026-11-12T13:00:00+00:00",
+            "raw_payload": payload,
+            "normalized_intervals": intervals,
+            "weather_payload": {"source": "open-meteo"},
+            "plant_ids": [plants[0].pk],
+        },
+        {
+            "id": snapshots[1].pk,
+            "provider": "solcast",
+            "source_kind": "forecast",
+            "endpoint": "scaled_forecasts",
+            "issued_at": None,
+            "collected_at": "2026-11-09T13:00:00+00:00",
+            "coverage_start": "2026-11-09T13:00:00+00:00",
+            "coverage_end": "2026-11-12T13:00:00+00:00",
+            "raw_payload": payload,
+            "normalized_intervals": intervals,
+            "weather_payload": None,
+            "plant_ids": [plants[0].pk],
+        },
+    ]
+    binding = snapshots[0].binding
+    for site in sites:
+        assert {key: site[key] for key in ("id", "region_id", "provider_account_id")} == {
+            "id": binding.pk,
+            "region_id": binding.region_id,
+            "provider_account_id": binding.provider_account_id,
+        }
+        assert {
+            key: site[key]
+            for key in (
+                "site_id",
+                "capacity_kw",
+                "dc_capacity_kw",
+                "power_basis",
+                "azimuth_degrees",
+                "losses_percent",
+                "installation_date",
+                "latitude",
+                "longitude",
+                "timezone",
+            )
+        } == {
+            "site_id": "solcast-site",
+            "capacity_kw": 1000,
+            "dc_capacity_kw": None,
+            "power_basis": "ac",
+            "azimuth_degrees": 180,
+            "losses_percent": 7,
+            "installation_date": None,
+            "latitude": 40,
+            "longitude": 29,
+            "timezone": "Europe/Istanbul",
+        }
+
+
 def test_reset_purges_every_queue_recreates_the_database_and_checks_both_roles(
     host: Host,
     commands: FakeCommands,
@@ -709,6 +1007,28 @@ def test_reset_stops_before_dropping_when_a_queue_keeps_messages(
     with pytest.raises(RuntimeError, match="default: 3"):
         reset_database.reset(host, name)
     assert not any("DROP DATABASE" in " ".join(call) for call in commands.calls)
+
+
+@pytest.mark.parametrize("operation", ["reset", "restore"])
+@pytest.mark.parametrize("condition", ["missing-export", "changed-export", "record-without-export"])
+def test_reset_and_restore_refuse_a_pre_reset_archive_without_its_verified_solcast_export(
+    host: Host, commands: FakeCommands, uploads: dict[str, bytes], operation: str, condition: str
+) -> None:
+    name = prepared(host, uploads)
+    match condition:
+        case "missing-export":
+            kept_export(host, name).unlink(missing_ok=True)
+        case "changed-export":
+            kept_export(host, name).write_bytes(b"tampered")
+        case _:
+            record = saved_record(host, name)
+            record.pop("solcast", None)
+            kept_archive(host, name).with_suffix(".json").write_text(json.dumps(record))
+    run = reset_database.reset if operation == "reset" else reset_database.restore
+    with pytest.raises(RefusedError, match="Solcast export"):
+        run(host, name)
+    assert commands.destructive_calls() == []
+    assert host.marker.exists()
 
 
 def test_restore_brings_back_the_kept_archive_with_owners_and_starts_the_previous_release(
