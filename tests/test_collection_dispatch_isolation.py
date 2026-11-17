@@ -19,8 +19,8 @@ from pyracast.forecasts.scheduler import CollectionSchedulingError, enqueue_due
 from pyracast.providers import normalize_payload
 from pyracast.regions.models import Region
 from pyracast.regions.operations import approve_region, configure_binding, submit_region
-from tests.test_domain import NOW, FakeAdapter, make_system
-from tests.test_jobs import calculate
+from tests.support.domain import NOW, FakeAdapter, make_system
+from tests.support.jobs import calculate
 
 
 def test_existing_pending_collections_are_dispatched_after_scheduler_failure(

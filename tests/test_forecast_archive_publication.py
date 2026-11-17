@@ -16,8 +16,8 @@ from pyracast.forecasts.models import (
 from pyracast.plants import forecast_archive
 from pyracast.plants.models import ForecastIssuance, Plant
 from pyracast.plants.operations import revise_plant
-from tests.test_domain import NOW, FakeAdapter, System
-from tests.test_plant_operations import make_plant, snapshot_for
+from tests.support.domain import NOW, FakeAdapter, System
+from tests.support.plant_operations import make_plant, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

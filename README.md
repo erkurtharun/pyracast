@@ -31,20 +31,22 @@ and reference settings belong in the operations workspace, not `.env`.
 For isolated development dependencies:
 
 ```text
-uv run --locked python scripts/start_postgres.py
+uv run --locked python -m scripts.start_postgres
 ```
 
-This starts checksum-pinned PostgreSQL binaries on Windows or a pinned Docker image
-on Ubuntu, using loopback-only trust authentication. It leaves the database running;
-never use it for production. Tests need permission to create databases. CI adds
-`--non-durable` (no `fsync`, `synchronous_commit` or `full_page_writes`) because its
-cluster is discarded after the run; never pass it for a cluster that holds data.
+This starts checksum-pinned PostgreSQL binaries on Windows (data in
+`%LOCALAPPDATA%\pyracast\postgres`) or a pinned Docker image with the volume
+`pyracast-postgres-data` on Ubuntu, using loopback-only trust authentication. A rerun
+reports or restarts the same cluster; never use it for production. Tests need
+permission to create databases. CI adds `--ephemeral --non-durable` (a throwaway
+cluster without `fsync`, `synchronous_commit` or `full_page_writes`).
 
-On Windows, `uv run --locked python scripts/start_rabbitmq.py` starts the pinned
-development broker. On Ubuntu with Docker:
+On Windows, `uv run --locked python -m scripts.start_rabbitmq` starts the pinned
+development broker with its state in `%LOCALAPPDATA%\pyracast\rabbitmq`; `start.cmd`
+runs both helpers when a dependency is down. On Ubuntu with Docker:
 
 ```text
-docker run -d --rm --name pyracast-rabbitmq -p 127.0.0.1:5672:5672 rabbitmq:4.4.0@sha256:485319d42170eab53d8a030e1cc49d95e41f5d325479fa504736db8091981eb7
+docker run -d --name pyracast-rabbitmq --hostname pyracast-rabbitmq -v pyracast-rabbitmq-data:/var/lib/rabbitmq -p 127.0.0.1:5672:5672 rabbitmq:4.4.0@sha256:485319d42170eab53d8a030e1cc49d95e41f5d325479fa504736db8091981eb7
 ```
 
 ### Local settings
@@ -309,7 +311,7 @@ uv run --locked python scripts/check_solcast.py --live --binding-id BINDING_ID -
 ```
 
 Each kind is allowed once per binding/UTC day and reserves shared account quota before HTTP,
-without automatic retries. Sanitized captures go to ignored `.codex/solcast/`.
+without automatic retries. Sanitized captures go to ignored `.dev/solcast/`.
 Other applications' quota use remains unknown; coordinate consumers. Never create a
 second account record to reset the budget or infer AC/DC semantics from output.
 
@@ -332,8 +334,11 @@ Deployment remains disabled until the operator configures the project and sets
 [AGENTS.md](AGENTS.md) is the shared workflow; `CLAUDE.md` imports it without copying
 instructions. Both clients use the same skill paths listed there. Hook adapters in
 `.codex/hooks.json` and `.claude/settings.json` call `.agents/hooks.py` to format
-edited Python files and guard direct source reads. Shell commands and dependency
-execution remain available. Run the full check explicitly before delivery.
+edited Python files (ruff) and web files (the local prettier, when `web/node_modules`
+exists), to refuse direct and IDE reads of generated output, credentials and backups,
+and to refuse agent shell commands that publish (see `AGENTS.md`). It is an accident
+guard: shell reads, search and dependency execution remain available. Run the full
+check explicitly before delivery.
 Codex hooks must be enabled and trusted through `/hooks`; changed hook hashes need
 new trust. Claude needs workspace trust. Personal settings and MCP credentials stay ignored.
 

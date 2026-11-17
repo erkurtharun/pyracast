@@ -118,7 +118,7 @@ sequenceDiagram
 - 401 blocks the account for the current `credential_revision` until a key rotation; 429 extends `request_blocked_until` (provider `Retry-After`, else 900 s, plus jitter); other failures only set binding `health = error`, which nothing but a later successful validation resets.
 - A successful validation of the approved binding re-arms only a forecast job whose last error is `provider_authentication_failed` (attempts reset to 0); the dispatcher's `pending_job_ids` publishes it, nothing is sent to Dramatiq directly.
 - Account identity is `CASEFOLD(BTRIM(...) COLLATE "pg_unicode_fast")`; the stored `external_account_id` is the canonical form. Keys must be 1..1024 printable ASCII characters without spaces and are stored as `encrypted:v1:` Fernet tokens.
-- `check_solcast.py` allows one attempt per binding, kind and UTC day and writes allowlisted fields plus a metadata file only inside the working directory (default `.codex/solcast`).
+- `check_solcast.py` allows one attempt per binding, kind and UTC day and writes allowlisted fields plus a metadata file only inside the working directory (default `.dev/solcast`).
 
 ## Tests
 

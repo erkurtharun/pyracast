@@ -21,8 +21,8 @@ from pyracast.metering.models import EpiasCollectionJob
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.notifications.scheduler import PREPARATION_GRACE
 from pyracast.regions.models import Region
-from tests.test_domain import System, make_system
-from tests.test_metering import connected
+from tests.support.domain import System, make_system
+from tests.support.metering import connected
 
 pytestmark = pytest.mark.django_db(transaction=True)
 NOW = datetime(2026, 11, 15, 12, tzinfo=UTC)

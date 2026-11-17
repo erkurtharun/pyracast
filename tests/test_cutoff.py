@@ -10,7 +10,7 @@ from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import CollectionJob
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.regions.models import Region
-from tests.test_domain import NOW, make_system
+from tests.support.domain import NOW, make_system
 
 
 @pytest.mark.parametrize("value", ["1:30", "24:00", "16:60", "16:00:00", ""])

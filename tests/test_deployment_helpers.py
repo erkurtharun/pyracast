@@ -14,6 +14,7 @@ import pytest
         "operations_log.py",
         "pin_release_images.py",
         "release_scope.py",
+        "reset_database.py",
         "runtime_secrets.py",
         "watchdog.py",
     ],
@@ -23,7 +24,7 @@ def test_host_helpers_accept_ubuntu_system_python_312_syntax(helper: str) -> Non
     ast.parse(source.read_text(), filename=str(source), feature_version=(3, 12))
 
 
-@pytest.mark.parametrize("helper", ["bootstrap_database.py", "backup.py"])
+@pytest.mark.parametrize("helper", ["bootstrap_database.py", "backup.py", "reset_database.py"])
 def test_smoke_helpers_run_without_application_dependencies_or_project_working_directory(
     tmp_path: Path,
     helper: str,

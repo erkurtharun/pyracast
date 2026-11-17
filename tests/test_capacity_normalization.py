@@ -7,46 +7,18 @@ import pytest
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.test import Client
 
-from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.connections.secrets import encrypt_secret
+from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.capacity_normalization import normalize_reference_capacity
 from pyracast.forecasts.history import select_actual_snapshot
 from pyracast.forecasts.models import ForecastSnapshot, ReferenceCapacityNormalization
 from pyracast.plants.availability import actual_power_intervals
 from pyracast.plants.models import PlantConfiguration
-from tests.test_domain import NOW, System
-from tests.test_plant_operations import make_plant, publish_snapshot, snapshot_for
-from tests.test_plant_training import actual_snapshot_for
+from tests.support.capacity_normalization import normalize, scaled_system
+from tests.support.domain import NOW
+from tests.support.plant_operations import publish_snapshot, snapshot_for
+from tests.support.plant_training import actual_snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
-
-
-def scaled_system(monkeypatch: pytest.MonkeyPatch) -> tuple[System, SiteBinding]:
-    system, _ = make_plant(monkeypatch)
-    ProviderAccount.objects.filter(pk=system.account.pk).update(
-        provider="solcast", encrypted_api_key=encrypt_secret("test-only-solcast-key")
-    )
-    SiteBinding.objects.filter(pk=system.binding.pk).update(
-        settings_verification_reference="Verified original Hobby settings", dc_capacity_kw=1
-    )
-    target = SiteBinding.objects.get(pk=system.binding.pk)
-    target.pk = None
-    target.capacity_kw = target.dc_capacity_kw = 1000
-    target.save()
-    system.region.approved_binding = target
-    system.region.save(update_fields=["approved_binding"])
-    return system, target
-
-
-def normalize(system: System, target: SiteBinding) -> tuple[int, ...]:
-    return normalize_reference_capacity(
-        system.admin,
-        system.tenant.pk,
-        system.region.pk,
-        system.binding.pk,
-        target.pk,
-        "User confirms the same Hobby model with only a 1 to 1000 kW reference scale change",
-    )
 
 
 def test_old_hobby_history_becomes_available_at_the_new_scale_without_rewriting_sources(

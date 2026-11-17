@@ -4,7 +4,7 @@ from django.test import Client
 from pyracast.connections.operations import rotate_secret
 from pyracast.plants.models import PlantConfiguration, PlantEvent, PlantSubmission
 from pyracast.regions.models import Region
-from tests.test_plant_operations import make_plant
+from tests.support.plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

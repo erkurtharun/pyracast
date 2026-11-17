@@ -1,82 +1,34 @@
 import json
 from calendar import monthrange
 from dataclasses import replace
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from decimal import Decimal
-from typing import cast
 
 import pytest
 from django.db import connection
 
 from pyracast.epias import (
     BASE_URL,
-    TIMEZONE,
     EpiasClient,
     EpiasDay,
     EpiasError,
     EpiasPlant,
-    EpiasReading,
 )
 from pyracast.metering.jobs import pending_epias_ids, run_epias_job
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
-from pyracast.metering.operations import connect_epias
 from pyracast.metering.scheduler import enqueue_due_epias_jobs
 from pyracast.plants.models import Plant, ProductionObservation
 from pyracast.regions.models import Region
-from tests.test_domain import NOW
-from tests.test_metering import NEXT_NIGHT, PROVIDER_PLANT, FixtureClient, connected
-from tests.test_plant_operations import make_plant
+from tests.support.domain import NOW
+from tests.support.metering import NEXT_NIGHT, PROVIDER_PLANT, connected
+from tests.support.metering_settlement import (
+    SETTLEMENT,
+    SettlementClient,
+    link_settlement,
+    month_data,
+)
 
 pytestmark = pytest.mark.django_db(transaction=True)
-SETTLEMENT = EpiasPlant(7001, PROVIDER_PLANT.eic, PROVIDER_PLANT.name, "Solar")
-
-
-def month_data(plant: EpiasPlant, start: date, end: date) -> EpiasDay:
-    stamp = datetime.combine(start, datetime.min.time(), TIMEZONE)
-    readings = tuple(
-        EpiasReading(stamp + timedelta(hours=i), f"{i % 24:02}:00", Decimal("1.5"), None)
-        for i in range(((end - start).days + 1) * 24)
-    )
-    return EpiasDay(
-        plant,
-        start,
-        readings,
-        NOW,
-        json.dumps(
-            {
-                "items": [
-                    {"date": r.timestamp.isoformat(), "hour": r.timestamp.hour, "total": 1.5}
-                    for r in readings
-                ]
-            }
-        ),
-        endpoint=f"{BASE_URL}/injection-quantity",
-        source_kind="settlement_injection",
-        end_day=end,
-    )
-
-
-class SettlementClient(FixtureClient):
-    def resolve_settlement_plant(self, eic: str) -> EpiasPlant | None:
-        assert not connection.in_atomic_block
-        assert eic == SETTLEMENT.eic
-        return SETTLEMENT
-
-    def fetch_settlement(self, plant: EpiasPlant, start: date, end: date) -> EpiasDay:
-        assert not connection.in_atomic_block
-        assert plant.id == SETTLEMENT.id
-        return month_data(plant, start, end)
-
-
-def link_settlement(monkeypatch: pytest.MonkeyPatch) -> EpiasConnection:
-    system, plant = make_plant(monkeypatch)
-    return connect_epias(
-        plant.pk,
-        actor=system.admin,
-        provider_plant_id=PROVIDER_PLANT.id,
-        expected_eic=cast(str, PROVIDER_PLANT.eic),
-        client=cast(EpiasClient, SettlementClient()),
-    )
 
 
 def test_month_collection_splits_immutable_daily_sources_without_manual_observations(

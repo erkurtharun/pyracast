@@ -11,9 +11,10 @@ from pyracast.plants.measurements import production_identity_at, production_iden
 from pyracast.plants.models import CalibrationRun, Plant, PlantEvent
 from pyracast.plants.operations import activate_calibration
 from pyracast.regions.models import Region
-from tests.test_domain import NOW
-from tests.test_plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
-from tests.test_provisional_measurements import acquisition
+from tests.support.domain import NOW
+from tests.support.historical_production_identity import record_identity
+from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
+from tests.support.provisional_measurements import acquisition
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -89,23 +90,6 @@ def historical_source(
     )
     _, end = local_day_bounds(NOW.date(), configuration.binding.timezone)
     return run, connection, snapshot, end - timedelta(microseconds=1)
-
-
-def record_identity(
-    monkeypatch: pytest.MonkeyPatch, connection: EpiasConnection, stamp: datetime
-) -> PlantEvent:
-    monkeypatch.setattr(timezone, "now", lambda: stamp)
-    connection.save()
-    return PlantEvent.objects.create(
-        plant=connection.plant,
-        actor=connection.connected_by,
-        action="epias_connected",
-        details={
-            "provider_plant_id": connection.provider_plant_id,
-            "eic": connection.eic,
-            "revision": connection.revision,
-        },
-    )
 
 
 @pytest.mark.parametrize("kind", ["realtime_generation", "settlement_injection"])

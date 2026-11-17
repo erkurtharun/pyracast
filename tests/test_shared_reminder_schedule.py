@@ -15,7 +15,7 @@ from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.notifications.operations import configure_reminders, get_reminder_schedule
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.models import Region
-from tests.test_domain import NOW, make_system
+from tests.support.domain import NOW, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
 SLOT = NOW + timedelta(days=1, hours=-6)

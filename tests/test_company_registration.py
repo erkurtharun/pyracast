@@ -1,5 +1,3 @@
-import re
-from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 from typing import Any
@@ -15,38 +13,10 @@ from django.test import Client, override_settings
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.accounts.signup import CompanySignupInput
-from tests.test_auth_lifecycle import submit
+from tests.support.auth_lifecycle import submit
+from tests.support.company_registration import AUTH, DETAILS, PASSWORD, mailed_code, signup
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
-PASSWORD = "test-only-" + "falcon-cloud-79!"
-DETAILS = {"company_name": "Sunfield Energy", "email": "Owner@Example.COM", "password": PASSWORD}
-AUTH = "/api/auth/browser/v1/"
-
-
-@pytest.fixture(autouse=True)
-def local_mail() -> Iterator[None]:
-    with override_settings(
-        MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
-    ):
-        yield
-
-
-def mailed_code() -> str:
-    for message in reversed(mail.outbox):
-        for line in str(message.body).splitlines():
-            if re.fullmatch(r"[A-Z0-9]{4}-[A-Z0-9]{4}", line.strip()):
-                return line.strip()
-    raise AssertionError("No authentication code was delivered.")
-
-
-def signup(client: Client, overrides: dict[str, Any] | None = None) -> Any:
-    token = client.get("/api/session/").json()["csrf_token"]
-    return client.post(
-        AUTH + "auth/signup",
-        DETAILS | (overrides or {}),
-        content_type="application/json",
-        HTTP_X_CSRFTOKEN=token,
-    )
 
 
 def test_signup_requires_verification_before_tenant_access() -> None:

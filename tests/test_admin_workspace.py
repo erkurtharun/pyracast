@@ -31,11 +31,11 @@ from pyracast.notifications.scheduler import PREPARATION_GRACE
 from pyracast.plants.models import Plant
 from pyracast.regions.models import AuditEvent, Region
 from pyracast.regions.operations import request_location_change
-from tests.test_admin_setup import admin_system, setup_input, submitted_plant
-from tests.test_api import verified_admin
-from tests.test_delivery_health import recent_forecast
-from tests.test_domain import make_system
-from tests.test_notifications import ready
+from tests.support.admin_setup import admin_system, setup_input, submitted_plant
+from tests.support.api import verified_admin
+from tests.support.delivery_health import recent_forecast
+from tests.support.domain import make_system
+from tests.support.notifications import ready
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

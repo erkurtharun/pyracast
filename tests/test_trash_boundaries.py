@@ -1,13 +1,7 @@
-from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
-from threading import Event, get_ident
-from typing import Any
 from unittest.mock import Mock
 
 import pytest
-from django.db import close_old_connections, connection
-from django.db.models import Model, QuerySet
 from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
@@ -33,10 +27,11 @@ from pyracast.plants.preparation import prepare_calibration
 from pyracast.plants.training import run_calibration
 from pyracast.regions.models import Region
 from pyracast.trash import purge_expired, restore_region, trash_region
-from tests.test_domain import NOW, FakeAdapter
-from tests.test_jobs import calculate
-from tests.test_notifications import SLOT, configured, saved
-from tests.test_plant_operations import make_plant, request_run
+from tests.support.domain import NOW, FakeAdapter
+from tests.support.jobs import calculate
+from tests.support.notifications import SLOT, configured, saved
+from tests.support.plant_operations import make_plant, request_run
+from tests.support.trash_boundaries import _race_before_region_lock
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -124,47 +119,6 @@ def test_dispatch_prioritizes_notifications_and_continues_all_queues(
         "dispatch_epias",
     ]
     broker.close.assert_called_once_with()
-
-
-def _race_before_region_lock(
-    monkeypatch: pytest.MonkeyPatch,
-    query_method: str,
-    work: Callable[[], object],
-    purge: Callable[[], None],
-    *,
-    lock_model: type[Model] = Region,
-) -> object:
-    entered, release = Event(), Event()
-    main_thread = get_ident()
-    original = getattr(QuerySet, query_method)
-
-    def paused(queryset: QuerySet[Any], *args: Any, **kwargs: Any) -> Any:
-        if (
-            get_ident() != main_thread
-            and queryset.model is lock_model
-            and queryset.query.select_for_update
-        ):
-            entered.set()
-            assert release.wait(timeout=10)
-        return original(queryset, *args, **kwargs)
-
-    monkeypatch.setattr(QuerySet, query_method, paused)
-
-    def worker() -> object:
-        close_old_connections()
-        try:
-            return work()
-        finally:
-            connection.close()
-
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(worker)
-        try:
-            assert entered.wait(timeout=10)
-            purge()
-        finally:
-            release.set()
-        return future.result(timeout=10)
 
 
 def test_collection_candidate_purged_before_region_lock(monkeypatch: pytest.MonkeyPatch) -> None:

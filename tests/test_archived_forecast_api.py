@@ -4,8 +4,8 @@ import pytest
 from django.test import Client
 
 from pyracast.accounts.models import Tenant
-from tests.test_domain import NOW
-from tests.test_plant_operations import make_plant, publish_snapshot, snapshot_for
+from tests.support.domain import NOW
+from tests.support.plant_operations import make_plant, publish_snapshot, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 8)

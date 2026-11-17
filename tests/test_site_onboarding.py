@@ -24,7 +24,7 @@ from pyracast.regions.operations import (
     submit_region,
 )
 from pyracast.trash import purge_expired, restore_region, trash_region
-from tests.test_domain import NOW, FakeAdapter, System, make_system
+from tests.support.domain import NOW, FakeAdapter, System, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

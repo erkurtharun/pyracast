@@ -11,12 +11,12 @@ from pyracast.metering.models import EpiasConnection
 from pyracast.plants.models import CalibrationRun, ProductionObservation
 from pyracast.plants.performance import forecast_performance
 from pyracast.solar import Daylight
-from tests.test_domain import NOW
-from tests.test_forecast_performance import selected_factor
-from tests.test_plant_operations import make_plant
-from tests.test_plant_training import actual_snapshot_for
-from tests.test_provisional_measurements import DAY, acquisition
-from tests.test_settlement_calibration import settlement
+from tests.support.domain import NOW
+from tests.support.forecast_performance import selected_factor
+from tests.support.plant_operations import make_plant
+from tests.support.plant_training import actual_snapshot_for
+from tests.support.provisional_measurements import DAY, acquisition
+from tests.support.settlement_calibration import settlement
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

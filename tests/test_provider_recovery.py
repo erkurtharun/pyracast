@@ -9,8 +9,8 @@ from pyracast.connections.models import ProviderAccount
 from pyracast.connections.recovery import clear_provider_cooldown
 from pyracast.forecasts.models import RequestAttempt
 from pyracast.regions.models import AuditEvent
-from tests.test_admin_setup import admin_system, setup_url
-from tests.test_api import verified_admin
+from tests.support.admin_setup import admin_system, setup_url
+from tests.support.api import verified_admin
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

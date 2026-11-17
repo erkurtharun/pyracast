@@ -24,9 +24,9 @@ from pyracast.plants.models import CalibrationActivation
 from pyracast.regions.models import Region
 from pyracast.solar import daylight_window
 from pyracast.weather import serialize_weather
-from tests.test_domain import System
-from tests.test_plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
-from tests.test_weather_collection import WeatherFixture
+from tests.support.domain import System
+from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
+from tests.support.weather_collection import WeatherFixture
 
 pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 11)

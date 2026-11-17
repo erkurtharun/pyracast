@@ -6,7 +6,7 @@ from typing import Any, cast
 import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.db import close_old_connections, connections, transaction
+from django.db import close_old_connections, connections
 from django.test import Client
 from django.utils import timezone
 
@@ -16,7 +16,6 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.plants.automation import (
     automation_status,
     prepare_due_calibrations,
-    promote_automatic_calibration,
     set_calibration_automation,
 )
 from pyracast.plants.calibration_data import current_source_validation
@@ -37,9 +36,10 @@ from pyracast.plants.operations import (
 from pyracast.plants.training import run_calibration
 from pyracast.regions.models import Region
 from pyracast.trash import purge_expired, trash_region
-from tests.test_domain import NOW, System
-from tests.test_plant_operations import make_plant, ready_run
-from tests.test_plant_training import actual_snapshot_for
+from tests.support.calibration_automation import declare_native_sources, evaluated_run, promote
+from tests.support.domain import NOW, System
+from tests.support.plant_operations import make_plant, ready_run
+from tests.support.plant_training import actual_snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -66,52 +66,6 @@ def test_automation_can_start_before_a_fit_and_disable_without_reset(
     assert response.status_code == 200, response.content
     assert response.json()["enabled"] is False
     assert not CalibrationActivation.objects.exists()
-
-
-def declare_native_sources(run: CalibrationRun) -> None:
-    day = run.window_start
-    included = []
-    while day <= run.window_end:
-        included.append(day.isoformat())
-        day += timedelta(days=1)
-    run.result["included_day_dates"] = included
-    run.result["valid_days"] = len(included)
-    run.result["training_day_dates"] = [
-        day for day in included if day not in run.result["holdout_day_dates"]
-    ]
-    run.result["training_days"] = len(run.result["training_day_dates"])
-    run.dataset_manifest["binding_id"] = run.binding_id
-    run.dataset_manifest["sources"] = {
-        day: {
-            "snapshot_id": index + 1,
-            "binding_id": run.binding_id,
-            "source_kind": "estimated_actuals",
-            "source_product": "rooftop_pv_power",
-            "reference_import": None,
-        }
-        for index, day in enumerate(included)
-    }
-    run.result["current_source_validation"] = current_source_validation(
-        run.dataset_manifest, run.result, run.binding_id
-    )
-
-
-def evaluated_run(system: System, plant: Plant) -> CalibrationRun:
-    run = ready_run(system, plant)
-    run.window_start, run.window_end = date(2026, 10, 9), date(2026, 11, 7)
-    run.assessment = "evaluated"
-    run.result.update(
-        {
-            "valid_days": 30,
-            "holdout_days": 7,
-            "holdout_day_dates": [date(2026, 11, day).isoformat() for day in range(1, 8)],
-            "candidate": {"interval_mae_mw": 0.5, "daily_mae_mwh": 0.5},
-            "incumbent": {"interval_mae_mw": 1.0, "daily_mae_mwh": 1.0},
-        }
-    )
-    declare_native_sources(run)
-    run.save()
-    return run
 
 
 @pytest.mark.parametrize(
@@ -161,15 +115,6 @@ def test_automatic_evaluation_requires_recent_holdout_but_manual_selection_remai
             system.member, system.tenant.pk, system.region.pk, plant.pk, run.pk
         )
         assert activation.calibration_id == run.pk
-
-
-def promote(plant_id: int, run: CalibrationRun) -> bool:
-    with transaction.atomic():
-        identity = Plant.objects.select_related("region").get(pk=plant_id)
-        Tenant.objects.select_for_update().get(pk=identity.region.tenant_id)
-        Region.objects.select_for_update().get(pk=identity.region_id)
-        plant = Plant.objects.select_for_update().get(pk=plant_id)
-        return promote_automatic_calibration(plant, run, NOW)
 
 
 def unpublished_history(system: System, plant: Plant) -> None:

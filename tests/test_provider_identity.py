@@ -13,7 +13,7 @@ from pyracast.connections.operations import (
 )
 from pyracast.connections.secrets import decrypt_api_key, encrypt_secret
 from pyracast.regions.models import AuditEvent
-from tests.test_domain import NOW, provider_key
+from tests.support.domain import NOW, provider_key
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

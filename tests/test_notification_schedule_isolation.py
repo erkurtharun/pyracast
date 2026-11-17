@@ -21,9 +21,9 @@ from pyracast.notifications.operations import configure_reminders, invalid_remin
 from pyracast.notifications.scheduler import NotificationSchedulingError, enqueue_due
 from pyracast.regions.models import Region
 from pyracast.regions.operations import approve_region, configure_binding, submit_region
-from tests.test_domain import NOW, FakeAdapter, System
-from tests.test_notification_recipient_validation import recipient
-from tests.test_notifications import SLOT, configured
+from tests.support.domain import NOW, FakeAdapter, System
+from tests.support.notification_recipient_validation import recipient
+from tests.support.notifications import SLOT, configured
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

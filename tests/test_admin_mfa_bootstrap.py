@@ -15,21 +15,9 @@ from django.test import Client, RequestFactory
 from django.urls import URLPattern, get_resolver
 
 from pyracast.accounts.mfa import MFAAdapter
+from tests.support.admin_mfa_bootstrap import TEST_PASSWORD, administrator
 
 pytestmark = pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
-TEST_PASSWORD = "test-only-" + "z" * 40
-
-
-def administrator() -> User:
-    user = User.objects.create_user(
-        username="operator",
-        email="operator@example.com",
-        password=TEST_PASSWORD,
-        is_staff=True,
-        is_superuser=True,
-    )
-    EmailAddress.objects.create(user=user, email=user.email, verified=True, primary=True)
-    return user
 
 
 def test_admin_password_alone_cannot_bootstrap_an_authenticator() -> None:

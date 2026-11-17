@@ -2,19 +2,20 @@ version: "1.0"
 linter: qodana-python
 withinDocker: false
 
+# Python only; qodana-js.yaml analyses web/.
 profile:
-  name: qodana.recommended
-
-include:
-  - name: VulnerableLibrariesLocal
-  - name: PyVulnerableApiCode
+  base:
+    name: qodana.recommended
+  inspections:
+    - inspection: VulnerableLibrariesLocal
+      enabled: true
+    - inspection: PyVulnerableApiCode
+      enabled: true
 
 exclude:
   - name: All
     paths:
-      - web/src/lib/schema.d.ts
-      - web/test-results-frontend
-      - web/test-results-security
+      - web
   - name: PyTypeHintsInspection
     paths:
       - src/pyracast/admin_workspace.py
@@ -33,10 +34,6 @@ exclude:
     paths:
       - src/pyracast/calculation.py
       - src/pyracast/notifications/preparation.py
-  - name: DuplicatedCode
-    paths:
-      - web/tests
-      - web/integration
   - name: PyMethodOverridingInspection
     paths:
       - src/pyracast/admin.py

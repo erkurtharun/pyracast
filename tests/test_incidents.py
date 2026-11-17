@@ -15,8 +15,8 @@ from pyracast.incidents.operations import pinned_incidents, save_incident, selec
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import create_plant, revise_plant
 from pyracast.trash import RETENTION, purge_expired, restore_region, trash_region
-from tests.test_domain import make_system
-from tests.test_trash_operations import sibling
+from tests.support.domain import make_system
+from tests.support.trash_operations import sibling
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

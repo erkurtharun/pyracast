@@ -24,8 +24,8 @@ from pyracast.plants.models import CalibrationRun, Plant
 from pyracast.plants.numerics import evaluate_samples, fit_calibration
 from pyracast.plants.operations import ObservationInput, create_plant, import_observations
 from pyracast.regions.models import AuditEvent
-from tests.test_domain import NOW, System
-from tests.test_historical_reference_import import system_for_import
+from tests.support.domain import NOW, System
+from tests.support.historical_reference_import import system_for_import
 
 
 def row(**updates: Any) -> dict[str, Any]:

@@ -8,10 +8,10 @@ from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.preparation import prepare_delivery
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.plants.models import PlantConfiguration
-from tests.test_domain import NOW
-from tests.test_notification_preparation import complete_saved
-from tests.test_notification_report_data import report_delivery
-from tests.test_notifications import SLOT, cache_saved_days, configured
+from tests.support.domain import NOW
+from tests.support.notification_preparation import complete_saved
+from tests.support.notification_report_data import report_delivery
+from tests.support.notifications import SLOT, cache_saved_days, configured
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

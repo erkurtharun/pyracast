@@ -9,9 +9,9 @@ from pyracast.forecasts.monitoring import record_dispatch_phase
 from pyracast.metering.models import EpiasCollectionJob
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.notifications.scheduler import PREPARATION_GRACE
-from tests.test_api import verified_admin
-from tests.test_delivery_health import NOW, recent_forecast
-from tests.test_metering import connected
+from tests.support.api import verified_admin
+from tests.support.delivery_health import NOW, recent_forecast
+from tests.support.metering import connected
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

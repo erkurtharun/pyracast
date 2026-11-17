@@ -11,7 +11,7 @@ from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import CollectionJob, ForecastResult, ForecastSnapshot
 from pyracast.forecasts.projections import prepare_daily_payloads, saved_day_payload
 from pyracast.irradiance import local_day_bounds
-from tests.test_domain import NOW, FakeAdapter, make_system
+from tests.support.domain import NOW, FakeAdapter, make_system
 
 
 def source_data() -> ProviderData:
