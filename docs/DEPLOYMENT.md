@@ -451,14 +451,15 @@ and name the `restore` command for that object.
 | `restore --confirm OBJECT` | the marker, no application container, `OBJECT` is the session's archive once `reset` replaced the database, the archive has applied migrations, both database roles | writes the runtime secrets; uses the archive `prepare` kept, or downloads `OBJECT` from the backup bucket, checks it against the bucket's MD5 and size and verifies it in a throwaway PostgreSQL first; then purges the queues, recreates the database as `reset` does, restores the archive with its owners and privileges, compares every table's row count with the record, checks both roles and `migrate --check`, starts the release in `/opt/pyracast/current`, probes readiness and removes the marker and the session |
 
 When the start, readiness or the service unit fails or is interrupted, `abort` and
-`restore` write the marker back and attempt to stop the application in the
-installer's order, each step even after an earlier one failed. Ctrl-C and SIGTERM
-wait until every step was attempted (the command running at that moment still
-receives a terminal Ctrl-C and may fail), and a broken or closed console skips
-nothing. They then print every error with its captured output, any signal that
-arrived (exit status 130), the state they observe (whether the marker holds the
-session identity, which application containers still run) and the next step: the
-same command once no application container runs and the marker holds the identity,
+`restore` write the marker back and send each stop command of the installer's
+order, each even after an earlier step failed. Ctrl-C and SIGTERM wait until these
+steps were attempted and the report is printed (the command running at that moment
+still receives a terminal Ctrl-C and may fail), and a broken or closed console
+skips nothing and keeps the exit status. They then print every error with its
+captured output, any signal that arrived (exit status 130), the outcome of each
+stop command, the state they observe (whether the marker holds the session
+identity, which application containers still run) and the next step: the same
+command once no application container runs and the marker holds the identity,
 otherwise first the stop command or the identity to write back.
 Both render the environment files with the release they start, and after removing the
 marker they reset and start `pyracast.service`, which refused to start while it existed.

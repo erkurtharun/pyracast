@@ -6,6 +6,7 @@ import datetime
 import hashlib
 import importlib
 import json
+import os
 import re
 import shlex
 import signal
@@ -16,6 +17,7 @@ import urllib.request
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
+from functools import partial
 from pathlib import Path
 from types import FrameType
 from typing import Literal
@@ -82,6 +84,7 @@ class RefusedError(Exception):
 
 
 type MarkerState = Literal["held", "foreign", "missing", "unknown"]
+type SignalHandler = Callable[[int, FrameType | None], object] | int | signal.Handlers | None
 
 MARKER_REPORT: dict[MarkerState, str] = {
     "held": "The maintenance marker {marker} is present and holds {identity}.",
@@ -119,6 +122,7 @@ class StartFailedError(RuntimeError):
         marker: MarkerState,
         running: set[str] | None,
         signals: list[str],
+        handlers: dict[signal.Signals, SignalHandler],
     ) -> None:
         super().__init__(describe(failure))
         self.failure = failure
@@ -127,6 +131,7 @@ class StartFailedError(RuntimeError):
         self.marker = marker
         self.running = running
         self.signals = signals
+        self.handlers = handlers
 
     @property
     def interrupted(self) -> bool:
@@ -380,14 +385,18 @@ def running_services(host: Host) -> set[str]:
     return set(capture(status_command(host)).split())
 
 
-def stop_in_order(host: Host, progress: Callable[[str], None] = step) -> None:
+def stop_group(host: Host, timeout: str, services: tuple[str, ...]) -> None:
+    subprocess.run(
+        [*compose(host), "stop", "-t", timeout, *services],
+        check=True,
+        timeout=int(timeout) + 60,
+    )
+
+
+def stop_in_order(host: Host) -> None:
     for timeout, services in STOP_ORDER:
-        progress(f"Stopping {', '.join(services)}")
-        subprocess.run(
-            [*compose(host), "stop", "-t", timeout, *services],
-            check=True,
-            timeout=int(timeout) + 60,
-        )
+        step(f"Stopping {', '.join(services)}")
+        stop_group(host, timeout, services)
 
 
 def stop_application(host: Host) -> None:
@@ -707,43 +716,48 @@ def marker_state(host: Host, identity: str) -> MarkerState:
     return "held" if content.strip() == identity.strip() else "foreign"
 
 
-@contextmanager
-def deferred_signals() -> Iterator[list[str]]:
-    received: list[str] = []
-
+def defer_signals(received: list[str]) -> dict[signal.Signals, SignalHandler]:
     def record(number: int, _frame: FrameType | None) -> None:
         received.append(signal.Signals(number).name)
 
-    # Main thread only. A raising handler (Python's Ctrl-C default) could skip a cleanup step.
-    previous = [
-        (number, signal.signal(number, record)) for number in (signal.SIGINT, signal.SIGTERM)
-    ]
+    # Main thread only. Python's raising Ctrl-C default could skip a cleanup step or lose the
+    # report, so the handlers stay deferred until main has printed it and calls restore_signals.
+    return {number: signal.signal(number, record) for number in (signal.SIGINT, signal.SIGTERM)}
+
+
+def restore_signals(handlers: dict[signal.Signals, SignalHandler], received: list[str]) -> None:
     try:
-        yield received
+        signal.signal(signal.SIGTERM, handlers[signal.SIGTERM])
     finally:
-        for number, handler in previous:
-            signal.signal(number, handler)
+        try:
+            signal.signal(signal.SIGINT, handlers[signal.SIGINT])
+        except KeyboardInterrupt:
+            received.append("SIGINT")
 
 
 def stop_after_failed_start(host: Host, identity: str, failure: BaseException) -> StartFailedError:
-    with deferred_signals() as received:
-        cleanup_step("Writing the maintenance marker back and stopping the application again")
-        problems: list[tuple[str, BaseException]] = []
-        attempt(
-            problems,
-            "Writing the maintenance marker back",
-            lambda: write_synced(host.marker, identity),
-        )
-        attempt(problems, "Stopping the application", lambda: stop_in_order(host, cleanup_step))
-        running = attempt(
-            problems,
-            "Listing the running containers",
-            lambda: running_services(host) & APPLICATION_SERVICES,
-        )
-        marker = attempt(
-            problems, "Reading the maintenance marker", lambda: marker_state(host, identity)
-        )
-        return StartFailedError(failure, problems, identity, marker or "unknown", running, received)
+    received: list[str] = []
+    handlers = defer_signals(received)
+    cleanup_step("Writing the maintenance marker back and stopping the application again")
+    problems: list[tuple[str, BaseException]] = []
+    attempt(
+        problems, "Writing the maintenance marker back", lambda: write_synced(host.marker, identity)
+    )
+    for timeout, services in STOP_ORDER:
+        names = ", ".join(services)
+        cleanup_step(f"Stopping {names}")
+        attempt(problems, f"Stopping {names}", partial(stop_group, host, timeout, services))
+    running = attempt(
+        problems,
+        "Listing the running containers",
+        lambda: running_services(host) & APPLICATION_SERVICES,
+    )
+    marker = attempt(
+        problems, "Reading the maintenance marker", lambda: marker_state(host, identity)
+    )
+    return StartFailedError(
+        failure, problems, identity, marker or "unknown", running, received, handlers
+    )
 
 
 def end_session(host: Host) -> None:
@@ -919,15 +933,27 @@ def print_recovery(host: Host, options: argparse.Namespace) -> None:
     )
 
 
+def stop_outcome(problem: BaseException | None) -> str:
+    if problem is None:
+        return "done"
+    return "interrupted" if isinstance(problem, KeyboardInterrupt) else "failed"
+
+
 def print_failed_start(host: Host, options: argparse.Namespace, error: StartFailedError) -> None:
     rerun = "abort" if options.command == "abort" else f"restore --confirm {options.confirm}"
     shown = shlex.quote(error.identity.strip())
     lines = [outcome(options.command, error.failure)]
     lines += [outcome(what, problem) for what, problem in error.problems]
     lines += [
-        f"{name} arrived during the cleanup; every step was still attempted."
+        f"{name} arrived after the start failed; every cleanup step was still attempted."
         for name in dict.fromkeys(error.signals)
     ]
+    failed = dict(error.problems)
+    stops = [
+        f"{names} {stop_outcome(failed.get(f'Stopping {names}'))}"
+        for names in (", ".join(services) for _, services in STOP_ORDER)
+    ]
+    lines.append("Stop commands in the installer's order: " + "; ".join(stops) + ".")
     lines.append(MARKER_REPORT[error.marker].format(marker=host.marker, identity=shown))
     steps = []
     if error.running is None:
@@ -947,7 +973,27 @@ def print_failed_start(host: Host, options: argparse.Namespace, error: StartFail
     print_safely("\n".join(lines), error=True)
 
 
+def release_broken_streams() -> None:
+    # CPython exits with 120 instead of main's status when it cannot flush stdout or stderr at exit.
+    for stream in (sys.stdout, sys.stderr):
+        with suppress(ValueError):  # closed, which the exit skips, or not backed by a descriptor
+            try:
+                stream.flush()
+            except OSError:
+                descriptor = stream.fileno()
+                devnull = os.open(os.devnull, os.O_WRONLY)
+                os.dup2(devnull, descriptor)
+                os.close(devnull)
+
+
 def main(arguments: list[str] | None = None) -> int:
+    try:
+        return command_line(arguments)
+    finally:
+        release_broken_streams()
+
+
+def command_line(arguments: list[str] | None) -> int:
     parser = argparse.ArgumentParser(
         description="Reset or restore the production database during a planned maintenance."
     )
@@ -984,7 +1030,10 @@ def main(arguments: list[str] | None = None) -> int:
         print(f"Refused: {error} No data was changed.", file=sys.stderr)
         return 2
     except StartFailedError as error:
-        print_failed_start(host, options, error)
+        try:
+            print_failed_start(host, options, error)
+        finally:
+            restore_signals(error.handlers, error.signals)
         return 130 if error.interrupted else 1
     except KeyboardInterrupt:
         print(f"{options.command} was interrupted.", file=sys.stderr)
