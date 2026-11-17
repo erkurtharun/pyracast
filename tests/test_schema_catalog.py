@@ -146,6 +146,12 @@ def test_forecasts_are_archived_only_as_issuances_for_horizontal_bindings() -> N
     assert "tilt_degrees" not in table_columns("connections_sitebinding")
 
 
+def test_plants_and_reminders_are_stored_in_their_one_current_shape() -> None:
+    assert "deleted_at" not in table_columns("plants_plant")
+    assert "retired_at" not in table_columns("notifications_reminderschedule")
+    assert "grouped" not in table_columns("notifications_notificationdelivery")
+
+
 def test_extensions_equal_the_declared_schema_objects() -> None:
     with connection.cursor() as cursor:
         cursor.execute("SELECT extname FROM pg_extension WHERE extname <> 'plpgsql'")

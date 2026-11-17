@@ -452,6 +452,23 @@ def test_interrupted_sending_never_retries_ambiguous_delivery() -> None:
     assert not process_notification(delivery.pk, SLOT)
 
 
+def test_a_delivery_is_sending_only_with_prepared_content_in_a_known_state() -> None:
+    delivery = ready()
+    rows = NotificationDelivery.objects.filter(pk=delivery.pk)
+    with (
+        pytest.raises(IntegrityError, match="notification_delivery_status_valid"),
+        transaction.atomic(),
+    ):
+        rows.update(status="unavailable")
+    with (
+        pytest.raises(IntegrityError, match="notification_delivery_sending_prepared"),
+        transaction.atomic(),
+    ):
+        rows.update(status="sending", prepared_message=None)
+    rows.update(status="sending", prepared_message={"kind": "unavailable"})
+    assert rows.get().status == "sending"
+
+
 def test_locmem_adapter_zero_return_is_known_not_sent() -> None:
     with pytest.raises(NotSentError):
         send_message(EmailMultiAlternatives(subject="Empty", body="No recipient", to=[]))

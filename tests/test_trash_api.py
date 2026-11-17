@@ -7,7 +7,7 @@ from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.admin import RegionAdmin, site
-from pyracast.plants.models import Plant
+from pyracast.plants.models import Plant, PlantEvent
 from pyracast.regions.models import Region
 from tests.test_domain import NOW
 from tests.test_plant_operations import make_plant
@@ -58,6 +58,29 @@ def test_trash_restore_hides_all_entity_routes_and_keeps_child_trash(
     assert client.get(region + "plants/").json()["count"] == 1
     assert client.get(tenant + "trash/regions/").json()["count"] == 0
     assert client.get(tenant + "trash/plants/").json()["count"] == 0
+
+
+def test_a_plant_leaves_the_workspace_and_returns_only_with_its_location(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    client = Client()
+    client.force_login(system.member)
+    tenant = f"/api/tenants/{system.tenant.pk}/"
+    region = f"{tenant}regions/{system.region.pk}/"
+    detail = f"{region}plants/{plant.pk}/"
+    assert client.delete(detail).status_code == 405
+    assert client.post(detail + "restore/", {}, content_type="application/json").status_code == 404
+    assert client.get(tenant + "trash/plants/").status_code == 404
+    assert client.get(region + "plants/").json()["count"] == 1
+    assert client.delete(region).status_code == 204
+    assert client.get(detail).status_code == 404
+    restored = client.post(region + "restore/", {}, content_type="application/json")
+    assert restored.status_code == 200
+    assert client.get(detail).json()["current_configuration"]["id"] == (
+        plant.current_configuration_id
+    )
+    assert not PlantEvent.objects.filter(action__in=("plant_trashed", "plant_restored")).exists()
 
 
 def test_expired_trash_remains_visible_but_cannot_be_restored(

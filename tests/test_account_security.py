@@ -488,3 +488,7 @@ def test_authentication_throttling_emits_private_security_events(
             }
         ]
     assert "never-log-this" not in caplog.text
+
+
+def test_passwords_are_hashed_and_checked_only_with_argon2() -> None:
+    assert project_settings.PASSWORD_HASHERS == ["django.contrib.auth.hashers.Argon2PasswordHasher"]
