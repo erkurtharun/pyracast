@@ -54,12 +54,13 @@ def test_a_plant_leaves_the_workspace_and_returns_only_with_its_location(
     assert client.get(tenant + "trash/plants/").status_code == 404
     assert client.get(region + "plants/").json()["count"] == 1
     assert client.delete(region).status_code == 204
-    assert client.get(detail).status_code == 404
+    assert client.get(region + "plants/").status_code == 404
     restored = client.post(region + "restore/", {}, content_type="application/json")
     assert restored.status_code == 200
-    assert client.get(detail).json()["current_configuration"]["id"] == (
-        plant.current_configuration_id
-    )
+    rows = client.get(region + "plants/").json()["results"]
+    assert [(row["id"], row["current_configuration"]["id"]) for row in rows] == [
+        (plant.pk, plant.current_configuration_id)
+    ]
     assert not PlantEvent.objects.filter(action__in=("plant_trashed", "plant_restored")).exists()
 
 
