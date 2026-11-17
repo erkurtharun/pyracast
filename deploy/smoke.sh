@@ -270,4 +270,126 @@ restore_archive(release, release / 'database.dump', 'local-smoke')
 PY
 "${compose[@]}" exec -T api pyracast dispatch
 "${compose[@]}" stop -t 30 dispatcher worker notifications
-echo 'Production containers, TLS routing, static assets, session and sign-in API, workspace app shell, database roles, fixture queue publication and graceful idle shutdown passed.'
+
+# The smoke substitutes bucket upload, runtime secrets, systemctl, public readiness and Windows locking.
+"${compose[@]}" exec -T api python - <<'PY'
+import django
+django.setup()
+from django.contrib.auth.models import User
+User.objects.create_user(username='reset-smoke', email='reset-smoke@example.com',
+                         password='reset-smoke-sign-in-4c1e9a')
+PY
+cat > "$temporary/reset_tool.py" <<'PY'
+import contextlib
+import importlib.util
+import subprocess
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from deploy import reset_database
+temporary = Path(sys.argv[2])
+
+def upload(_bucket, name, archive):
+    target = temporary / 'bucket' / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(archive.read_bytes())
+
+def site_ready(_host, attempts):
+    result = subprocess.run(
+        ['curl', '--silent', '--show-error', '--fail', '--ssl-revoke-best-effort',
+         '--cacert', str(temporary / 'ca.pem'), '--retry', str(attempts), '--retry-delay', '2',
+         '--retry-all-errors', 'https://localhost:18443/health/ready/'],
+        capture_output=True, text=True, check=False)
+    return result.returncode == 0 and result.stdout.strip() == 'ok'
+
+reset_database.upload_backup = upload
+reset_database.site_ready = site_ready
+reset_database.write_runtime_secrets = lambda _host: None
+run = subprocess.run
+subprocess.run = lambda command, *args, **kwargs: (
+    subprocess.CompletedProcess(command, 0) if command[0] == 'systemctl'
+    else run(command, *args, **kwargs))
+if importlib.util.find_spec('fcntl') is None:
+    reset_database.release_lock = lambda _host: contextlib.nullcontext()
+reset_database.load_host = lambda config: reset_database.Host(
+    config=config, release=temporary, bucket='smoke-backups', runtime_version='smoke',
+    marker=temporary / 'release-blocked', lock=temporary / 'release.lock',
+    state=temporary / 'reset', environment=temporary)
+raise SystemExit(reset_database.main([str(temporary / 'host.json'), *sys.argv[3:]]))
+PY
+reset_tool=(uv run --no-project --python 3.15.2 python "$temporary/reset_tool.py" "$root" "$temporary")
+application_running() {
+  "${compose[@]}" ps --services --status running gateway api web dispatcher worker notifications
+}
+ready() { [[ $("${secure_curl[@]}" https://localhost:18443/health/ready/) == ok ]]; }
+"${reset_tool[@]}" prepare
+test -f "$temporary/release-blocked"
+[[ -z $(application_running) ]]
+"${reset_tool[@]}" abort
+test ! -e "$temporary/release-blocked"
+ready
+"${reset_tool[@]}" prepare | tee "$temporary/prepare.log"
+object=$(sed -n 's|^  Object:  gs://smoke-backups/||p' "$temporary/prepare.log")
+[[ $object == postgres/*-prereset-*.dump ]]
+cmp "$temporary/bucket/$object" "$temporary/reset/${object##*/}"
+solcast=${object%.dump}.solcast.jsonl.gz
+grep -qxF "  Solcast export: gs://smoke-backups/$solcast" "$temporary/prepare.log"
+grep -qxF '  Solcast snapshots: 0' "$temporary/prepare.log"
+cmp "$temporary/bucket/$solcast" "$temporary/reset/${solcast##*/}"
+[[ -z $(gzip -dc "$temporary/reset/${solcast##*/}") ]]
+"${reset_tool[@]}" reset --confirm "$object"
+test -f "$temporary/release-blocked"
+refused=0
+"${reset_tool[@]}" abort || refused=$?
+[[ $refused == 2 ]]
+[[ $("${compose[@]}" exec -T postgres psql -X -U postgres -d pyracast -Atc \
+  "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'") == 0 ]]
+# The installer's pre-release dump and migrate run from zero under the restricted owner.
+"${compose[@]}" exec -T postgres pg_dump -U postgres -d pyracast --format=custom --compress=zstd:3 > "$temporary/empty.dump"
+test -s "$temporary/empty.dump"
+"${compose[@]}" run --rm --no-deps migrate
+"${compose[@]}" run --rm --no-deps migrate pyracast migrate --check
+"${compose[@]}" up -d --wait --wait-timeout 180
+ready
+"${compose[@]}" exec -T api python - <<'PY'
+import django
+django.setup()
+from django.db import connection, ProgrammingError
+from pyracast.forecasts.models import ForecastResult
+assert not ForecastResult.objects.exists()
+try:
+    with connection.cursor() as cursor:
+        cursor.execute('CREATE TABLE forbidden_runtime_ddl (id int)')
+except ProgrammingError:
+    pass
+else:
+    raise SystemExit('Runtime role unexpectedly owns DDL permission after the reset')
+PY
+# A release that fails after maintenance began leaves the application stopped; restore recovers it.
+"${compose[@]}" stop -t 100 gateway api web
+"${compose[@]}" stop -t 660 dispatcher
+"${compose[@]}" stop -t 660 worker notifications
+"${reset_tool[@]}" restore --confirm "$object"
+test ! -e "$temporary/release-blocked"
+ready
+"${compose[@]}" exec -T api python - <<'PY'
+import django
+django.setup()
+from django.contrib.auth.models import User
+from django.db import connection, ProgrammingError
+from pyracast.forecasts.models import ForecastResult
+assert User.objects.get(username='reset-smoke').check_password('reset-smoke-sign-in-4c1e9a')
+assert ForecastResult.objects.exists()
+with connection.cursor() as cursor:
+    cursor.execute("SELECT count(*) FROM pg_tables WHERE schemaname = 'public' "
+                   "AND tableowner <> 'pyracast_owner'")
+    assert cursor.fetchone() == (0,)
+try:
+    with connection.cursor() as cursor:
+        cursor.execute('CREATE TABLE forbidden_runtime_ddl (id int)')
+except ProgrammingError:
+    pass
+else:
+    raise SystemExit('Runtime role unexpectedly owns DDL permission after the restore')
+PY
+echo 'Production containers, TLS routing, static assets, session and sign-in API, workspace app shell, database roles, fixture queue publication, graceful idle shutdown, and database reset and restore passed.'
