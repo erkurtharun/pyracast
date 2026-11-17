@@ -5,12 +5,12 @@ import pytest
 from django.core import mail
 from django.core.mail import EmailMultiAlternatives
 from django.test import override_settings
+from pyracast.mail.errors import NotSentError
 
 from pyracast.accounts.models import Membership
 from pyracast.accounts.operations import remove_workspace_member
 from pyracast.notifications import jobs
 from pyracast.notifications.jobs import LEASE_DURATION, process_notification
-from pyracast.notifications.mail import NotSentError
 from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.scheduler import enqueue_due
 from tests.test_notification_groups import group, member

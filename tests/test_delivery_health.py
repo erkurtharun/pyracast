@@ -162,7 +162,7 @@ def test_incomplete_and_interrupted_deliveries_remain_visible_to_monitoring() ->
     delivery.save()
     assert delivery_health(NOW, timedelta(minutes=5))["healthy"] is True
     delivery.status = "retry"
-    delivery.last_error = "mail_authentication_failed"
+    delivery.last_error = "mail_credentials_rejected"
     delivery.save()
     report = delivery_health(NOW, timedelta(minutes=5))
     assert report["mail_authentication_failures"] == 1

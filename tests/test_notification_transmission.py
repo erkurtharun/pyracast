@@ -9,10 +9,11 @@ from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.core.mail.backends.base import BaseEmailBackend
 from django.db import OperationalError, connection
 from django.test import override_settings
+from pyracast.mail.errors import NotSentError
 
 from pyracast.notifications import jobs
 from pyracast.notifications.jobs import LEASE_DURATION, process_notification
-from pyracast.notifications.mail import NotSentError, build_message
+from pyracast.notifications.mail import build_message
 from pyracast.notifications.models import (
     NotificationDelivery,
     NotificationSettings,

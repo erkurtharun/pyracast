@@ -16,6 +16,8 @@ from django.db.migrations.executor import MigrationExecutor
 from django.test import override_settings
 from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
+from pyracast.mail.errors import NotSentError, PermanentlyNotSentError
+from pyracast.mail.send import send
 from rest_framework.test import APIClient
 
 from pyracast.accounts.models import Membership, Tenant
@@ -36,7 +38,6 @@ from pyracast.notifications.jobs import (
     pending_notification_ids,
     process_notification,
 )
-from pyracast.notifications.mail import NotSentError, PermanentlyNotSentError, send_message
 from pyracast.notifications.models import (
     NotificationDelivery,
     NotificationSettings,
@@ -454,7 +455,7 @@ def test_interrupted_sending_never_retries_ambiguous_delivery() -> None:
 
 def test_locmem_adapter_zero_return_is_known_not_sent() -> None:
     with pytest.raises(NotSentError):
-        send_message(EmailMultiAlternatives(subject="Empty", body="No recipient", to=[]))
+        send(EmailMultiAlternatives(subject="Empty", body="No recipient", to=[]))
 
 
 def test_full_summary_preserves_units_and_escapes_html() -> None:
@@ -959,7 +960,7 @@ def test_multiple_recipients_share_one_private_message_and_delivery_outcome(outc
             raise NotSentError
         if outcome == "uncertain":
             raise TimeoutError
-        send_message(message)
+        send(message)
 
     assert process_notification(delivery_id, SLOT, sender=sender) is (outcome == "sent")
     delivery = NotificationDelivery.objects.get(pk=delivery_id)

@@ -7,6 +7,7 @@ from django.core import mail
 from django.core.mail import EmailMultiAlternatives
 from django.db.models.fetch_modes import FetchMode
 from openpyxl.worksheet.worksheet import Worksheet
+from pyracast.mail.errors import NotSentError
 
 from pyracast.connections.models import ProviderAccount
 from pyracast.forecasts.models import (
@@ -17,7 +18,6 @@ from pyracast.forecasts.models import (
 )
 from pyracast.irradiance import local_day_bounds
 from pyracast.notifications.jobs import process_notification
-from pyracast.notifications.mail import NotSentError
 from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.scheduler import PREPARATION_GRACE, enqueue_due

@@ -17,9 +17,9 @@ from django.core.cache import cache
 from django.core.mail import EmailMessage
 from django.core.mail.backends.base import BaseEmailBackend
 from django.test import Client, override_settings
+from pyracast.mail.errors import NotSentError
 
 from pyracast.accounts.models import Membership, Tenant
-from pyracast.mail_delivery import NotSentError
 from tests.test_admin_recovery_security import RECOVERY, authenticated_account
 from tests.test_admin_recovery_security import submit as submit_to
 from tests.test_auth_lifecycle import PASSWORD, member, submit

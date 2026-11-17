@@ -7,11 +7,12 @@ from django.core.mail import EmailMultiAlternatives
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.utils import translation
+from pyracast.mail.errors import NotSentError
 
 from pyracast.accounts.models import UserLanguagePreference
 from pyracast.forecasts.models import ForecastSnapshot, RequestAttempt
 from pyracast.notifications.jobs import process_notification
-from pyracast.notifications.mail import NotSentError, build_message
+from pyracast.notifications.mail import build_message
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.models import Region

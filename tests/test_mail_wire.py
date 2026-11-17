@@ -15,9 +15,9 @@ from django.core.mail import EmailMultiAlternatives
 from django.core.management import call_command
 from django.test import override_settings
 from openpyxl import load_workbook
+from pyracast.mail.gmail import SEND_SCOPE, TOKEN_URL
+from pyracast.mail.send import send
 
-from pyracast.gmail import SEND_SCOPE, TOKEN_URL
-from pyracast.notifications.mail import send_message
 from tests.smtp_server import Script, loopback_smtp
 
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -47,7 +47,7 @@ def smtp_wire() -> Iterator[tuple[Script, Transmit]]:
     script = Script()
 
     def transmit(message: EmailMultiAlternatives) -> bytes:
-        send_message(message)
+        send(message)
         assert len(script.transactions) == 1
         return script.transactions[0].data
 
@@ -55,7 +55,10 @@ def smtp_wire() -> Iterator[tuple[Script, Transmit]]:
         loopback_smtp(script) as port,
         override_settings(
             MAILERS={
-                "default": {"BACKEND": "pyracast.smtp.EmailBackend", "OPTIONS": smtp_options(port)}
+                "default": {
+                    "BACKEND": "pyracast.mail.smtp.EmailBackend",
+                    "OPTIONS": smtp_options(port),
+                }
             }
         ),
     ):
@@ -82,14 +85,14 @@ def gmail_wire(monkeypatch: pytest.MonkeyPatch) -> Iterator[Transmit]:
     )
 
     def transmit(message: EmailMultiAlternatives) -> bytes:
-        send_message(message)
+        send(message)
         assert len(sent) == 1
         return sent[0]
 
     options = {"client_id": "client", "client_secret": "secret", "refresh_token": "refresh"}
     with override_settings(
         DEFAULT_FROM_EMAIL=SENDER,
-        MAILERS={"default": {"BACKEND": "pyracast.gmail.EmailBackend", "OPTIONS": options}},
+        MAILERS={"default": {"BACKEND": "pyracast.mail.gmail.EmailBackend", "OPTIONS": options}},
     ):
         yield transmit
 
