@@ -552,7 +552,14 @@ def test_configured_matchers_cover_reads_through_the_ide_and_shell_tools() -> No
     assert matchers["pre-read"].fullmatch("mcp__filesystem__read")
     assert matchers["pre-read"].fullmatch("mcp__images__view_image")
     assert not matchers["pre-read"].fullmatch("Bash")
-    for tool_name in ("Bash", "PowerShell", "shell", "exec_command", "mcp__pycharm__execute_tool"):
+    for tool_name in (
+        "Bash",
+        "PowerShell",
+        "shell",
+        "local_shell",
+        "exec_command",
+        "mcp__pycharm__execute_tool",
+    ):
         assert matchers["pre-shell"].fullmatch(tool_name)
     assert not matchers["pre-shell"].fullmatch("Read")
 
@@ -591,7 +598,12 @@ def test_configured_matchers_cover_reads_through_the_ide_and_shell_tools() -> No
 )
 @pytest.mark.parametrize(
     ("tool_name", "input_key"),
-    [("Bash", "command"), ("PowerShell", "command"), ("exec_command", "cmd")],
+    [
+        ("Bash", "command"),
+        ("PowerShell", "command"),
+        ("local_shell", "command"),
+        ("exec_command", "cmd"),
+    ],
 )
 def test_shell_commands_that_publish_need_the_orchestrator_marker(
     repository: Path, tool_name: str, input_key: str, command: str
@@ -695,9 +707,12 @@ def test_ide_terminal_publishing_checks_the_nested_shell_command(
         assert decision is None
 
 
-def test_shell_tools_that_pass_an_argument_vector_are_checked(repository: Path) -> None:
+@pytest.mark.parametrize("tool_name", ["shell", "local_shell"])
+def test_shell_tools_that_pass_an_argument_vector_are_checked(
+    repository: Path, tool_name: str
+) -> None:
     payload: dict[str, object] = {
-        "tool_name": "shell",
+        "tool_name": tool_name,
         "tool_input": {"command": ["bash", "-lc", "git push"]},
     }
 

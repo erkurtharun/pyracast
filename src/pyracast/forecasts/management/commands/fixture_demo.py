@@ -62,7 +62,7 @@ def _binding(actor: User, region: Region) -> SiteBinding:
 
 
 def run_demo(actor: User) -> str:
-    tenant, _ = Tenant.objects.get_or_create(name=f"Fixture demonstration ({actor.username})")
+    tenant, _ = Tenant.objects.get_or_create(name=f"Fixture demonstration (user {actor.pk})")
     Membership.objects.get_or_create(
         user=actor, tenant=tenant, defaults={"role": Membership.Role.ADMIN}
     )

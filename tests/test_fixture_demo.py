@@ -54,6 +54,18 @@ def test_fixture_demo_reruns_and_reports_the_existing_demo(demo_user: User) -> N
     assert ForecastResult.objects.count() == 1
 
 
+def test_fixture_demo_resumes_the_same_workspace_after_a_username_change(demo_user: User) -> None:
+    first = call_command("fixture_demo", "--username", "demo")
+    demo_user.username = "renamed"
+    demo_user.save(update_fields=("username",))
+
+    second = call_command("fixture_demo", "--username", "renamed")
+
+    assert second == first
+    assert Tenant.objects.count() == Region.objects.count() == Plant.objects.count() == 1
+    assert ForecastResult.objects.count() == 1
+
+
 def test_fixture_demo_resumes_after_an_interrupted_run(
     demo_user: User, monkeypatch: pytest.MonkeyPatch
 ) -> None:

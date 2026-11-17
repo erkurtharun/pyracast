@@ -7,6 +7,8 @@ profile:
   base:
     name: qodana.recommended
   inspections:
+    - inspection: VulnerableLibrariesLocal
+      enabled: true
     - group: "category:JavaScript and TypeScript"
       enabled: true
 

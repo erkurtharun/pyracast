@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 from django.conf import settings
 
 TESTS = Path(__file__).resolve().parent
@@ -94,3 +95,14 @@ def test_selection_markers_cover_every_module_that_needs_them(marker: str, patte
 def test_selection_markers_are_applied_by_module(request: pytest.FixtureRequest) -> None:
     assert request.node.get_closest_marker("tooling") is not None
     assert request.node.get_closest_marker("migration") is None
+
+
+@pytest.mark.parametrize("name", ["qodana.yaml", "qodana-js.yaml"])
+def test_each_language_scan_enables_dependency_vulnerability_inspections(name: str) -> None:
+    configuration = yaml.safe_load((TESTS.parent / name).read_text(encoding="utf-8"))
+
+    assert any(
+        inspection.get("inspection") == "VulnerableLibrariesLocal"
+        and inspection.get("enabled") is True
+        for inspection in configuration["profile"]["inspections"]
+    )
