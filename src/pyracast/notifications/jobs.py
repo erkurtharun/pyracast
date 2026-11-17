@@ -45,8 +45,7 @@ def _skip_reason(delivery: NotificationDelivery, limit: int) -> str | None:
     if not delivery.recipients:
         return "no_recipients"
     if (
-        delivery.binding is None
-        or schedule.region_id != delivery.binding.region_id
+        schedule.region_id != delivery.binding.region_id
         or clock not in schedule.times[: delivery.binding.provider_account.daily_quota]
         or not binding_can_notify(delivery.binding)
     ):

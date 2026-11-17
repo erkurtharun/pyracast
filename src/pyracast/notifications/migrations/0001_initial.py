@@ -115,7 +115,7 @@ class Migration(migrations.Migration):
                         choices=[("en", "English"), ("tr", "Türkçe")], default="en", max_length=2
                     ),
                 ),
-                ("preparation_deadline", models.DateTimeField(null=True)),
+                ("preparation_deadline", models.DateTimeField()),
                 ("prepared_message", models.JSONField(null=True)),
                 ("transmit_started_at", models.DateTimeField(null=True)),
                 ("sent_at", models.DateTimeField(null=True)),
@@ -123,9 +123,7 @@ class Migration(migrations.Migration):
                 (
                     "binding",
                     models.ForeignKey(
-                        null=True,
-                        on_delete=django.db.models.deletion.PROTECT,
-                        to="connections.sitebinding",
+                        on_delete=django.db.models.deletion.PROTECT, to="connections.sitebinding"
                     ),
                 ),
                 (

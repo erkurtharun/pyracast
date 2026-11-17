@@ -28,7 +28,7 @@ def _available_by(moment: datetime) -> Q:
 def eligible_saved_forecasts(
     delivery: NotificationDelivery, available_at: datetime
 ) -> QuerySet[ForecastSnapshot]:
-    cutoff = min(available_at, delivery.preparation_deadline or delivery.scheduled_for)
+    cutoff = min(available_at, delivery.preparation_deadline)
     return (
         ForecastSnapshot.objects.filter(
             binding=delivery.binding, job__status="succeeded", source_kind="forecast"
@@ -46,7 +46,6 @@ def eligible_saved_forecasts(
 def composed_report_source(
     delivery: NotificationDelivery, day: date, available_at: datetime
 ) -> PreparedIntradaySource | None:
-    assert delivery.binding is not None  # noqa: S101 -- Preparation pins an authorized binding.
     start, end = local_day_bounds(day, delivery.binding.timezone)
     snapshots = list(
         eligible_saved_forecasts(delivery, available_at).filter(
@@ -54,7 +53,7 @@ def composed_report_source(
         )
     )
     cutoff = min(delivery.scheduled_for, available_at)
-    grace = min(available_at, delivery.preparation_deadline or delivery.scheduled_for)
+    grace = min(available_at, delivery.preparation_deadline)
     return prepare_intraday_source(
         delivery.binding,
         day,
@@ -68,7 +67,6 @@ def composed_report_source(
 def saved_report_results(
     delivery: NotificationDelivery, available_at: datetime
 ) -> list[dict[str, object] | None]:
-    assert delivery.binding is not None  # noqa: S101 -- Preparation pins an authorized binding.
     today = delivery.scheduled_for.astimezone(ZoneInfo(delivery.binding.timezone)).date()
     results = [
         saved_day_payload(delivery.snapshot, today + timedelta(days=offset))

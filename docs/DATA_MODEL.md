@@ -150,7 +150,7 @@ erDiagram
     plants_plantconfiguration ||--o{ incidents_plantincident : "declared_configuration_id"
     plants_plant ||--o{ incidents_plantincident : "plant_id"
     auth_user ||--o{ incidents_plantincident : "updated_by_id"
-    connections_sitebinding |o--o{ notifications_notificationdelivery : "binding_id"
+    connections_sitebinding ||--o{ notifications_notificationdelivery : "binding_id"
     forecasts_forecastsnapshot |o--o{ notifications_notificationdelivery : "snapshot_id"
     notifications_reminderschedule ||--o{ notifications_notificationdelivery : "schedule_id"
     auth_user |o--o{ notifications_reminderschedule : "configured_by_id"
@@ -871,12 +871,12 @@ erDiagram
         jsonb recipient_memberships
         jsonb revoked_recipients
         varchar_2 language
-        timestamp_with_time_zone preparation_deadline "nullable"
+        timestamp_with_time_zone preparation_deadline
         jsonb prepared_message "nullable"
         timestamp_with_time_zone transmit_started_at "nullable"
         timestamp_with_time_zone sent_at "nullable"
         varchar_40 last_error
-        bigint binding_id FK "nullable; references connections_sitebinding.id"
+        bigint binding_id FK "references connections_sitebinding.id"
         bigint snapshot_id FK "nullable; references forecasts_forecastsnapshot.id"
         bigint schedule_id FK "references notifications_reminderschedule.id"
     }
@@ -896,7 +896,7 @@ erDiagram
         integer configured_by_id FK "nullable; references auth_user.id"
         bigint region_id FK "references regions_region.id"
     }
-    connections_sitebinding |o--o{ notifications_notificationdelivery : "binding_id"
+    connections_sitebinding ||--o{ notifications_notificationdelivery : "binding_id"
     forecasts_forecastsnapshot |o--o{ notifications_notificationdelivery : "snapshot_id"
     notifications_reminderschedule ||--o{ notifications_notificationdelivery : "schedule_id"
     auth_user |o--o{ notifications_reminderschedule : "configured_by_id"

@@ -276,17 +276,6 @@ def test_partial_tomorrow_survives_missing_today_and_does_not_invent_daily_total
     assert delivery.prepared_message["tomorrow_complete"] is False
 
 
-def test_legacy_preparation_uses_slot_cutoff_without_grace() -> None:
-    system, _ = configured()
-    old = complete_saved(system)
-    delivery_id = enqueue_due(SLOT)[0]
-    NotificationDelivery.objects.filter(pk=delivery_id).update(preparation_deadline=None)
-    newer = complete_saved(system, SLOT + timedelta(seconds=30))
-    CollectionJob.objects.filter(pk=newer.job_id).update(scheduled_slot=SLOT)
-    assert process_notification(delivery_id, SLOT + timedelta(minutes=1))
-    assert NotificationDelivery.objects.get(pk=delivery_id).snapshot_id == old.pk
-
-
 @pytest.mark.parametrize(
     "change", ["actuals", "future_acquisition", "late_publication", "failed_job"]
 )

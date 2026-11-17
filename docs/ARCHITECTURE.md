@@ -232,13 +232,13 @@ these recent outcomes even when the admin presents them as review items.
 
 Keep approval (`pending`, `approved`, `rejected`, `suspended`), connection health and data freshness separate. Approval does not mean a forecast is ready. Coordinate or model-setting changes create a new revision requiring validation and approval; saving unchanged settings or only a new API key keeps the revision and approval; stale jobs must not publish into the new revision.
 
-PostgreSQL permits one active plant per region and one active location per tenant, comparing latitude and longitude rounded to six decimal places. The application uses the same rounding for new coordinates. The same location in another tenant is independent. Deleted definitions and their immutable archives remain intact; restoring a definition rejects an active replacement conflict. Migrations add constraints without deleting or merging existing records and require conflicting legacy active definitions to be resolved explicitly before migration. Provider reapproval creates a new configuration revision from the current technical parameters when the binding changes, preserving prior configuration and source identities.
+PostgreSQL permits one plant per region and one active location per tenant, comparing latitude and longitude rounded to six decimal places. The application uses the same rounding for new coordinates. The same location in another tenant is independent. Trashed locations and their immutable archives remain intact; restoring a location rejects an active replacement conflict. Provider reapproval creates a new configuration revision from the current technical parameters when the binding changes, preserving prior configuration and source identities.
 
 Workspace administrators can rename a plant and its region without changing a revision or approval. Location changes are reviewed requests pinned to the current revision and moved along when a binding replacement bumps it; one pending request per region is allowed. Platform administrator acceptance applies a new pending revision and removes the old approval. A replacement binding must be configured, validated and approved before collection resumes. Rejection preserves the current location.
 
 ## Reliability and security
 
-- Keep one authentication authority: django-allauth browser sessions, with no app-token endpoints or separate password login. Platform admin and API actions require active superuser status and MFA evidence bound to the current user and a live authenticator. Administrators require a TOTP factor provisioned through the trusted operator command before login; password possession cannot bootstrap an administrative factor. Upgrades remove an empty legacy OTP table but stop if any legacy device exists, requiring verified factor migration instead of reducing MFA to password/email enrollment. Reauthentication protects security changes, and recovery codes are one-use and shown once. MFA secrets use authenticated encryption with an HKDF context distinct from provider credentials.
+- Keep one authentication authority: django-allauth browser sessions, with no app-token endpoints or separate password login. Platform admin and API actions require active superuser status and MFA evidence bound to the current user and a live authenticator. Administrators require a TOTP factor provisioned through the trusted operator command before login; password possession cannot bootstrap an administrative factor. Reauthentication protects security changes, and recovery codes are one-use and shown once. MFA secrets use authenticated encryption with an HKDF context distinct from provider credentials.
 - Derive tenant access from authenticated membership. Scope list/detail/create/update operations, worker jobs and cache keys. Tenant ownership is not a trusted request field. Django admin does not provide tenant isolation automatically.
 - Store provider keys in a secret manager or authenticated encryption with keys outside the database. Accept credential changes through write-only admin inputs; redact secrets from responses, logs and audit payloads.
   The MFA-protected administration setup page supports existing authorized accounts
@@ -248,8 +248,7 @@ Workspace administrators can rename a plant and its region without changing a re
   Solcast inputs are write-only raw API keys; persistence accepts encrypted credentials
   and never resolves environment references. Existing-account key changes require
   explicit confirmation and invalidate validation for every binding on that account
-  without replacing the canonical identity or resetting quota. Migration preserves
-  encrypted credentials and rejects unresolved legacy Solcast references. Key rotation
+  without replacing the canonical identity or resetting quota. Key rotation
   can decrypt with configured secret-key fallbacks; `reencrypt_secrets` rewrites stored
   credentials under the new primary key before the old fallback is removed. Back up
   the external keys separately from the database. This protects database-only
@@ -592,7 +591,7 @@ Forecast collection prepares immutable `ForecastIssuance` outputs outside databa
 
 Policy `latest-published-pre-daylight-issuance-v1` selects the latest acquired eligible issuance for each target day. Acquisition, publication and any known provider issue time must precede the first astronomical daylight window in that binding's local day. Polar day, polar night and daylight crossing midnight use local midnight. Preparation considers the acquisition's local date and the following two dates where native intervals overlap; the collection job's canonical target date does not exclude a same-day pre-dawn update. Latest partial issuances retain their gaps rather than silently selecting an older complete forecast. Actuals, mixed outlooks and daytime forecast updates cannot replace this archive.
 
-The plant-only `archived_forecast` source and explicit `as_of` queries read these frozen outputs without recalculation or writes. An `as_of` cutoff additionally excludes issuances not yet available then. Later model, calibration, outage or plant changes cannot alter an issuance. Mark earlier configurations explicitly. Existing raw snapshots and legacy read-time caches remain preserved but are not backfilled as previously published electrical issuances. A missing issuance stays unavailable; ordinary live forecasts and retrospective estimated-actual comparisons keep their separate policies.
+The plant-only `archived_forecast` source and explicit `as_of` queries read these frozen outputs without recalculation or writes. An `as_of` cutoff additionally excludes issuances not yet available then. Later model, calibration, outage or plant changes cannot alter an issuance. Mark earlier configurations explicitly. A missing issuance stays unavailable; ordinary live forecasts and retrospective estimated-actual comparisons keep their separate policies.
 
 `collection-schedule/` exposes multiple daily region-local forecast times, the fixed night window, recent collection outcomes and the shared account's tracked UTC budget. Count successful, failed and uncertain/reserved attempts, including validation, retries and operator checks; usage outside this application is unknown. One daily request is reserved in the per-region schedule limit for history; this is a planning limit, not a guaranteed allocation across regions or a promise of unlimited night retries. The first forecast acquisition created by binding approval can run immediately outside existing clocks when collection is enabled and that schedule predates approval. Later schedule edits and disabling collection still cancel unclaimed work. Snapshot coverage indexes support history lookup, and `available_at` records atomic publication separately from acquisition. Partial history remains readable and retries create new immutable acquisitions. Saving unchanged settings preserves the effective boundary and all jobs. Forecast edits retain night jobs and queued forecast work at clocks still configured, cancel removed forecast clocks, and only generate newly added forecast clocks after the change. Disabling collection cancels unclaimed night and forecast work. An authorized in-flight response can still be archived if its binding remains current.
 
@@ -645,11 +644,9 @@ retain hours outside it. Wait within the existing preparation deadline for colle
 jobs at the reminder's slot, without treating later intervals as completed. Pin every
 contributing source and use identical native intervals for daily totals, hourly rows
 and outage scenarios. Source age follows the oldest contributing acquisition.
-Freeze the report for the schedule's slot and render text and HTML in its explicit email
-language. Pin that language
-when scheduling; freeze each language's content before sending. Retries preserve
-the frozen message and attachment bytes. All languages share the same numeric report.
-Plant messages show electrical energy in MWh, with a separate scenario for reported
+Freeze the report for the schedule's slot and render text and HTML in the email
+language pinned when scheduling. Retries preserve the frozen message and attachment
+bytes. Plant messages show electrical energy in MWh, with a separate scenario for reported
 outage times and capacities. Unknown outage impact remains unavailable. A compact
 XLSX contains daily summaries and interval energy; dates, times and numbers are typed,
 and UTC offsets disambiguate clock changes. Native intervals overlapping daylight are
@@ -663,8 +660,7 @@ date and the following two dates, ending at the next local midnight, including D
 the same publication transaction as the canonical target-day result. Failure to
 calculate a supplemental day omits only that day. Preparation calculates plant electricity
 locally from the pinned saved forecast inputs, using configuration, calibration and incident
-revisions eligible at the reminder slot. It freezes these results before rendering any
-language; retries and later language variants never recalculate them. No provider request
+revisions eligible at the reminder slot. It freezes these results before rendering; retries never recalculate them. No provider request
 is made. Validate saved dates, binding identity, finite
 values, interval coverage, energy consistency and completeness before selection.
 An unexpected rendering failure freezes a minimal plain-text unavailable notice,
@@ -679,8 +675,7 @@ current schedule, recipients and binding and record transmission permission. A w
 that lost its lease while opening the connection cannot send. Expired leases before
 this marker can safely retry; after the marker they become `uncertain`, with no
 automatic second send. Preserve the original token so a late known response can
-resolve that same attempt. Legacy interrupted deliveries without prepared content
-remain uncertain because their transmission phase is unknown.
+resolve that same attempt.
 
 SMTP submits DATA only after every envelope recipient accepts RCPT. Any recipient
 rejection resets the transaction before content is sent, so a retry cannot duplicate

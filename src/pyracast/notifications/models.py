@@ -76,8 +76,8 @@ class NotificationDelivery(models.Model):
         max_length=2, choices=(("en", "English"), ("tr", "Türkçe")), default="en"
     )
     snapshot = models.ForeignKey(ForecastSnapshot, on_delete=models.PROTECT, null=True)
-    binding = models.ForeignKey(SiteBinding, on_delete=models.PROTECT, null=True)
-    preparation_deadline = models.DateTimeField(null=True)
+    binding = models.ForeignKey(SiteBinding, on_delete=models.PROTECT)
+    preparation_deadline = models.DateTimeField()
     prepared_message = models.JSONField(null=True)
     transmit_started_at = models.DateTimeField(null=True)
     sent_at = models.DateTimeField(null=True)

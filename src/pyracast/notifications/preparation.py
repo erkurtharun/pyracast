@@ -18,8 +18,7 @@ def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
     if delivery.prepared_message is not None:
         return True
     binding = delivery.binding
-    assert binding is not None  # noqa: S101 -- Authority was checked under the region lock.
-    deadline = delivery.preparation_deadline or delivery.scheduled_for
+    deadline = delivery.preparation_deadline
     jobs = list(
         CollectionJob.objects.filter(
             binding=binding,

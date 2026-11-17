@@ -1,6 +1,6 @@
 # Browse platform records in the stock Django admin
 
-A platform administrator who types or follows a stock Django admin URL under `/admin/{app}/{model}/` gets read-only changelists, detail pages and history pages for 17 platform models. Nothing in the workspace navigation links to them, and `ReadOnlyAdmin` refuses add, change and delete. The outcome is a server-rendered page (or JSON for `autocomplete/`). No application operation, queue job or provider call is involved.
+A platform administrator who types or follows a stock Django admin URL under `/admin/{app}/{model}/` gets read-only changelists, detail pages and history pages for 16 platform models. Nothing in the workspace navigation links to them, and `ReadOnlyAdmin` refuses add, change and delete. The outcome is a server-rendered page (or JSON for `autocomplete/`). No application operation, queue job or provider call is involved.
 
 ## Entry points
 
@@ -76,7 +76,7 @@ sequenceDiagram
 ## Rules and invariants
 
 - Only `pyracast.admin.site` is mounted. The default `django.contrib.admin.site` holds 8 auth, allauth, socialaccount, mfa and usersessions registrations that have no URL, so users, emails, MFA factors and sessions cannot be browsed.
-- No model defines `__str__`, so the 13 plain `ReadOnlyAdmin` rows show as `Model object (pk)` with no search or filter. Only the Region, location-change, delivery and dispatcher admins declare columns.
+- No model defines `__str__`, so the 12 plain `ReadOnlyAdmin` rows show as `Model object (pk)` with no search or filter. Only the Region, location-change, delivery and dispatcher admins declare columns.
 - `autocomplete/` returns Region rows (searchable by name and tenant name) for any foreign key to Region, such as `plants.Plant.region`, although no admin declares `autocomplete_fields`.
 - History pages are empty for all 16 read-only models: nothing writes `django_admin_log` for them. `AuditEvent` is the real trail. Changelists use stock paging (100 rows, full `COUNT`) and select every column, including JSON payloads.
 

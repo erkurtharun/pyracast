@@ -23,29 +23,6 @@ from pyracast.notifications.models import NotificationDelivery
 from pyracast.smtp import EmailBackend
 
 
-def test_pending_csv_delivery_preserves_its_frozen_content_after_the_xlsx_upgrade() -> None:
-    delivery = NotificationDelivery(
-        id=17,
-        recipients=["recipient@example.com"],
-        prepared_message={
-            "subject": "Saved forecast",
-            "body": "Frozen text",
-            "html": "<p>Frozen text</p>",
-            "csv_filename": "irradiance-2026-11-15.csv",
-            "csv": "start,ghi_wm2\n2026-11-15T10:00:00+03:00,250\n",
-        },
-    )
-    message = build_message(delivery)
-    assert message.subject == "Saved forecast"
-    assert message.body == "Frozen text"
-    assert message.attachments[0] == (
-        "irradiance-2026-11-15.csv",
-        "start,ghi_wm2\n2026-11-15T10:00:00+03:00,250\n",
-        "text/csv",
-    )
-    assert message.extra_headers["Message-ID"] == "<pyracast-reminder-17@notifications.pyracast>"
-
-
 def test_a_prepared_delivery_restores_its_frozen_message_and_workbook() -> None:
     workbook = b"PK\x03\x04 frozen workbook"
     delivery = NotificationDelivery(
