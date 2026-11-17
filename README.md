@@ -36,7 +36,9 @@ uv run --locked python scripts/start_postgres.py
 
 This starts checksum-pinned PostgreSQL binaries on Windows or a pinned Docker image
 on Ubuntu, using loopback-only trust authentication. It leaves the database running;
-never use it for production. Tests need permission to create databases.
+never use it for production. Tests need permission to create databases. CI adds
+`--non-durable` (no `fsync`, `synchronous_commit` or `full_page_writes`) because its
+cluster is discarded after the run; never pass it for a cluster that holds data.
 
 On Windows, `uv run --locked python scripts/start_rabbitmq.py` starts the pinned
 development broker. On Ubuntu with Docker:
@@ -229,7 +231,9 @@ npm --prefix web run check
 ```
 
 The backend gate runs formatting, Ruff, strict mypy and parallel pytest with the
-100% branch-coverage floor configured in `pyproject.toml`. Use
+100% branch-coverage floor configured in `pyproject.toml`. It runs as many pytest
+workers as physical cores, at most six, unless `PYTEST_XDIST_AUTO_NUM_WORKERS` is
+set, and a test that runs longer than 300 seconds prints every thread's stack. Use
 `uv run --locked ruff format .` for formatting. Deliberate dependency upgrades
 must review the lock diff and rerun checks; prereleases are disallowed.
 

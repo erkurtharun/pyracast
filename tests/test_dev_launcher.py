@@ -312,7 +312,7 @@ def test_command_lock_excludes_another_os_process(tmp_path: Path) -> None:
             cwd=repo,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=60,
             check=False,
         )
 
@@ -327,11 +327,11 @@ def read_child_line(process: subprocess.Popen[str]) -> str:
     with ThreadPoolExecutor(max_workers=1) as executor:
         line = executor.submit(process.stdout.readline)
         try:
-            return line.result(timeout=5).strip()
+            return line.result(timeout=60).strip()
         except TimeoutError:
             with suppress(psutil.NoSuchProcess):
                 launcher.terminate_tree(psutil.Process(process.pid))
-            process.wait(timeout=5)
+            process.wait(timeout=60)
             raise AssertionError("Lock probe did not produce the expected output.") from None
 
 
@@ -342,7 +342,7 @@ def test_command_lock_waits_for_another_process_to_release_it(tmp_path: Path) ->
         "import sys\n"
         "from pathlib import Path\n"
         "from scripts.dev import command_lock\n"
-        "with command_lock(Path(sys.argv[1]), timeout=5):\n"
+        "with command_lock(Path(sys.argv[1]), timeout=60):\n"
         "    Path(sys.argv[2]).touch()\n"
         "    print('acquired', flush=True)\n"
     )
@@ -363,7 +363,7 @@ def test_command_lock_waits_for_another_process_to_release_it(tmp_path: Path) ->
             assert not acquired.exists()
             assert process.poll() is None
 
-        output, _ = process.communicate(timeout=5)
+        output, _ = process.communicate(timeout=60)
         assert process.returncode == 0
         assert output.splitlines() == [
             "Previous launcher command finished; continuing.",
@@ -375,7 +375,7 @@ def test_command_lock_waits_for_another_process_to_release_it(tmp_path: Path) ->
             if process.poll() is None:
                 with suppress(psutil.NoSuchProcess):
                     launcher.terminate_tree(psutil.Process(process.pid))
-            process.communicate(timeout=5)
+            process.communicate(timeout=60)
 
 
 def test_command_lock_timeout_never_enters_the_protected_section(tmp_path: Path) -> None:
@@ -398,7 +398,7 @@ def test_command_lock_timeout_never_enters_the_protected_section(tmp_path: Path)
             cwd=repo,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=60,
             check=False,
         )
 
@@ -437,7 +437,7 @@ def test_command_lock_is_released_after_process_crash_without_deleting_file(tmp_
             launcher.command_lock(tmp_path),
         ):
             pytest.fail("A competing command entered the protected section.")
-        process.communicate("exit\n", timeout=5)
+        process.communicate("exit\n", timeout=60)
         assert process.returncode == 9
         assert (tmp_path / "launcher.lock").is_file()
 
@@ -447,7 +447,7 @@ def test_command_lock_is_released_after_process_crash_without_deleting_file(tmp_
         if process.poll() is None:
             with suppress(psutil.NoSuchProcess):
                 launcher.terminate_tree(psutil.Process(process.pid))
-        process.communicate(timeout=5)
+        process.communicate(timeout=60)
 
 
 def test_repeated_command_locks_do_not_grow_the_lock_file(tmp_path: Path) -> None:

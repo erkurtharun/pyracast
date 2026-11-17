@@ -160,7 +160,7 @@ jobs:
           version: 0.13.7
           enable-cache: true
       - run: uv sync --locked --no-build
-      - run: uv run --locked --no-sync --no-build python scripts/start_postgres.py
+      - run: uv run --locked --no-sync --no-build python scripts/start_postgres.py --non-durable
       - name: Start RabbitMQ (Windows)
         if: runner.os == 'Windows'
         run: uv run --locked --no-sync --no-build python scripts/start_rabbitmq.py
@@ -317,7 +317,7 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
       - run: uv sync --locked --no-build
-      - run: uv run --locked --no-sync --no-build python scripts/start_postgres.py
+      - run: uv run --locked --no-sync --no-build python scripts/start_postgres.py --non-durable
       - run: npm ci --ignore-scripts
         working-directory: web
       - run: npx --no-install playwright install --with-deps chromium

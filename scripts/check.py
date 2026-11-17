@@ -7,10 +7,28 @@ import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import psutil
+
 if TYPE_CHECKING or __package__:
     from scripts.pytest_shard import finish_shard, parse_shard, validate_shards
 else:
     from pytest_shard import finish_shard, parse_shard, validate_shards
+
+XDIST_WORKERS = "PYTEST_XDIST_AUTO_NUM_WORKERS"
+# Each worker runs its own interpreter and test database; the cap bounds peak memory on 16 GB hosts.
+MAX_XDIST_WORKERS = 6
+
+
+def xdist_workers(environment: dict[str, str]) -> str:
+    if explicit := environment.get(XDIST_WORKERS):
+        # xdist ignores a value int() rejects and falls back to every physical core.
+        try:
+            int(explicit)
+        except ValueError:
+            raise ValueError(f"{XDIST_WORKERS} must be an integer, got {explicit!r}") from None
+        return explicit
+    cores = psutil.cpu_count(logical=False) or os.cpu_count() or 1
+    return str(min(cores, MAX_XDIST_WORKERS))
 
 
 def arguments(argv: list[str] | None) -> argparse.Namespace:
@@ -40,6 +58,13 @@ def main(argv: list[str] | None = None) -> int:
         settings = tomllib.load(stream)
     coverage_floor = settings["tool"]["coverage"]["report"]["fail_under"]
     environment = os.environ.copy()
+    if not args.combine_shards:
+        try:
+            environment[XDIST_WORKERS] = xdist_workers(environment)
+        except ValueError as error:
+            print(error, file=sys.stderr)
+            return 2
+        print(f"pytest-xdist workers: {environment[XDIST_WORKERS]}", flush=True)
     commands = [
         [sys.executable, "-m", "ruff", "format", "--check", "."],
         [sys.executable, "-m", "ruff", "check", "--output-format", "concise", "."],
@@ -66,8 +91,11 @@ def main(argv: list[str] | None = None) -> int:
             PYRACAST_TEST_SHARD_OUTPUT=str(output),
             COVERAGE_FILE=str(output / "coverage.dat"),
         )
-        options = shlex.split(settings["tool"]["pytest"]["ini_options"]["addopts"])
-        options = [option for option in options if not option.startswith("--cov-report")]
+        options = [
+            option
+            for option in settings["tool"]["pytest"]["addopts"]
+            if not option.startswith("--cov-report")
+        ]
         # Partial measurements are gated only after every shard is combined at the shared floor.
         commands[-1] = [
             sys.executable,

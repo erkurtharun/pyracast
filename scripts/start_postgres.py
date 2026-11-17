@@ -1,3 +1,4 @@
+import argparse
 import csv
 import hashlib
 import os
@@ -16,6 +17,15 @@ ARCHIVE_URL = "https://sbp.enterprisedb.com/getfile.jsp?fileid=1260609"
 ARCHIVE_SHA256 = "e2246ba91d22345bc3d017586c09ede52d9df180b1eeb480f050445f1cad84e2"
 POSTGRES_IMAGE = (
     "postgres:18.6@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42"
+)
+# Only for throwaway clusters: a crash can lose or corrupt data that was not flushed.
+NON_DURABLE_OPTIONS = (
+    "-c",
+    "fsync=off",
+    "-c",
+    "synchronous_commit=off",
+    "-c",
+    "full_page_writes=off",
 )
 
 
@@ -81,7 +91,18 @@ def windows_preflight(binary: Path, env: dict[str, str]) -> None:
         raise
 
 
-def main() -> None:
+def server_options(argv: list[str] | None) -> tuple[str, ...]:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--non-durable",
+        action="store_true",
+        help="turn off fsync, synchronous_commit and full_page_writes on a throwaway cluster",
+    )
+    return NON_DURABLE_OPTIONS if parser.parse_args(argv).non_durable else ()
+
+
+def main(argv: list[str] | None = None) -> None:
+    options = server_options(argv)
     port = str(int(os.environ.get("PGPORT", "55432")))
     if sys.platform == "win32":
         root = windows_workspace()
@@ -123,7 +144,7 @@ def main() -> None:
             "-l",
             str(root / "postgres.log"),
             "-o",
-            f"-h 127.0.0.1 -p {port}",
+            " ".join(("-h", "127.0.0.1", "-p", port, *options)),
             "start",
             env=env,
         )
@@ -157,6 +178,7 @@ def main() -> None:
             "-e",
             "POSTGRES_HOST_AUTH_METHOD=trust",
             POSTGRES_IMAGE,
+            *(("postgres", *options) if options else ()),
         )
         for _ in range(60):
             if (
