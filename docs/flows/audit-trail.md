@@ -33,7 +33,7 @@ flowchart LR
 
 | Table | R/W | What |
 |---|---|---|
-| `regions_auditevent` | W by fifteen operations, R by console and admin browser | actor, `region` xor `provider_account` (check `audit_exactly_one_target`), `action`, `revision`, `created_at`. Region events carry the region revision, account events the credential revision |
+| `regions_auditevent` | W by sixteen operations, R by console and admin browser | actor, `region` xor `provider_account` (check `audit_exactly_one_target`), `action`, `revision`, `created_at`. Region events carry the region revision, account events the credential revision |
 | `plants_plantevent` | W by plant operations and workers, R by two rules and admin browser; D by purge | plant, nullable actor (null for system decisions), `action`, JSON `details`, `created_at` |
 | `accounts_workspaceadminchange` | W only | tenant, actor, new and previous administrator |
 | `accounts_workspacememberremoval` | W only | tenant, actor, removed user |

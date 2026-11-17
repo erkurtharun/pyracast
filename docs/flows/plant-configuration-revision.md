@@ -36,9 +36,9 @@ sequenceDiagram
         O-->>V: "OperationalError (LockNotAvailable)"
         V-->>UI: "503 workspace_busy, Retry-After 1"
     else region pending and no configuration
-        O->>DB: "upsert PlantSubmission, rename, event submission_saved"
+        O->>DB: "rename when the name differs; upsert PlantSubmission and event submission_saved when a parameter differs"
     else binding current, parameters and binding unchanged
-        O->>DB: "rename only: plant and region name, plant_renamed, region_renamed"
+        O->>DB: "rename only when the name differs: plant_renamed, and region_renamed when the region name differs"
     else binding current, parameters or binding changed
         O->>DB: "rename, insert revision n+1, repoint plant, automation off, supersede runs"
         O->>DB: "event configuration_created, EpiasCollectionJob rows if connected"

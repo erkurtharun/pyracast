@@ -17,7 +17,7 @@ from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.plants.models import Plant, PlantConfiguration, PlantSubmission
 from pyracast.regions.models import AuditEvent, Region
 from tests.test_api import verified_admin
-from tests.test_domain import FakeAdapter, System, make_system
+from tests.test_domain import NOW, FakeAdapter, System, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -449,7 +449,11 @@ def approved_admin_system() -> tuple[System, list[int]]:
     system.binding.settings_verification_reference = "Verified synthetic site settings"
     system.binding.save(update_fields=("installation_date", "settings_verification_reference"))
     create_plant(system.member, system.tenant.pk, system.region.pk, name="Plant", dc_capacity_mw=1)
-    Plant.objects.update(automatic_calibration_enabled=True)
+    Plant.objects.update(
+        automatic_calibration_enabled=True,
+        automatic_calibration_enabled_by=system.member,
+        next_calibration_check_at=NOW,
+    )
     return system, list(PlantConfiguration.objects.order_by("pk").values_list("pk", flat=True))
 
 
@@ -476,10 +480,12 @@ def assert_setup_kept(system: System, configurations: list[int]) -> None:
         == configurations
     )
     plant = Plant.objects.get()
-    assert (plant.current_configuration_id, plant.automatic_calibration_enabled) == (
-        configurations[-1],
-        True,
-    )
+    assert (
+        plant.current_configuration_id,
+        plant.automatic_calibration_enabled,
+        plant.automatic_calibration_enabled_by_id,
+        plant.next_calibration_check_at,
+    ) == (configurations[-1], True, system.member.pk, NOW)
     assert not AuditEvent.objects.filter(action="binding_configured", revision=2).exists()
 
 
