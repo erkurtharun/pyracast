@@ -2,6 +2,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 
 import pytest
+from django.db import connections
 from django.test import Client
 from django.urls import URLPattern, URLResolver, get_resolver
 
@@ -10,13 +11,12 @@ from tests.support.budgets import assert_scale_invariant, query_budget
 from tests.support.domain import NOW, System
 from tests.support.plant_operations import make_plant
 
-pytestmark = pytest.mark.django_db(transaction=True)
+pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 
 DAY = NOW.date().isoformat()
 PLANT = "api/tenants/<int:tenant_id>/regions/<int:region_id>/plants/<int:plant_id>/"
 REGION = "api/tenants/<int:tenant_id>/regions/<int:region_id>/"
 
-# Routes the web client polls, with the query it sends and the statement ceiling of one read.
 POLLED = {
     "api/tenants/": ("", 18),
     "api/tenants/<int:tenant_id>/sites/": ("", 19),
@@ -61,6 +61,16 @@ def _routes(patterns: list[URLPattern | URLResolver], prefix: str = "") -> Itera
             yield from _routes(pattern.url_patterns, route)
         elif hasattr(getattr(pattern.callback, "view_class", None), "get"):
             yield route
+
+
+@pytest.mark.parametrize("alias", ["default", "auth_cache"])
+def test_statements_through_every_connection_count_against_the_budget(alias: str) -> None:
+    with (
+        pytest.raises(AssertionError, match="1 queries exceed the budget of 0"),
+        query_budget(0),
+        connections[alias].cursor() as cursor,
+    ):
+        cursor.execute("SELECT 1")
 
 
 def test_every_tenant_read_route_is_classified_as_polled_or_not() -> None:

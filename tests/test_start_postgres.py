@@ -1,4 +1,5 @@
 import hashlib
+import json
 import shutil
 import socket
 import subprocess
@@ -40,6 +41,11 @@ def windows_server_options(
     monkeypatch.setattr(start_postgres, "windows_preflight", lambda binary, env: None)
     monkeypatch.setattr(
         start_postgres, "start_server", lambda command, env: commands.append(tuple(command))
+    )
+    monkeypatch.setattr(
+        start_postgres,
+        "execute",
+        lambda command, **options: subprocess.CompletedProcess(command, 0, stdout=""),
     )
     monkeypatch.setattr(
         start_postgres, "ARCHIVE_SHA256", hashlib.sha256(archive.read_bytes()).hexdigest()
@@ -87,6 +93,16 @@ def test_non_durable_flag_is_opt_in_on_both_platforms(
         ]
 
 
+def test_the_port_argument_overrides_pgport(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    options = windows_server_options(
+        monkeypatch, tmp_path / "port", ["--ephemeral", "--port", "5432"]
+    )
+
+    assert options == "-h 127.0.0.1 -p 5432"
+
+
 def test_durable_data_lives_in_the_per_user_data_directory(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -127,7 +143,7 @@ def windows_cluster(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> tuple[Path, list[tuple[str, ...]], dict[str, bool]]:
     commands: list[tuple[str, ...]] = []
-    server = {"running": False}
+    server = {"running": False, "database": False, "createdb_fails": False}
     root = tmp_path / "pyracast" / "postgres"
 
     def run(*args: str, env: dict[str, str] | None = None) -> None:
@@ -136,11 +152,21 @@ def windows_cluster(
             data = Path(args[args.index("-D") + 1])
             data.mkdir(parents=True)
             (data / "PG_VERSION").write_text("18\n", encoding="utf-8")
+        if Path(args[0]).name == "createdb.exe":
+            if server["createdb_fails"]:
+                raise subprocess.CalledProcessError(1, args)
+            server["database"] = True
+
+    def execute(command: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        assert Path(command[0]).name == "psql.exe"
+        assert {"-w", "postgres"} <= set(command)
+        return subprocess.CompletedProcess(command, 0, stdout="1\n" if server["database"] else "")
 
     archive = tmp_path / "postgres.zip"
     with zipfile.ZipFile(archive, "w") as target:
         target.writestr("pgsql/bin/pg_ctl.exe", "")
     monkeypatch.setattr(start_postgres, "run", run)
+    monkeypatch.setattr(start_postgres, "execute", execute)
     monkeypatch.setattr(start_postgres, "start_server", lambda *args: run(*args[0]))
     monkeypatch.setattr(start_postgres, "accepts_connections", lambda port: server["running"])
     monkeypatch.setattr(start_postgres, "windows_preflight", lambda binary, env: None)
@@ -175,6 +201,30 @@ def test_windows_provisioning_creates_starts_and_then_reuses_one_cluster(
     assert (root / "data" / "PG_VERSION").is_file()
 
 
+@pytest.mark.parametrize(
+    ("running", "expected", "names"),
+    [(True, "running", ["createdb.exe"]), (False, "started", ["pg_ctl.exe", "createdb.exe"])],
+)
+def test_windows_provisioning_creates_the_database_an_interrupted_initialization_left_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    running: bool,
+    expected: str,
+    names: list[str],
+) -> None:
+    root, commands, server = windows_cluster(monkeypatch, tmp_path)
+    server["createdb_fails"] = True
+    with pytest.raises(subprocess.CalledProcessError):
+        start_postgres.provision_windows(root, "55432", ())
+    server.update(createdb_fails=False, running=running)
+    commands.clear()
+
+    assert start_postgres.provision_windows(root, "55432", ()) == expected
+
+    assert [Path(command[0]).name for command in commands] == names
+    assert server["database"]
+
+
 def test_windows_provisioning_refuses_a_directory_that_is_not_a_cluster(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -190,24 +240,83 @@ def test_windows_provisioning_refuses_a_directory_that_is_not_a_cluster(
     assert commands == []
 
 
+def inspected(running: bool, volumes: list[str], command: list[str]) -> str:
+    mounts = [
+        {"Type": "volume", "Name": name, "Destination": "/var/lib/postgresql"} for name in volumes
+    ]
+    return json.dumps(
+        [{"State": {"Running": running}, "Mounts": mounts, "Config": {"Cmd": command}}]
+    )
+
+
+def fake_docker(
+    monkeypatch: pytest.MonkeyPatch, containers: dict[str, str]
+) -> list[tuple[str, ...]]:
+    commands: list[tuple[str, ...]] = []
+
+    def execute(command: list[str], **options: object) -> subprocess.CompletedProcess[str]:
+        if command[-1] in containers:
+            return subprocess.CompletedProcess(command, 0, stdout=containers[command[-1]])
+        return subprocess.CompletedProcess(command, 1, stdout="[]")
+
+    monkeypatch.setattr(start_postgres, "execute", execute)
+    monkeypatch.setattr(start_postgres, "run", lambda *args, env=None: commands.append(args))
+    monkeypatch.setattr(start_postgres, "wait_for_container", lambda *args: None)
+    return commands
+
+
 @pytest.mark.parametrize(
-    ("state", "expected", "command"),
+    ("existing", "expected", "command"),
     [
         (None, "created", "run"),
-        ("false", "started", "start"),
-        ("true", "running", None),
+        (inspected(False, ["data"], ["postgres"]), "started", "start"),
+        (inspected(True, ["data"], ["postgres"]), "running", None),
     ],
 )
 def test_docker_provisioning_keeps_the_cluster_in_a_named_volume(
-    monkeypatch: pytest.MonkeyPatch, state: str | None, expected: str, command: str | None
+    monkeypatch: pytest.MonkeyPatch, existing: str | None, expected: str, command: str | None
 ) -> None:
-    commands: list[tuple[str, ...]] = []
-    monkeypatch.setattr(start_postgres, "run", lambda *args, env=None: commands.append(args))
-    monkeypatch.setattr(start_postgres, "container_state", lambda docker, name: state)
-    monkeypatch.setattr(start_postgres, "wait_for_container", lambda docker: None)
+    containers = {} if existing is None else {"pyracast-postgres": existing}
+    commands = fake_docker(monkeypatch, containers)
 
     assert start_postgres.provision_docker("docker", "55432", (), volume="data") == expected
 
     assert [arguments[1] for arguments in commands] == ([command] if command else [])
     if command == "run":
         assert "data:/var/lib/postgresql" in commands[0]
+        assert "pyracast-postgres" in commands[0]
+
+
+@pytest.mark.parametrize(
+    "existing",
+    [
+        inspected(True, ["4f1c0e"], ["postgres"]),
+        inspected(False, [], ["postgres"]),
+        inspected(True, ["data"], ["postgres", *NON_DURABLE]),
+    ],
+)
+def test_docker_provisioning_refuses_a_container_that_does_not_keep_durable_data(
+    monkeypatch: pytest.MonkeyPatch, existing: str
+) -> None:
+    commands = fake_docker(monkeypatch, {"pyracast-postgres": existing})
+
+    with pytest.raises(RuntimeError, match="nothing was changed"):
+        start_postgres.provision_docker("docker", "55432", (), volume="data")
+
+    assert commands == []
+
+
+def test_a_throwaway_docker_cluster_never_takes_the_durable_container(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    commands = fake_docker(
+        monkeypatch, {"pyracast-postgres": inspected(True, ["data"], ["postgres"])}
+    )
+
+    assert start_postgres.provision_docker("docker", "55432", NON_DURABLE, volume=None) == (
+        "created"
+    )
+
+    (container,) = commands
+    assert container[container.index("--name") + 1] == "pyracast-postgres-ephemeral"
+    assert "--volume" not in container

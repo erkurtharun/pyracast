@@ -71,7 +71,24 @@ def test_starts_the_durable_database_when_the_loopback_database_is_down(
 
     dependencies.ensure_dependencies()
 
-    local_dependencies["postgres"].assert_called_once_with([])
+    local_dependencies["postgres"].assert_called_once_with(["--port", "55432"])
+
+
+def test_provisions_the_database_on_the_port_it_probes(
+    local_dependencies: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("PGPORT")
+    local_dependencies["connect"].side_effect = [
+        psycopg.OperationalError("down"),
+        local_dependencies["connection"],
+    ]
+
+    dependencies.ensure_dependencies()
+
+    assert {call.kwargs["port"] for call in local_dependencies["connect"].call_args_list} == {
+        "5432"
+    }
+    local_dependencies["postgres"].assert_called_once_with(["--port", "5432"])
 
 
 def test_reports_a_database_that_stays_down_without_its_connection_details(
@@ -85,8 +102,8 @@ def test_reports_a_database_that_stays_down_without_its_connection_details(
     assert "private" not in str(failure.value)
 
 
-@pytest.mark.parametrize("host", ["db.example.com", "10.0.0.5"])
-def test_refuses_a_database_outside_the_loopback_interface(
+@pytest.mark.parametrize("host", ["db.example.com", "10.0.0.5", "::1"])
+def test_refuses_a_database_outside_the_ipv4_loopback_the_helper_serves(
     local_dependencies: dict[str, Any], monkeypatch: pytest.MonkeyPatch, host: str
 ) -> None:
     monkeypatch.setenv("PGHOST", host)
@@ -128,6 +145,22 @@ def test_starts_the_durable_broker_when_it_is_down_on_windows(
     dependencies.ensure_dependencies()
 
     local_dependencies["rabbitmq"].assert_called_once_with([])
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["amqp://guest:guest@127.0.0.1:5673/%2F", "amqp://guest:guest@[::1]:5672/%2F"],
+)
+def test_a_broker_target_the_helper_does_not_serve_is_refused_before_provisioning(
+    local_dependencies: dict[str, Any], monkeypatch: pytest.MonkeyPatch, url: str
+) -> None:
+    monkeypatch.setenv("PYRACAST_RABBITMQ_URL", url)
+    local_dependencies["broker_connect"].side_effect = pika.exceptions.AMQPConnectionError()
+
+    with pytest.raises(RuntimeError, match=r"127\.0\.0\.1:5672"):
+        dependencies.ensure_dependencies()
+
+    local_dependencies["rabbitmq"].assert_not_called()
 
 
 def test_rejected_broker_credentials_are_reported_as_authentication(
