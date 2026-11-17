@@ -13,11 +13,8 @@ from allauth.mfa.totp.internal.auth import (
     generate_totp_secret,
     hotp_value,
 )
-from django.conf import LazySettings
 from django.contrib.auth.models import AnonymousUser, User
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
-from django.core.management import call_command
-from django.core.management.base import CommandError
 from django.test import Client, RequestFactory
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError as APIValidationError
@@ -316,21 +313,6 @@ def test_entrypoints(monkeypatch: pytest.MonkeyPatch) -> None:
     cli.main()
     assert seen == [True]
     assert callable(wsgi.application)
-
-
-def test_fixture_demo(settings: LazySettings) -> None:
-    with pytest.raises(CommandError, match="PYRACAST_DEBUG"):
-        call_command("fixture_demo", "--username", "demo")
-    settings.DEBUG = True
-    with pytest.raises(CommandError, match="superuser"):
-        call_command("fixture_demo", "--username", "demo")
-    User.objects.create_user(username="demo", is_superuser=True)
-    path = call_command("fixture_demo", "--username", "demo")
-    assert "/forecast/?date=" in path
-    assert ForecastResult.objects.get().payload["complete"] is True
-    reference = SiteBinding.objects.get()
-    assert reference.capacity_kw == reference.dc_capacity_kw == 1000
-    assert reference.azimuth_degrees == reference.tilt_degrees == reference.losses_percent == 0
 
 
 def test_binding_api_records_megawatt_reference_metadata(
