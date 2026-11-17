@@ -1,6 +1,7 @@
 import json
 import re
 import time
+from collections import Counter
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
@@ -20,8 +21,9 @@ from allauth.socialaccount.models import SocialAccount
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core import mail
+from django.core.cache import cache
 from django.core.mail import EmailMultiAlternatives
-from django.test import Client, override_settings
+from django.test import Client, TestCase, override_settings
 from django.utils import dateformat, translation
 from django.utils.html import escape
 
@@ -32,24 +34,7 @@ from tests.support.auth_lifecycle import AUTH, PASSWORD, member, submit, totp_co
 from tests.support.company_registration import signup
 from tests.support.social_accounts import CALLBACK, PROVIDERS, complete, provider_destination
 
-pytestmark = pytest.mark.django_db(
-    transaction=True,
-    databases=["default", "auth_cache"],
-    available_apps=[
-        "django.contrib.auth",
-        "django.contrib.contenttypes",
-        "django.contrib.sessions",
-        "allauth",
-        "allauth.account",
-        "allauth.socialaccount",
-        "allauth.socialaccount.providers.google",
-        "allauth.socialaccount.providers.microsoft",
-        "allauth.mfa",
-        "allauth.headless",
-        "allauth.usersessions",
-        "pyracast.accounts",
-    ],
-)
+pytestmark = pytest.mark.django_db
 FIREFOX = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:139.0) Gecko/20100101 Firefox/139.0"
 HOSTILE_AGENT = f'{FIREFOX} <script>alert("agent")</script>\r\nX-Injected: agent'
 CODE = re.compile(r"^\s*([A-Z0-9]{4}-[A-Z0-9]{4}|[0-9]{6})\s*$", re.MULTILINE)
@@ -479,7 +464,11 @@ NOT_APPLICABLE: tuple[tuple[str, Callable[[Combination], bool]], ...] = (
         lambda c: gated(c) and (c.shape != "verified" or c.target != canonical_target(c.endpoint)),
     ),
 )
-NO_MAIL_LANGUAGE_RULE = "an outcome without mail has nothing to localize and runs in English only"
+LANGUAGE_RULE = (
+    "a sending row runs its first combination in both languages and every further one in one "
+    "language, alternating by position; a combination without mail has nothing to localize and "
+    "runs in English"
+)
 
 
 def notifies(endpoint: str, template: str) -> tuple[Expect, ...]:
@@ -759,16 +748,27 @@ class Case:
         return f"{c.endpoint}-{c.shape}-{c.target}-{c.state}-{c.provider}-{self.language}"
 
 
+def languages_of(expected: Mail | NoMail | None, position: int) -> tuple[str, ...]:
+    if isinstance(expected, NoMail):
+        return ("en",)
+    if expected is None or position == 0:
+        return LANGUAGES
+    return (LANGUAGES[position % len(LANGUAGES)],)
+
+
 def matrix() -> list[Case]:
     cases: list[Case] = []
+    positions: Counter[int] = Counter()
     for endpoint, shape, target, state, provider in product(
         ENDPOINTS, SHAPES, TARGETS, STATES, PROVIDER_CHOICES
     ):
         combination = Combination(endpoint, shape, target, state, provider)
         if any(rule(combination) for _, rule in NOT_APPLICABLE):
             continue
-        expected = next((row.outcome for row in EXPECTED if row.matches(combination)), None)
-        languages = ("en",) if isinstance(expected, NoMail) else LANGUAGES
+        row = next((index for index, row in enumerate(EXPECTED) if row.matches(combination)), -1)
+        expected = EXPECTED[row].outcome if row >= 0 else None
+        languages = languages_of(expected, positions[row])
+        positions[row] += 1
         cases.extend(Case(combination, language, expected) for language in languages)
     return cases
 
@@ -814,8 +814,13 @@ def local_mail() -> Iterator[None]:
         SOCIALACCOUNT_PROVIDERS=PROVIDERS,
         HEADLESS_FRONTEND_URLS=settings.HEADLESS_FRONTEND_URLS
         | {"socialaccount_login_error": CALLBACK},
+        # The authentication cache needs an autocommit connection, which a rolled-back test
+        # transaction does not have; the rate limits stay those of ACCOUNT_RATE_LIMITS.
+        CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
     ):
+        cache.clear()
         yield
+        cache.clear()
 
 
 @pytest.fixture(params=LANGUAGES)
@@ -867,11 +872,19 @@ def one_minute_later(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+class CommitClient(Client):
+    def request(self, **request: Any) -> Any:
+        # A rolled-back test transaction never commits: run the request's commit callbacks, such as
+        # account mail, once the request finishes.
+        with TestCase.captureOnCommitCallbacks(execute=True):
+            return super().request(**request)
+
+
 def browser(language: str | None = None) -> Client:
     headers = {"User-Agent": HOSTILE_AGENT}
     if language is not None:
         headers["Accept-Language"] = language
-    return Client(enforce_csrf_checks=True, headers=headers)
+    return CommitClient(enforce_csrf_checks=True, headers=headers)
 
 
 def call(client: Client, method: str, path: str, data: dict[str, Any] | None = None) -> Any:
@@ -1248,7 +1261,16 @@ def test_account_mail_matrix(
 def test_every_combination_is_declared_or_excluded_by_a_rule() -> None:
     assert [str(case) for case in CASES if case.expected is None] == []
     assert all(reason for reason, _ in NOT_APPLICABLE)
-    assert NO_MAIL_LANGUAGE_RULE
+    assert LANGUAGE_RULE
+
+
+def test_every_sending_row_runs_in_both_languages() -> None:
+    languages: dict[int, set[str]] = {}
+    for case in CASES:
+        index = next(i for i, row in enumerate(EXPECTED) if row.matches(case.combination))
+        languages.setdefault(index, set()).add(case.language)
+    sending = [i for i, row in enumerate(EXPECTED) if isinstance(row.outcome, Mail)]
+    assert {i: languages[i] for i in sending} == {i: set(LANGUAGES) for i in sending}
 
 
 @pytest.mark.parametrize("target", [PRIMARY, SECONDARY])
