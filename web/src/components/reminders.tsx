@@ -313,7 +313,6 @@ function ReminderSettings({
         recipient_limit_exceeded: t("recipientLimitPaused"),
         no_recipients: t("noRecipientsPaused"),
         invalid_recipient: t("invalidRecipientPaused"),
-        missing_recipient: t("missingRecipient"),
         no_saved_forecast: t("noSavedForecast"),
     };
 

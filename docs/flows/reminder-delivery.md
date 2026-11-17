@@ -85,7 +85,7 @@ sequenceDiagram
 
 No user acts in this flow; authority is the state of the plant at each step and is checked three times.
 - Scheduling (`scheduler.py` `_enqueue_schedule`, under Tenant, settings and Region locks): `eligibility.py` `binding_can_notify` (region not deleted, approved, current revision, binding is the approved one, provider account enabled and authorized), schedule enabled and current, slot not before `effective_from`, clock within `times[:daily_quota]`. A due slot whose effective recipients are empty, above the global limit or fail `validate_recipient` gets a `skipped` row with the reason and no recipients.
-- Claim (`jobs.py` `process_notification` -> `_skip_reason`, same locks plus the delivery row): the same checks against the pinned binding, except `effective_from`; recipients shrink to `recipients.py` `permitted_recipients` (still effective, not revoked, a pinned member still active) and each must pass `validate_email`.
+- Claim (`jobs.py` `process_notification` -> `_skip_reason`, same locks plus the delivery row): the same checks against the pinned binding, except `effective_from`; the schedule's effective recipients pass the scheduler's recipient check again (`scheduler.slot_recipients`), then the row's recipients shrink to `recipients.py` `permitted_recipients` (still effective, not revoked, a pinned member still active) and must not be empty.
 - Transmit (`jobs.py` `_mark_transmit` inside `send_message`'s `before_send`): repeats the recipient shrink and `_skip_reason`, checks the lease token and expiry and the 2 h deadline, then writes `transmit_started_at` and the final BCC list.
 - Database: unique `unique_reminder_group_slot` (schedule, scheduled_for, where `grouped`); check constraints on status and language. The history is readable by any active workspace member of a non-trashed region (`operations.py` `get_reminder_schedule` -> `require_member`): the region's 20 newest rows, recipient addresses included.
 
@@ -99,9 +99,9 @@ No user acts in this flow; authority is the state of the plant at each step and 
 | Due slot with no effective recipient, more than the global limit, or a stored address that fails `validate_recipient` or is not a string | Row created `skipped` with `no_recipients`, `recipient_limit_exceeded` or `invalid_recipient`, `recipients` empty, no snapshot; logged with the schedule id and reason, never the address; the slot is not retried when the cause clears, the next slot is created normally; counted in `paused_notifications` (informational) |
 | Unknown or purged delivery id, or its region row is gone | Worker returns without any change |
 | Schedule disabled or retired, or the slot's local time removed from `times`, before claim or transmit | `skipped`, `cancelled_by_settings_change` |
-| Binding, region, quota or limit changed, or no permitted recipient left, before claim or transmit | `skipped`, `schedule_or_authority_changed` |
+| Before claim or transmit, the schedule's effective recipients are above the limit or fail `validate_recipient`, or no permitted recipient of the row is left | `skipped`, `recipient_limit_exceeded`, `invalid_recipient` or `no_recipients` (the scheduler's check, shared as `scheduler.slot_recipients`); counted in `paused_notifications` |
+| Binding, region or quota changed before claim or transmit | `skipped`, `schedule_or_authority_changed` |
 | Claimed or transmitted after 2 h | `skipped`, `missed_schedule` (claim) or `delivery_deadline_exceeded` (transmit) |
-| A pinned address fails `validate_email` at claim | `skipped`, `missing_recipient` |
 | Slot collection pending, or due but not yet created, before the 15 min deadline | Status unchanged; `available_at` moved to `min(now + 30 s, deadline)` |
 | Preparation or rendering raises a non-database error | Plain-text "forecast unavailable" notice frozen and sent, `kind` `unavailable` |
 | Database error during claim or preparation | Transaction rolls back; the actor fails without a Dramatiq retry; row stays ready for the next cycle |

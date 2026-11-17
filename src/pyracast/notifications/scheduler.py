@@ -54,7 +54,7 @@ def enqueue_due(now: datetime) -> list[int]:
     return ids
 
 
-def _slot_recipients(schedule: ReminderSchedule, limit: int) -> tuple[list[str], str]:
+def slot_recipients(schedule: ReminderSchedule, limit: int) -> tuple[list[str], str]:
     try:
         recipients = effective_recipients(schedule)
         for address in recipients:
@@ -104,7 +104,7 @@ def _enqueue_schedule(schedule: ReminderSchedule, now: datetime) -> list[int]:
                 if existing_ids:
                     ids.extend(existing_ids)
                     continue
-                recipients, reason = _slot_recipients(current, limit)
+                recipients, reason = slot_recipients(current, limit)
                 if reason:
                     logger.info(
                         "notification_slot_skipped schedule_id=%s reason=%s", current.pk, reason

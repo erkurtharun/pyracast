@@ -63,11 +63,6 @@ def normalize_recipients(recipients: list[str]) -> list[str]:
     return normalized
 
 
-def region_recipient_count(region: Region) -> int:
-    schedule = ReminderSchedule.objects.filter(region=region, retired_at__isnull=True).first()
-    return len(effective_recipients(schedule)) if schedule else 0
-
-
 def _reminder_settings(schedule: ReminderSchedule) -> tuple[object, ...]:
     return (
         schedule.enabled,

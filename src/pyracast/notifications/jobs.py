@@ -9,7 +9,6 @@ from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError
 from django.core.mail import EmailMultiAlternatives
-from django.core.validators import validate_email
 from django.db import DatabaseError, transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -25,13 +24,10 @@ from pyracast.notifications.mail import (
     send_message,
 )
 from pyracast.notifications.models import NotificationDelivery
-from pyracast.notifications.operations import (
-    recipient_limit,
-    region_recipient_count,
-)
+from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.preparation import prepare_delivery
 from pyracast.notifications.recipients import permitted_recipients
-from pyracast.notifications.scheduler import MAX_LATENESS
+from pyracast.notifications.scheduler import MAX_LATENESS, slot_recipients
 from pyracast.regions.models import Region
 
 LEASE_DURATION = timedelta(minutes=5)
@@ -43,10 +39,13 @@ def _skip_reason(delivery: NotificationDelivery, limit: int) -> str | None:
     clock = delivery.scheduled_for.astimezone(ZoneInfo(schedule.region.timezone)).strftime("%H:%M")
     if not schedule.enabled or schedule.retired_at is not None or clock not in schedule.times:
         return "cancelled_by_settings_change"
+    if reason := slot_recipients(schedule, limit)[1]:
+        return reason
+    delivery.recipients = permitted_recipients(delivery)
+    if not delivery.recipients:
+        return "no_recipients"
     if (
         delivery.binding is None
-        or not delivery.recipients
-        or region_recipient_count(schedule.region) > limit
         or schedule.region_id != delivery.binding.region_id
         or clock not in schedule.times[: delivery.binding.provider_account.daily_quota]
         or not binding_can_notify(delivery.binding)
@@ -105,7 +104,6 @@ def _mark_transmit(
         delivery = _locked_delivery(delivery_id)
         if delivery is None or delivery.status != "sending" or delivery.lease_token != token:
             return False
-        delivery.recipients = permitted_recipients(delivery)
         reason = _skip_reason(delivery, limit)
         now += timedelta(seconds=time.monotonic() - started)
         if delivery.lease_expires_at is None or delivery.lease_expires_at <= now:
@@ -147,20 +145,12 @@ def process_notification(
             return False
         if delivery.status not in {"pending", "retry"} or delivery.available_at > now:
             return False
-        delivery.recipients = permitted_recipients(delivery)
         if (reason := _skip_reason(delivery, limit)) is not None:
             delivery.status, delivery.last_error = "skipped", reason
             delivery.save()
             return False
         if now - delivery.scheduled_for > MAX_LATENESS:
             delivery.status, delivery.last_error = "skipped", "missed_schedule"
-            delivery.save()
-            return False
-        try:
-            for recipient in delivery.recipients:
-                validate_email(recipient)
-        except ValidationError:
-            delivery.status, delivery.last_error = "skipped", "missing_recipient"
             delivery.save()
             return False
         slot_deliveries = NotificationDelivery.objects.filter(
