@@ -4,7 +4,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
-from pyracast.accounts.operations import require_admin
+from pyracast.accounts.authorization import require_platform_admin
 from pyracast.connections.models import ProviderAccount
 from pyracast.regions.models import AuditEvent
 
@@ -16,7 +16,7 @@ def clear_provider_cooldown(
     *,
     expected_blocked_until: datetime | None,
 ) -> None:
-    require_admin(actor)
+    require_platform_admin(actor)
     with transaction.atomic():
         account = ProviderAccount.objects.select_for_update().get(pk=account_id)
         if account.credential_revision != credential_revision:

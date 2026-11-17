@@ -62,7 +62,7 @@ def test_mounting_geometry_is_validated_and_versioned_in_api() -> None:
     ):
         response = client.put(detail, values | invalid, content_type="application/json")
         assert response.status_code == 400, response.content
-        assert client.get(detail).json()["current_configuration"]["id"] == fixed["id"]
+        assert client.get(base).json()["results"][0]["current_configuration"]["id"] == fixed["id"]
     response = client.put(
         detail,
         values | {"mounting_type": "tracking", "surface_tilt": None, "surface_azimuth": None},
@@ -121,12 +121,12 @@ def test_new_plant_forecast_reports_unavailable_history_without_rejecting_capaci
     assert not PlantForecast.objects.exists()
 
 
-def test_tenant_scope_observation_import_and_validation() -> None:
+def test_tenant_scope_and_production_input_validation() -> None:
     client, base, plant = setup_plant()
     detail = f"{base}{plant['id']}/"
-    assert client.get(base).json()["count"] == 1
-    assert client.get(detail).json()["current_configuration"]["revision"] == 1
-    config = plant["current_configuration"]["id"]
+    rows = client.get(base).json()
+    assert rows["count"] == 1
+    assert rows["results"][0]["current_configuration"]["revision"] == 1
     observation = {
         "starts_at": "2020-01-01T09:00:00Z",
         "ends_at": "2020-01-01T09:30:00Z",
@@ -134,18 +134,32 @@ def test_tenant_scope_observation_import_and_validation() -> None:
         "quality": "valid",
         "source": "meter",
     }
-    payload = {"configuration_id": config, "unit": "kWh", "observations": [observation]}
-    response = client.post(detail + "observations/", payload, content_type="application/json")
-    assert response.status_code == 201, response.content
-    assert response.json()["created"] == 1
-    assert ProductionObservation.objects.get().energy_mwh == 0.5
-    assert (
-        client.post(detail + "observations/", payload, content_type="application/json").json()[
-            "existing"
-        ]
-        == 1
+    payload = {
+        "configuration_id": plant["current_configuration"]["id"],
+        "unit": "kWh",
+        "observations": [observation],
+    }
+    preview = detail + "production/preview/"
+    configuration = PlantConfiguration.objects.get(pk=payload["configuration_id"])
+    other_plant = Plant.objects.create(
+        region=configuration.region, name="Archived PV", deleted_at=timezone.now()
     )
-    assert client.get(detail + "observations/").json()["results"][0]["energy_mwh"] == 0.5
+    foreign_configuration = PlantConfiguration.objects.create(
+        plant=other_plant,
+        region=configuration.region,
+        binding=configuration.binding,
+        revision=1,
+        dc_capacity_mw=1,
+        created_by=configuration.created_by,
+    )
+    assert (
+        client.post(
+            preview,
+            {**payload, "configuration_id": foreign_configuration.pk},
+            content_type="application/json",
+        ).status_code
+        == 404
+    )
     for change in (
         {"energy": True},
         {"energy": "NaN"},
@@ -153,37 +167,12 @@ def test_tenant_scope_observation_import_and_validation() -> None:
         {"extra": 1},
     ):
         invalid = {**payload, "observations": [{**observation, **change}]}
-        assert (
-            client.post(
-                detail + "observations/", invalid, content_type="application/json"
-            ).status_code
-            == 400
-        )
+        assert client.post(preview, invalid, content_type="application/json").status_code == 400
     assert (
         client.post(
-            detail + "observations/", {**payload, "unit": "watts"}, content_type="application/json"
+            preview, {**payload, "unit": "watts"}, content_type="application/json"
         ).status_code
         == 400
-    )
-    current = PlantConfiguration.objects.get(pk=config)
-    other_plant = Plant.objects.create(
-        region_id=plant["region_id"], name="Other PV", deleted_at=timezone.now()
-    )
-    foreign_config = PlantConfiguration.objects.create(
-        region_id=other_plant.region_id,
-        plant=other_plant,
-        binding=current.binding,
-        revision=1,
-        dc_capacity_mw=2,
-        created_by=current.created_by,
-    ).pk
-    assert (
-        client.post(
-            detail + "observations/",
-            {**payload, "configuration_id": foreign_config},
-            content_type="application/json",
-        ).status_code
-        == 404
     )
     assert (
         client.put(
@@ -193,18 +182,21 @@ def test_tenant_scope_observation_import_and_validation() -> None:
         ).status_code
         == 400
     )
+    assert not ProductionObservation.objects.exists()
     other = Tenant.objects.create(name="Other")
     user = User.objects.create_user(username="other")
-    Membership.objects.create(tenant=other, user=user)
+    Membership.objects.create(tenant=other, user=user, role=Membership.Role.ADMIN)
     client.force_login(user)
-    assert client.get(detail).status_code == 403
-    assert (
-        client.post(detail + "observations/", payload, content_type="application/json").status_code
-        == 403
-    )
+    assert client.get(base).status_code == 403
+    assert client.post(preview, payload, content_type="application/json").status_code == 403
     own_scope = f"/api/tenants/{other.pk}/regions/{plant['region_id']}/plants/{plant['id']}/"
-    assert client.get(own_scope).status_code == 404
     assert client.get(own_scope + "calibrations/").status_code == 404
+    assert (
+        client.post(
+            own_scope + "production/preview/", payload, content_type="application/json"
+        ).status_code
+        == 404
+    )
 
 
 def test_calibration_pending_forecast_and_csrf() -> None:

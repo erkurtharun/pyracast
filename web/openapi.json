@@ -15,16 +15,6 @@
                             "schema": {
                                 "$ref": "#/components/schemas/InvitationAcceptanceInput"
                             }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/InvitationAcceptanceInput"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/InvitationAcceptanceInput"
-                            }
                         }
                     },
                     "required": true
@@ -73,16 +63,6 @@
                 "requestBody": {
                     "content": {
                         "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/LanguageInput"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/LanguageInput"
-                            }
-                        },
-                        "multipart/form-data": {
                             "schema": {
                                 "$ref": "#/components/schemas/LanguageInput"
                             }
@@ -268,16 +248,6 @@
                             "schema": {
                                 "$ref": "#/components/schemas/ApprovalInput"
                             }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ApprovalInput"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ApprovalInput"
-                            }
                         }
                     },
                     "required": true
@@ -326,16 +296,6 @@
                 "requestBody": {
                     "content": {
                         "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/RejectionInput"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/RejectionInput"
-                            }
-                        },
-                        "multipart/form-data": {
                             "schema": {
                                 "$ref": "#/components/schemas/RejectionInput"
                             }
@@ -495,16 +455,6 @@
                             "schema": {
                                 "$ref": "#/components/schemas/InvitationInput"
                             }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/InvitationInput"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/InvitationInput"
-                            }
                         }
                     },
                     "required": true
@@ -629,256 +579,7 @@
                 }
             }
         },
-        "/api/tenants/{tenant_id}/regions/": {
-            "get": {
-                "operationId": "tenants_regions_list",
-                "parameters": [
-                    {
-                        "name": "page",
-                        "required": false,
-                        "in": "query",
-                        "description": "A page number within the paginated result set.",
-                        "schema": {
-                            "type": "integer"
-                        }
-                    },
-                    {
-                        "in": "path",
-                        "name": "tenant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    }
-                ],
-                "tags": ["tenants"],
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/PaginatedRegionOutputList"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            },
-            "post": {
-                "operationId": "tenants_regions_create",
-                "parameters": [
-                    {
-                        "in": "path",
-                        "name": "tenant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    }
-                ],
-                "tags": ["tenants"],
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/RegionInput"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/RegionInput"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/RegionInput"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/RegionOutput"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            }
-        },
         "/api/tenants/{tenant_id}/regions/{region_id}/": {
-            "get": {
-                "operationId": "tenants_regions_retrieve",
-                "parameters": [
-                    {
-                        "in": "path",
-                        "name": "region_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    },
-                    {
-                        "in": "path",
-                        "name": "tenant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    }
-                ],
-                "tags": ["tenants"],
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/RegionOutput"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            },
-            "put": {
-                "operationId": "tenants_regions_update",
-                "parameters": [
-                    {
-                        "in": "path",
-                        "name": "region_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    },
-                    {
-                        "in": "path",
-                        "name": "tenant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    }
-                ],
-                "tags": ["tenants"],
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/RegionRenameInput"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/RegionRenameInput"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/RegionRenameInput"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/RegionOutput"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            },
-            "patch": {
-                "operationId": "tenants_regions_partial_update",
-                "parameters": [
-                    {
-                        "in": "path",
-                        "name": "region_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    },
-                    {
-                        "in": "path",
-                        "name": "tenant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    }
-                ],
-                "tags": ["tenants"],
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/PatchedRegionRenameInput"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/PatchedRegionRenameInput"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/PatchedRegionRenameInput"
-                            }
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/RegionOutput"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            },
             "delete": {
                 "operationId": "tenants_regions_destroy",
                 "parameters": [
@@ -976,16 +677,6 @@
                 "requestBody": {
                     "content": {
                         "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/CollectionScheduleInput"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/CollectionScheduleInput"
-                            }
-                        },
-                        "multipart/form-data": {
                             "schema": {
                                 "$ref": "#/components/schemas/CollectionScheduleInput"
                             }
@@ -1149,16 +840,6 @@
                             "schema": {
                                 "$ref": "#/components/schemas/LocationChangeInput"
                             }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/LocationChangeInput"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/LocationChangeInput"
-                            }
                         }
                     },
                     "required": true
@@ -1258,16 +939,6 @@
                             "schema": {
                                 "$ref": "#/components/schemas/PlantInput"
                             }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/PlantInput"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/PlantInput"
-                            }
                         }
                     },
                     "required": true
@@ -1292,53 +963,6 @@
             }
         },
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/": {
-            "get": {
-                "operationId": "tenants_regions_plants_retrieve",
-                "parameters": [
-                    {
-                        "in": "path",
-                        "name": "plant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    },
-                    {
-                        "in": "path",
-                        "name": "region_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    },
-                    {
-                        "in": "path",
-                        "name": "tenant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    }
-                ],
-                "tags": ["tenants"],
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/PlantOutput"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            },
             "put": {
                 "operationId": "tenants_regions_plants_update",
                 "parameters": [
@@ -1371,16 +995,6 @@
                 "requestBody": {
                     "content": {
                         "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/PlantInput"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/PlantInput"
-                            }
-                        },
-                        "multipart/form-data": {
                             "schema": {
                                 "$ref": "#/components/schemas/PlantInput"
                             }
@@ -1527,16 +1141,6 @@
                 "requestBody": {
                     "content": {
                         "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/PatchedCalibrationAutomationInput"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/PatchedCalibrationAutomationInput"
-                            }
-                        },
-                        "multipart/form-data": {
                             "schema": {
                                 "$ref": "#/components/schemas/PatchedCalibrationAutomationInput"
                             }
@@ -1700,16 +1304,6 @@
                 "requestBody": {
                     "content": {
                         "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/CalibrationInput"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/CalibrationInput"
-                            }
-                        },
-                        "multipart/form-data": {
                             "schema": {
                                 "$ref": "#/components/schemas/CalibrationInput"
                             }
@@ -1886,16 +1480,6 @@
                             "schema": {
                                 "$ref": "#/components/schemas/IncidentRequestInput"
                             }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/IncidentRequestInput"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/IncidentRequestInput"
-                            }
                         }
                     },
                     "required": true
@@ -1952,16 +1536,6 @@
                 "requestBody": {
                     "content": {
                         "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ProductionRequestInput"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ProductionRequestInput"
-                            }
-                        },
-                        "multipart/form-data": {
                             "schema": {
                                 "$ref": "#/components/schemas/ProductionRequestInput"
                             }
@@ -2080,131 +1654,6 @@
                 }
             }
         },
-        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/observations/": {
-            "get": {
-                "operationId": "tenants_regions_plants_observations_list",
-                "parameters": [
-                    {
-                        "name": "page",
-                        "required": false,
-                        "in": "query",
-                        "description": "A page number within the paginated result set.",
-                        "schema": {
-                            "type": "integer"
-                        }
-                    },
-                    {
-                        "in": "path",
-                        "name": "plant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    },
-                    {
-                        "in": "path",
-                        "name": "region_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    },
-                    {
-                        "in": "path",
-                        "name": "tenant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    }
-                ],
-                "tags": ["tenants"],
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/PaginatedObservationOutputList"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            },
-            "post": {
-                "operationId": "tenants_regions_plants_observations_create",
-                "parameters": [
-                    {
-                        "in": "path",
-                        "name": "plant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    },
-                    {
-                        "in": "path",
-                        "name": "region_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    },
-                    {
-                        "in": "path",
-                        "name": "tenant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    }
-                ],
-                "tags": ["tenants"],
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ObservationImport"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ObservationImport"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ObservationImport"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/ObservationImportOutput"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            }
-        },
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/": {
             "get": {
                 "operationId": "tenants_regions_plants_outages_list",
@@ -2297,16 +1746,6 @@
                             "schema": {
                                 "$ref": "#/components/schemas/IncidentInput"
                             }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/IncidentInput"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/IncidentInput"
-                            }
                         }
                     },
                     "required": true
@@ -2371,16 +1810,6 @@
                 "requestBody": {
                     "content": {
                         "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/IncidentUpdate"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/IncidentUpdate"
-                            }
-                        },
-                        "multipart/form-data": {
                             "schema": {
                                 "$ref": "#/components/schemas/IncidentUpdate"
                             }
@@ -2451,16 +1880,6 @@
                             "schema": {
                                 "$ref": "#/components/schemas/RevisionInput"
                             }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/RevisionInput"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/RevisionInput"
-                            }
                         }
                     },
                     "required": true
@@ -2525,16 +1944,6 @@
                 "requestBody": {
                     "content": {
                         "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ResolveInput"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ResolveInput"
-                            }
-                        },
-                        "multipart/form-data": {
                             "schema": {
                                 "$ref": "#/components/schemas/ResolveInput"
                             }
@@ -2792,113 +2201,6 @@
                         "description": ""
                     }
                 }
-            },
-            "put": {
-                "operationId": "tenants_regions_plants_production_source_update",
-                "parameters": [
-                    {
-                        "in": "path",
-                        "name": "plant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    },
-                    {
-                        "in": "path",
-                        "name": "region_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    },
-                    {
-                        "in": "path",
-                        "name": "tenant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    }
-                ],
-                "tags": ["tenants"],
-                "requestBody": {
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/EpiasConnectionInput"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/EpiasConnectionInput"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/EpiasConnectionInput"
-                            }
-                        }
-                    },
-                    "required": true
-                },
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/EpiasConnectionOutput"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            },
-            "delete": {
-                "operationId": "tenants_regions_plants_production_source_destroy",
-                "parameters": [
-                    {
-                        "in": "path",
-                        "name": "plant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    },
-                    {
-                        "in": "path",
-                        "name": "region_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    },
-                    {
-                        "in": "path",
-                        "name": "tenant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    }
-                ],
-                "tags": ["tenants"],
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "No response body"
-                    }
-                }
             }
         },
         "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/changes/": {
@@ -2934,16 +2236,6 @@
                 "requestBody": {
                     "content": {
                         "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ProductionChangesInput"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ProductionChangesInput"
-                            }
-                        },
-                        "multipart/form-data": {
                             "schema": {
                                 "$ref": "#/components/schemas/ProductionChangesInput"
                             }
@@ -3006,16 +2298,6 @@
                             "schema": {
                                 "$ref": "#/components/schemas/ObservationImport"
                             }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ObservationImport"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ObservationImport"
-                            }
                         }
                     },
                     "required": true
@@ -3031,78 +2313,6 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/ProductionPreviewOutput"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            }
-        },
-        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/reported-production/": {
-            "get": {
-                "operationId": "tenants_regions_plants_reported_production_retrieve",
-                "parameters": [
-                    {
-                        "in": "query",
-                        "name": "data_source",
-                        "schema": {
-                            "enum": [
-                                "auto",
-                                "realtime_generation",
-                                "settlement_injection"
-                            ],
-                            "type": "string",
-                            "default": "auto",
-                            "minLength": 1
-                        },
-                        "description": "* `auto` - auto\n* `realtime_generation` - realtime_generation\n* `settlement_injection` - settlement_injection"
-                    },
-                    {
-                        "in": "query",
-                        "name": "date",
-                        "schema": {
-                            "type": "string",
-                            "format": "date"
-                        }
-                    },
-                    {
-                        "in": "path",
-                        "name": "plant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    },
-                    {
-                        "in": "path",
-                        "name": "region_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    },
-                    {
-                        "in": "path",
-                        "name": "tenant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    }
-                ],
-                "tags": ["tenants"],
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/EpiasHistoryOutput"
                                 }
                             }
                         },
@@ -3224,16 +2434,6 @@
                 "requestBody": {
                     "content": {
                         "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ReminderInput"
-                            }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/ReminderInput"
-                            }
-                        },
-                        "multipart/form-data": {
                             "schema": {
                                 "$ref": "#/components/schemas/ReminderInput"
                             }
@@ -3361,16 +2561,6 @@
                             "schema": {
                                 "$ref": "#/components/schemas/SiteInput"
                             }
-                        },
-                        "application/x-www-form-urlencoded": {
-                            "schema": {
-                                "$ref": "#/components/schemas/SiteInput"
-                            }
-                        },
-                        "multipart/form-data": {
-                            "schema": {
-                                "$ref": "#/components/schemas/SiteInput"
-                            }
                         }
                     },
                     "required": true
@@ -3382,47 +2572,6 @@
                 ],
                 "responses": {
                     "201": {
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/SiteOutput"
-                                }
-                            }
-                        },
-                        "description": ""
-                    }
-                }
-            }
-        },
-        "/api/tenants/{tenant_id}/sites/{region_id}/": {
-            "get": {
-                "operationId": "tenants_sites_retrieve",
-                "parameters": [
-                    {
-                        "in": "path",
-                        "name": "region_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    },
-                    {
-                        "in": "path",
-                        "name": "tenant_id",
-                        "schema": {
-                            "type": "integer"
-                        },
-                        "required": true
-                    }
-                ],
-                "tags": ["tenants"],
-                "security": [
-                    {
-                        "cookieAuth": []
-                    }
-                ],
-                "responses": {
-                    "200": {
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -4120,24 +3269,15 @@
                         "type": "string",
                         "format": "date-time"
                     },
-                    "daily_request_limit": {
-                        "type": "integer"
-                    },
-                    "used_today": {
-                        "type": "integer"
-                    },
-                    "remaining_today": {
-                        "type": "integer"
-                    },
-                    "quota_utc_day": {
+                    "last_success_at": {
                         "type": "string",
-                        "format": "date"
+                        "format": "date-time",
+                        "nullable": true
                     },
-                    "requests_by_outcome": {
-                        "type": "object",
-                        "additionalProperties": {
-                            "type": "integer"
-                        }
+                    "next_collection_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
                     },
                     "recent_jobs": {
                         "type": "array",
@@ -4162,21 +3302,18 @@
                     }
                 },
                 "required": [
-                    "daily_request_limit",
                     "effective_from",
                     "enabled",
                     "history_local_time",
                     "history_requests_reserved_per_day",
                     "history_retry_minutes",
                     "history_retry_until_local",
+                    "last_success_at",
                     "max_forecast_times",
-                    "quota_utc_day",
+                    "next_collection_at",
                     "recent_jobs",
-                    "remaining_today",
-                    "requests_by_outcome",
                     "times",
-                    "timezone",
-                    "used_today"
+                    "timezone"
                 ]
             },
             "ComparisonEnum": {
@@ -4299,20 +3436,6 @@
                 "type": "string",
                 "description": "* `pending` - Pending\n* `accepted` - Accepted\n* `uncertain` - Uncertain"
             },
-            "EpiasConnectionInput": {
-                "type": "object",
-                "properties": {
-                    "provider_plant_id": {
-                        "type": "integer",
-                        "minimum": 1
-                    },
-                    "expected_eic": {
-                        "type": "string",
-                        "pattern": "^[A-Za-z0-9-]{16}$"
-                    }
-                },
-                "required": ["expected_eic", "provider_plant_id"]
-            },
             "EpiasConnectionOutput": {
                 "type": "object",
                 "properties": {
@@ -4371,198 +3494,6 @@
                     "provider_plant_id",
                     "settlement_plant_id"
                 ]
-            },
-            "EpiasHistoryOutput": {
-                "type": "object",
-                "properties": {
-                    "date": {
-                        "type": "string",
-                        "format": "date"
-                    },
-                    "timezone": {
-                        "type": "string"
-                    },
-                    "unit": {
-                        "type": "string"
-                    },
-                    "source_kind": {
-                        "nullable": true,
-                        "oneOf": [
-                            {
-                                "$ref": "#/components/schemas/EpiasHistoryOutputSourceKindEnum"
-                            },
-                            {
-                                "$ref": "#/components/schemas/NullEnum"
-                            }
-                        ]
-                    },
-                    "complete": {
-                        "type": "boolean"
-                    },
-                    "reported_total_mwh": {
-                        "type": "number",
-                        "format": "double",
-                        "nullable": true
-                    },
-                    "available_sources": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/EpiasSourceKindEnum"
-                        }
-                    },
-                    "calibration_eligible": {
-                        "type": "boolean"
-                    },
-                    "calibration_blocker": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "snapshot": {
-                        "allOf": [
-                            {
-                                "$ref": "#/components/schemas/EpiasSnapshotOutput"
-                            }
-                        ],
-                        "nullable": true
-                    },
-                    "source_snapshots": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/EpiasSnapshotOutput"
-                        }
-                    },
-                    "readings": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/EpiasReadingOutput"
-                        }
-                    }
-                },
-                "required": [
-                    "available_sources",
-                    "calibration_blocker",
-                    "calibration_eligible",
-                    "complete",
-                    "date",
-                    "readings",
-                    "reported_total_mwh",
-                    "snapshot",
-                    "source_kind",
-                    "source_snapshots",
-                    "timezone",
-                    "unit"
-                ]
-            },
-            "EpiasHistoryOutputSourceKindEnum": {
-                "enum": [
-                    "realtime_generation",
-                    "settlement_injection",
-                    "mixed"
-                ],
-                "type": "string",
-                "description": "* `realtime_generation` - realtime_generation\n* `settlement_injection` - settlement_injection\n* `mixed` - mixed"
-            },
-            "EpiasReadingOutput": {
-                "type": "object",
-                "properties": {
-                    "source_kind": {
-                        "nullable": true,
-                        "oneOf": [
-                            {
-                                "$ref": "#/components/schemas/EpiasSourceKindEnum"
-                            },
-                            {
-                                "$ref": "#/components/schemas/NullEnum"
-                            }
-                        ]
-                    },
-                    "snapshot_id": {
-                        "type": "integer",
-                        "nullable": true
-                    },
-                    "provider_timestamp": {
-                        "type": "string",
-                        "format": "date-time",
-                        "nullable": true
-                    },
-                    "period_start": {
-                        "type": "string",
-                        "format": "date-time"
-                    },
-                    "period_end": {
-                        "type": "string",
-                        "format": "date-time"
-                    },
-                    "reported": {
-                        "type": "boolean"
-                    },
-                    "energy_mwh": {
-                        "type": "number",
-                        "format": "double",
-                        "nullable": true
-                    },
-                    "solar_mwh": {
-                        "type": "number",
-                        "format": "double",
-                        "nullable": true
-                    }
-                },
-                "required": [
-                    "energy_mwh",
-                    "period_end",
-                    "period_start",
-                    "provider_timestamp",
-                    "reported",
-                    "snapshot_id",
-                    "solar_mwh",
-                    "source_kind"
-                ]
-            },
-            "EpiasSnapshotOutput": {
-                "type": "object",
-                "properties": {
-                    "id": {
-                        "type": "integer"
-                    },
-                    "configuration_id": {
-                        "type": "integer"
-                    },
-                    "collected_at": {
-                        "type": "string",
-                        "format": "date-time"
-                    },
-                    "available_at": {
-                        "type": "string",
-                        "format": "date-time"
-                    },
-                    "content_sha256": {
-                        "type": "string"
-                    },
-                    "source_kind": {
-                        "$ref": "#/components/schemas/EpiasSourceKindEnum"
-                    },
-                    "normalization_policy": {
-                        "type": "string"
-                    },
-                    "complete": {
-                        "type": "boolean"
-                    }
-                },
-                "required": [
-                    "available_at",
-                    "collected_at",
-                    "complete",
-                    "configuration_id",
-                    "content_sha256",
-                    "id",
-                    "normalization_policy",
-                    "source_kind"
-                ]
-            },
-            "EpiasSourceKindEnum": {
-                "enum": ["realtime_generation", "settlement_injection"],
-                "type": "string",
-                "description": "* `realtime_generation` - realtime_generation\n* `settlement_injection` - settlement_injection"
             },
             "ForecastOutput": {
                 "type": "object",
@@ -5399,34 +4330,6 @@
                     }
                 }
             },
-            "PaginatedObservationOutputList": {
-                "type": "object",
-                "required": ["count", "results"],
-                "properties": {
-                    "count": {
-                        "type": "integer",
-                        "example": 123
-                    },
-                    "next": {
-                        "type": "string",
-                        "nullable": true,
-                        "format": "uri",
-                        "example": "http://api.example.org/accounts/?page=4"
-                    },
-                    "previous": {
-                        "type": "string",
-                        "nullable": true,
-                        "format": "uri",
-                        "example": "http://api.example.org/accounts/?page=2"
-                    },
-                    "results": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/ObservationOutput"
-                        }
-                    }
-                }
-            },
             "PaginatedPlantOutputList": {
                 "type": "object",
                 "required": ["count", "results"],
@@ -5451,34 +4354,6 @@
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/PlantOutput"
-                        }
-                    }
-                }
-            },
-            "PaginatedRegionOutputList": {
-                "type": "object",
-                "required": ["count", "results"],
-                "properties": {
-                    "count": {
-                        "type": "integer",
-                        "example": 123
-                    },
-                    "next": {
-                        "type": "string",
-                        "nullable": true,
-                        "format": "uri",
-                        "example": "http://api.example.org/accounts/?page=4"
-                    },
-                    "previous": {
-                        "type": "string",
-                        "nullable": true,
-                        "format": "uri",
-                        "example": "http://api.example.org/accounts/?page=2"
-                    },
-                    "results": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/RegionOutput"
                         }
                     }
                 }
@@ -5600,15 +4475,6 @@
                 "properties": {
                     "enabled": {
                         "type": "boolean"
-                    }
-                }
-            },
-            "PatchedRegionRenameInput": {
-                "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string",
-                        "maxLength": 200
                     }
                 }
             },
@@ -6802,32 +5668,6 @@
                     "starts_at"
                 ]
             },
-            "RegionInput": {
-                "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string",
-                        "maxLength": 200
-                    },
-                    "latitude": {
-                        "type": "number",
-                        "format": "double",
-                        "maximum": 90,
-                        "minimum": -90
-                    },
-                    "longitude": {
-                        "type": "number",
-                        "format": "double",
-                        "maximum": 180,
-                        "minimum": -180
-                    },
-                    "timezone": {
-                        "type": "string",
-                        "maxLength": 100
-                    }
-                },
-                "required": ["latitude", "longitude", "name", "timezone"]
-            },
             "RegionOutput": {
                 "type": "object",
                 "properties": {
@@ -6871,16 +5711,6 @@
                     "status",
                     "timezone"
                 ]
-            },
-            "RegionRenameInput": {
-                "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string",
-                        "maxLength": 200
-                    }
-                },
-                "required": ["name"]
             },
             "RejectionInput": {
                 "type": "object",

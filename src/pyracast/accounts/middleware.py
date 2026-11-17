@@ -10,6 +10,7 @@ from django.core.exceptions import ImproperlyConfigured, PermissionDenied
 from django.http import HttpRequest, HttpResponse
 
 from pyracast.accounts.audit import record_security_event
+from pyracast.accounts.authorization import requires_admin_mfa
 from pyracast.accounts.checks import validate_public_origin
 from pyracast.accounts.security import normalize_client_ip
 
@@ -102,7 +103,7 @@ class PrivilegedAuthenticatorEnrollment:
             request.path.rstrip("/") == "/api/auth/browser/v1/account/authenticators/totp"
             and request.method in {"GET", "POST"}
             and user.is_authenticated
-            and (user.is_staff or user.is_superuser)
+            and requires_admin_mfa(user)
         ):
             raise PermissionDenied(
                 "Administrator authenticators require trusted operator provisioning."

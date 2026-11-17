@@ -1,7 +1,6 @@
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from django.test import Client
 from django.utils import timezone
 
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
@@ -66,11 +65,11 @@ def archive_source(
     )
 
 
-def connected_source() -> tuple[Client, str, EpiasConnection]:
-    client, base, plant_data = setup_plant()
+def connected_source() -> EpiasConnection:
+    client, _, plant_data = setup_plant()
     plant = Plant.objects.get(pk=plant_data["id"])
     assert PLANT.eic is not None
-    connection = EpiasConnection.objects.create(
+    return EpiasConnection.objects.create(
         plant=plant,
         provider_plant_id=PLANT.id,
         settlement_plant_id=789,
@@ -78,4 +77,3 @@ def connected_source() -> tuple[Client, str, EpiasConnection]:
         name=PLANT.name,
         connected_by_id=client.session["_auth_user_id"],
     )
-    return client, f"{base}{plant.pk}/reported-production/", connection
