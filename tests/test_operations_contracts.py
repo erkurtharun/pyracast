@@ -732,14 +732,19 @@ def test_reset_tool_stops_the_application_in_the_installers_drain_order() -> Non
     assert [(int(timeout), group) for timeout, group in reset_database.STOP_ORDER] == drain
 
 
-def test_failed_maintenance_names_the_reset_tool_commands_that_recover_it() -> None:
+def test_failed_maintenance_names_the_recorded_prerelease_object_for_the_reset_tool() -> None:
     script = text(DEPLOY / "install-release.sh")
-    message = re.search(r"^\s*echo '(Release failed during maintenance\..*)' >&2$", script, re.M)
-    tool = "python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json"
     deployment = text(ROOT / "docs" / "DEPLOYMENT.md")
+    tool = "python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json"
+    record = f'"$release/{backup.PRERELEASE_RECORD}"'
+    dump = script.index("--kind prerelease")
 
-    assert message
-    for command in (f"{tool} abort", f"{tool} restore --confirm OBJECT"):
-        assert command in message[1]
-        assert command in deployment
-    assert "A release that fails during maintenance" in message[1]
+    assert script.index(record) < dump < script.index(record, dump)
+    assert script.index(record, dump) < script.index("run --rm --no-deps migrate\n")
+    assert f"recovery='{tool}'" in script
+    assert "$recovery abort" in script
+    assert "$recovery restore --confirm $prerelease_object" in script
+    assert f"{tool} abort" in deployment
+    assert f"{tool} restore --confirm OBJECT" in deployment
+    assert f"/opt/pyracast/releases/<sha>-<hash>/{backup.PRERELEASE_RECORD}" in deployment
+    assert "last-backup.json` and run" not in deployment

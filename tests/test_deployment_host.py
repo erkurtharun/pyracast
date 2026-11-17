@@ -59,6 +59,23 @@ def test_release_lock_gives_up_at_its_deadline(
     assert clock.sleeps == sleeps
 
 
+def test_pointer_lock_waits_for_an_exclusive_lock_beside_the_pointer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    operations: list[int] = []
+    fcntl = types.SimpleNamespace(
+        LOCK_EX=2, LOCK_NB=4, flock=lambda _stream, operation: operations.append(operation)
+    )
+    monkeypatch.setattr(
+        host, "importlib", types.SimpleNamespace(import_module={"fcntl": fcntl}.__getitem__)
+    )
+    monkeypatch.setattr(host, "LAST_BACKUP", tmp_path / "last-backup.json")
+
+    with host.pointer_lock():
+        assert operations == [2]
+    assert (tmp_path / "last-backup.lock").exists()
+
+
 @pytest.mark.parametrize("busy", [False, True])
 def test_lock_attempt_is_exclusive_and_never_blocks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, busy: bool

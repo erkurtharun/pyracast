@@ -35,6 +35,8 @@ elif [[ ${1:-} == */bootstrap_database.py || ${1:-} == */backup.py ]]; then
     if [[ $MODE == backup || $MODE == first-backup ]]; then exit 45; fi
     if [[ $MODE == killed-backup ]]; then kill -KILL "$PPID"; exit 0; fi
     touch /backup-complete
+    release_dir=$(sed -n 's/.* --release-dir \([^ ]*\) .*/\1/p' <<<"$*")
+    printf '{"object": "postgres/fixture-prerelease.dump"}\n' >"$release_dir/prerelease-backup.json"
   fi
 else
   exec /usr/local/bin/python3 "$@"
@@ -304,7 +306,18 @@ for MODE in preflight deploy-check plan secrets units-invalid image live-artifac
           response) test "$result" == 1 ;;
         esac
         test -f /var/lib/pyracast/release-blocked
-        grep -Fq 'reset_database.py /etc/pyracast/host.json restore --confirm OBJECT' /result
+        grep -Fq 'reset_database.py /etc/pyracast/host.json abort' /result
+        case "$MODE" in
+          drain|backup|first-backup)
+            if grep -q 'restore --confirm' /result; then exit 1; fi
+            ;;
+          *) grep -Fq 'host.json restore --confirm postgres/fixture-prerelease.dump' /result ;;
+        esac
+        if [[ $MODE == drain ]]; then
+          grep -Fq 'A stop command failed' /result
+        else
+          grep -Fq 'Every stop command succeeded' /result
+        fi
         grep -q 'stop -t 660 dispatcher' /calls
         grep -q 'stop -t 660 worker notifications' /calls
         grep -q 'stop -t 100 gateway api web' /calls

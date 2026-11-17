@@ -16,6 +16,7 @@ from deploy import backup, host
 class BackupHost:
     def __init__(self, root: Path) -> None:
         self.release = root / "release"
+        self.release.mkdir()
         self.directory = root / "work"
         self.directory.mkdir()
         self.blocked = root / "release-blocked"
@@ -30,6 +31,8 @@ class BackupHost:
         self.dump_error: BaseException | None = None
         self.events: list[tuple[str, str, dict[str, object]]] = []
         self.handlers: dict[int, Callable[[int, object], None]] = {}
+        self.pointer_held = False
+        self.on_upload: Callable[[str], None] = lambda _name: None
 
     @contextmanager
     def release_lock(self, wait_seconds: float) -> Iterator[bool]:
@@ -44,6 +47,15 @@ class BackupHost:
         finally:
             self.held = False
 
+    @contextmanager
+    def pointer_lock(self) -> Iterator[None]:
+        assert not self.pointer_held
+        self.pointer_held = True
+        try:
+            yield
+        finally:
+            self.pointer_held = False
+
     def run(self, command: list[str], **options: Any) -> subprocess.CompletedProcess[bytes]:
         self.commands.append(command)
         if "pg_dump" in command:
@@ -57,6 +69,7 @@ class BackupHost:
     def upload(self, _bucket: str, name: str, archive: Path) -> None:
         assert archive.read_bytes() == b"PGDMP"
         self.uploads.append((name, self.held))
+        self.on_upload(name)
 
     def report(self, event: str, severity: str, **details: object) -> None:
         self.events.append((event, severity, details))
@@ -68,6 +81,7 @@ def backup_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> BackupHost:
     monkeypatch.setattr(host, "RELEASE_BLOCKED", fake.blocked)
     monkeypatch.setattr(host, "LAST_BACKUP", fake.last_backup)
     monkeypatch.setattr(host, "release_lock", fake.release_lock)
+    monkeypatch.setattr(host, "pointer_lock", fake.pointer_lock, raising=False)
     monkeypatch.setattr(backup, "upload_backup", fake.upload)
     monkeypatch.setattr(backup, "report", fake.report)
     monkeypatch.setattr(subprocess, "run", fake.run)
@@ -149,34 +163,74 @@ def test_hourly_backup_started_during_a_release_dumps_once_the_release_finishes(
     assert [event for event, _, _ in backup_host.events] == ["pyracast_backup_succeeded"]
 
 
-def test_overlapping_hourly_and_prerelease_backups_both_record_their_completion(
+def test_hourly_upload_finishing_after_a_newer_prerelease_backup_leaves_the_pointer_on_it(
     backup_host: BackupHost, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    replace = Path.replace
     second = backup_host.directory / "prerelease"
     second.mkdir()
     prerelease: list[str | None] = []
+    replace = Path.replace
+    unguarded: list[Path] = []
 
-    def overlapping(source: Path, target: Path) -> Path:
-        if not prerelease:
-            prerelease.append(None)
-            prerelease[0] = backup.create_backup(
-                backup_host.release, "private-backups", "prerelease", second
+    def release_during_the_hourly_upload(name: str) -> None:
+        if "-hourly-" in name:
+            prerelease.append(
+                backup.create_backup(backup_host.release, "private-backups", "prerelease", second)
             )
+
+    def guarded(source: Path, target: Path) -> Path:
+        if target == backup_host.last_backup and not backup_host.pointer_held:
+            unguarded.append(target)
         return replace(source, target)
 
-    monkeypatch.setattr(Path, "replace", overlapping)
+    backup_host.on_upload = release_during_the_hourly_upload
+    monkeypatch.setattr(Path, "replace", guarded)
     hourly = backup.create_backup(
         backup_host.release, "private-backups", "hourly", backup_host.directory
     )
 
     assert hourly is not None
     assert prerelease[0] is not None
+    assert [name for name, _ in backup_host.uploads] == [hourly, prerelease[0]]
     assert [details["object"] for _, _, details in backup_host.events] == [prerelease[0], hourly]
-    assert json.loads(backup_host.last_backup.read_text())["object"] == hourly
+    assert json.loads(backup_host.last_backup.read_text())["object"] == prerelease[0]
     assert [path.name for path in backup_host.last_backup.parent.iterdir() if path.is_file()] == [
         backup_host.last_backup.name
     ]
+    assert unguarded == []
+
+
+def test_a_newer_hourly_backup_moves_the_pointer_forward(backup_host: BackupHost) -> None:
+    first = backup.create_backup(
+        backup_host.release, "private-backups", "prerelease", backup_host.directory
+    )
+    second = backup.create_backup(
+        backup_host.release, "private-backups", "hourly", backup_host.directory
+    )
+
+    assert first is not None
+    assert second is not None
+    pointer = json.loads(backup_host.last_backup.read_text())
+    assert pointer["object"] == second
+    assert pointer["snapshot_at"] <= pointer["completed_at"]
+
+
+def test_prerelease_backup_records_its_object_in_the_release_directory(
+    backup_host: BackupHost,
+) -> None:
+    name = backup.create_backup(
+        backup_host.release, "private-backups", "prerelease", backup_host.directory
+    )
+
+    record = backup_host.release / backup.PRERELEASE_RECORD
+    assert json.loads(record.read_text()) == {"object": name}
+    assert [path.name for path in backup_host.release.iterdir()] == [record.name]
+
+
+def test_hourly_backup_writes_no_release_record(backup_host: BackupHost) -> None:
+    backup.create_backup(backup_host.release, "private-backups", "hourly", backup_host.directory)
+
+    assert list(backup_host.release.iterdir()) == []
 
 
 def test_prerelease_backup_never_waits_for_the_lock_its_installer_holds(
