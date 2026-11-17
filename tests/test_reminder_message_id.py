@@ -4,7 +4,7 @@ from django.test import override_settings
 
 from pyracast.notifications.mail import build_message
 from pyracast.notifications.models import NotificationDelivery
-from tests.support.notifications import SLOT, configured, ready
+from tests.support.notifications import ready
 
 pytestmark = pytest.mark.django_db(transaction=True)
 SENDER = "Pyracast <info@pyracast.app>"
@@ -17,6 +17,7 @@ def test_message_id_is_unique_per_delivery_and_stable_across_attempts() -> None:
         schedule=delivery.schedule,
         scheduled_for=delivery.scheduled_for.replace(minute=1),
         available_at=delivery.available_at,
+        preparation_deadline=delivery.preparation_deadline,
         recipients=delivery.recipients,
         binding=delivery.binding,
         snapshot=delivery.snapshot,
@@ -30,15 +31,17 @@ def test_message_id_is_unique_per_delivery_and_stable_across_attempts() -> None:
 
 
 def test_every_delivery_holds_its_own_message_token() -> None:
-    _system, schedule = configured()
-    deliveries = [
+    first = ready()
+    deliveries = [first] + [
         NotificationDelivery.objects.create(
-            schedule=schedule,
-            scheduled_for=SLOT.replace(minute=offset),
-            available_at=SLOT,
-            status="sent",
+            schedule=first.schedule,
+            scheduled_for=first.scheduled_for.replace(minute=offset),
+            available_at=first.available_at,
+            preparation_deadline=first.preparation_deadline,
+            binding=first.binding,
+            snapshot=first.snapshot,
         )
-        for offset in range(3)
+        for offset in (1, 2)
     ]
 
     tokens = list(NotificationDelivery.objects.values_list("message_token", flat=True))
