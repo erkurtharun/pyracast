@@ -215,7 +215,7 @@ def language(request: pytest.FixtureRequest) -> str:
     return str(request.param)
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def social_providers(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, Any]]:
     profile: dict[str, Any] = {
         "sub": "google-identity",
@@ -383,8 +383,94 @@ def assert_action(message: EmailMultiAlternatives, *, prefix: str, language: str
     assert SECURITY_COPY[language]["warning"] not in str(message.body)
 
 
-def test_signup_mails_the_verification_code_in_the_request_language(language: str) -> None:
-    assert signup(browser(language)).status_code == 401
+ANONYMOUS = "anonymous"
+PENDING_SIGNUP = "pending-signup"
+PENDING_PROVIDER_SIGNUP = "pending-provider-signup"
+SIGNED_IN = "signed-in"
+SECOND_ADDRESS = "second-address"
+PENDING_CHANGE = "pending-change"
+REAUTHENTICATION_PENDING = "reauthentication-pending"
+ANONYMOUS_STATES = (ANONYMOUS, PENDING_SIGNUP, PENDING_PROVIDER_SIGNUP)
+REAUTHENTICATED_STATES = (SIGNED_IN, SECOND_ADDRESS, PENDING_CHANGE)
+SIGNED_IN_STATES = (*REAUTHENTICATED_STATES, REAUTHENTICATION_PENDING)
+ALL_STATES = (*ANONYMOUS_STATES, *SIGNED_IN_STATES)
+LINKED_IDENTITY = {"sub": "linked-identity", "email": "solar@gmail.com", "email_verified": False}
+
+
+def anonymous_client(state: str, profile: dict[str, Any], language: str | None = None) -> Client:
+    client = browser(language)
+    if state == PENDING_SIGNUP:
+        details = {"email": "pending-signup@example.com", "company_name": "Pending Signup"}
+        assert signup(client, details).status_code == 401
+    elif state == PENDING_PROVIDER_SIGNUP:
+        profile.update(sub="pending-identity", email="pending@gmail.com", email_verified=True)
+        complete(client, begin(client))
+        assert "socialaccount_sociallogin" in client.session
+    mail.outbox.clear()
+    return client
+
+
+def enter(client: Client, user: User, state: str) -> None:
+    if state == SECOND_ADDRESS:
+        EmailAddress.objects.create(user=user, email="second@example.com", verified=True)
+    elif state == PENDING_CHANGE:
+        change = {"email": "pending-change@example.com"}
+        assert submit(client, "account/email", change).status_code == 200
+    mail.outbox.clear()
+
+
+def signed_in_client(user: User, state: str) -> Client:
+    if state == REAUTHENTICATION_PENDING:
+        client = signed_in(user)
+        request = {"email": user.email}
+        assert submit(client, "auth/reauthenticate/code/request", request).status_code == 200
+        mail.outbox.clear()
+        return client
+    client = signed_in(user, reauthenticated=True)
+    enter(client, user, state)
+    return client
+
+
+def client_in(
+    state: str, user: User, profile: dict[str, Any], anonymous_language: str | None = None
+) -> Client:
+    if state in ANONYMOUS_STATES:
+        return anonymous_client(state, profile, anonymous_language)
+    return signed_in_client(user, state)
+
+
+def answered(state: str) -> int:
+    return 401 if state in ANONYMOUS_STATES else 200
+
+
+def start_verification(client: Client, user: User, origin: str) -> str:
+    if origin == "change":
+        assert submit(client, "account/email", {"email": "new@example.com"}).status_code == 200
+        return "new@example.com"
+    EmailAddress.objects.create(user=user, email="pending@example.com")
+    assert call(client, "put", "account/email", {"email": "pending@example.com"}).status_code == 200
+    return "pending@example.com"
+
+
+def linked_unverified_account(
+    language: str, profile: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile.update(LINKED_IDENTITY)
+    client = browser(language)
+    complete(client, begin(client))
+    details = {"email": "solar@gmail.com", "company_name": "Linked Solar"}
+    assert submit(client, "auth/provider/signup", details).status_code == 401
+    mail.outbox.clear()
+    one_minute_later(monkeypatch)
+
+
+@pytest.mark.parametrize("state", ANONYMOUS_STATES)
+def test_signup_mails_the_verification_code_in_the_request_language(
+    language: str, state: str, social_providers: dict[str, Any]
+) -> None:
+    client = anonymous_client(state, social_providers, language)
+
+    assert signup(client).status_code == 401
 
     assert_code_mail(
         only_mail(),
@@ -395,21 +481,43 @@ def test_signup_mails_the_verification_code_in_the_request_language(language: st
     )
 
 
+@pytest.mark.parametrize("state", ANONYMOUS_STATES)
 def test_unverified_sign_in_mails_a_new_code_in_the_stored_language(
-    language: str, monkeypatch: pytest.MonkeyPatch
+    language: str, state: str, social_providers: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
     assert signup(browser(language)).status_code == 401
-    mail.outbox.clear()
     one_minute_later(monkeypatch)
+    client = anonymous_client(state, social_providers, OTHER[language])
     credentials = {"email": "owner@example.com", "password": PASSWORD}
 
-    response = submit(browser(OTHER[language]), "auth/login", credentials)
+    response = submit(client, "auth/login", credentials)
 
     assert response.status_code == 401
     assert {"id": "verify_email", "is_pending": True} in response.json()["data"]["flows"]
     assert_code_mail(
         only_mail(),
         prefix="account/email/email_confirmation_signup",
+        to="owner@example.com",
+        language=language,
+        minutes=10,
+    )
+
+
+def test_unverified_sign_in_of_a_returning_account_mails_the_plain_verification_code(
+    language: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert signup(browser(language)).status_code == 401
+    mail.outbox.clear()
+    User.objects.filter(email="owner@example.com").update(last_login=datetime.now(UTC))
+    one_minute_later(monkeypatch)
+    credentials = {"email": "owner@example.com", "password": PASSWORD}
+
+    response = submit(browser(OTHER[language]), "auth/login", credentials)
+
+    assert response.status_code == 401
+    assert_code_mail(
+        only_mail(),
+        prefix="account/email/email_confirmation",
         to="owner@example.com",
         language=language,
         minutes=10,
@@ -439,10 +547,53 @@ def test_verification_resend_mails_a_new_code_in_the_stored_language(
     assert first not in str(message.body)
 
 
-def test_signup_with_a_taken_address_notifies_the_owner_in_their_language(language: str) -> None:
+@pytest.mark.parametrize("origin", ["change", "stored"])
+def test_verification_resend_while_signed_in_mails_the_pending_address(
+    language: str, origin: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     user = account(language)
+    client = signed_in(user, reauthenticated=True)
+    address = start_verification(client, user, origin)
+    first = mailed_code()
+    one_minute_later(monkeypatch)
 
-    assert signup(browser(OTHER[language]), {"email": user.email}).status_code == 401
+    response = submit(client, "auth/email/verify/resend", {})
+
+    assert response.status_code == 200
+    message = only_mail()
+    assert_code_mail(
+        message,
+        prefix="account/email/email_confirmation",
+        to=address,
+        language=language,
+        minutes=10,
+    )
+    assert first not in str(message.body)
+
+
+def test_verification_resend_after_signup_with_a_taken_address_mails_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    member()
+    client = browser()
+    assert signup(client, {"email": "member@example.com"}).status_code == 401
+    mail.outbox.clear()
+    one_minute_later(monkeypatch)
+
+    response = submit(client, "auth/email/verify/resend", {})
+
+    assert response.status_code == 200
+    assert mail.outbox == []
+
+
+@pytest.mark.parametrize("state", ANONYMOUS_STATES)
+def test_signup_with_a_taken_address_notifies_the_owner_in_their_language(
+    language: str, state: str, social_providers: dict[str, Any]
+) -> None:
+    user = account(language)
+    client = anonymous_client(state, social_providers, OTHER[language])
+
+    assert signup(client, {"email": user.email}).status_code == 401
 
     message = only_mail()
     prefix = "account/email/account_already_exists"
@@ -455,14 +606,16 @@ def test_signup_with_a_taken_address_notifies_the_owner_in_their_language(langua
     )
 
 
+@pytest.mark.parametrize("state", ALL_STATES)
 def test_reset_request_for_an_unknown_address_notifies_it_in_the_request_language(
-    language: str,
+    language: str, state: str, social_providers: dict[str, Any]
 ) -> None:
+    client = client_in(state, account(language), social_providers, language)
     address = "missing@example.com"
 
-    response = submit(browser(language), "auth/password/request", {"email": address})
+    response = submit(client, "auth/password/request", {"email": address})
 
-    assert response.status_code == 401
+    assert response.status_code == answered(state)
     message = only_mail()
     prefix = "account/email/unknown_account"
     assert_notice(message, prefix=prefix, to=address, language=language, email=address)
@@ -474,12 +627,16 @@ def test_reset_request_for_an_unknown_address_notifies_it_in_the_request_languag
     )
 
 
-def test_reset_code_follows_the_saved_language_of_the_address(language: str) -> None:
+@pytest.mark.parametrize("state", ALL_STATES)
+def test_reset_code_follows_the_saved_language_of_the_address(
+    language: str, state: str, social_providers: dict[str, Any]
+) -> None:
     user = account(language)
+    client = client_in(state, user, social_providers, OTHER[language])
 
-    response = submit(browser(OTHER[language]), "auth/password/request", {"email": user.email})
+    response = submit(client, "auth/password/request", {"email": user.email})
 
-    assert response.status_code == 401
+    assert response.status_code == answered(state)
     assert_code_mail(
         only_mail(),
         prefix="account/email/password_reset_code",
@@ -489,24 +646,29 @@ def test_reset_code_follows_the_saved_language_of_the_address(language: str) -> 
     )
 
 
-def test_password_reset_completion_sends_a_security_notice(language: str) -> None:
+@pytest.mark.parametrize("state", ALL_STATES)
+def test_password_reset_completion_sends_a_security_notice(
+    language: str, state: str, social_providers: dict[str, Any]
+) -> None:
     user = account(language)
-    client = browser(OTHER[language])
-    assert submit(client, "auth/password/request", {"email": user.email}).status_code == 401
+    client = client_in(state, user, social_providers, OTHER[language])
+    response = submit(client, "auth/password/request", {"email": user.email})
+    assert response.status_code == answered(state)
     code = mailed_code()
     since = datetime.now(UTC)
 
     response = submit(client, "auth/password/reset", {"key": code, "password": PASSWORD + "new"})
 
-    assert response.status_code == 401
+    assert response.status_code == answered(state)
     message = only_mail()
     assert_notice(message, prefix="account/email/password_reset", to=user.email, language=language)
     assert_security_details(message, language=language, since=since)
 
 
-def test_password_change_sends_a_security_notice(language: str) -> None:
+@pytest.mark.parametrize("state", SIGNED_IN_STATES)
+def test_password_change_sends_a_security_notice(language: str, state: str) -> None:
     user = account(language)
-    client = signed_in(user)
+    client = signed_in_client(user, state)
     since = datetime.now(UTC)
 
     response = submit(
@@ -523,7 +685,8 @@ def test_password_change_sends_a_security_notice(language: str) -> None:
     assert_security_details(message, language=language, since=since)
 
 
-def test_password_set_sends_a_security_notice(language: str) -> None:
+@pytest.mark.parametrize("state", REAUTHENTICATED_STATES)
+def test_password_set_sends_a_security_notice(language: str, state: str) -> None:
     user = account(language)
     user.set_unusable_password()
     user.save(update_fields=["password"])
@@ -533,6 +696,7 @@ def test_password_set_sends_a_security_notice(language: str) -> None:
     assert submit(client, "auth/reauthenticate/code/request", request).status_code == 200
     confirmation = {"code": mailed_code()}
     assert submit(client, "auth/reauthenticate/code/confirm", confirmation).status_code == 200
+    enter(client, user, state)
     since = datetime.now(UTC)
 
     response = submit(client, "account/password/change", {"new_password": PASSWORD + "set"})
@@ -543,9 +707,10 @@ def test_password_set_sends_a_security_notice(language: str) -> None:
     assert_security_details(message, language=language, since=since)
 
 
-def test_reauthentication_code_is_mailed_in_the_stored_language(language: str) -> None:
+@pytest.mark.parametrize("state", SIGNED_IN_STATES)
+def test_reauthentication_code_is_mailed_in_the_stored_language(language: str, state: str) -> None:
     user = account(language)
-    client = signed_in(user)
+    client = signed_in_client(user, state)
 
     response = submit(client, "auth/reauthenticate/code/request", {"email": user.email})
 
@@ -561,11 +726,7 @@ def test_reauthentication_code_is_mailed_in_the_stored_language(language: str) -
 
 def test_reauthentication_code_resend_is_disabled_and_mails_nothing() -> None:
     user = member()
-    client = signed_in(user)
-    assert (
-        submit(client, "auth/reauthenticate/code/request", {"email": user.email}).status_code == 200
-    )
-    mail.outbox.clear()
+    client = signed_in_client(user, REAUTHENTICATION_PENDING)
 
     response = submit(client, "auth/reauthenticate/code/resend", {})
 
@@ -573,9 +734,10 @@ def test_reauthentication_code_resend_is_disabled_and_mails_nothing() -> None:
     assert mail.outbox == []
 
 
-def test_email_change_mails_the_code_to_the_new_address(language: str) -> None:
+@pytest.mark.parametrize("state", REAUTHENTICATED_STATES)
+def test_email_change_mails_the_code_to_the_new_address(language: str, state: str) -> None:
     user = account(language)
-    client = signed_in(user, reauthenticated=True)
+    client = signed_in_client(user, state)
 
     response = submit(client, "account/email", {"email": "new@example.com"})
 
@@ -584,6 +746,28 @@ def test_email_change_mails_the_code_to_the_new_address(language: str) -> None:
         only_mail(),
         prefix="account/email/email_confirmation",
         to="new@example.com",
+        language=language,
+        minutes=10,
+    )
+
+
+@pytest.mark.parametrize("state", REAUTHENTICATED_STATES)
+def test_email_change_to_another_accounts_address_mails_the_code_in_the_requesters_language(
+    language: str, state: str
+) -> None:
+    user = account(language)
+    owner = User.objects.create_user(username="owner", email="owner@example.com")
+    EmailAddress.objects.create(user=owner, email=owner.email, primary=True, verified=True)
+    UserLanguagePreference.objects.create(user=owner, language=OTHER[language])
+    client = signed_in_client(user, state)
+
+    response = submit(client, "account/email", {"email": owner.email})
+
+    assert response.status_code == 200
+    assert_code_mail(
+        only_mail(),
+        prefix="account/email/email_confirmation",
+        to=owner.email,
         language=language,
         minutes=10,
     )
@@ -612,10 +796,11 @@ def test_put_resends_the_pending_change_code_to_the_new_address(
     assert first not in str(message.body)
 
 
-def test_put_mails_a_code_to_a_stored_unverified_address(language: str) -> None:
+@pytest.mark.parametrize("state", SIGNED_IN_STATES)
+def test_put_mails_a_code_to_a_stored_unverified_address(language: str, state: str) -> None:
     user = account(language)
     EmailAddress.objects.create(user=user, email="pending@example.com")
-    client = signed_in(user)
+    client = signed_in_client(user, state)
 
     response = call(client, "put", "account/email", {"email": "pending@example.com"})
 
@@ -629,11 +814,48 @@ def test_put_mails_a_code_to_a_stored_unverified_address(language: str) -> None:
     )
 
 
+@pytest.mark.parametrize("state", SIGNED_IN_STATES)
+def test_put_for_a_verified_address_is_refused_without_mail(state: str) -> None:
+    user = member()
+    client = signed_in_client(user, state)
+
+    response = call(client, "put", "account/email", {"email": user.email})
+
+    assert response.status_code == 400
+    assert [error["code"] for error in response.json()["errors"]] == ["email_already_verified"]
+    assert mail.outbox == []
+
+
+@pytest.mark.parametrize("origin", ["change", "stored"])
+def test_email_verification_while_signed_in_notifies_the_old_address(
+    language: str, origin: str
+) -> None:
+    user = account(language)
+    old = user.email
+    client = signed_in(user, reauthenticated=True)
+    address = start_verification(client, user, origin)
+    code = mailed_code()
+    since = datetime.now(UTC)
+
+    response = submit(client, "auth/email/verify", {"key": code})
+
+    assert response.status_code == 200
+    message = only_mail()
+    assert_notice(
+        message,
+        prefix="account/email/email_changed",
+        to=old,
+        language=language,
+        from_email=old,
+        to_email=address,
+    )
+    assert_security_details(message, language=language, since=since)
+
+
 def test_primary_address_change_notifies_the_previous_primary_address(language: str) -> None:
     user = account(language)
     old = user.email
-    EmailAddress.objects.create(user=user, email="second@example.com", verified=True)
-    client = signed_in(user, reauthenticated=True)
+    client = signed_in_client(user, SECOND_ADDRESS)
     since = datetime.now(UTC)
 
     response = call(
@@ -653,33 +875,9 @@ def test_primary_address_change_notifies_the_previous_primary_address(language: 
     assert_security_details(message, language=language, since=since)
 
 
-def test_email_change_notifies_the_old_address(language: str) -> None:
-    user = account(language)
-    old = user.email
-    client = signed_in(user, reauthenticated=True)
-    assert submit(client, "account/email", {"email": "new@example.com"}).status_code == 200
-    code = mailed_code()
-    since = datetime.now(UTC)
-
-    response = submit(client, "auth/email/verify", {"key": code})
-
-    assert response.status_code == 200
-    message = only_mail()
-    assert_notice(
-        message,
-        prefix="account/email/email_changed",
-        to=old,
-        language=language,
-        from_email=old,
-        to_email="new@example.com",
-    )
-    assert_security_details(message, language=language, since=since)
-
-
 def test_removing_an_address_notifies_the_primary_address(language: str) -> None:
     user = account(language)
-    EmailAddress.objects.create(user=user, email="second@example.com", verified=True)
-    client = signed_in(user, reauthenticated=True)
+    client = signed_in_client(user, SECOND_ADDRESS)
     since = datetime.now(UTC)
 
     response = call(client, "delete", "account/email", {"email": "second@example.com"})
@@ -696,11 +894,12 @@ def test_removing_an_address_notifies_the_primary_address(language: str) -> None
     assert_security_details(message, language=language, since=since)
 
 
+@pytest.mark.parametrize("state", REAUTHENTICATED_STATES)
 def test_totp_activation_sends_a_security_notice(
-    language: str, monkeypatch: pytest.MonkeyPatch
+    language: str, state: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     user = account(language)
-    client = signed_in(user, reauthenticated=True)
+    client = signed_in_client(user, state)
     setup = client.get(AUTH + "account/authenticators/totp")
     assert setup.status_code == 404
     now = time.time()
@@ -717,8 +916,10 @@ def test_totp_activation_sends_a_security_notice(
     assert_security_details(message, language=language, since=since)
 
 
-def test_totp_deactivation_sends_a_security_notice(language: str) -> None:
+@pytest.mark.parametrize("state", REAUTHENTICATED_STATES)
+def test_totp_deactivation_sends_a_security_notice(language: str, state: str) -> None:
     client, user = two_factor_account(language)
+    enter(client, user, state)
     since = datetime.now(UTC)
 
     response = call(client, "delete", "account/authenticators/totp")
@@ -729,8 +930,10 @@ def test_totp_deactivation_sends_a_security_notice(language: str) -> None:
     assert_security_details(message, language=language, since=since)
 
 
-def test_recovery_code_regeneration_sends_a_security_notice(language: str) -> None:
+@pytest.mark.parametrize("state", REAUTHENTICATED_STATES)
+def test_recovery_code_regeneration_sends_a_security_notice(language: str, state: str) -> None:
     client, user = two_factor_account(language)
+    enter(client, user, state)
     since = datetime.now(UTC)
 
     response = submit(client, "account/authenticators/recovery-codes", {})
@@ -743,10 +946,10 @@ def test_recovery_code_regeneration_sends_a_security_notice(language: str) -> No
     assert_security_details(message, language=language, since=since)
 
 
-@pytest.mark.usefixtures("social_providers")
-def test_provider_connect_sends_a_security_notice(language: str) -> None:
+@pytest.mark.parametrize("state", REAUTHENTICATED_STATES)
+def test_provider_connect_sends_a_security_notice(language: str, state: str) -> None:
     user = account(language)
-    client = signed_in(user, reauthenticated=True)
+    client = signed_in_client(user, state)
     since = datetime.now(UTC)
 
     complete(client, begin(client, process="connect"))
@@ -762,11 +965,11 @@ def test_provider_connect_sends_a_security_notice(language: str) -> None:
     assert_security_details(message, language=language, since=since)
 
 
-@pytest.mark.usefixtures("social_providers")
-def test_provider_disconnect_sends_a_security_notice(language: str) -> None:
+@pytest.mark.parametrize("state", REAUTHENTICATED_STATES)
+def test_provider_disconnect_sends_a_security_notice(language: str, state: str) -> None:
     user = account(language)
     linked = SocialAccount.objects.create(user=user, provider="google", uid="google-identity")
-    client = signed_in(user, reauthenticated=True)
+    client = signed_in_client(user, state)
     since = datetime.now(UTC)
 
     response = call(
@@ -827,6 +1030,45 @@ def test_provider_signup_with_a_registered_address_notifies_the_owner_in_their_l
         prefix=prefix,
         language=language,
         url=settings.HEADLESS_FRONTEND_URLS["account_reset_password"],
+    )
+
+
+@pytest.mark.parametrize("state", ALL_STATES)
+def test_provider_sign_in_of_an_unverified_account_mails_a_new_code_in_the_stored_language(
+    language: str, state: str, social_providers: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    linked_unverified_account(language, social_providers, monkeypatch)
+    client = client_in(state, account(OTHER[language]), social_providers, OTHER[language])
+    social_providers.update(LINKED_IDENTITY)
+
+    response = complete(client, begin(client))
+
+    assert response.status_code == 302
+    assert_code_mail(
+        only_mail(),
+        prefix="account/email/email_confirmation_signup",
+        to="solar@gmail.com",
+        language=language,
+        minutes=10,
+    )
+
+
+def test_provider_sign_in_of_a_returning_unverified_account_mails_the_plain_verification_code(
+    language: str, social_providers: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    linked_unverified_account(language, social_providers, monkeypatch)
+    User.objects.filter(email="solar@gmail.com").update(last_login=datetime.now(UTC))
+    client = browser(OTHER[language])
+
+    response = complete(client, begin(client))
+
+    assert response.status_code == 302
+    assert_code_mail(
+        only_mail(),
+        prefix="account/email/email_confirmation",
+        to="solar@gmail.com",
+        language=language,
+        minutes=10,
     )
 
 
