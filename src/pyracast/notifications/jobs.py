@@ -14,15 +14,16 @@ from django.db.models import Q
 from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
-from pyracast.notifications.eligibility import binding_can_notify
-from pyracast.notifications.mail import (
+from pyracast.mail.errors import (
+    DeliveryUncertainError,
+    MailFailure,
     NotSentError,
     PermanentlyNotSentError,
     SendCancelledError,
-    build_message,
-    build_unavailable_message,
-    send_message,
 )
+from pyracast.mail.send import send
+from pyracast.notifications.eligibility import binding_can_notify
+from pyracast.notifications.mail import build_message, build_unavailable_message
 from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.preparation import prepare_delivery
@@ -180,47 +181,55 @@ def process_notification(
         delivery.attempts += 1
         delivery.save()
     available_at = now
+    error_code: str
+    transmitting = False
+
+    def before_send() -> bool:
+        nonlocal transmitting
+        transmitting = _mark_transmit(
+            delivery_id,
+            token,
+            entered_at + timedelta(seconds=time.monotonic() - started),
+            message,
+        )
+        return transmitting
+
+    def retry_or_fail() -> tuple[str, datetime]:
+        completed_at = entered_at + timedelta(seconds=time.monotonic() - started)
+        retry_at = completed_at + timedelta(
+            seconds=min(60 * 2 ** (delivery.attempts - 1), 1800) + secrets.randbelow(31)
+        )
+        if delivery.attempts < 8 and retry_at < delivery.scheduled_for + MAX_LATENESS:
+            return "retry", retry_at
+        return "failed", now
+
     try:
-
-        def before_send() -> bool:
-            return _mark_transmit(
-                delivery_id,
-                token,
-                entered_at + timedelta(seconds=time.monotonic() - started),
-                message,
-            )
-
         if sender is None:
-            send_message(message, before_send=before_send)
+            send(message, before_send=before_send)
         elif before_send():
             sender(message)
         else:
             return False
     except SendCancelledError:
         return False
-    except PermanentlyNotSentError:
-        status, error_code = "failed", "mail_rejected"
+    except PermanentlyNotSentError as error:
+        status, error_code = "failed", error.code
     except NotSentError as error:
-        completed_at = entered_at + timedelta(seconds=time.monotonic() - started)
-        retry_at = completed_at + timedelta(
-            seconds=min(60 * 2 ** (delivery.attempts - 1), 1800) + secrets.randbelow(31)
-        )
-        status = (
-            "retry"
-            if delivery.attempts < 8 and retry_at < delivery.scheduled_for + MAX_LATENESS
-            else "failed"
-        )
-        available_at = retry_at if status == "retry" else now
-        error_code = error.code
-    except (
-        Exception
-    ) as error:  # SMTP acceptance may have succeeded before an exception reached the caller.
+        (status, available_at), error_code = retry_or_fail(), error.code
+    except DeliveryUncertainError:
+        status, error_code = "uncertain", MailFailure.OUTCOME_UNCERTAIN
+        logger.warning("notification_delivery_uncertain delivery_id=%s", delivery_id)
+    except Exception as error:
         logger.warning(
-            "notification_delivery_uncertain delivery_id=%s error_type=%s",
+            "notification_send_failed delivery_id=%s error_type=%s transmitting=%s",
             delivery_id,
             type(error).__name__,
+            transmitting,
         )
-        status, error_code = "uncertain", "mail_outcome_uncertain"
+        if transmitting:
+            status, error_code = "uncertain", MailFailure.OUTCOME_UNCERTAIN
+        else:
+            (status, available_at), error_code = retry_or_fail(), MailFailure.NOT_SENT
     else:
         status, error_code = "sent", ""
     updated = NotificationDelivery.objects.filter(

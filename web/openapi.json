@@ -3301,9 +3301,9 @@
                 "required": ["ends_at", "starts_at"]
             },
             "DeliveryStatusEnum": {
-                "enum": ["pending", "accepted", "uncertain"],
+                "enum": ["pending", "accepted", "failed", "uncertain"],
                 "type": "string",
-                "description": "* `pending` - Pending\n* `accepted` - Accepted\n* `uncertain` - Uncertain"
+                "description": "* `pending` - Pending\n* `accepted` - Accepted\n* `failed` - Failed\n* `uncertain` - Uncertain"
             },
             "EpiasConnectionOutput": {
                 "type": "object",

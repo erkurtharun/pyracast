@@ -179,6 +179,7 @@ def test_browser_against_live_django(
         "BROWSER_ADMIN_TOTP_SEED": admin_secret,
         "BROWSER_ADMIN_ORIGIN": live_server.url,
         "BROWSER_REVIEW_REGION": str(review_region.pk),
+        "BROWSER_NOW": now.isoformat(),
         "BROWSER_DATE": job.target_date.isoformat(),
         "BROWSER_TODAY": (job.target_date - timedelta(days=1)).isoformat(),
         "BROWSER_HISTORY_DATE": history_date.isoformat(),

@@ -22,12 +22,13 @@ from pyracast.forecasts.models import (
     RequestAttempt,
 )
 from pyracast.forecasts.monitoring import delivery_health
+from pyracast.mail.errors import NotSentError, PermanentlyNotSentError
+from pyracast.mail.send import send
 from pyracast.notifications.jobs import (
     LEASE_DURATION,
     pending_notification_ids,
     process_notification,
 )
-from pyracast.notifications.mail import NotSentError, PermanentlyNotSentError, send_message
 from pyracast.notifications.models import (
     NotificationDelivery,
     NotificationSettings,
@@ -390,7 +391,7 @@ def test_a_delivery_always_pins_its_binding_and_preparation_deadline(field: str)
 
 def test_locmem_adapter_zero_return_is_known_not_sent() -> None:
     with pytest.raises(NotSentError):
-        send_message(EmailMultiAlternatives(subject="Empty", body="No recipient", to=[]))
+        send(EmailMultiAlternatives(subject="Empty", body="No recipient", to=[]))
 
 
 def test_full_summary_preserves_units_and_escapes_html() -> None:
@@ -895,7 +896,7 @@ def test_multiple_recipients_share_one_private_message_and_delivery_outcome(outc
             raise NotSentError
         if outcome == "uncertain":
             raise TimeoutError
-        send_message(message)
+        send(message)
 
     assert process_notification(delivery_id, SLOT, sender=sender) is (outcome == "sent")
     delivery = NotificationDelivery.objects.get(pk=delivery_id)

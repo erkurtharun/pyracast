@@ -88,4 +88,5 @@ sequenceDiagram
 ## Tests
 
 - `tests/test_social_accounts.py` (link, unlink, audit, last-provider rule, disabled provider removal, concurrent disconnect and claim, lock recheck, callback user binding, callback URL, provider errors), `tests/test_account_mail_failures.py` (connect and disconnect with a failing mailer), `tests/test_configured_social_apps.py` (apps from environment); `web/tests/social-auth.spec.ts` (email-code disconnect, callback error consumed once); `web/integration/social-auth.spec.ts` (connect up to the provider redirect).
-- Gaps: no assertion on the connect or disconnect mails or on the 400 error codes (tests check status only), no non-Google/Microsoft row in the list, no frontend test of the success return or of `connected_other`.
+- `tests/test_account_mail_content.py`: connect and disconnect notices through the real views.
+- Gaps: no assertion on the 400 error codes (tests check status only), no non-Google/Microsoft row in the list, no frontend test of the success return or of `connected_other`.

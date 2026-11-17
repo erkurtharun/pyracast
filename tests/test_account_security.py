@@ -31,7 +31,7 @@ from pyracast.accounts.checks import (
 from pyracast.accounts.middleware import TrustedProxyHeaders
 from pyracast.accounts.security import has_verified_mfa, normalize_client_ip
 from pyracast.api.middleware import PrivateAPIResponses
-from pyracast.smtp import EmailBackend as SMTPEmailBackend
+from pyracast.mail.smtp import EmailBackend as SMTPEmailBackend
 
 
 @pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
@@ -241,8 +241,8 @@ def test_deployment_requires_production_mail_configuration(settings: LazySetting
     settings.DEFAULT_FROM_EMAIL = "Pyracast <accounts@example.com>"
     settings.MAILERS = {
         "default": {
-            "BACKEND": "pyracast.smtp.EmailBackend",
-            "OPTIONS": {"host": "smtp.example.com"},
+            "BACKEND": "pyracast.mail.smtp.EmailBackend",
+            "OPTIONS": {"host": "smtp.example.com", "use_tls": True},
         }
     }
     assert check_authentication_mail_delivery() == []
@@ -281,8 +281,8 @@ def test_configured_smtp_passes_registered_production_mail_check(
 @pytest.mark.parametrize(
     ("backend", "options"),
     [
-        ("pyracast.smtp.EmailBackend", {}),
-        ("pyracast.smtp.EmailBackend", {"host": ""}),
+        ("pyracast.mail.smtp.EmailBackend", {}),
+        ("pyracast.mail.smtp.EmailBackend", {"host": ""}),
         ("django.core.mail.backends.smtp.EmailBackend", {"host": "smtp.example.com"}),
         ("django.core.mail.backends.console.EmailBackend", {"host": "smtp.example.com"}),
         ("django.core.mail.backends.locmem.EmailBackend", {"host": "smtp.example.com"}),

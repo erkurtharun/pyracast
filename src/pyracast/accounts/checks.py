@@ -1,10 +1,19 @@
 from email.utils import parseaddr
+from ipaddress import ip_address
+from socket import inet_aton
 from typing import Any, cast
 from urllib.parse import urlsplit
 
 from django.conf import settings
 from django.core.checks import CheckMessage, Error, Tags, register
-from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import ImproperlyConfigured, ValidationError
+from django.core.validators import validate_email
+
+from pyracast.mail.errors import NotSentError
+from pyracast.mail.send import configured_mailer
+
+SMTP_BACKEND = "pyracast.mail.smtp.EmailBackend"
+PRODUCTION_BACKENDS = {SMTP_BACKEND, "pyracast.mail.gmail.EmailBackend"}
 
 
 def validate_public_origin() -> None:
@@ -36,27 +45,59 @@ def check_authentication_origin(**_kwargs: Any) -> list[CheckMessage]:
     return []
 
 
+def _mail_problem() -> str | None:
+    mailer = cast(dict[str, Any], settings.MAILERS["default"])
+    options = cast(dict[str, Any], mailer.get("OPTIONS", {}))
+    address = parseaddr(settings.DEFAULT_FROM_EMAIL)[1]
+    if mailer["BACKEND"] not in PRODUCTION_BACKENDS:
+        return "Configure the SMTP or Gmail mail backend."
+    if not _public_mailbox(address):
+        return "Set PYRACAST_FROM_EMAIL to a public sender address."
+    if mailer["BACKEND"] == SMTP_BACKEND:
+        if _loopback(str(options.get("host", ""))):
+            return "Set PYRACAST_EMAIL_HOST to the public mail relay."
+        if not 1 <= int(options.get("port", 25)) <= 65535:
+            return "Set PYRACAST_EMAIL_PORT to a TCP port from 1 to 65535."
+        if not options.get("use_tls") and not options.get("use_ssl"):
+            return "Enable PYRACAST_EMAIL_TLS or PYRACAST_EMAIL_SSL."
+    try:
+        configured_mailer()
+    except NotSentError:
+        return "The mail backend rejects its configuration."
+    return None
+
+
+def _public_mailbox(address: str) -> bool:
+    try:
+        validate_email(address)
+    except ValidationError:
+        return False
+    return address.rsplit("@", 1)[-1].lower() != "localhost"
+
+
+def _loopback(host: str) -> bool:
+    if not host or host.lower() == "localhost":
+        return True
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    try:
+        address = ip_address(host)
+    except ValueError:
+        try:
+            address = ip_address(inet_aton(host))
+        except OSError:
+            return False
+    return address.is_loopback or address.is_unspecified
+
+
 @register(Tags.security, deploy=True)
 def check_authentication_mail_delivery(**_kwargs: Any) -> list[CheckMessage]:
-    mailer = cast(dict[str, Any], settings.MAILERS["default"])
-    address = parseaddr(settings.DEFAULT_FROM_EMAIL)[1]
-    options = mailer.get("OPTIONS", {})
-    production_backend = (
-        mailer["BACKEND"] == "pyracast.smtp.EmailBackend" and options.get("host")
-    ) or (
-        mailer["BACKEND"] == "pyracast.gmail.EmailBackend"
-        and all(options.get(key) for key in ("client_id", "client_secret", "refresh_token"))
-        and parseaddr(options.get("sender", settings.DEFAULT_FROM_EMAIL))[1].casefold()
-        == address.casefold()
-    )
-    if not settings.DEBUG and (
-        not production_backend or "@" not in address or address.rsplit("@", 1)[-1] == "localhost"
-    ):
-        return [
-            Error(
-                "Verified signup and account recovery require production mail and a public sender.",
-                hint="Configure SMTP or Gmail OAuth and PYRACAST_FROM_EMAIL, then verify delivery.",
-                id="accounts.E001",
-            )
-        ]
-    return []
+    if settings.DEBUG or (problem := _mail_problem()) is None:
+        return []
+    return [
+        Error(
+            "Verified signup and account recovery require production mail and a public sender.",
+            hint=f"{problem} Then run pyracast check_mail.",
+            id="accounts.E001",
+        )
+    ]

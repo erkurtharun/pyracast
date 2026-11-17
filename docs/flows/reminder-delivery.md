@@ -11,7 +11,7 @@ connection and sends a single BCC message; the outcome is shown in the plant's E
 - Dispatcher phase `notifications` (first phase of every cycle): `src/pyracast/forecasts/management/commands/dispatch.py` `Command.handle` -> `src/pyracast/notifications/runtime.py` `dispatch_notifications` -> `scheduler.py` `enqueue_due`, `jobs.py` `pending_notification_ids`.
 - Actor `send_forecast_reminder` (queue `notifications`, `max_retries=0`): `runtime.py` `make_notification_actor`, `deliver_notification` -> `jobs.py` `process_notification`. Consumed only by a worker started with `notifications` in `--queues` (`worker.py` defaults exclude it; `deploy/compose.yaml` service `notifications`).
 - Preparation and rendering: `preparation.py` `prepare_delivery`, `sources.py` `eligible_saved_forecasts`, `saved_report_results`, `report_data.py` `saved_report_context`, `rendering.py` `render_forecast` (templates `notifications/forecast.txt` and `forecast.html`), `presentation.py` `present_report`, `workbook.py` `build_workbook`, `mail.py` `build_message`, `build_unavailable_message`.
-- Transmission: `mail.py` `send_message` over `mail.mailers["default"]` (`src/pyracast/smtp.py` or `src/pyracast/gmail.py`, flow `email-transport`).
+- Transmission: `pyracast.mail.send.send` over `MAILERS["default"]` (flow `email-transport`); `Message-ID` from the delivery's `message_token`.
 - Result surface: `web/src/components/reminders.tsx` "Recent deliveries" via `GET /api/tenants/{t}/regions/{r}/reminders/` (`notifications/views.py` `RemindersView.get`, `reminder_schedule_payload`); operator counts in `forecasts/monitoring.py` `delivery_health`; read-only rows in the admin console (`admin.py` `NotificationDeliveryAdmin`).
 
 ## Sequence
@@ -86,7 +86,7 @@ sequenceDiagram
 No user acts in this flow; authority is the state of the plant at each step and is checked three times.
 - Scheduling (`scheduler.py` `_enqueue_schedule`, under Tenant, settings and Region locks): `eligibility.py` `binding_can_notify` (region not deleted, approved, current revision, binding is the approved one, provider account enabled and authorized), schedule enabled and current, slot not before `effective_from`, clock within `times[:daily_quota]`. A due slot whose effective recipients are empty, above the global limit or fail `validate_recipient` gets a `skipped` row with the reason and no recipients.
 - Claim (`jobs.py` `process_notification` -> `_skip_reason`, same locks plus the delivery row): the same checks against the pinned binding, except `effective_from`; the schedule's effective recipients pass the scheduler's recipient check again (`scheduler.slot_recipients`), then the row's recipients shrink to `recipients.py` `permitted_recipients` (still effective, not revoked, a pinned member still active) and must not be empty.
-- Transmit (`jobs.py` `_mark_transmit` inside `send_message`'s `before_send`): repeats the recipient shrink and `_skip_reason`, checks the lease token and expiry and the 2 h deadline, then writes `transmit_started_at` and the final BCC list.
+- Transmit (`jobs.py` `_mark_transmit` inside `send`'s `before_send`): repeats the recipient shrink and `_skip_reason`, checks the lease token and expiry and the 2 h deadline, then writes `transmit_started_at` and the final BCC list.
 - Database: unique `unique_reminder_group_slot` (one delivery per schedule and `scheduled_for`); check constraints on status, language and `notification_delivery_sending_prepared` (a `sending` row holds its prepared message). The history is readable by any active workspace member of a non-trashed region (`operations.py` `get_reminder_schedule` -> `require_member`): the region's 20 newest rows, recipient addresses included.
 
 ## Failure paths
@@ -107,9 +107,9 @@ No user acts in this flow; authority is the state of the plant at each step and 
 | Database error during claim or preparation | Transaction rolls back; the actor fails without a Dramatiq retry; row stays ready for the next cycle |
 | Lease expired before transmission marker | `retry`, `interrupted_connection` (or `failed` after 8 attempts or past 2 h) |
 | Lease expired after the transmit marker | `uncertain`, `interrupted_send`; never retried |
-| Connection or authentication failure, SMTP 4xx, Gmail 401, 429 or quota 403, backend sent count not 1, marker raised | `retry` with backoff, codes `mail_not_sent`, `mail_authentication_failed`, `mail_rate_limited`, `mail_preparation_failed`; `failed` when budget is exhausted |
+| `NotSentError` (connection, credentials, SMTP 4xx, Gmail 401, 429 or quota 403, invalid mailer configuration, marker raised) or an unclassified error before the marker | `retry` with backoff and the `MailFailure` code; `failed` when budget is exhausted. `PermanentlyNotSentError` is `failed` at once with its code |
 | SMTP 5xx or unsupported transaction, any other Gmail 4xx except 408, invalid Gmail headers | `failed`, `mail_rejected` |
-| Any other exception during send (SMTP disconnect or invalid reply, Gmail 5xx, 408, read timeout, unconfirmed response) | `uncertain`, `mail_outcome_uncertain`; never retried |
+| `DeliveryUncertainError` (SMTP disconnect or invalid reply after DATA began, Gmail 5xx, 408, read timeout, unconfirmed response) or an unclassified error after the marker | `uncertain`, `mail_outcome_uncertain`; never retried |
 | Site (region) moved to trash | `pending`/`retry` -> `cancelled`, `sending` -> `uncertain`, both `definition_trashed` (`trash.py` `trash_region`). |
 
 ## Rules and invariants

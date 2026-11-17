@@ -368,10 +368,10 @@ def test_invitation_email_failure_has_explicit_unknown_outcome(
 ) -> None:
     tenant, administrator, _ = workspace
 
-    def fail(*args: object, **kwargs: object) -> int:
+    def fail(*args: object, **kwargs: object) -> None:
         raise OSError("secret transport details")
 
-    monkeypatch.setattr("pyracast.accounts.invitations.send_mail", fail)
+    monkeypatch.setattr("pyracast.accounts.invitations.send", fail)
     invitation = invite_workspace_member(administrator, tenant.pk, "new@example.com")
     assert invitation.delivery_status == "uncertain"
     assert WorkspaceInvitation.objects.get().delivery_status == "uncertain"

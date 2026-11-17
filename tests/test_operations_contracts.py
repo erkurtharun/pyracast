@@ -17,13 +17,13 @@ from django.urls import URLPattern, URLResolver
 from dramatiq.brokers.stub import StubBroker
 
 from deploy import authorize_gmail, backup, host, release_record, reset_database, watchdog
-from pyracast import gmail
 from pyracast.accounts.authentication import email_identity
 from pyracast.forecasts.historical_upload import MAX_UPLOAD_BYTES
 from pyracast.forecasts.management.commands.check_delivery_health import (
     Command as DeliveryHealthCommand,
 )
 from pyracast.forecasts.management.commands.worker import Command as WorkerCommand
+from pyracast.mail import gmail
 from pyracast.metering.runtime import make_epias_actor
 from pyracast.notifications.runtime import make_notification_actor
 from pyracast.plants.runtime import make_calibration_actor

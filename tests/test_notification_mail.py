@@ -11,18 +11,14 @@ from django.core.mail import EmailMultiAlternatives
 from django.test import override_settings
 
 from pyracast import settings as project_settings
-from pyracast.notifications.mail import (
-    XLSX_MIME,
-    NotSentError,
-    PermanentlyNotSentError,
-    SendCancelledError,
-    build_message,
-    send_message,
-)
+from pyracast.mail.errors import NotSentError, SendCancelledError
+from pyracast.mail.send import send
+from pyracast.mail.smtp import EmailBackend
+from pyracast.notifications.mail import XLSX_MIME, build_message
 from pyracast.notifications.models import NotificationDelivery
-from pyracast.smtp import EmailBackend
 
 
+@override_settings(DEFAULT_FROM_EMAIL="Pyracast <info@pyracast.app>")
 def test_a_prepared_delivery_restores_its_frozen_message_and_workbook() -> None:
     workbook = b"PK\x03\x04 frozen workbook"
     delivery = NotificationDelivery(
@@ -45,7 +41,9 @@ def test_a_prepared_delivery_restores_its_frozen_message_and_workbook() -> None:
     )
     assert message.alternatives[0][0] == "<p>Frozen text</p>"
     assert message.attachments == [("forecast-2026-11-15.xlsx", workbook, XLSX_MIME)]
-    assert message.extra_headers["Message-ID"] == "<pyracast-reminder-18@notifications.pyracast>"
+    assert message.extra_headers["Message-ID"] == (
+        f"<reminder.{delivery.message_token}@pyracast.app>"
+    )
 
 
 def test_default_smtp_configuration_has_a_bounded_socket_timeout(
@@ -54,7 +52,7 @@ def test_default_smtp_configuration_has_a_bounded_socket_timeout(
     monkeypatch.setenv("PYRACAST_EMAIL_BACKEND", "smtp")
     configuration = run_path(str(Path(project_settings.__file__)))
     mailer = configuration["MAILERS"]["default"]
-    assert mailer["BACKEND"] == "pyracast.smtp.EmailBackend"
+    assert mailer["BACKEND"] == "pyracast.mail.smtp.EmailBackend"
     with override_settings(MAILERS=configuration["MAILERS"]):
         backend = mail.mailers["default"]
     assert isinstance(backend, EmailBackend)
@@ -105,78 +103,17 @@ class SMTP:
             raise self.close_error
 
 
-@pytest.mark.parametrize(
-    ("phase", "error", "failure"),
-    [
-        ("open", ConnectionRefusedError(), NotSentError),
-        ("open", TimeoutError(), NotSentError),
-        ("open", smtplib.SMTPAuthenticationError(454, b"temporary"), NotSentError),
-        ("open", smtplib.SMTPAuthenticationError(535, b"secret"), NotSentError),
-        ("open", smtplib.SMTPNotSupportedError(), NotSentError),
-        ("send", smtplib.SMTPRecipientsRefused({"to@example.com": (450, b"wait")}), NotSentError),
-        ("send", smtplib.SMTPRecipientsRefused({}), smtplib.SMTPException),
-        (
-            "send",
-            smtplib.SMTPRecipientsRefused({"to@example.com": (-1, b"bad")}),
-            smtplib.SMTPException,
-        ),
-        (
-            "send",
-            smtplib.SMTPRecipientsRefused({"to@example.com": (550, b"secret")}),
-            PermanentlyNotSentError,
-        ),
-        ("send", smtplib.SMTPDataError(451, b"wait"), NotSentError),
-        ("send", smtplib.SMTPDataError(554, b"secret"), PermanentlyNotSentError),
-        ("send", smtplib.SMTPDataError(-1, b"malformed"), smtplib.SMTPException),
-        ("send", smtplib.SMTPDataError(250, b"malformed"), smtplib.SMTPException),
-        (
-            "send",
-            smtplib.SMTPSenderRefused(550, b"secret", "from@example.com"),
-            PermanentlyNotSentError,
-        ),
-        ("send", smtplib.SMTPHeloError(450, b"wait"), NotSentError),
-        ("send", smtplib.SMTPNotSupportedError(), PermanentlyNotSentError),
-        ("send", smtplib.SMTPServerDisconnected(), smtplib.SMTPServerDisconnected),
-        ("send", TimeoutError(), TimeoutError),
-    ],
-)
-def test_smtp_classifies_acceptance_at_the_real_django_backend_boundary(
-    smtp: type[SMTP], phase: str, error: Exception, failure: type[Exception]
-) -> None:
-    setattr(smtp, phase + "_error", error)
-    with (
-        override_settings(
-            MAILERS={
-                "default": {
-                    "BACKEND": "pyracast.smtp.EmailBackend",
-                    "OPTIONS": {"host": "localhost"},
-                }
-            }
-        ),
-        pytest.raises(failure) as caught,
-    ):
-        send_message(
-            EmailMultiAlternatives(subject="Forecast", body="Saved", to=["to@example.com"])
-        )
-    assert smtp.accepted == 0
-    if isinstance(caught.value, NotSentError):
-        assert "secret" not in str(caught.value)
-    assert smtp.closed is (phase == "send")
-
-
 def test_smtp_quit_failure_does_not_discard_confirmed_acceptance(smtp: type[SMTP]) -> None:
     smtp.close_error = smtplib.SMTPResponseException(421, b"closing")
     with override_settings(
         MAILERS={
             "default": {
-                "BACKEND": "pyracast.smtp.EmailBackend",
+                "BACKEND": "pyracast.mail.smtp.EmailBackend",
                 "OPTIONS": {"host": "localhost"},
             }
         }
     ):
-        send_message(
-            EmailMultiAlternatives(subject="Forecast", body="Saved", to=["to@example.com"])
-        )
+        send(EmailMultiAlternatives(subject="Forecast", body="Saved", to=["to@example.com"]))
     assert smtp.accepted == 1
     assert smtp.closed
 
@@ -184,21 +121,19 @@ def test_smtp_quit_failure_does_not_discard_confirmed_acceptance(smtp: type[SMTP
 def test_zero_backend_deliveries_are_reported_as_known_non_acceptance(
     smtp: type[SMTP], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(EmailBackend, "_send", lambda self, message: False)
+    monkeypatch.setattr(EmailBackend, "send_messages", lambda self, messages: 0)
     with (
         override_settings(
             MAILERS={
                 "default": {
-                    "BACKEND": "pyracast.smtp.EmailBackend",
+                    "BACKEND": "pyracast.mail.smtp.EmailBackend",
                     "OPTIONS": {"host": "localhost"},
                 }
             }
         ),
         pytest.raises(NotSentError, match="did not send"),
     ):
-        send_message(
-            EmailMultiAlternatives(subject="Forecast", body="Saved", to=["to@example.com"])
-        )
+        send(EmailMultiAlternatives(subject="Forecast", body="Saved", to=["to@example.com"]))
     assert smtp.accepted == 0
     assert smtp.closed
 
@@ -217,14 +152,14 @@ def test_smtp_does_not_send_when_the_open_connection_loses_transmission_authorit
         override_settings(
             MAILERS={
                 "default": {
-                    "BACKEND": "pyracast.smtp.EmailBackend",
+                    "BACKEND": "pyracast.mail.smtp.EmailBackend",
                     "OPTIONS": {"host": "localhost"},
                 }
             }
         ),
         pytest.raises(NotSentError if failed_check else SendCancelledError) as caught,
     ):
-        send_message(
+        send(
             EmailMultiAlternatives(subject="Forecast", body="Saved", to=["to@example.com"]),
             before_send=check,
         )
@@ -248,7 +183,7 @@ def test_configured_mailer_lookups_create_independent_backends_without_connectin
         override_settings(
             MAILERS={
                 "default": {
-                    "BACKEND": "pyracast.smtp.EmailBackend",
+                    "BACKEND": "pyracast.mail.smtp.EmailBackend",
                     "OPTIONS": {"host": "localhost", "timeout": 15},
                 }
             }

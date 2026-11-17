@@ -26,6 +26,9 @@ msgstr "Davet geçersiz veya süresi dolmuş."
 msgid "This account already belongs to the workspace."
 msgstr "Bu hesap zaten çalışma alanının üyesi."
 
+msgid "This email address is already verified."
+msgstr "Bu e-posta adresi zaten doğrulanmış."
+
 msgid "Verify the invited email address before accepting."
 msgstr "Daveti kabul etmeden önce davet edilen e-posta adresini doğrulayın."
 
@@ -52,18 +55,11 @@ msgstr "E-posta adresinizi doğrulayın"
 msgid "Enter this code in the Pyracast window where you requested it."
 msgstr "Bu kodu, isteği başlattığınız Pyracast penceresine girin."
 
-#, python-format
-msgid "This code expires in %(minutes)s minutes. Do not share it."
-msgstr "Bu kod %(minutes)s dakika içinde sona erer. Kodu paylaşmayın."
-
 msgid "Confirm your email address to continue to Pyracast."
 msgstr "Pyracast'e devam etmek için e-posta adresinizi doğrulayın."
 
 msgid "If you did not request this, you can ignore this email."
 msgstr "Bu isteği siz yapmadıysanız bu e-postayı yok sayabilirsiniz."
-
-msgid "Verify email"
-msgstr "E-postayı doğrula"
 
 msgid "Reset your password"
 msgstr "Parolanızı sıfırlayın"
@@ -91,10 +87,6 @@ msgstr "Çalışma alanı daveti"
 
 msgid "Review invitation"
 msgstr "Daveti incele"
-
-msgid "Use this link to choose a new password for your Pyracast account."
-msgstr ""
-"Pyracast hesabınıza yeni bir parola belirlemek için bu bağlantıyı kullanın."
 
 msgid "Reset password"
 msgstr "Parolayı sıfırla"
@@ -155,3 +147,130 @@ msgid ""
 msgstr ""
 "Çok fazla giriş denemesi yapıldı veya kısa süre önce bir doğrulama kodu "
 "gönderildi. Birkaç dakika sonra tekrar deneyin."
+
+msgid "Your password was changed"
+msgstr "Parolanız değiştirildi"
+
+msgid "The password of your Pyracast account was changed."
+msgstr "Pyracast hesabınızın parolası değiştirildi."
+
+msgid "A password was set for your account"
+msgstr "Hesabınız için parola belirlendi"
+
+msgid "A password was set for your Pyracast account."
+msgstr "Pyracast hesabınız için bir parola belirlendi."
+
+msgid "Your password was reset"
+msgstr "Parolanız sıfırlandı"
+
+msgid "The password of your Pyracast account was reset."
+msgstr "Pyracast hesabınızın parolası sıfırlandı."
+
+msgid "Your email address was changed"
+msgstr "E-posta adresiniz değiştirildi"
+
+msgid ""
+"Your Pyracast email address changed from %(from_email)s to %(to_email)s."
+msgstr ""
+"Pyracast e-posta adresiniz %(from_email)s yerine %(to_email)s olarak "
+"değişti."
+
+msgid "Your email address was verified"
+msgstr "E-posta adresiniz doğrulandı"
+
+msgid "The email address of your Pyracast account was verified."
+msgstr "Pyracast hesabınızın e-posta adresi doğrulandı."
+
+msgid "An email address was removed"
+msgstr "Bir e-posta adresi kaldırıldı"
+
+msgid "%(deleted_email)s was removed from your Pyracast account."
+msgstr "%(deleted_email)s, Pyracast hesabınızdan kaldırıldı."
+
+msgid "Two-factor authentication was turned on"
+msgstr "İki adımlı doğrulama açıldı"
+
+msgid ""
+"Two-factor authentication with an authenticator app was turned on for your "
+"account."
+msgstr "Hesabınız için doğrulama uygulamasıyla iki adımlı doğrulama açıldı."
+
+msgid "Two-factor authentication was turned off"
+msgstr "İki adımlı doğrulama kapatıldı"
+
+msgid ""
+"Two-factor authentication with an authenticator app was turned off for your "
+"account."
+msgstr ""
+"Hesabınız için doğrulama uygulamasıyla iki adımlı doğrulama kapatıldı."
+
+msgid "New recovery codes were generated"
+msgstr "Yeni kurtarma kodları oluşturuldu"
+
+msgid ""
+"New recovery codes were generated for your account. The previous codes no "
+"longer work."
+msgstr ""
+"Hesabınız için yeni kurtarma kodları oluşturuldu. Önceki kodlar artık "
+"geçerli değil."
+
+msgid "A sign-in provider was connected"
+msgstr "Bir oturum açma sağlayıcısı bağlandı"
+
+msgid "%(provider)s was connected to your Pyracast account for signing in."
+msgstr "%(provider)s, oturum açmak için Pyracast hesabınıza bağlandı."
+
+msgid "A sign-in provider was disconnected"
+msgstr "Bir oturum açma sağlayıcısının bağlantısı kaldırıldı"
+
+msgid "%(provider)s was disconnected from your Pyracast account."
+msgstr "%(provider)s bağlantısı Pyracast hesabınızdan kaldırıldı."
+
+msgid "Pyracast account not found"
+msgstr "Pyracast hesabı bulunamadı"
+
+msgid ""
+"Someone tried to use %(email)s with Pyracast, but no account uses this "
+"address."
+msgstr ""
+"Birisi %(email)s adresini Pyracast'te kullanmayı denedi, ancak bu adresi "
+"kullanan bir hesap yok."
+
+msgid "Create an account"
+msgstr "Hesap oluştur"
+
+msgid "Your Pyracast account already exists"
+msgstr "Pyracast hesabınız zaten var"
+
+msgid ""
+"Someone tried to create a Pyracast account with %(email)s, which already has"
+" one."
+msgstr ""
+"Birisi %(email)s adresiyle Pyracast hesabı oluşturmayı denedi, ancak bu "
+"adresin zaten bir hesabı var."
+
+msgid "%(browser)s on %(system)s"
+msgstr "%(system)s üzerinde %(browser)s"
+
+msgid "an unknown device"
+msgstr "bilinmeyen bir cihaz"
+
+msgid "Time"
+msgstr "Zaman"
+
+msgid "Device"
+msgstr "Cihaz"
+
+msgid "IP address"
+msgstr "IP adresi"
+
+msgid "If you did not make this change, secure your account now:"
+msgstr "Bu değişikliği siz yapmadıysanız hesabınızı hemen güvenceye alın:"
+
+msgid "Secure your account"
+msgstr "Hesabınızı güvenceye alın"
+
+msgid "This code expires in %(minutes)s minute. Do not share it."
+msgid_plural "This code expires in %(minutes)s minutes. Do not share it."
+msgstr[0] "Bu kod %(minutes)s dakika içinde sona erer. Kodu paylaşmayın."
+msgstr[1] "Bu kod %(minutes)s dakika içinde sona erer. Kodu paylaşmayın."

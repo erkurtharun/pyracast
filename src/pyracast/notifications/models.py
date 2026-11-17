@@ -1,3 +1,5 @@
+import uuid
+
 from django.conf import settings
 from django.core.validators import MinValueValidator
 from django.db import models
@@ -82,6 +84,7 @@ class NotificationDelivery(models.Model):
     transmit_started_at = models.DateTimeField(null=True)
     sent_at = models.DateTimeField(null=True)
     last_error = models.CharField(max_length=40, default="")
+    message_token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
 
     class Meta:
         constraints = (
