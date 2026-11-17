@@ -1,5 +1,6 @@
 from email.utils import parseaddr
 from ipaddress import ip_address
+from socket import inet_aton
 from typing import Any, cast
 from urllib.parse import urlsplit
 
@@ -77,10 +78,16 @@ def _public_mailbox(address: str) -> bool:
 def _loopback(host: str) -> bool:
     if not host or host.lower() == "localhost":
         return True
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
     try:
-        return ip_address(host).is_loopback
+        address = ip_address(host)
     except ValueError:
-        return False
+        try:
+            address = ip_address(inet_aton(host))
+        except OSError:
+            return False
+    return address.is_loopback or address.is_unspecified
 
 
 @register(Tags.security, deploy=True)

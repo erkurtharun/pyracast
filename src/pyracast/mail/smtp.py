@@ -39,25 +39,28 @@ class EmailBackend(SMTPEmailBackend):
     def send_messages(self, email_messages: Sequence[EmailMessage] | None) -> int:
         if not email_messages:
             return 0
-        created = self.open()
-        if self.connection is None:
-            return 0
-        sent = 0
-        try:
-            for message in email_messages:
-                if not message.recipients():
-                    continue
-                try:
-                    self._transmit(message)
-                except NotSentError, DeliveryUncertainError:
-                    if not self.fail_silently:
-                        raise
-                else:
-                    sent += 1
-        finally:
-            if created:
-                self.close()
-        return sent
+        with self._lock:
+            created = self.open()
+            if self.connection is None:
+                return 0
+            sent = 0
+            try:
+                for message in email_messages:
+                    if not message.recipients():
+                        continue
+                    try:
+                        self._transmit(message)
+                    except NotSentError, DeliveryUncertainError:
+                        if not self.fail_silently:
+                            raise
+                        if not self.connection:
+                            break
+                    else:
+                        sent += 1
+            finally:
+                if created:
+                    self.close()
+            return sent
 
     def _transmit(self, message: EmailMessage) -> None:
         connection = cast(smtplib.SMTP, self.connection)

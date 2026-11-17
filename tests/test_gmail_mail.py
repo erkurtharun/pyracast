@@ -122,6 +122,7 @@ def test_gmail_serializes_recipients_html_csv_and_stable_message_id(
     raw = base64.urlsafe_b64decode(json.loads(requests[1].content)["raw"])
     mime = BytesParser(policy=policy.default).parsebytes(raw)
     assert str(mime["From"]) == SENDER
+    assert str(mime["MIME-Version"]) == "1.0"
     if blind_only:
         assert mime["To"] is None
         assert mime["Cc"] is None
@@ -182,6 +183,38 @@ def test_gmail_authenticates_before_rechecking_transmission_permission(
     assert len(requests) == 1
 
 
+@pytest.mark.parametrize(
+    ("status", "code"),
+    [
+        (429, "mail_rate_limited"),
+        (500, "mail_not_sent"),
+        (503, "mail_not_sent"),
+        (599, "mail_not_sent"),
+    ],
+)
+@pytest.mark.parametrize("json_body", [False, True])
+def test_oauth_transient_failure_preserves_credentials_without_sending(
+    gmail_transport: Callable[[Callable[[httpx.Request], httpx.Response]], None],
+    status: int,
+    code: str,
+    json_body: bool,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if json_body:
+            return httpx.Response(status, json={"error": "private-provider-error"})
+        return httpx.Response(status, text="private-provider-error")
+
+    gmail_transport(respond)
+    with override_settings(MAILERS=MAILERS), pytest.raises(NotSentError) as error:
+        send(message())
+    assert error.value.code == code
+    assert "private" not in str(error.value)
+    assert [str(request.url) for request in requests] == [TOKEN_URL]
+
+
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize(
     ("mode", "status", "code"),
@@ -190,6 +223,8 @@ def test_gmail_authenticates_before_rechecking_transmission_permission(
         ("auth", "retry", "mail_credentials_rejected"),
         ("token_rejected", "retry", "mail_credentials_rejected"),
         ("token_revoked", "failed", "mail_authorization_revoked"),
+        ("token_quota", "retry", "mail_rate_limited"),
+        ("token_server", "retry", "mail_not_sent"),
         ("quota", "retry", "mail_rate_limited"),
         ("quota403", "retry", "mail_rate_limited"),
         ("open_timeout", "retry", "mail_not_sent"),
@@ -219,6 +254,10 @@ def test_gmail_preserves_durable_delivery_acceptance_and_retry_policy(
                 return httpx.Response(401, json={"error": "invalid_client"})
             if mode == "token_revoked":
                 return httpx.Response(400, json={"error": "invalid_grant"})
+            if mode == "token_quota":
+                return httpx.Response(429)
+            if mode == "token_server":
+                return httpx.Response(503)
             return token()
         sends += 1
         if mode.endswith("timeout"):
@@ -248,7 +287,7 @@ def test_gmail_preserves_durable_delivery_acceptance_and_retry_policy(
         assert delivery.last_error == code
         if status == "uncertain":
             assert not process_notification(delivery.pk, SLOT)
-    assert sends == (0 if mode in {"open_timeout", "token_rejected", "token_revoked"} else 1)
+    assert sends == (0 if mode == "open_timeout" or mode.startswith("token_") else 1)
 
 
 def test_gmail_fail_silently_counts_only_acknowledged_messages(

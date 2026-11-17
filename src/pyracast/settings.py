@@ -283,11 +283,11 @@ if _email_backend == "console" and not DEBUG:
     raise ImproperlyConfigured("PYRACAST_EMAIL_BACKEND=console requires PYRACAST_DEBUG=1.")
 DEFAULT_FROM_EMAIL = os.environ.get("PYRACAST_FROM_EMAIL", "Pyracast <noreply@localhost>")
 if _email_backend == "smtp":
+    _email_ssl = os.environ.get("PYRACAST_EMAIL_SSL", "0") == "1"
     try:
-        _email_port = int(os.environ.get("PYRACAST_EMAIL_PORT", "587"))
+        _email_port = int(os.environ.get("PYRACAST_EMAIL_PORT", "465" if _email_ssl else "587"))
     except ValueError:
         raise ImproperlyConfigured("PYRACAST_EMAIL_PORT must be an integer.") from None
-    _email_ssl = os.environ.get("PYRACAST_EMAIL_SSL", "0") == "1"
     _mailer: dict[str, object] = {
         "BACKEND": "pyracast.mail.smtp.EmailBackend",
         "OPTIONS": {

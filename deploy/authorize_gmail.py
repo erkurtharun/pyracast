@@ -11,6 +11,7 @@ import urllib.request
 import webbrowser
 from collections.abc import Callable
 from dataclasses import dataclass
+from email.utils import formatdate
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode, urlsplit
@@ -144,6 +145,8 @@ def exchange_code(client: OAuthClient, code: str, verifier: str, redirect_uri: s
 def send_check_mail(access_token: str, sender: str) -> None:
     message = (
         f"From: {sender}\r\nTo: {sender}\r\nSubject: Pyracast sender check\r\n"
+        f"Date: {formatdate(usegmt=True)}\r\n"
+        "MIME-Version: 1.0\r\n"
         "Content-Type: text/plain; charset=utf-8\r\n\r\n"
         "This account is authorized to send Pyracast mail as this address.\r\n"
     )

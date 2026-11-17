@@ -7,6 +7,9 @@ test("a customer manages one plant site through the real API", async ({
     page,
 }, testInfo) => {
     test.setTimeout(60_000);
+    await page.clock.setFixedTime(
+        new Date(`${process.env.BROWSER_TODAY!}T12:00:00Z`),
+    );
     await page.goto("/app/");
     await expect(page.getByLabel("Email", { exact: true })).toBeVisible();
     await page.screenshot({

@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 from io import StringIO
+from ipaddress import IPv4Address
 from pathlib import Path
 from runpy import run_path
 from typing import Any
@@ -23,6 +24,7 @@ GMAIL_OPTIONS = {"client_id": "client", "client_secret": "secret", "refresh_toke
 
 
 def configuration(monkeypatch: pytest.MonkeyPatch, **environment: str | None) -> dict[str, Any]:
+    monkeypatch.setattr("pyracast.environment.load_environment", lambda: None)
     monkeypatch.setenv("PYRACAST_FROM_EMAIL", PUBLIC_SENDER)
     monkeypatch.setenv("PYRACAST_EMAIL_HOST", "smtp.example.com")
     for key, value in environment.items():
@@ -41,9 +43,23 @@ def deploy_errors(mailers: dict[str, Any], sender: str = PUBLIC_SENDER) -> list[
 def test_public_smtp_relay_with_starttls_passes_the_deploy_check(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    mailers = configuration(monkeypatch)["MAILERS"]
+    mailers = configuration(monkeypatch, PYRACAST_EMAIL_PORT=None)["MAILERS"]
 
+    assert mailers["default"]["OPTIONS"]["port"] == 587
     assert deploy_errors(mailers) == []
+
+
+def test_configuration_does_not_reload_local_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def load_local_environment() -> None:
+        monkeypatch.setenv("PYRACAST_EMAIL_HOST", "developer-relay.example.com")
+
+    monkeypatch.setattr("pyracast.environment.load_environment", load_local_environment)
+
+    mailers = configuration(monkeypatch, PYRACAST_EMAIL_HOST=None)["MAILERS"]
+
+    assert mailers["default"]["OPTIONS"]["host"] == ""
 
 
 def test_unset_smtp_host_fails_the_deploy_check(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -52,7 +68,21 @@ def test_unset_smtp_host_fails_the_deploy_check(monkeypatch: pytest.MonkeyPatch)
     assert deploy_errors(mailers) == ["accounts.E001"]
 
 
-@pytest.mark.parametrize("host", ["localhost", "LOCALHOST", "127.0.0.1", "::1", "127.0.0.53"])
+@pytest.mark.parametrize(
+    "host",
+    [
+        "localhost",
+        "LOCALHOST",
+        "127.0.0.1",
+        "::1",
+        "127.0.0.53",
+        str(IPv4Address(0)),
+        "::",
+        "[::1]",
+        "[::]",
+        "127.1",
+    ],
+)
 def test_loopback_smtp_host_fails_the_deploy_check(
     monkeypatch: pytest.MonkeyPatch, host: str
 ) -> None:
@@ -78,10 +108,31 @@ def test_smtp_with_both_transport_modes_fails_the_deploy_check() -> None:
 
 
 def test_implicit_tls_needs_only_the_ssl_variable(monkeypatch: pytest.MonkeyPatch) -> None:
-    mailers = configuration(monkeypatch, PYRACAST_EMAIL_SSL="1", PYRACAST_EMAIL_TLS=None)["MAILERS"]
+    mailers = configuration(
+        monkeypatch,
+        PYRACAST_EMAIL_SSL="1",
+        PYRACAST_EMAIL_TLS=None,
+        PYRACAST_EMAIL_PORT=None,
+    )["MAILERS"]
 
     options = mailers["default"]["OPTIONS"]
     assert (options["use_ssl"], options["use_tls"]) == (True, False)
+    assert options["port"] == 465
+    assert deploy_errors(mailers) == []
+
+
+@pytest.mark.parametrize("ssl", ["0", "1"])
+def test_explicit_smtp_port_overrides_transport_default(
+    monkeypatch: pytest.MonkeyPatch, ssl: str
+) -> None:
+    mailers = configuration(
+        monkeypatch,
+        PYRACAST_EMAIL_SSL=ssl,
+        PYRACAST_EMAIL_TLS=None,
+        PYRACAST_EMAIL_PORT="2525",
+    )["MAILERS"]
+
+    assert mailers["default"]["OPTIONS"]["port"] == 2525
     assert deploy_errors(mailers) == []
 
 

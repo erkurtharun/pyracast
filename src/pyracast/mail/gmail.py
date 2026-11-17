@@ -85,6 +85,13 @@ class EmailBackend(BaseEmailBackend):
             )
         except httpx.HTTPError:
             raise NotSentError("The Gmail OAuth token endpoint could not be reached.") from None
+        if response.status_code == 429:
+            raise NotSentError(
+                "The Gmail OAuth token endpoint rejected the request due to quota.",
+                code=MailFailure.RATE_LIMITED,
+            )
+        if 500 <= response.status_code < 600:
+            raise NotSentError("The Gmail OAuth token endpoint is temporarily unavailable.")
         try:
             token = response.json()
         except ValueError:

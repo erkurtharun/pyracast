@@ -1,7 +1,10 @@
 import smtplib
 from collections.abc import Buffer, Iterator, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from email import policy
 from email.parser import BytesParser
+from threading import Event
 
 import pytest
 from django.core import mail
@@ -234,6 +237,49 @@ def test_silent_rejection_returns_no_sent_message(smtp: SMTP) -> None:
     smtp.recipient_responses[RECIPIENTS[1]] = 550, b"rejected"
     assert backend.send_messages([message()]) == 0
     assert smtp.content == []
+
+
+@pytest.mark.parametrize("disconnect", ["closing", "reset_disconnect", "reset_rejection"])
+def test_silent_batch_stops_after_connection_is_discarded(smtp: SMTP, disconnect: str) -> None:
+    backend = mail.mailers["default"]
+    assert isinstance(backend, EmailBackend)
+    backend.fail_silently = True
+    smtp.recipient_responses[RECIPIENTS[0]] = (
+        421 if disconnect == "closing" else 450,
+        b"rejected",
+    )
+    if disconnect == "reset_disconnect":
+        smtp.reset_error = smtplib.SMTPServerDisconnected()
+    elif disconnect == "reset_rejection":
+        smtp.reset_response = 500, b"failed"
+    accepted = message()
+    accepted.bcc = ["accepted@example.com"]
+
+    assert backend.send_messages([accepted, message(), message()]) == 1
+
+    assert len(smtp.content) == 1
+    assert smtp.closed
+
+
+def test_shared_backend_waits_for_connection_lock(smtp: SMTP) -> None:
+    backend = mail.mailers["default"]
+    assert isinstance(backend, EmailBackend)
+    started = Event()
+
+    def send_from_thread() -> int:
+        started.set()
+        return backend.send_messages([message()])
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        with backend._lock:
+            sending = executor.submit(send_from_thread)
+            assert started.wait(timeout=5)
+            with pytest.raises(FutureTimeoutError):
+                sending.result(timeout=0.2)
+        assert sending.result(timeout=5) == 1
+
+    assert len(smtp.content) == 1
+    assert smtp.closed
 
 
 def test_empty_recipient_list_does_not_start_a_transaction(smtp: SMTP) -> None:

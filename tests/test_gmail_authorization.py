@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from email import policy
 from email.message import Message
 from email.parser import BytesParser
+from email.utils import parsedate_to_datetime
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
@@ -250,11 +251,13 @@ def test_oauth_main_redacts_failures_and_preserves_existing_runtime(
 
 
 @pytest.mark.parametrize("accepted", [True, False])
+@pytest.mark.parametrize("header", ["Date", "MIME-Version"])
 def test_credentials_are_saved_only_after_the_sender_mails_itself(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     accepted: bool,
+    header: str,
 ) -> None:
     runtime = tmp_path / "runtime.json"
     runtime.write_text('{"PYRACAST_SECRET_KEY":"preserved"}')
@@ -280,14 +283,15 @@ def test_credentials_are_saved_only_after_the_sender_mails_itself(
         ["authorize_gmail", "--client", str(client), "--runtime", str(runtime), "--no-browser"],
     )
 
-    if accepted:
-        main()
-        saved = json.loads(runtime.read_text())
-        assert saved["PYRACAST_GMAIL_REFRESH_TOKEN"] == grant.refresh_token
-    else:
-        with pytest.raises(SystemExit):
+    with refusal:
+        if accepted:
             main()
-        assert runtime.read_bytes() == before
+            saved = json.loads(runtime.read_text())
+            assert saved["PYRACAST_GMAIL_REFRESH_TOKEN"] == grant.refresh_token
+        else:
+            with pytest.raises(SystemExit):
+                main()
+            assert runtime.read_bytes() == before
     (request,) = requests
     assert request.full_url == (
         "https://gmail.googleapis.com/gmail/v1/users/info%40pyracast.app/messages/send"
@@ -297,5 +301,9 @@ def test_credentials_are_saved_only_after_the_sender_mails_itself(
     raw = base64.urlsafe_b64decode(json.loads(request.data)["raw"])
     mail = BytesParser(policy=policy.default).parsebytes(raw)
     assert str(mail["From"]) == str(mail["To"]) == "info@pyracast.app"
+    assert mail[header] is not None
+    if header == "Date":
+        assert parsedate_to_datetime(str(mail[header])).utcoffset() is not None
+    else:
+        assert str(mail[header]) == "1.0"
     assert "private" not in str(capsys.readouterr())
-    refusal.close()
