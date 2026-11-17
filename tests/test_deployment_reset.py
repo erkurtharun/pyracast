@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from django.db import connection
 
 from deploy import reset_database
 from deploy.reset_database import Host, RefusedError
@@ -440,6 +441,45 @@ def test_abort_refuses_when_the_release_cannot_serve_the_database(
     assert host.marker.exists()
 
 
+def test_abort_requires_an_active_maintenance_marker(host: Host, commands: FakeCommands) -> None:
+    with pytest.raises(RefusedError, match="only during maintenance"):
+        reset_database.abort(host)
+    assert commands.calls == []
+
+
+@pytest.mark.parametrize("operation", ["abort", "restore"])
+@pytest.mark.parametrize("failure", ["systemctl reset-failed", "systemctl start"])
+def test_service_unit_failure_preserves_maintenance_for_retry(
+    host: Host,
+    commands: FakeCommands,
+    uploads: dict[str, bytes],
+    operation: str,
+    failure: str,
+) -> None:
+    name = prepared(host, uploads)
+    if operation == "restore":
+        reset_database.reset(host, name)
+    identity = host.marker.read_text()
+    commands.fail = failure
+
+    def action() -> None:
+        if operation == "abort":
+            reset_database.abort(host)
+        else:
+            reset_database.restore(host, name)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        action()
+    assert host.marker.read_text() == identity
+    assert reset_database.current_session(host) is not None
+    assert commands.running == SUPPORT
+    commands.fail = None
+    action()
+    assert not host.marker.exists()
+    assert not host.session.exists()
+    assert commands.running == APPLICATION | SUPPORT
+
+
 def test_abort_refuses_once_the_database_was_replaced(
     host: Host, commands: FakeCommands, uploads: dict[str, bytes]
 ) -> None:
@@ -544,6 +584,23 @@ def test_a_retried_abort_after_a_host_restart_starts_the_unit(
     reset_database.abort(host)
     assert commands.calls[-2:] == START_UNIT
     assert not host.marker.exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("role, readable", [("pg_read_all_data", True), ("pg_monitor", False)])
+def test_runtime_table_privilege_check_uses_each_tables_schema(role: str, readable: bool) -> None:
+    query = re.search(
+        r"SELECT FROM pg_tables WHERE schemaname = 'public'\s+"
+        r"AND NOT has_table_privilege\(.+?'SELECT'\)",
+        reset_database.ROLE_CHECK_SQL,
+        re.DOTALL,
+    )
+    assert query is not None
+    statement = query[0].replace("%", "%%").replace("'pyracast_app'", "%s")
+    with connection.cursor() as cursor:
+        cursor.execute(statement, [role])
+        missing = cursor.fetchall()
+    assert (missing == []) is readable
 
 
 def test_reset_purges_every_queue_recreates_the_database_and_checks_both_roles(
