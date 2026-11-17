@@ -18,18 +18,9 @@ def test_stock_settings_page_is_read_only_and_members_see_the_global_limit() -> 
     assert response.status_code == 200
     assert b'name="max_recipients"' not in response.content
     assert client.post(url, {"max_recipients": 9, "_save": "Save"}).status_code == 403
-    assert (
-        client.post(
-            reverse("admin:notifications_notificationsettings_add"), {"max_recipients": 12}
-        ).status_code
-        == 403
-    )
-    assert (
-        client.post(
-            reverse("admin:notifications_notificationsettings_delete", args=(1,)), {"post": "yes"}
-        ).status_code
-        == 403
-    )
+    records = "/admin/notifications/notificationsettings/"
+    assert client.post(f"{records}add/", {"max_recipients": 12}).status_code == 404
+    assert client.post(f"{records}1/delete/", {"post": "yes"}).status_code == 404
     assert NotificationSettings.objects.get().max_recipients == 8
     system = make_system()
     member = Client()

@@ -223,7 +223,7 @@ def test_schedule_configuration_quota_and_effective_boundary() -> None:
     default = get_schedule(system.member, system.tenant.pk, system.region.pk, NOW)
     assert not CollectionSchedule.objects.exists()
     assert default.times == ["16:00"]
-    payload = schedule_payload(default)
+    payload = schedule_payload(default, NOW)
     assert payload["max_forecast_times"] == 9
     assert payload["history_local_time"] == "00:00"
     assert payload["history_retry_until_local"] == "09:00"
@@ -400,8 +400,8 @@ def test_schedule_requires_approval_membership_and_aware_timestamp() -> None:
     with pytest.raises(Region.DoesNotExist):
         get_schedule(system.member, other.pk, system.region.pk, NOW)
     default = get_schedule(system.member, system.tenant.pk, system.region.pk, NOW)
-    assert schedule_payload(default)["recent_jobs"] == []
-    assert schedule_payload(default)["next_collection_at"] is None
+    assert schedule_payload(default, NOW)["recent_jobs"] == []
+    assert schedule_payload(default, NOW)["next_collection_at"] is None
     assert (
         configure_schedule(
             system.member, system.tenant.pk, system.region.pk, enabled=False, times=[], now=NOW

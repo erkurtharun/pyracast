@@ -135,14 +135,7 @@ RECORD_BROWSER_MODELS = {
     "regions.region",
     "regions.regionlocationchangerequest",
 }
-RECORD_BROWSER_ROUTES = (
-    "",
-    "add/",
-    "<path:object_id>/history/",
-    "<path:object_id>/delete/",
-    "<path:object_id>/change/",
-    "<path:object_id>/",
-)
+RECORD_BROWSER_ROUTES = ("", "<path:object_id>/history/", "<path:object_id>/change/")
 
 
 def _walk(
@@ -322,11 +315,17 @@ def test_console_offers_no_bulk_or_raw_write_actions() -> None:
     settings_row, _ = NotificationSettings.objects.update_or_create(
         pk=1, defaults={"max_recipients": 5}
     )
-    change = f"/admin/notifications/notificationsettings/{settings_row.pk}/change/"
-    assert client.post(change, {"max_recipients": 9}).status_code == 403
-    assert client.post("/admin/notifications/notificationsettings/add/", {}).status_code == 403
+    record = f"/admin/notifications/notificationsettings/{settings_row.pk}/"
+    assert client.post(record + "change/", {"max_recipients": 9}).status_code == 403
+    assert client.post(record + "delete/", {"post": "yes"}).status_code == 404
+    add = "/admin/notifications/notificationsettings/add/"
+    assert client.post(add, {"max_recipients": 9}).status_code == 404
     settings_row.refresh_from_db()
     assert settings_row.max_recipients == 5
+    region_record = f"/admin/regions/region/{system.region.pk}/"
+    assert client.get(region_record).status_code == 404
+    assert client.get(region_record + "setup/").status_code == 404
+    assert client.get(region_record + "change/").status_code == 200
     with pytest.raises(NoReverseMatch):
         reverse("admin:regions_region_setup", args=(system.region.pk,))
     assert client.get("/admin/autocomplete/").status_code == 404
