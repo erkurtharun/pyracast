@@ -30,8 +30,9 @@ sequenceDiagram
         Op-->>V: "ValidationError or InvitationRateLimitError, rollback"
         V-->>UI: "400, or 429 with Retry-After 60"
     end
-    Op->>DB: "expire pending rows for the address, insert hashed invitation, COMMIT"
-    Op->>M: "on_commit deliver: send_mail in the admin language"
+    Op->>DB: "expire pending rows for the address, insert hashed invitation"
+    Op->>Op: "render the mail in the admin language, then COMMIT"
+    Op->>M: "on_commit deliver: send(message)"
     Op->>DB: "delivery_status = accepted, failed if NotSentError, else uncertain"
     Op-->>V: "invitation"
     V-->>UI: "201 id, email, expires_at, delivery_status"
@@ -73,7 +74,7 @@ sequenceDiagram
 | 20 invitations in the last hour for the tenant, or same address within one minute (cancelled rows count) | 429 `http_429`, `Retry-After: 60` in both cases |
 | Tenant or invitation row lock not acquired within 5 s; same-session request still running after 5 s | 503 `workspace_busy` / 429 `session_busy`, both `Retry-After: 1` |
 | Mail known not sent (`NotSentError`) / any other mail error | Still 201, `delivery_status` `failed` / `uncertain`, UI hint in `workspace-members.tsx` |
-| Mail template fails to render, or email of 255 to 320 characters passes both validators (both inferred) | 500; the first after commit, leaving the row `pending`; the second on the `varchar(254)` column |
+| Mail template fails to render / email of 255 to 320 characters passes both validators (inferred) | 500 and the transaction rolls back, no row is left / 500 on the `varchar(254)` column |
 | Cancel with unknown id or id of another tenant | 400 "The invitation is invalid or expired." |
 | Cancel of an already expired or accepted row | 204; `expires_at` never moves later |
 

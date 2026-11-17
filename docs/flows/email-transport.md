@@ -5,8 +5,8 @@ Every outgoing mail is built by a caller and handed to one entry point, `pyracas
 ## Entry points
 
 - Settings `src/pyracast/settings.py` (`_email_backend`, `MAILERS`, `DEFAULT_FROM_EMAIL`): `smtp` (default), `gmail`, or `console` (needs `PYRACAST_DEBUG=1`, otherwise `ImproperlyConfigured` at import). `PYRACAST_EMAIL_SSL=1` alone selects implicit TLS; a non-integer `PYRACAST_EMAIL_PORT` is `ImproperlyConfigured`. The Gmail sender is `PYRACAST_FROM_EMAIL`.
-- Package `pyracast.mail`: `send` (`send` and `probe`), `errors` (`MailFailure`, `NotSentError`, `PermanentlyNotSentError`, `DeliveryUncertainError`, `SendCancelledError`), `policy` (wire serialization), `smtp.EmailBackend` (hand-written SMTP transaction) and `gmail.EmailBackend` (OAuth refresh plus `users.messages.send` over httpx).
-- Account mail: `pyracast.accounts.adapters.AccountAdapter.send_mail` (`transaction.on_commit`, then allauth `msg.send()`; flow `account-mail-notifications`).
+- Package `src/pyracast/mail/`: entry point, outcome types, wire policy, SMTP and Gmail backends.
+- Account mail: `pyracast.accounts.adapters.AccountAdapter.send_mail` (`transaction.on_commit`, then `send`; flow `account-mail-notifications`).
 - Invitation mail: `pyracast.accounts.invitations.invite_workspace_member` inner `deliver` (`on_commit`, `send`), reached by `POST /api/tenants/{tenant_id}/invitations/`.
 - Reminder mail: `pyracast.notifications.runtime.deliver_notification` (actor `send_forecast_reminder`, queue `notifications`, `max_retries=0`) to `process_notification` to `send(message, before_send=...)`.
 - Command `pyracast check_mail`: without arguments opens and closes the transport without sending; `--send-to ADDRESS` sends one reminder-shaped test mail (HTML, text and an XLSX attachment). Exit code per `MailFailure` (`docs/DEPLOYMENT.md`). `deploy/install-release.sh` runs the probe after a healthy release and prints a warning on failure.
@@ -21,7 +21,7 @@ sequenceDiagram
     participant B as Backend
     participant X as SMTP or Gmail
     participant D as Database
-    C->>M: "account: msg.send / invitation, reminder, check_mail: send(message)"
+    C->>M: "send(message): account, invitation, reminder, check_mail"
     M->>B: "MAILERS default builds a new backend instance"
     alt configuration invalid
         M-->>C: "NotSentError mail_configuration_invalid"
@@ -62,7 +62,7 @@ sequenceDiagram
 | Condition | Result |
 |---|---|
 | Unknown backend name, `console` without `PYRACAST_DEBUG=1`, or a non-integer port | `ImproperlyConfigured` at settings import, process does not start |
-| Production check: no SMTP or Gmail backend, sender without `@` or at `localhost`, SMTP host empty or loopback, SMTP without TLS or SSL, or options the backend refuses (both TLS modes, invalid Gmail sender, timeout at or below 0) | `accounts.E001`, `check --deploy` fails, release stops |
+| Production check: no SMTP or Gmail backend, sender not a valid mailbox or at `localhost`, SMTP host empty or loopback, SMTP port outside 1 to 65535, SMTP without TLS or SSL, or options the backend refuses (both TLS modes, invalid Gmail sender, timeout at or below 0) | `accounts.E001`, `check --deploy` fails, release stops |
 | Backend construction fails at send time | `NotSentError` `mail_configuration_invalid`; reminder retried |
 | SMTP connect or TLS error / authentication 4xx / authentication 5xx | `NotSentError` `mail_not_sent` / `mail_not_sent` / `mail_credentials_rejected` |
 | Gmail token endpoint unreachable / `invalid_grant` / other token failure or wrong scope | `NotSentError` `mail_not_sent` / `PermanentlyNotSentError` `mail_authorization_revoked` / `NotSentError` `mail_credentials_rejected` |
@@ -87,5 +87,5 @@ sequenceDiagram
 
 ## Tests
 
-- `tests/test_mail_wire.py` (bytes on both transports through a loopback SMTP server and a recorded Gmail request: unfolded attachment type, encoded-word length, RFC 2231 name, 8BITMIME negotiation, `check_mail --send-to`), `tests/test_mail_outcomes.py` (outcome per error class and SMTP phase, reminder and invitation persistence), `tests/test_mail_configuration.py` (deploy check, settings parsing, `check_mail` exit codes), `tests/test_smtp_mail.py`, `tests/test_gmail_mail.py`, `tests/test_reminder_message_id.py`, `tests/test_notification_transmission.py`, `tests/test_account_mail_failures.py`, `tests/test_environment.py`.
+- `tests/test_mail_wire.py` (bytes on both transports through a loopback SMTP server and a recorded Gmail request: unfolded attachment type, encoded-word length, RFC 2231 name, 8BITMIME negotiation, `check_mail --send-to`), `tests/test_mail_outcomes.py` (outcome per error class and SMTP phase; reminder, invitation and account mail outcomes), `tests/test_mail_configuration.py` (deploy check, settings parsing, `check_mail` exit codes), `tests/test_smtp_mail.py`, `tests/test_gmail_mail.py`, `tests/test_reminder_message_id.py`, `tests/test_notification_transmission.py`, `tests/test_account_mail_failures.py`, `tests/test_environment.py`.
 - Gaps: no live Gmail or provider SMTP; no Playwright test touches mail (browser tests mock the API).

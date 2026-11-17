@@ -5,7 +5,8 @@ from urllib.parse import urlsplit
 
 from django.conf import settings
 from django.core.checks import CheckMessage, Error, Tags, register
-from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import ImproperlyConfigured, ValidationError
+from django.core.validators import validate_email
 
 from pyracast.mail.errors import NotSentError
 from pyracast.mail.send import configured_mailer
@@ -49,11 +50,13 @@ def _mail_problem() -> str | None:
     address = parseaddr(settings.DEFAULT_FROM_EMAIL)[1]
     if mailer["BACKEND"] not in PRODUCTION_BACKENDS:
         return "Configure the SMTP or Gmail mail backend."
-    if "@" not in address or address.rsplit("@", 1)[-1].lower() == "localhost":
+    if not _public_mailbox(address):
         return "Set PYRACAST_FROM_EMAIL to a public sender address."
     if mailer["BACKEND"] == SMTP_BACKEND:
         if _loopback(str(options.get("host", ""))):
             return "Set PYRACAST_EMAIL_HOST to the public mail relay."
+        if not 1 <= int(options.get("port", 25)) <= 65535:
+            return "Set PYRACAST_EMAIL_PORT to a TCP port from 1 to 65535."
         if not options.get("use_tls") and not options.get("use_ssl"):
             return "Enable PYRACAST_EMAIL_TLS or PYRACAST_EMAIL_SSL."
     try:
@@ -61,6 +64,14 @@ def _mail_problem() -> str | None:
     except NotSentError:
         return "The mail backend rejects its configuration."
     return None
+
+
+def _public_mailbox(address: str) -> bool:
+    try:
+        validate_email(address)
+    except ValidationError:
+        return False
+    return address.rsplit("@", 1)[-1].lower() != "localhost"
 
 
 def _loopback(host: str) -> bool:

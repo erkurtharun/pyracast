@@ -6,7 +6,7 @@ Every mail django-allauth sends about an account goes through one adapter: verif
 
 - `pyracast.accounts.adapters.AccountAdapter`: `send_mail` (language, deferral), `send_notification_mail` (adds the `user` to the context), `render_mail` (marker header, code timeout, notices). Wired by `ACCOUNT_ADAPTER`; behaviour gated by `ACCOUNT_EMAIL_NOTIFICATIONS`, `ACCOUNT_PREVENT_ENUMERATION`, `ACCOUNT_REAUTHENTICATION_METHODS` and the `*_BY_CODE_*` settings in `src/pyracast/settings.py`.
 - Code mails, project templates on the shell `mail/base.html` plus `mail/code.html` and `account/email/code_expiry.txt`: `email_confirmation{,_signup}` for signup, unverified login, `auth/email/verify/resend` and `account/email` (add or change); `password_reset_code` for `auth/password/request`; `login_code` for `auth/reauthenticate/code/request` (`web/src/components/security-reauthentication.tsx`). Each has a product subject template.
-- Notices, `pyracast.accounts.account_mail.NOTICES` rendered by `render_notice` into `mail/notice.{txt,html}`: security notices `account/email/{password_changed,password_set,password_reset,email_changed,email_confirm,email_deleted}`, `mfa/email/{totp_activated,totp_deactivated,recovery_codes_generated}`, `socialaccount/email/{account_connected,account_disconnected}`; anti-enumeration notices `unknown_account` (reset request for an address without an eligible account) and `account_already_exists` (signup with a registered address). Triggers: the password, email, TOTP, recovery-code, provider-link, reset and signup endpoints (flows `password-change`, `password-reset`, `account-email-change`, `two-factor-management`, `linked-accounts`).
+- Notices, `pyracast.accounts.account_mail.NOTICES` rendered by `render_notice` into `mail/notice.{txt,html}`: security notices for password, email, two-factor, recovery-code and sign-in provider changes; anti-enumeration notices `unknown_account` (reset request for an address without an eligible account) and `account_already_exists` (signup with a registered address). Triggers: the password, email, TOTP, recovery-code, provider-link, reset and signup endpoints (flows `password-change`, `password-reset`, `account-email-change`, `two-factor-management`, `linked-accounts`).
 
 ## Sequence
 
@@ -33,7 +33,7 @@ sequenceDiagram
     else commit, or autocommit
         A->>T: "render_mail under translation.override: notice or code template"
         T-->>A: "subject, text and HTML, header X-Pyracast-Mail"
-        A->>M: "message.send"
+        A->>M: "send(message)"
         alt render or transport error
             M-->>A: "exception"
             A->>A: "log account_mail_failed, return normally"
@@ -82,5 +82,5 @@ sequenceDiagram
 - `tests/test_account_mail_content.py`: one test per trigger through the real headless views (signup, taken address, reset code, unknown address, password change and reset completion, reauthentication code, provider connect and disconnect, recovery codes) asserting recipient, language, subject, marker header and the security-notice details; direct rendering of the remaining notices and the device label.
 - `tests/test_transactional_mail.py`: HTML and text parity of the code mails, expiry per configured flow, invitation escaping.
 - `tests/test_language.py`, `tests/test_auth_lifecycle.py`, `tests/test_company_registration.py`, `tests/test_social_accounts.py`, `tests/test_session_serialization.py`: codes and language through the real flows.
-- `tests/test_account_mail_failures.py`: failing mailers through the real views and one `account_mail_failed` line without address, code or traceback.
+- `tests/test_account_mail_failures.py`, `tests/test_mail_outcomes.py`: failing mailers through the real views and one `account_mail_failed` line without address, code or traceback.
 - Gaps: browser tests mock the API; no real inbox.

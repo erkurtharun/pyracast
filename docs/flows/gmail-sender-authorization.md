@@ -43,7 +43,7 @@ sequenceDiagram
     opt scope not exactly gmail.send, no refresh token, token_type not Bearer, empty access token
         H-->>Op: "ValueError, generic failure message"
     end
-    H->>G: "send_check_mail: POST messages/send from and to the sender"
+    H->>G: "send_check_mail: POST users/{sender}/messages/send from and to the sender"
     opt not accepted (no message id, HTTP error)
         H-->>Op: "generic failure message, nothing written"
     end
@@ -83,7 +83,7 @@ sequenceDiagram
 - Every handled failure collapses to one message so that tokens, codes and client secrets never reach the terminal. The cost is that the operator cannot tell causes apart.
 - State and PKCE bind the redirect to this run: `state` is 32 random bytes, the verifier 64 random bytes, challenge S256, port random per run.
 - `--replace` guards only the three `PYRACAST_GMAIL_*` keys; the previous refresh token is overwritten, not revoked. `merge_runtime` is atomic (same-directory temp file, `fsync`, `os.replace`) and never removes keys, so SMTP settings stay in the file but are inert once the backend is `gmail`.
-- The sender is written as a bare address (display name lost). The check mail proves that the consenting account may send as it before anything is saved.
+- The sender is written as a bare address (display name lost). The check mail goes through the same `users/{sender}` endpoint as production, so it proves before anything is saved that the consenting account is that mailbox.
 - The helper needs Python 3.14+ syntax (`except A, B`); it is not in the `py312` per-file target list in `pyproject.toml` because it only runs on the workstation.
 - `docs/DEPLOYMENT.md` states that an external app in Testing gets seven-day refresh tokens (not verified here); the code cannot detect that.
 

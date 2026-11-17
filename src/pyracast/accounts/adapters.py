@@ -20,6 +20,7 @@ from pyracast.accounts.account_mail import NOTICES, render_notice
 from pyracast.accounts.language import user_language
 from pyracast.accounts.security import normalize_client_ip
 from pyracast.mail.errors import NotSentError
+from pyracast.mail.send import send
 
 logger = logging.getLogger(__name__)
 CODE_TIMEOUTS = {
@@ -126,10 +127,10 @@ class AccountAdapter(DefaultAccountAdapter):
         preference = user_language(user) if isinstance(user, User) else None
         language = preference or translation.get_language()
 
-        def send() -> None:
+        def deliver() -> None:
             with translation.override(language):
                 try:
-                    super(AccountAdapter, self).send_mail(template_prefix, email, context)
+                    send(self.render_mail(template_prefix, email, {"email": email, **context}))
                 except Exception as error:
                     # Transport errors can carry the recipient address, so neither the message
                     # nor the traceback is logged.
@@ -141,4 +142,4 @@ class AccountAdapter(DefaultAccountAdapter):
                         error.code if isinstance(error, NotSentError) else None,
                     )
 
-        transaction.on_commit(send)
+        transaction.on_commit(deliver)

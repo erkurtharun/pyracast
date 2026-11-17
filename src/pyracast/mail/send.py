@@ -19,7 +19,6 @@ def configured_mailer() -> BaseEmailBackend:
 
 
 def probe() -> None:
-    """Open and close the configured transport without sending, or raise a typed mail error."""
     backend = configured_mailer()
     try:
         backend.fail_silently = False
@@ -30,11 +29,8 @@ def probe() -> None:
 
 
 def send(message: EmailMessage, *, before_send: Callable[[], bool] | None = None) -> None:
-    """Send one message or raise a typed mail error.
-
-    ``before_send`` runs after the connection opens and before the mail transaction; returning False
-    raises ``SendCancelledError`` and nothing is transmitted.
-    """
+    """``before_send`` runs after the connection opens and before the mail transaction; returning
+    False raises ``SendCancelledError`` and nothing is transmitted."""
     if not message.recipients():
         raise NotSentError("The message has no recipient.")
     backend = configured_mailer()

@@ -13,12 +13,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlencode, urlsplit
+from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 OAUTH_EXCHANGE_ENDPOINT = "https://oauth2.googleapis.com/token"
 GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.send"
-GMAIL_SEND_ENDPOINT = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
 GMAIL_KEYS = {
     "PYRACAST_GMAIL_CLIENT_ID",
     "PYRACAST_GMAIL_CLIENT_SECRET",
@@ -150,7 +149,8 @@ def send_check_mail(access_token: str, sender: str) -> None:
     )
     accepted = google_json(
         urllib.request.Request(
-            GMAIL_SEND_ENDPOINT,
+            # Production sends as this mailbox, so "me" or a send-as alias would prove nothing.
+            f"https://gmail.googleapis.com/gmail/v1/users/{quote(sender, safe='')}/messages/send",
             data=json.dumps({"raw": base64.urlsafe_b64encode(message.encode()).decode()}).encode(),
             headers={
                 "Authorization": f"Bearer {access_token}",
