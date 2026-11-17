@@ -10,12 +10,14 @@ WORKDIR /app
 FROM base AS build
 COPY --from=uv /uv /usr/local/bin/uv
 ENV UV_PYTHON_DOWNLOADS=never UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1
-RUN apt-get update && apt-get install --no-install-recommends -y build-essential \
+RUN apt-get update && apt-get install --no-install-recommends -y build-essential gettext \
     && rm -rf /var/lib/apt/lists/*
 COPY pyproject.toml uv.lock README.md ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-install-project --no-editable
 COPY src ./src
+# The project is not installed yet, so compilemessages runs without settings and walks src for catalogs.
+RUN cd src && env -u DJANGO_SETTINGS_MODULE python -m django compilemessages
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --no-editable
 RUN PYRACAST_SECRET_KEY=build-only-not-a-runtime-secret \
     PYRACAST_PUBLIC_ORIGIN=https://build.invalid pyracast collectstatic --noinput
@@ -46,7 +48,6 @@ RUN apt-get update && apt-get upgrade --no-install-recommends -y \
       cp -L "/usr/share/doc/$package/copyright" "/runtime/usr/share/doc/$package/"; \
       done
 
-# The backend runtime excludes package managers and interactive/database tools.
 FROM gcr.io/distroless/cc-debian13:nonroot@sha256:cb87acc574abe719b6e5c547384defa2f7b1f24af9605d3f618cf852495d8be2 AS runtime
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:/usr/local/bin:$PATH" LD_LIBRARY_PATH=/usr/local/lib \

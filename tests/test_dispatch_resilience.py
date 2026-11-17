@@ -12,7 +12,7 @@ from pyracast.forecasts import scheduler
 from pyracast.forecasts.management.commands import dispatch as command
 from pyracast.forecasts.monitoring import PhaseOutcome
 from pyracast.forecasts.scheduler import CollectionSchedulingError
-from tests.test_domain import make_system
+from tests.support.domain import make_system
 
 
 @pytest.fixture(autouse=True)

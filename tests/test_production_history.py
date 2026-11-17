@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.connections.models import SiteBinding
+from pyracast.forecasts.actuals import replay_archived_actual_source, select_archived_actual_source
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.availability import (
     actual_power_intervals,
@@ -19,31 +20,18 @@ from pyracast.plants.availability import (
 from pyracast.plants.models import Plant, ProductionObservation
 from pyracast.plants.numerics import PowerInterval
 from pyracast.plants.operations import (
-    ObservationImportResult,
     ObservationInput,
     import_observations,
     revise_plant,
 )
 from pyracast.plants.production import production_history
 from pyracast.regions.models import Region
-from tests.test_domain import NOW, System
-from tests.test_plant_operations import make_plant, saved_actuals, snapshot_for
+from tests.support.domain import NOW, System
+from tests.support.plant_operations import make_plant, saved_actuals, snapshot_for
+from tests.support.production_history import upload
 
 pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 8)
-
-
-def upload(system: System, plant: Plant, rows: list[ObservationInput]) -> ObservationImportResult:
-    assert plant.current_configuration_id is not None
-    return import_observations(
-        system.member,
-        system.tenant.pk,
-        system.region.pk,
-        plant.pk,
-        configuration_id=plant.current_configuration_id,
-        unit="MWh",
-        observations=rows,
-    )
 
 
 def test_seven_saved_days_do_not_enable_ten_and_batch_rolls_back(
@@ -266,6 +254,56 @@ def test_configless_history_and_source_interval_validation(monkeypatch: pytest.M
     source.save()
     assert len(reference_intervals(configuration, DAY, NOW)) == 47
     monkeypatch.setattr(timezone, "now", lambda: NOW)
+
+
+@pytest.mark.parametrize("invalid_bounds", ["naive_start", "naive_end", "zero", "reversed"])
+def test_invalid_actual_bounds_keep_missingness_and_replay_provenance(
+    monkeypatch: pytest.MonkeyPatch, invalid_bounds: str
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    older = saved_actuals(system, DAY)
+    latest = saved_actuals(system, DAY)
+    first = latest.normalized_intervals[0]
+    original_start = first["start"]
+    original_end = first["end"]
+    if invalid_bounds == "naive_start":
+        first["start"] = datetime.fromisoformat(original_start).replace(tzinfo=None).isoformat()
+    elif invalid_bounds == "naive_end":
+        first["end"] = datetime.fromisoformat(original_end).replace(tzinfo=None).isoformat()
+    elif invalid_bounds == "zero":
+        first["end"] = original_start
+    else:
+        first["end"] = (datetime.fromisoformat(original_start) - timedelta(minutes=30)).isoformat()
+    latest.save(update_fields=("normalized_intervals",))
+
+    source = select_archived_actual_source(system.binding, DAY, NOW)
+    assert source is not None
+    assert source.composition is not None
+    assert len(source.intervals) == 47
+    assert all(row["source_snapshot_id"] == latest.pk for row in source.intervals)
+    assert all(row["start"] != original_start for row in source.intervals)
+    assert source.composition.snapshot_ids == (latest.pk,)
+    assert latest.coverage_start is not None
+    assert latest.coverage_end is not None
+    assert source.composition.segments == [
+        {
+            "start": latest.coverage_start.isoformat(),
+            "end": latest.coverage_end.isoformat(),
+            "snapshot_id": latest.pk,
+        }
+    ]
+    assert older.pk not in source.composition.snapshot_ids
+    replay = replay_archived_actual_source(system.binding, DAY, NOW, source.pin)
+    assert replay is not None
+    assert replay.pin == source.pin
+    assert replay.intervals == source.intervals
+    intervals = reference_intervals(plant.configurations.get(), DAY, NOW)
+    assert len(intervals) == 47
+    assert not interval_is_covered(
+        intervals, datetime.fromisoformat(original_start), datetime.fromisoformat(original_end)
+    )
+    latest.refresh_from_db()
+    assert latest.normalized_intervals[0] == first
 
 
 @pytest.mark.parametrize("power", [None, float("nan"), -1.0])

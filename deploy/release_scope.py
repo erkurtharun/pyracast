@@ -22,6 +22,7 @@ ALLOWLIST = (
     ".codex/hooks.json",
     ".github/dependabot.yml",
     "qodana.yaml",
+    "qodana-js.yaml",
     "sonar-project.properties",
     ".gitignore",
     "web/.gitignore",

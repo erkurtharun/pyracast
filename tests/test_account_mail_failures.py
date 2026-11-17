@@ -20,11 +20,11 @@ from django.test import Client, override_settings
 
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.mail_delivery import NotSentError
-from tests.test_admin_recovery_security import RECOVERY, authenticated_account
-from tests.test_admin_recovery_security import submit as submit_to
-from tests.test_auth_lifecycle import PASSWORD, member, submit
-from tests.test_company_registration import signup
-from tests.test_social_accounts import CALLBACK, PROVIDERS, begin, complete
+from tests.support.admin_recovery_security import RECOVERY, authenticated_account
+from tests.support.admin_recovery_security import submit as submit_to
+from tests.support.auth_lifecycle import PASSWORD, member, submit
+from tests.support.company_registration import signup
+from tests.support.social_accounts import CALLBACK, PROVIDERS, begin, complete
 
 pytestmark = [
     pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"]),

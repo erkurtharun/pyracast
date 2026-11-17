@@ -1,5 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import timedelta
 from threading import Barrier
 from typing import Any
 
@@ -12,10 +12,9 @@ from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.irradiance import local_day_bounds
-from pyracast.metering.models import EpiasConnection
 from pyracast.plants.measurements import latest_measurement_day, select_measurements
-from pyracast.plants.models import Plant, ProductionObservation
-from pyracast.plants.operations import ObservationImportResult, ObservationInput, revise_plant
+from pyracast.plants.models import ProductionObservation
+from pyracast.plants.operations import ObservationInput, revise_plant
 from pyracast.plants.production import production_history
 from pyracast.plants.production_changes import (
     ProductionChange,
@@ -23,51 +22,12 @@ from pyracast.plants.production_changes import (
     change_production,
     preview_production,
 )
-from tests.test_domain import NOW, System
-from tests.test_plant_operations import make_plant
-from tests.test_provisional_measurements import DAY, acquisition
+from tests.support.domain import NOW
+from tests.support.plant_operations import make_plant
+from tests.support.production_changes import edit, provider, write
+from tests.support.provisional_measurements import DAY, acquisition
 
 pytestmark = pytest.mark.django_db(transaction=True)
-
-
-def write(
-    system: System, plant: Plant, changes: list[ProductionChange], *, unit: str = "MWh"
-) -> ObservationImportResult:
-    assert plant.current_configuration_id is not None
-    return change_production(
-        system.member,
-        system.tenant.pk,
-        system.region.pk,
-        plant.pk,
-        configuration_id=plant.current_configuration_id,
-        unit=unit,
-        changes=changes,
-    )
-
-
-def edit(
-    start: datetime,
-    energy: float = 1,
-    *,
-    revision_id: int | None = None,
-    action: str = "set",
-    minutes: int = 60,
-    quality: str = "valid",
-) -> ProductionChange:
-    return ProductionChange(
-        start, start + timedelta(minutes=minutes), revision_id, action, energy, quality, "meter"
-    )
-
-
-def provider(system: System, plant: Plant) -> EpiasConnection:
-    return EpiasConnection.objects.create(
-        plant=plant,
-        provider_plant_id=2,
-        settlement_plant_id=77,
-        eic="EIC",
-        name="Plant",
-        connected_by=system.member,
-    )
 
 
 def test_correction_survives_imports_and_revert_uses_latest_provider(

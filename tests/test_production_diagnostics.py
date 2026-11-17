@@ -17,10 +17,10 @@ from pyracast.plants.models import (
 )
 from pyracast.plants.operations import activate_calibration
 from pyracast.plants.tracking import MODEL_VERSION as TRACKING_MODEL_VERSION
-from tests.test_calibration_automation import declare_native_sources, evaluated_run, promote
-from tests.test_domain import NOW, System
-from tests.test_incident_calibration import incident
-from tests.test_plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
+from tests.support.calibration_automation import declare_native_sources, evaluated_run, promote
+from tests.support.domain import NOW, System
+from tests.support.incident_calibration import incident
+from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

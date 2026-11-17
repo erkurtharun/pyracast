@@ -12,8 +12,8 @@ from pyracast.connections.operations import (
 from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.provider_retry import next_retry_at, retry_after_seconds
-from tests.test_domain import NOW, FakeAdapter, make_system
-from tests.test_jobs import calculate
+from tests.support.domain import NOW, FakeAdapter, make_system
+from tests.support.jobs import calculate
 
 
 def test_retry_after_two_days_is_not_shortened() -> None:

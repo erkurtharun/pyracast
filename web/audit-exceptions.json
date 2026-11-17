@@ -1,0 +1,8 @@
+[
+    {
+        "advisory": "GHSA-fc5q-39xc-vjpf",
+        "package": "picomatch",
+        "reason": "No patched release exists. The ReDoS needs an attacker-controlled glob pattern. The audited copies run in lint tooling (eslint, typescript-eslint) and in the next-intl message watcher with patterns from this repository; the copy Next.js vendors matches only image patterns from its configuration.",
+        "expires": "2026-12-17"
+    }
+]

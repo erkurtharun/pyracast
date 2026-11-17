@@ -14,8 +14,8 @@ from pyracast.plants.models import PlantConfiguration, PlantForecast
 from pyracast.plants.operations import revise_plant
 from pyracast.regions.models import Region
 from pyracast.solar import daylight_window
-from tests.test_automatic_forecast_selection import reference_transition
-from tests.test_plant_operations import make_plant, publish_snapshot, snapshot_for
+from tests.support.automatic_forecast_selection import reference_transition
+from tests.support.plant_operations import make_plant, publish_snapshot, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 14)

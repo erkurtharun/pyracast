@@ -137,7 +137,6 @@ def main() -> None:
                 "--no-dev",
                 "--extra",
                 "scientific",
-                "--no-cache",
             ],
             env=env,
             check=True,

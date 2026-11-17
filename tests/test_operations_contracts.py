@@ -102,6 +102,11 @@ def reported_events() -> dict[str, set[str]]:
     return events
 
 
+def ci_jobs() -> dict[str, dict[str, Any]]:
+    jobs: dict[str, dict[str, Any]] = yaml.safe_load(text(WORKFLOWS / "ci.yml"))["jobs"]
+    return jobs
+
+
 def matrix_combinations(matrix: dict[str, Any]) -> list[dict[str, Any]]:
     axes = {key: values for key, values in matrix.items() if key not in {"include", "exclude"}}
     original: list[dict[str, Any]] = []
@@ -126,18 +131,33 @@ def matrix_combinations(matrix: dict[str, Any]) -> list[dict[str, Any]]:
     return [*original, *added]
 
 
-def ci_job_names(jobs: dict[str, Any]) -> set[str]:
+def job_names(identifier: str, job: dict[str, Any]) -> set[str]:
+    matrix = job.get("strategy", {}).get("matrix")
     names: set[str] = set()
-    for identifier, job in jobs.items():
-        matrix = job.get("strategy", {}).get("matrix")
-        for combination in [{}] if matrix is None else matrix_combinations(matrix):
-            name = str(job.get("name", identifier))
-            for key, value in combination.items():
-                name = name.replace(f"${{{{ matrix.{key} }}}}", str(value))
-            if "${{" in name:
-                raise ValueError(f"Unsupported expression in CI job name: {name}")
-            names.add(name)
+    for combination in [{}] if matrix is None else matrix_combinations(matrix):
+        name = str(job.get("name", identifier))
+        for key, value in combination.items():
+            name = name.replace(f"${{{{ matrix.{key} }}}}", str(value))
+        if "${{" in name:
+            raise ValueError(f"Unsupported expression in CI job name: {name}")
+        names.add(name)
     return names
+
+
+def ci_job_names(jobs: dict[str, Any]) -> set[str]:
+    return {name for identifier, job in jobs.items() for name in job_names(identifier, job)}
+
+
+def run_scripts(commands: str) -> dict[str, str]:
+    return {path: text(ROOT / path) for path in set(re.findall(r"scripts/\w+\.py", commands))}
+
+
+def locked_installs(commands: str, scripts: dict[str, str]) -> tuple[str, ...]:
+    direct = re.findall(r"uv sync --locked.*", commands)
+    delegated = [
+        path for path, source in scripts.items() if re.search(r'"sync",\s*"--locked"', source)
+    ]
+    return tuple(sorted({*direct, *delegated}))
 
 
 def release_required_jobs(workflow: str) -> set[str]:
@@ -434,7 +454,7 @@ def test_release_waits_only_for_jobs_that_ci_defines() -> None:
     required = release_required_jobs(text(WORKFLOWS / "release.yml"))
 
     assert required
-    assert required <= ci_job_names(yaml.safe_load(text(WORKFLOWS / "ci.yml"))["jobs"])
+    assert required <= ci_job_names(ci_jobs())
 
 
 def test_ci_job_names_apply_matrix_include_and_exclude() -> None:
@@ -496,6 +516,69 @@ def test_required_job_parser_reads_conditional_additions() -> None:
     workflow = "const required = ['A',\n  'B'];\nif (x) required.push('C');"
 
     assert release_required_jobs(workflow) == {"A", "B", "C"}
+
+
+def test_release_requires_every_ci_job_directly_or_through_needs() -> None:
+    jobs = ci_jobs()
+    required = release_required_jobs(text(WORKFLOWS / "release.yml"))
+    direct = [key for key, job in jobs.items() if job_names(key, job) & required]
+    gating: set[str] = set()
+    pending = list(direct)
+    while pending:
+        key = pending.pop()
+        if key not in gating:
+            gating.add(key)
+            needs = jobs[key].get("needs", [])
+            pending.extend([needs] if isinstance(needs, str) else needs)
+
+    assert all(job_names(key, jobs[key]) <= required for key in direct)
+    assert gating == set(jobs)
+
+
+def test_windows_tests_run_in_four_shards_that_the_verify_job_combines() -> None:
+    jobs = ci_jobs()
+    shards = jobs["verify_windows_shards"]
+    indexes = shards["strategy"]["matrix"]["shard"]
+    count = len(indexes)
+    partition = "\n".join(step.get("run", "") for step in shards["steps"])
+    combine = "\n".join(step.get("run", "") for step in jobs["verify_windows"]["steps"])
+
+    assert count == 4
+    assert indexes == list(range(1, count + 1))
+    assert job_names("verify_windows_shards", shards) == {
+        f"Windows tests ({index}/{count})" for index in indexes
+    }
+    assert f"--shard ${{{{ env.TEST_SHARD }}}}/{count} " in partition
+    assert re.findall(r"windows-shard-\$\{\{ github\.run_attempt \}\}-(\d+)\"", combine) == [
+        str(index) for index in indexes
+    ]
+    assert jobs["verify_windows"]["needs"] == "verify_windows_shards"
+
+
+def test_every_ci_job_caches_exactly_the_locked_dependencies_it_installs() -> None:
+    installs_by_key: dict[str, set[tuple[str, ...]]] = {}
+    for key, job in ci_jobs().items():
+        commands = "\n".join(step.get("run", "") for step in job["steps"])
+        scripts = run_scripts(commands)
+        installs = locked_installs(commands, scripts)
+        actions = {
+            step["uses"].split("@", 1)[0]: step.get("with", {})
+            for step in job["steps"]
+            if "uses" in step
+        }
+        if "astral-sh/setup-uv" in actions:
+            uv = actions["astral-sh/setup-uv"]
+            assert uv.get("enable-cache") is bool(installs), key
+            if installs:
+                assert all(
+                    "--no-cache" not in source for source in [commands, *scripts.values()]
+                ), key
+                installs_by_key.setdefault(uv.get("cache-suffix", ""), set()).add(installs)
+        if "npm ci" in commands:
+            assert actions["actions/setup-node"].get("cache") == "npm", key
+
+    # One key per OS and suffix serves every job; the first job to finish saves it.
+    assert all(len(installs) == 1 for installs in installs_by_key.values()), installs_by_key
 
 
 def test_gmail_authorization_helper_matches_the_backend_configuration() -> None:

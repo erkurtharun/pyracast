@@ -9,9 +9,9 @@ from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import ForecastIssuance, Plant, PlantConfiguration, PlantForecast
 from pyracast.plants.numerics import MODEL_VERSION
 from pyracast.plants.operations import activate_calibration
-from tests.test_domain import NOW, System
-from tests.test_incident_calibration import incident
-from tests.test_plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
+from tests.support.domain import NOW, System
+from tests.support.incident_calibration import incident
+from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

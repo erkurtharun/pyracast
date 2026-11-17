@@ -34,6 +34,7 @@ def xdist_workers(environment: dict[str, str]) -> str:
 
 
 Stage = tuple[str, list[str]]
+CATALOGS: Stage = ("compile translations", [sys.executable, "scripts/translations.py"])
 
 
 def arguments(argv: list[str] | None) -> tuple[argparse.Namespace, list[str]]:
@@ -205,7 +206,7 @@ def main(argv: list[str] | None = None) -> int:
         print(error, file=sys.stderr)
         return 2
     if not args.static_only:
-        stages.append(pytest_stage(args, settings, coverage_floor, pytest_arguments))
+        stages += [CATALOGS, pytest_stage(args, settings, coverage_floor, pytest_arguments)]
     shard_output: Path | None = None
     if args.shard:
         shard_output = args.shard_output.resolve()

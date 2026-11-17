@@ -5,7 +5,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
 
 from pyracast.metering.history import read_production_day
-from tests.test_epias_api import archive_source, connected_source
+from tests.support.epias_api import archive_source, connected_source
 
 pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2020, 1, 1)

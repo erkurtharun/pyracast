@@ -97,7 +97,7 @@ case "$MODE:$*" in
   support-rabbit:*' up -d rabbitmq') exit 42 ;;
   support-postgres:*' up -d postgres') exit 46 ;;
   drain:*' stop -t 660 worker notifications') exit 47 ;;
-  migration:*' run --rm --no-deps migrate') exit 43 ;;
+  migration:*' run --rm --no-deps migrate' | maintenance-migration:*' run --rm --no-deps migrate') exit 43 ;;
   health:*'releases/'*' up -d --wait --wait-timeout 180') exit 44 ;;
   killed:*' run --rm --no-deps migrate')
     test -f /var/lib/pyracast/release-blocked || exit 90
@@ -192,10 +192,12 @@ units_installed() {
   grep -Fxq 'systemctl enable --now pyracast-backup.timer pyracast-watchdog.timer' /calls
 }
 
-for MODE in preflight deploy-check plan secrets units-invalid image live-artifact redeploy-preflight drain backup support-postgres support-rabbit migration health tls response success first-success redeploy final-start first-backup killed-backup killed lock-wait lock-timeout; do
+for MODE in preflight deploy-check plan secrets units-invalid image live-artifact redeploy-preflight drain backup support-postgres support-rabbit migration health tls response success first-success redeploy final-start first-backup killed-backup killed lock-wait lock-timeout maintenance-success maintenance-migration; do
   export MODE
   rm -rf /opt/pyracast/current /opt/pyracast/current.next /opt/pyracast/releases/* /run/pyracast
   rm -f /var/lib/pyracast/release-blocked /migration-entered /backup-entered /backup-complete /support-changed /database-initialized
+  # deploy/reset_database.py leaves its session identity in the marker and the site stopped.
+  if [[ $MODE == maintenance-* ]]; then printf 'reset-session\n' >/var/lib/pyracast/release-blocked; fi
   mkdir -p /opt/pyracast/releases/old/deploy /run/pyracast
   live=/opt/pyracast/releases/old
   case "$MODE" in
@@ -286,13 +288,17 @@ for MODE in preflight deploy-check plan secrets units-invalid image live-artifac
         absent ' stop '
         units_untouched
         ;;
-      drain|backup|first-backup|support-postgres|support-rabbit|migration|health|tls|response)
+      drain|backup|first-backup|support-postgres|support-rabbit|migration|maintenance-migration|health|tls|response)
         case "$MODE" in
           drain) test "$result" == 47 ;;
           backup|first-backup) test "$result" == 45 ;;
           support-postgres) test "$result" == 46 ;;
           support-rabbit) test "$result" == 42 ;;
           migration) test "$result" == 43 ;;
+          maintenance-migration)
+            test "$result" == 43
+            grep -Fxq reset-session /var/lib/pyracast/release-blocked
+            ;;
           health) test "$result" == 44 ;;
           tls) test "$result" == 60 ;;
           response) test "$result" == 1 ;;
@@ -322,7 +328,7 @@ for MODE in preflight deploy-check plan secrets units-invalid image live-artifac
         grep -Fq "Finish with: bash $new_release/deploy/install-units.sh install $new_release && systemctl start pyracast.service" /result
         units_installed
         ;;
-      success|first-success|redeploy|lock-wait)
+      success|first-success|redeploy|lock-wait|maintenance-success)
         test "$result" == 0
         test "$(readlink /opt/pyracast/current)" == "$new_release"
         test ! -e /var/lib/pyracast/release-blocked

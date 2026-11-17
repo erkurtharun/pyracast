@@ -10,7 +10,6 @@ export default defineConfig([
         "src/lib/schema.d.ts",
         "playwright-report/**",
         "test-results/**",
-        "test-results-*/**",
         "integration-results/**",
         "coverage/**",
         ".dev/**",

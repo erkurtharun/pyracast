@@ -12,8 +12,8 @@ from django.http import HttpRequest
 from django.test import Client, override_settings
 
 from pyracast.notifications.operations import configure_reminders, recipient_limit
-from tests.test_auth_lifecycle import PASSWORD, mailed_code, submit
-from tests.test_domain import NOW, make_system
+from tests.support.auth_lifecycle import PASSWORD, mailed_code, submit
+from tests.support.domain import NOW, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 

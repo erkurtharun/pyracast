@@ -25,7 +25,7 @@ from pyracast.accounts import session_lock
 from pyracast.accounts.mfa import MFAAdapter
 from pyracast.accounts.session_lock import SessionRequestSerialization, serialize_session
 from pyracast.api.session import SessionView
-from tests.test_auth_lifecycle import AUTH, PASSWORD, mailed_code, member, submit, totp_code
+from tests.support.auth_lifecycle import AUTH, PASSWORD, mailed_code, member, submit, totp_code
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 MAILERS = {"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
