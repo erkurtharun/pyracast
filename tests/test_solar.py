@@ -1,11 +1,11 @@
 from dataclasses import FrozenInstanceError
-from datetime import UTC, date, datetime, timedelta, tzinfo
+from datetime import UTC, date, datetime, time, timedelta, tzinfo
 from hashlib import sha256
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pytest
 from astral import Observer, refraction_at_zenith
-from astral.sun import zenith
+from astral.sun import sunrise, sunset, zenith
 from hypothesis import example, given, strategies
 
 from pyracast.irradiance import local_day_bounds
@@ -276,6 +276,69 @@ def test_sunset_at_the_start_of_the_day_is_kept() -> None:
     assert result.sunset == start
     assert result.sunrise is not None
     assert result.windows == ((result.sunrise, end),)
+
+
+@pytest.mark.parametrize(
+    ("day", "longitude", "rising"),
+    [(date(2026, 2, 3), 60.45317594166667, True), (date(2026, 2, 2), -53.57329358333331, False)],
+)
+def test_astral_event_within_a_second_of_midnight_is_kept(
+    day: date, longitude: float, rising: bool
+) -> None:
+    observer = Observer(-60.0, longitude, elevation=0.0)
+    event = (sunrise if rising else sunset)(observer, day, UTC)
+    result = daylight_window(day, "UTC", -60.0, longitude)
+    neighbours = [
+        daylight_window(day + timedelta(days=step), "UTC", -60.0, longitude) for step in (-1, 1)
+    ]
+    assert abs(
+        event - datetime.combine(day + timedelta(days=0 if rising else 1), time(), UTC)
+    ) < timedelta(seconds=1)
+    assert (result.sunrise if rising else result.sunset) == event
+    assert all(event not in (other.sunrise, other.sunset) for other in neighbours)
+
+
+@pytest.mark.parametrize(
+    ("day", "zone", "latitude", "longitude", "up"),
+    [
+        (date(2026, 12, 15), "Etc/GMT+5", 67.5, -74.006, True),
+        (date(2026, 12, 25), "UTC", 67.40274368286133, 3.75, True),
+        (date(2026, 6, 24), "UTC", 65.81747, 18.0, False),
+    ],
+)
+def test_daylight_or_night_of_seconds_is_found(
+    day: date, zone: str, latitude: float, longitude: float, up: bool
+) -> None:
+    start, end = local_day_bounds(day, zone)
+    result = daylight_window(day, zone, latitude, longitude)
+    observer = Observer(latitude, longitude, elevation=0.0)
+    edges = sorted(
+        moment for window in result.windows for moment in window if moment not in (start, end)
+    )
+    assert result.status == "normal"
+    assert len(edges) == 2
+    assert timedelta() < edges[1] - edges[0] < timedelta(minutes=1)
+    assert sun_is_up(observer, edges[0] + (edges[1] - edges[0]) / 2) == up
+    margin = timedelta(minutes=2)
+    crossings = horizon_crossings(
+        observer, edges[0] - margin, edges[1] + margin, step=timedelta(seconds=1)
+    )
+    assert len(crossings) == 2
+    for edge, crossing in zip(edges, crossings, strict=True):
+        assert abs((edge - crossing).total_seconds()) < 2
+
+
+def test_astral_event_far_from_the_crossing_is_replaced(monkeypatch: pytest.MonkeyPatch) -> None:
+    expected = daylight_window(date(2026, 3, 20), "UTC", 0, 0)
+
+    def late(observer: Observer, day: date, zone: tzinfo) -> datetime:
+        return sunrise(observer, day, zone) + timedelta(minutes=5)
+
+    monkeypatch.setattr("pyracast.solar.sunrise", late)
+    result = daylight_window(date(2026, 3, 20), "UTC", 0, 0)
+    assert result.sunrise is not None
+    assert expected.sunrise is not None
+    assert abs((result.sunrise - expected.sunrise).total_seconds()) < 1
 
 
 def test_assembly_keeps_events_at_midnight_in_the_half_open_day() -> None:
