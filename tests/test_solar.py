@@ -1,14 +1,15 @@
 from dataclasses import FrozenInstanceError
-from datetime import UTC, date, datetime, time, timedelta, tzinfo
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from hashlib import sha256
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pytest
 from astral import Observer, refraction_at_zenith
 from astral.sun import zenith
+from hypothesis import example, given, strategies
 
 from pyracast.irradiance import local_day_bounds
-from pyracast.solar import DAYLIGHT_POLICY, daylight_window
+from pyracast.solar import DAYLIGHT_POLICY, Daylight, daylight_from_events, daylight_window
 
 # Astral's sunrise convention: upper solar limb on the sea-level horizon, with refraction.
 HORIZON_ZENITH = 90 + 32 / 120 + refraction_at_zenith(90 + 32 / 120)
@@ -64,6 +65,8 @@ def test_turkey_grid_daylight_is_bit_identical(latitude: float, longitude: float
         (date(2026, 8, 10), "America/New_York", 40.7128, -74.006),
         (date(2026, 5, 17), "Asia/Kolkata", 28.6, 77.2),
         (date(2026, 5, 14), "Europe/Oslo", 69.65, 18.96),
+        (date(2026, 7, 7), "Asia/Kolkata", 28.6, 77.2),
+        (date(2026, 9, 25), "Etc/GMT-6", 90.0, 90.0),
     ],
 )
 def test_every_horizon_crossing_is_found(
@@ -172,17 +175,12 @@ def test_daylight_crossing_midnight_has_two_windows() -> None:
     )
 
 
-@pytest.mark.parametrize("day", [date(2026, 5, 14), date(2026, 5, 17)])
-def test_polar_transition_can_have_only_one_event(day: date) -> None:
-    result = daylight_window(day, "Europe/Oslo", 69.65, 18.96)
+def test_polar_transition_can_have_only_one_event() -> None:
+    result = daylight_window(date(2026, 5, 17), "Europe/Oslo", 69.65, 18.96)
     assert result.status == "normal"
     assert len(result.windows) == 1
-    if day.day == 14:
-        assert result.sunrise is None
-        assert result.windows == ((datetime(2026, 5, 13, 22, tzinfo=UTC), result.sunset),)
-    else:
-        assert result.sunset is None
-        assert result.windows == ((result.sunrise, datetime(2026, 5, 17, 22, tzinfo=UTC)),)
+    assert result.sunset is None
+    assert result.windows == ((result.sunrise, datetime(2026, 5, 17, 22, tzinfo=UTC)),)
 
 
 @pytest.mark.parametrize("latitude", [69.65, 90])
@@ -225,52 +223,126 @@ def test_invalid_timezone_and_skipped_local_date_propagate() -> None:
         daylight_window(date(2011, 12, 30), "Pacific/Apia", -13.8, -171.8)
 
 
-@pytest.mark.parametrize(
-    "message",
-    [
-        "Sun is always below the horizon on this day, at this location.",
-        "Sun is always above the horizon on this day, at this location.",
-    ],
-)
-def test_astral_translated_polar_errors_are_accepted(
-    monkeypatch: pytest.MonkeyPatch, message: str
-) -> None:
-    def no_event(_observer: Observer, _day: date, _zone: tzinfo) -> datetime:
-        raise ValueError(message)
+def test_astral_misses_fall_back_to_the_scanned_crossing(monkeypatch: pytest.MonkeyPatch) -> None:
+    expected = daylight_window(date(2026, 3, 20), "UTC", 0, 0)
 
-    monkeypatch.setattr("pyracast.solar.sunrise", no_event)
-    monkeypatch.setattr("pyracast.solar.sunset", no_event)
-    result = daylight_window(date(2026, 6, 21), "UTC", 90, 0)
-    assert result.status == "polar_day"
+    def missing(_observer: Observer, _day: date, _zone: tzinfo) -> datetime:
+        raise ValueError("Unable to find a sunrise time on the date specified")
+
+    monkeypatch.setattr("pyracast.solar.sunrise", missing)
+    monkeypatch.setattr("pyracast.solar.sunset", missing)
+    result = daylight_window(date(2026, 3, 20), "UTC", 0, 0)
+    assert result.status == expected.status == "normal"
+    assert result.sunrise is not None
+    assert result.sunset is not None
+    assert expected.sunrise is not None
+    assert expected.sunset is not None
+    assert abs((result.sunrise - expected.sunrise).total_seconds()) < 2
+    assert abs((result.sunset - expected.sunset).total_seconds()) < 2
+    assert result.windows == ((result.sunrise, result.sunset),)
 
 
-@pytest.mark.parametrize(
-    "error", [ValueError("unexpected calculation error"), RuntimeError("failed")]
-)
-def test_unexpected_calculation_failures_propagate(
-    monkeypatch: pytest.MonkeyPatch, error: Exception
-) -> None:
+def test_unexpected_calculation_failures_propagate(monkeypatch: pytest.MonkeyPatch) -> None:
     def broken(_observer: Observer, _day: date, _zone: tzinfo) -> datetime:
-        raise error
+        raise RuntimeError("failed")
 
     monkeypatch.setattr("pyracast.solar.sunrise", broken)
-    with pytest.raises(type(error), match=str(error)):
+    with pytest.raises(RuntimeError, match="failed"):
         daylight_window(date(2026, 3, 20), "UTC", 0, 0)
 
 
-def test_events_exactly_at_midnight_preserve_half_open_day(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def rise(_observer: Observer, day: date, _zone: tzinfo) -> datetime:
-        return datetime.combine(day, time(12), UTC)
-
-    def setting(_observer: Observer, day: date, _zone: tzinfo) -> datetime:
-        return datetime.combine(day, time.min, UTC)
-
-    monkeypatch.setattr("pyracast.solar.sunrise", rise)
-    monkeypatch.setattr("pyracast.solar.sunset", setting)
-    result = daylight_window(date(2026, 3, 20), "UTC", 0, 0)
-    assert result.sunset == datetime(2026, 3, 20, tzinfo=UTC)
+def test_night_shorter_than_the_scan_step_keeps_astral_events() -> None:
+    result = daylight_window(date(2026, 6, 17), "UTC", 65.8, 18.0)
+    assert result.status == "normal"
+    assert result.sunrise is not None
+    assert result.sunset is not None
+    assert timedelta(minutes=10) < result.sunrise - result.sunset < timedelta(minutes=30)
     assert result.windows == (
-        (datetime(2026, 3, 20, 12, tzinfo=UTC), datetime(2026, 3, 21, tzinfo=UTC)),
+        (datetime(2026, 6, 17, tzinfo=UTC), result.sunset),
+        (result.sunrise, datetime(2026, 6, 18, tzinfo=UTC)),
     )
+
+
+def test_assembly_keeps_events_at_midnight_in_the_half_open_day() -> None:
+    start, end = datetime(2026, 3, 20, tzinfo=UTC), datetime(2026, 3, 21, tzinfo=UTC)
+    noon = datetime(2026, 3, 20, 12, tzinfo=UTC)
+    events = [(noon, True), (start, False), (end, False)]
+    result = daylight_from_events(events, start, end, sun_up=False)
+    assert result == Daylight(((noon, end),), noon, start, "normal")
+
+
+@pytest.mark.parametrize("rising", [True, False])
+@pytest.mark.parametrize("sun_up", [True, False])
+def test_assembly_of_a_single_event_day_ignores_the_midday_sample(
+    rising: bool, sun_up: bool
+) -> None:
+    start, end = datetime(2026, 5, 13, 22, tzinfo=UTC), datetime(2026, 5, 14, 22, tzinfo=UTC)
+    event = datetime(2026, 5, 14, 9, tzinfo=UTC)
+    result = daylight_from_events([(event, rising)], start, end, sun_up=sun_up)
+    if rising:
+        assert result == Daylight(((event, end),), event, None, "normal")
+    else:
+        assert result == Daylight(((start, event),), None, event, "normal")
+
+
+@pytest.mark.parametrize("sun_up", [True, False])
+def test_assembly_without_events_follows_the_midday_sample(sun_up: bool) -> None:
+    start, end = datetime(2026, 6, 20, 22, tzinfo=UTC), datetime(2026, 6, 21, 22, tzinfo=UTC)
+    result = daylight_from_events([], start, end, sun_up=sun_up)
+    assert result.windows == (((start, end),) if sun_up else ())
+    assert result.status == ("polar_day" if sun_up else "polar_night")
+
+
+ZONES = (
+    "UTC",
+    "Europe/Istanbul",
+    "America/New_York",
+    "America/Lima",
+    "Asia/Kolkata",
+    "Australia/Sydney",
+    "Pacific/Kiritimati",
+)
+
+
+def assert_matches_the_sun(day: date, zone: str, latitude: float, longitude: float) -> None:
+    start, end = local_day_bounds(day, zone)
+    result = daylight_window(day, zone, latitude, longitude)
+    observer = Observer(latitude, longitude, elevation=0.0)
+    edges = [moment for window in result.windows for moment in window]
+    moment = start
+    while moment < end:
+        if all(abs(moment - edge) > timedelta(minutes=15) for edge in edges):
+            inside = any(left <= moment < right for left, right in result.windows)
+            assert sun_is_up(observer, moment) == inside, moment
+        moment += timedelta(minutes=10)
+
+
+@pytest.mark.parametrize(
+    ("day", "zone", "latitude", "longitude"),
+    [
+        (date(2026, 6, 12), "America/Lima", 66.0, -74.006),
+        (date(2026, 12, 15), "Etc/GMT+5", 67.5, -74.006),
+        (date(2026, 11, 16), "Etc/GMT-1", 72.0, 18.96),
+        (date(2026, 2, 25), "Etc/GMT-1", -80.0, 18.96),
+    ],
+)
+def test_astral_events_the_scan_contradicts_are_dropped(
+    day: date, zone: str, latitude: float, longitude: float
+) -> None:
+    assert_matches_the_sun(day, zone, latitude, longitude)
+
+
+# Beyond 65 degrees a night or daylight can be shorter than the 30-minute scan step.
+@example(date(2026, 5, 8), "America/New_York", 40.7128, -74.006)
+@example(date(2026, 8, 10), "America/New_York", 40.7128, -74.006)
+@example(date(2026, 5, 17), "Asia/Kolkata", 28.6, 77.2)
+@given(
+    day=strategies.dates(date(2000, 1, 1), date(2100, 12, 31)),
+    zone=strategies.sampled_from(ZONES),
+    latitude=strategies.floats(-65, 65),
+    longitude=strategies.floats(-180, 180),
+)
+def test_daylight_window_matches_the_sun(
+    day: date, zone: str, latitude: float, longitude: float
+) -> None:
+    assert_matches_the_sun(day, zone, latitude, longitude)

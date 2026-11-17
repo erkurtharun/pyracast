@@ -8,6 +8,7 @@ A developer runs `scripts/check.py`, the `web` npm scripts or `scripts/check_sci
 - `web/package.json` scripts: `check` (static + `test`), `check:coverage` (static + `test:coverage`), `check:static` (format:check, lint, typecheck, build), `test:integration`, `api:generate`. Configs: `web/playwright.config.ts`, `web/playwright.integration.config.ts`, `web/eslint.config.mjs`; coverage in `web/testing/run-coverage.mjs`, `coverage-options.ts`, `coverage-reporter.ts`.
 - `tests/test_browser.py` `test_browser_against_live_django`: the only automated runner of the real-backend Playwright suite in `web/integration/` (a developer can also call `npm run test:integration` by hand with the `BROWSER_*` variables).
 - `scripts/check_scientific.py` `main`: probe of the optional `scientific` extra (pvlib, h5py, HDF5); optional as a dependency, but CI runs it on every run.
+- `tests/conftest.py`: registers the Hypothesis profiles `gate` (derandomized, no deadline, no example database), loaded unless `HYPOTHESIS_PROFILE` names another, and `explore` (randomized, 2000 examples) for local searches with `--hypothesis-profile=explore`.
 - `.github/workflows/ci.yml`: `verify_ubuntu` (whole `check.py`), `verify_windows_shards` (two `--shard` runs) then `verify_windows` (`--combine-shards`), `web_ubuntu` (`check:coverage`) and `web_windows` (`check`), `scientific` (both OS), `audit` (`pip-audit`), `sonar`. Before `check.py` the verify jobs start a non-durable PostgreSQL (`start_postgres.py --non-durable`, as do the web jobs) and RabbitMQ, run `pyracast migrate`, `migrate --check` and `pyracast check`. The `deployment` job belongs to the release pipeline flow.
 
 ## Sequence
@@ -78,6 +79,7 @@ None for users. Privilege boundaries: workflow `permissions: contents: read` and
 
 ## Rules and invariants
 
+- Property tests are reproducible: the `gate` profile derives examples from the test itself, so every shard, worker and rerun checks the same cases; a counterexample found with `explore` is pinned with `@example`, and no line is covered only by a property test.
 - The floor has one source, `tool.coverage.report.fail_under` in `pyproject.toml`. Shards run with floor 0; only the combine step enforces it.
 - Worker count: `check.py` keeps an explicit integer `PYTEST_XDIST_AUTO_NUM_WORKERS` (it refuses any other value, which xdist would ignore in favour of every physical core) and otherwise sets it to the physical core count (logical count when psutil cannot tell) capped at 6, printing the value; CI pins 2. Shard mode replaces `addopts` through `-o` without the `--cov-report` entries, and `strict = true` still applies there.
 - Only throwaway CI clusters run without `fsync`; a developer cluster keeps it on, and test sessions only relax `synchronous_commit`.

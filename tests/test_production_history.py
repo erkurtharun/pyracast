@@ -74,21 +74,30 @@ def test_seven_saved_days_do_not_enable_ten_and_batch_rolls_back(
     assert not ProductionObservation.objects.exists()
 
 
-def test_history_reads_and_saves_where_astral_misses_an_event(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+LIMA_DAY = date(2026, 11, 4)
+
+
+def lima_plant(monkeypatch: pytest.MonkeyPatch) -> tuple[System, Plant]:
     system, plant = make_plant(monkeypatch)
     location = {"latitude": -20.0, "longitude": -87.5, "timezone": "America/Lima"}
     SiteBinding.objects.filter(pk=system.binding.pk).update(**location)
     Region.objects.filter(pk=system.region.pk).update(**location)
     system.binding.refresh_from_db()
     plant.refresh_from_db()
-    day = date(2026, 11, 4)
-    saved_actuals(system, day)
+    saved_actuals(system, LIMA_DAY)
+    return system, plant
+
+
+def test_history_reads_where_astral_misses_an_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    _, plant = lima_plant(monkeypatch)
     result = production_history(plant, start_date=date(2026, 11, 2), end_date=DAY)
     assert len(result["intervals"]) == 7 * 24
     assert sum(row["can_enter"] for row in result["intervals"]) == 24
-    start, _ = local_day_bounds(day, "America/Lima")
+
+
+def test_history_saves_where_astral_misses_an_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    system, plant = lima_plant(monkeypatch)
+    start, _ = local_day_bounds(LIMA_DAY, "America/Lima")
     noon = start + timedelta(hours=12)
     assert upload(system, plant, [ObservationInput(noon, noon + timedelta(hours=1), 1)]) == {
         "created": 1,
