@@ -5,7 +5,7 @@ from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass
-from threading import Barrier, BrokenBarrierError
+from threading import Barrier, BrokenBarrierError, Event
 from types import SimpleNamespace
 from typing import Any
 
@@ -18,6 +18,7 @@ from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
 from django.contrib.auth.models import User
 from django.core import mail
 from django.db import close_old_connections, connections
+from django.http import HttpResponseBase
 from django.test import Client, override_settings
 from django.utils import translation
 
@@ -153,6 +154,44 @@ def hold_password_checks(
     monkeypatch.setattr(User, "check_password", held)
 
 
+def hold_correct_password(monkeypatch: pytest.MonkeyPatch) -> tuple[Event, Event]:
+    # A correct password check signals `held` after its slots are reserved and answers only
+    # once `release` is set.
+    held, release = Event(), Event()
+    check_password = User.check_password
+
+    def checked(user: User, raw_password: str) -> bool:
+        correct = check_password(user, raw_password)
+        if correct:
+            held.set()
+            release.wait(timeout=10)
+        return correct
+
+    monkeypatch.setattr(User, "check_password", checked)
+    return held, release
+
+
+@pytest.fixture
+def mail_at_close(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    # A WSGI server closes a response after sending it, so the outbox length at each close counts
+    # the mail sent before the client had its answer.
+    counts: list[int] = []
+    close = HttpResponseBase.close
+
+    def closing(response: HttpResponseBase) -> None:
+        counts.append(len(mail.outbox))
+        close(response)
+
+    monkeypatch.setattr(HttpResponseBase, "close", closing)
+    return counts
+
+
+def mail_around_answer(counts: list[int], request: Callable[[], Any]) -> tuple[Any, int, int]:
+    before = len(mail.outbox)
+    response = request()
+    return response, counts[-1] - before, len(mail.outbox) - counts[-1]
+
+
 def fail_daily(client: Client, email: str, failures: int, clock: Clock) -> None:
     for start in range(0, failures, 5):
         for _ in range(min(5, failures - start)):
@@ -220,6 +259,23 @@ def test_wrong_second_factor_codes_for_several_accounts_share_the_client_allowan
             signed_in, "auth/2fa/reauthenticate", {"code": totp_code(signed_in_secret, now + 31)}
         )
     ) == ["too_many_login_attempts"]
+
+
+def test_wrong_reauthentication_codes_count_towards_the_client_allowance(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = time.time()
+    client, secret = pending_second_factor(monkeypatch, now, "member")
+    assert (
+        submit(client, "auth/2fa/authenticate", {"code": totp_code(secret, now)}).status_code == 200
+    )
+    for _ in range(5):
+        assert error_codes(submit(client, "auth/2fa/reauthenticate", {"code": "000000"})) == [
+            "incorrect_code"
+        ]
+    guesses = Client(enforce_csrf_checks=True)
+    guess_unknown_addresses(guesses, 0, 5)
+    assert error_codes(login(guesses, "absent-5@example.com", WRONG)) == ["too_many_login_attempts"]
 
 
 def test_five_wrong_second_factor_codes_lock_the_account_code_check(
@@ -410,6 +466,71 @@ def test_a_success_beside_the_last_daily_failure_neither_locks_nor_announces(
     assert login(Client(enforce_csrf_checks=True), user.email, PASSWORD).status_code == 200
 
 
+def test_a_refusal_beside_a_pending_correct_password_announces_no_lock(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = member()
+    fail_daily(Client(enforce_csrf_checks=True), user.email, 98, clock)
+    held, release = hold_correct_password(monkeypatch)
+
+    def beside_the_held_check() -> list[list[str]]:
+        assert held.wait(timeout=10)
+        try:
+            return [
+                error_codes(login(Client(enforce_csrf_checks=True), user.email, WRONG))
+                for _ in range(2)
+            ]
+        finally:
+            release.set()
+
+    success, codes = in_parallel(
+        [
+            lambda: login(Client(enforce_csrf_checks=True), user.email, PASSWORD).status_code,
+            beside_the_held_check,
+        ]
+    )
+    assert success == 200
+    assert codes == [["email_password_mismatch"], ["too_many_login_attempts"]]
+    assert not mail.outbox
+    client = Client(enforce_csrf_checks=True)
+    assert error_codes(login(client, user.email, WRONG)) == ["email_password_mismatch"]
+    assert error_codes(login(client, user.email, PASSWORD)) == ["too_many_login_attempts"]
+    assert [message.to for message in mail.outbox] == [[user.email]]
+
+
+def test_refusals_just_before_daily_failures_expire_leave_the_short_window_free(
+    clock: Clock,
+) -> None:
+    user = member()
+    client = Client(enforce_csrf_checks=True)
+    start = clock.now
+    fail_daily(client, user.email, 100, clock)
+    clock.advance(start + 24 * 3600 - 60 - clock.now)
+    for _ in range(5):
+        assert error_codes(login(client, user.email, WRONG)) == ["too_many_login_attempts"]
+    clock.advance(61)
+    assert login(client, user.email, PASSWORD).status_code == 200
+
+
+def test_a_daily_lock_refusal_is_answered_before_its_notice_is_mailed(
+    clock: Clock, mail_at_close: list[int]
+) -> None:
+    user = member()
+    client = Client(enforce_csrf_checks=True)
+    for email in (user.email, "absent@example.com"):
+        fail_daily(client, email, 100, clock)
+    known = mail_around_answer(mail_at_close, lambda: login(client, user.email, PASSWORD))
+    unknown = mail_around_answer(
+        mail_at_close, lambda: login(client, "absent@example.com", PASSWORD)
+    )
+    assert [
+        (error_codes(response), before, after) for response, before, after in (known, unknown)
+    ] == [
+        (["too_many_login_attempts"], 0, 1),
+        (["too_many_login_attempts"], 0, 0),
+    ]
+
+
 @pytest.mark.parametrize(
     ("language", "subject"),
     [
@@ -504,6 +625,35 @@ def test_anonymous_account_mails_share_one_hourly_budget(
         == 401
     )
     assert len(mail.outbox) == 21
+
+
+def test_reset_requests_mail_nothing_before_answering_once_the_notice_budget_is_spent(
+    clock: Clock, mail_at_close: list[int]
+) -> None:
+    user = member()
+    for index in range(20):
+        assert (
+            submit(
+                visitor(index), "auth/password/request", {"email": f"absent-{index}@example.com"}
+            ).status_code
+            == 401
+        )
+    assert len(mail.outbox) == 20
+    known = mail_around_answer(
+        mail_at_close,
+        lambda: submit(visitor(20), "auth/password/request", {"email": user.email}),
+    )
+    unknown = mail_around_answer(
+        mail_at_close,
+        lambda: submit(visitor(21), "auth/password/request", {"email": "absent-21@example.com"}),
+    )
+    assert [
+        (response.status_code, before, after) for response, before, after in (known, unknown)
+    ] == [
+        (401, 0, 1),
+        (401, 0, 0),
+    ]
+    assert known[0].json() == unknown[0].json()
 
 
 def test_wrong_current_passwords_are_limited_per_ten_minutes_and_recorded(
