@@ -4,8 +4,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from django.contrib.auth.models import User
 from django.core.mail import EmailMultiAlternatives
-from django.db import IntegrityError, connection, transaction
-from django.db.migrations.executor import MigrationExecutor
+from django.db import IntegrityError, transaction
 from django.utils import translation
 
 from pyracast.accounts.models import UserLanguagePreference
@@ -426,29 +425,3 @@ def test_saved_forecast_updated_date_and_stale_warning_are_localized(days: int) 
     assert attached_sheet(message)["A2"].value == (
         snapshot.collected_at.astimezone(ZoneInfo(system.region.timezone)).replace(tzinfo=None)
     )
-
-
-def test_language_migration_preserves_prepared_content_and_does_not_resend() -> None:
-    system, _ = configured()
-    complete_saved(system)
-    (delivery_id,) = enqueue_due(SLOT)
-    messages: list[EmailMultiAlternatives] = []
-    assert process_notification(delivery_id, SLOT, sender=messages.append)
-    original = NotificationDelivery.objects.get(pk=delivery_id)
-    executor = MigrationExecutor(connection)
-    latest = executor.loader.graph.leaf_nodes()
-    try:
-        executor.migrate([("notifications", "0006_delivery_preparation")])
-    finally:
-        MigrationExecutor(connection).migrate(latest)
-    restored = NotificationDelivery.objects.get(pk=delivery_id)
-    assert restored.language == "en"
-    assert restored.prepared_message == original.prepared_message
-    assert restored.snapshot_id == original.snapshot_id
-    assert restored.status == "sent"
-    assert restored.attempts == 1
-    assert restored.sent_at == original.sent_at
-    assert not process_notification(
-        delivery_id, SLOT + timedelta(minutes=1), sender=messages.append
-    )
-    assert len(messages) == 1

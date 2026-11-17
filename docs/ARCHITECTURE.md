@@ -303,13 +303,18 @@ continues consuming all queues until stopped.
 
 Use Django migrations as the sole schema owner. The migration dependency graph,
 historical models and `django_migrations` ledger travel with the application.
+The history starts from one `0001_initial` per app (`connections` adds
+`0002_initial` to break its cycle with `regions`), built for a reset database.
 Applied operations and data transformations are immutable; fixes use new forward
-migrations. Historical model type annotations can be corrected without changing
-replay behavior. Do not add Flyway
-or Liquibase over the same tables. `makemigrations --check --dry-run` checks model
-state against committed migrations, while `migrate --check` checks unapplied
-migrations; neither is a physical-schema drift detector or a migration checksum.
-Do not make unrecorded manual DDL changes.
+migrations. The overridden `migrate` command refuses, before it changes anything,
+a database whose ledger names a project migration that is not on disk: such a
+database was built from replaced migration files and must be reset or restored
+from a backup taken after the reset. Historical model type annotations can be
+corrected without changing replay behavior. Do not add Flyway or Liquibase over the
+same tables. `makemigrations --check --dry-run` checks model state against committed
+migrations, while `migrate --check` checks unapplied migrations; neither is a
+physical-schema drift detector or a migration checksum. Do not make unrecorded manual
+DDL changes.
 
 PostgreSQL 18.6 is the verified, pinned development/CI version. Keep time in
 `timestamptz`, quantities in explicitly named units, unknown measurements nullable,
@@ -330,8 +335,9 @@ point to a different source snapshot and to an acquisition for their target bind
 the source/target uniqueness key still prevents duplicate normalization.
 CHECK constraints reject invalid ranges, non-finite physical values and unsupported
 persisted states.
-New CHECK and composite FK constraints are added without scanning old rows, then
-validated in separate migrations; deployment is incomplete until validation passes.
+Composite foreign keys, the issuance trigger and the `btree_gist` extension, which
+models cannot declare, are listed once in `pyracast/schema_objects.py`; the migration
+that creates each one and the schema catalog test both read that list.
 EPİAŞ archives use protected relations; only the explicit expired-definition purge
 removes their snapshots, jobs and connections in order.
 
@@ -567,7 +573,7 @@ The Production workspace selects a completed local day and preserves native meas
 
 Workspace administrators can enter or correct completed native 30/60-minute intervals under the current approved configuration, independently of reference-weather availability. Calibration still requires matching archived estimated actuals. Input uses explicit MWh or kWh, timezone-aware bounds and quality labels. Batches contain at most 2,000 non-overlapping rows within 31 local days. Each change checks its expected head revision; stale input rejects the entire atomic batch. CSV preview captures those same tokens and warns when partial measurements suppress a whole provider hour without covering its remainder. The existing insert-only command/API retains reference-coverage validation and idempotent exact replays.
 
-Observation values remain immutable: corrections append a revision and explicit revert appends a withdrawal, returning selection to the latest eligible provider value or missing data. Current-head metadata supports PostgreSQL uniqueness and exclusion constraints using `btree_gist`; historical selection uses the recorded-time cutoff and observation ID watermark, including replacements with identical timestamps. Writes and calibration watermark capture serialize under the plant lock. Corrections are absolute energy values: newer provider acquisitions refresh the displayed original and provenance without changing the correction. Preserve native bounds, actor, recording time and revision history. Deploy migration 0017 within the existing maintenance window; after revisions exist, rollback requires the pre-release database backup rather than reversing the unique-constraint migration.
+Observation values remain immutable: corrections append a revision and explicit revert appends a withdrawal, returning selection to the latest eligible provider value or missing data. Current-head metadata supports PostgreSQL uniqueness and exclusion constraints using `btree_gist`; historical selection uses the recorded-time cutoff and observation ID watermark, including replacements with identical timestamps. Writes and calibration watermark capture serialize under the plant lock. Corrections are absolute energy values: newer provider acquisitions refresh the displayed original and provenance without changing the correction. Preserve native bounds, actor, recording time and revision history.
 
 Saving production automatically prepares a durable analysis job once at least one day has complete, valid matched daylight coverage within a 60-day pool ending on the latest recorded local day. One to six days produce diagnostics with an insufficient fit; fitting requires seven matched days and five informative training days. Complete valid zero-production days remain in the chronological holdout and its scored errors, but are excluded from factor learning. The fitter trains on the 30 calendar days before the final untouched holdout. Additional readings can be saved while a job is running; terminal completion prepares one follow-up if new eligible data arrived. An unchanged dataset does not trigger repeated jobs. The manual API retains its 7–90 completed-day range for operator compatibility. A separate Dramatiq `calibration` queue performs offline analysis without provider calls; leases expire after five minutes and permit at most three attempts. Pin observation creation time and ID watermark, source snapshots, configuration, selection policy and a dataset digest. Recheck configuration and lease ownership before publication. Authorized members can enable daily automatic checks and guarded promotion before any fit is ready. Promotion requires at least thirty matched days, current Hobby source validation, the candidate-specific improvement and bias guards, and seven new holdout days after the previous promotion. Disabling keeps the last good selection; baseline reset disables automation, and configuration changes clear its authorization. Activations are audited separately from immutable fits, with a null actor for system decisions and the authorizing member in event details. Details and statistical acceptance criteria live in `IRRADIANCE.md`.
 
@@ -608,13 +614,8 @@ editable through the MFA-protected admin's **Email reminder settings**. Lowering
 preserves the schedule but pauses deliveries until its list fits; each paused time is
 recorded as a skipped delivery with its reason. Membership growth
 above the limit also pauses delivery without truncating the group; reducing an excess
-or disabling the schedule remains possible. Migration `notifications.0008` retains
-the current administrator's legacy schedule when available, otherwise an existing
-active member's. Other schedules are retired without merging their times or
-recipients. Retired schedules preserve delivery history but cannot send or consume
-the current schedule's recipient allowance. Rollback after a configuring account
-is deleted or ownership creates a legacy-key conflict requires the pre-release
-database backup; the migration rejects a lossy reverse conversion.
+or disabling the schedule remains possible. Retired schedules preserve delivery
+history but cannot send or consume the current schedule's recipient allowance.
 
 The current provider plan's daily request limit also caps daily reminder times; this is a product limit, not a quota reservation. Emails make **zero provider requests** and do not consume the request ledger. A reduced plan limit retains only the earliest configured times within the current limit.
 
@@ -629,10 +630,7 @@ external. Revocations survive late mail responses and safe retries without chang
 an already authorized envelope. Rejoining restores automatic inclusion in new slots.
 Tenant locking serializes membership changes with the transmission permission marker;
 removal after that marker cannot revoke an already authorized in-flight message.
-Migration `notifications.0009` preserves old individual deliveries and their outcomes;
-an existing slot is never re-enqueued as a group. Reversing multi-recipient groups,
-automatic membership or delivery revocations requires the pre-release backup. If collection is scheduled
-at the same local time, preparation waits for that exact job to finish, for at most
+If collection is scheduled at the same local time, preparation waits for that exact job to finish, for at most
 15 minutes. Its acquisition may become eligible within that grace period; every
 other acquisition must have been collected and published by the original reminder
 time. A delayed restart never admits arbitrary later acquisitions.
@@ -669,10 +667,7 @@ locally from the pinned saved forecast inputs, using configuration, calibration 
 revisions eligible at the reminder slot. It freezes these results before rendering any
 language; retries and later language variants never recalculate them. No provider request
 is made. Validate saved dates, binding identity, finite
-values, interval coverage, energy consistency and completeness before selection. Migration
-`forecasts.0017` copies only an existing result's matching original target day;
-additional historical days are not recalculated or backdated. The wider fallback
-window becomes available after subsequent successful collections.
+values, interval coverage, energy consistency and completeness before selection.
 An unexpected rendering failure freezes a minimal plain-text unavailable notice,
 using an independent message builder; retries preserve that same notice. Database
 failures leave durable unsent work for later recovery.
@@ -686,10 +681,7 @@ that lost its lease while opening the connection cannot send. Expired leases bef
 this marker can safely retry; after the marker they become `uncertain`, with no
 automatic second send. Preserve the original token so a late known response can
 resolve that same attempt. Legacy interrupted deliveries without prepared content
-remain uncertain because their transmission phase is unknown. Migration
-`notifications.0006` conservatively marks existing sending/uncertain rows using
-their saved acceptance time or scheduled time; this legacy marker is not an
-observed mail transmission timestamp.
+remain uncertain because their transmission phase is unknown.
 
 SMTP submits DATA only after every envelope recipient accepts RCPT. Any recipient
 rejection resets the transaction before content is sent, so a retry cannot duplicate

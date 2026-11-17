@@ -303,10 +303,13 @@ successful `main` CI runs trigger it automatically. The workflow:
    SBOM and provenance are preserved; all four release references are immutable.
 2. Rejects HIGH/CRITICAL image vulnerabilities and tests the exact image digests.
 3. Transfers the release through IAP using a short-lived OIDC identity.
-4. Checks configuration and database access, stops producers and drains workers,
-   takes a database dump and waits for its off-host upload before upgrading
-   PostgreSQL/RabbitMQ, migrates with the schema owner, and starts the tested
-   revision. A failed backup leaves the application stopped and blocks migration.
+4. Checks configuration, database access and the migration plan, stops producers
+   and drains workers, takes a database dump and waits for its off-host upload
+   before upgrading PostgreSQL/RabbitMQ, migrates with the schema owner, and starts
+   the tested revision. A failed backup leaves the application stopped and blocks migration.
+   The plan step refuses a database whose migration ledger names Pyracast migrations
+   that are no longer in the release (a database from before the migration baseline);
+   the running release keeps serving until the database is reset.
 5. Promotes `current` only after container readiness checks and a local HTTPS request
    verify the public certificate, routing and database health.
 

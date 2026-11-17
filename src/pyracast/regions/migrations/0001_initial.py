@@ -29,10 +29,10 @@ class Migration(migrations.Migration):
                 ("latitude", models.FloatField()),
                 ("longitude", models.FloatField()),
                 ("timezone", models.CharField(max_length=100)),
-                ("surface", models.CharField(default="horizontal", max_length=30)),
                 ("revision", models.PositiveIntegerField(default=1)),
                 ("status", models.CharField(default="pending", max_length=20)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("deleted_at", models.DateTimeField(db_index=True, null=True)),
                 (
                     "approved_binding",
                     models.ForeignKey(
@@ -69,12 +69,80 @@ class Migration(migrations.Migration):
                     ),
                 ),
                 (
+                    "provider_account",
+                    models.ForeignKey(
+                        null=True,
+                        on_delete=django.db.models.deletion.PROTECT,
+                        to="connections.provideraccount",
+                    ),
+                ),
+                (
                     "region",
                     models.ForeignKey(
-                        on_delete=django.db.models.deletion.PROTECT, to="regions.region"
+                        null=True, on_delete=django.db.models.deletion.PROTECT, to="regions.region"
                     ),
                 ),
             ],
+        ),
+        migrations.CreateModel(
+            name="RegionLocationChangeRequest",
+            fields=[
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("base_revision", models.PositiveIntegerField()),
+                ("latitude", models.FloatField()),
+                ("longitude", models.FloatField()),
+                ("timezone", models.CharField(max_length=100)),
+                ("reason", models.CharField(blank=True, max_length=1000)),
+                ("status", models.CharField(default="pending", max_length=20)),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                ("reviewed_at", models.DateTimeField(null=True)),
+                (
+                    "region",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE, to="regions.region"
+                    ),
+                ),
+                (
+                    "requested_by",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="region_location_requests",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
+                (
+                    "reviewed_by",
+                    models.ForeignKey(
+                        null=True,
+                        on_delete=django.db.models.deletion.PROTECT,
+                        related_name="reviewed_region_location_requests",
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
+            ],
+        ),
+        migrations.AddConstraint(
+            model_name="region",
+            constraint=models.UniqueConstraint(
+                models.F("tenant"),
+                models.Func(
+                    models.F("latitude"),
+                    output_field=models.DecimalField(decimal_places=6, max_digits=10),
+                    template="ROUND((%(expressions)s)::numeric, 6)",
+                ),
+                models.Func(
+                    models.F("longitude"),
+                    output_field=models.DecimalField(decimal_places=6, max_digits=10),
+                    template="ROUND((%(expressions)s)::numeric, 6)",
+                ),
+                condition=models.Q(("deleted_at__isnull", True)),
+                name="one_active_region_per_tenant_location",
+            ),
         ),
         migrations.AddConstraint(
             model_name="region",
@@ -97,6 +165,58 @@ class Migration(migrations.Migration):
                     ("status__in", ("pending", "approved", "rejected", "suspended"))
                 ),
                 name="region_status",
+            ),
+        ),
+        migrations.AddConstraint(
+            model_name="auditevent",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    models.Q(("provider_account__isnull", True), ("region__isnull", False)),
+                    models.Q(("provider_account__isnull", False), ("region__isnull", True)),
+                    _connector="OR",
+                ),
+                name="audit_exactly_one_target",
+            ),
+        ),
+        migrations.AddConstraint(
+            model_name="regionlocationchangerequest",
+            constraint=models.UniqueConstraint(
+                condition=models.Q(("status", "pending")),
+                fields=("region",),
+                name="one_pending_region_location_request",
+            ),
+        ),
+        migrations.AddConstraint(
+            model_name="regionlocationchangerequest",
+            constraint=models.CheckConstraint(
+                condition=models.Q(("latitude__gte", -90), ("latitude__lte", 90)),
+                name="location_request_latitude",
+            ),
+        ),
+        migrations.AddConstraint(
+            model_name="regionlocationchangerequest",
+            constraint=models.CheckConstraint(
+                condition=models.Q(("longitude__gte", -180), ("longitude__lte", 180)),
+                name="location_request_longitude",
+            ),
+        ),
+        migrations.AddConstraint(
+            model_name="regionlocationchangerequest",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    models.Q(
+                        ("reviewed_at__isnull", True),
+                        ("reviewed_by__isnull", True),
+                        ("status", "pending"),
+                    ),
+                    models.Q(
+                        ("reviewed_at__isnull", False),
+                        ("reviewed_by__isnull", False),
+                        ("status__in", ("approved", "rejected")),
+                    ),
+                    _connector="OR",
+                ),
+                name="location_request_review_state",
             ),
         ),
     ]

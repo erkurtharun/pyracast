@@ -1,10 +1,8 @@
 from datetime import timedelta
-from importlib import import_module
 from typing import Any
 
 import pytest
-from django.db import IntegrityError, connection, transaction
-from django.db.migrations.executor import MigrationExecutor
+from django.db import IntegrityError, transaction
 
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import (
@@ -15,51 +13,6 @@ from pyracast.forecasts.models import (
 from tests.test_domain import NOW, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
-
-
-def test_snapshot_binding_backfill_preserves_a_populated_archive() -> None:
-    system = make_system()
-    with transaction.atomic():
-        with connection.cursor() as cursor:
-            cursor.execute("CREATE TEMP TABLE connections_sitebinding (id bigint PRIMARY KEY)")
-            cursor.execute("INSERT INTO connections_sitebinding VALUES (%s)", (system.binding.pk,))
-            cursor.execute(
-                "CREATE TEMP TABLE forecasts_collectionjob "
-                "(id bigint PRIMARY KEY, binding_id bigint)"
-            )
-            cursor.execute(
-                "CREATE TEMP TABLE forecasts_forecastsnapshot "
-                "(id bigint PRIMARY KEY, job_id bigint, "
-                "raw_payload jsonb, collected_at timestamptz)"
-            )
-            cursor.execute(
-                "CREATE TEMP TABLE forecasts_referencecapacitynormalization "
-                "(id bigint PRIMARY KEY, source_snapshot_id bigint, snapshot_id bigint, "
-                "source_capacity_kw double precision, target_capacity_kw double precision)"
-            )
-            cursor.execute(
-                "INSERT INTO forecasts_collectionjob VALUES (1,%s)", (system.binding.pk,)
-            )
-            cursor.execute(
-                "INSERT INTO forecasts_forecastsnapshot VALUES (1,1,%s,%s)",
-                ('{"native":true}', NOW),
-            )
-        name = "0012_forecastsnapshot_binding_and_more"
-        migration = import_module(f"pyracast.forecasts.migrations.{name}").Migration(
-            name, "forecasts"
-        )
-        state = MigrationExecutor(connection).loader.project_state(
-            [("forecasts", "0011_validate_collection_integrity")]
-        )
-        with connection.schema_editor() as editor:
-            migration.apply(state, editor)
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT binding_id, raw_payload = '{\"native\":true}'::jsonb, collected_at "
-                "FROM forecasts_forecastsnapshot"
-            )
-            assert cursor.fetchone() == (system.binding.pk, True, NOW)
-        transaction.set_rollback(True)
 
 
 def test_snapshot_and_normalization_share_the_target_job_binding() -> None:

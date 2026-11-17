@@ -11,8 +11,6 @@ from django.contrib.auth.models import User
 from django.core import mail
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, close_old_connections, connection, connections, transaction
-from django.db.migrations.exceptions import IrreversibleError
-from django.db.migrations.executor import MigrationExecutor
 from django.test import override_settings
 from rest_framework.test import APIClient
 
@@ -340,46 +338,6 @@ def test_group_uniqueness_and_legacy_slot_prevent_duplicate_dispatch() -> None:
     assert ids[-1] not in {first.pk, second.pk}
 
 
-def test_migration_preserves_distinct_legacy_deliveries_and_ambiguity() -> None:
-    _, schedule = configured()
-    executor = MigrationExecutor(connection)
-    latest = executor.loader.graph.leaf_nodes()
-    previous = [("notifications", "0008_shared_reminder_schedules")]
-    executor.migrate(previous)
-    try:
-        legacy_records = executor.loader.project_state(previous).apps.get_model(
-            "notifications", "NotificationDelivery"
-        )
-        keys = []
-        for index, status in enumerate(("sent", "uncertain", "retry")):
-            keys.append(
-                legacy_records.objects.create(
-                    schedule_id=schedule.pk,
-                    recipient=f"member{index}@example.com",
-                    status=status,
-                    scheduled_for=SLOT,
-                    available_at=SLOT,
-                    attempts=2,
-                    transmit_started_at=SLOT if status != "retry" else None,
-                    prepared_message={"subject": "Frozen"},
-                ).pk
-            )
-    finally:
-        MigrationExecutor(connection).migrate(latest)
-    records = list(NotificationDelivery.objects.filter(pk__in=keys).order_by("pk"))
-    assert [record.recipients for record in records] == [
-        [f"member{i}@example.com"] for i in range(3)
-    ]
-    assert [record.status for record in records] == ["sent", "uncertain", "retry"]
-    assert all(
-        not record.grouped
-        and record.attempts == 2
-        and record.prepared_message == {"subject": "Frozen"}
-        for record in records
-    )
-    assert records[1].transmit_started_at == SLOT
-
-
 def test_unverified_alias_cannot_claim_or_remove_an_external_recipient() -> None:
     system, _ = configured()
     user = member(system, "member@example.com")
@@ -410,25 +368,3 @@ def test_workspace_recipients_are_rechecked_before_transmission(change: str) -> 
         EmailAddress.objects.create(user=user, email=user.email, verified=True)
     assert not process_notification(key, SLOT)
     assert not mail.outbox
-
-
-@pytest.mark.parametrize("automatic", [False, True])
-def test_rollback_rejects_loss_of_grouped_history_or_membership_settings(automatic: bool) -> None:
-    system, schedule = configured()
-    if automatic:
-        group(system)
-    else:
-        NotificationDelivery.objects.create(
-            schedule=schedule,
-            scheduled_for=SLOT,
-            available_at=SLOT,
-            recipients=["first@example.com", "second@example.com"],
-        )
-    with pytest.raises(IrreversibleError):
-        MigrationExecutor(connection).migrate([("notifications", "0008_shared_reminder_schedules")])
-    assert ReminderSchedule.objects.get().include_workspace_members is automatic
-    if not automatic:
-        assert NotificationDelivery.objects.get().recipients == [
-            "first@example.com",
-            "second@example.com",
-        ]

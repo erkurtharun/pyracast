@@ -61,7 +61,7 @@ sequenceDiagram
 ## Authorization
 
 - No per-user check: the phase selects rows only by `deleted_at`, across all tenants. Authorization happened when a workspace administrator trashed the item (`plant-trash-and-restore`).
-- Database: foreign keys to `Region`, `Plant`, `SiteBinding`, `CollectionJob` and `ForecastSnapshot` are `PROTECT` except `CollectionSchedule.region`, `ReminderSchedule.region`, `RegionLocationChangeRequest.region` and `PlantSubmission.plant`, which cascade; deliveries and change-request items cascade only from their own parents (`ReminderSchedule`, `ChangeRequest`). A child the purge forgets raises `ProtectedError` instead of orphaning data. No trigger blocks deleting archives: the issuance guard (`0018_forecast_issuance`) fires on INSERT and UPDATE only.
+- Database: foreign keys to `Region`, `Plant`, `SiteBinding`, `CollectionJob` and `ForecastSnapshot` are `PROTECT` except `CollectionSchedule.region`, `ReminderSchedule.region`, `RegionLocationChangeRequest.region` and `PlantSubmission.plant`, which cascade; deliveries and change-request items cascade only from their own parents (`ReminderSchedule`, `ChangeRequest`). A child the purge forgets raises `ProtectedError` instead of orphaning data. No trigger blocks deleting archives: the issuance guard (`immutable_forecast_issuance`, declared in `pyracast/schema_objects.py`) fires on INSERT and UPDATE only.
 
 ## Failure paths
 

@@ -12,7 +12,6 @@ from django.core import mail
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.db import IntegrityError, close_old_connections, connection, connections, transaction
-from django.db.migrations.executor import MigrationExecutor
 from django.test import override_settings
 from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
@@ -1055,43 +1054,6 @@ def test_notification_settings_database_constraints() -> None:
         NotificationSettings.objects.create(pk=2)
 
 
-def test_notification_migration_preserves_legacy_recipients_and_delivery_history() -> None:
-    system, _ = configured()
-    saved(system)
-    old_target = [("notifications", "0001_initial")]
-    executor = MigrationExecutor(connection)
-    current_targets = executor.loader.graph.leaf_nodes()
-    try:
-        executor.migrate(old_target)
-        apps = executor.loader.project_state(old_target).apps
-        preference_model = apps.get_model("notifications", "ReminderPreference")
-        delivery_model = apps.get_model("notifications", "NotificationDelivery")
-        schedule = preference_model.objects.get(user_id=system.member.pk)
-        schedule.email = "legacy@example.com"
-        schedule.save()
-        delivery = delivery_model.objects.create(
-            preference=schedule,
-            scheduled_for=SLOT,
-            available_at=SLOT,
-            recipient="historic@example.com",
-            status="sent",
-            sent_at=SLOT,
-            attempts=1,
-        )
-    finally:
-        MigrationExecutor(connection).migrate(current_targets)
-    restored = ReminderSchedule.objects.get(pk=schedule.pk)
-    assert restored.recipients == ["legacy@example.com"]
-    history = NotificationDelivery.objects.get(pk=delivery.pk)
-    assert (history.recipients, history.status, history.sent_at, history.attempts) == (
-        ["historic@example.com"],
-        "sent",
-        SLOT,
-        1,
-    )
-    assert NotificationSettings.objects.get(pk=1).max_recipients == 5
-
-
 def test_new_administrator_replaces_one_shared_recipient_list_within_the_cap() -> None:
     system, schedule = configured()
     addresses = [f"person{index}@example.com" for index in range(5)]
@@ -1375,77 +1337,3 @@ def test_reminder_api_requires_an_explicit_recipient_list() -> None:
         "code": "http_400",
         "detail": {"recipients": ["This field is required."]},
     }
-
-
-def test_email_column_removal_preserves_recipients_and_pinned_deliveries() -> None:
-    system, original = configured()
-    saved(system)
-    old_target = [("notifications", "0004_validate_delivery_status")]
-    executor = MigrationExecutor(connection)
-    current_targets = executor.loader.graph.leaf_nodes()
-    expected = [
-        ("legacy@example.com", [], ["legacy@example.com"]),
-        ("single@example.com", ["single@example.com"], ["single@example.com"]),
-        (
-            "obsolete@example.com",
-            ["one@example.com", "two@example.com"],
-            ["one@example.com", "two@example.com"],
-        ),
-        ("", [], []),
-    ]
-    ids: list[int] = []
-    try:
-        executor.migrate(old_target)
-        old_apps = executor.loader.project_state(old_target).apps
-        preference_model = old_apps.get_model("notifications", "ReminderPreference")
-        delivery_model = old_apps.get_model("notifications", "NotificationDelivery")
-        preference_model.objects.filter(pk=original.pk).delete()
-        for index, (email, recipients, _) in enumerate(expected):
-            user = User.objects.create(username=f"legacy-{index}")
-            schedule = preference_model.objects.create(
-                user_id=user.pk,
-                region_id=system.region.pk,
-                email=email,
-                recipients=recipients,
-                effective_from=NOW,
-                times=["10:00"],
-                enabled=False,
-            )
-            ids.append(schedule.pk)
-        delivery = delivery_model.objects.create(
-            preference_id=ids[0],
-            scheduled_for=SLOT,
-            available_at=SLOT,
-            recipient="pinned@example.com",
-            status="uncertain",
-            attempts=1,
-        )
-        MigrationExecutor(connection).migrate(current_targets)
-        assert list(
-            ReminderSchedule.objects.filter(pk__in=ids)
-            .order_by("pk")
-            .values_list("recipients", flat=True)
-        ) == [recipients for _, _, recipients in expected]
-        history = NotificationDelivery.objects.get(pk=delivery.pk)
-        assert (history.schedule_id, history.recipients, history.status, history.attempts) == (
-            ids[0],
-            ["pinned@example.com"],
-            "uncertain",
-            1,
-        )
-        executor = MigrationExecutor(connection)
-        executor.migrate(old_target)
-        old_apps = executor.loader.project_state(old_target).apps
-        preference_model = old_apps.get_model("notifications", "ReminderPreference")
-        assert list(
-            preference_model.objects.filter(pk__in=ids)
-            .order_by("pk")
-            .values_list("email", "recipients")
-        ) == [
-            ("legacy@example.com", ["legacy@example.com"]),
-            ("single@example.com", ["single@example.com"]),
-            ("", ["one@example.com", "two@example.com"]),
-            ("", []),
-        ]
-    finally:
-        MigrationExecutor(connection).migrate(current_targets)

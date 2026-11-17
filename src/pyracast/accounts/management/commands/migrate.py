@@ -2,11 +2,14 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any, cast
 
+from django.apps import apps
 from django.core.management.base import CommandError, CommandParser
 from django.core.management.commands.migrate import Command as DjangoMigrateCommand
 from django.db import connections
 from django.db.backends.base.base import BaseDatabaseWrapper
 from django.db.backends.postgresql.base import DatabaseWrapper
+from django.db.migrations.loader import MigrationLoader
+from django.db.migrations.recorder import MigrationRecorder
 
 # Session locks survive the commits between atomic and non-atomic migrations.
 MIGRATION_LOCK = (0x50595241, 0x4D494752)
@@ -70,6 +73,26 @@ def migration_session(
             raise
 
 
+def refuse_replaced_history(connection: BaseDatabaseWrapper) -> None:
+    project = {
+        config.label for config in apps.get_app_configs() if config.name.startswith("pyracast.")
+    }
+    on_disk = MigrationLoader(None, ignore_no_migrations=True).disk_migrations
+    # Django skips ledger rows without a file, so a database built from replaced migration
+    # files would pass as migrated and meet code written for a different schema.
+    replaced = sorted(
+        f"{app}.{name}"
+        for app, name in MigrationRecorder(connection).applied_migrations()
+        if app in project and (app, name) not in on_disk
+    )
+    if replaced:
+        raise CommandError(
+            "The migration ledger names Pyracast migrations that are not on disk: "
+            f"{', '.join(replaced)}. The database predates the current migration baseline; "
+            "reset it with deploy/reset_database.py or restore a backup taken after the reset."
+        )
+
+
 class Command(DjangoMigrateCommand):
     def add_arguments(self, parser: CommandParser) -> None:
         super().add_arguments(parser)
@@ -82,4 +105,5 @@ class Command(DjangoMigrateCommand):
             lock_timeout=options["lock_timeout_seconds"],
             statement_timeout=options["statement_timeout_seconds"],
         ):
+            refuse_replaced_history(connections[options["database"]])
             return super().handle(*args, **options)

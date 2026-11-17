@@ -4,9 +4,6 @@ from datetime import timedelta
 import pytest
 from allauth.account.models import EmailAddress
 from django.core import mail
-from django.db import connection
-from django.db.migrations.exceptions import IrreversibleError
-from django.db.migrations.executor import MigrationExecutor
 from django.test import override_settings
 
 from pyracast.accounts.models import Membership
@@ -106,22 +103,6 @@ def test_later_schedule_alias_evidence_prunes_earlier_external_schedule(retired:
     assert evidence.recipient_memberships == (
         {"old@example.com": [membership.pk]} if retired else {}
     )
-
-
-def test_rollback_refuses_to_discard_recipient_revocations() -> None:
-    _, schedule = configured()
-    delivery = NotificationDelivery.objects.create(
-        schedule=schedule,
-        scheduled_for=SLOT,
-        available_at=SLOT,
-        recipients=["retained@example.com"],
-        revoked_recipients=["removed@example.com"],
-    )
-    with pytest.raises(IrreversibleError, match="Revoked delivery recipients"):
-        MigrationExecutor(connection).migrate([("notifications", "0008_shared_reminder_schedules")])
-    delivery.refresh_from_db()
-    assert delivery.recipients == ["retained@example.com"]
-    assert delivery.revoked_recipients == ["removed@example.com"]
 
 
 def test_historical_alias_does_not_revoke_a_different_pinned_member() -> None:

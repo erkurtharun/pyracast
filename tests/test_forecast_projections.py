@@ -1,11 +1,8 @@
-from copy import deepcopy
 from datetime import UTC, date, datetime, timedelta
-from importlib import import_module
 from json import dumps, loads
 from typing import cast
 
 import pytest
-from django.db import connection
 
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
@@ -362,27 +359,3 @@ def test_supplemental_solver_crash_does_not_discard_the_valid_target_day() -> No
     assert result is not None
     assert result["energy_kwh_m2"] == 12
     assert saved_day_payload(snapshot, job.target_date + timedelta(days=1)) is None
-
-
-@pytest.mark.django_db(transaction=True)
-def test_projection_migration_copies_only_the_original_target_without_recalculation() -> None:
-    system = make_system(approved=True)
-    job = CollectionJob.objects.get()
-    snapshot = ForecastSnapshot.objects.create(
-        job=job, binding=system.binding, raw_payload={}, normalized_intervals=[], collected_at=NOW
-    )
-    payload = {"local_date": job.target_date.isoformat(), "energy_kwh_m2": 12}
-    result = ForecastResult.objects.create(snapshot=snapshot, payload=payload, published_at=NOW)
-    migration = import_module("pyracast.forecasts.migrations.0017_forecastresult_daily_payloads")
-    with connection.cursor() as cursor:
-        cursor.execute(migration.BACKFILL)
-    result.refresh_from_db()
-    assert result.daily_payloads == {job.target_date.isoformat(): payload}
-    changed = deepcopy(payload)
-    changed["local_date"] = (job.target_date + timedelta(days=1)).isoformat()
-    result.payload, result.daily_payloads = changed, {}
-    result.save()
-    with connection.cursor() as cursor:
-        cursor.execute(migration.BACKFILL)
-    result.refresh_from_db()
-    assert result.daily_payloads == {}

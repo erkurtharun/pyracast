@@ -45,7 +45,7 @@ def foreign_keys() -> list[tuple[Any, ...]]:
             """,
             (project_tables(),),
         )
-        return cursor.fetchall()
+        return list(cursor.fetchall())
 
 
 def test_composite_foreign_keys_equal_the_declared_schema_objects() -> None:

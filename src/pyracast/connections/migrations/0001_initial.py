@@ -1,6 +1,7 @@
 from typing import ClassVar
 
 import django.db.models.deletion
+from django.conf import settings
 from django.db import migrations, models
 from django.db.migrations.operations.base import Operation
 
@@ -8,7 +9,9 @@ from django.db.migrations.operations.base import Operation
 class Migration(migrations.Migration):
     initial = True
 
-    dependencies: ClassVar[list[tuple[str, str]]] = []
+    dependencies: ClassVar = [
+        migrations.swappable_dependency(settings.AUTH_USER_MODEL),
+    ]
 
     operations: ClassVar[list[Operation]] = [
         migrations.CreateModel(
@@ -22,19 +25,23 @@ class Migration(migrations.Migration):
                 ),
                 ("provider", models.CharField(max_length=30)),
                 ("external_account_id", models.CharField(max_length=200)),
-                ("secret_reference", models.CharField(max_length=250)),
+                ("encrypted_api_key", models.CharField(blank=True, default="", max_length=2048)),
                 ("daily_quota", models.PositiveIntegerField(default=10)),
                 ("enabled", models.BooleanField(default=True)),
                 ("credential_revision", models.PositiveIntegerField(default=1)),
+                ("request_blocked_until", models.DateTimeField(null=True)),
+                ("authentication_failed_revision", models.PositiveIntegerField(null=True)),
+                ("authorization_reference", models.CharField(default="", max_length=500)),
+                ("authorized_at", models.DateTimeField(null=True)),
+                (
+                    "authorized_by",
+                    models.ForeignKey(
+                        null=True,
+                        on_delete=django.db.models.deletion.PROTECT,
+                        to=settings.AUTH_USER_MODEL,
+                    ),
+                ),
             ],
-            options={
-                "constraints": [
-                    models.UniqueConstraint(
-                        fields=("provider", "external_account_id"),
-                        name="canonical_provider_account",
-                    )
-                ],
-            },
         ),
         migrations.CreateModel(
             name="SiteBinding",
@@ -48,13 +55,14 @@ class Migration(migrations.Migration):
                 ("region_revision", models.PositiveIntegerField()),
                 ("site_id", models.CharField(max_length=200)),
                 ("capacity_kw", models.FloatField()),
+                ("dc_capacity_kw", models.FloatField(blank=True, null=True)),
                 ("power_basis", models.CharField(default="ac", max_length=2)),
-                ("capacity_basis", models.CharField(default="ac", max_length=2)),
                 ("capacity_semantics_verified", models.BooleanField(default=False)),
                 ("tilt_degrees", models.FloatField(default=0)),
-                ("azimuth_degrees", models.FloatField(default=180)),
+                ("azimuth_degrees", models.FloatField(default=0)),
                 ("losses_percent", models.FloatField(default=0)),
                 ("installation_date", models.DateField(null=True)),
+                ("settings_verification_reference", models.CharField(default="", max_length=500)),
                 ("latitude", models.FloatField()),
                 ("longitude", models.FloatField()),
                 ("timezone", models.CharField(max_length=100)),

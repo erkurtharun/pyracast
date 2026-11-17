@@ -92,8 +92,8 @@ erDiagram
     accounts_tenant ||--o{ accounts_workspacememberremoval : "tenant_id"
     auth_user ||--o{ accounts_workspacememberremoval : "user_id"
     auth_user ||--o{ regions_auditevent : "actor_id"
-    regions_region |o--o{ regions_auditevent : "region_id"
     connections_provideraccount |o--o{ regions_auditevent : "provider_account_id"
+    regions_region |o--o{ regions_auditevent : "region_id"
     connections_sitebinding |o--o{ regions_region : "approved_binding_id"
     accounts_tenant ||--o{ regions_region : "tenant_id"
     regions_region ||--o{ regions_regionlocationchangerequest : "region_id"
@@ -106,8 +106,8 @@ erDiagram
     forecasts_historicalreferenceimport |o--o{ forecasts_collectionjob : "reference_import_id"
     regions_region ||--o| forecasts_collectionschedule : "region_id"
     forecasts_forecastsnapshot ||--o| forecasts_forecastresult : "snapshot_id"
-    forecasts_collectionjob ||--o| forecasts_forecastsnapshot : "job_id"
     connections_sitebinding ||--o{ forecasts_forecastsnapshot : "binding_id"
+    forecasts_collectionjob ||--o| forecasts_forecastsnapshot : "job_id"
     connections_sitebinding ||--o{ forecasts_historicalreferenceimport : "binding_id"
     auth_user ||--o{ forecasts_historicalreferenceimport : "imported_by_id"
     auth_user ||--o{ forecasts_referencecapacitynormalization : "authorized_by_id"
@@ -122,17 +122,17 @@ erDiagram
     plants_plant ||--o{ plants_calibrationactivation : "plant_id"
     plants_plantconfiguration ||--o{ plants_calibrationactivation : "configuration_id"
     connections_sitebinding ||--o{ plants_calibrationrun : "binding_id"
+    plants_calibrationactivation |o--o{ plants_calibrationrun : "comparison_activation_id"
     auth_user ||--o{ plants_calibrationrun : "requested_by_id"
     plants_plant ||--o{ plants_calibrationrun : "plant_id"
     plants_plantconfiguration ||--o{ plants_calibrationrun : "configuration_id"
-    plants_calibrationactivation |o--o{ plants_calibrationrun : "comparison_activation_id"
     plants_calibrationrun |o--o{ plants_forecastissuance : "calibration_id"
-    plants_plantconfiguration ||--o{ plants_forecastissuance : "configuration_id"
-    plants_plant ||--o{ plants_forecastissuance : "plant_id"
     forecasts_forecastsnapshot ||--o{ plants_forecastissuance : "snapshot_id"
+    plants_plant ||--o{ plants_forecastissuance : "plant_id"
+    plants_plantconfiguration ||--o{ plants_forecastissuance : "configuration_id"
+    auth_user |o--o{ plants_plant : "automatic_calibration_enabled_by_id"
     regions_region ||--o{ plants_plant : "region_id"
     plants_plantconfiguration |o--o{ plants_plant : "current_configuration_id"
-    auth_user |o--o{ plants_plant : "automatic_calibration_enabled_by_id"
     connections_sitebinding ||--o{ plants_plantconfiguration : "binding_id"
     auth_user ||--o{ plants_plantconfiguration : "created_by_id"
     plants_plant ||--o{ plants_plantconfiguration : "plant_id"
@@ -154,14 +154,14 @@ erDiagram
     plants_plantconfiguration ||--o{ incidents_plantincident : "declared_configuration_id"
     plants_plant ||--o{ incidents_plantincident : "plant_id"
     auth_user ||--o{ incidents_plantincident : "updated_by_id"
-    forecasts_forecastsnapshot |o--o{ notifications_notificationdelivery : "snapshot_id"
     connections_sitebinding |o--o{ notifications_notificationdelivery : "binding_id"
+    forecasts_forecastsnapshot |o--o{ notifications_notificationdelivery : "snapshot_id"
     notifications_reminderschedule ||--o{ notifications_notificationdelivery : "schedule_id"
-    regions_region ||--o{ notifications_reminderschedule : "region_id"
     auth_user |o--o{ notifications_reminderschedule : "configured_by_id"
+    regions_region ||--o{ notifications_reminderschedule : "region_id"
     plants_plantconfiguration ||--o{ metering_epiascollectionjob : "configuration_id"
-    metering_epiasconnection ||--o{ metering_epiascollectionjob : "connection_id"
     plants_plant ||--o{ metering_epiascollectionjob : "plant_id"
+    metering_epiasconnection ||--o{ metering_epiascollectionjob : "connection_id"
     auth_user ||--o{ metering_epiasconnection : "connected_by_id"
     plants_plant ||--o| metering_epiasconnection : "plant_id"
     plants_plantconfiguration ||--o{ metering_epiassnapshot : "configuration_id"
@@ -201,9 +201,9 @@ erDiagram
 erDiagram
     accounts_membership {
         bigint id PK
+        varchar_6 role
         integer user_id FK "references auth_user.id"
         bigint tenant_id FK "references accounts_tenant.id"
-        varchar_6 role
     }
     accounts_tenant {
         bigint id PK
@@ -286,8 +286,8 @@ erDiagram
         integer revision
         timestamp_with_time_zone created_at
         integer actor_id FK "references auth_user.id"
-        bigint region_id FK "nullable; references regions_region.id"
         bigint provider_account_id FK "nullable; references connections_provideraccount.id"
+        bigint region_id FK "nullable; references regions_region.id"
     }
     regions_region {
         bigint id PK
@@ -298,9 +298,9 @@ erDiagram
         integer revision
         varchar_20 status
         timestamp_with_time_zone created_at
+        timestamp_with_time_zone deleted_at "nullable"
         bigint approved_binding_id FK "nullable; references connections_sitebinding.id"
         bigint tenant_id FK "references accounts_tenant.id"
-        timestamp_with_time_zone deleted_at "nullable"
     }
     regions_regionlocationchangerequest {
         bigint id PK
@@ -317,8 +317,8 @@ erDiagram
         integer reviewed_by_id FK "nullable; references auth_user.id"
     }
     auth_user ||--o{ regions_auditevent : "actor_id"
-    regions_region |o--o{ regions_auditevent : "region_id"
     connections_provideraccount |o--o{ regions_auditevent : "provider_account_id"
+    regions_region |o--o{ regions_auditevent : "region_id"
     connections_sitebinding |o--o{ regions_region : "approved_binding_id"
     accounts_tenant ||--o{ regions_region : "tenant_id"
     regions_region ||--o{ regions_regionlocationchangerequest : "region_id"
@@ -358,27 +358,29 @@ erDiagram
         bigint id PK
         varchar_30 provider
         varchar_200 external_account_id
+        varchar_2048 encrypted_api_key
         integer daily_quota
         boolean enabled
         integer credential_revision
+        timestamp_with_time_zone request_blocked_until "nullable"
+        integer authentication_failed_revision "nullable"
         varchar_500 authorization_reference
         timestamp_with_time_zone authorized_at "nullable"
         integer authorized_by_id FK "nullable; references auth_user.id"
-        varchar_2048 encrypted_api_key
-        integer authentication_failed_revision "nullable"
-        timestamp_with_time_zone request_blocked_until "nullable"
     }
     connections_sitebinding {
         bigint id PK
         integer region_revision
         varchar_200 site_id
         double_precision capacity_kw
+        double_precision dc_capacity_kw "nullable"
         varchar_2 power_basis
         boolean capacity_semantics_verified
         double_precision tilt_degrees
         double_precision azimuth_degrees
         double_precision losses_percent
         date installation_date "nullable"
+        varchar_500 settings_verification_reference
         double_precision latitude
         double_precision longitude
         varchar_100 timezone
@@ -388,8 +390,6 @@ erDiagram
         timestamp_with_time_zone created_at
         bigint provider_account_id FK "references connections_provideraccount.id"
         bigint region_id FK "references regions_region.id"
-        varchar_500 settings_verification_reference
-        double_precision dc_capacity_kw "nullable"
     }
     auth_user |o--o{ connections_provideraccount : "authorized_by_id"
     connections_provideraccount ||--o{ connections_sitebinding : "provider_account_id"
@@ -434,13 +434,13 @@ erDiagram
         date target_date
         varchar_20 status
         timestamp_with_time_zone available_at
+        timestamp_with_time_zone retry_until "nullable"
         uuid lease_token "nullable"
         timestamp_with_time_zone lease_expires_at "nullable"
         integer attempts
         varchar_40 last_error
         timestamp_with_time_zone created_at
         bigint binding_id FK "references connections_sitebinding.id"
-        timestamp_with_time_zone retry_until "nullable"
         bigint reference_import_id FK "nullable; references forecasts_historicalreferenceimport.id"
     }
     forecasts_collectionschedule {
@@ -461,9 +461,9 @@ erDiagram
     forecasts_forecastresult {
         bigint id PK
         jsonb payload
+        jsonb daily_payloads
         timestamp_with_time_zone published_at
         bigint snapshot_id FK, UK "references forecasts_forecastsnapshot.id"
-        jsonb daily_payloads
     }
     forecasts_forecastsnapshot {
         bigint id PK
@@ -471,14 +471,14 @@ erDiagram
         jsonb normalized_intervals
         timestamp_with_time_zone collected_at
         timestamp_with_time_zone issued_at "nullable"
-        bigint job_id FK, UK "references forecasts_collectionjob.id"
         varchar_20 source_kind
-        timestamp_with_time_zone available_at "nullable"
-        timestamp_with_time_zone coverage_end "nullable"
         timestamp_with_time_zone coverage_start "nullable"
-        varchar_64 weather_error
+        timestamp_with_time_zone coverage_end "nullable"
+        timestamp_with_time_zone available_at "nullable"
         jsonb weather_payload "nullable"
+        varchar_64 weather_error
         bigint binding_id FK "references connections_sitebinding.id"
+        bigint job_id FK, UK "references forecasts_collectionjob.id"
     }
     forecasts_historicalreferenceimport {
         bigint id PK
@@ -517,8 +517,8 @@ erDiagram
     forecasts_historicalreferenceimport |o--o{ forecasts_collectionjob : "reference_import_id"
     regions_region ||--o| forecasts_collectionschedule : "region_id"
     forecasts_forecastsnapshot ||--o| forecasts_forecastresult : "snapshot_id"
-    forecasts_collectionjob ||--o| forecasts_forecastsnapshot : "job_id"
     connections_sitebinding ||--o{ forecasts_forecastsnapshot : "binding_id"
+    forecasts_collectionjob ||--o| forecasts_forecastsnapshot : "job_id"
     connections_sitebinding ||--o{ forecasts_historicalreferenceimport : "binding_id"
     auth_user ||--o{ forecasts_historicalreferenceimport : "imported_by_id"
     auth_user ||--o{ forecasts_referencecapacitynormalization : "authorized_by_id"
@@ -596,6 +596,12 @@ erDiagram
         date window_start
         date window_end
         timestamp_with_time_zone cutoff_at
+        bigint observation_id_cutoff "nullable"
+        jsonb production_snapshot_ids
+        varchar_80 measurement_selection_policy
+        jsonb reference_snapshot_ids "nullable"
+        jsonb incident_revision_ids
+        varchar_64 input_fingerprint
         timestamp_with_time_zone created_at
         timestamp_with_time_zone completed_at "nullable"
         varchar_20 status
@@ -609,16 +615,10 @@ erDiagram
         integer attempts
         varchar_200 last_error
         bigint binding_id FK "references connections_sitebinding.id"
+        bigint comparison_activation_id FK "nullable; references plants_calibrationactivation.id"
         integer requested_by_id FK "references auth_user.id"
         bigint plant_id FK "references plants_plant.id"
         bigint configuration_id FK "references plants_plantconfiguration.id"
-        bigint observation_id_cutoff "nullable"
-        bigint comparison_activation_id FK "nullable; references plants_calibrationactivation.id"
-        varchar_64 input_fingerprint
-        jsonb reference_snapshot_ids "nullable"
-        jsonb incident_revision_ids
-        jsonb production_snapshot_ids
-        varchar_80 measurement_selection_policy
     }
     plants_forecastissuance {
         bigint id PK
@@ -631,20 +631,20 @@ erDiagram
         jsonb outage_scenarios
         jsonb native_intervals
         bigint calibration_id FK "nullable; references plants_calibrationrun.id"
-        bigint configuration_id FK "references plants_plantconfiguration.id"
-        bigint plant_id FK "references plants_plant.id"
         bigint snapshot_id FK "references forecasts_forecastsnapshot.id"
+        bigint plant_id FK "references plants_plant.id"
+        bigint configuration_id FK "references plants_plantconfiguration.id"
     }
     plants_plant {
         bigint id PK
         varchar_200 name
         timestamp_with_time_zone created_at
-        bigint region_id FK "references regions_region.id"
-        bigint current_configuration_id FK "nullable; references plants_plantconfiguration.id"
         timestamp_with_time_zone deleted_at "nullable"
         boolean automatic_calibration_enabled
-        integer automatic_calibration_enabled_by_id FK "nullable; references auth_user.id"
         timestamp_with_time_zone next_calibration_check_at "nullable"
+        integer automatic_calibration_enabled_by_id FK "nullable; references auth_user.id"
+        bigint region_id FK "references regions_region.id"
+        bigint current_configuration_id FK "nullable; references plants_plantconfiguration.id"
     }
     plants_plantconfiguration {
         bigint id PK
@@ -652,14 +652,14 @@ erDiagram
         double_precision dc_capacity_mw
         double_precision inverter_capacity_mw "nullable"
         double_precision export_limit_mw "nullable"
+        varchar_10 mounting_type
+        double_precision surface_tilt "nullable"
+        double_precision surface_azimuth "nullable"
         varchar_20 measurement_basis
         timestamp_with_time_zone created_at
         bigint binding_id FK "references connections_sitebinding.id"
         integer created_by_id FK "references auth_user.id"
         bigint plant_id FK "references plants_plant.id"
-        varchar_10 mounting_type
-        double_precision surface_azimuth "nullable"
-        double_precision surface_tilt "nullable"
         bigint region_id FK "references regions_region.id"
     }
     plants_plantevent {
@@ -701,11 +701,11 @@ erDiagram
         varchar_20 quality
         varchar_200 source
         timestamp_with_time_zone recorded_at
+        boolean is_current
+        boolean is_reverted
         bigint configuration_id FK "references plants_plantconfiguration.id"
         bigint plant_id FK "references plants_plant.id"
         integer recorded_by_id FK "references auth_user.id"
-        boolean is_current
-        boolean is_reverted
         bigint supersedes_id FK, UK "nullable; references plants_productionobservation.id"
     }
     auth_user |o--o{ plants_calibrationactivation : "actor_id"
@@ -713,17 +713,17 @@ erDiagram
     plants_plant ||--o{ plants_calibrationactivation : "plant_id"
     plants_plantconfiguration ||--o{ plants_calibrationactivation : "configuration_id"
     connections_sitebinding ||--o{ plants_calibrationrun : "binding_id"
+    plants_calibrationactivation |o--o{ plants_calibrationrun : "comparison_activation_id"
     auth_user ||--o{ plants_calibrationrun : "requested_by_id"
     plants_plant ||--o{ plants_calibrationrun : "plant_id"
     plants_plantconfiguration ||--o{ plants_calibrationrun : "configuration_id"
-    plants_calibrationactivation |o--o{ plants_calibrationrun : "comparison_activation_id"
     plants_calibrationrun |o--o{ plants_forecastissuance : "calibration_id"
-    plants_plantconfiguration ||--o{ plants_forecastissuance : "configuration_id"
-    plants_plant ||--o{ plants_forecastissuance : "plant_id"
     forecasts_forecastsnapshot ||--o{ plants_forecastissuance : "snapshot_id"
+    plants_plant ||--o{ plants_forecastissuance : "plant_id"
+    plants_plantconfiguration ||--o{ plants_forecastissuance : "configuration_id"
+    auth_user |o--o{ plants_plant : "automatic_calibration_enabled_by_id"
     regions_region ||--o{ plants_plant : "region_id"
     plants_plantconfiguration |o--o{ plants_plant : "current_configuration_id"
-    auth_user |o--o{ plants_plant : "automatic_calibration_enabled_by_id"
     connections_sitebinding ||--o{ plants_plantconfiguration : "binding_id"
     auth_user ||--o{ plants_plantconfiguration : "created_by_id"
     plants_plant ||--o{ plants_plantconfiguration : "plant_id"
@@ -894,19 +894,19 @@ erDiagram
         integer attempts
         uuid lease_token "nullable"
         timestamp_with_time_zone lease_expires_at "nullable"
-        timestamp_with_time_zone sent_at "nullable"
-        varchar_40 last_error
-        bigint snapshot_id FK "nullable; references forecasts_forecastsnapshot.id"
-        bigint binding_id FK "nullable; references connections_sitebinding.id"
+        jsonb recipients
+        jsonb recipient_memberships
+        boolean grouped
+        jsonb revoked_recipients
+        varchar_2 language
         timestamp_with_time_zone preparation_deadline "nullable"
         jsonb prepared_message "nullable"
         timestamp_with_time_zone transmit_started_at "nullable"
-        varchar_2 language
+        timestamp_with_time_zone sent_at "nullable"
+        varchar_40 last_error
+        bigint binding_id FK "nullable; references connections_sitebinding.id"
+        bigint snapshot_id FK "nullable; references forecasts_forecastsnapshot.id"
         bigint schedule_id FK "references notifications_reminderschedule.id"
-        boolean grouped
-        jsonb recipient_memberships
-        jsonb recipients
-        jsonb revoked_recipients
     }
     notifications_notificationsettings {
         smallint id PK
@@ -915,21 +915,21 @@ erDiagram
     notifications_reminderschedule {
         bigint id PK
         boolean enabled
-        jsonb times
-        timestamp_with_time_zone effective_from
-        bigint region_id FK "references regions_region.id"
         jsonb recipients
-        integer configured_by_id FK "nullable; references auth_user.id"
-        varchar_2 language
-        timestamp_with_time_zone retired_at "nullable"
         boolean include_workspace_members
         jsonb recipient_memberships
+        jsonb times
+        timestamp_with_time_zone effective_from
+        varchar_2 language
+        timestamp_with_time_zone retired_at "nullable"
+        integer configured_by_id FK "nullable; references auth_user.id"
+        bigint region_id FK "references regions_region.id"
     }
-    forecasts_forecastsnapshot |o--o{ notifications_notificationdelivery : "snapshot_id"
     connections_sitebinding |o--o{ notifications_notificationdelivery : "binding_id"
+    forecasts_forecastsnapshot |o--o{ notifications_notificationdelivery : "snapshot_id"
     notifications_reminderschedule ||--o{ notifications_notificationdelivery : "schedule_id"
-    regions_region ||--o{ notifications_reminderschedule : "region_id"
     auth_user |o--o{ notifications_reminderschedule : "configured_by_id"
+    regions_region ||--o{ notifications_reminderschedule : "region_id"
 ```
 
 ### Constraints and indexes
@@ -963,24 +963,26 @@ erDiagram
         integer connection_revision
         jsonb provider_plant
         date target_day
+        date period_end_day "nullable"
+        varchar_30 source_kind
         timestamp_with_time_zone scheduled_for
         varchar_20 status
         uuid lease_token "nullable"
         timestamp_with_time_zone lease_expires_at "nullable"
         smallint attempts
         timestamp_with_time_zone next_attempt_at
+        timestamp_with_time_zone retry_until "nullable"
         varchar_40 last_error
         timestamp_with_time_zone created_at
         bigint configuration_id FK "references plants_plantconfiguration.id"
-        bigint connection_id FK "references metering_epiasconnection.id"
-        date period_end_day "nullable"
-        varchar_30 source_kind
-        timestamp_with_time_zone retry_until "nullable"
         bigint plant_id FK "references plants_plant.id"
+        bigint connection_id FK "references metering_epiasconnection.id"
     }
     metering_epiasconnection {
         bigint id PK
         bigint provider_plant_id
+        bigint settlement_plant_id "nullable"
+        timestamp_with_time_zone settlement_checked_at "nullable"
         varchar_100 eic
         varchar_300 name
         boolean enabled
@@ -989,13 +991,15 @@ erDiagram
         timestamp_with_time_zone updated_at
         integer connected_by_id FK "references auth_user.id"
         bigint plant_id FK, UK "references plants_plant.id"
-        bigint settlement_plant_id "nullable"
-        timestamp_with_time_zone settlement_checked_at "nullable"
     }
     metering_epiassnapshot {
         bigint id PK
         smallint attempt
         date target_day
+        varchar_30 source_kind
+        jsonb provider_plant
+        varchar_200 endpoint
+        varchar_40 normalization_policy
         timestamp_with_time_zone collected_at
         timestamp_with_time_zone available_at
         jsonb raw_payload
@@ -1005,14 +1009,10 @@ erDiagram
         bigint configuration_id FK "references plants_plantconfiguration.id"
         bigint connection_id FK "references metering_epiasconnection.id"
         bigint job_id FK "references metering_epiascollectionjob.id"
-        varchar_200 endpoint
-        varchar_40 normalization_policy
-        jsonb provider_plant
-        varchar_30 source_kind
     }
     plants_plantconfiguration ||--o{ metering_epiascollectionjob : "configuration_id"
-    metering_epiasconnection ||--o{ metering_epiascollectionjob : "connection_id"
     plants_plant ||--o{ metering_epiascollectionjob : "plant_id"
+    metering_epiasconnection ||--o{ metering_epiascollectionjob : "connection_id"
     auth_user ||--o{ metering_epiasconnection : "connected_by_id"
     plants_plant ||--o| metering_epiasconnection : "plant_id"
     plants_plantconfiguration ||--o{ metering_epiassnapshot : "configuration_id"
@@ -1069,11 +1069,11 @@ erDiagram
         timestamp_with_time_zone closed_at "nullable"
         varchar_500 decision_reason
         timestamp_with_time_zone outcome_seen_at "nullable"
+        jsonb reviewed_context
         bigint configuration_id FK "references plants_plantconfiguration.id"
         bigint plant_id FK "references plants_plant.id"
         integer proposed_by_id FK "references auth_user.id"
         integer reviewed_by_id FK "nullable; references auth_user.id"
-        jsonb reviewed_context
     }
     change_requests_incidentchange {
         bigint id PK
