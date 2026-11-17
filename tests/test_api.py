@@ -98,6 +98,8 @@ def setup_binding(client: Client, region_id: int) -> int:
     return int(response.json()["id"])
 
 
+# The region forecast opens its own read-only snapshot transaction.
+@pytest.mark.django_db(transaction=True)
 def test_tenant_isolation_and_read_only_ownership(customer: tuple[Client, User, Tenant]) -> None:
     client, user, tenant = customer
     region_id = create_region(client, tenant)
@@ -148,6 +150,8 @@ def test_tenant_isolation_and_read_only_ownership(customer: tuple[Client, User, 
     )
 
 
+# The region forecast opens its own read-only snapshot transaction.
+@pytest.mark.django_db(transaction=True)
 def test_fixture_workflow_and_freshness(customer: tuple[Client, User, Tenant]) -> None:
     client, _, tenant = customer
     region_id = create_region(client, tenant)

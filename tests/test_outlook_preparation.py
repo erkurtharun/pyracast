@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from threading import Event
 from typing import Any, cast
 
@@ -63,7 +63,7 @@ def test_snapshot_selection_loads_only_coverage_owners(
 
 
 @pytest.mark.parametrize("source_kind", ["forecast", "estimated_actuals"])
-def test_region_rejects_coverage_changed_between_metadata_and_payload_reads(
+def test_region_keeps_its_selected_coverage_when_a_source_is_revoked_during_the_read(
     monkeypatch: pytest.MonkeyPatch, source_kind: str
 ) -> None:
     system, _ = make_plant(monkeypatch)
@@ -106,17 +106,19 @@ def test_region_rejects_coverage_changed_between_metadata_and_payload_reads(
             assert changed.wait(timeout=10)
         return execute(sql, params, many, context)
 
+    path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/"
+    params = {"date": day.isoformat(), "data_source": source_kind}
     with ThreadPoolExecutor(max_workers=1) as pool:
         writer = pool.submit(revoke_source)
         with connection.execute_wrapper(interleave_payload_read):
-            response = client.get(
-                f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/",
-                {"date": day.isoformat(), "data_source": source_kind},
-            )
+            during = client.get(path, params)
         writer.result(timeout=10)
-    assert response.status_code == 400, response.content
-    assert response.json()["code"] == "invalid_request"
-    assert response.json()["detail"] == ["forecast_sources_changed"]
+    assert during.status_code == 200, during.content
+    assert during.json()["result"] is not None
+    assert datetime.fromisoformat(during.json()["collected_at"]) == snapshot.collected_at
+    after = client.get(path, params)
+    assert after.status_code == 200
+    assert after.json()["collected_at"] != during.json()["collected_at"]
 
 
 @pytest.mark.parametrize("shadowed", [True, False])

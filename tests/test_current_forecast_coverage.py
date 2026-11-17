@@ -8,7 +8,6 @@ from django.utils import timezone
 from pyracast.forecasts.models import RequestAttempt
 from pyracast.incidents.operations import save_incident
 from pyracast.irradiance import local_day_bounds
-from pyracast.plants import current_forecast, forecasting
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import PlantConfiguration, PlantForecast
 from pyracast.plants.operations import activate_calibration
@@ -201,25 +200,18 @@ def test_outage_scenario_and_invalidated_calibration_keep_composite_morning(
         available_export_mw=None,
     )
     if calibrated:
-        original_payload = forecasting.forecast_payload
-
-        def record_training_outage(*args: Any, **kwargs: Any) -> dict[str, object]:
-            payload = original_payload(*args, **kwargs)
-            training_start, _ = local_day_bounds(date(2026, 11, 4), system.binding.timezone)
-            save_incident(
-                *scope,
-                kind="panels",
-                title="Corrected training outage",
-                notes="",
-                starts_at=training_start + timedelta(hours=9),
-                ends_at=training_start + timedelta(hours=10),
-                available_dc_mw=65,
-                available_inverter_mw=None,
-                available_export_mw=None,
-            )
-            return payload
-
-        monkeypatch.setattr(current_forecast, "forecast_payload", record_training_outage)
+        training_start, _ = local_day_bounds(date(2026, 11, 4), system.binding.timezone)
+        save_incident(
+            *scope,
+            kind="panels",
+            title="Corrected training outage",
+            notes="",
+            starts_at=training_start + timedelta(hours=9),
+            ends_at=training_start + timedelta(hours=10),
+            available_dc_mw=65,
+            available_inverter_mw=None,
+            available_export_mw=None,
+        )
     outlook = plant_outlook(*scope, target_date=DAY, resolution_minutes=60)
     normal = cast(dict[str, Any], outlook["result"])
     affected = cast(dict[str, Any], outlook["outage_scenario"])["result"]
@@ -239,7 +231,7 @@ def test_outage_scenario_and_invalidated_calibration_keep_composite_morning(
         assert affected["provenance"][key] == normal["provenance"][key]
     if calibrated:
         assert outlook["calibration_id"] is None
-        assert "calibration_invalidated_by_outage_history" in normal["quality_flags"]
+        assert "calibration_invalidated_by_outage_history" not in normal["quality_flags"]
 
 
 def test_explicit_as_of_stays_on_day_ahead_snapshot_without_vintage_composition(
