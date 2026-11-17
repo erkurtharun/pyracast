@@ -75,7 +75,7 @@ sequenceDiagram
 | No current configuration | 200, `configuration_id` null, `days` empty, `missing_days` = requested, `metrics` null |
 | Day: issuance basis or timezone differs; no issuance; no estimated actuals | Missing: `configuration_not_comparable`, `forecast_not_available`, `estimated_actuals_not_available` |
 | Day: saved issuance, source or meter rows invalid (`ValueError`, `ArithmeticError` in transfer or scoring); a required window not fully covered | Excluded: `invalid_forecast_data`, `incomplete_or_invalid_day` |
-| `daylight_window` raises for a location (window set-up), or historical actual-source selection raises (bad saved bounds, `daylight_window`) | Uncaught 500: both run outside the per-day guard; the UI shows the error `Notice` |
+| `daylight_window` raises for a local date the timezone skips (window set-up), or historical actual-source selection raises (bad saved bounds) | Uncaught 500: both run outside the per-day guard; the UI shows the error `Notice` |
 
 ## Rules and invariants
 
@@ -87,4 +87,5 @@ sequenceDiagram
 ## Tests
 
 - `tests/test_forecast_performance.py`: frozen clipping, read-only, daylight boundaries, no configuration, date validation, 403 and 404, basis mixing, archived configuration and location. `tests/test_performance_cutoff.py`: cutoff parsing and selection, ambiguous time, incidents. `tests/test_historical_model_comparison.py`: period calibration, tenant access. `tests/test_settlement_performance.py`: settlement provenance. `web/tests/production-comparison.spec.ts`, `web/tests/workspace.spec.ts` (loading, CSV, archived metrics): mocked routes. `web/integration/workspace.spec.ts` only opens the screen on the real API; `web/tests/outages.spec.ts` stubs the endpoint.
+- `tests/test_solar.py` pins the daylight windows behind every day: Turkish locations bit-identical over a year, every horizon crossing at New York, Kolkata, Tromsø and the North Pole, Astral events the scan contradicts at high latitudes, and a property over latitudes -65 to 65 against a sampled zenith.
 - Gaps: no viewer request, no unknown-field 400, no polar location, no day scored at a non-Turkish location or timezone (New York coordinates appear only on a relocated current binding while archived scoring uses the original location; Berlin only for cutoff rejection), no test of the uncaught 500 paths, no query-count bound for 90 days, no real-data assertion, no error-alert test.

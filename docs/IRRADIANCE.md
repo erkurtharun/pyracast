@@ -508,7 +508,15 @@ activates a factor; the separately authorized promotion policy does.
 The versioned `astral-3.2-sea-level-v1` policy uses the apparent upper solar limb,
 standard refraction and a sea-level horizon, without terrain or shading inference.
 Collect UTC sunrise/sunset events around the local day to preserve DST, date-line
-and midnight-crossing daylight. Polar day requires the full local day; polar night
+and midnight-crossing daylight. Astral searches each event per UTC date and can miss one
+whose neighbour falls across 00:00 UTC, so a 30-minute scan of the same horizon test
+brackets every crossing of the local day: a bracket keeps Astral's event of the same
+direction within 60 s and otherwise bisects the crossing to the second, the resolution of
+Astral's zenith. An Astral event outside every bracket remains only with an opposite one
+less than a scan step away: such a pair is a daylight or night shorter than the step,
+which falls between two samples; such a dip is lost when Astral reports only one of its
+events. Any valid coordinate and timezone yields windows; only a local date the
+timezone skips is rejected. Polar day requires the full local day; polar night
 does not count as a calibration day. The journal and calibration use the same
 windows. A time interval ending exactly at sunrise or starting at sunset has no
 daylight overlap. The journal hides night slots but retains original saved readings.

@@ -1,4 +1,5 @@
 from collections.abc import Iterable
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from math import isfinite
@@ -12,10 +13,11 @@ from pyracast.irradiance import local_day_bounds
 DAYLIGHT_POLICY = "astral-3.2-sea-level-v1"
 _SOLAR_RADIUS = 32 / 120
 _HORIZON_ZENITH = 90 + _SOLAR_RADIUS + refraction_at_zenith(90 + _SOLAR_RADIUS)
-_POLAR_ERRORS = {
-    "Sun is always below the horizon on this day, at this location.",
-    "Sun is always above the horizon on this day, at this location.",
-}
+_SCAN_STEP = timedelta(minutes=30)
+_MATCH_SLACK = timedelta(seconds=60)
+_CROSSING_PRECISION = timedelta(milliseconds=1)
+
+type Event = tuple[datetime, bool]
 
 
 @dataclass(frozen=True)
@@ -138,33 +140,89 @@ def daylight_window(day: date, timezone: str, latitude: float, longitude: float)
         raise ValueError("Longitude must be finite and between -180 and 180 degrees")
     start, end = local_day_bounds(day, timezone)
     observer = Observer(latitude, longitude, elevation=0.0)
-    events: set[tuple[datetime, bool]] = set()
+    return daylight_from_events(
+        _horizon_events(observer, start, end),
+        start,
+        end,
+        sun_up=_sun_is_up(observer, start + (end - start) / 2),
+    )
+
+
+def _sun_is_up(observer: Observer, moment: datetime) -> bool:
+    return zenith(observer, moment, with_refraction=False) < _HORIZON_ZENITH
+
+
+def _astral_events(observer: Observer, start: datetime, end: datetime) -> list[Event]:
+    events: set[Event] = set()
     cursor = start.date() - timedelta(days=1)
-    last = end.date() + timedelta(days=1)
-    while cursor <= last:
+    while cursor <= end.date() + timedelta(days=1):
         for calculate, rising in ((sunrise, True), (sunset, False)):
-            try:
-                event = calculate(observer, cursor, UTC)
-            except ValueError as exc:
-                # Python 3.15 changed the acos error that Astral 3.2 translates for polar dates.
-                if str(exc) not in _POLAR_ERRORS and not str(exc).startswith(
-                    "expected a number in range from -1 up to 1, got "
-                ):
-                    raise
-            else:
-                if start <= event < end:
-                    events.add((event, rising))
+            # Astral searches per UTC date and raises when that date holds no such event.
+            with suppress(ValueError):
+                events.add((calculate(observer, cursor, UTC), rising))
         cursor += timedelta(days=1)
-    ordered = sorted(events)
-    if not ordered:
-        daylight = (
-            zenith(observer, start + (end - start) / 2, with_refraction=False) < _HORIZON_ZENITH
+    return sorted(events)
+
+
+def _bisect_crossing(observer: Observer, left: datetime, right: datetime) -> datetime:
+    up = _sun_is_up(observer, left)
+    while right - left > _CROSSING_PRECISION:
+        middle = left + (right - left) / 2
+        left, right = (middle, right) if _sun_is_up(observer, middle) == up else (left, middle)
+    return right
+
+
+def _hidden_pairs(unmatched: list[Event]) -> list[Event]:
+    # Both samples around an unmatched event show one state, so it is a crossing only together
+    # with an opposite event inside the same step.
+    return [
+        event
+        for event in unmatched
+        if any(
+            other[1] != event[1] and abs(other[0] - event[0]) < _SCAN_STEP for other in unmatched
         )
+    ]
+
+
+def _horizon_events(observer: Observer, start: datetime, end: datetime) -> list[Event]:
+    # Astral's event is kept wherever the scan brackets one, so its timings stay unchanged; the
+    # scan fills the crossings Astral misses near 00:00 UTC. Hazard: a daylight or night shorter
+    # than the scan step hides between samples; only Astral's set-and-rise pairs recover it.
+    unmatched = _astral_events(observer, start, end)
+    events: list[Event] = []
+    left, up = start, _sun_is_up(observer, start)
+    while left < end:
+        right = min(left + _SCAN_STEP, end)
+        if _sun_is_up(observer, right) != up:
+            up = not up
+            match = next(
+                (
+                    event
+                    for event in unmatched
+                    if event[1] == up and left - _MATCH_SLACK <= event[0] <= right + _MATCH_SLACK
+                ),
+                None,
+            )
+            if match is None:
+                events.append((_bisect_crossing(observer, left, right), up))
+            else:
+                unmatched.remove(match)
+                events.append(match)
+        left = right
+    return sorted(events + _hidden_pairs(unmatched))
+
+
+def daylight_from_events(
+    events: Iterable[Event], start: datetime, end: datetime, *, sun_up: bool
+) -> Daylight:
+    """Assemble the half-open local day; `sun_up` decides a day without events."""
+    ordered = sorted(event for event in events if start <= event[0] < end)
+    if not ordered:
         return Daylight(
-            ((start, end),) if daylight else (),
+            ((start, end),) if sun_up else (),
             None,
             None,
-            "polar_day" if daylight else "polar_night",
+            "polar_day" if sun_up else "polar_night",
         )
     previous = start
     windows = []
