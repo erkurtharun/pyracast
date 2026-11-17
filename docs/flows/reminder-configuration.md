@@ -37,7 +37,7 @@ sequenceDiagram
         O-->>V: "ValidationError, rolled back"
         V-->>U: "400 invalid_request"
     else "accepted, settings unchanged"
-        O->>D: "COMMIT without writing the schedule"
+        O->>D: "UPDATE recipient_memberships only when a new pin was found, COMMIT"
         V-->>U: "200 payload"
     else "accepted, settings changed"
         O->>D: "UPDATE schedule, effective_from = now, COMMIT"
