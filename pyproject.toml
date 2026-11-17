@@ -68,6 +68,7 @@ line-length = 100
 [tool.ruff.per-file-target-version]
 "deploy/backup.py" = "py312"
 "deploy/bootstrap_database.py" = "py312"
+"deploy/host.py" = "py312"
 "deploy/operations_log.py" = "py312"
 "deploy/pin_release_images.py" = "py312"
 "deploy/release_scope.py" = "py312"

@@ -46,7 +46,7 @@ RUN apt-get update && apt-get upgrade --no-install-recommends -y \
       cp -L "/usr/share/doc/$package/copyright" "/runtime/usr/share/doc/$package/"; \
       done
 
-# This PostgreSQL server runtime excludes package managers and interactive/database tools.
+# The backend runtime excludes package managers and interactive/database tools.
 FROM gcr.io/distroless/cc-debian13:nonroot@sha256:cb87acc574abe719b6e5c547384defa2f7b1f24af9605d3f618cf852495d8be2 AS runtime
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:/usr/local/bin:$PATH" LD_LIBRARY_PATH=/usr/local/lib \

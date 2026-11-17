@@ -1,0 +1,9 @@
+[Unit]
+Description=Pyracast runtime health supervision
+
+[Timer]
+OnBootSec=180
+OnUnitInactiveSec=60
+
+[Install]
+WantedBy=timers.target

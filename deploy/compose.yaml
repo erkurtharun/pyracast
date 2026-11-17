@@ -103,7 +103,7 @@ services:
     pids_limit: 100
     stop_grace_period: 100s
     healthcheck:
-      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready/', timeout=8).read()"]
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live/', timeout=8).read()"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -156,11 +156,19 @@ services:
 
   dispatcher:
     <<: *process
-    command: [pyracast, dispatch, --loop, --poll-seconds, "30"]
+    command: [pyracast, dispatch, --loop, --poll-seconds, "30", --heartbeat-file, /tmp/dispatcher-heartbeat]
     stop_grace_period: 660s
     mem_limit: 256m
     cpus: 0.5
     pids_limit: 100
+    # Unhealthy once a cycle has run longer than the delivery check's five-minute lag.
+    healthcheck:
+      test: [CMD, python, -c, "import os, sys, time; sys.exit(time.time() - os.stat('/tmp/dispatcher-heartbeat').st_mtime > 300)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 300s
+      start_interval: 5s
     depends_on:
       postgres: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}

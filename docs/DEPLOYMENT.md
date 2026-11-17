@@ -303,12 +303,16 @@ successful `main` CI runs trigger it automatically. The workflow:
    SBOM and provenance are preserved; all four release references are immutable.
 2. Rejects HIGH/CRITICAL image vulnerabilities and tests the exact image digests.
 3. Transfers the release through IAP using a short-lived OIDC identity.
-4. Checks configuration and database access, stops producers and drains workers,
-   takes a database dump and waits for its off-host upload before upgrading
+4. Checks configuration, database access and the shipped systemd units, stops the
+   dispatcher and drains workers while the site still serves, stops ingress, takes a
+   database dump and waits for its off-host upload before upgrading
    PostgreSQL/RabbitMQ, migrates with the schema owner, and starts the tested
    revision. A failed backup leaves the application stopped and blocks migration.
 5. Promotes `current` only after container readiness checks and a local HTTPS request
-   verify the public certificate, routing and database health.
+   verify the public certificate, routing and database health, then installs the
+   release's watchdog and backup units. Each build gets its own directory under
+   `/opt/pyracast/releases/` (revision plus a hash of the four image digests), so a
+   redeploy never edits the live release.
 
 Image artifacts expire after one day and are deleted after successful deployment.
 Retry a failed Release while its artifact remains available; otherwise run
@@ -368,17 +372,28 @@ fixtures do not establish provider access or inbox delivery.
   uncertain email delivery, failed/stale backups and VM disk/memory pressure.
   A worker that exhausts its five automatic retries stays stopped until restarted.
   Do not automatically resend an email marked `uncertain`.
+- **Host supervision:** `pyracast-watchdog.timer` runs independent checks (capacity,
+  backup age, containers, delivery at most every five minutes, origin certificate)
+  within one deadline and ends each run with a `pyracast_watchdog_heartbeat` whose
+  `state` is `ok`, `blocked`, `unit_failed` or `lock_busy`; a missing heartbeat
+  alerts. It restarts application containers only under the release lock and never
+  restarts PostgreSQL or RabbitMQ. The watchdog and backup units ship in
+  `deploy/systemd/` and are installed by each release and at boot; change them there,
+  not on the host.
 - **Planned host maintenance:** run `sudo systemctl stop pyracast` and wait before
   restarting Docker, rebooting or stopping the VM. Workers get 660 seconds for
   their existing 600-second drain and broker cleanup. Google host failure or a
   forced console stop can interrupt that budget; DB leases and idempotency recover
   safe work. No configuration can promise graceful completion after host failure.
-- **Failed deployment:** preflight failures preserve the running release. Before
-  stopping ingress and producers, the script durably creates
-  `/var/lib/pyracast/release-blocked`; only then does it drain workers, back up the
-  existing database and upgrade support services. A first deployment initializes
+- **Failed deployment:** preflight failures preserve the running release and its
+  environment files. Before stopping anything, the script durably creates
+  `/var/lib/pyracast/release-blocked`; only then does it drain the dispatcher and
+  workers, stop ingress, back up the existing database and upgrade support services.
+  A first deployment initializes
   PostgreSQL under the same block before its initial backup. Any maintenance
   failure leaves the application stopped without downgrading support images.
+  A failure after promotion stops nothing: the new release keeps serving and the
+  log names the step to finish by hand.
   The block clears only after readiness and release promotion; even
   after an abrupt host restart, systemd refuses automatic application startup
   while this marker exists. Application containers retry process failures up to
@@ -392,7 +407,8 @@ fixtures do not establish provider access or inbox delivery.
   fix or explicit database restore; moving an image tag does not undo a database.
 - **Backups:** the host's hourly timer uploads a custom-format PostgreSQL dump to
   the private backup bucket; each release requires another successful dump before
-  migration. Cloud Storage lifecycle cleanup expires objects after seven days;
+  migration. The hourly dump waits up to ten minutes for the release lock, holds it
+  only while dumping and reports `pyracast_backup_skipped` when a release keeps it. Cloud Storage lifecycle cleanup expires objects after seven days;
   deletion is asynchronous. Check the last successful upload, not just timer
   activation. A one-hour recovery point depends on successful hourly backups;
   failures increase possible data loss, and there is no WAL/PITR recovery. Keep
@@ -437,7 +453,8 @@ wrong-password sign-in gets the normal 400 `email_password_mismatch` refusal and
 that the `/app/` workspace app shell loads.
 `tests/test_operations_contracts.py` keeps the values that `deploy/`,
 `infra/terraform` and the workflows restate in agreement: worker queues, the
-watchdog and drain service lists, stop grace periods, alert event names,
+watchdog and drain service lists, the shipped units and host paths, stop grace
+periods, alert event names,
 Cloudflare ranges, the gateway trust anchor, router prefixes, timeouts, the
 body limit, the CI jobs the release waits for, Gmail constants and `host.json`
 keys. Change those values together with that test.

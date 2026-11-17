@@ -102,6 +102,7 @@ mkdir -p "$temporary/deploy"
 : > "$temporary/deploy/release.env"
 cp "$root/deploy/bootstrap.sql" "$temporary/deploy/bootstrap.sql"
 uv run --no-project --python 3.15.2 python "$root/deploy/bootstrap_database.py" "$temporary" --environment-directory "$temporary"
+# The second run proves that bootstrapping an initialized database changes nothing.
 uv run --no-project --python 3.15.2 python "$root/deploy/bootstrap_database.py" "$temporary" --environment-directory "$temporary"
 "${compose[@]}" run --rm --no-deps migrate
 "${compose[@]}" run --rm --no-deps migrate pyracast check --deploy --fail-level WARNING
@@ -259,13 +260,13 @@ errors = json.load(sys.stdin)["errors"]
 assert [error["code"] for error in errors] == ["email_password_mismatch"], errors
 ' < "$temporary/sign-in.json"
 [[ $("${secure_curl[@]}" https://localhost:18443/app/) == *'<title>Pyracast workspace'* ]]
-"${compose[@]}" exec -T postgres pg_dump -U postgres -d pyracast --format=custom --compress=zstd:3 > "$temporary/database.dump"
 uv run --no-project --python 3.15.2 python - "$temporary" "$root" <<'PY'
 import sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[2])
-from deploy.backup import restore_archive
+from deploy.backup import dump_database, restore_archive
 release = Path(sys.argv[1])
+dump_database(release, release / 'database.dump')
 restore_archive(release, release / 'database.dump', 'local-smoke')
 PY
 "${compose[@]}" exec -T api pyracast dispatch
