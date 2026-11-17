@@ -1,10 +1,13 @@
 import json
 import re
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
+from itertools import product
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 import requests
@@ -25,12 +28,28 @@ from django.utils.html import escape
 from pyracast.accounts.account_mail import device_label
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.models import UserLanguagePreference
-from tests.support.auth_lifecycle import PASSWORD, member, submit, totp_code
+from tests.support.auth_lifecycle import AUTH, PASSWORD, member, submit, totp_code
 from tests.support.company_registration import signup
-from tests.support.social_accounts import CALLBACK, PROVIDERS, begin, complete
+from tests.support.social_accounts import CALLBACK, PROVIDERS, complete, provider_destination
 
-pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
-AUTH = "/api/auth/browser/v1/"
+pytestmark = pytest.mark.django_db(
+    transaction=True,
+    databases=["default", "auth_cache"],
+    available_apps=[
+        "django.contrib.auth",
+        "django.contrib.contenttypes",
+        "django.contrib.sessions",
+        "allauth",
+        "allauth.account",
+        "allauth.socialaccount",
+        "allauth.socialaccount.providers.google",
+        "allauth.socialaccount.providers.microsoft",
+        "allauth.mfa",
+        "allauth.headless",
+        "allauth.usersessions",
+        "pyracast.accounts",
+    ],
+)
 FIREFOX = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:139.0) Gecko/20100101 Firefox/139.0"
 HOSTILE_AGENT = f'{FIREFOX} <script>alert("agent")</script>\r\nX-Injected: agent'
 CODE = re.compile(r"^\s*([A-Z0-9]{4}-[A-Z0-9]{4}|[0-9]{6})\s*$", re.MULTILINE)
@@ -200,28 +219,613 @@ SECURITY_COPY = {
 }
 
 
+SIGNUP_CODE = "account/email/email_confirmation_signup"
+CHANGE_CODE = "account/email/email_confirmation"
+RESET_CODE = "account/email/password_reset_code"
+LOGIN_CODE = "account/email/login_code"
+EXISTS = "account/email/account_already_exists"
+UNKNOWN_ACCOUNT = "account/email/unknown_account"
+RESET_NOTICE = "account/email/password_reset"
+CHANGED_NOTICE = "account/email/password_changed"
+SET_NOTICE = "account/email/password_set"
+EMAIL_CHANGED = "account/email/email_changed"
+EMAIL_DELETED = "account/email/email_deleted"
+TOTP_ON = "mfa/email/totp_activated"
+TOTP_OFF = "mfa/email/totp_deactivated"
+RECOVERY_CODES = "mfa/email/recovery_codes_generated"
+CONNECTED = "socialaccount/email/account_connected"
+DISCONNECTED = "socialaccount/email/account_disconnected"
+CODE_MINUTES = {SIGNUP_CODE: 10, CHANGE_CODE: 10, RESET_CODE: 10, LOGIN_CODE: 3}
+ACTION_URLS = {
+    EXISTS: settings.HEADLESS_FRONTEND_URLS["account_reset_password"],
+    UNKNOWN_ACCOUNT: settings.HEADLESS_FRONTEND_URLS["account_signup"],
+}
+PROVIDER_NAMES = {"google": "Google", "microsoft": "Microsoft"}
+REFUSAL = {
+    "en": "This email address is already verified.",
+    "tr": "Bu e-posta adresi zaten doğrulanm\u0131ş.",
+}
+
+PRIMARY = "member@example.com"
+SECONDARY = "second@example.com"
+UNVERIFIED = "pending@example.com"
+OTHER_ADDRESS = "other@example.com"
+UNKNOWN = "missing@example.com"
+INACTIVE_ADDRESS = "inactive@example.com"
+FRESH = "fresh@example.com"
+CHANGE = "change@example.com"
+
+LANGUAGES = ("en", "tr")
+SHAPES = (
+    "verified",
+    "verified-secondary",
+    "unverified-secondary",
+    "unverified-new",
+    "unverified-returning",
+    "inactive",
+    "passwordless",
+)
+TARGETS = {
+    "own-primary": PRIMARY,
+    "own-verified-secondary": SECONDARY,
+    "own-unverified-secondary": UNVERIFIED,
+    "other-account": OTHER_ADDRESS,
+    "unknown": UNKNOWN,
+    "inactive-account": INACTIVE_ADDRESS,
+    "pending-address": CHANGE,
+    "none": "",
+}
+STATES = ("signed-out", "pending-signup", "signed-in", "reauthenticated", "pending-change")
+PROVIDER_CHOICES = ("none", "google", "microsoft")
+SIGNED_OUT = frozenset({"signed-out", "pending-signup"})
+SIGNED = frozenset({"signed-in", "reauthenticated", "pending-change"})
+NOT_PENDING = frozenset({"signed-out", "signed-in", "reauthenticated"})
+OWN = frozenset({"own-primary", "own-verified-secondary", "own-unverified-secondary"})
+ELSEWHERE = frozenset({"other-account", "unknown", "inactive-account"})
+UNVERIFIED_SHAPES = frozenset({"unverified-new", "unverified-returning"})
+SESSION_SHAPES = frozenset(
+    {"verified", "verified-secondary", "unverified-secondary", "passwordless"}
+)
+
+
+@dataclass(frozen=True)
+class Endpoint:
+    method: str
+    path: str
+    takes_address: bool
+    provider: bool = False
+    mfa: bool = False
+
+    def route(self, provider: str) -> str:
+        return (
+            self.path.format(provider=provider) if self.path.startswith("/") else AUTH + self.path
+        )
+
+
+CALLBACK_ROUTE = "/api/accounts/{provider}/login/callback/"
+ENDPOINTS = {
+    "signup": Endpoint("POST", "auth/signup", True),
+    "login": Endpoint("POST", "auth/login", True),
+    "reset-request": Endpoint("POST", "auth/password/request", True),
+    "reset": Endpoint("POST", "auth/password/reset", True),
+    "verify": Endpoint("POST", "auth/email/verify", False),
+    "resend": Endpoint("POST", "auth/email/verify/resend", False),
+    "add-address": Endpoint("POST", "account/email", True),
+    "select-address": Endpoint("PUT", "account/email", True),
+    "make-primary": Endpoint("PATCH", "account/email", True),
+    "remove-address": Endpoint("DELETE", "account/email", True),
+    "password": Endpoint("POST", "account/password/change", False),
+    "reauthentication-code": Endpoint("POST", "auth/reauthenticate/code/request", True),
+    "totp-on": Endpoint("POST", "account/authenticators/totp", False),
+    "totp-off": Endpoint("DELETE", "account/authenticators/totp", False, mfa=True),
+    "recovery-codes": Endpoint("POST", "account/authenticators/recovery-codes", False, mfa=True),
+    "disconnect": Endpoint("DELETE", "account/providers", False, provider=True),
+    "provider-signup": Endpoint("POST", "auth/provider/signup", True, provider=True),
+    "provider-login": Endpoint("GET", CALLBACK_ROUTE, True, provider=True),
+    "provider-connect": Endpoint("GET", CALLBACK_ROUTE, False, provider=True),
+}
+GATED = {
+    "signup": SIGNED,
+    "login": SIGNED,
+    "verify": NOT_PENDING,
+    "resend": NOT_PENDING,
+    "provider-connect": SIGNED_OUT | {"signed-in"},
+} | {
+    name: SIGNED_OUT
+    for name in (
+        "add-address",
+        "select-address",
+        "make-primary",
+        "remove-address",
+        "password",
+        "reauthentication-code",
+        "totp-on",
+        "totp-off",
+        "recovery-codes",
+        "disconnect",
+    )
+}
+
+
+@dataclass(frozen=True)
+class Combination:
+    endpoint: str
+    shape: str
+    target: str
+    state: str
+    provider: str
+
+
+@dataclass(frozen=True)
+class Mail:
+    template: str
+    to: str
+    language: str
+    status: int
+
+
+@dataclass(frozen=True)
+class NoMail:
+    status: int
+    reason: str
+
+
+@dataclass(frozen=True)
+class Expect:
+    endpoint: str
+    outcome: Mail | NoMail
+    shapes: frozenset[str] | None = None
+    targets: frozenset[str] | None = None
+    states: frozenset[str] | None = None
+
+    def matches(self, combination: Combination) -> bool:
+        return (
+            self.endpoint == combination.endpoint
+            and (self.shapes is None or combination.shape in self.shapes)
+            and (self.targets is None or combination.target in self.targets)
+            and (self.states is None or combination.state in self.states)
+        )
+
+
+def expect(
+    endpoint: str,
+    outcome: Mail | NoMail,
+    *,
+    shapes: Iterable[str] | None = None,
+    targets: Iterable[str] | None = None,
+    states: Iterable[str] | None = None,
+) -> Expect:
+    return Expect(
+        endpoint,
+        outcome,
+        None if shapes is None else frozenset(shapes),
+        None if targets is None else frozenset(targets),
+        None if states is None else frozenset(states),
+    )
+
+
+def gated(combination: Combination) -> bool:
+    return combination.state in GATED.get(combination.endpoint, frozenset())
+
+
+def canonical_target(endpoint: str) -> str:
+    return "own-primary" if ENDPOINTS[endpoint].takes_address else "none"
+
+
+def touches_account(combination: Combination) -> bool:
+    return combination.target in OWN or (
+        combination.endpoint in {"verify", "resend"} and combination.shape in UNVERIFIED_SHAPES
+    )
+
+
+NOT_APPLICABLE: tuple[tuple[str, Callable[[Combination], bool]], ...] = (
+    (
+        "only endpoints that read an address in the request take a target",
+        lambda c: (c.target == "none") == ENDPOINTS[c.endpoint].takes_address,
+    ),
+    (
+        "only provider endpoints take a provider",
+        lambda c: (c.provider == "none") == ENDPOINTS[c.endpoint].provider,
+    ),
+    (
+        "an own secondary target exists only in the account shape that has it",
+        lambda c: (
+            (c.target == "own-verified-secondary" and c.shape != "verified-secondary")
+            or (c.target == "own-unverified-secondary" and c.shape != "unverified-secondary")
+        ),
+    ),
+    (
+        "the pending address exists only while a change is pending, and only the endpoints that "
+        "select a stored or pending address read it",
+        lambda c: (
+            c.target == "pending-address"
+            and (
+                c.state != "pending-change"
+                or c.endpoint not in {"select-address", "make-primary", "remove-address"}
+            )
+        ),
+    ),
+    (
+        "a provider identity is linked to an account, not to one of its secondary addresses",
+        lambda c: (
+            c.endpoint == "provider-login"
+            and c.target in {"own-verified-secondary", "own-unverified-secondary"}
+        ),
+    ),
+    (
+        "only an account that can sign in holds a signed-in session",
+        lambda c: c.state in SIGNED and c.shape not in SESSION_SHAPES,
+    ),
+    (
+        "only the password endpoint reads whether the account has a password",
+        lambda c: c.shape == "passwordless" and c.endpoint != "password",
+    ),
+    (
+        "signed out, the account's shape matters only when the request touches the account",
+        lambda c: c.state in SIGNED_OUT and c.shape != "verified" and not touches_account(c),
+    ),
+    (
+        "a reset completes only with the code its request mailed",
+        lambda c: (
+            c.endpoint == "reset"
+            and (
+                c.target in {"own-unverified-secondary", "unknown", "inactive-account"}
+                or (c.target == "own-primary" and c.shape == "inactive")
+            )
+        ),
+    ),
+    (
+        "a state rejected before the body is read runs once per state and provider",
+        lambda c: gated(c) and (c.shape != "verified" or c.target != canonical_target(c.endpoint)),
+    ),
+)
+NO_MAIL_LANGUAGE_RULE = "an outcome without mail has nothing to localize and runs in English only"
+
+
+def notifies(endpoint: str, template: str) -> tuple[Expect, ...]:
+    return (
+        expect(endpoint, NoMail(401, "no session"), states=SIGNED_OUT),
+        expect(endpoint, NoMail(401, "needs reauthentication"), states={"signed-in"}),
+        expect(endpoint, Mail(template, "primary", "member", 200)),
+    )
+
+
+EXPECTED: tuple[Expect, ...] = (
+    expect("signup", NoMail(409, "a signed-in client cannot sign up"), states=SIGNED),
+    expect("signup", Mail(SIGNUP_CODE, "target", "request", 401), targets={"unknown"}),
+    expect(
+        "signup",
+        Mail(EXISTS, "target", "request", 401),
+        targets={"own-primary"},
+        shapes=UNVERIFIED_SHAPES,
+    ),
+    expect("signup", Mail(EXISTS, "target", "request", 401), targets={"own-unverified-secondary"}),
+    expect(
+        "signup",
+        Mail(EXISTS, "target", "member", 401),
+        targets={"own-primary", "own-verified-secondary"},
+    ),
+    expect("signup", Mail(EXISTS, "target", "other", 401), targets={"other-account"}),
+    expect("signup", Mail(EXISTS, "target", "inactive", 401), targets={"inactive-account"}),
+    expect("login", NoMail(409, "already signed in"), states=SIGNED),
+    expect(
+        "login",
+        Mail(SIGNUP_CODE, "target", "member", 401),
+        targets={"own-primary"},
+        shapes={"unverified-new"},
+    ),
+    expect(
+        "login",
+        Mail(CHANGE_CODE, "target", "member", 401),
+        targets={"own-primary"},
+        shapes={"unverified-returning"},
+    ),
+    expect(
+        "login",
+        NoMail(400, "an inactive account is refused like a wrong password"),
+        targets={"own-primary"},
+        shapes={"inactive"},
+    ),
+    expect(
+        "login",
+        NoMail(200, "signs in"),
+        targets={"own-primary", "own-verified-secondary", "other-account"},
+    ),
+    expect("login", NoMail(400, "not a sign-in identity"), targets={"own-unverified-secondary"}),
+    expect("login", NoMail(400, "not a sign-in identity"), targets={"unknown"}),
+    expect(
+        "login",
+        NoMail(400, "an inactive account is refused like a wrong password"),
+        targets={"inactive-account"},
+    ),
+    expect(
+        "reset-request",
+        Mail(UNKNOWN_ACCOUNT, "target", "member", 401),
+        targets={"own-primary"},
+        shapes={"inactive"},
+    ),
+    expect(
+        "reset-request",
+        Mail(RESET_CODE, "target", "request", 401),
+        targets={"own-primary"},
+        shapes=UNVERIFIED_SHAPES,
+    ),
+    expect(
+        "reset-request",
+        Mail(RESET_CODE, "target", "member", 401),
+        targets={"own-primary", "own-verified-secondary"},
+        states=SIGNED_OUT,
+    ),
+    expect(
+        "reset-request",
+        Mail(RESET_CODE, "target", "member", 200),
+        targets={"own-primary", "own-verified-secondary"},
+    ),
+    expect(
+        "reset-request",
+        Mail(RESET_CODE, "target", "other", 401),
+        targets={"other-account"},
+        states=SIGNED_OUT,
+    ),
+    expect("reset-request", Mail(RESET_CODE, "target", "other", 200), targets={"other-account"}),
+    expect(
+        "reset-request",
+        Mail(UNKNOWN_ACCOUNT, "target", "inactive", 401),
+        targets={"inactive-account"},
+        states=SIGNED_OUT,
+    ),
+    expect(
+        "reset-request",
+        Mail(UNKNOWN_ACCOUNT, "target", "inactive", 200),
+        targets={"inactive-account"},
+    ),
+    expect(
+        "reset-request",
+        Mail(UNKNOWN_ACCOUNT, "target", "request", 401),
+        targets={"own-unverified-secondary", "unknown"},
+        states=SIGNED_OUT,
+    ),
+    expect(
+        "reset-request",
+        Mail(UNKNOWN_ACCOUNT, "target", "request", 200),
+        targets={"own-unverified-secondary", "unknown"},
+    ),
+    expect(
+        "reset",
+        Mail(RESET_NOTICE, "primary", "member", 401),
+        targets={"own-primary", "own-verified-secondary"},
+        states=SIGNED_OUT,
+    ),
+    expect(
+        "reset",
+        Mail(RESET_NOTICE, "primary", "member", 200),
+        targets={"own-primary", "own-verified-secondary"},
+    ),
+    expect(
+        "reset",
+        Mail(RESET_NOTICE, "target", "other", 401),
+        targets={"other-account"},
+        states=SIGNED_OUT,
+    ),
+    expect("reset", Mail(RESET_NOTICE, "target", "other", 200), targets={"other-account"}),
+    expect("verify", NoMail(409, "no verification is pending"), states=NOT_PENDING),
+    expect(
+        "verify",
+        NoMail(200, "a first verification has no previous address to notify"),
+        states={"pending-signup"},
+    ),
+    expect("verify", Mail(EMAIL_CHANGED, "primary", "member", 200), states={"pending-change"}),
+    expect("resend", NoMail(409, "no verification is pending"), states=NOT_PENDING),
+    expect(
+        "resend",
+        Mail(SIGNUP_CODE, "primary", "member", 200),
+        states={"pending-signup"},
+        shapes={"unverified-new"},
+    ),
+    expect(
+        "resend",
+        Mail(CHANGE_CODE, "primary", "member", 200),
+        states={"pending-signup"},
+        shapes={"unverified-returning"},
+    ),
+    expect("resend", Mail(SIGNUP_CODE, "fresh", "request", 200), states={"pending-signup"}),
+    expect("resend", Mail(CHANGE_CODE, "change", "member", 200), states={"pending-change"}),
+    expect("add-address", NoMail(409, "no session and no change stage"), states=SIGNED_OUT),
+    expect("add-address", NoMail(400, "already an address of the account"), targets=OWN),
+    expect("add-address", NoMail(401, "needs reauthentication"), states={"signed-in"}),
+    expect("add-address", Mail(CHANGE_CODE, "target", "member", 200), targets=ELSEWHERE),
+    expect("select-address", NoMail(401, "no session"), states=SIGNED_OUT),
+    expect(
+        "select-address",
+        NoMail(400, "the address is already verified"),
+        targets={"own-primary", "own-verified-secondary"},
+    ),
+    expect(
+        "select-address",
+        Mail(CHANGE_CODE, "target", "member", 200),
+        targets={"own-unverified-secondary", "pending-address"},
+    ),
+    expect("select-address", NoMail(400, "not an address of the account"), targets=ELSEWHERE),
+    expect("make-primary", NoMail(401, "no session"), states=SIGNED_OUT),
+    expect(
+        "make-primary",
+        NoMail(400, "an unverified address cannot become primary"),
+        targets={"own-unverified-secondary", "pending-address"},
+    ),
+    expect("make-primary", NoMail(400, "not an address of the account"), targets=ELSEWHERE),
+    expect("make-primary", NoMail(401, "needs reauthentication"), states={"signed-in"}),
+    expect(
+        "make-primary", NoMail(200, "already primary: nothing changes"), targets={"own-primary"}
+    ),
+    expect(
+        "make-primary",
+        Mail(EMAIL_CHANGED, "primary", "member", 200),
+        targets={"own-verified-secondary"},
+    ),
+    expect("remove-address", NoMail(401, "no session"), states=SIGNED_OUT),
+    expect("remove-address", NoMail(400, "the primary address stays"), targets={"own-primary"}),
+    expect("remove-address", NoMail(400, "not an address of the account"), targets=ELSEWHERE),
+    expect("remove-address", NoMail(200, "aborts the pending change"), targets={"pending-address"}),
+    expect("remove-address", NoMail(401, "needs reauthentication"), states={"signed-in"}),
+    expect(
+        "remove-address",
+        Mail(EMAIL_DELETED, "primary", "member", 200),
+        targets={"own-verified-secondary", "own-unverified-secondary"},
+    ),
+    expect("password", NoMail(401, "no session"), states=SIGNED_OUT),
+    expect(
+        "password",
+        NoMail(401, "a first password needs reauthentication"),
+        shapes={"passwordless"},
+        states={"signed-in"},
+    ),
+    expect("password", Mail(SET_NOTICE, "primary", "member", 401), shapes={"passwordless"}),
+    expect("password", Mail(CHANGED_NOTICE, "primary", "member", 401)),
+    expect("reauthentication-code", NoMail(401, "no session"), states=SIGNED_OUT),
+    expect(
+        "reauthentication-code",
+        Mail(LOGIN_CODE, "target", "member", 200),
+        targets={"own-primary", "own-verified-secondary"},
+    ),
+    expect(
+        "reauthentication-code",
+        NoMail(400, "not a verified address of the account"),
+        targets={"own-unverified-secondary", *ELSEWHERE},
+    ),
+    expect(
+        "totp-on",
+        NoMail(400, "two-factor authentication needs every address verified"),
+        shapes={"unverified-secondary"},
+        states=SIGNED,
+    ),
+    *notifies("totp-on", TOTP_ON),
+    *notifies("totp-off", TOTP_OFF),
+    *notifies("recovery-codes", RECOVERY_CODES),
+    *notifies("disconnect", DISCONNECTED),
+    expect("provider-signup", Mail(SIGNUP_CODE, "target", "request", 401), targets={"unknown"}),
+    expect(
+        "provider-signup",
+        Mail(EXISTS, "target", "request", 401),
+        targets={"own-primary"},
+        shapes=UNVERIFIED_SHAPES,
+    ),
+    expect(
+        "provider-signup",
+        Mail(EXISTS, "target", "request", 401),
+        targets={"own-unverified-secondary"},
+    ),
+    expect(
+        "provider-signup",
+        Mail(EXISTS, "target", "member", 401),
+        targets={"own-primary", "own-verified-secondary"},
+    ),
+    expect("provider-signup", Mail(EXISTS, "target", "other", 401), targets={"other-account"}),
+    expect(
+        "provider-signup", Mail(EXISTS, "target", "inactive", 401), targets={"inactive-account"}
+    ),
+    expect(
+        "provider-login",
+        Mail(SIGNUP_CODE, "target", "member", 302),
+        targets={"own-primary"},
+        shapes={"unverified-new"},
+    ),
+    expect(
+        "provider-login",
+        Mail(CHANGE_CODE, "target", "member", 302),
+        targets={"own-primary"},
+        shapes={"unverified-returning"},
+    ),
+    expect(
+        "provider-login",
+        NoMail(302, "signs in, asks for the sign-up form or refuses an inactive account"),
+    ),
+    expect(
+        "provider-connect",
+        NoMail(302, "connecting needs a reauthenticated session"),
+        states=GATED["provider-connect"],
+    ),
+    expect("provider-connect", Mail(CONNECTED, "primary", "member", 302)),
+)
+
+
+@dataclass(frozen=True)
+class Case:
+    combination: Combination
+    language: str
+    expected: Mail | NoMail | None
+
+    def __str__(self) -> str:
+        c = self.combination
+        return f"{c.endpoint}-{c.shape}-{c.target}-{c.state}-{c.provider}-{self.language}"
+
+
+def matrix() -> list[Case]:
+    cases: list[Case] = []
+    for endpoint, shape, target, state, provider in product(
+        ENDPOINTS, SHAPES, TARGETS, STATES, PROVIDER_CHOICES
+    ):
+        combination = Combination(endpoint, shape, target, state, provider)
+        if any(rule(combination) for _, rule in NOT_APPLICABLE):
+            continue
+        expected = next((row.outcome for row in EXPECTED if row.matches(combination)), None)
+        languages = ("en",) if isinstance(expected, NoMail) else LANGUAGES
+        cases.extend(Case(combination, language, expected) for language in languages)
+    return cases
+
+
+CASES = matrix()
+
+
+@dataclass
+class World:
+    member: User
+    recovery_codes: list[str]
+
+
+@dataclass
+class Session:
+    client: Client
+    code: str
+
+
+@dataclass
+class Act:
+    case: Case
+    session: Session
+    world: World
+    profile: dict[str, Any]
+    monkeypatch: pytest.MonkeyPatch
+
+    @property
+    def target(self) -> str:
+        return TARGETS[self.case.combination.target]
+
+    @property
+    def provider(self) -> str:
+        return self.case.combination.provider
+
+
 @pytest.fixture(autouse=True)
 def local_mail() -> Iterator[None]:
     # A non-UTC server zone proves that notices convert their time to UTC.
     with override_settings(
         MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}},
         TIME_ZONE="Europe/Istanbul",
+        SOCIALACCOUNT_PROVIDERS=PROVIDERS,
+        HEADLESS_FRONTEND_URLS=settings.HEADLESS_FRONTEND_URLS
+        | {"socialaccount_login_error": CALLBACK},
     ):
         yield
 
 
-@pytest.fixture(params=["en", "tr"])
+@pytest.fixture(params=LANGUAGES)
 def language(request: pytest.FixtureRequest) -> str:
     return str(request.param)
 
 
 @pytest.fixture(autouse=True)
-def social_providers(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, Any]]:
-    profile: dict[str, Any] = {
-        "sub": "google-identity",
-        "email": "solar@gmail.com",
-        "email_verified": True,
-    }
+def identity(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    profile: dict[str, Any] = {}
 
     def request(
         self: requests.Session, method: str, url: str, *args: Any, **kwargs: Any
@@ -229,20 +833,28 @@ def social_providers(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, Any]
         response = requests.Response()
         response.status_code = 200
         response.headers["content-type"] = "application/json"
+        keys = (
+            {"id", "mail", "userPrincipalName"}
+            if "graph.microsoft.com" in url
+            else {"sub", "email", "email_verified"}
+        )
         response._content = json.dumps(
             {"access_token": "test-access-token", "token_type": "Bearer", "expires_in": 3600}
             if url.endswith("/token")
-            else profile
+            else {key: value for key, value in profile.items() if key in keys}
         ).encode()
         return response
 
     monkeypatch.setattr(requests.Session, "request", request)
-    with override_settings(
-        SOCIALACCOUNT_PROVIDERS=PROVIDERS,
-        HEADLESS_FRONTEND_URLS=settings.HEADLESS_FRONTEND_URLS
-        | {"socialaccount_login_error": CALLBACK},
-    ):
-        yield profile
+    return profile
+
+
+def assume_identity(
+    profile: dict[str, Any], uid: str, email: str, *, verified: bool = False
+) -> None:
+    profile.update(
+        sub=uid, id=uid, email=email, mail=email, userPrincipalName=email, email_verified=verified
+    )
 
 
 def one_minute_later(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -260,37 +872,6 @@ def browser(language: str | None = None) -> Client:
     if language is not None:
         headers["Accept-Language"] = language
     return Client(enforce_csrf_checks=True, headers=headers)
-
-
-def account(language: str) -> User:
-    user = member()
-    UserLanguagePreference.objects.create(user=user, language=language)
-    return user
-
-
-def signed_in(user: User, *, reauthenticated: bool = False) -> Client:
-    client = browser()
-    assert (
-        submit(client, "auth/login", {"email": user.email, "password": PASSWORD}).status_code == 200
-    )
-    if reauthenticated:
-        assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
-    mail.outbox.clear()
-    return client
-
-
-def two_factor_account(language: str) -> tuple[Client, User]:
-    user = account(language)
-    TOTP.activate(user, generate_totp_secret())
-    first, second, *_ = RecoveryCodes.activate(user).generate_codes()
-    client = browser()
-    assert (
-        submit(client, "auth/login", {"email": user.email, "password": PASSWORD}).status_code == 401
-    )
-    assert submit(client, "auth/2fa/authenticate", {"code": first}).status_code == 200
-    assert submit(client, "auth/2fa/reauthenticate", {"code": second}).status_code == 200
-    mail.outbox.clear()
-    return client, user
 
 
 def call(client: Client, method: str, path: str, data: dict[str, Any] | None = None) -> Any:
@@ -311,6 +892,210 @@ def mailed_code() -> str:
     assert match is not None
     mail.outbox.clear()
     return match.group(1)
+
+
+def account(
+    email: str, username: str, language: str, *, verified: bool = True, active: bool = True
+) -> User:
+    user = User.objects.create_user(
+        username=username, email=email, password=PASSWORD, is_active=active
+    )
+    EmailAddress.objects.create(user=user, email=email, primary=True, verified=verified)
+    UserLanguagePreference.objects.create(user=user, language=language)
+    return user
+
+
+def build_world(case: Case) -> World:
+    combination, language = case.combination, case.language
+    shape = combination.shape
+    member = account(
+        PRIMARY,
+        "member",
+        language,
+        verified=shape not in UNVERIFIED_SHAPES,
+        active=shape != "inactive",
+    )
+    if shape == "passwordless":
+        member.set_unusable_password()
+        member.save(update_fields=["password"])
+    if shape == "verified-secondary":
+        EmailAddress.objects.create(user=member, email=SECONDARY, verified=True)
+    if shape == "unverified-secondary":
+        EmailAddress.objects.create(user=member, email=UNVERIFIED)
+    if shape == "unverified-returning":
+        User.objects.filter(pk=member.pk).update(last_login=datetime.now(UTC))
+    owners = {
+        "own-primary": member,
+        "other-account": account(OTHER_ADDRESS, "other", OTHER[language]),
+        "inactive-account": account(INACTIVE_ADDRESS, "inactive", language, active=False),
+    }
+    recovery_codes: list[str] = []
+    if ENDPOINTS[combination.endpoint].mfa:
+        TOTP.activate(member, generate_totp_secret())
+        recovery_codes = RecoveryCodes.activate(member).generate_codes()
+    if combination.endpoint == "disconnect":
+        SocialAccount.objects.create(
+            user=member, provider=combination.provider, uid="linked-identity"
+        )
+    if combination.endpoint == "provider-login" and combination.target in owners:
+        SocialAccount.objects.create(
+            user=owners[combination.target], provider=combination.provider, uid="linked-identity"
+        )
+    return World(member, recovery_codes)
+
+
+def sign_in(client: Client, case: Case, world: World) -> None:
+    if case.combination.shape == "passwordless":
+        client.force_login(world.member)
+        return
+    credentials = {"email": PRIMARY, "password": PASSWORD}
+    if world.recovery_codes:
+        assert submit(client, "auth/login", credentials).status_code == 401
+        code = {"code": world.recovery_codes[0]}
+        assert submit(client, "auth/2fa/authenticate", code).status_code == 200
+        return
+    assert submit(client, "auth/login", credentials).status_code == 200
+
+
+def reauthenticate(client: Client, case: Case, world: World) -> None:
+    if case.combination.shape == "passwordless":
+        request = {"email": PRIMARY}
+        assert submit(client, "auth/reauthenticate/code/request", request).status_code == 200
+        confirmation = {"code": mailed_code()}
+        assert submit(client, "auth/reauthenticate/code/confirm", confirmation).status_code == 200
+    elif world.recovery_codes:
+        code = {"code": world.recovery_codes[1]}
+        assert submit(client, "auth/2fa/reauthenticate", code).status_code == 200
+    else:
+        assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
+
+
+def enter(case: Case, world: World) -> Session:
+    combination = case.combination
+    if combination.state in SIGNED_OUT:
+        client = browser(OTHER[case.language])
+        if combination.state == "signed-out":
+            return Session(client, "")
+        if combination.shape in UNVERIFIED_SHAPES:
+            credentials = {"email": PRIMARY, "password": PASSWORD}
+            assert submit(client, "auth/login", credentials).status_code == 401
+        else:
+            details = {"email": FRESH, "company_name": "Fresh Signup"}
+            assert signup(client, details).status_code == 401
+        return Session(client, mailed_code())
+    client = browser()
+    sign_in(client, case, world)
+    if combination.state == "signed-in":
+        return Session(client, "")
+    reauthenticate(client, case, world)
+    if combination.state == "reauthenticated":
+        return Session(client, "")
+    assert submit(client, "account/email", {"email": CHANGE}).status_code == 200
+    return Session(client, mailed_code())
+
+
+def provider_redirect(client: Client, provider: str, process: str) -> tuple[Any, str | None]:
+    token = client.get("/api/session/").json()["csrf_token"]
+    response = client.post(
+        AUTH + "auth/provider/redirect",
+        {"provider": provider, "process": process, "callback_url": CALLBACK},
+        HTTP_X_CSRFTOKEN=token,
+    )
+    if response.status_code != 200:
+        return response, None
+    return response, parse_qs(urlsplit(provider_destination(response)).query)["state"][0]
+
+
+def through_provider(client: Client, provider: str, process: str) -> Any:
+    response, state = provider_redirect(client, provider, process)
+    return response if state is None else complete(client, state, provider)
+
+
+def act_reset(act: Act) -> Any:
+    submit(act.session.client, "auth/password/request", {"email": act.target})
+    reset = {"key": mailed_code(), "password": PASSWORD + "reset"}
+    return submit(act.session.client, "auth/password/reset", reset)
+
+
+def act_password(act: Act) -> Any:
+    change = {"new_password": PASSWORD + "new"}
+    if act.case.combination.shape != "passwordless":
+        change["current_password"] = PASSWORD
+    return submit(act.session.client, "account/password/change", change)
+
+
+def act_totp_on(act: Act) -> Any:
+    client = act.session.client
+    setup = client.get(AUTH + "account/authenticators/totp").json()
+    secret = setup.get("meta", {}).get("secret", "")
+    now = time.time()
+    # The CSRF and activation requests can cross a 30-second TOTP boundary.
+    act.monkeypatch.setattr(totp_auth, "time", SimpleNamespace(time=lambda: now))
+    code = totp_code(secret, now) if secret else "000000"
+    return submit(client, "account/authenticators/totp", {"code": code})
+
+
+def act_provider_signup(act: Act) -> Any:
+    assume_identity(act.profile, "signup-identity", act.target)
+    response, state = provider_redirect(act.session.client, act.provider, "login")
+    if state is None:
+        return response
+    complete(act.session.client, state, act.provider)
+    details = {"email": act.target, "company_name": "Provider Signup"}
+    return submit(act.session.client, "auth/provider/signup", details)
+
+
+def act_provider_login(act: Act) -> Any:
+    unknown = act.case.combination.target == "unknown"
+    assume_identity(act.profile, "new-identity" if unknown else "linked-identity", act.target)
+    return through_provider(act.session.client, act.provider, "login")
+
+
+def act_provider_connect(act: Act) -> Any:
+    assume_identity(act.profile, "connect-identity", "connect@example.com", verified=True)
+    return through_provider(act.session.client, act.provider, "connect")
+
+
+ACTIONS: dict[str, Callable[[Act], Any]] = {
+    "signup": lambda a: signup(
+        a.session.client, {"email": a.target, "company_name": "Matrix Signup"}
+    ),
+    "login": lambda a: submit(
+        a.session.client, "auth/login", {"email": a.target, "password": PASSWORD}
+    ),
+    "reset-request": lambda a: submit(
+        a.session.client, "auth/password/request", {"email": a.target}
+    ),
+    "reset": act_reset,
+    "verify": lambda a: submit(a.session.client, "auth/email/verify", {"key": a.session.code}),
+    "resend": lambda a: submit(a.session.client, "auth/email/verify/resend", {}),
+    "add-address": lambda a: submit(a.session.client, "account/email", {"email": a.target}),
+    "select-address": lambda a: call(a.session.client, "put", "account/email", {"email": a.target}),
+    "make-primary": lambda a: call(
+        a.session.client, "patch", "account/email", {"email": a.target, "primary": True}
+    ),
+    "remove-address": lambda a: call(
+        a.session.client, "delete", "account/email", {"email": a.target}
+    ),
+    "password": act_password,
+    "reauthentication-code": lambda a: submit(
+        a.session.client, "auth/reauthenticate/code/request", {"email": a.target}
+    ),
+    "totp-on": act_totp_on,
+    "totp-off": lambda a: call(a.session.client, "delete", "account/authenticators/totp"),
+    "recovery-codes": lambda a: submit(
+        a.session.client, "account/authenticators/recovery-codes", {}
+    ),
+    "disconnect": lambda a: call(
+        a.session.client,
+        "delete",
+        "account/providers",
+        {"provider": a.provider, "account": "linked-identity"},
+    ),
+    "provider-signup": act_provider_signup,
+    "provider-login": act_provider_login,
+    "provider-connect": act_provider_connect,
+}
 
 
 def html(message: EmailMultiAlternatives) -> str:
@@ -383,200 +1168,159 @@ def assert_action(message: EmailMultiAlternatives, *, prefix: str, language: str
     assert SECURITY_COPY[language]["warning"] not in str(message.body)
 
 
-ANONYMOUS = "anonymous"
-PENDING_SIGNUP = "pending-signup"
-PENDING_PROVIDER_SIGNUP = "pending-provider-signup"
-SIGNED_IN = "signed-in"
-SECOND_ADDRESS = "second-address"
-PENDING_CHANGE = "pending-change"
-REAUTHENTICATION_PENDING = "reauthentication-pending"
-ANONYMOUS_STATES = (ANONYMOUS, PENDING_SIGNUP, PENDING_PROVIDER_SIGNUP)
-REAUTHENTICATED_STATES = (SIGNED_IN, SECOND_ADDRESS, PENDING_CHANGE)
-SIGNED_IN_STATES = (*REAUTHENTICATED_STATES, REAUTHENTICATION_PENDING)
-ALL_STATES = (*ANONYMOUS_STATES, *SIGNED_IN_STATES)
-LINKED_IDENTITY = {"sub": "linked-identity", "email": "solar@gmail.com", "email_verified": False}
+def recipient(role: str, case: Case) -> str:
+    return {
+        "target": TARGETS[case.combination.target],
+        "primary": PRIMARY,
+        "fresh": FRESH,
+        "change": CHANGE,
+    }[role]
 
 
-def anonymous_client(state: str, profile: dict[str, Any], language: str | None = None) -> Client:
-    client = browser(language)
-    if state == PENDING_SIGNUP:
-        details = {"email": "pending-signup@example.com", "company_name": "Pending Signup"}
-        assert signup(client, details).status_code == 401
-    elif state == PENDING_PROVIDER_SIGNUP:
-        profile.update(sub="pending-identity", email="pending@gmail.com", email_verified=True)
-        complete(client, begin(client))
-        assert "socialaccount_sociallogin" in client.session
-    mail.outbox.clear()
-    return client
+def language_of(role: str, case: Case) -> str:
+    request = OTHER[case.language] if case.combination.state in SIGNED_OUT else case.language
+    return {
+        "member": case.language,
+        "other": OTHER[case.language],
+        "inactive": case.language,
+        "request": request,
+    }[role]
 
 
-def enter(client: Client, user: User, state: str) -> None:
-    if state == SECOND_ADDRESS:
-        EmailAddress.objects.create(user=user, email="second@example.com", verified=True)
-    elif state == PENDING_CHANGE:
-        change = {"email": "pending-change@example.com"}
-        assert submit(client, "account/email", change).status_code == 200
-    mail.outbox.clear()
+def sentence_values(template: str, case: Case, to: str) -> dict[str, str]:
+    combination = case.combination
+    if template in ACTION_URLS:
+        return {"email": to}
+    if template == EMAIL_CHANGED:
+        new = CHANGE if combination.endpoint == "verify" else TARGETS[combination.target]
+        return {"from_email": PRIMARY, "to_email": new}
+    if template == EMAIL_DELETED:
+        return {"deleted_email": TARGETS[combination.target]}
+    if template in {CONNECTED, DISCONNECTED}:
+        return {"provider": PROVIDER_NAMES[combination.provider]}
+    return {}
 
 
-def signed_in_client(user: User, state: str) -> Client:
-    if state == REAUTHENTICATION_PENDING:
-        client = signed_in(user)
-        request = {"email": user.email}
-        assert submit(client, "auth/reauthenticate/code/request", request).status_code == 200
-        mail.outbox.clear()
-        return client
-    client = signed_in(user, reauthenticated=True)
-    enter(client, user, state)
-    return client
+def assert_contract(message: EmailMultiAlternatives, case: Case, since: datetime) -> None:
+    expected = case.expected
+    assert isinstance(expected, Mail)
+    to, language = recipient(expected.to, case), language_of(expected.language, case)
+    if expected.template in CODE_MINUTES:
+        assert_code_mail(
+            message,
+            prefix=expected.template,
+            to=to,
+            language=language,
+            minutes=CODE_MINUTES[expected.template],
+        )
+        return
+    values = sentence_values(expected.template, case, to)
+    assert_notice(message, prefix=expected.template, to=to, language=language, **values)
+    if expected.template in ACTION_URLS:
+        url = ACTION_URLS[expected.template]
+        assert_action(message, prefix=expected.template, language=language, url=url)
+    else:
+        assert_security_details(message, language=language, since=since)
 
 
-def client_in(
-    state: str, user: User, profile: dict[str, Any], anonymous_language: str | None = None
-) -> Client:
-    if state in ANONYMOUS_STATES:
-        return anonymous_client(state, profile, anonymous_language)
-    return signed_in_client(user, state)
-
-
-def answered(state: str) -> int:
-    return 401 if state in ANONYMOUS_STATES else 200
-
-
-def start_verification(client: Client, user: User, origin: str) -> str:
-    if origin == "change":
-        assert submit(client, "account/email", {"email": "new@example.com"}).status_code == 200
-        return "new@example.com"
-    EmailAddress.objects.create(user=user, email="pending@example.com")
-    assert call(client, "put", "account/email", {"email": "pending@example.com"}).status_code == 200
-    return "pending@example.com"
-
-
-def linked_unverified_account(
-    language: str, profile: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("case", CASES, ids=str)
+def test_account_mail_matrix(
+    case: Case, identity: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    profile.update(LINKED_IDENTITY)
-    client = browser(language)
-    complete(client, begin(client))
-    details = {"email": "solar@gmail.com", "company_name": "Linked Solar"}
-    assert submit(client, "auth/provider/signup", details).status_code == 401
+    assert case.expected is not None, f"no expectation declared for {case}"
+    world = build_world(case)
+    session = enter(case, world)
     mail.outbox.clear()
     one_minute_later(monkeypatch)
+    since = datetime.now(UTC)
+
+    response = ACTIONS[case.combination.endpoint](Act(case, session, world, identity, monkeypatch))
+
+    sent = [(message.extra_headers.get("X-Pyracast-Mail"), message.to) for message in mail.outbox]
+    if isinstance(case.expected, NoMail):
+        assert (response.status_code, sent) == (case.expected.status, []), case.expected.reason
+        return
+    to = recipient(case.expected.to, case)
+    assert (response.status_code, sent) == (case.expected.status, [(case.expected.template, [to])])
+    assert_contract(only_mail(), case, since)
 
 
-@pytest.mark.parametrize("state", ANONYMOUS_STATES)
-def test_signup_mails_the_verification_code_in_the_request_language(
-    language: str, state: str, social_providers: dict[str, Any]
+def test_every_combination_is_declared_or_excluded_by_a_rule() -> None:
+    assert [str(case) for case in CASES if case.expected is None] == []
+    assert all(reason for reason, _ in NOT_APPLICABLE)
+    assert NO_MAIL_LANGUAGE_RULE
+
+
+@pytest.mark.parametrize("target", [PRIMARY, SECONDARY])
+def test_verified_address_refusal_names_the_field_in_the_account_language(
+    language: str, target: str
 ) -> None:
-    client = anonymous_client(state, social_providers, language)
-
-    assert signup(client).status_code == 401
-
-    assert_code_mail(
-        only_mail(),
-        prefix="account/email/email_confirmation_signup",
-        to="owner@example.com",
-        language=language,
-        minutes=10,
-    )
-
-
-@pytest.mark.parametrize("state", ANONYMOUS_STATES)
-def test_unverified_sign_in_mails_a_new_code_in_the_stored_language(
-    language: str, state: str, social_providers: dict[str, Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    assert signup(browser(language)).status_code == 401
-    one_minute_later(monkeypatch)
-    client = anonymous_client(state, social_providers, OTHER[language])
-    credentials = {"email": "owner@example.com", "password": PASSWORD}
-
-    response = submit(client, "auth/login", credentials)
-
-    assert response.status_code == 401
-    assert {"id": "verify_email", "is_pending": True} in response.json()["data"]["flows"]
-    assert_code_mail(
-        only_mail(),
-        prefix="account/email/email_confirmation_signup",
-        to="owner@example.com",
-        language=language,
-        minutes=10,
-    )
-
-
-def test_unverified_sign_in_of_a_returning_account_mails_the_plain_verification_code(
-    language: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    assert signup(browser(language)).status_code == 401
+    member = account(PRIMARY, "member", language)
+    EmailAddress.objects.create(user=member, email=SECONDARY, verified=True)
+    client = browser()
+    assert submit(client, "auth/login", {"email": PRIMARY, "password": PASSWORD}).status_code == 200
     mail.outbox.clear()
-    User.objects.filter(email="owner@example.com").update(last_login=datetime.now(UTC))
-    one_minute_later(monkeypatch)
-    credentials = {"email": "owner@example.com", "password": PASSWORD}
 
-    response = submit(browser(OTHER[language]), "auth/login", credentials)
+    response = call(client, "put", "account/email", {"email": target})
+
+    assert response.status_code == 400
+    assert response.json()["errors"] == [
+        {"message": REFUSAL[language], "code": "email_already_verified", "param": "email"}
+    ]
+    assert mail.outbox == []
+
+
+def test_reset_request_for_duplicate_unverified_identities_mails_the_shared_address(
+    language: str,
+) -> None:
+    for name in ("first", "second"):
+        account("shared@example.com", name, OTHER[language], verified=False)
+
+    response = submit(browser(language), "auth/password/request", {"email": "shared@example.com"})
 
     assert response.status_code == 401
     assert_code_mail(
-        only_mail(),
-        prefix="account/email/email_confirmation",
-        to="owner@example.com",
-        language=language,
-        minutes=10,
+        only_mail(), prefix=RESET_CODE, to="shared@example.com", language=language, minutes=10
     )
 
 
-def test_verification_resend_mails_a_new_code_in_the_stored_language(
-    language: str, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("provider", ["google", "microsoft"])
+@pytest.mark.parametrize("state", sorted(SIGNED))
+def test_signed_in_provider_sign_in_of_another_unverified_account_mails_its_language(
+    language: str,
+    provider: str,
+    state: str,
+    identity: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    client = browser(language)
-    assert signup(client).status_code == 401
-    first = mailed_code()
+    actor = account(PRIMARY, "member", OTHER[language])
+    linked = account("linked@example.com", "linked", language, verified=False)
+    SocialAccount.objects.create(user=linked, provider=provider, uid="linked-identity")
+    client = browser()
+    credentials = {"email": actor.email, "password": PASSWORD}
+    assert submit(client, "auth/login", credentials).status_code == 200
+    if state != "signed-in":
+        assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
+    if state == "pending-change":
+        assert submit(client, "account/email", {"email": CHANGE}).status_code == 200
+    mail.outbox.clear()
     one_minute_later(monkeypatch)
-    client.defaults["HTTP_ACCEPT_LANGUAGE"] = OTHER[language]
+    assume_identity(identity, "linked-identity", "linked@example.com")
 
-    response = submit(client, "auth/email/verify/resend", {})
+    response = through_provider(client, provider, "login")
 
-    assert response.status_code == 200
-    message = only_mail()
+    assert response.status_code == 302
     assert_code_mail(
-        message,
-        prefix="account/email/email_confirmation_signup",
-        to="owner@example.com",
-        language=language,
-        minutes=10,
+        only_mail(), prefix=SIGNUP_CODE, to="linked@example.com", language=language, minutes=10
     )
-    assert first not in str(message.body)
-
-
-@pytest.mark.parametrize("origin", ["change", "stored"])
-def test_verification_resend_while_signed_in_mails_the_pending_address(
-    language: str, origin: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    user = account(language)
-    client = signed_in(user, reauthenticated=True)
-    address = start_verification(client, user, origin)
-    first = mailed_code()
-    one_minute_later(monkeypatch)
-
-    response = submit(client, "auth/email/verify/resend", {})
-
-    assert response.status_code == 200
-    message = only_mail()
-    assert_code_mail(
-        message,
-        prefix="account/email/email_confirmation",
-        to=address,
-        language=language,
-        minutes=10,
-    )
-    assert first not in str(message.body)
 
 
 def test_verification_resend_after_signup_with_a_taken_address_mails_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    member()
+    account(PRIMARY, "member", "en")
     client = browser()
-    assert signup(client, {"email": "member@example.com"}).status_code == 401
+    assert signup(client, {"email": PRIMARY}).status_code == 401
     mail.outbox.clear()
     one_minute_later(monkeypatch)
 
@@ -586,490 +1330,18 @@ def test_verification_resend_after_signup_with_a_taken_address_mails_nothing(
     assert mail.outbox == []
 
 
-@pytest.mark.parametrize("state", ANONYMOUS_STATES)
-def test_signup_with_a_taken_address_notifies_the_owner_in_their_language(
-    language: str, state: str, social_providers: dict[str, Any]
-) -> None:
-    user = account(language)
-    client = anonymous_client(state, social_providers, OTHER[language])
-
-    assert signup(client, {"email": user.email}).status_code == 401
-
-    message = only_mail()
-    prefix = "account/email/account_already_exists"
-    assert_notice(message, prefix=prefix, to=user.email, language=language, email=user.email)
-    assert_action(
-        message,
-        prefix=prefix,
-        language=language,
-        url=settings.HEADLESS_FRONTEND_URLS["account_reset_password"],
-    )
-
-
-@pytest.mark.parametrize("state", ALL_STATES)
-def test_reset_request_for_an_unknown_address_notifies_it_in_the_request_language(
-    language: str, state: str, social_providers: dict[str, Any]
-) -> None:
-    client = client_in(state, account(language), social_providers, language)
-    address = "missing@example.com"
-
-    response = submit(client, "auth/password/request", {"email": address})
-
-    assert response.status_code == answered(state)
-    message = only_mail()
-    prefix = "account/email/unknown_account"
-    assert_notice(message, prefix=prefix, to=address, language=language, email=address)
-    assert_action(
-        message,
-        prefix=prefix,
-        language=language,
-        url=settings.HEADLESS_FRONTEND_URLS["account_signup"],
-    )
-
-
-@pytest.mark.parametrize("state", ALL_STATES)
-def test_reset_code_follows_the_saved_language_of_the_address(
-    language: str, state: str, social_providers: dict[str, Any]
-) -> None:
-    user = account(language)
-    client = client_in(state, user, social_providers, OTHER[language])
-
-    response = submit(client, "auth/password/request", {"email": user.email})
-
-    assert response.status_code == answered(state)
-    assert_code_mail(
-        only_mail(),
-        prefix="account/email/password_reset_code",
-        to=user.email,
-        language=language,
-        minutes=10,
-    )
-
-
-@pytest.mark.parametrize("state", ALL_STATES)
-def test_password_reset_completion_sends_a_security_notice(
-    language: str, state: str, social_providers: dict[str, Any]
-) -> None:
-    user = account(language)
-    client = client_in(state, user, social_providers, OTHER[language])
-    response = submit(client, "auth/password/request", {"email": user.email})
-    assert response.status_code == answered(state)
-    code = mailed_code()
-    since = datetime.now(UTC)
-
-    response = submit(client, "auth/password/reset", {"key": code, "password": PASSWORD + "new"})
-
-    assert response.status_code == answered(state)
-    message = only_mail()
-    assert_notice(message, prefix="account/email/password_reset", to=user.email, language=language)
-    assert_security_details(message, language=language, since=since)
-
-
-@pytest.mark.parametrize("state", SIGNED_IN_STATES)
-def test_password_change_sends_a_security_notice(language: str, state: str) -> None:
-    user = account(language)
-    client = signed_in_client(user, state)
-    since = datetime.now(UTC)
-
-    response = submit(
-        client,
-        "account/password/change",
-        {"current_password": PASSWORD, "new_password": PASSWORD + "new"},
-    )
-
-    assert response.status_code == 401
-    message = only_mail()
-    assert_notice(
-        message, prefix="account/email/password_changed", to=user.email, language=language
-    )
-    assert_security_details(message, language=language, since=since)
-
-
-@pytest.mark.parametrize("state", REAUTHENTICATED_STATES)
-def test_password_set_sends_a_security_notice(language: str, state: str) -> None:
-    user = account(language)
-    user.set_unusable_password()
-    user.save(update_fields=["password"])
-    client = browser()
-    client.force_login(user)
-    request = {"email": user.email}
-    assert submit(client, "auth/reauthenticate/code/request", request).status_code == 200
-    confirmation = {"code": mailed_code()}
-    assert submit(client, "auth/reauthenticate/code/confirm", confirmation).status_code == 200
-    enter(client, user, state)
-    since = datetime.now(UTC)
-
-    response = submit(client, "account/password/change", {"new_password": PASSWORD + "set"})
-
-    assert response.status_code == 401
-    message = only_mail()
-    assert_notice(message, prefix="account/email/password_set", to=user.email, language=language)
-    assert_security_details(message, language=language, since=since)
-
-
-@pytest.mark.parametrize("state", SIGNED_IN_STATES)
-def test_reauthentication_code_is_mailed_in_the_stored_language(language: str, state: str) -> None:
-    user = account(language)
-    client = signed_in_client(user, state)
-
-    response = submit(client, "auth/reauthenticate/code/request", {"email": user.email})
-
-    assert response.status_code == 200
-    assert_code_mail(
-        only_mail(),
-        prefix="account/email/login_code",
-        to=user.email,
-        language=language,
-        minutes=3,
-    )
-
-
 def test_unrouted_reauthentication_code_resend_answers_404_and_mails_nothing() -> None:
-    user = member()
-    client = signed_in_client(user, REAUTHENTICATION_PENDING)
+    account(PRIMARY, "member", "en")
+    client = browser()
+    assert submit(client, "auth/login", {"email": PRIMARY, "password": PASSWORD}).status_code == 200
+    request = {"email": PRIMARY}
+    assert submit(client, "auth/reauthenticate/code/request", request).status_code == 200
+    mail.outbox.clear()
 
     response = submit(client, "auth/reauthenticate/code/resend", {})
 
     assert response.status_code == 404
     assert mail.outbox == []
-
-
-@pytest.mark.parametrize("state", REAUTHENTICATED_STATES)
-def test_email_change_mails_the_code_to_the_new_address(language: str, state: str) -> None:
-    user = account(language)
-    client = signed_in_client(user, state)
-
-    response = submit(client, "account/email", {"email": "new@example.com"})
-
-    assert response.status_code == 200
-    assert_code_mail(
-        only_mail(),
-        prefix="account/email/email_confirmation",
-        to="new@example.com",
-        language=language,
-        minutes=10,
-    )
-
-
-@pytest.mark.parametrize("state", REAUTHENTICATED_STATES)
-def test_email_change_to_another_accounts_address_mails_the_code_in_the_requesters_language(
-    language: str, state: str
-) -> None:
-    user = account(language)
-    owner = User.objects.create_user(username="owner", email="owner@example.com")
-    EmailAddress.objects.create(user=owner, email=owner.email, primary=True, verified=True)
-    UserLanguagePreference.objects.create(user=owner, language=OTHER[language])
-    client = signed_in_client(user, state)
-
-    response = submit(client, "account/email", {"email": owner.email})
-
-    assert response.status_code == 200
-    assert_code_mail(
-        only_mail(),
-        prefix="account/email/email_confirmation",
-        to=owner.email,
-        language=language,
-        minutes=10,
-    )
-
-
-def test_put_resends_the_pending_change_code_to_the_new_address(
-    language: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    user = account(language)
-    client = signed_in(user, reauthenticated=True)
-    assert submit(client, "account/email", {"email": "new@example.com"}).status_code == 200
-    first = mailed_code()
-    one_minute_later(monkeypatch)
-
-    response = call(client, "put", "account/email", {"email": "new@example.com"})
-
-    assert response.status_code == 200
-    message = only_mail()
-    assert_code_mail(
-        message,
-        prefix="account/email/email_confirmation",
-        to="new@example.com",
-        language=language,
-        minutes=10,
-    )
-    assert first not in str(message.body)
-
-
-@pytest.mark.parametrize("state", SIGNED_IN_STATES)
-def test_put_mails_a_code_to_a_stored_unverified_address(language: str, state: str) -> None:
-    user = account(language)
-    EmailAddress.objects.create(user=user, email="pending@example.com")
-    client = signed_in_client(user, state)
-
-    response = call(client, "put", "account/email", {"email": "pending@example.com"})
-
-    assert response.status_code == 200
-    assert_code_mail(
-        only_mail(),
-        prefix="account/email/email_confirmation",
-        to="pending@example.com",
-        language=language,
-        minutes=10,
-    )
-
-
-@pytest.mark.parametrize("state", SIGNED_IN_STATES)
-def test_put_for_a_verified_address_is_refused_without_mail(state: str) -> None:
-    user = member()
-    client = signed_in_client(user, state)
-
-    response = call(client, "put", "account/email", {"email": user.email})
-
-    assert response.status_code == 400
-    assert [error["code"] for error in response.json()["errors"]] == ["email_already_verified"]
-    assert mail.outbox == []
-
-
-@pytest.mark.parametrize("origin", ["change", "stored"])
-def test_email_verification_while_signed_in_notifies_the_old_address(
-    language: str, origin: str
-) -> None:
-    user = account(language)
-    old = user.email
-    client = signed_in(user, reauthenticated=True)
-    address = start_verification(client, user, origin)
-    code = mailed_code()
-    since = datetime.now(UTC)
-
-    response = submit(client, "auth/email/verify", {"key": code})
-
-    assert response.status_code == 200
-    message = only_mail()
-    assert_notice(
-        message,
-        prefix="account/email/email_changed",
-        to=old,
-        language=language,
-        from_email=old,
-        to_email=address,
-    )
-    assert_security_details(message, language=language, since=since)
-
-
-def test_primary_address_change_notifies_the_previous_primary_address(language: str) -> None:
-    user = account(language)
-    old = user.email
-    client = signed_in_client(user, SECOND_ADDRESS)
-    since = datetime.now(UTC)
-
-    response = call(
-        client, "patch", "account/email", {"email": "second@example.com", "primary": True}
-    )
-
-    assert response.status_code == 200
-    message = only_mail()
-    assert_notice(
-        message,
-        prefix="account/email/email_changed",
-        to=old,
-        language=language,
-        from_email=old,
-        to_email="second@example.com",
-    )
-    assert_security_details(message, language=language, since=since)
-
-
-def test_removing_an_address_notifies_the_primary_address(language: str) -> None:
-    user = account(language)
-    client = signed_in_client(user, SECOND_ADDRESS)
-    since = datetime.now(UTC)
-
-    response = call(client, "delete", "account/email", {"email": "second@example.com"})
-
-    assert response.status_code == 200
-    message = only_mail()
-    assert_notice(
-        message,
-        prefix="account/email/email_deleted",
-        to=user.email,
-        language=language,
-        deleted_email="second@example.com",
-    )
-    assert_security_details(message, language=language, since=since)
-
-
-@pytest.mark.parametrize("state", REAUTHENTICATED_STATES)
-def test_totp_activation_sends_a_security_notice(
-    language: str, state: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    user = account(language)
-    client = signed_in_client(user, state)
-    setup = client.get(AUTH + "account/authenticators/totp")
-    assert setup.status_code == 404
-    now = time.time()
-    # The CSRF and activation requests can cross a 30-second TOTP boundary.
-    monkeypatch.setattr(totp_auth, "time", SimpleNamespace(time=lambda: now))
-    code = totp_code(setup.json()["meta"]["secret"], now)
-    since = datetime.now(UTC)
-
-    response = submit(client, "account/authenticators/totp", {"code": code})
-
-    assert response.status_code == 200
-    message = only_mail()
-    assert_notice(message, prefix="mfa/email/totp_activated", to=user.email, language=language)
-    assert_security_details(message, language=language, since=since)
-
-
-@pytest.mark.parametrize("state", REAUTHENTICATED_STATES)
-def test_totp_deactivation_sends_a_security_notice(language: str, state: str) -> None:
-    client, user = two_factor_account(language)
-    enter(client, user, state)
-    since = datetime.now(UTC)
-
-    response = call(client, "delete", "account/authenticators/totp")
-
-    assert response.status_code == 200
-    message = only_mail()
-    assert_notice(message, prefix="mfa/email/totp_deactivated", to=user.email, language=language)
-    assert_security_details(message, language=language, since=since)
-
-
-@pytest.mark.parametrize("state", REAUTHENTICATED_STATES)
-def test_recovery_code_regeneration_sends_a_security_notice(language: str, state: str) -> None:
-    client, user = two_factor_account(language)
-    enter(client, user, state)
-    since = datetime.now(UTC)
-
-    response = submit(client, "account/authenticators/recovery-codes", {})
-
-    assert response.status_code == 200
-    message = only_mail()
-    assert_notice(
-        message, prefix="mfa/email/recovery_codes_generated", to=user.email, language=language
-    )
-    assert_security_details(message, language=language, since=since)
-
-
-@pytest.mark.parametrize("state", REAUTHENTICATED_STATES)
-def test_provider_connect_sends_a_security_notice(language: str, state: str) -> None:
-    user = account(language)
-    client = signed_in_client(user, state)
-    since = datetime.now(UTC)
-
-    complete(client, begin(client, process="connect"))
-
-    message = only_mail()
-    assert_notice(
-        message,
-        prefix="socialaccount/email/account_connected",
-        to=user.email,
-        language=language,
-        provider="Google",
-    )
-    assert_security_details(message, language=language, since=since)
-
-
-@pytest.mark.parametrize("state", REAUTHENTICATED_STATES)
-def test_provider_disconnect_sends_a_security_notice(language: str, state: str) -> None:
-    user = account(language)
-    linked = SocialAccount.objects.create(user=user, provider="google", uid="google-identity")
-    client = signed_in_client(user, state)
-    since = datetime.now(UTC)
-
-    response = call(
-        client, "delete", "account/providers", {"provider": linked.provider, "account": linked.uid}
-    )
-
-    assert response.status_code == 200
-    message = only_mail()
-    assert_notice(
-        message,
-        prefix="socialaccount/email/account_disconnected",
-        to=user.email,
-        language=language,
-        provider="Google",
-    )
-    assert_security_details(message, language=language, since=since)
-
-
-def test_provider_signup_with_an_unverified_address_mails_the_code(
-    language: str, social_providers: dict[str, Any]
-) -> None:
-    social_providers["email_verified"] = False
-    client = browser(language)
-    complete(client, begin(client))
-
-    response = submit(
-        client, "auth/provider/signup", {"email": "solar@gmail.com", "company_name": "Social Solar"}
-    )
-
-    assert response.status_code == 401
-    assert_code_mail(
-        only_mail(),
-        prefix="account/email/email_confirmation_signup",
-        to="solar@gmail.com",
-        language=language,
-        minutes=10,
-    )
-
-
-def test_provider_signup_with_a_registered_address_notifies_the_owner_in_their_language(
-    language: str, social_providers: dict[str, Any]
-) -> None:
-    user = account(language)
-    social_providers["email"] = user.email
-    client = browser(OTHER[language])
-    complete(client, begin(client))
-
-    response = submit(
-        client, "auth/provider/signup", {"email": user.email, "company_name": "Other"}
-    )
-
-    assert response.status_code == 401
-    message = only_mail()
-    prefix = "account/email/account_already_exists"
-    assert_notice(message, prefix=prefix, to=user.email, language=language, email=user.email)
-    assert_action(
-        message,
-        prefix=prefix,
-        language=language,
-        url=settings.HEADLESS_FRONTEND_URLS["account_reset_password"],
-    )
-
-
-@pytest.mark.parametrize("state", ALL_STATES)
-def test_provider_sign_in_of_an_unverified_account_mails_a_new_code_in_the_stored_language(
-    language: str, state: str, social_providers: dict[str, Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    linked_unverified_account(language, social_providers, monkeypatch)
-    client = client_in(state, account(OTHER[language]), social_providers, OTHER[language])
-    social_providers.update(LINKED_IDENTITY)
-
-    response = complete(client, begin(client))
-
-    assert response.status_code == 302
-    assert_code_mail(
-        only_mail(),
-        prefix="account/email/email_confirmation_signup",
-        to="solar@gmail.com",
-        language=language,
-        minutes=10,
-    )
-
-
-def test_provider_sign_in_of_a_returning_unverified_account_mails_the_plain_verification_code(
-    language: str, social_providers: dict[str, Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    linked_unverified_account(language, social_providers, monkeypatch)
-    User.objects.filter(email="solar@gmail.com").update(last_login=datetime.now(UTC))
-    client = browser(OTHER[language])
-
-    response = complete(client, begin(client))
-
-    assert response.status_code == 302
-    assert_code_mail(
-        only_mail(),
-        prefix="account/email/email_confirmation",
-        to="solar@gmail.com",
-        language=language,
-        minutes=10,
-    )
 
 
 def test_email_verified_notice_without_a_trigger_renders_the_product_copy() -> None:
