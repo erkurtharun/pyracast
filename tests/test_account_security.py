@@ -21,7 +21,6 @@ from django.core.exceptions import ImproperlyConfigured, PermissionDenied
 from django.db import close_old_connections, connections, transaction
 from django.http import HttpRequest, HttpResponse
 from django.test import Client, RequestFactory, override_settings
-from pyracast.mail.smtp import EmailBackend as SMTPEmailBackend
 
 from pyracast import settings as project_settings
 from pyracast.accounts.cache import AuthenticationCache
@@ -32,6 +31,7 @@ from pyracast.accounts.checks import (
 from pyracast.accounts.middleware import TrustedProxyHeaders
 from pyracast.accounts.security import has_verified_mfa, normalize_client_ip
 from pyracast.api.middleware import PrivateAPIResponses
+from pyracast.mail.smtp import EmailBackend as SMTPEmailBackend
 
 
 @pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
@@ -197,7 +197,7 @@ def test_deployment_requires_production_mail_configuration(settings: LazySetting
     settings.MAILERS = {
         "default": {
             "BACKEND": "pyracast.mail.smtp.EmailBackend",
-            "OPTIONS": {"host": "smtp.example.com"},
+            "OPTIONS": {"host": "smtp.example.com", "use_tls": True},
         }
     }
     assert check_authentication_mail_delivery() == []

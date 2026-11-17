@@ -1,6 +1,6 @@
 import base64
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from email import policy
 from email.parser import BytesParser
 from pathlib import Path
@@ -14,6 +14,9 @@ from django.core import mail
 from django.core.exceptions import ImproperlyConfigured
 from django.core.mail import EmailMultiAlternatives
 from django.test import Client, override_settings
+
+from pyracast import settings as project_settings
+from pyracast.accounts.checks import check_authentication_mail_delivery
 from pyracast.mail.errors import (
     DeliveryUncertainError,
     NotSentError,
@@ -22,20 +25,23 @@ from pyracast.mail.errors import (
 )
 from pyracast.mail.gmail import SEND_SCOPE, TOKEN_URL, EmailBackend
 from pyracast.mail.send import send
-
-from pyracast import settings as project_settings
-from pyracast.accounts.checks import check_authentication_mail_delivery
 from pyracast.notifications.jobs import process_notification
 from tests.test_company_registration import signup
 from tests.test_notifications import SLOT, ready
 
+SENDER = "Pyracast <info@pyracast.app>"
 OPTIONS = {
     "client_id": "gmail-client",
     "client_secret": "gmail-secret",
     "refresh_token": "gmail-refresh",
-    "sender": "Pyracast <info@pyracast.app>",
 }
 MAILERS = {"default": {"BACKEND": "pyracast.mail.gmail.EmailBackend", "OPTIONS": OPTIONS}}
+
+
+@pytest.fixture(autouse=True)
+def gmail_sender() -> Iterator[None]:
+    with override_settings(DEFAULT_FROM_EMAIL=SENDER):
+        yield
 
 
 @pytest.fixture
@@ -68,7 +74,7 @@ def message() -> EmailMultiAlternatives:
     return EmailMultiAlternatives(
         "Pyracast forecast",
         "Plain forecast",
-        OPTIONS["sender"],
+        SENDER,
         ["customer@example.com"],
         headers={"Message-ID": "<delivery-123@notifications.pyracast>"},
     )
@@ -115,7 +121,7 @@ def test_gmail_serializes_recipients_html_csv_and_stable_message_id(
     assert requests[1].headers["Authorization"] == "Bearer gmail-access"
     raw = base64.urlsafe_b64decode(json.loads(requests[1].content)["raw"])
     mime = BytesParser(policy=policy.default).parsebytes(raw)
-    assert str(mime["From"]) == OPTIONS["sender"]
+    assert str(mime["From"]) == SENDER
     if blind_only:
         assert mime["To"] is None
         assert mime["Cc"] is None
@@ -235,7 +241,7 @@ def test_gmail_preserves_durable_delivery_acceptance_and_retry_policy(
 
     gmail_transport(respond)
     delivery = ready()
-    with override_settings(MAILERS=MAILERS, DEFAULT_FROM_EMAIL=OPTIONS["sender"]):
+    with override_settings(MAILERS=MAILERS, DEFAULT_FROM_EMAIL=SENDER):
         assert process_notification(delivery.pk, SLOT) is (status == "sent")
         delivery.refresh_from_db()
         assert delivery.status == status
@@ -254,7 +260,6 @@ def test_gmail_fail_silently_counts_only_acknowledged_messages(
         client_id=OPTIONS["client_id"],
         client_secret=OPTIONS["client_secret"],
         refresh_token=OPTIONS["refresh_token"],
-        sender=OPTIONS["sender"],
         fail_silently=True,
     )
     assert backend.send_messages([message(), message()]) == 1
@@ -266,13 +271,13 @@ def test_gmail_configuration_accepts_oauth_in_production(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PYRACAST_EMAIL_BACKEND", "gmail")
-    monkeypatch.setenv("PYRACAST_FROM_EMAIL", OPTIONS["sender"])
+    monkeypatch.setenv("PYRACAST_FROM_EMAIL", SENDER)
     for suffix in ("CLIENT_ID", "CLIENT_SECRET", "REFRESH_TOKEN"):
         monkeypatch.setenv("PYRACAST_GMAIL_" + suffix, OPTIONS[suffix.lower()])
     configuration = run_path(str(Path(project_settings.__file__)))
     assert configuration["MAILERS"]["default"]["BACKEND"] == "pyracast.mail.gmail.EmailBackend"
     with override_settings(
-        MAILERS=configuration["MAILERS"], DEFAULT_FROM_EMAIL=OPTIONS["sender"], DEBUG=False
+        MAILERS=configuration["MAILERS"], DEFAULT_FROM_EMAIL=SENDER, DEBUG=False
     ):
         assert check_authentication_mail_delivery() == []
         backend = mail.mailers["default"]
@@ -284,7 +289,7 @@ def test_gmail_deployment_check_rejects_incomplete_oauth(missing: str) -> None:
     options = {**OPTIONS, missing: ""}
     with override_settings(
         MAILERS={"default": {"BACKEND": "pyracast.mail.gmail.EmailBackend", "OPTIONS": options}},
-        DEFAULT_FROM_EMAIL=OPTIONS["sender"],
+        DEFAULT_FROM_EMAIL=SENDER,
         DEBUG=False,
     ):
         assert [error.id for error in check_authentication_mail_delivery()] == ["accounts.E001"]
@@ -305,7 +310,7 @@ def test_allauth_signup_sends_verification_using_gmail(
         )
 
     gmail_transport(respond)
-    with override_settings(MAILERS=MAILERS, DEFAULT_FROM_EMAIL=OPTIONS["sender"]):
+    with override_settings(MAILERS=MAILERS, DEFAULT_FROM_EMAIL=SENDER):
         response = signup(Client(enforce_csrf_checks=True))
     assert response.status_code == 401
     assert any(flow["id"] == "verify_email" for flow in response.json()["data"]["flows"])
@@ -319,7 +324,6 @@ def test_allauth_signup_sends_verification_using_gmail(
 @pytest.mark.parametrize(
     ("key", "value"),
     [
-        ("sender", "invalid"),
         ("client_id", ""),
         ("client_secret", ""),
         ("refresh_token", ""),
@@ -328,6 +332,13 @@ def test_allauth_signup_sends_verification_using_gmail(
 )
 def test_gmail_rejects_invalid_transport_configuration(key: str, value: object) -> None:
     options: dict[str, Any] = {**OPTIONS, key: value}
+    with pytest.raises(ImproperlyConfigured, match="Gmail"):
+        EmailBackend(**options)
+
+
+@override_settings(DEFAULT_FROM_EMAIL="invalid")
+def test_gmail_rejects_an_invalid_sender() -> None:
+    options: dict[str, Any] = dict(OPTIONS)
     with pytest.raises(ImproperlyConfigured, match="Gmail"):
         EmailBackend(**options)
 

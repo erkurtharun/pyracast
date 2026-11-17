@@ -10,7 +10,8 @@ from django.template.loader import render_to_string
 from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 
-from pyracast.mail.send import send
+from pyracast.mail.errors import DeliveryUncertainError, MailFailure, NotSentError
+from pyracast.mail.send import probe, send
 from pyracast.notifications.mail import XLSX_MIME
 
 
@@ -34,17 +35,48 @@ def sample_message(recipient: str) -> EmailMultiAlternatives:
     return message
 
 
+# Operators and the release script read these exit codes; docs/DEPLOYMENT.md lists them.
+EXIT_CODES = {
+    MailFailure.CONFIGURATION_INVALID: 2,
+    MailFailure.CREDENTIALS_REJECTED: 3,
+    MailFailure.AUTHORIZATION_REVOKED: 4,
+    MailFailure.SENDER_FORBIDDEN: 5,
+    MailFailure.REJECTED: 6,
+    MailFailure.RATE_LIMITED: 7,
+    MailFailure.NOT_SENT: 8,
+    MailFailure.OUTCOME_UNCERTAIN: 9,
+    MailFailure.PREPARATION_FAILED: 10,
+}
+
+
 class Command(BaseCommand):
-    help = "Send one reminder-shaped test mail through the configured mail backend."
+    help = (
+        "Open the configured mail transport without sending; with --send-to, send one "
+        "reminder-shaped test mail. Exits with a code per mail failure."
+    )
 
     def add_arguments(self, parser: CommandParser) -> None:
-        parser.add_argument("--send-to", required=True)
+        parser.add_argument("--send-to")
 
     def handle(self, *args: Any, **options: Any) -> None:
-        recipient = options["send_to"].strip()
+        recipient = options["send_to"]
+        if recipient is not None:
+            recipient = recipient.strip()
+            try:
+                validate_email(recipient)
+            except ValidationError:
+                raise CommandError("--send-to must be a valid email address.") from None
         try:
-            validate_email(recipient)
-        except ValidationError:
-            raise CommandError("--send-to must be a valid email address.") from None
-        send(sample_message(recipient))
-        self.stdout.write("The mail service accepted the test mail.")
+            if recipient is None:
+                probe()
+            else:
+                send(sample_message(recipient))
+        except (NotSentError, DeliveryUncertainError) as error:
+            raise CommandError(
+                f"Mail check failed: {error.code}", returncode=EXIT_CODES[error.code]
+            ) from None
+        self.stdout.write(
+            "The mail service accepted the connection."
+            if recipient is None
+            else "The mail service accepted the test mail."
+        )

@@ -33,7 +33,7 @@ def configuration(monkeypatch: pytest.MonkeyPatch, **environment: str | None) ->
     return run_path(str(Path(project_settings.__file__)))
 
 
-def deploy_errors(mailers: dict[str, Any], sender: str = PUBLIC_SENDER) -> list[str]:
+def deploy_errors(mailers: dict[str, Any], sender: str = PUBLIC_SENDER) -> list[str | None]:
     with override_settings(MAILERS=mailers, DEFAULT_FROM_EMAIL=sender, DEBUG=False):
         return [error.id for error in check_authentication_mail_delivery()]
 

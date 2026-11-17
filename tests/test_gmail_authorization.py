@@ -262,13 +262,14 @@ def test_credentials_are_saved_only_after_the_sender_mails_itself(
     before = runtime.read_bytes()
     client = client_file(tmp_path / "client.json")
     requests: list[Request] = []
+    refusal = urllib.error.HTTPError(
+        "https://gmail.googleapis.com", 403, "Forbidden", Message(), BytesIO(b"private")
+    )
 
     def respond(request: Request, *, timeout: int) -> BytesIO:
         requests.append(request)
         if not accepted:
-            raise urllib.error.HTTPError(
-                request.full_url, 403, "Forbidden", Message(), BytesIO(b"private")
-            )
+            raise refusal
         return BytesIO(b'{"id": "sent"}')
 
     grant = Grant("private-access", "private-refresh")
@@ -296,3 +297,4 @@ def test_credentials_are_saved_only_after_the_sender_mails_itself(
     mail = BytesParser(policy=policy.default).parsebytes(raw)
     assert str(mail["From"]) == str(mail["To"]) == "info@pyracast.app"
     assert "private" not in str(capsys.readouterr())
+    refusal.close()

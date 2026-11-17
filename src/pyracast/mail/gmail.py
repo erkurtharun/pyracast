@@ -31,7 +31,6 @@ class EmailBackend(BaseEmailBackend):
         client_id: str,
         client_secret: str,
         refresh_token: str,
-        sender: str = "",
         timeout: float = 15,
         fail_silently: bool = False,
         **kwargs: Any,
@@ -43,7 +42,7 @@ class EmailBackend(BaseEmailBackend):
             client_secret,
             refresh_token,
         )
-        self.sender = parseaddr(sender or settings.DEFAULT_FROM_EMAIL)[1]
+        self.sender = parseaddr(settings.DEFAULT_FROM_EMAIL)[1]
         try:
             validate_email(self.sender)
         except ValidationError:
