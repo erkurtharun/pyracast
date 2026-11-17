@@ -426,8 +426,13 @@ def test_workspace_invitation_hourly_limit_is_durable(
             for number in range(20)
         ]
     )
-    with pytest.raises(DomainError):
+    with pytest.raises(DomainError) as refusal:
         invite_workspace_member(administrator, tenant.pk, "another@example.com")
+    assert (refusal.value.code, refusal.value.status, refusal.value.retry_after) == (
+        "invitation_rate_limited",
+        429,
+        60,
+    )
     assert WorkspaceInvitation.objects.count() == 20
 
 

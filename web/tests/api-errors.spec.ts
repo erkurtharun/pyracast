@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { ApiError, errorFromResponse } from "../src/lib/api/errors";
+import { authRequest } from "../src/lib/auth-api";
 import { errorBody } from "./support/errors";
 
 test("a contract body becomes one typed error", () => {
@@ -68,4 +69,107 @@ test("client-side errors carry no server code", () => {
     expect(error.status).toBe(0);
     expect(error.code).toBeNull();
     expect(error.fields).toEqual({});
+});
+
+test("malformed optional properties never reach typed fields", () => {
+    const error = errorFromResponse(400, {
+        code: "code_from_a_newer_server",
+        message: "Check the values.",
+        fields: { email: { invalid: true }, name: "Too long." },
+        retry_after: "1",
+        request_id: { id: 1 },
+    });
+    expect(error.message).toBe("Check the values.");
+    expect(error.code).toBeNull();
+    expect(error.fields).toEqual({ name: "Too long." });
+    expect(error.retryAfter).toBeNull();
+    expect(error.requestId).toBeNull();
+    for (const fields of [["name"], "name", null]) {
+        expect(
+            errorFromResponse(400, { code: "busy", message: "Busy.", fields })
+                .fields,
+        ).toEqual({});
+    }
+    expect(
+        errorFromResponse(503, {
+            code: "busy",
+            message: "Busy.",
+            retry_after: -1,
+        }).retryAfter,
+    ).toBeNull();
+});
+
+test.describe("authentication requests", () => {
+    const realFetch = globalThis.fetch;
+    test.afterEach(() => {
+        globalThis.fetch = realFetch;
+    });
+
+    function answer(status: number, body: unknown) {
+        globalThis.fetch = async () =>
+            new Response(JSON.stringify(body), {
+                status,
+                headers: { "Content-Type": "application/json" },
+            });
+    }
+
+    test("a contract body keeps every property", async () => {
+        answer(
+            429,
+            errorBody("session_busy", "Another request is running.", {
+                retry_after: 1,
+                request_id: "0123456789abcdef0123456789abcdef",
+            }),
+        );
+        const error = await authRequest("auth/session", "GET", "token").catch(
+            (failure: unknown) => failure,
+        );
+        expect(error).toBeInstanceOf(ApiError);
+        expect(error).toMatchObject({
+            status: 429,
+            code: "session_busy",
+            retryAfter: 1,
+            requestId: "0123456789abcdef0123456789abcdef",
+        });
+    });
+
+    test("an allauth body keeps its messages per input", async () => {
+        answer(400, {
+            status: 400,
+            errors: [
+                {
+                    message: "Enter an email.",
+                    param: "email",
+                    code: "required",
+                },
+                { message: "Try again later.", code: "too_many" },
+            ],
+        });
+        const error = await authRequest(
+            "auth/login",
+            "POST",
+            "token",
+            {},
+        ).catch((failure: unknown) => failure);
+        expect(error).toMatchObject({
+            status: 400,
+            code: null,
+            message: "Enter an email. Try again later.",
+            fields: { email: "Enter an email." },
+        });
+    });
+
+    test("an allauth body without messages names the status", async () => {
+        answer(409, { status: 409 });
+        const error = await authRequest(
+            "auth/provider/signup",
+            "POST",
+            "token",
+            {},
+        ).catch((failure: unknown) => failure);
+        expect(error).toMatchObject({
+            status: 409,
+            message: "Request failed (409). Please try again.",
+        });
+    });
 });

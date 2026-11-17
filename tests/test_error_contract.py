@@ -24,6 +24,7 @@ from pyracast.connections.operations import QuotaExceededError, RequestDeferredE
 
 pytestmark = pytest.mark.django_db(databases=["default", "auth_cache"])
 OPENAPI = Path(__file__).resolve().parents[1] / "web" / "openapi.json"
+ALLAUTH = "/api/auth/browser/v1/"
 
 type Trigger = Callable[[pytest.MonkeyPatch, str], Any]
 
@@ -652,14 +653,41 @@ def test_nested_serializer_errors_name_the_item_path() -> None:
     assert error.fields == {"items.1.value": "A valid integer is required."}
 
 
-def test_django_validation_errors_keep_their_field_keys_and_translated_text() -> None:
+def test_drf_field_errors_keep_whole_sentences_in_every_form() -> None:
+    from rest_framework import serializers
+
+    from pyracast.api.errors import api_error
+
+    error = api_error(
+        serializers.ValidationError(
+            {
+                "email": "Enter a valid email address.",
+                "name": ["Too long.", "Not unique."],
+                "site": {"timezone": "Unknown zone."},
+            }
+        ),
+        None,
+        "-",
+    )
+    assert error.fields == {
+        "email": "Enter a valid email address.",
+        "name": "Too long. Not unique.",
+        "site.timezone": "Unknown zone.",
+    }
+    sentence = api_error(serializers.ValidationError("Choose a plant."), None, "-")
+    assert (sentence.message, sentence.fields) == ("Choose a plant.", None)
+
+
+@pytest.mark.parametrize("lazy", [False, True])
+def test_django_validation_errors_keep_their_field_keys_and_translated_text(lazy: bool) -> None:
     from django.core.exceptions import ValidationError
     from django.utils import translation
     from django.utils.translation import gettext_lazy
 
     from pyracast.api.errors import api_error
 
-    required = gettext_lazy("An IANA timezone is required.")
+    text = "An IANA timezone is required."
+    required = gettext_lazy(text) if lazy else text
     with translation.override("tr"):
         error = api_error(ValidationError({"timezone": [required]}), None, "-")
         assert error.body() == {
@@ -728,6 +756,74 @@ def test_busy_session_navigation_reloads_once_then_explains() -> None:
     assert filtered["Refresh"] == "1; url=/admin/?q=solar&session_retry=1"
     assert reload.status_code == 429
     assert reload.json()["code"] == "session_busy"
+
+
+def test_busy_session_api_navigation_keeps_the_json_body() -> None:
+    client = Client()
+    client.cookies["sessionid"] = "a" * 32
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(session_lock, "serialize_session", busy)
+        response = client.get("/api/session/", HTTP_SEC_FETCH_MODE="navigate")
+    assert response.status_code == 429
+    assert response["Content-Type"] == "application/json"
+    assert response["Retry-After"] == "1"
+    assert response.json()["code"] == "session_busy"
+
+
+def api_routes(patterns: list[Any] | None = None, prefix: str = "") -> Iterator[str]:
+    from django.urls import URLResolver, get_resolver
+
+    for entry in get_resolver().url_patterns if patterns is None else patterns:
+        route = prefix + re.sub(r"<(?:\w+:)?\w+>", "1", str(entry.pattern))
+        if isinstance(entry, URLResolver):
+            yield from api_routes(entry.url_patterns, route)
+        elif route.startswith("api/"):
+            yield f"/{route}"
+
+
+def refuses_in_its_own_shape(path: str, status: int, body: Any) -> bool:
+    if not isinstance(body, dict):
+        return False
+    if path.startswith(ALLAUTH) and body.get("status") == status:
+        return True
+    return set(body) == {"code", "message"} and body["message"] == CASES[body["code"]].tr
+
+
+@pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+def test_every_api_route_refuses_an_unknown_method_with_a_json_body() -> None:
+    client = Client()
+    client.force_login(User.objects.create_user(username="person"))
+    refusals = {}
+    for path in sorted(api_routes()):
+        response = client.generic("PROPFIND", path, headers={"Accept-Language": "tr"})
+        json_body = response["Content-Type"] == "application/json"
+        refusals[path] = (response.status_code, response.json() if json_body else None)
+    assert len(refusals) > 30
+    assert {
+        path: refusal
+        for path, refusal in refusals.items()
+        if not refuses_in_its_own_shape(path, *refusal)
+    } == {}
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/auth/browser/v1/auth/email/verify",
+        "/api/auth/browser/v1/auth/password/reset",
+        "/api/accounts/google/login/callback/",
+    ],
+)
+def test_method_guards_answer_the_localized_contract_body(path: str) -> None:
+    method = "POST" if "callback" in path else "GET"
+    response = Client().generic(method, path, headers={"Accept-Language": "tr"})
+    assert response.status_code == 405
+    assert response["Content-Type"] == "application/json"
+    assert response["Allow"] == ("GET" if method == "POST" else "POST")
+    assert response.json() == {
+        "code": "method_not_allowed",
+        "message": CASES["method_not_allowed"].tr,
+    }
 
 
 def test_drf_permission_classes_answer_coded_refusals() -> None:

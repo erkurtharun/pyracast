@@ -305,8 +305,9 @@ def test_incident_overlap_and_configuration_change_are_derived_conflicts(
         values=incident_values(),
     )
     save_incident(*case.scope(case.system.member), **incident_values())
-    with pytest.raises(ConflictError):
+    with pytest.raises(ConflictError) as conflict:
         approve(case, request)
+    assert conflict.value.code == "request_conflict"
     request.refresh_from_db()
     assert request.status == "pending"
     assert (
