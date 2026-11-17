@@ -1,12 +1,11 @@
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Any, cast
 
 import pytest
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
-from pyracast.incidents.models import PlantIncident
-from pyracast.incidents.operations import finish_incident, save_incident
+from pyracast.incidents.operations import finish_incident
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants import training
 from pyracast.plants.calibration_data import build_calibration_dataset
@@ -17,43 +16,23 @@ from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
     ForecastIssuance,
-    Plant,
     PlantForecast,
     ProductionObservation,
 )
 from pyracast.plants.numerics import FitResult, fit_calibration
 from pyracast.plants.operations import activate_calibration, revise_plant
-from tests.test_domain import NOW, System
-from tests.test_plant_operations import (
+from tests.support.domain import NOW
+from tests.support.incident_calibration import incident
+from tests.support.plant_operations import (
     make_plant,
     publish_snapshot,
     ready_run,
     request_run,
     snapshot_for,
 )
-from tests.test_plant_training import actual_snapshot_for, history
+from tests.support.plant_training import actual_snapshot_for, history
 
 pytestmark = pytest.mark.django_db(transaction=True)
-
-
-def incident(
-    system: System, plant: Plant, start: datetime, end: datetime | None, **caps: Any
-) -> PlantIncident:
-    return save_incident(
-        system.member,
-        system.tenant.pk,
-        system.region.pk,
-        plant.pk,
-        kind="inverter",
-        title="Inverter outage",
-        notes="",
-        starts_at=start,
-        ends_at=end,
-        **(
-            {"available_dc_mw": 65, "available_inverter_mw": None, "available_export_mw": None}
-            | caps
-        ),
-    )
 
 
 def test_late_outage_supersedes_fit_preserves_meter_readings_and_cancel_restores_eligibility(

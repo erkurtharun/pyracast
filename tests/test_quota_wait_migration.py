@@ -7,7 +7,7 @@ from django.db.migrations.executor import MigrationExecutor
 
 from pyracast.forecasts.jobs import claim
 from pyracast.forecasts.models import CollectionJob, ForecastSnapshot, RequestAttempt
-from tests.test_domain import NOW, make_system
+from tests.support.domain import NOW, make_system
 
 
 @pytest.mark.django_db(transaction=True)

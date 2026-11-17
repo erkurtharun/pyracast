@@ -5,8 +5,8 @@ import pytest
 from pyracast.connections.contracts import ProviderError
 from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
-from tests.test_domain import NOW, FakeAdapter, make_system
-from tests.test_jobs import calculate
+from tests.support.domain import NOW, FakeAdapter, make_system
+from tests.support.jobs import calculate
 
 
 @pytest.mark.django_db(transaction=True)

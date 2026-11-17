@@ -6,8 +6,8 @@ from django.test import Client
 
 from pyracast.plants import production
 from pyracast.plants.operations import ObservationInput
-from tests.test_plant_operations import make_plant, saved_actuals
-from tests.test_production_history import upload
+from tests.support.plant_operations import make_plant, saved_actuals
+from tests.support.production_history import upload
 
 pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 8)

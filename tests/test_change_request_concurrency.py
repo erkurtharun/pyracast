@@ -27,7 +27,7 @@ from pyracast.metering import jobs as metering_jobs
 from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
 from pyracast.plants.models import Plant, PlantEvent, ProductionObservation
 from pyracast.plants.production_changes import ProductionChange, change_production
-from tests.test_change_request_boundaries import (
+from tests.support.change_request_boundaries import (
     RequestCase,
     approve,
     incident_request,
@@ -35,8 +35,8 @@ from tests.test_change_request_boundaries import (
     production_request,
     review_fingerprint,
 )
-from tests.test_domain import NOW
-from tests.test_metering import FixtureClient, connect, day_data
+from tests.support.domain import NOW
+from tests.support.metering import FixtureClient, connect, day_data
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

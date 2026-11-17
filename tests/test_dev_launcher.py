@@ -230,7 +230,7 @@ def test_start_refuses_to_adopt_process_with_pending_shutdown(
 
 @pytest.mark.django_db(transaction=True)
 def test_worker_drain_waits_for_active_notification(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_notifications import ready
+    from tests.support.notifications import ready
 
     delivery = ready()
     delivery.status = "sending"
@@ -250,7 +250,7 @@ def test_worker_drain_waits_for_active_notification(monkeypatch: pytest.MonkeyPa
 
 @pytest.mark.django_db(transaction=True)
 def test_worker_drain_timeout_preserves_active_notification() -> None:
-    from tests.test_notifications import ready
+    from tests.support.notifications import ready
 
     delivery = ready()
     delivery.status = "sending"
@@ -266,7 +266,7 @@ def test_worker_drain_timeout_preserves_active_notification() -> None:
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize("status", ["pending", "retry", "uncertain"])
 def test_worker_drain_does_not_wait_for_inactive_notification(status: str) -> None:
-    from tests.test_notifications import ready
+    from tests.support.notifications import ready
 
     delivery = ready()
     delivery.status = status

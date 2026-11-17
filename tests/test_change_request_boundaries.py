@@ -1,8 +1,7 @@
 from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, cast
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 from django.contrib.auth.models import User
@@ -19,92 +18,24 @@ from pyracast.change_requests.operations import (
     mark_seen,
     reject_request,
     submit_incident,
-    submit_production,
     withdraw_request,
 )
 from pyracast.change_requests.queries import inbox, request_detail
 from pyracast.incidents.models import IncidentRevision, PlantIncident
 from pyracast.incidents.operations import save_incident, select_incidents
 from pyracast.plants.measurements import select_measurements
-from pyracast.plants.models import CalibrationRun, Plant, PlantEvent, ProductionObservation
-from pyracast.plants.production_changes import ProductionChange
-from tests.test_domain import NOW, System
-from tests.test_plant_operations import make_plant
+from pyracast.plants.models import CalibrationRun, PlantEvent, ProductionObservation
+from tests.support.change_request_boundaries import (
+    approve,
+    incident_request,
+    incident_values,
+    make_request_case,
+    production_request,
+    review_fingerprint,
+)
+from tests.support.domain import NOW
 
 pytestmark = pytest.mark.django_db(transaction=True)
-
-
-@dataclass(frozen=True)
-class RequestCase:
-    system: System
-    plant: Plant
-    proposer: User
-
-    def scope(self, actor: User) -> tuple[User, int, int, int]:
-        return actor, self.system.tenant.pk, self.system.region.pk, self.plant.pk
-
-    def detail_path(self, request: ChangeRequest) -> str:
-        return f"/api/tenants/{self.system.tenant.pk}/change-requests/{request.pk}/"
-
-
-def make_request_case(monkeypatch: pytest.MonkeyPatch) -> RequestCase:
-    system, plant = make_plant(monkeypatch)
-    proposer = User.objects.create_user(username="proposer")
-    Membership.objects.create(user=proposer, tenant=system.tenant)
-    return RequestCase(system, plant, proposer)
-
-
-def production_request(
-    case: RequestCase, *, key: UUID | None = None, energy: float = 1234.567
-) -> ChangeRequest:
-    assert case.plant.current_configuration_id is not None
-    return submit_production(
-        *case.scope(case.proposer),
-        configuration_id=case.plant.current_configuration_id,
-        unit="kWh",
-        changes=[ProductionChange(NOW - timedelta(hours=1), NOW, None, "set", energy)],
-        reason="Verified meter reading",
-        idempotency_key=key or uuid4(),
-    )
-
-
-def incident_values() -> dict[str, Any]:
-    return {
-        "kind": "inverter",
-        "title": "Inverter maintenance",
-        "notes": "Reported by the operator",
-        "starts_at": NOW - timedelta(hours=2),
-        "ends_at": None,
-        "available_dc_mw": 65.0,
-        "available_inverter_mw": None,
-        "available_export_mw": None,
-    }
-
-
-def incident_request(case: RequestCase) -> ChangeRequest:
-    return submit_incident(
-        *case.scope(case.proposer),
-        action="create",
-        idempotency_key=uuid4(),
-        reason="Observed equipment outage",
-        values=incident_values(),
-    )
-
-
-def review_fingerprint(case: RequestCase, request: ChangeRequest) -> str:
-    return cast(
-        str,
-        request_detail(case.system.member, case.system.tenant.pk, request.pk)["review_fingerprint"],
-    )
-
-
-def approve(case: RequestCase, request: ChangeRequest) -> ChangeRequest:
-    return approve_request(
-        case.system.member,
-        case.system.tenant.pk,
-        request.pk,
-        review_fingerprint=review_fingerprint(case, request),
-    )
 
 
 def tenant_summary(client: Client, tenant_id: int) -> dict[str, Any]:

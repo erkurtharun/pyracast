@@ -10,10 +10,10 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasConnection
 from pyracast.plants.models import CalibrationRun, PlantConfiguration, ProductionObservation
 from pyracast.plants.performance import forecast_performance
-from tests.test_forecast_performance import DAY, measurements, publish, selected_factor
-from tests.test_incident_calibration import incident
-from tests.test_plant_operations import make_plant, snapshot_for
-from tests.test_settlement_calibration import settlement
+from tests.support.forecast_performance import DAY, measurements, publish, selected_factor
+from tests.support.incident_calibration import incident
+from tests.support.plant_operations import make_plant, snapshot_for
+from tests.support.settlement_calibration import settlement
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

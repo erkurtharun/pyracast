@@ -13,9 +13,9 @@ from pyracast.notifications.jobs import LEASE_DURATION, process_notification
 from pyracast.notifications.mail import NotSentError
 from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.scheduler import enqueue_due
-from tests.test_notification_groups import group, member
-from tests.test_notification_transmission import OpeningBackend
-from tests.test_notifications import SLOT, configured
+from tests.support.notification_groups import group, member
+from tests.support.notification_transmission import OpeningBackend
+from tests.support.notifications import SLOT, configured
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -90,7 +90,9 @@ def test_join_remove_and_rejoin_during_connection_open_cannot_restore_the_envelo
     OpeningBackend.action = change_membership
     try:
         with override_settings(
-            MAILERS={"default": {"BACKEND": "tests.test_notification_transmission.OpeningBackend"}}
+            MAILERS={
+                "default": {"BACKEND": "tests.support.notification_transmission.OpeningBackend"}
+            }
         ):
             assert process_notification(delivery_id, SLOT)
     finally:

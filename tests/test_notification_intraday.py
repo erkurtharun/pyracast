@@ -24,11 +24,11 @@ from pyracast.notifications.report_data import saved_report_context
 from pyracast.notifications.sources import saved_report_results
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.regions.models import Region
-from tests.test_domain import System
-from tests.test_incident_calibration import incident
-from tests.test_notification_report_data import report_delivery
-from tests.test_notifications import SLOT, cache_saved_days
-from tests.test_plant_operations import publish_snapshot, snapshot_for
+from tests.support.domain import System
+from tests.support.incident_calibration import incident
+from tests.support.notification_report_data import report_delivery
+from tests.support.notifications import SLOT, cache_saved_days
+from tests.support.plant_operations import publish_snapshot, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

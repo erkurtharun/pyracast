@@ -7,7 +7,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.test import Client
 
-from tests.test_api import verified_admin
+from tests.support.api import verified_admin
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 PASSWORD = "test-only-" + "x" * 40

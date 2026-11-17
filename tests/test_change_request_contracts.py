@@ -32,15 +32,15 @@ from pyracast.plants.production_changes import (
     prepare_production_changes,
     production_change_warnings,
 )
-from tests.test_change_request_boundaries import (
+from tests.support.change_request_boundaries import (
     RequestCase,
     incident_values,
     make_request_case,
     production_request,
 )
-from tests.test_domain import NOW
-from tests.test_production_changes import provider
-from tests.test_provisional_measurements import DAY, acquisition
+from tests.support.domain import NOW
+from tests.support.production_changes import provider
+from tests.support.provisional_measurements import DAY, acquisition
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

@@ -4,7 +4,7 @@ from django.db.migrations.executor import MigrationExecutor
 
 from pyracast.regions.models import Region, RegionLocationChangeRequest
 from pyracast.regions.operations import review_location_change
-from tests.test_domain import NOW, make_system
+from tests.support.domain import NOW, make_system
 
 
 @pytest.mark.django_db(transaction=True)

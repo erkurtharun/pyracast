@@ -6,9 +6,9 @@ from pyracast.plants.models import CalibrationActivation, CalibrationRun
 from pyracast.plants.operations import activate_calibration
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.plants.training import run_calibration
-from tests.test_calibration_preparation import add_days
-from tests.test_domain import NOW
-from tests.test_plant_operations import make_plant, ready_run
+from tests.support.calibration_preparation import add_days
+from tests.support.domain import NOW
+from tests.support.plant_operations import make_plant, ready_run
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

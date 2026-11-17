@@ -21,8 +21,8 @@ from pyracast.gmail import SEND_SCOPE, TOKEN_URL, EmailBackend
 from pyracast.mail_delivery import DeliveryUncertainError, NotSentError, PermanentlyNotSentError
 from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.mail import SendCancelledError, send_message
-from tests.test_company_registration import signup
-from tests.test_notifications import SLOT, ready
+from tests.support.company_registration import signup
+from tests.support.notifications import SLOT, ready
 
 OPTIONS = {
     "client_id": "gmail-client",
