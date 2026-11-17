@@ -22,6 +22,10 @@ def compile_catalogs(root: Path, *, check: bool) -> int:
         compiled = catalog.to_binary()
         if not check:
             source.with_suffix(".mo").write_bytes(compiled)
+    if not check:
+        for target in root.glob("src/**/locale/*/LC_MESSAGES/*.mo"):
+            if not target.with_suffix(".po").exists():
+                target.unlink()
     return 0
 
 
