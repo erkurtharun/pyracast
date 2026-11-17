@@ -13,9 +13,9 @@ from pyracast.plants.production import production_history
 from pyracast.plants.production_changes import (
     preview_production,
 )
-from tests.test_plant_operations import make_plant
-from tests.test_production_changes import edit, provider, write
-from tests.test_provisional_measurements import DAY, acquisition
+from tests.support.plant_operations import make_plant
+from tests.support.production_changes import edit, provider, write
+from tests.support.provisional_measurements import DAY, acquisition
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

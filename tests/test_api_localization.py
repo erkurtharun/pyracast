@@ -9,7 +9,7 @@ from pyracast.api.errors import exception_handler
 from pyracast.notifications.models import NotificationSettings
 from pyracast.plants.operations import create_plant
 from pyracast.regions.operations import request_location_change
-from tests.test_domain import make_system
+from tests.support.domain import make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

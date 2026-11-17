@@ -7,8 +7,8 @@ from django.utils import timezone
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import ForecastResult, ForecastSnapshot, RequestAttempt
 from pyracast.regions.models import Region
-from tests.test_domain import NOW, make_system
-from tests.test_plant_operations import publish_snapshot, snapshot_for
+from tests.support.domain import NOW, make_system
+from tests.support.plant_operations import publish_snapshot, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

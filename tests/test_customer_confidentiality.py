@@ -21,9 +21,9 @@ from pyracast.forecasts.models import (
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import CalibrationRun
 from pyracast.plants.production_changes import ProductionChange, change_production
-from tests.test_change_request_boundaries import make_request_case, production_request
-from tests.test_domain import NOW, make_system
-from tests.test_provisional_measurements import DAY
+from tests.support.change_request_boundaries import make_request_case, production_request
+from tests.support.domain import NOW, make_system
+from tests.support.provisional_measurements import DAY
 
 CUSTOMER_FIELDS = {
     "action",

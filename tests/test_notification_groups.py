@@ -1,4 +1,3 @@
-from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from threading import Event
@@ -20,44 +19,14 @@ from pyracast.accounts.models import Membership, Tenant
 from pyracast.accounts.operations import remove_workspace_member
 from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
-from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.recipients import effective_recipients
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.notifications.views import reminder_schedule_payload
-from tests.test_domain import NOW, System
-from tests.test_notification_transmission import OpeningBackend
-from tests.test_notifications import SLOT, configured
+from tests.support.notification_groups import group, member
+from tests.support.notification_transmission import OpeningBackend
+from tests.support.notifications import SLOT, configured
 
 pytestmark = pytest.mark.django_db(transaction=True)
-
-
-@pytest.fixture(autouse=True)
-def memory_mail() -> Iterator[None]:
-    with override_settings(
-        MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
-    ):
-        yield
-
-
-def member(system: System, email: str, *, verified: bool = True, active: bool = True) -> User:
-    user = User.objects.create(username=email, email=email, is_active=active)
-    Membership.objects.create(tenant=system.tenant, user=user)
-    EmailAddress.objects.create(user=user, email=email, verified=verified, primary=True)
-    return user
-
-
-def group(system: System, addresses: list[str] | None = None) -> ReminderSchedule:
-    return configure_reminders(
-        system.member,
-        system.tenant.pk,
-        system.region.pk,
-        enabled=True,
-        recipients=addresses or [],
-        include_workspace_members=True,
-        times=["10:00"],
-        language="en",
-        now=NOW,
-    )
 
 
 def test_one_bcc_message_with_deduplicated_verified_workspace_members() -> None:
@@ -122,7 +91,9 @@ def test_removal_during_connection_open_shrinks_the_actual_envelope() -> None:
     )
     try:
         with override_settings(
-            MAILERS={"default": {"BACKEND": "tests.test_notification_transmission.OpeningBackend"}}
+            MAILERS={
+                "default": {"BACKEND": "tests.support.notification_transmission.OpeningBackend"}
+            }
         ):
             assert process_notification(key, SLOT)
     finally:

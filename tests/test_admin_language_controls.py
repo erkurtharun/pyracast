@@ -1,7 +1,7 @@
 import pytest
 
-from tests.test_admin_setup import admin_system
-from tests.test_api import verified_admin
+from tests.support.admin_setup import admin_system
+from tests.support.api import verified_admin
 
 
 @pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])

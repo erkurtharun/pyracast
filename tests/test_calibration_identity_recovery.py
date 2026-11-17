@@ -16,9 +16,9 @@ from pyracast.plants.operations import activate_calibration
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.plants.training import run_calibration
 from pyracast.regions.models import Region
-from tests.test_domain import NOW
-from tests.test_plant_operations import make_plant, ready_run
-from tests.test_plant_training import actual_snapshot_for
+from tests.support.domain import NOW
+from tests.support.plant_operations import make_plant, ready_run
+from tests.support.plant_training import actual_snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

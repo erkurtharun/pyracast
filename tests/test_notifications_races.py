@@ -7,9 +7,9 @@ from pyracast.accounts.models import Tenant
 from pyracast.notifications.jobs import process_notification
 from pyracast.notifications.models import NotificationDelivery
 from pyracast.trash import purge_expired, trash_region
-from tests.test_domain import NOW
-from tests.test_notifications import SLOT, ready
-from tests.test_trash_boundaries import _race_before_region_lock
+from tests.support.domain import NOW
+from tests.support.notifications import SLOT, ready
+from tests.support.trash_boundaries import _race_before_region_lock
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

@@ -15,9 +15,9 @@ from pyracast.connections.secrets import encrypt_secret
 from pyracast.forecasts.models import CollectionJob, ForecastResult, ForecastSnapshot
 from pyracast.notifications.mail import build_message
 from pyracast.plants.models import CalibrationRun
-from tests.test_domain import NOW, make_system
-from tests.test_notifications import attached_sheet, ready
-from tests.test_plant_operations import make_plant
+from tests.support.domain import NOW, make_system
+from tests.support.notifications import attached_sheet, ready
+from tests.support.plant_operations import make_plant
 
 
 def test_public_projection_preserves_customer_text_and_production_attribution() -> None:

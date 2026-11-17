@@ -12,11 +12,12 @@ from django.utils import timezone
 from pyracast.epias import AUTH_URL, EpiasClient, EpiasDay, EpiasReading
 from pyracast.metering import operations
 from pyracast.metering.jobs import run_epias_job
-from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
+from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
 from pyracast.plants.models import Plant, ProductionObservation
-from tests.test_api import verified_admin
-from tests.test_epias import PASSWORD, PLANT, USERNAME
-from tests.test_plant_api import setup_plant
+from tests.support.api import verified_admin
+from tests.support.epias import PASSWORD, PLANT, USERNAME
+from tests.support.epias_api import archive_source, connected_source
+from tests.support.plant_api import setup_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -100,74 +101,10 @@ def test_production_source_is_scoped_before_provider_access(
     assert client.get(source).status_code == 404
 
 
-def archive_source(
-    connection: EpiasConnection,
-    source_kind: str,
-    values: dict[int, str | None],
-) -> EpiasSnapshot:
-    now = timezone.now()
-    day = date(2020, 1, 1)
-    configuration = connection.plant.current_configuration
-    assert configuration is not None
-    provider = {
-        "id": connection.settlement_plant_id
-        if source_kind == "settlement_injection"
-        else connection.provider_plant_id,
-        "eic": connection.eic,
-    }
-    job = EpiasCollectionJob.objects.create(
-        plant_id=connection.plant_id,
-        connection=connection,
-        configuration=configuration,
-        connection_revision=connection.revision,
-        provider_plant=provider,
-        target_day=day,
-        scheduled_for=now,
-        next_attempt_at=now,
-        source_kind=source_kind,
-        status="succeeded",
-    )
-    midnight = datetime.combine(day, time(), ZoneInfo("Europe/Istanbul"))
-    readings = [
-        {
-            "provider_timestamp": (midnight + timedelta(hours=hour)).isoformat(),
-            "period_start": (midnight + timedelta(hours=hour)).isoformat(),
-            "period_end": (midnight + timedelta(hours=hour + 1)).isoformat(),
-            "total_mwh": energy,
-            "sun_mwh": energy,
-        }
-        for hour, energy in values.items()
-    ]
-    return EpiasSnapshot.objects.create(
-        job=job,
-        attempt=1,
-        connection=connection,
-        configuration=configuration,
-        provider_plant=provider,
-        target_day=day,
-        source_kind=source_kind,
-        collected_at=now,
-        available_at=now,
-        readings=readings,
-        raw_payload={"items": readings},
-        content_sha256="a" * 64,
-    )
-
-
 def test_connection_status_reports_archived_settlement_dates() -> None:
-    _, _, plant_data = setup_plant()
-    plant = Plant.objects.get(pk=plant_data["id"])
-    assert PLANT.eic is not None
-    connection = EpiasConnection.objects.create(
-        plant=plant,
-        provider_plant_id=PLANT.id,
-        settlement_plant_id=789,
-        eic=PLANT.eic,
-        name=PLANT.name,
-        connected_by=User.objects.create_user("epias-operator"),
-    )
+    connection = connected_source()
     archive_source(connection, "realtime_generation", {8: "20"})
     archive_source(connection, "settlement_injection", {8: "19"})
-    status = operations.get_epias_status(plant.pk, actor=User.objects.get(username="member"))
+    status = operations.get_epias_status(connection.plant_id, actor=connection.connected_by)
     assert status["first_settlement_date"] == date(2020, 1, 1)
     assert status["last_settlement_date"] == date(2020, 1, 1)

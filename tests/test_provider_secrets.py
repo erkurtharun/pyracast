@@ -14,7 +14,7 @@ from pyracast.connections.secrets import (
 )
 from pyracast.providers import SolcastProvider
 from pyracast.regions.models import AuditEvent
-from tests.test_providers import binding_for, payload_for
+from tests.support.providers import binding_for, payload_for
 
 KEY = "test-only-" + "provider-credential"
 

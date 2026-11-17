@@ -230,7 +230,7 @@ def test_start_refuses_to_adopt_process_with_pending_shutdown(
 
 @pytest.mark.django_db(transaction=True)
 def test_worker_drain_waits_for_active_notification(monkeypatch: pytest.MonkeyPatch) -> None:
-    from tests.test_notifications import ready
+    from tests.support.notifications import ready
 
     delivery = ready()
     delivery.status = "sending"
@@ -250,7 +250,7 @@ def test_worker_drain_waits_for_active_notification(monkeypatch: pytest.MonkeyPa
 
 @pytest.mark.django_db(transaction=True)
 def test_worker_drain_timeout_preserves_active_notification() -> None:
-    from tests.test_notifications import ready
+    from tests.support.notifications import ready
 
     delivery = ready()
     delivery.status = "sending"
@@ -266,7 +266,7 @@ def test_worker_drain_timeout_preserves_active_notification() -> None:
 @pytest.mark.django_db(transaction=True)
 @pytest.mark.parametrize("status", ["pending", "retry", "uncertain"])
 def test_worker_drain_does_not_wait_for_inactive_notification(status: str) -> None:
-    from tests.test_notifications import ready
+    from tests.support.notifications import ready
 
     delivery = ready()
     delivery.status = status
@@ -587,7 +587,7 @@ def test_failed_frontend_start_rolls_back_new_api_and_preserves_existing_worker(
     (root / "web").mkdir()
     monkeypatch.setenv("PYTHONPATH", str(root))
     monkeypatch.setattr(launcher, "PORTS", {})
-    monkeypatch.setattr(launcher, "ensure_dependencies", lambda state: None)
+    monkeypatch.setattr(launcher, "ensure_dependencies", lambda: None)
     monkeypatch.setattr(launcher, "run_setup", lambda root, args: None)
     monkeypatch.setattr(
         launcher,
@@ -673,7 +673,7 @@ def test_failed_dispatcher_start_requests_worker_shutdown_and_preserves_timeout_
     monkeypatch.setattr(launcher, "terminate_tree", force_stop)
     monkeypatch.setenv("PYTHONPATH", str(root))
     monkeypatch.setattr(launcher, "PORTS", {})
-    monkeypatch.setattr(launcher, "ensure_dependencies", lambda state: None)
+    monkeypatch.setattr(launcher, "ensure_dependencies", lambda: None)
     monkeypatch.setattr(launcher, "run_setup", lambda root, args: None)
     monkeypatch.setattr(launcher, "frontend_command", lambda *args, **kwargs: [])
 
@@ -719,3 +719,36 @@ def test_failed_dispatcher_start_requests_worker_shutdown_and_preserves_timeout_
                 launcher.terminate_tree(psutil.Process(child.pid))
             child.wait(timeout=5)
             launcher.CHILDREN.remove(child)
+
+
+def _touch(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.touch()
+    return path
+
+
+def test_npm_is_found_beside_node_behind_a_version_manager_shim(tmp_path: Path) -> None:
+    shim = _touch(tmp_path / "nvm" / "symlink" / "npm.exe")
+    node = _touch(tmp_path / "nodejs" / "node.exe")
+    cli = _touch(tmp_path / "nodejs" / "node_modules" / "npm" / "bin" / "npm-cli.js")
+
+    assert launcher.npm_cli(str(shim), str(node)) == cli.resolve()
+
+
+def test_npm_is_found_in_the_posix_library_directory_of_node(tmp_path: Path) -> None:
+    npm = _touch(tmp_path / "shims" / "npm")
+    node = _touch(tmp_path / "prefix" / "bin" / "node")
+    cli = _touch(tmp_path / "prefix" / "lib" / "node_modules" / "npm" / "bin" / "npm-cli.js")
+
+    assert launcher.npm_cli(str(npm), str(node)) == cli.resolve()
+
+
+def test_missing_npm_names_every_path_that_was_tried(tmp_path: Path) -> None:
+    npm = _touch(tmp_path / "shims" / "npm")
+    node = _touch(tmp_path / "prefix" / "bin" / "node")
+
+    with pytest.raises(RuntimeError, match=r"npm-cli\.js") as failure:
+        launcher.npm_cli(str(npm), str(node))
+
+    assert str((tmp_path / "prefix" / "lib").resolve()) in str(failure.value)
+    assert str((tmp_path / "shims" / "node_modules").resolve()) in str(failure.value)

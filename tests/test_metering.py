@@ -30,62 +30,18 @@ from pyracast.metering.scheduler import enqueue_due_epias_jobs
 from pyracast.plants.models import Plant, PlantEvent
 from pyracast.regions.models import Region
 from pyracast.trash import purge_expired
-from tests.test_domain import NOW, System
-from tests.test_plant_operations import make_plant
+from tests.support.domain import NOW
+from tests.support.metering import (
+    NEXT_NIGHT,
+    PROVIDER_PLANT,
+    FixtureClient,
+    connect,
+    connected,
+    day_data,
+)
+from tests.support.plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
-PROVIDER_PLANT = EpiasPlant(7, "40X0000000000001", "Solar plant", "Solar")
-NEXT_NIGHT = NOW + timedelta(hours=11)
-
-
-class FixtureClient:
-    def __init__(self, action: Callable[[], None] = lambda: None) -> None:
-        self.calls = 0
-        self.action = action
-
-    def list_plants(self) -> tuple[EpiasPlant, ...]:
-        assert not connection.in_atomic_block
-        self.calls += 1
-        self.action()
-        return (PROVIDER_PLANT,)
-
-    def resolve_settlement_plant(self, eic: str) -> EpiasPlant | None:
-        return None
-
-    def fetch_day(self, plant: EpiasPlant, day: date) -> EpiasDay:
-        assert not connection.in_atomic_block
-        return day_data(plant, day)
-
-
-def day_data(plant: EpiasPlant, day: date) -> EpiasDay:
-    timestamp = datetime.combine(day, datetime.min.time(), tzinfo=timezone.get_current_timezone())
-    return EpiasDay(
-        plant,
-        day,
-        tuple(
-            EpiasReading(timestamp + timedelta(hours=i), f"{i:02}:00", Decimal("1.5"), None)
-            for i in range(24)
-        ),
-        NOW,
-        json.dumps({"items": [{"total": "1.5", "sun": None}]}),
-    )
-
-
-def connect(plant: Plant, actor: User, client: FixtureClient | None = None) -> EpiasConnection:
-    assert PROVIDER_PLANT.eic is not None
-    return connect_epias(
-        plant.pk,
-        actor=actor,
-        provider_plant_id=7,
-        expected_eic=PROVIDER_PLANT.eic,
-        client=cast(EpiasClient, client or FixtureClient()),
-    )
-
-
-def connected(monkeypatch: pytest.MonkeyPatch) -> tuple[System, Plant, EpiasConnection]:
-    monkeypatch.setattr("pyracast.metering.scheduler.get_epias_client", lambda: FixtureClient())
-    system, plant = make_plant(monkeypatch)
-    return system, plant, connect(plant, system.admin)
 
 
 def test_connection_scope_identity_and_missing_configuration(

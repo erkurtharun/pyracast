@@ -27,7 +27,7 @@ from pyracast.plants.models import Plant, PlantEvent
 from pyracast.plants.sites import submit_site
 from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest
 from pyracast.regions.operations import request_location_change, submit_region
-from tests.test_domain import NOW, System, make_system
+from tests.support.domain import NOW, System, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

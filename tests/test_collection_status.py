@@ -8,7 +8,7 @@ from pyracast.forecasts.models import CollectionJob, ForecastSnapshot, RequestAt
 from pyracast.forecasts.schedule import configure_schedule, get_schedule, schedule_payload
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.regions.operations import configure_binding, submit_region, transition_region
-from tests.test_domain import NOW, make_system
+from tests.support.domain import NOW, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

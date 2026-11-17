@@ -8,7 +8,7 @@ from django.test import Client
 
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.admin_tenants import WorkspaceAdministratorForm, tenant_list_context
-from tests.test_api import verified_admin
+from tests.support.api import verified_admin
 
 pytestmark = pytest.mark.django_db
 

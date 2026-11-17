@@ -28,8 +28,8 @@ from pyracast.accounts.operations import reassign_workspace_admin, remove_worksp
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import create_plant
 from pyracast.regions.models import AuditEvent, Region
-from tests.test_domain import make_system
-from tests.test_workspaces import invitation_token
+from tests.support.domain import make_system
+from tests.support.workspaces import invitation_token
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

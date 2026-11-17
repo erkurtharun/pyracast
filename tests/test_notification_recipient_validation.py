@@ -8,10 +8,7 @@ from pyracast.notifications import runtime
 from pyracast.notifications.operations import normalize_recipients
 from pyracast.notifications.scheduler import NotificationSchedulingError
 from pyracast.notifications.serializers import ReminderInput
-
-
-def recipient(length: int) -> str:
-    return "a" * (length - 191) + "@" + "b" * 63 + "." + "c" * 63 + "." + "d" * 62
+from tests.support.notification_recipient_validation import recipient
 
 
 @pytest.mark.parametrize("length", [255, 320])

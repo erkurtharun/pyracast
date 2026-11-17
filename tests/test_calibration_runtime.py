@@ -13,7 +13,7 @@ from pyracast.plants.models import CalibrationRun
 from pyracast.plants.operations import create_plant, request_calibration
 from pyracast.plants.runtime import dispatch_calibrations, make_calibration_actor
 from pyracast.runtime import make_broker
-from tests.test_domain import NOW, make_system
+from tests.support.domain import NOW, make_system
 
 
 def calibration_request() -> CalibrationRun:

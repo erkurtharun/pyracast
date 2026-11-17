@@ -16,36 +16,17 @@ from pyracast.metering.models import EpiasConnection
 from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.preparation import prepare_delivery
 from pyracast.notifications.report_data import saved_report_context
-from pyracast.notifications.scheduler import enqueue_due
 from pyracast.plants.models import CalibrationActivation, Plant, PlantConfiguration
-from pyracast.plants.operations import create_plant
 from pyracast.regions.models import Region
-from tests.test_domain import NOW, System
-from tests.test_historical_production_identity import record_identity
-from tests.test_incident_calibration import incident
-from tests.test_notification_preparation import complete_saved
-from tests.test_notifications import SLOT, configured, saved
-from tests.test_plant_operations import ready_run
-from tests.test_provisional_measurements import acquisition
+from tests.support.domain import NOW
+from tests.support.historical_production_identity import record_identity
+from tests.support.incident_calibration import incident
+from tests.support.notification_report_data import report_delivery
+from tests.support.notifications import SLOT, saved
+from tests.support.plant_operations import ready_run
+from tests.support.provisional_measurements import acquisition
 
 pytestmark = pytest.mark.django_db(transaction=True)
-
-
-def report_delivery(monkeypatch: pytest.MonkeyPatch) -> tuple[System, Plant, NotificationDelivery]:
-    monkeypatch.setattr(timezone, "now", lambda: NOW)
-    system, _ = configured()
-    plant = create_plant(
-        system.member,
-        system.tenant.pk,
-        system.region.pk,
-        name="Electrical plant",
-        dc_capacity_mw=130,
-        export_limit_mw=100,
-    )
-    snapshot = complete_saved(system)
-    delivery = NotificationDelivery.objects.get(pk=enqueue_due(SLOT)[0])
-    delivery.snapshot = snapshot
-    return system, plant, delivery
 
 
 def test_report_transfers_one_pinned_forecast_and_reported_outage_without_external_work(

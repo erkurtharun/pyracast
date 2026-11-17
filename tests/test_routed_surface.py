@@ -12,8 +12,8 @@ from pyracast.admin import site
 from pyracast.admin_forms import ProviderSetupForm
 from pyracast.connections.models import ProviderAccount
 from pyracast.notifications.models import NotificationSettings
-from tests.test_api import verified_admin
-from tests.test_domain import make_system
+from tests.support.api import verified_admin
+from tests.support.domain import make_system
 
 TENANT = "api/tenants/<int:tenant_id>/"
 REGION = TENANT + "regions/<int:region_id>/"
