@@ -1,7 +1,32 @@
 import { expect, test } from "@playwright/test";
 import { ApiError, errorFromResponse } from "../src/lib/api/errors";
 import { authRequest } from "../src/lib/auth-api";
-import { errorBody } from "./support/errors";
+import { allauthErrorBody, errorBody } from "./support/errors";
+
+test("allauth fixtures join every message for the same field", () => {
+    expect(
+        allauthErrorBody(400, "invalid_request", [
+            { param: "email", message: "Enter an email." },
+            { param: "email", message: "Use your invited address." },
+            { param: "password", message: "Enter a password." },
+            { message: "Check your input." },
+        ]),
+    ).toEqual({
+        status: 400,
+        code: "invalid_request",
+        message: "Enter an email.",
+        fields: {
+            email: "Enter an email. Use your invited address.",
+            password: "Enter a password.",
+        },
+        errors: [
+            { param: "email", message: "Enter an email." },
+            { param: "email", message: "Use your invited address." },
+            { param: "password", message: "Enter a password." },
+            { message: "Check your input." },
+        ],
+    });
+});
 
 test("a contract body becomes one typed error", () => {
     const error = errorFromResponse(
