@@ -1,4 +1,3 @@
-from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from threading import Event
@@ -29,14 +28,6 @@ from tests.test_notification_transmission import OpeningBackend
 from tests.test_notifications import SLOT, configured
 
 pytestmark = pytest.mark.django_db(transaction=True)
-
-
-@pytest.fixture(autouse=True)
-def memory_mail() -> Iterator[None]:
-    with override_settings(
-        MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
-    ):
-        yield
 
 
 def member(system: System, email: str, *, verified: bool = True, active: bool = True) -> User:

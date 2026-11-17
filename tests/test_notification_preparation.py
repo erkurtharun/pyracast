@@ -29,12 +29,10 @@ from tests.test_notifications import (
     attached_sheet,
     cache_saved_days,
     configured,
-    memory_mail,
     saved,
 )
 
 pytestmark = pytest.mark.django_db(transaction=True)
-__all__ = ["memory_mail"]
 
 
 def _summary_row(sheet: Worksheet, day: int) -> int:

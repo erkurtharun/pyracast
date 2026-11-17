@@ -1,5 +1,4 @@
 import re
-from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 from typing import Any
@@ -21,14 +20,6 @@ pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth
 PASSWORD = "test-only-" + "falcon-cloud-79!"
 DETAILS = {"company_name": "Sunfield Energy", "email": "Owner@Example.COM", "password": PASSWORD}
 AUTH = "/api/auth/browser/v1/"
-
-
-@pytest.fixture(autouse=True)
-def local_mail() -> Iterator[None]:
-    with override_settings(
-        MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
-    ):
-        yield
 
 
 def mailed_code() -> str:
