@@ -67,6 +67,7 @@ SUBPROCESS = frozenset(
 )
 MIGRATION = frozenset(
     {
+        "test_delivery_health",
         "test_derived_metadata",
         "test_epias_meter_basis_migration",
         "test_location_change_rebase_migration",
@@ -82,6 +83,7 @@ MIGRATION = frozenset(
         "test_provider_identity",
         "test_provisional_migration",
         "test_quota_wait_migration",
+        "test_reminder_message_id",
         "test_shared_reminder_migration",
         "test_snapshot_lineage",
         "test_workspace_migration",
