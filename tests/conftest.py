@@ -68,6 +68,7 @@ MIGRATION = frozenset(
     {
         "test_derived_metadata",
         "test_epias_meter_basis_migration",
+        "test_location_change_rebase_migration",
         "test_notification_group_boundaries",
         "test_notification_groups",
         "test_notification_language",
