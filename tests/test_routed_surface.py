@@ -37,7 +37,6 @@ API_ROUTES = sorted(
         (TENANT + "members/", ("GET",)),
         (TENANT + "members/<int:user_id>/", ("DELETE",)),
         (TENANT + "sites/", ("GET", "POST")),
-        (TENANT + "trash/plants/", ("GET",)),
         (TENANT + "trash/regions/", ("GET",)),
         (REGION, ("DELETE",)),
         (REGION + "collection-schedule/", ("GET", "PUT")),
@@ -46,7 +45,7 @@ API_ROUTES = sorted(
         (REGION + "plants/", ("GET", "POST")),
         (REGION + "reminders/", ("GET", "PUT")),
         (REGION + "restore/", ("POST",)),
-        (PLANT, ("DELETE", "PUT")),
+        (PLANT, ("PUT",)),
         (PLANT + "calibration/automation/", ("GET", "PATCH")),
         (PLANT + "calibration/reset/", ("POST",)),
         (PLANT + "calibrations/", ("GET", "POST")),
@@ -64,7 +63,6 @@ API_ROUTES = sorted(
         (PLANT + "production/", ("GET",)),
         (PLANT + "production/changes/", ("POST",)),
         (PLANT + "production/preview/", ("POST",)),
-        (PLANT + "restore/", ("POST",)),
     ]
 )
 AUTH = "api/auth/browser/v1/"
@@ -129,7 +127,6 @@ RECORD_BROWSER_MODELS = {
     "plants.plant",
     "plants.plantconfiguration",
     "plants.plantevent",
-    "plants.plantforecast",
     "plants.productionobservation",
     "regions.auditevent",
     "regions.region",
