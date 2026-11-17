@@ -445,10 +445,10 @@ and name the `restore` command for that object.
 
 | Subcommand | Requires | Does |
 | --- | --- | --- |
-| `prepare` | the release lock is free, no `release-blocked` marker, the site answers `/health/ready/` | writes the marker, stops the application in the installer's order (PostgreSQL and RabbitMQ stay up), dumps the database into `/var/lib/pyracast/reset/`, uploads it as `postgres/<stamp>-prereset-<uuid>.dump`, restores it into a throwaway PostgreSQL without network, compares every table's row count with the live database, records object, SHA-256 and counts and opens the session; prints them with the release commit, its image digests, the runtime secret version and any earlier archives kept on the host |
+| `prepare` | the release lock is free, no `release-blocked` marker, the site answers `/health/ready/` | writes the marker, stops the application in the installer's order (PostgreSQL and RabbitMQ stay up), dumps the database into `/var/lib/pyracast/reset/`, uploads it as `postgres/<stamp>-prereset-<uuid>.dump`, restores it into a throwaway PostgreSQL without network, compares every table's row count with the live database; exports every Solcast forecast snapshot with its binding row and plant ids as gzip-compressed JSON lines (`psql` `COPY`), checks that it decompresses to as many lines as the database counts and uploads it beside the archive (`<archive>.solcast.jsonl.gz`); records object, SHA-256 and counts of both and opens the session; prints them with the release commit, its image digests, the runtime secret version and any earlier archives kept on the host |
 | `abort` | the marker; `reset` has not replaced the database in this maintenance; `migrate --check` of the release in `/opt/pyracast/current` passes on the database | writes the runtime secrets with that release, starts it with `docker compose --env-file deploy/release.env -f deploy/compose.yaml up --detach --wait`, probes `/health/ready/` and removes the marker and the session |
-| `reset --confirm OBJECT` | the marker, no running, restarting or paused application container, `OBJECT` is the session's archive and its file still has the recorded SHA-256, both database roles | writes the runtime secrets; purges every RabbitMQ queue, dead-letter queues included, and checks that none holds a message; marks the session replaced and syncs it; runs `DROP DATABASE pyracast WITH (FORCE)` and `CREATE DATABASE pyracast`; applies `deploy/bootstrap.sql` without its role statements (roles survive a dropped database); checks that the owner can create a table, that the runtime role can connect and read, and that the owner lost database `CREATE`. The marker stays |
-| `restore --confirm OBJECT` | the marker, no application container, `OBJECT` is the session's archive once `reset` replaced the database, the archive has applied migrations, both database roles | writes the runtime secrets; uses the archive `prepare` kept, or downloads `OBJECT` from the backup bucket, checks it against the bucket's MD5 and size and verifies it in a throwaway PostgreSQL first; then purges the queues, recreates the database as `reset` does, restores the archive with its owners and privileges, compares every table's row count with the record, checks both roles and `migrate --check`, starts the release in `/opt/pyracast/current`, probes readiness and removes the marker and the session |
+| `reset --confirm OBJECT` | the marker, no running, restarting or paused application container, `OBJECT` is the session's archive and its file and Solcast export still have the recorded SHA-256, both database roles | writes the runtime secrets; purges every RabbitMQ queue, dead-letter queues included, and checks that none holds a message; marks the session replaced and syncs it; runs `DROP DATABASE pyracast WITH (FORCE)` and `CREATE DATABASE pyracast`; applies `deploy/bootstrap.sql` without its role statements (roles survive a dropped database); checks that the owner can create a table, that the runtime role can connect and read, and that the owner lost database `CREATE`. The marker stays |
+| `restore --confirm OBJECT` | the marker, no application container, `OBJECT` is the session's archive once `reset` replaced the database, a pre-reset archive's Solcast export still has the recorded SHA-256, the archive has applied migrations, both database roles | writes the runtime secrets; uses the archive `prepare` kept, or downloads `OBJECT` from the backup bucket, checks it against the bucket's MD5 and size and verifies it in a throwaway PostgreSQL first; then purges the queues, recreates the database as `reset` does, restores the archive with its owners and privileges, compares every table's row count with the record, checks both roles and `migrate --check`, starts the release in `/opt/pyracast/current`, probes readiness and removes the marker and the session |
 
 When the start, readiness or the service unit fails or is interrupted, `abort` and
 `restore` write the marker back and send each stop command of the installer's
@@ -473,7 +473,8 @@ observations, EPIAS data, calibrations, outages, change requests, reminders, aud
 events and rate-limit counters. The owner enters the provider account again and
 customers sign up again; if the provider key was used that UTC day, the first plant
 is approved the next day. **What is kept:** host configuration, Secret Manager
-secrets, certificates, and the archive of step 1. A restore starts the release in
+secrets, certificates, and the archive and Solcast export of step 1 (nothing is loaded
+back from the export). A restore starts the release in
 `/opt/pyracast/current` only after its `migrate --check` passes on the restored data.
 
 Run each command on the VM through IAP after `sudo -i`, inside `tmux`. A dry run of
@@ -489,9 +490,11 @@ verification and restart on the real host in about five minutes of downtime.
    Expect `==> Blocking automatic starts with /var/lib/pyracast/release-blocked`,
    `==> Stopping gateway, api, web`, `==> Stopping dispatcher`,
    `==> Stopping worker, notifications`, `==> Dumping database pyracast`,
-   `==> Uploading gs://BUCKET/postgres/...-prereset-....dump` and
-   `==> Restoring the archive into a throwaway PostgreSQL`, then
+   `==> Uploading gs://BUCKET/postgres/...-prereset-....dump`,
+   `==> Restoring the archive into a throwaway PostgreSQL`,
+   `==> Exporting the Solcast snapshots` and its upload line, then
    `Pre-reset archive verified: ...` with `Object:`, `SHA-256:`, `Archive:`,
+   `Solcast export:`, `Solcast SHA-256:`, `Solcast snapshots:` (0 is valid),
    `Release commit:`, one `..._IMAGE=` line per image, `Runtime secret version:`,
    the table and row totals and one `table count` line per table. Write these down.
    The site is down from here. A refusal names its cause and changes nothing; any
@@ -507,10 +510,12 @@ verification and restart on the real host in about five minutes of downtime.
    `==> Starting the release in /opt/pyracast/current` and
    `The previous release serves again and the marker is removed.` After a dry run,
    copy and verify its archive as in step 3 before deleting it in step 9.
-3. Copy the archive off the host and out of the bucket's seven-day lifecycle, on
-   your own machine: `gcloud storage cp gs://BUCKET/OBJECT .`, then check that
-   `sha256sum` (Windows: `Get-FileHash -Algorithm SHA256`) shows the printed
-   SHA-256. Its provider keys decrypt only with the printed runtime secret version.
+3. Copy both objects, the archive and the Solcast export, off the host and out of
+   the bucket's seven-day lifecycle, on your own machine:
+   `gcloud storage cp gs://BUCKET/OBJECT gs://BUCKET/EXPORT .`, then check that
+   `sha256sum` (Windows: `Get-FileHash -Algorithm SHA256`) shows each printed
+   SHA-256. The archive's provider keys decrypt only with the printed runtime
+   secret version.
 4. Reset. Type the command `prepare` printed, with the object name exactly as shown:
 
    ```bash
@@ -545,8 +550,8 @@ verification and restart on the real host in about five minutes of downtime.
    service" above.
 8. The watchdog may report `last_verified_backup_older_than_90_minutes` once after
    a long maintenance, until the next hourly backup.
-9. Once your off-host copy shows the printed SHA-256, delete the archives on the
-   host; they hold every erased row:
+9. Once your off-host copies show the printed SHA-256 values, delete the archives
+   and exports on the host; they hold every erased row:
 
    ```bash
    rm -rf /var/lib/pyracast/reset

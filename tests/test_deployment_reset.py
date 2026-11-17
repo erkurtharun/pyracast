@@ -843,6 +843,8 @@ def test_solcast_export_copies_each_solcast_snapshot_with_its_binding_and_plants
                     weather_payload={"source": "open-meteo"} if endpoint == "forecasts" else None,
                 )
             )
+    selection = reset_database.SOLCAST_COUNT_SQL.removeprefix("SELECT count(*) ")
+    assert f"binding {selection}) e ORDER BY e.id)" in reset_database.SOLCAST_EXPORT_SQL
     with connection.cursor() as cursor:
         cursor.execute(reset_database.SOLCAST_COUNT_SQL)
         assert cursor.fetchone() == (2,)

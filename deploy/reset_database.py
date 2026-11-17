@@ -1,8 +1,9 @@
-# ruff: noqa: S603, S607 -- Fixed Docker, curl, sync and systemctl executables with argument lists.
+# ruff: noqa: S603, S607 -- Fixed Docker, curl, gzip, sync and systemctl executables with argument lists.
 import argparse
 import base64
 import dataclasses
 import datetime
+import gzip
 import hashlib
 import importlib
 import json
@@ -15,6 +16,7 @@ import sys
 import time
 import urllib.request
 import uuid
+import zlib
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from functools import partial
@@ -38,6 +40,7 @@ STOP_ORDER = (
 APPLICATION_SERVICES = frozenset(service for _, group in STOP_ORDER for service in group)
 SUPPORT_SERVICES = ("postgres", "rabbitmq")
 OBJECT_PATTERN = re.compile(r"postgres/[A-Za-z0-9/_.-]+\.dump")
+PRERESET = "-prereset-"
 BUCKET_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]")
 # Roles and their memberships belong to the cluster and survive DROP DATABASE.
 ROLE_STATEMENTS = ("CREATE ROLE ", "GRANT pyracast_owner TO ")
@@ -46,6 +49,27 @@ COUNT_SQL = (
     "format('SELECT count(*) AS n FROM public.%I', c.relname), false, true, '')))[1]::text "
     "FROM pg_class c JOIN pg_namespace s ON s.oid = c.relnamespace "
     "WHERE s.nspname = 'public' AND c.relkind = 'r' ORDER BY c.relname"
+)
+SOLCAST_COUNT_SQL = (
+    "SELECT count(*) FROM forecasts_forecastsnapshot s "
+    "JOIN forecasts_collectionjob j ON j.id = s.job_id "
+    "JOIN connections_sitebinding b ON b.id = j.binding_id "
+    "JOIN connections_provideraccount a ON a.id = b.provider_account_id "
+    "WHERE a.provider = 'solcast'"
+)
+# Same filter as SOLCAST_COUNT_SQL. CSV with control-byte delimiter and quote never quotes JSON
+# text, so each line is the JSON as is.
+SOLCAST_EXPORT_SQL = (
+    "COPY (SELECT row_to_json(e) FROM (SELECT s.id, a.provider, s.source_kind, j.endpoint, "
+    "s.issued_at, s.collected_at, s.coverage_start, s.coverage_end, s.raw_payload, "
+    "s.normalized_intervals, s.weather_payload, ARRAY(SELECT DISTINCT c.plant_id "
+    "FROM plants_plantconfiguration c WHERE c.binding_id = b.id ORDER BY c.plant_id) "
+    "AS plant_ids, row_to_json(b) AS binding FROM forecasts_forecastsnapshot s "
+    "JOIN forecasts_collectionjob j ON j.id = s.job_id "
+    "JOIN connections_sitebinding b ON b.id = j.binding_id "
+    "JOIN connections_provideraccount a ON a.id = b.provider_account_id "
+    "WHERE a.provider = 'solcast') e ORDER BY e.id) "
+    "TO STDOUT WITH (FORMAT csv, DELIMITER E'\\x02', QUOTE E'\\x01', ENCODING 'UTF8')"
 )
 ROLE_CHECK_SQL = """DO $$
 BEGIN
@@ -169,10 +193,18 @@ class Host:
 
 
 @dataclasses.dataclass(frozen=True)
+class SolcastExport:
+    object: str
+    sha256: str
+    rows: int
+
+
+@dataclasses.dataclass(frozen=True)
 class Record:
     object: str
     sha256: str
     counts: dict[str, int]
+    solcast: SolcastExport | None = None
 
 
 def load_host(config_path: Path) -> Host:
@@ -272,12 +304,31 @@ def load_record(host: Host, name: str) -> Record | None:
         return None
     data = json.loads(path.read_text())
     counts = {str(table): int(count) for table, count in data["counts"].items()}
-    return Record(object=str(data["object"]), sha256=str(data["sha256"]), counts=counts)
+    export = data.get("solcast")
+    solcast = (
+        None
+        if export is None
+        else SolcastExport(
+            object=str(export["object"]), sha256=str(export["sha256"]), rows=int(export["rows"])
+        )
+    )
+    return Record(
+        object=str(data["object"]), sha256=str(data["sha256"]), counts=counts, solcast=solcast
+    )
 
 
 def require_object_name(name: str) -> None:
     if not OBJECT_PATTERN.fullmatch(name):
         raise RefusedError(f"{name!r} is not a PostgreSQL archive object name (postgres/....dump).")
+
+
+def require_kept(path: Path, sha256: str, what: str) -> None:
+    if not path.is_file():
+        raise RefusedError(
+            f"The verified {what} {path} is missing; copy it back to that path first."
+        )
+    if file_sha256(path) != sha256:
+        raise RefusedError(f"The {what} {path} no longer matches its recorded SHA-256 {sha256}.")
 
 
 def verified_record(host: Host, name: str) -> tuple[Record, Path]:
@@ -292,12 +343,15 @@ def verified_record(host: Host, name: str) -> tuple[Record, Path]:
             f"The archive kept as {archive_path(host, name)} is {record.object}, not {name}."
         )
     archive = archive_path(host, name)
-    if not archive.is_file():
-        raise RefusedError(
-            f"The verified archive {archive} is missing; copy it back to that path first."
-        )
-    if file_sha256(archive) != record.sha256:
-        raise RefusedError(f"{archive} no longer matches its recorded SHA-256 {record.sha256}.")
+    require_kept(archive, record.sha256, "archive")
+    if PRERESET in name:
+        if record.solcast is None:
+            raise RefusedError(
+                f"The record of {name} names no verified Solcast export; "
+                "prepare keeps one beside each pre-reset archive."
+            )
+        export = archive_path(host, record.solcast.object)
+        require_kept(export, record.solcast.sha256, "Solcast export")
     return record, archive
 
 
@@ -447,7 +501,7 @@ def require_roles(host: Host) -> None:
 
 def dump_database(host: Host) -> tuple[str, Path]:
     stamp = datetime.datetime.now(datetime.UTC).strftime("%Y/%m/%d/%Y%m%dT%H%M%SZ")
-    name = f"postgres/{stamp}-prereset-{uuid.uuid4().hex}.dump"
+    name = f"postgres/{stamp}{PRERESET}{uuid.uuid4().hex}.dump"
     archive = archive_path(host, name)
     partial = archive.with_suffix(".partial")
     with partial.open("wb") as stream:
@@ -541,6 +595,60 @@ def verify_archive(host: Host, archive: Path) -> dict[str, int]:
     finally:
         subprocess.run(["docker", "rm", "--force", container], capture_output=True, check=False)
         subprocess.run(["docker", "volume", "rm", volume], capture_output=True, check=False)
+
+
+def exported_rows(path: Path) -> int:
+    rows = 0
+    try:
+        with gzip.open(path, "rb") as lines:
+            for line in lines:
+                if not isinstance(json.loads(line), dict):
+                    raise ValueError("a line is not a JSON object")
+                rows += 1
+    except (OSError, EOFError, ValueError, zlib.error) as error:
+        raise RuntimeError(f"{path} is not gzip-compressed JSON lines: {error}") from error
+    return rows
+
+
+def export_solcast(host: Host, archive: str) -> SolcastExport:
+    name = archive.removesuffix(".dump") + ".solcast.jsonl.gz"
+    packed = archive_path(host, name)
+    lines = packed.with_suffix("")
+    step("Exporting the Solcast snapshots")
+    with lines.open("wb") as stream:
+        subprocess.run(
+            [
+                *compose(host),
+                "exec",
+                "-T",
+                "--env",
+                "PGTZ=UTC",
+                "postgres",
+                "psql",
+                "-X",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-U",
+                "postgres",
+                "-d",
+                "pyracast",
+                "-c",
+                SOLCAST_EXPORT_SQL,
+            ],
+            stdout=stream,
+            check=True,
+            timeout=1200,
+        )
+    subprocess.run(["gzip", "--force", str(lines)], check=True, timeout=1200)
+    rows = exported_rows(packed)
+    counted = int(psql(host, "pyracast", "-At", "-c", SOLCAST_COUNT_SQL))
+    if rows != counted:
+        raise RuntimeError(
+            f"The Solcast export holds {rows} snapshots; the database counts {counted}."
+        )
+    step(f"Uploading gs://{host.bucket}/{name}")
+    upload_backup(host.bucket, name, packed)
+    return SolcastExport(object=name, sha256=file_sha256(packed), rows=rows)
 
 
 def download_archive(host: Host, name: str) -> Path:
@@ -764,11 +872,14 @@ def end_session(host: Host) -> None:
     host.session.unlink(missing_ok=True)
 
 
-def print_prepared(host: Host, record: Record) -> None:
+def print_prepared(host: Host, record: Record, solcast: SolcastExport) -> None:
     print("\nPre-reset archive verified: the restored copy has every table's live row count.")
     print(f"  Object:  gs://{host.bucket}/{record.object}")
     print(f"  SHA-256: {record.sha256}")
     print(f"  Archive: {archive_path(host, record.object)}")
+    print(f"  Solcast export: gs://{host.bucket}/{solcast.object}")
+    print(f"  Solcast SHA-256: {solcast.sha256}")
+    print(f"  Solcast snapshots: {solcast.rows}")
     print(f"  Release commit: {host.release.resolve().name}")
     for key, value in sorted(release_values(host).items()):
         if key.endswith("_IMAGE"):
@@ -781,8 +892,11 @@ def print_prepared(host: Host, record: Record) -> None:
     earlier = sorted(path.name for path in host.state.glob("*.dump") if path.name != kept)
     if earlier:
         print(f"Earlier archives in {host.state}: {', '.join(earlier)}.")
-        print("Delete each with its .json record once its off-host copy is verified.")
-    print("The site is down. Copy the archive off the host, then run:")
+        print(
+            "Delete each with its .json record and Solcast export once their off-host copies "
+            "are verified."
+        )
+    print("The site is down. Copy the archive and the Solcast export off the host, then run:")
     print(f"  {host.command(f'reset --confirm {record.object}')}")
     print("To serve the previous release again instead, run:")
     print(f"  {host.command('abort')}")
@@ -816,11 +930,12 @@ def prepare(host: Host) -> None:
         live = table_counts(host)
         step("Restoring the archive into a throwaway PostgreSQL")
         require_equal_counts(live, verify_archive(host, archive), "Live and restored")
-        record = Record(object=name, sha256=digest, counts=live)
+        solcast = export_solcast(host, name)
+        record = Record(object=name, sha256=digest, counts=live, solcast=solcast)
         save_record(host, record)
         release = host.release.resolve().name
         save_session(host, Session(marker=identity, object=name, release=release, replaced=False))
-    print_prepared(host, record)
+    print_prepared(host, record, solcast)
 
 
 def abort(host: Host) -> None:
