@@ -21,7 +21,7 @@ from pyracast.accounts.audit import record_security_event
 from pyracast.accounts.language import user_language
 from pyracast.accounts.login_limits import reserve_address_failure, reserve_client_failure
 from pyracast.accounts.security import normalize_client_ip
-from pyracast.mail.errors import NotSentError
+from pyracast.mail.errors import DeliveryUncertainError, NotSentError
 from pyracast.mail.send import send
 
 logger = logging.getLogger(__name__)
@@ -157,7 +157,9 @@ class AccountAdapter(DefaultAccountAdapter):
                         template_prefix,
                         user.pk if isinstance(user, User) else None,
                         type(error).__name__,
-                        error.code if isinstance(error, NotSentError) else None,
+                        error.code
+                        if isinstance(error, (NotSentError, DeliveryUncertainError))
+                        else None,
                     )
 
         transaction.on_commit(deliver)

@@ -3,7 +3,7 @@ from datetime import timedelta
 import pytest
 from allauth.account.models import EmailAddress
 from django.core import mail
-from django.db import connection
+from django.db import connection, transaction
 from django.db.migrations.exceptions import IrreversibleError
 from django.db.migrations.executor import MigrationExecutor
 
@@ -107,7 +107,10 @@ def test_rollback_refuses_to_discard_recipient_revocations() -> None:
         recipients=["retained@example.com"],
         revoked_recipients=["removed@example.com"],
     )
-    with pytest.raises(IrreversibleError, match="Revoked delivery recipients"):
+    with (
+        pytest.raises(IrreversibleError, match="Revoked delivery recipients"),
+        transaction.atomic(),
+    ):
         MigrationExecutor(connection).migrate([("notifications", "0008_shared_reminder_schedules")])
     delivery.refresh_from_db()
     assert delivery.recipients == ["retained@example.com"]

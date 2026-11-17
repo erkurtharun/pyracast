@@ -250,6 +250,7 @@ def process_notification(
         (status, available_at), error_code = retry_or_fail(), error.code
     except DeliveryUncertainError:
         status, error_code = "uncertain", MailFailure.OUTCOME_UNCERTAIN
+        logger.warning("notification_delivery_uncertain delivery_id=%s", delivery_id)
     except Exception as error:
         logger.warning(
             "notification_send_failed delivery_id=%s error_type=%s transmitting=%s",

@@ -724,13 +724,13 @@ def test_reauthentication_code_is_mailed_in_the_stored_language(language: str, s
     )
 
 
-def test_reauthentication_code_resend_is_disabled_and_mails_nothing() -> None:
+def test_unrouted_reauthentication_code_resend_answers_404_and_mails_nothing() -> None:
     user = member()
     client = signed_in_client(user, REAUTHENTICATION_PENDING)
 
     response = submit(client, "auth/reauthenticate/code/resend", {})
 
-    assert response.status_code == 409
+    assert response.status_code == 404
     assert mail.outbox == []
 
 
@@ -1107,6 +1107,10 @@ def test_email_verified_notice_without_a_trigger_renders_the_product_copy() -> N
         ),
         ("curl/8.0 (Android)", "Android"),
         ("Mozilla/5.0 Gecko/20100101 Firefox/139.0", "Firefox"),
+        ("Mozilla/5.0 (iPhone) CriOS/140.0 Safari/604.1", "Chrome on iOS"),
+        ("Mozilla/5.0 (iPad) FxiOS/140.0 Safari/605.1", "Firefox on iOS"),
+        ("Mozilla/5.0 (iPhone) EdgiOS/140.0 Safari/605.1", "Edge on iOS"),
+        ("Mozilla/5.0 (Android) EdgA/140.0 Chrome/140.0 Safari/537.36", "Edge on Android"),
         ("", "an unknown device"),
     ],
 )

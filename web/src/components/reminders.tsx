@@ -304,6 +304,8 @@ function ReminderSettings({
         mail_authorization_revoked: t("mailAuthorizationRevoked"),
         mail_sender_forbidden: t("mailSenderForbidden"),
         mail_configuration_invalid: t("mailConfigurationInvalid"),
+        mail_rate_limited: t("mailRateLimited"),
+        mail_preparation_failed: t("mailPreparationFailed"),
         interrupted_connection: t("interruptedConnection"),
         authority_or_deadline_changed: t("authorityChanged"),
         mail_outcome_uncertain: t("outcomeUncertain"),

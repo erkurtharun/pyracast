@@ -2,12 +2,18 @@ import pytest
 from django.contrib.auth.models import User
 from django.core import mail
 from django.core.mail import EmailMultiAlternatives
+from django.template import TemplateDoesNotExist
 from django.test import override_settings
 from django.utils import translation
 
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.invitations import invite_workspace_member
 from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference
+
+
+def test_unknown_account_mail_template_is_not_rendered_as_a_code_message() -> None:
+    with pytest.raises(TemplateDoesNotExist):
+        AccountAdapter().render_mail("account/email/unsupported", "member@example.com", {})
 
 
 @pytest.mark.parametrize("language", ["en", "tr"])

@@ -78,9 +78,13 @@ NOTICES = {
 }
 _SENTENCE_KEYS = ("from_email", "to_email", "deleted_email", "provider", "email")
 _BROWSERS = (
+    ("EdgiOS/", "Edge"),
+    ("EdgA/", "Edge"),
     ("Edg/", "Edge"),
     ("OPR/", "Opera"),
+    ("FxiOS/", "Firefox"),
     ("Firefox/", "Firefox"),
+    ("CriOS/", "Chrome"),
     ("Chrome/", "Chrome"),
     ("Safari/", "Safari"),
 )

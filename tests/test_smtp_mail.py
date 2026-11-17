@@ -288,3 +288,58 @@ def test_empty_recipient_list_does_not_start_a_transaction(smtp: SMTP) -> None:
     assert mail.mailers["default"].send_messages([outgoing]) == 0
     assert smtp.envelope == []
     assert smtp.content == []
+
+
+@pytest.mark.parametrize("empty_batch", [None, []])
+def test_empty_batch_does_not_open_a_connection(
+    smtp: SMTP, empty_batch: list[EmailMultiAlternatives] | None
+) -> None:
+    backend = mail.mailers["default"]
+    assert isinstance(backend, EmailBackend)
+    assert backend.send_messages(empty_batch) == 0
+    assert smtp.envelope == []
+    assert smtp.content == []
+    assert not smtp.closed
+
+
+def test_silent_connection_failure_returns_no_sent_messages(
+    smtp: SMTP, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unavailable(*args: object, **kwargs: object) -> SMTP:
+        raise TimeoutError
+
+    monkeypatch.setattr(smtplib, "SMTP", unavailable)
+    backend = mail.mailers["default"]
+    assert isinstance(backend, EmailBackend)
+    backend.fail_silently = True
+
+    assert backend.send_messages([message()]) == 0
+
+    assert smtp.envelope == []
+    assert smtp.content == []
+
+
+@pytest.mark.parametrize("address_field", ["sender", "recipient"])
+def test_invalid_envelope_address_is_permanently_not_sent(smtp: SMTP, address_field: str) -> None:
+    outgoing = message()
+    if address_field == "sender":
+        outgoing.from_email = "invalid@@example.com"
+    else:
+        outgoing.bcc = ["invalid@@example.com"]
+
+    with pytest.raises(PermanentlyNotSentError, match="The message addresses are invalid"):
+        mail.mailers["default"].send_messages([outgoing])
+
+    assert smtp.envelope == []
+    assert smtp.content == []
+
+
+def test_invalid_header_is_permanently_not_sent(smtp: SMTP) -> None:
+    outgoing = message()
+    outgoing.subject = "Forecast\nBcc: unexpected@example.com"
+
+    with pytest.raises(PermanentlyNotSentError, match="The message headers or content are invalid"):
+        mail.mailers["default"].send_messages([outgoing])
+
+    assert smtp.envelope == []
+    assert smtp.content == []

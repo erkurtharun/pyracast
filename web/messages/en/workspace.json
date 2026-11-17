@@ -180,6 +180,8 @@
         "mailAuthorizationRevoked": "The mail sender authorization was revoked. An administrator must authorize the sender again.",
         "mailSenderForbidden": "The mail service does not permit this sender. An administrator must check the sender settings.",
         "mailConfigurationInvalid": "The mail settings are invalid. Delivery will retry within the sending window.",
+        "mailRateLimited": "The mail service rate limit was reached. Retries are bounded by the sending window.",
+        "mailPreparationFailed": "Transmission permission could not be confirmed. Retries are bounded by the sending window.",
         "interruptedConnection": "The connection was interrupted before sending. A retry is scheduled.",
         "authorityChanged": "Sending stopped because access changed or the delivery window ended.",
         "outcomeUncertain": "Check the mail service before resending to avoid a duplicate.",

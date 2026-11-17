@@ -395,7 +395,7 @@ def test_rollback_rejects_loss_of_grouped_history_or_membership_settings(automat
             available_at=SLOT,
             recipients=["first@example.com", "second@example.com"],
         )
-    with pytest.raises(IrreversibleError):
+    with pytest.raises(IrreversibleError), transaction.atomic():
         MigrationExecutor(connection).migrate([("notifications", "0008_shared_reminder_schedules")])
     assert ReminderSchedule.objects.get().include_workspace_members is automatic
     if not automatic:

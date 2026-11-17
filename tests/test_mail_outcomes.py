@@ -133,6 +133,7 @@ def test_transaction_reply_decides_the_outcome_per_phase(
     assert type(caught.value) is failure
     assert getattr(caught.value, "code", None) == code
     assert "refused" not in str(caught.value)
+    assert reply.partition(" ")[2] not in str(caught.value)
 
 
 def test_accepted_message_reaches_the_relay_once(relay: Script) -> None:
@@ -395,3 +396,31 @@ def test_account_mail_accepted_before_a_failed_close_is_delivered(
 
     assert [message.to for message in closing.sent] == [["missing@example.com"]]
     assert account_mail_failures(caplog) == []
+
+
+@ACCOUNT_MAIL
+def test_account_mail_logs_the_uncertain_delivery_code(
+    scripted: type[ScriptedBackend], caplog: pytest.LogCaptureFixture
+) -> None:
+    scripted.send_failure = DeliveryUncertainError("private relay detail")
+
+    request_unknown_account_notice()
+
+    (failure,) = account_mail_failures(caplog)
+    assert failure.endswith(" error_type=DeliveryUncertainError error_code=mail_outcome_uncertain")
+    assert "private relay detail" not in caplog.text
+
+
+@pytest.mark.django_db(transaction=True)
+def test_uncertain_reminder_delivery_logs_the_delivery_id(
+    scripted: type[ScriptedBackend], caplog: pytest.LogCaptureFixture
+) -> None:
+    delivery = ready()
+    scripted.send_failure = DeliveryUncertainError("private relay detail")
+
+    assert not process_notification(delivery.pk, SLOT)
+
+    delivery.refresh_from_db()
+    assert (delivery.status, delivery.last_error) == ("uncertain", "mail_outcome_uncertain")
+    assert f"notification_delivery_uncertain delivery_id={delivery.pk}" in caplog.messages
+    assert "private relay detail" not in caplog.text
