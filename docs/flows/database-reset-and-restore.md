@@ -77,7 +77,7 @@ sequenceDiagram
 | `abort` after `reset` replaced the database in this maintenance | Refused, naming the `restore` command for the session's object |
 | `abort` when `migrate --check` of the release fails on the database | Refused before the application starts |
 | `abort` without a maintenance marker | Refused before any service command |
-| `abort` or `restore` readiness or service-unit startup fails | Exit 1; the application is stopped again, marker identity kept; the same command can be run again |
+| `abort` or `restore` readiness or service-unit startup fails | Exit 1; the application is stopped again, marker identity kept; the same command can be run again. If the marker cannot be written back, both errors and the identity to write back are printed |
 | Interrupted (Ctrl-C) | Exit 130 with the command to run next |
 | `reset` without a current session for that object (no `prepare`, an earlier maintenance, another prefix), with no marker, an application container running, a malformed object, a missing record, a missing or changed archive, or missing roles | Refused before any purge or drop |
 | `restore` of another object once `reset` replaced the database, of an archive recorded for another object, or of an archive without applied migrations | Refused before any purge or drop |

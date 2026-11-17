@@ -452,7 +452,8 @@ and name the `restore` command for that object.
 
 When readiness or the service unit fails after a start, `abort` and `restore` stop
 the application again in the installer's order and keep the marker, so the same
-command can be run again.
+command can be run again. If the marker cannot be written back, they still stop the
+application and print its identity to write back first.
 Both render the environment files with the release they start, and after removing the
 marker they reset and start `pyracast.service`, which refused to start while it existed.
 

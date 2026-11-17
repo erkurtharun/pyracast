@@ -912,6 +912,48 @@ def test_command_line_reports_refusals_failures_and_the_next_step(
     assert not host.marker.exists()
 
 
+@pytest.mark.parametrize(
+    ("command", "stuck"), [("restore", set()), ("restore", {"worker"}), ("abort", set())]
+)
+def test_a_failed_start_stops_the_application_even_when_the_marker_cannot_be_restored(
+    host: Host,
+    commands: FakeCommands,
+    uploads: dict[str, bytes],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    command: str,
+    stuck: set[str],
+) -> None:
+    monkeypatch.setattr(reset_database, "load_host", lambda _path: host)
+    name = prepared(host, uploads)
+    if command == "restore":
+        reset_database.reset(host, name)
+        arguments = ["restore", "--confirm", name]
+    else:
+        arguments = ["abort"]
+    identity = host.marker.read_text()
+    capsys.readouterr()
+    write_synced = reset_database.write_synced
+
+    def full_disk(path: Path, text: str) -> None:
+        if path == host.marker:
+            raise OSError(28, "No space left on device")
+        write_synced(path, text)
+
+    monkeypatch.setattr(reset_database, "write_synced", full_disk)
+    commands.ready = False
+    commands.stuck = stuck
+    assert reset_database.main([str(host.config), *arguments]) == 1
+    assert commands.running == SUPPORT | stuck
+    error = capsys.readouterr().err
+    assert f"{command} failed: The release started, but /health/ready/ did not answer ok." in error
+    assert "No space left on device" in error
+    assert ("Application containers still run: worker" in error) == bool(stuck)
+    assert f"write {identity} into {host.marker}" in error
+    assert f"{host.command(' '.join(arguments))} again" in error
+    assert "The marker stays" not in error
+
+
 def test_command_line_names_the_next_step_after_an_interruption(
     host: Host, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

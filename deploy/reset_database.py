@@ -77,6 +77,12 @@ class RefusedError(Exception):
     pass
 
 
+class MarkerLostError(RuntimeError):
+    def __init__(self, message: str, identity: str) -> None:
+        super().__init__(message)
+        self.identity = identity
+
+
 @dataclasses.dataclass(frozen=True)
 class Session:
     """One maintenance window: valid only while the marker still holds its identity."""
@@ -611,8 +617,20 @@ def start_release(host: Host) -> None:
         sync(host.marker.parent)
         subprocess.run(["systemctl", "reset-failed", "pyracast.service"], check=True)
         subprocess.run(["systemctl", "start", "pyracast.service"], check=True)
-    except BaseException:
-        write_synced(host.marker, identity)
+    except BaseException as failure:
+        try:
+            write_synced(host.marker, identity)
+        except Exception as error:
+            step("Stopping the application again although the maintenance marker is not restored")
+            problems = [
+                str(failure) or type(failure).__name__,
+                f"The maintenance marker could not be restored: {error}.",
+            ]
+            try:
+                stop_application(host)
+            except Exception as stopped:
+                problems.append(f"Stopping the application failed: {stopped}")
+            raise MarkerLostError(" ".join(problems), identity) from failure
         step("Stopping the application again; the site stays in maintenance")
         stop_application(host)
         raise
@@ -827,6 +845,16 @@ def main(arguments: list[str] | None = None) -> int:
     except RefusedError as error:
         print(f"Refused: {error} No data was changed.", file=sys.stderr)
         return 2
+    except MarkerLostError as error:
+        rerun = "abort" if options.command == "abort" else f"restore --confirm {options.confirm}"
+        print(f"{options.command} failed: {error}", file=sys.stderr)
+        print(
+            "The site is down without its maintenance marker. Check that no application "
+            f"container runs, write {error.identity} into {host.marker}, then run "
+            f"{host.command(rerun)} again.",
+            file=sys.stderr,
+        )
+        return 1
     except KeyboardInterrupt:
         print(f"{options.command} was interrupted.", file=sys.stderr)
         print_recovery(host, options)
