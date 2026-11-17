@@ -106,64 +106,12 @@ TimeoutStopSec=960
 WantedBy=multi-user.target
 EOF
 
-cat >/etc/systemd/system/pyracast-backup.service <<'EOF'
-[Unit]
-Description=Pyracast PostgreSQL off-host backup
-Requires=docker.service
-After=docker.service
-RequiresMountsFor=/var/lib/pyracast
-ConditionPathExists=/opt/pyracast/current/deploy/backup.py
-ConditionPathExists=!/var/lib/pyracast/release-blocked
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/flock --nonblock --conflict-exit-code 0 /run/lock/pyracast-release.lock /usr/bin/python3 /opt/pyracast/current/deploy/backup.py /etc/pyracast/host.json
-TimeoutStartSec=2400
-EOF
-
-cat >/etc/systemd/system/pyracast-backup.timer <<'EOF'
-[Unit]
-Description=Pyracast hourly database backup
-
-[Timer]
-OnCalendar=hourly
-RandomizedDelaySec=300
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-EOF
-
-cat >/etc/systemd/system/pyracast-watchdog.service <<'EOF'
-[Unit]
-Description=Pyracast container and host capacity watchdog
-Requires=docker.service
-After=docker.service
-RequiresMountsFor=/var/lib/pyracast
-ConditionPathExists=/opt/pyracast/current/deploy/watchdog.py
-ConditionPathExists=!/var/lib/pyracast/release-blocked
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/python3 /opt/pyracast/current/deploy/watchdog.py
-TimeoutStartSec=300
-EOF
-
-cat >/etc/systemd/system/pyracast-watchdog.timer <<'EOF'
-[Unit]
-Description=Pyracast runtime health supervision
-
-[Timer]
-OnBootSec=180
-OnUnitInactiveSec=60
-
-[Install]
-WantedBy=timers.target
-EOF
-
 systemctl daemon-reload
 systemctl enable docker.service pyracast.service
-systemctl enable --now pyracast-backup.timer pyracast-watchdog.timer
+if test -f /opt/pyracast/current/deploy/install-units.sh; then
+  bash /opt/pyracast/current/deploy/install-units.sh install /opt/pyracast/current \
+    || echo 'The release units were not installed; the previous units stay in place.' >&2
+fi
 systemctl restart docker.service
 if test -f /opt/pyracast/current/deploy/compose.yaml; then
   systemctl start pyracast.service

@@ -1,0 +1,11 @@
+[Unit]
+Description=Pyracast container and host capacity watchdog
+Requires=docker.service
+After=docker.service
+RequiresMountsFor=/var/lib/pyracast
+ConditionPathExists=/opt/pyracast/current/deploy/watchdog.py
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/pyracast/current/deploy/watchdog.py
+TimeoutStartSec=300

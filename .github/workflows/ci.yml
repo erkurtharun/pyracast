@@ -40,6 +40,8 @@ jobs:
           -v "$PWD/deploy:/source:ro"
           python:3.15.2-slim-trixie@sha256:65a65fc7b30b06cb6df4930fd4650697cb23f4c2698ab81fc87e4b031bc36928
           /source/test-release.sh
+      - name: Verify the systemd units a release installs
+        run: systemd-analyze verify deploy/systemd/*.service deploy/systemd/*.timer
       - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: 1.17.2
