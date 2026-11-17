@@ -83,7 +83,7 @@ sequenceDiagram
 
 - Lock order at confirmation: session advisory lock (whole request) -> `auth_user` row (`AccountAdapter.confirm_email`) -> `account_emailaddress` writes. Concurrent confirmations of one user serialize; the constraint admits one owner across users.
 - `ACCOUNT_CHANGE_EMAIL=True`: confirmation replaces the old address; mail is deferred with `transaction.on_commit`, so a rolled-back confirmation sends no notice.
-- Code policy: 600 s lifetime, 3 attempts, one send per target address per minute across all users (`ACCOUNT_RATE_LIMITS["confirm_email"]` overrides allauth's 10 s default). A new POST replaces the pending process and its code. A pending address cannot sign in or recover (`email_identity`).
+- Code policy: 600 s lifetime, 3 attempts, one send per target address per minute and six per hour across all users (`ACCOUNT_RATE_LIMITS["confirm_email"]` replaces allauth's 10 s default). A new POST replaces the pending process and its code. A pending address cannot sign in or recover (`email_identity`).
 
 ## Tests
 
