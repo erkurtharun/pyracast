@@ -58,7 +58,6 @@ class Migration(migrations.Migration):
                 ("dc_capacity_kw", models.FloatField(blank=True, null=True)),
                 ("power_basis", models.CharField(default="ac", max_length=2)),
                 ("capacity_semantics_verified", models.BooleanField(default=False)),
-                ("tilt_degrees", models.FloatField(default=0)),
                 ("azimuth_degrees", models.FloatField(default=0)),
                 ("losses_percent", models.FloatField(default=0)),
                 ("installation_date", models.DateField(null=True)),

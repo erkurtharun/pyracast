@@ -10,7 +10,7 @@ from pyracast.forecasts.models import ForecastResult, ForecastSnapshot, RequestA
 from pyracast.incidents.operations import save_incident
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.history import plant_outlook
-from pyracast.plants.models import ForecastIssuance, Plant, PlantConfiguration, PlantForecast
+from pyracast.plants.models import ForecastIssuance, Plant, PlantConfiguration
 from pyracast.plants.operations import activate_calibration, revise_plant
 from pyracast.regions.models import Region
 from tests.test_domain import System
@@ -78,7 +78,6 @@ def test_today_automatic_uses_complete_original_forecast_after_reference_transit
     assert result["provenance"]["snapshot_id"] == old_id
     assert automatic["configuration_id"] != plant.current_configuration_id
     assert "reference_transition_fallback" in result["quality_flags"]
-    assert not PlantForecast.objects.exists()
     assert RequestAttempt.objects.count() == count
     client = Client()
     client.force_login(system.member)
@@ -230,23 +229,10 @@ def test_automatic_does_not_replace_latest_when_reference_transition_is_not_safe
     assert "reference_transition_fallback" not in payload["quality_flags"]
 
 
-@pytest.mark.parametrize("cached_complete", [False, True])
 def test_partial_archive_cannot_supply_a_complete_automatic_forecast(
     monkeypatch: pytest.MonkeyPatch,
-    cached_complete: bool,
 ) -> None:
-    system, plant, old_id = reference_transition(monkeypatch, archive_periods=24)
-    if cached_complete:
-        old = ForecastSnapshot.objects.select_related("job").get(pk=old_id)
-        configuration = PlantConfiguration.objects.get(plant=plant, binding_id=old.job.binding_id)
-        PlantForecast.objects.create(
-            configuration=configuration,
-            snapshot=old,
-            calibration=None,
-            target_date=DAY,
-            resolution_minutes=60,
-            payload={"complete": True, "quality_flags": [], "provenance": {"snapshot_id": old_id}},
-        )
+    system, plant, _ = reference_transition(monkeypatch, archive_periods=24)
     outlook = plant_outlook(
         system.member,
         system.tenant.pk,

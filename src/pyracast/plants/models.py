@@ -343,34 +343,6 @@ class CalibrationActivation(models.Model):
         )
 
 
-class PlantForecast(models.Model):
-    configuration = models.ForeignKey(PlantConfiguration, on_delete=models.PROTECT)
-    snapshot = models.ForeignKey("forecasts.ForecastSnapshot", on_delete=models.PROTECT)
-    calibration = models.ForeignKey(CalibrationRun, null=True, on_delete=models.PROTECT)
-    resolution_minutes = models.PositiveIntegerField()
-    target_date = models.DateField()
-    payload = models.JSONField()
-    created_at = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        constraints = (
-            models.UniqueConstraint(
-                fields=(
-                    "configuration",
-                    "snapshot",
-                    "calibration",
-                    "resolution_minutes",
-                    "target_date",
-                ),
-                nulls_distinct=False,
-                name="plant_forecast_unique",
-            ),
-            models.CheckConstraint(
-                condition=Q(resolution_minutes__in=(30, 60)), name="plant_forecast_resolution"
-            ),
-        )
-
-
 class ForecastIssuance(models.Model):
     plant = models.ForeignKey(Plant, on_delete=models.PROTECT)
     configuration = models.ForeignKey(PlantConfiguration, on_delete=models.PROTECT)

@@ -245,14 +245,6 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "plants",
     ),
     _owner_key(
-        "forecast_calibration_config_fk",
-        "plants_plantforecast",
-        ("calibration_id", "configuration_id"),
-        "plants_calibrationrun",
-        ("id", "configuration_id"),
-        "plants",
-    ),
-    _owner_key(
         "issuance_configuration_owner_fk",
         "plants_forecastissuance",
         ("configuration_id", "plant_id"),

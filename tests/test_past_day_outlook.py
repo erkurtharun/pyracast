@@ -4,7 +4,7 @@ from typing import Any, cast
 import pytest
 
 from pyracast.plants.history import plant_outlook
-from pyracast.plants.models import CalibrationRun, Plant, PlantForecast
+from pyracast.plants.models import CalibrationRun, Plant
 from pyracast.plants.operations import activate_calibration, reset_calibration, revise_plant
 from tests.test_domain import NOW, System
 from tests.test_plant_operations import make_plant, ready_run, saved_actuals
@@ -59,7 +59,6 @@ def test_past_day_inside_the_training_period_uses_that_calibration(
     assert "retrospective_calibration" in payload["quality_flags"]
     assert "uncalibrated" not in payload["quality_flags"]
     assert result["production_diagnostic"] is None
-    assert not PlantForecast.objects.exists()
 
 
 @pytest.mark.parametrize(

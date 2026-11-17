@@ -19,7 +19,6 @@ from pyracast.plants.models import (
     ForecastIssuance,
     Plant,
     PlantConfiguration,
-    PlantForecast,
     ProductionObservation,
 )
 from pyracast.plants.performance import forecast_performance
@@ -103,7 +102,6 @@ def test_performance_reads_frozen_native_clipping_and_keeps_read_only(
     assert result["days"][0]["factor"] == 1
     assert result["days"][0]["calibration_id"] is None
     assert result["days"][0]["snapshot_id"] == source.pk
-    assert not PlantForecast.objects.exists()
     assert ForecastIssuance.objects.count() == 1
 
 

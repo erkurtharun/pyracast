@@ -124,7 +124,6 @@ def _validate_binding(binding: SiteBinding, source: HistoricalSourceSettings) ->
         "longitude",
         "capacity_kw",
         "dc_capacity_kw",
-        "tilt_degrees",
         "azimuth_degrees",
         "losses_percent",
     ):

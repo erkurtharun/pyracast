@@ -32,7 +32,6 @@ from pyracast.plants.models import (
     Plant,
     PlantConfiguration,
     PlantEvent,
-    PlantForecast,
     ProductionObservation,
 )
 from pyracast.plants.operations import create_plant
@@ -139,14 +138,6 @@ def linked_records(system: System, plant: Plant) -> tuple[ForecastSnapshot, Remi
     run = request_run(system, plant)
     CalibrationActivation.objects.create(
         plant=plant, configuration=configuration, calibration=run, actor=system.member
-    )
-    PlantForecast.objects.create(
-        configuration=configuration,
-        snapshot=source,
-        calibration=run,
-        resolution_minutes=30,
-        target_date=NOW.date(),
-        payload={},
     )
     ProductionObservation.objects.create(
         plant=plant,
@@ -360,7 +351,6 @@ def test_purge_region_removes_owned_dependencies_and_preserves_shared_quota_ledg
     assert not SiteBinding.objects.filter(pk=system.binding.pk).exists()
     assert not ForecastSnapshot.objects.filter(pk=source.pk).exists()
     assert not ForecastResult.objects.exists()
-    assert not PlantForecast.objects.exists()
     assert not CalibrationRun.objects.exists()
     assert not CalibrationActivation.objects.exists()
     assert not ProductionObservation.objects.exists()

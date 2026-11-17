@@ -58,7 +58,6 @@ from pyracast.plants.models import (
     Plant,
     PlantConfiguration,
     PlantEvent,
-    PlantForecast,
     PlantSubmission,
     ProductionObservation,
 )
@@ -685,7 +684,6 @@ for model in (
     ProductionObservation,
     CalibrationRun,
     CalibrationActivation,
-    PlantForecast,
     PlantEvent,
 ):
     site.register(model, ReadOnlyAdmin)

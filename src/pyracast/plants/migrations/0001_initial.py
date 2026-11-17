@@ -327,41 +327,6 @@ class Migration(migrations.Migration):
             ],
         ),
         migrations.CreateModel(
-            name="PlantForecast",
-            fields=[
-                (
-                    "id",
-                    models.BigAutoField(
-                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
-                    ),
-                ),
-                ("resolution_minutes", models.PositiveIntegerField()),
-                ("target_date", models.DateField()),
-                ("payload", models.JSONField()),
-                ("created_at", models.DateTimeField(auto_now_add=True)),
-                (
-                    "calibration",
-                    models.ForeignKey(
-                        null=True,
-                        on_delete=django.db.models.deletion.PROTECT,
-                        to="plants.calibrationrun",
-                    ),
-                ),
-                (
-                    "configuration",
-                    models.ForeignKey(
-                        on_delete=django.db.models.deletion.PROTECT, to="plants.plantconfiguration"
-                    ),
-                ),
-                (
-                    "snapshot",
-                    models.ForeignKey(
-                        on_delete=django.db.models.deletion.PROTECT, to="forecasts.forecastsnapshot"
-                    ),
-                ),
-            ],
-        ),
-        migrations.CreateModel(
             name="PlantSubmission",
             fields=[
                 (
@@ -673,27 +638,6 @@ class Migration(migrations.Migration):
             model_name="calibrationactivation",
             constraint=models.UniqueConstraint(
                 fields=("id", "configuration"), name="activation_id_config_unique"
-            ),
-        ),
-        migrations.AddConstraint(
-            model_name="plantforecast",
-            constraint=models.UniqueConstraint(
-                fields=(
-                    "configuration",
-                    "snapshot",
-                    "calibration",
-                    "resolution_minutes",
-                    "target_date",
-                ),
-                name="plant_forecast_unique",
-                nulls_distinct=False,
-            ),
-        ),
-        migrations.AddConstraint(
-            model_name="plantforecast",
-            constraint=models.CheckConstraint(
-                condition=models.Q(("resolution_minutes__in", (30, 60))),
-                name="plant_forecast_resolution",
             ),
         ),
         migrations.AddConstraint(

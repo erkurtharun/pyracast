@@ -18,7 +18,6 @@ from pyracast.plants.models import (
     CalibrationRun,
     Plant,
     PlantConfiguration,
-    PlantForecast,
     ProductionObservation,
 )
 from pyracast.plants.numerics import POLICY_VERSION
@@ -131,7 +130,6 @@ def test_new_plant_forecast_reports_unavailable_history_without_rejecting_capaci
     assert tomorrow.json()["configuration_id"] == configuration["id"]
     assert tomorrow.json()["unavailable_reason"] == "forecast_unavailable"
     assert tomorrow.json()["result"] is None
-    assert not PlantForecast.objects.exists()
 
 
 def test_tenant_scope_observation_import_and_validation() -> None:

@@ -124,7 +124,7 @@ class Migration(migrations.Migration):
                 ("normalized_intervals", models.JSONField()),
                 ("collected_at", models.DateTimeField()),
                 ("issued_at", models.DateTimeField(null=True)),
-                ("source_kind", models.CharField(default="unknown", max_length=20)),
+                ("source_kind", models.CharField(max_length=20)),
                 ("coverage_start", models.DateTimeField(db_index=True, null=True)),
                 ("coverage_end", models.DateTimeField(db_index=True, null=True)),
                 ("available_at", models.DateTimeField(null=True)),
@@ -317,9 +317,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="forecastsnapshot",
             constraint=models.CheckConstraint(
-                condition=models.Q(
-                    ("source_kind__in", ("unknown", "forecast", "estimated_actuals"))
-                ),
+                condition=models.Q(("source_kind__in", ("forecast", "estimated_actuals"))),
                 name="snapshot_source_kind",
             ),
         ),

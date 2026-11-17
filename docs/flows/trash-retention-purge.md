@@ -54,7 +54,7 @@ sequenceDiagram
 | `forecasts_collectionjob`, `forecasts_forecastsnapshot`, `forecasts_forecastresult`, `forecasts_referencecapacitynormalization`, `forecasts_historicalreferenceimport` | W | Region archive, deleted in the order normalization, result, snapshot, job, import |
 | `forecasts_collectionschedule`, `notifications_reminderschedule`, `notifications_notificationdelivery` | W | Region schedules and all deliveries of the region |
 | `connections_sitebinding`, `regions_auditevent`, `regions_regionlocationchangerequest` | W | Bindings (after `approved_binding` is nulled), region audit rows, location requests by cascade |
-| `plants_plantconfiguration`, `plants_plantforecast`, `plants_forecastissuance`, `plants_productionobservation`, `plants_plantevent`, `plants_plantsubmission`, `plants_calibrationrun`, `plants_calibrationactivation` | W | Plant history; `current_configuration` and `comparison_activation` nulled first, submission by cascade |
+| `plants_plantconfiguration`, `plants_forecastissuance`, `plants_productionobservation`, `plants_plantevent`, `plants_plantsubmission`, `plants_calibrationrun`, `plants_calibrationactivation` | W | Plant history; `current_configuration` and `comparison_activation` nulled first, submission by cascade |
 | `metering_epias*` (snapshot, job, connection), `change_requests_changerequest`, `incidents_plantincident`, `incidents_incidentrevision` | W | EPIAS in that order; request items and incident changes by cascade |
 | `forecasts_dispatcherstatus` | W | `retention` row: attempt, success, error class (`record_dispatch_phase`) |
 

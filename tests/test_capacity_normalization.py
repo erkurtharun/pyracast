@@ -99,10 +99,8 @@ def test_old_hobby_history_becomes_available_at_the_new_scale_without_rewriting_
     assert ReferenceCapacityNormalization.objects.count() == 1
 
 
-@pytest.mark.parametrize("missing_availability", [False, True])
 def test_forecast_copy_recalculates_results_and_never_backdates_publication(
     monkeypatch: pytest.MonkeyPatch,
-    missing_availability: bool,
 ) -> None:
     system, target = scaled_system(monkeypatch)
     original = publish_snapshot(snapshot_for(system, date(2026, 11, 9), power_kw=0.6))
@@ -110,9 +108,6 @@ def test_forecast_copy_recalculates_results_and_never_backdates_publication(
     original_payload = deepcopy(original_result.payload)
     original_daily_payloads = deepcopy(original_result.daily_payloads)
     original_published_at = original_result.published_at
-    if missing_availability:
-        original.available_at = None
-        original.save()
     ids = normalize(system, target)
     assert len(ids) == 1
     copied = ForecastSnapshot.objects.get(pk=ids[0])

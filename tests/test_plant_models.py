@@ -4,12 +4,11 @@ from typing import Any
 import pytest
 from django.db import IntegrityError, transaction
 
-from pyracast.forecasts.models import CollectionJob, ForecastSnapshot
+from pyracast.forecasts.models import CollectionJob
 from pyracast.plants.models import (
     CalibrationRun,
     Plant,
     PlantConfiguration,
-    PlantForecast,
     ProductionObservation,
 )
 from tests.test_domain import NOW, make_system
@@ -127,25 +126,6 @@ def test_database_rejects_invalid_values_and_duplicate_baseline_forecast() -> No
             recorded_by=system.member,
         )
     job = CollectionJob.objects.get()
-    snapshot = ForecastSnapshot.objects.create(
-        job=job,
-        binding=job.binding,
-        raw_payload={},
-        normalized_intervals=[],
-        collected_at=NOW,
-        source_kind="forecast",
-    )
-    forecast: dict[str, Any] = dict(
-        configuration=config,
-        snapshot=snapshot,
-        calibration=None,
-        resolution_minutes=30,
-        target_date=job.target_date,
-        payload={},
-    )
-    PlantForecast.objects.create(**forecast)
-    with pytest.raises(IntegrityError), transaction.atomic():
-        PlantForecast.objects.create(**forecast)
     run = dict(
         plant=plant,
         configuration=config,

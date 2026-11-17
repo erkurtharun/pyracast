@@ -6,7 +6,7 @@ import pytest
 from pyracast.connections.models import SiteBinding
 from pyracast.plants.forecasting import plant_forecast
 from pyracast.plants.history import plant_outlook
-from pyracast.plants.models import ForecastIssuance, Plant, PlantConfiguration, PlantForecast
+from pyracast.plants.models import ForecastIssuance, Plant, PlantConfiguration
 from pyracast.plants.numerics import MODEL_VERSION
 from pyracast.plants.operations import activate_calibration
 from tests.test_domain import NOW, System
@@ -47,7 +47,6 @@ def test_saved_forecast_keeps_its_calibration_after_the_transfer_model_changes(
     _declare_tracking(system, plant)
     assert _replay(system, plant, 60) == saved
     assert ForecastIssuance.objects.count() == 1
-    assert not PlantForecast.objects.exists()
     fresh = _replay(system, plant, 30)
     payload = cast(dict[str, Any], fresh["result"])
     assert fresh["calibration_id"] == run.pk
@@ -56,7 +55,6 @@ def test_saved_forecast_keeps_its_calibration_after_the_transfer_model_changes(
     assert "uncalibrated" not in payload["quality_flags"]
     assert _replay(system, plant, 30) == fresh
     assert ForecastIssuance.objects.count() == 1
-    assert not PlantForecast.objects.exists()
 
 
 def test_outage_scenario_replays_the_transfer_model_of_its_saved_forecast(

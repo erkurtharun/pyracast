@@ -145,7 +145,7 @@ class ForecastSnapshot(models.Model):
     normalized_intervals = models.JSONField()
     collected_at = models.DateTimeField()
     issued_at = models.DateTimeField(null=True)
-    source_kind = models.CharField(max_length=20, default="unknown")
+    source_kind = models.CharField(max_length=20)
     coverage_start = models.DateTimeField(null=True, db_index=True)
     coverage_end = models.DateTimeField(null=True, db_index=True)
     available_at = models.DateTimeField(null=True)
@@ -173,7 +173,7 @@ class ForecastSnapshot(models.Model):
                 name="snapshot_coverage_bounds",
             ),
             models.CheckConstraint(
-                condition=models.Q(source_kind__in=("unknown", "forecast", "estimated_actuals")),
+                condition=models.Q(source_kind__in=("forecast", "estimated_actuals")),
                 name="snapshot_source_kind",
             ),
         )

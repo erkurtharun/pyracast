@@ -86,7 +86,7 @@ Use conventional Django apps for accounts, regions, provider connections, foreca
 | CalibrationRun, CalibrationActivation | Durable fit, reproducible dataset, held-out evaluation and audited manual/automatic activation history |
 | HistoricalReferenceImport | Authorized source settings, immutable export digest and actual acquisition time |
 | ReferenceCapacityNormalization | Authorized capacity-only copies, original source lineage and conversion availability |
-| PlantForecast, PlantEvent | Immutable electrical result and audited plant operations |
+| ForecastIssuance, PlantEvent | Immutable published electrical forecast and audited plant operations |
 | NotificationSettings, ReminderSchedule, NotificationDelivery | Shared plant email schedule, explicit recipients and language, pinned saved forecasts and grouped delivery outcomes |
 | AuditEvent | Actor, action, target and timestamp for privileged changes |
 

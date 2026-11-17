@@ -14,7 +14,6 @@ from pyracast.plants.models import (
     CalibrationRun,
     Plant,
     PlantConfiguration,
-    PlantForecast,
     PlantSubmission,
     ProductionObservation,
 )
@@ -202,7 +201,7 @@ def test_database_rejects_configuration_from_another_tenant(
                 )
 
 
-@pytest.mark.parametrize("record", ["activation", "comparison", "forecast"])
+@pytest.mark.parametrize("record", ["activation", "comparison"])
 def test_database_rejects_calibration_from_another_configuration(
     owners: tuple[System, PlantConfiguration, PlantConfiguration], record: str
 ) -> None:
@@ -211,7 +210,6 @@ def test_database_rejects_calibration_from_another_configuration(
     constraint = {
         "activation": "activation_calibration_config_fk",
         "comparison": "calibration_comparison_config_fk",
-        "forecast": "forecast_calibration_config_fk",
     }[record]
     with pytest.raises(IntegrityError, match=constraint), transaction.atomic():  # noqa: PT012 -- commit checks the selected write.
         match record:
@@ -226,31 +224,6 @@ def test_database_rejects_calibration_from_another_configuration(
                 candidate = calibration(first)
                 CalibrationRun.objects.filter(pk=candidate.pk).update(
                     comparison_activation=activation
-                )
-            case "forecast":
-                from pyracast.forecasts.models import CollectionJob, ForecastSnapshot
-
-                job = CollectionJob.objects.create(
-                    binding=system.binding,
-                    target_date=NOW.date(),
-                    scheduled_slot=NOW,
-                    available_at=NOW,
-                )
-                snapshot = ForecastSnapshot.objects.create(
-                    job=job,
-                    binding=system.binding,
-                    raw_payload={},
-                    normalized_intervals=[],
-                    collected_at=NOW,
-                    source_kind="forecast",
-                )
-                PlantForecast.objects.create(
-                    configuration=first,
-                    snapshot=snapshot,
-                    calibration=run,
-                    resolution_minutes=60,
-                    target_date=NOW.date(),
-                    payload={},
                 )
 
 

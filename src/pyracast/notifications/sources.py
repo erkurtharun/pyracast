@@ -18,11 +18,11 @@ from pyracast.notifications.models import NotificationDelivery
 
 
 def _available_by(moment: datetime) -> Q:
-    return (
-        Q(collected_at__lte=moment, forecastresult__published_at__lte=moment)
-        & (Q(available_at__isnull=True) | Q(available_at__lte=moment))
-        & (Q(issued_at__isnull=True) | Q(issued_at__lte=moment))
-    )
+    return Q(
+        collected_at__lte=moment,
+        available_at__lte=moment,
+        forecastresult__published_at__lte=moment,
+    ) & (Q(issued_at__isnull=True) | Q(issued_at__lte=moment))
 
 
 def eligible_saved_forecasts(
@@ -50,7 +50,7 @@ def composed_report_source(
     start, end = local_day_bounds(day, delivery.binding.timezone)
     snapshots = list(
         eligible_saved_forecasts(delivery, available_at).filter(
-            coverage_start__lt=end, coverage_end__gt=start, available_at__isnull=False
+            coverage_start__lt=end, coverage_end__gt=start
         )
     )
     cutoff = min(delivery.scheduled_for, available_at)

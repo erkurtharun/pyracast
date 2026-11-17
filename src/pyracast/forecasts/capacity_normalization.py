@@ -1,6 +1,6 @@
 from datetime import datetime
 from math import isclose, isfinite
-from typing import Any
+from typing import Any, cast
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
@@ -50,7 +50,6 @@ def _validate_bindings(source: SiteBinding, target: SiteBinding) -> float:
         "latitude",
         "longitude",
         "timezone",
-        "tilt_degrees",
         "azimuth_degrees",
         "losses_percent",
         "installation_date",
@@ -107,9 +106,7 @@ def normalization_provenance(snapshot: ForecastSnapshot) -> dict[str, object] | 
         "source_snapshot_id": record.source_snapshot_id,
         "source_binding_id": record.source_snapshot.job.binding_id,
         "source_capacity_kw": record.source_capacity_kw,
-        "source_available_at": record.source_snapshot.available_at.isoformat()
-        if record.source_snapshot.available_at is not None
-        else None,
+        "source_available_at": cast(datetime, record.source_snapshot.available_at).isoformat(),
         "target_capacity_kw": record.target_capacity_kw,
         "factor": record.factor,
         "authorized_by_id": record.authorized_by_id,
@@ -208,10 +205,7 @@ def normalize_reference_capacity(
                 job__reference_import__isnull=True,
                 capacity_normalization__isnull=True,
                 collected_at__lte=moment,
-            )
-            .filter(
-                Q(available_at__lte=moment)
-                | Q(available_at__isnull=True, forecastresult__published_at__lte=moment)
+                available_at__lte=moment,
             )
             .filter(Q(issued_at__isnull=True) | Q(issued_at__lte=moment))
             .order_by("pk")

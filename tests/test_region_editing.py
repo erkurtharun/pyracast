@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import IntegrityError, close_old_connections, connection
+from django.db import close_old_connections, connection
 from django.test import Client
 
 from pyracast.accounts.models import Membership, Tenant
@@ -504,12 +504,6 @@ BINDING_FIELD_CHANGES: dict[str, Callable[[System], dict[str, Any]]] = {
 )
 def test_a_change_of_any_binding_setup_field_replaces_the_binding(field: str) -> None:
     system = make_system(approved=True)
-    if field == "tilt_degrees":
-        with pytest.raises(ValidationError):
-            submit_binding(system, tilt_degrees=5)
-        with pytest.raises(IntegrityError):
-            SiteBinding.objects.filter(pk=system.binding.pk).update(tilt_degrees=5)
-        return
     replacement = submit_binding(system, **BINDING_FIELD_CHANGES[field](system))
     assert replacement.pk != system.binding.pk
     system.region.refresh_from_db()

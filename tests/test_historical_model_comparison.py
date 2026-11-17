@@ -8,7 +8,7 @@ from django.test import Client
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasConnection
-from pyracast.plants.models import CalibrationRun, PlantForecast, ProductionObservation
+from pyracast.plants.models import CalibrationRun, ProductionObservation
 from pyracast.plants.performance import forecast_performance
 from pyracast.solar import Daylight
 from tests.test_domain import NOW
@@ -65,7 +65,6 @@ def test_historical_daylight_comparison_retains_whole_boundary_hours_and_native_
     assert day["predicted_energy_mwh"] == pytest.approx((80 + 100 + 100 + 40) / 2)
     assert day["baseline_energy_mwh"] == pytest.approx(160)
     assert day["error_mwh"] == pytest.approx(-3)
-    assert not PlantForecast.objects.exists()
     assert (
         forecast_performance(plant, start_date=DAY, end_date=DAY, comparison="historical_model")[
             "matched_days"
@@ -117,7 +116,6 @@ def test_historical_model_applies_the_calibration_fitted_for_that_period(
     assert day["measured_energy_mwh"] == 624
     assert day["predicted_energy_mwh"] == pytest.approx(0.8 * 624)
     assert day["baseline_energy_mwh"] == pytest.approx(624)
-    assert not PlantForecast.objects.exists()
     archived = client.get(url, {**query, "comparison": "archived_forecast"}).json()
     assert archived["matched_days"] == 0
     assert archived["days"][0]["reason"] == "forecast_not_available"

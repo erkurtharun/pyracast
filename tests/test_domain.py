@@ -171,7 +171,6 @@ def test_revision_invalidates_approval_and_preserves_previous_configuration() ->
         {"capacity_kw": 0},
         {"capacity_kw": float("nan")},
         {"power_basis": "xx"},
-        {"tilt_degrees": 1},
         {"capacity_semantics_verified": False},
         {"azimuth_degrees": 360},
         {"azimuth_degrees": float("inf")},
@@ -328,8 +327,7 @@ def test_megawatt_reference_keeps_the_previous_capacity_revision() -> None:
         capacity_semantics_verified=True,
     )
     assert replacement.capacity_kw == replacement.dc_capacity_kw == 1000
-    assert replacement.tilt_degrees == replacement.azimuth_degrees == 0
-    assert replacement.losses_percent == 0
+    assert replacement.azimuth_degrees == replacement.losses_percent == 0
     system.region.refresh_from_db()
     assert replacement.region_revision == system.region.revision == 2
     assert system.region.status == "pending"

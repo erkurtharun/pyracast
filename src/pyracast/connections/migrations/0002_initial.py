@@ -109,12 +109,6 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="sitebinding",
             constraint=models.CheckConstraint(
-                condition=models.Q(("tilt_degrees", 0)), name="horizontal_binding"
-            ),
-        ),
-        migrations.AddConstraint(
-            model_name="sitebinding",
-            constraint=models.CheckConstraint(
                 condition=models.Q(("latitude__gte", -90), ("latitude__lte", 90)),
                 name="binding_latitude",
             ),

@@ -330,7 +330,7 @@ def test_fixture_demo(settings: LazySettings) -> None:
     assert ForecastResult.objects.get().payload["complete"] is True
     reference = SiteBinding.objects.get()
     assert reference.capacity_kw == reference.dc_capacity_kw == 1000
-    assert reference.azimuth_degrees == reference.tilt_degrees == reference.losses_percent == 0
+    assert reference.azimuth_degrees == reference.losses_percent == 0
 
 
 def test_binding_api_records_megawatt_reference_metadata(
@@ -356,7 +356,7 @@ def test_binding_api_records_megawatt_reference_metadata(
     assert response.status_code == 201
     reference = SiteBinding.objects.get(pk=response.json()["id"])
     assert reference.capacity_kw == reference.dc_capacity_kw == 1000
-    assert reference.azimuth_degrees == reference.tilt_degrees == reference.losses_percent == 0
+    assert reference.azimuth_degrees == reference.losses_percent == 0
     previous.refresh_from_db()
     assert previous.capacity_kw == 1
     assert previous.dc_capacity_kw is None

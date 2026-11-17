@@ -104,7 +104,6 @@ def _configuration_identity(region: Region, binding: SiteBinding) -> dict[str, A
                 "longitude",
                 "capacity_kw",
                 "dc_capacity_kw",
-                "tilt_degrees",
                 "azimuth_degrees",
                 "losses_percent",
                 "power_basis",

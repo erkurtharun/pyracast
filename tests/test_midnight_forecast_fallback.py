@@ -10,7 +10,7 @@ from pyracast.accounts.models import Membership, Tenant
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import ForecastResult, ForecastSnapshot, RequestAttempt
 from pyracast.irradiance import local_day_bounds
-from pyracast.plants.models import PlantConfiguration, PlantForecast
+from pyracast.plants.models import PlantConfiguration
 from pyracast.plants.operations import revise_plant
 from pyracast.regions.models import Region
 from pyracast.solar import daylight_window
@@ -77,7 +77,6 @@ def test_saved_fallback_does_not_assume_a_configuration_after_its_binding_day_en
     assert response.json()["source_kind"] == "estimated_actuals"
     assert response.json()["result"] is None
     assert response.json()["unavailable_reason"] == "estimated_actuals_unavailable"
-    assert not PlantForecast.objects.exists()
 
 
 @pytest.mark.parametrize("error_type", [ValueError, ArithmeticError])
@@ -106,7 +105,6 @@ def test_saved_actuals_calculation_failure_returns_validation_error_without_fore
             "Choose another day or contact your administrator."
         ],
     }
-    assert not PlantForecast.objects.exists()
     assert RequestAttempt.objects.count() == requests
 
 
@@ -155,7 +153,6 @@ def test_automatic_keeps_intraday_forecast_until_actual_values_arrive(
         assert archived["result"]["provenance"]["snapshot_id"] == first.pk
         assert archived["result"]["energy_mwh"] == pytest.approx(312)
     assert list(ForecastResult.objects.values()) == result_rows
-    assert not PlantForecast.objects.exists()
     assert RequestAttempt.objects.count() == requests
 
     publish_snapshot(snapshot_for(system, DAY, power_kw=0.9, collected_at=end))
