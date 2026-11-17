@@ -117,6 +117,7 @@ def release_required_jobs() -> set[str]:
     assert listed
     names = set(re.findall(r"'([^']+)'", listed[1]))
     names.update(re.findall(r"required\.push\('([^']+)'\)", workflow))
+    assert names
     return names
 
 
@@ -194,6 +195,7 @@ def test_every_alert_policy_matches_a_reported_event_and_every_error_is_alerted(
     policies = set(re.findall(r'event = "(pyracast_[a-z_]+)"', text(TERRAFORM / "monitoring.tf")))
     events = reported_events()
 
+    assert policies
     assert policies <= {event for group in events.values() for event in group}
     assert events["ERROR"] <= policies
 
