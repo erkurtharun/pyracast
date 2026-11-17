@@ -17,12 +17,14 @@ from allauth.headless.account.inputs import (
 from allauth.headless.account.inputs import (
     ResetPasswordInput as AllauthResetPasswordInput,
 )
+from allauth.headless.mfa import inputs as mfa_inputs
 from django import forms
 from django.contrib.auth.models import User
 from django.core.validators import MaxLengthValidator
 
 from pyracast.accounts.audit import record_security_event
 from pyracast.accounts.authentication import email_identity
+from pyracast.accounts.login_limits import check_second_factor
 
 
 class PasswordInput(forms.Form):
@@ -67,3 +69,13 @@ class ChangePasswordInput(PasswordInput, AllauthChangePasswordInput):
 
 class ReauthenticateInput(PasswordInput, AllauthReauthenticateInput):
     pass
+
+
+class SecondFactorInput(mfa_inputs.AuthenticateInput):
+    def clean_code(self) -> str:
+        return check_second_factor(super().clean_code)
+
+
+class SecondFactorReauthenticateInput(mfa_inputs.ReauthenticateInput):
+    def clean_code(self) -> str:
+        return check_second_factor(super().clean_code)

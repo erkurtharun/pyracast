@@ -247,6 +247,28 @@ def test_a_pending_second_factor_stage_expires_after_fifteen_minutes(
     assert response.status_code == status
 
 
+def test_an_unverified_address_is_verified_before_the_second_factor_is_asked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = time.time()
+    user = User.objects.create_user(
+        username="member", email="member@example.com", password=PASSWORD
+    )
+    EmailAddress.objects.create(user=user, email=user.email, primary=True, verified=False)
+    _, secret = totp_member(monkeypatch, now, user)
+    client = Client(enforce_csrf_checks=True)
+
+    def pending_flows(response: Any) -> list[str]:
+        assert response.status_code == 401
+        return [flow["id"] for flow in response.json()["data"]["flows"] if flow.get("is_pending")]
+
+    assert pending_flows(login(client, user.email, PASSWORD)) == ["verify_email"]
+    verified = submit(client, "auth/email/verify", {"key": mailed_code()})
+    assert pending_flows(verified) == ["mfa_authenticate"]
+    response = submit(client, "auth/2fa/authenticate", {"code": totp_code(secret, now)})
+    assert response.status_code == 200
+
+
 def test_concurrent_password_checks_from_one_client_stay_within_its_allowance(
     clock: Clock, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -7,11 +7,10 @@ from allauth.account.models import EmailAddress
 from allauth.core import context as allauth_context
 from allauth.core import ratelimit
 from allauth.core.exceptions import ImmediateHttpResponse
-from allauth.core.internal import ratelimit as ratelimit_store
+from allauth.core.internal.ratelimit import RateLimitUsage
 from allauth.headless.internal.restkit.response import ErrorResponse
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.core.cache import cache
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.mail import EmailMultiAlternatives
 from django.db import IntegrityError, transaction
@@ -23,6 +22,7 @@ from django.utils.translation import gettext_lazy
 from pyracast.accounts.audit import record_security_event
 from pyracast.accounts.authentication import email_identity
 from pyracast.accounts.language import user_language
+from pyracast.accounts.login_limits import claim_daily_lock_notice, reserve_client_failure
 from pyracast.accounts.security import normalize_client_ip
 from pyracast.mail_delivery import NotSentError
 
@@ -32,29 +32,15 @@ LOGIN_LIMITED_MESSAGE = gettext_lazy(
     "Too many sign-in attempts, or a verification code was sent recently. "
     "Try again in a few minutes."
 )
-FAILED_LOGIN_FROM_CLIENT = "login_failed_ip"
 ANONYMOUS_ACCOUNT_MAIL = "anonymous_account_mail"
 ANONYMOUS_ACCOUNT_TEMPLATES = frozenset(
     {"account/email/unknown_account", "account/email/account_already_exists"}
 )
 
 
-def count_failed_second_factor(request: HttpRequest, **_kwargs: object) -> None:
-    ratelimit.consume(request, action=FAILED_LOGIN_FROM_CLIENT)
-
-
-def daily_login_failures_exhausted(request: HttpRequest, key: str) -> bool:
-    # The longest `login_failed` window is the per-address daily allowance; allauth stores one
-    # pruned timestamp list per rate, so a full list means the latest failure used the last slot.
-    rates = ratelimit_store.get_rates(app="allauth.account", action="login_failed")
-    daily = max(rates, key=lambda rate: rate.duration)
-    cache_key = ratelimit_store.get_cache_key(
-        request, app="allauth.account", action="login_failed", rate=daily, key=key
-    )
-    return len(cache.get(cache_key, [])) >= daily.amount
-
-
 class AccountAdapter(DefaultAccountAdapter):
+    _client_failure: RateLimitUsage | None = None
+
     def validation_error(self, code: str, *args: Any) -> ValidationError:
         # allauth also answers a sign-in within the confirm_email window with this code.
         if code == "too_many_login_attempts":
@@ -90,19 +76,25 @@ class AccountAdapter(DefaultAccountAdapter):
         return message
 
     def pre_authenticate(self, request: HttpRequest, **credentials: Any) -> None:
+        self._client_failure = reserve_client_failure(request)
+        if self._client_failure is None:
+            record_security_event("login_locked", request=request)
+            raise self.validation_error("too_many_login_attempts")
         try:
-            if not ratelimit.consume(request, action=FAILED_LOGIN_FROM_CLIENT, dry_run=True):
-                raise self.validation_error("too_many_login_attempts")
             super().pre_authenticate(request, **credentials)
         except ValidationError:
+            self._client_failure.rollback()
             record_security_event("login_locked", request=request)
+            key = self._get_login_attempts_cache_key(request, **credentials)
+            if claim_daily_lock_notice(request, key):
+                self.send_login_locked_notice(credentials.get("email", ""))
             raise
 
-    def authentication_failed(self, request: HttpRequest, **credentials: Any) -> None:
-        ratelimit.consume(request, action=FAILED_LOGIN_FROM_CLIENT)
-        key = self._get_login_attempts_cache_key(request, **credentials)
-        if daily_login_failures_exhausted(request, key):
-            self.send_login_locked_notice(credentials.get("email", ""))
+    def authenticate(self, request: HttpRequest, **credentials: Any) -> User | None:
+        user = cast(User | None, super().authenticate(request, **credentials))
+        if user is not None and self._client_failure is not None:
+            self._client_failure.rollback()
+        return user
 
     def send_login_locked_notice(self, email: str) -> None:
         user = email_identity(email)
