@@ -27,11 +27,11 @@ urlpatterns = [
     path("auth/signup", CompanySignupView.as_api_view(client=Client.BROWSER)),
     path(
         "auth/email/verify",
-        require_POST(account_views.VerifyEmailView.as_api_view(client=Client.BROWSER)),
+        require_POST(headless.VerifyEmailView.as_api_view(client=Client.BROWSER)),
     ),
     path(
         "auth/email/verify/resend",
-        account_views.ResendEmailVerificationCodeView.as_api_view(client=Client.BROWSER),
+        headless.ResendEmailVerificationCodeView.as_api_view(client=Client.BROWSER),
     ),
     path(
         "auth/password/request",
