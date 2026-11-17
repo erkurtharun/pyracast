@@ -23,8 +23,8 @@ from django.db import close_old_connections, connections
 from django.test import Client, override_settings
 
 from pyracast.accounts.audit import logger as security_logger
-from tests.test_auth_lifecycle import AUTH, PASSWORD, mailed_code, member, submit, totp_code
-from tests.test_company_registration import signup
+from tests.support.auth_lifecycle import AUTH, PASSWORD, mailed_code, member, submit, totp_code
+from tests.support.company_registration import signup
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 WRONG = "wrong-" + PASSWORD
