@@ -82,7 +82,10 @@ fi
 case "$MODE:$*" in
   preflight:*' --profile release pull --quiet') exit 41 ;;
   deploy-check:*' run --rm --no-deps migrate pyracast check --deploy --fail-level WARNING') exit 48 ;;
-  plan:*' run --rm --no-deps migrate pyracast migrate --plan') exit 49 ;;
+  plan:*' run --rm --no-deps migrate pyracast migrate --plan')
+    echo 'CommandError: The migration ledger names Pyracast migrations that are not on disk' >&2
+    exit 49
+    ;;
   support-rabbit:*' up -d rabbitmq') exit 42 ;;
   support-postgres:*' up -d postgres') exit 46 ;;
   drain:*' stop -t 660 worker notifications') exit 47 ;;
@@ -196,7 +199,11 @@ for MODE in preflight deploy-check plan drain backup support-postgres support-ra
         case "$MODE" in
           preflight) test "$result" == 41 ;;
           deploy-check) test "$result" == 48 ;;
-          plan) test "$result" == 49 ;;
+          plan)
+            test "$result" == 49
+            grep -Fq 'not on disk' /result
+            grep -q 'migrate pyracast migrate --plan$' /calls
+            ;;
         esac
         test "$(readlink /opt/pyracast/current)" == /opt/pyracast/releases/old
         test ! -e /var/lib/pyracast/release-blocked
@@ -205,6 +212,7 @@ for MODE in preflight deploy-check plan drain backup support-postgres support-ra
         grep -Fxq 'RABBITMQ_DEFAULT_PASS=old-password' /run/pyracast/broker.env
         test ! -e /backup-entered
         ! grep -q ' stop ' /calls
+        ! grep -q -- '--kind prerelease' /calls
         ;;
       drain|backup|first-backup|support-postgres|support-rabbit|migration|health|tls|response)
         case "$MODE" in
