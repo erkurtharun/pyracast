@@ -29,11 +29,11 @@ from pyracast.metering.models import EpiasCollectionJob
 from pyracast.provider_retry import retry_delay
 from pyracast.providers import SolcastProvider
 from pyracast.weather import WeatherData
-from tests.test_domain import NOW, FakeAdapter, make_system
-from tests.test_jobs import calculate
-from tests.test_metering import connected
-from tests.test_providers import TARGET, binding_for
-from tests.test_weather_collection import WeatherFixture
+from tests.support.domain import NOW, FakeAdapter, make_system
+from tests.support.jobs import calculate
+from tests.support.metering import connected
+from tests.support.providers import TARGET, binding_for
+from tests.support.weather_collection import WeatherFixture
 
 
 @pytest.mark.parametrize(

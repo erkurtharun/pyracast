@@ -7,36 +7,8 @@ import httpx
 import pytest
 
 from pyracast.connections.contracts import ProviderError
-from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.connections.secrets import encrypt_secret
 from pyracast.providers import FixtureProvider, SolcastProvider, adapter_for, normalize_payload
-
-TARGET = date(2026, 11, 10)
-
-
-def binding_for(provider: str = "solcast") -> SiteBinding:
-    reference = encrypt_secret("test-credential")
-    return SiteBinding(
-        id=7,
-        region_id=8,
-        region_revision=1,
-        provider_account=ProviderAccount(
-            provider=provider,
-            encrypted_api_key=reference,
-        ),
-        site_id="site-1",
-        capacity_kw=2,
-        timezone="UTC",
-        capacity_semantics_verified=True,
-    )
-
-
-def payload_for(power: object = 1.2) -> dict[str, object]:
-    return {
-        "forecasts": [
-            {"period_end": "2026-11-10T02:30:00+02:00", "period": "PT30M", "pv_estimate": power}
-        ]
-    }
+from tests.support.providers import TARGET, binding_for, payload_for
 
 
 def test_normalization_preserves_raw_missingness_units_bounds_and_collection() -> None:

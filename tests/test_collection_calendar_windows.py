@@ -20,8 +20,8 @@ from pyracast.forecasts.models import (
 from pyracast.forecasts.schedule import configure_schedule
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.providers import FixtureProvider, SolcastProvider
-from tests.test_domain import make_system
-from tests.test_providers import binding_for
+from tests.support.domain import make_system
+from tests.support.providers import binding_for
 
 MORNING = datetime(2026, 11, 15, 5, 45, tzinfo=UTC)
 PERIOD = timedelta(minutes=30)

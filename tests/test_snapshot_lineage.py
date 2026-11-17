@@ -12,7 +12,7 @@ from pyracast.forecasts.models import (
     ForecastSnapshot,
     ReferenceCapacityNormalization,
 )
-from tests.test_domain import NOW, make_system
+from tests.support.domain import NOW, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

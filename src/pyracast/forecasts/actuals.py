@@ -19,8 +19,11 @@ from pyracast.forecasts.intraday import (
 )
 from pyracast.forecasts.models import ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
-from pyracast.plants.forecast_composition import ForecastComposition
-from pyracast.plants.forecast_sources import compose_snapshots
+from pyracast.plants.forecast_composition import (
+    ForecastComposition,
+    ForecastVintage,
+    compose_forecasts,
+)
 from pyracast.solar import daylight_window
 
 ACTUAL_COMPOSITION_POLICY = "native-estimated-actuals-coverage-v1"
@@ -98,6 +101,16 @@ def select_archived_actual_source(
     return source
 
 
+def _valid_actual_intervals(snapshot: ForecastSnapshot) -> tuple[dict[str, Any], ...]:
+    intervals = []
+    for row in snapshot.normalized_intervals:
+        start, end = (datetime.fromisoformat(row[key]) for key in ("start", "end"))
+        if start.utcoffset() is None or end.utcoffset() is None or end <= start:
+            continue
+        intervals.append(row)
+    return tuple(intervals)
+
+
 def _compose_native_source(
     binding: SiteBinding,
     target_date: date,
@@ -105,7 +118,19 @@ def _compose_native_source(
     snapshots: list[ForecastSnapshot],
 ) -> ArchivedActualSource:
     start, end = local_day_bounds(target_date, binding.timezone)
-    selected = compose_snapshots(snapshots, start, end)
+    selected = compose_forecasts(
+        [
+            ForecastVintage(
+                snapshot.pk,
+                cast(datetime, snapshot.coverage_start),
+                cast(datetime, snapshot.coverage_end),
+                _valid_actual_intervals(snapshot),
+            )
+            for snapshot in snapshots
+        ],
+        start,
+        end,
+    )
     intervals = tuple(
         {**row, "source_kind": "estimated_actuals"}
         for row in completed_actual_intervals(selected.intervals, cutoff)

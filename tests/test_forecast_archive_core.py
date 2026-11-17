@@ -28,9 +28,9 @@ from pyracast.plants.models import (
     PlantEvent,
 )
 from pyracast.trash import RETENTION, purge_expired, trash_plant
-from tests.test_domain import NOW
-from tests.test_plant_operations import make_plant, ready_run, snapshot_for
-from tests.test_provisional_measurements import acquisition
+from tests.support.domain import NOW
+from tests.support.plant_operations import make_plant, ready_run, snapshot_for
+from tests.support.provisional_measurements import acquisition
 
 pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 10)

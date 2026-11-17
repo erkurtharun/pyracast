@@ -9,8 +9,8 @@ from pyracast.forecasts.jobs import collect, pending_job_ids
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
 from pyracast.forecasts.timing import effective_forecast_schedule
 from pyracast.regions.models import Region
-from tests.test_domain import NOW, FakeAdapter, make_system
-from tests.test_jobs import calculate
+from tests.support.domain import NOW, FakeAdapter, make_system
+from tests.support.jobs import calculate
 
 
 def test_effective_collection_schedule_covers_default_trim_disabled_and_approval_boundary() -> None:

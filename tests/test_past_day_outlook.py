@@ -6,8 +6,8 @@ import pytest
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import CalibrationRun, Plant, PlantForecast
 from pyracast.plants.operations import activate_calibration, reset_calibration, revise_plant
-from tests.test_domain import NOW, System
-from tests.test_plant_operations import make_plant, ready_run, saved_actuals
+from tests.support.domain import NOW, System
+from tests.support.plant_operations import make_plant, ready_run, saved_actuals
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

@@ -12,7 +12,7 @@ GitHub Actions runs the scans: CI on every push to `main`, pull request, merge g
 - `.github/workflows/release.yml` job `deploy`: two `aquasecurity/trivy-action` steps (backend, web), then `deploy/scan-support.sh` again. Job `authorize` re-checks the CI scan jobs.
 - `.github/dependabot.yml`: ten weekly ecosystems (uv, github-actions, four docker directories, docker-compose, gomod, terraform, npm).
 - `scripts/check.py` lint runs Ruff with the bandit rules (`S` in `pyproject.toml`, `S101` allowed in tests), so `verify_ubuntu` and both `verify_windows_shards` jobs also do static security linting of Python; `verify_windows` runs `check.py --combine-shards`, which replaces the command list with coverage combine, report and xml and runs no Ruff.
-- `qodana.yaml` is local-only (no workflow, script or hook runs Qodana). A developer runs the two README `pip-audit` commands or `bash deploy/scan-support.sh GATEWAY_IMAGE POSTGRES_IMAGE`.
+- Qodana is local-only (no workflow, script or hook runs it): `qodana scan --config qodana.yaml` for Python and `qodana scan --only-directory web --config qodana-js.yaml` for `web/`, both native, with `QODANA_TOKEN` in the environment. A developer runs the two README `pip-audit` commands or `bash deploy/scan-support.sh GATEWAY_IMAGE POSTGRES_IMAGE`.
 
 ## Sequence
 
@@ -87,4 +87,4 @@ No database table is read or written. Artifacts:
 
 - `tests/test_support_images.py` pins `check_support_images`: clean reports, any vulnerability per service, mismatched id, missing OS, results or packages, missing report file.
 - CI validates the workflows and shell scripts (`actionlint`, `shellcheck deploy/*.sh` in job `deployment`).
-- Gaps: `deploy/check_support_images.py main`, `scan-support.sh`, `.github/dependabot.yml`, `sonar-project.properties`, `qodana.yaml` and the `authorize` script have no automated test. `deploy/` is outside the coverage source and outside Sonar. No Playwright test applies.
+- Gaps: `deploy/check_support_images.py main`, `scan-support.sh`, `.github/dependabot.yml`, `sonar-project.properties`, the two Qodana configurations and the `authorize` script have no automated test. `deploy/` is outside the coverage source and outside Sonar. No Playwright test applies.
