@@ -1,18 +1,23 @@
 import json
 import logging
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import suppress
 from dataclasses import dataclass
+from threading import Barrier, BrokenBarrierError
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from allauth.account.internal import stagekit
 from allauth.account.models import EmailAddress
 from allauth.core.internal import ratelimit
 from allauth.mfa.totp.internal import auth as totp_auth
 from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
 from django.contrib.auth.models import User
 from django.core import mail
+from django.db import close_old_connections, connections
 from django.test import Client, override_settings
 from django.utils import translation
 
@@ -40,6 +45,11 @@ class Clock:
     def advance(self, seconds: float) -> None:
         self.now += seconds
 
+    def read(self) -> float:
+        # allauth rolls a hit back by its timestamp, so every reading must be distinct.
+        self.now += 1e-6
+        return self.now
+
 
 @pytest.fixture
 def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
@@ -47,7 +57,7 @@ def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
     monkeypatch.setattr(
         ratelimit,
         "time",
-        SimpleNamespace(time=lambda: clock.now, monotonic=time.monotonic, sleep=time.sleep),
+        SimpleNamespace(time=clock.read, monotonic=time.monotonic, sleep=time.sleep),
     )
     return clock
 
@@ -84,12 +94,70 @@ def guess_unknown_addresses(client: Client, first: int, count: int) -> None:
         ]
 
 
-def totp_member(monkeypatch: pytest.MonkeyPatch, now: float) -> tuple[User, str]:
-    user = member()
+def totp_member(
+    monkeypatch: pytest.MonkeyPatch, now: float, user: User | None = None
+) -> tuple[User, str]:
+    user = user or member()
     secret = generate_totp_secret()
     TOTP.activate(user, secret)
     monkeypatch.setattr(totp_auth, "time", SimpleNamespace(time=lambda: now))
     return user, secret
+
+
+def account(name: str) -> User:
+    user = User.objects.create_user(username=name, email=f"{name}@example.com", password=PASSWORD)
+    EmailAddress.objects.create(user=user, email=user.email, primary=True, verified=True)
+    return user
+
+
+def pending_second_factor(
+    monkeypatch: pytest.MonkeyPatch, now: float, name: str
+) -> tuple[Client, str]:
+    user, secret = totp_member(monkeypatch, now, account(name))
+    client = Client(enforce_csrf_checks=True)
+    assert login(client, user.email, PASSWORD).status_code == 401
+    return client, secret
+
+
+def in_parallel(requests: list[Callable[[], Any]]) -> list[Any]:
+    start = Barrier(len(requests))
+
+    def run(request: Callable[[], Any]) -> Any:
+        close_old_connections()
+        try:
+            start.wait(timeout=10)
+            return request()
+        finally:
+            connections.close_all()
+
+    with ThreadPoolExecutor(max_workers=len(requests)) as executor:
+        return list(executor.map(run, requests))
+
+
+def hold_password_checks(
+    monkeypatch: pytest.MonkeyPatch, parties: int, success_delay: float = 0.0
+) -> None:
+    # Every check that starts waits for the others, so all of them run inside one window; a
+    # correct password answers after `success_delay` so the failures are handled first.
+    checks = Barrier(parties)
+    check_password = User.check_password
+
+    def held(user: User, raw_password: str) -> bool:
+        with suppress(BrokenBarrierError):
+            checks.wait(timeout=2)
+        correct = check_password(user, raw_password)
+        if correct:
+            time.sleep(success_delay)
+        return correct
+
+    monkeypatch.setattr(User, "check_password", held)
+
+
+def fail_daily(client: Client, email: str, failures: int, clock: Clock) -> None:
+    for start in range(0, failures, 5):
+        for _ in range(min(5, failures - start)):
+            assert error_codes(login(client, email, WRONG)) == ["email_password_mismatch"]
+        clock.advance(601)
 
 
 def test_five_wrong_passwords_lock_the_address_for_ten_minutes(clock: Clock) -> None:
@@ -125,6 +193,73 @@ def test_wrong_second_factor_codes_count_towards_the_client_address(
     guesses = Client(enforce_csrf_checks=True)
     guess_unknown_addresses(guesses, 0, 5)
     assert error_codes(login(guesses, "absent-5@example.com", WRONG)) == ["too_many_login_attempts"]
+
+
+def test_wrong_second_factor_codes_for_several_accounts_share_the_client_allowance(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = time.time()
+    signed_in, signed_in_secret = pending_second_factor(monkeypatch, now, "owner")
+    assert (
+        submit(signed_in, "auth/2fa/authenticate", {"code": totp_code(signed_in_secret, now)})
+    ).status_code == 200
+    pending = [pending_second_factor(monkeypatch, now, f"member{index}") for index in range(3)]
+    codes = [
+        error_codes(submit(client, "auth/2fa/authenticate", {"code": "000000"}))[0]
+        for _ in range(4)
+        for client, _ in pending
+    ]
+    assert codes == ["incorrect_code"] * 10 + ["too_many_login_attempts"] * 2
+    client, secret = pending[0]
+    assert error_codes(
+        submit(client, "auth/2fa/authenticate", {"code": totp_code(secret, now)})
+    ) == ["too_many_login_attempts"]
+    monkeypatch.setattr(totp_auth, "time", SimpleNamespace(time=lambda: now + 31))
+    assert error_codes(
+        submit(
+            signed_in, "auth/2fa/reauthenticate", {"code": totp_code(signed_in_secret, now + 31)}
+        )
+    ) == ["too_many_login_attempts"]
+
+
+def test_five_wrong_second_factor_codes_lock_the_account_code_check(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = time.time()
+    client, secret = pending_second_factor(monkeypatch, now, "member")
+    for _ in range(5):
+        assert error_codes(submit(client, "auth/2fa/authenticate", {"code": "000000"})) == [
+            "incorrect_code"
+        ]
+    assert error_codes(
+        submit(client, "auth/2fa/authenticate", {"code": totp_code(secret, now)})
+    ) == ["too_many_login_attempts"]
+
+
+@pytest.mark.parametrize(("elapsed", "status"), [(899, 200), (901, 401)])
+def test_a_pending_second_factor_stage_expires_after_fifteen_minutes(
+    elapsed: int, status: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = time.time()
+    client, secret = pending_second_factor(monkeypatch, now, "member")
+    monkeypatch.setattr(stagekit, "time", SimpleNamespace(time=lambda: now + elapsed))
+    response = submit(client, "auth/2fa/authenticate", {"code": totp_code(secret, now)})
+    assert response.status_code == status
+
+
+def test_concurrent_password_checks_from_one_client_stay_within_its_allowance(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = member()
+    guess_unknown_addresses(Client(enforce_csrf_checks=True), 0, 9)
+    hold_password_checks(monkeypatch, 4)
+    responses = in_parallel(
+        [lambda: login(Client(enforce_csrf_checks=True), user.email, WRONG)] * 4
+    )
+    assert (
+        sorted(error_codes(response)[0] for response in responses)
+        == ["email_password_mismatch"] + ["too_many_login_attempts"] * 3
+    )
 
 
 @pytest.mark.parametrize("success", ["totp_login", "totp_reauthentication", "password_reset"])
@@ -196,20 +331,17 @@ def test_a_refused_login_records_one_login_locked_event_without_the_address(
     assert user.email not in security_log.text
 
 
-def test_the_hundredth_failure_in_a_day_locks_the_address_until_a_password_reset(
+def test_a_hundred_failures_in_a_day_lock_the_address_until_a_password_reset(
     clock: Clock,
 ) -> None:
     user = member()
     client = Client(enforce_csrf_checks=True)
-    for _ in range(20):
-        for _ in range(5):
-            assert error_codes(login(client, user.email, WRONG)) == ["email_password_mismatch"]
-        clock.advance(601)
-    assert [message.to for message in mail.outbox] == [[user.email]]
-    assert "reset your password" in str(mail.outbox[0].body)
+    fail_daily(client, user.email, 100, clock)
+    assert not mail.outbox
     for _ in range(2):
         assert error_codes(login(client, user.email, PASSWORD)) == ["too_many_login_attempts"]
-    assert len(mail.outbox) == 1
+    assert [message.to for message in mail.outbox] == [[user.email]]
+    assert "reset your password" in str(mail.outbox[0].body)
     reset = Client(enforce_csrf_checks=True)
     assert submit(reset, "auth/password/request", {"email": user.email}).status_code == 401
     assert (
@@ -219,6 +351,41 @@ def test_the_hundredth_failure_in_a_day_locks_the_address_until_a_password_reset
         == 401
     )
     assert login(client, user.email, PASSWORD + "new").status_code == 200
+    client = Client(enforce_csrf_checks=True)
+    fail_daily(client, user.email, 100, clock)
+    assert error_codes(login(client, user.email, PASSWORD)) == ["too_many_login_attempts"]
+    notices = [message for message in mail.outbox if "paused" in str(message.subject)]
+    assert [message.to for message in notices] == [[user.email]] * 2
+
+
+def test_a_daily_lock_that_keeps_refusing_is_announced_once(clock: Clock) -> None:
+    user = member()
+    client = Client(enforce_csrf_checks=True)
+    fail_daily(client, user.email, 100, clock)
+    responses = in_parallel(
+        [lambda: login(Client(enforce_csrf_checks=True), user.email, PASSWORD)] * 4
+    )
+    assert [error_codes(response) for response in responses] == [["too_many_login_attempts"]] * 4
+    clock.advance(3600)
+    assert error_codes(login(client, user.email, PASSWORD)) == ["too_many_login_attempts"]
+    assert [message.to for message in mail.outbox] == [[user.email]]
+
+
+def test_a_success_beside_the_last_daily_failure_neither_locks_nor_announces(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = member()
+    fail_daily(Client(enforce_csrf_checks=True), user.email, 98, clock)
+    hold_password_checks(monkeypatch, 2, success_delay=1.0)
+    statuses = in_parallel(
+        [
+            lambda: login(Client(enforce_csrf_checks=True), user.email, WRONG).status_code,
+            lambda: login(Client(enforce_csrf_checks=True), user.email, PASSWORD).status_code,
+        ]
+    )
+    assert statuses == [400, 200]
+    assert not mail.outbox
+    assert login(Client(enforce_csrf_checks=True), user.email, PASSWORD).status_code == 200
 
 
 @pytest.mark.parametrize(
@@ -242,12 +409,7 @@ def test_the_daily_lock_notice_is_written_in_the_account_language(
 
 def test_the_daily_lock_notice_is_not_sent_for_an_unknown_address(clock: Clock) -> None:
     client = Client(enforce_csrf_checks=True)
-    for _ in range(20):
-        for _ in range(5):
-            assert error_codes(login(client, "absent@example.com", WRONG)) == [
-                "email_password_mismatch"
-            ]
-        clock.advance(601)
+    fail_daily(client, "absent@example.com", 100, clock)
     assert error_codes(login(client, "absent@example.com", WRONG)) == ["too_many_login_attempts"]
     assert not mail.outbox
 
@@ -271,11 +433,11 @@ def company(index: int) -> dict[str, str]:
     return {"company_name": f"Sunfield Energy {index}"}
 
 
-def test_an_address_receives_one_verification_mail_per_three_minutes(clock: Clock) -> None:
+def test_an_address_receives_one_verification_mail_per_minute(clock: Clock) -> None:
     assert signup(visitor(0), company(0)).status_code == 401
-    clock.advance(60)
+    clock.advance(59)
     assert signup(visitor(1), company(1)).status_code == 429
-    clock.advance(121)
+    clock.advance(2)
     assert signup(visitor(2), company(2)).status_code == 401
     assert len(mail.outbox) == 2
 
@@ -293,18 +455,30 @@ def test_anonymous_account_mails_share_one_hourly_budget(
     clock: Clock, caplog: pytest.LogCaptureFixture
 ) -> None:
     caplog.set_level(logging.WARNING, logger="pyracast.accounts.adapters")
-    responses = [
-        submit(visitor(index), "auth/password/request", {"email": f"absent-{index}@example.com"})
-        for index in range(21)
-    ]
+    for index in range(1, 22, 2):
+        account(f"taken-{index}")
+
+    def request(index: int) -> Any:
+        if index % 2:
+            return signup(visitor(index), company(index) | {"email": f"taken-{index}@example.com"})
+        return submit(
+            visitor(index), "auth/password/request", {"email": f"absent-{index}@example.com"}
+        )
+
+    responses = [request(index) for index in range(22)]
     assert {response.status_code for response in responses} == {401}
-    assert all(response.json() == responses[0].json() for response in responses)
-    assert len(mail.outbox) == 20
+    for parity in (0, 1):
+        assert all(response.json() == responses[parity].json() for response in responses[parity::2])
+    sent = [message.to[0] for message in mail.outbox]
+    assert len(sent) == 20
+    assert {"absent-0@example.com", "taken-1@example.com"} <= set(sent)
     assert "account_mail_skipped template=account/email/unknown_account" in caplog.text
-    assert "absent-20@example.com" not in caplog.text
+    assert "account_mail_skipped template=account/email/account_already_exists" in caplog.text
+    assert "absent-20@example.com" not in caplog.text + " ".join(sent)
+    assert "taken-21@example.com" not in caplog.text + " ".join(sent)
     clock.advance(3601)
     assert (
-        submit(visitor(21), "auth/password/request", {"email": "absent-21@example.com"}).status_code
+        submit(visitor(22), "auth/password/request", {"email": "absent-22@example.com"}).status_code
         == 401
     )
     assert len(mail.outbox) == 21
