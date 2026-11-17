@@ -629,6 +629,23 @@ def test_wrong_current_passwords_are_limited_per_ten_minutes_and_recorded(
     assert user.check_password(PASSWORD)
 
 
+@pytest.mark.parametrize(("elapsed", "status"), [(599, 429), (601, 400)])
+def test_password_change_allowance_reopens_after_ten_minutes(
+    elapsed: int, status: int, clock: Clock
+) -> None:
+    user = member()
+    client = Client(enforce_csrf_checks=True)
+    assert login(client, user.email, PASSWORD).status_code == 200
+    change = {"current_password": WRONG, "new_password": PASSWORD + "new"}
+    for _ in range(5):
+        assert submit(client, "account/password/change", change).status_code == 400
+
+    clock.advance(elapsed)
+    assert submit(client, "account/password/change", change).status_code == status
+    user.refresh_from_db()
+    assert user.check_password(PASSWORD)
+
+
 def test_provider_signup_without_a_pending_signup_leaves_the_signup_quota(clock: Clock) -> None:
     client = Client(enforce_csrf_checks=True)
     for _ in range(5):
