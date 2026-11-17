@@ -12,12 +12,9 @@ import httpx
 import pytest
 
 from pyracast.epias import AUTH_URL, BASE_URL, EpiasClient, EpiasDay, EpiasError, EpiasPlant
+from tests.support.epias import PASSWORD, PLANT, TICKET, USERNAME
 
 DAY = date(2026, 11, 9)
-PLANT = EpiasPlant(3154, "40W000005011621Y", "G4-BOR-1 GES", "G4-BOR-1")
-USERNAME = "fixture@example.invalid"
-PASSWORD = "fixture-password-47"  # noqa: S105
-TICKET = "TGT-fixture-ticket"
 
 
 def payload() -> dict[str, object]:

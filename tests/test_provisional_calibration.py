@@ -22,11 +22,11 @@ from pyracast.plants.models import CalibrationActivation, CalibrationRun, Plant,
 from pyracast.plants.operations import activate_calibration
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.plants.training import run_calibration
-from tests.test_domain import NOW, System
-from tests.test_historical_production_identity import record_identity
-from tests.test_plant_operations import make_plant, publish_snapshot, snapshot_for
-from tests.test_plant_training import actual_snapshot_for
-from tests.test_settlement_calibration import settlement
+from tests.support.domain import NOW, System
+from tests.support.historical_production_identity import record_identity
+from tests.support.plant_operations import make_plant, publish_snapshot, snapshot_for
+from tests.support.plant_training import actual_snapshot_for
+from tests.support.settlement_calibration import settlement
 
 pytestmark = pytest.mark.django_db(transaction=True)
 FIRST_DAY = date(2026, 11, 1)

@@ -8,7 +8,7 @@ from django.test import override_settings
 
 from pyracast.accounts.mfa import MFAAdapter
 from pyracast.connections.secrets import decrypt_api_key, encrypt_secret
-from tests.test_domain import make_system
+from tests.support.domain import make_system
 
 pytestmark = pytest.mark.django_db
 OLD_KEY = "test-only-" + "old-master-key"

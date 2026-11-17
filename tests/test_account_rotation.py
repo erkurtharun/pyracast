@@ -14,8 +14,8 @@ from pyracast.connections.secrets import decrypt_api_key
 from pyracast.forecasts.models import RequestAttempt
 from pyracast.regions.models import AuditEvent
 from pyracast.regions.operations import approve_region
-from tests.test_api import verified_admin
-from tests.test_domain import NOW, make_system
+from tests.support.api import verified_admin
+from tests.support.domain import NOW, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

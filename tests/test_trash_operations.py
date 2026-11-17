@@ -45,29 +45,12 @@ from pyracast.trash import (
     trash_plant,
     trash_region,
 )
-from tests.test_domain import NOW, System
-from tests.test_historical_reference_import import power_file, source_settings, system_for_import
-from tests.test_plant_operations import make_plant, request_run, snapshot_for
+from tests.support.domain import NOW, System
+from tests.support.historical_reference_import import power_file, source_settings, system_for_import
+from tests.support.plant_operations import make_plant, request_run, snapshot_for
+from tests.support.trash_operations import sibling
 
 pytestmark = pytest.mark.django_db(transaction=True)
-
-
-def sibling(system: System) -> tuple[Region, SiteBinding]:
-    region = Region.objects.create(
-        tenant=system.tenant,
-        name="Other region",
-        latitude=41 + Region.objects.filter(tenant=system.tenant).count(),
-        longitude=29,
-        timezone=system.region.timezone,
-        status="approved",
-    )
-    binding = SiteBinding.objects.get(pk=system.binding.pk)
-    binding.pk = None
-    binding.region = region
-    binding.save()
-    region.approved_binding = binding
-    region.save()
-    return region, binding
 
 
 def test_region_purge_removes_imported_reference_archive_and_preserves_other_owners(

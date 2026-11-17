@@ -16,7 +16,7 @@ from pyracast.connections.operations import (
 )
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.regions.operations import configure_binding
-from tests.test_domain import NOW, make_system
+from tests.support.domain import NOW, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

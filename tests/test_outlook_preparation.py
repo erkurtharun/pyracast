@@ -19,8 +19,8 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.plants import incident_forecasts
 from pyracast.plants.forecasting import forecast_payload
 from pyracast.plants.history import plant_outlook
-from tests.test_domain import NOW
-from tests.test_plant_operations import make_plant, publish_snapshot, snapshot_for
+from tests.support.domain import NOW
+from tests.support.plant_operations import make_plant, publish_snapshot, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 10)

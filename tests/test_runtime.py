@@ -12,7 +12,7 @@ from pyracast import runtime
 from pyracast.forecasts.models import CollectionJob, ForecastResult, RequestAttempt
 from pyracast.forecasts.monitoring import PhaseOutcome
 from pyracast.shutdown import ShutdownRequest
-from tests.test_domain import make_system
+from tests.support.domain import make_system
 
 
 @pytest.fixture(autouse=True)

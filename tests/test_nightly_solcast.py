@@ -21,9 +21,9 @@ from pyracast.forecasts.models import (
 from pyracast.forecasts.schedule import configure_schedule
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.regions.models import Region
-from tests.test_collection_schedule import HistoricalFixture, no_calculation
-from tests.test_domain import NOW, make_system
-from tests.test_jobs import calculate
+from tests.support.collection_schedule import HistoricalFixture, no_calculation
+from tests.support.domain import NOW, make_system
+from tests.support.jobs import calculate
 
 pytestmark = pytest.mark.django_db(transaction=True)
 NIGHT = (NOW + timedelta(days=1)).replace(hour=0)
