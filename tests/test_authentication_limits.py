@@ -24,7 +24,7 @@ from django.utils import translation
 
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.audit import logger as security_logger
-from tests.test_auth_lifecycle import PASSWORD, mailed_code, member, submit, totp_code
+from tests.test_auth_lifecycle import AUTH, PASSWORD, mailed_code, member, submit, totp_code
 from tests.test_company_registration import signup
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
@@ -290,6 +290,59 @@ def test_five_wrong_second_factor_codes_lock_the_account_code_check(
     assert error_codes(
         submit(client, "auth/2fa/authenticate", {"code": totp_code(secret, now)})
     ) == ["too_many_login_attempts"]
+
+
+def refuse_codes_before_the_first_daily_failures_expire(
+    client: Client, path: str, refusal: str, clock: Clock
+) -> None:
+    # 100 wrong codes spread over 10-minute windows, then five attempts refused a minute before
+    # the oldest of them leaves the day; on return the daily allowance has room again.
+    start = clock.now
+    for _ in range(20):
+        for _ in range(5):
+            assert error_codes(submit(client, path, {"code": "000000"})) == ["incorrect_code"]
+        clock.advance(601)
+    clock.advance(start + 24 * 3600 - 60 - clock.now)
+    for _ in range(5):
+        assert error_codes(submit(client, path, {"code": "000000"})) == [refusal]
+    clock.advance(61)
+
+
+@pytest.mark.parametrize("path", ["auth/2fa/authenticate", "auth/2fa/reauthenticate"])
+def test_refused_codes_just_before_daily_failures_expire_leave_the_short_window_free(
+    path: str, clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = time.time()
+    client, secret = pending_second_factor(monkeypatch, now, "member")
+    code_time = now
+    if path == "auth/2fa/reauthenticate":
+        assert (
+            submit(client, "auth/2fa/authenticate", {"code": totp_code(secret, now)}).status_code
+            == 200
+        )
+        code_time = now + 31
+        monkeypatch.setattr(totp_auth, "time", SimpleNamespace(time=lambda: code_time))
+    refuse_codes_before_the_first_daily_failures_expire(
+        client, path, "too_many_login_attempts", clock
+    )
+    assert submit(client, path, {"code": totp_code(secret, code_time)}).status_code == 200
+
+
+def test_refused_enrollment_codes_just_before_daily_failures_expire_leave_the_short_window_free(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = time.time()
+    monkeypatch.setattr(totp_auth, "time", SimpleNamespace(time=lambda: now))
+    user = member()
+    client = Client(enforce_csrf_checks=True)
+    assert login(client, user.email, PASSWORD).status_code == 200
+    secret = client.get(AUTH + "account/authenticators/totp").json()["meta"]["secret"]
+    assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
+    refuse_codes_before_the_first_daily_failures_expire(
+        client, "account/authenticators/totp", "rate_limited", clock
+    )
+    response = submit(client, "account/authenticators/totp", {"code": totp_code(secret, now)})
+    assert response.status_code == 200
 
 
 @pytest.mark.parametrize(("elapsed", "status"), [(899, 200), (901, 401)])
