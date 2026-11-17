@@ -80,7 +80,9 @@ def chain_gain(reference: float, zenith: float, azimuth: float, day_of_year: int
 
 
 table = root / "tests" / "fixtures" / "tracking_gain_reference.json"
-for case in json.loads(table.read_text("utf-8")):
+cases = json.loads(table.read_text("utf-8"))
+assert cases, "Tracker gain reference table must contain cases."
+for case in cases:
     inputs = (case["reference_fraction"], case["zenith"], case["azimuth"], case["day_of_year"])
     expected = chain_gain(*inputs)
     model = tracking_gain(*inputs)

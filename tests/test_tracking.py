@@ -22,6 +22,7 @@ LATITUDE, LONGITUDE = 37.80375, 34.460913
 REFERENCE_CHAIN = json.loads(
     (Path(__file__).parent / "fixtures" / "tracking_gain_reference.json").read_text("utf-8")
 )
+assert REFERENCE_CHAIN, "Tracker gain reference table must contain cases."
 
 
 @pytest.mark.parametrize("case", REFERENCE_CHAIN)
