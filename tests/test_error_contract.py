@@ -14,13 +14,14 @@ from django.db import OperationalError
 from django.test import Client, override_settings
 from django.utils import timezone
 from psycopg.errors import DeadlockDetected, LockNotAvailable, QueryCanceled
-from rest_framework.exceptions import Throttled
+from rest_framework.exceptions import APIException, Throttled
 
 from pyracast.accounts import session_lock
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.api.session import SessionView
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.operations import QuotaExceededError, RequestDeferredError
+from tests.support.auth_lifecycle import PASSWORD
 
 pytestmark = pytest.mark.django_db(databases=["default", "auth_cache"])
 OPENAPI = Path(__file__).resolve().parents[1] / "web" / "openapi.json"
@@ -180,6 +181,15 @@ def form_encoded(monkeypatch: pytest.MonkeyPatch, accept: str) -> Any:
     return Client().post("/api/session/language/", {"language": "tr"}, headers=language(accept))
 
 
+def status_only(status: int) -> Callable[[], BaseException]:
+    def factory() -> BaseException:
+        error = APIException()
+        error.status_code = status
+        return error
+
+    return factory
+
+
 def deferred_provider() -> BaseException:
     return RequestDeferredError(timezone.now() + timedelta(seconds=30, milliseconds=500))
 
@@ -270,6 +280,12 @@ CASES: dict[str, Case] = {
     ),
     "unsupported_media_type": Case(
         415, "Send the request as JSON.", "İsteği JSON olarak gönderin.", form_encoded
+    ),
+    "conflict": Case(
+        409,
+        "The request conflicts with the current state. Reload and try again.",
+        "İstek mevcut durumla çak\u0131ş\u0131yor. Sayfay\u0131 yenileyip tekrar deneyin.",
+        raising(status_only(409)),
     ),
     "throttled": Case(
         429,
@@ -727,14 +743,43 @@ def test_csrf_refusal_outside_the_api_keeps_the_html_page() -> None:
     assert response["Content-Type"].startswith("text/html")
 
 
-def test_csrf_refusal_on_a_navigation_returns_to_the_sign_in_callback() -> None:
-    response = Client(enforce_csrf_checks=True).post(
-        "/api/auth/browser/v1/auth/provider/redirect",
-        {"provider": "google", "process": "login"},
-        HTTP_SEC_FETCH_MODE="navigate",
-    )
-    assert response.status_code == 302
-    assert response["Location"] == "https://testserver/app/?social_callback=1&error=expired_form"
+NAVIGATION_ROUTES = (
+    f"{ALLAUTH}auth/provider/redirect",
+    "/api/accounts/google/login/callback/",
+    "/api/accounts/microsoft/login/callback/",
+)
+
+
+@pytest.mark.parametrize("path", NAVIGATION_ROUTES)
+def test_csrf_refusal_on_a_provider_navigation_returns_to_the_sign_in_callback(path: str) -> None:
+    client = Client(enforce_csrf_checks=True)
+    data = {"provider": "google", "process": "login"}
+    navigation = client.post(path, data, HTTP_SEC_FETCH_MODE="navigate")
+    assert navigation.status_code == 302
+    assert navigation["Location"] == "https://testserver/app/?social_callback=1&error=expired_form"
+    fetched = client.post(path, data, HTTP_SEC_FETCH_MODE="cors", headers=language("tr"))
+    assert fetched.status_code == 403
+    assert fetched.json() == {"code": "csrf_failed", "message": CASES["csrf_failed"].tr}
+
+
+@pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+@pytest.mark.parametrize("mode", ["navigate", "cors"])
+def test_csrf_refusal_on_every_other_api_route_is_the_coded_body(mode: str) -> None:
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(User.objects.create_user(username="person"))
+    refusals = {}
+    for path in sorted(set(api_routes()) - set(NAVIGATION_ROUTES)):
+        response = client.post(
+            path,
+            {},
+            content_type="application/json",
+            headers={"Accept-Language": "tr", "Sec-Fetch-Mode": mode},
+        )
+        json_body = response["Content-Type"] == "application/json"
+        refusals[path] = (response.status_code, response.json() if json_body else None)
+    assert len(refusals) > 30
+    expected = (403, {"code": "csrf_failed", "message": CASES["csrf_failed"].tr})
+    assert {path: refusal for path, refusal in refusals.items() if refusal != expected} == {}
 
 
 def test_busy_session_navigation_reloads_once_then_explains() -> None:
@@ -781,29 +826,147 @@ def api_routes(patterns: list[Any] | None = None, prefix: str = "") -> Iterator[
             yield f"/{route}"
 
 
-def refuses_in_its_own_shape(path: str, status: int, body: Any) -> bool:
-    if not isinstance(body, dict):
+def carries_the_contract(body: Any) -> bool:
+    if not isinstance(body, dict) or body.get("code") not in CASES:
         return False
-    if path.startswith(ALLAUTH) and body.get("status") == status:
-        return True
-    return set(body) == {"code", "message"} and body["message"] == CASES[body["code"]].tr
+    message = body.get("message")
+    return isinstance(message, str) and bool(message) and message != CASES[body["code"]].en
 
 
 @pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
-def test_every_api_route_refuses_an_unknown_method_with_a_json_body() -> None:
-    client = Client()
-    client.force_login(User.objects.create_user(username="person"))
-    refusals = {}
+@pytest.mark.parametrize("signed_in", [False, True])
+def test_every_api_route_answers_every_error_with_the_contract_body(signed_in: bool) -> None:
+    client = Client(raise_request_exception=False)
+    if signed_in:
+        client.force_login(User.objects.create_user(username="person"))
+    failures = {}
+    requests = 0
     for path in sorted(api_routes()):
-        response = client.generic("PROPFIND", path, headers={"Accept-Language": "tr"})
-        json_body = response["Content-Type"] == "application/json"
-        refusals[path] = (response.status_code, response.json() if json_body else None)
-    assert len(refusals) > 30
-    assert {
-        path: refusal
-        for path, refusal in refusals.items()
-        if not refuses_in_its_own_shape(path, *refusal)
-    } == {}
+        for method in ("GET", "POST", "PROPFIND"):
+            response = client.generic(
+                method,
+                path,
+                "{}" if method == "POST" else "",
+                content_type="application/json",
+                headers={"Accept-Language": "tr"},
+            )
+            requests += 1
+            if response.status_code < 400:
+                continue
+            json_body = response["Content-Type"] == "application/json"
+            body = response.json() if json_body else None
+            if not carries_the_contract(body):
+                failures[f"{method} {path}"] = (response.status_code, body)
+    assert requests > 90
+    assert failures == {}
+
+
+def allauth_login(client: Client, accept: str, payload: dict[str, str]) -> Any:
+    return client.post(
+        f"{ALLAUTH}auth/login", payload, content_type="application/json", headers=language(accept)
+    )
+
+
+def invalid_login_input(accept: str) -> Any:
+    return allauth_login(Client(), accept, {})
+
+
+def wrong_password(accept: str) -> Any:
+    User.objects.create_user(username="person", email="person@example.com", password=PASSWORD)
+    return allauth_login(
+        Client(), accept, {"email": "person@example.com", "password": f"{PASSWORD}-wrong"}
+    )
+
+
+def signed_out_session(accept: str) -> Any:
+    return Client().get(f"{ALLAUTH}auth/session", headers=language(accept))
+
+
+def provider_signup_without_a_pending_login(accept: str) -> Any:
+    return Client().post(
+        f"{ALLAUTH}auth/provider/signup",
+        {},
+        content_type="application/json",
+        headers=language(accept),
+    )
+
+
+def repeated_login(accept: str) -> Any:
+    from django.conf import settings
+
+    client = Client()
+    payload = {"email": "nobody@example.com", "password": "secret-1"}
+    with override_settings(ACCOUNT_RATE_LIMITS={**settings.ACCOUNT_RATE_LIMITS, "login": "1/m/ip"}):
+        allauth_login(client, accept, payload)
+        return allauth_login(client, accept, payload)
+
+
+def missing_authenticator(accept: str) -> Any:
+    client = Client()
+    client.force_login(User.objects.create_user(username="person", email="person@example.com"))
+    return client.get(f"{ALLAUTH}account/authenticators/totp", headers=language(accept))
+
+
+ALLAUTH_FAILURES: dict[str, tuple[Callable[[str], Any], int, str]] = {
+    "invalid_login_input": (invalid_login_input, 400, "invalid_request"),
+    "wrong_password": (wrong_password, 400, "invalid_request"),
+    "signed_out_session": (signed_out_session, 401, "not_authenticated"),
+    "provider_signup_without_a_pending_login": (
+        provider_signup_without_a_pending_login,
+        409,
+        "conflict",
+    ),
+    "repeated_login": (repeated_login, 429, "throttled"),
+    "missing_authenticator": (missing_authenticator, 404, "not_found"),
+}
+
+
+@pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+@pytest.mark.parametrize("failure", sorted(ALLAUTH_FAILURES))
+def test_allauth_failures_carry_the_contract_beside_their_own_keys(failure: str) -> None:
+    trigger, status, code = ALLAUTH_FAILURES[failure]
+    bodies = {}
+    for accept in ("en", "tr"):
+        User.objects.all().delete()
+        response = trigger(accept)
+        assert response.status_code == status
+        assert response["Content-Type"] == "application/json"
+        body = response.json()
+        assert set(body) - {"code", "message", "fields", "retry_after", "request_id"} <= {
+            "status",
+            "errors",
+            "data",
+            "meta",
+        }
+        assert body["status"] == status
+        assert body["code"] == code
+        errors = body.get("errors", [])
+        assert all(set(error) <= {"message", "code", "param"} for error in errors)
+        expected_message = errors[0]["message"] if errors else getattr(CASES[code], accept)
+        assert body["message"] == expected_message
+        fields: dict[str, str] = {}
+        for error in errors:
+            if "param" in error:
+                fields[error["param"]] = " ".join(
+                    filter(None, [fields.get(error["param"]), error["message"]])
+                )
+        assert body.get("fields") == (fields or None)
+        if "Retry-After" in response:
+            assert body["retry_after"] == int(response["Retry-After"])
+        else:
+            assert "retry_after" not in body
+        bodies[accept] = body
+    assert bodies["tr"]["message"] != bodies["en"]["message"]
+    assert set(bodies["tr"].get("fields", {}).values()).isdisjoint(
+        bodies["en"].get("fields", {}).values()
+    )
+
+
+def test_allauth_flow_data_survives_beside_the_contract() -> None:
+    body = signed_out_session("tr").json()
+    assert body["meta"] == {"is_authenticated": False}
+    assert {"id": "login"} in body["data"]["flows"]
+    assert (body["code"], body["message"]) == ("not_authenticated", CASES["not_authenticated"].tr)
 
 
 @pytest.mark.parametrize(
@@ -858,8 +1021,6 @@ def test_malformed_json_is_a_bad_request() -> None:
 def test_framework_errors_without_a_mapping_are_logged_server_errors(
     pyracast_logs: pytest.LogCaptureFixture,
 ) -> None:
-    from rest_framework.exceptions import APIException
-
     from pyracast.api.errors import api_error
 
     error = api_error(APIException(), None, "-")

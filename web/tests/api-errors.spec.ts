@@ -133,18 +133,66 @@ test.describe("authentication requests", () => {
         });
     });
 
-    test("an allauth body keeps its messages per input", async () => {
+    const allauthErrors = [
+        { message: "Enter an email.", param: "email", code: "required" },
+        { message: "Try again later.", code: "too_many" },
+    ];
+
+    test("an allauth failure maps through its contract keys", async () => {
         answer(400, {
             status: 400,
-            errors: [
-                {
-                    message: "Enter an email.",
-                    param: "email",
-                    code: "required",
-                },
-                { message: "Try again later.", code: "too_many" },
-            ],
+            errors: allauthErrors,
+            ...errorBody("invalid_request", "Enter an email.", {
+                fields: { email: "Enter an email." },
+            }),
         });
+        const error = await authRequest(
+            "auth/login",
+            "POST",
+            "token",
+            {},
+        ).catch((failure: unknown) => failure);
+        expect(error).toBeInstanceOf(ApiError);
+        expect(error).toMatchObject({
+            status: 400,
+            code: "invalid_request",
+            message: "Enter an email.",
+            fields: { email: "Enter an email." },
+        });
+    });
+
+    test("an allauth conflict carries its code", async () => {
+        answer(409, {
+            status: 409,
+            ...errorBody("conflict", "The request conflicts."),
+        });
+        const error = await authRequest(
+            "auth/provider/signup",
+            "POST",
+            "token",
+            {},
+        ).catch((failure: unknown) => failure);
+        expect(error).toMatchObject({
+            status: 409,
+            code: "conflict",
+            message: "The request conflicts.",
+        });
+    });
+
+    test("a signed-out state answer keeps its flow data", async () => {
+        answer(401, {
+            status: 401,
+            data: { flows: [{ id: "login" }] },
+            meta: { is_authenticated: false },
+            ...errorBody("not_authenticated", "Sign in to continue."),
+        });
+        const result = await authRequest("auth/session", "GET", "token");
+        expect(result.data?.flows).toEqual([{ id: "login" }]);
+        expect(result.meta?.is_authenticated).toBe(false);
+    });
+
+    test("a body without the contract keys names the status", async () => {
+        answer(400, { status: 400, errors: allauthErrors });
         const error = await authRequest(
             "auth/login",
             "POST",
@@ -154,22 +202,8 @@ test.describe("authentication requests", () => {
         expect(error).toMatchObject({
             status: 400,
             code: null,
-            message: "Enter an email. Try again later.",
-            fields: { email: "Enter an email." },
-        });
-    });
-
-    test("an allauth body without messages names the status", async () => {
-        answer(409, { status: 409 });
-        const error = await authRequest(
-            "auth/provider/signup",
-            "POST",
-            "token",
-            {},
-        ).catch((failure: unknown) => failure);
-        expect(error).toMatchObject({
-            status: 409,
-            message: "Request failed (409). Please try again.",
+            message: "Request failed (400). Please try again.",
+            fields: {},
         });
     });
 });
