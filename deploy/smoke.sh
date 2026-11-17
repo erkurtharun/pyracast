@@ -102,7 +102,7 @@ mkdir -p "$temporary/deploy"
 : > "$temporary/deploy/release.env"
 cp "$root/deploy/bootstrap.sql" "$temporary/deploy/bootstrap.sql"
 uv run --no-project --python 3.15.2 python "$root/deploy/bootstrap_database.py" "$temporary" --environment-directory "$temporary"
-# The second run proves that bootstrapping an initialized database changes nothing.
+# Bootstrap must also succeed on an initialized database.
 uv run --no-project --python 3.15.2 python "$root/deploy/bootstrap_database.py" "$temporary" --environment-directory "$temporary"
 "${compose[@]}" run --rm --no-deps migrate
 "${compose[@]}" run --rm --no-deps migrate pyracast check --deploy --fail-level WARNING

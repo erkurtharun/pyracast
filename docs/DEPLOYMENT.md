@@ -310,9 +310,8 @@ successful `main` CI runs trigger it automatically. The workflow:
    revision. A failed backup leaves the application stopped and blocks migration.
 5. Promotes `current` only after container readiness checks and a local HTTPS request
    verify the public certificate, routing and database health, then installs the
-   release's watchdog and backup units. Each build gets its own directory under
-   `/opt/pyracast/releases/` (revision plus a hash of the four image digests), so a
-   redeploy never edits the live release.
+   release's watchdog and backup units. Each build has its own release directory;
+   a redeploy never edits the live one.
 
 Image artifacts expire after one day and are deleted after successful deployment.
 Retry a failed Release while its artifact remains available; otherwise run
@@ -377,7 +376,8 @@ fixtures do not establish provider access or inbox delivery.
   within one deadline and ends each run with a `pyracast_watchdog_heartbeat` whose
   `state` is `ok`, `blocked`, `unit_failed` or `lock_busy`; a missing heartbeat
   alerts. It restarts application containers only under the release lock and never
-  restarts PostgreSQL or RabbitMQ. The watchdog and backup units ship in
+  restarts or starts a stopped PostgreSQL or RabbitMQ; it only recreates missing
+  ones. The watchdog and backup units ship in
   `deploy/systemd/` and are installed by each release and at boot; change them there,
   not on the host.
 - **Planned host maintenance:** run `sudo systemctl stop pyracast` and wait before
@@ -389,11 +389,10 @@ fixtures do not establish provider access or inbox delivery.
   environment files. Before stopping anything, the script durably creates
   `/var/lib/pyracast/release-blocked`; only then does it drain the dispatcher and
   workers, stop ingress, back up the existing database and upgrade support services.
-  A first deployment initializes
-  PostgreSQL under the same block before its initial backup. Any maintenance
-  failure leaves the application stopped without downgrading support images.
-  A failure after promotion stops nothing: the new release keeps serving and the
-  log names the step to finish by hand.
+  A first deployment initializes PostgreSQL under the same block before its initial
+  backup. Any maintenance failure leaves the application stopped without
+  downgrading support images. A failure after promotion stops nothing: the new
+  release keeps serving and the log prints the command that finishes the release.
   The block clears only after readiness and release promotion; even
   after an abrupt host restart, systemd refuses automatic application startup
   while this marker exists. Application containers retry process failures up to
@@ -408,8 +407,9 @@ fixtures do not establish provider access or inbox delivery.
 - **Backups:** the host's hourly timer uploads a custom-format PostgreSQL dump to
   the private backup bucket; each release requires another successful dump before
   migration. The hourly dump waits up to ten minutes for the release lock, holds it
-  only while dumping and reports `pyracast_backup_skipped` when a release keeps it. Cloud Storage lifecycle cleanup expires objects after seven days;
-  deletion is asynchronous. Check the last successful upload, not just timer
+  only while dumping and reports `pyracast_backup_skipped` when a release keeps the
+  lock or stays blocked. Cloud Storage lifecycle cleanup expires objects after
+  seven days; deletion is asynchronous. Check the last successful upload, not just timer
   activation. A one-hour recovery point depends on successful hourly backups;
   failures increase possible data loss, and there is no WAL/PITR recovery. Keep
   the external encryption key separately. Rehearse `pg_restore` into a separate

@@ -172,7 +172,8 @@ def create_backup(release: Path, bucket: str, kind: str, directory: Path) -> str
     stamp = datetime.datetime.now(datetime.UTC).strftime("%Y/%m/%d/%Y%m%dT%H%M%SZ")
     name = f"postgres/{stamp}-{kind}-{uuid.uuid4().hex}.dump"
     upload_backup(bucket, name, archive)
-    temporary = host.LAST_BACKUP.with_suffix(".next")
+    # Hourly and pre-release backups can finish at the same time; each needs its own file.
+    temporary = host.LAST_BACKUP.with_name(f"{host.LAST_BACKUP.name}.{uuid.uuid4().hex}")
     temporary.write_text(json.dumps({"object": name, "completed_at": time.time()}))
     temporary.replace(host.LAST_BACKUP)
     report(

@@ -42,7 +42,7 @@ cleanup() {
   if (( result != 0 )); then
     if (( promoted == 1 )); then
       rm -f /var/lib/pyracast/release-blocked
-      echo "Release $revision is serving, but a step after promotion failed; nothing was stopped. Install its units with deploy/install-units.sh install and run systemctl start pyracast.service." >&2
+      echo "Release $revision is serving, but a step after promotion failed; nothing was stopped. Finish with: bash $release/deploy/install-units.sh install $release && systemctl start pyracast.service" >&2
     elif (( maintenance_started == 1 )); then
       begin_maintenance || true
       "${compose[@]}" stop -t 660 dispatcher || true

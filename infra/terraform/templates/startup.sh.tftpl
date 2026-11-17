@@ -108,7 +108,6 @@ EOF
 
 systemctl daemon-reload
 systemctl enable docker.service pyracast.service
-# Each release ships the watchdog and backup units; a boot reinstalls those of the current one.
 if test -f /opt/pyracast/current/deploy/install-units.sh; then
   bash /opt/pyracast/current/deploy/install-units.sh install /opt/pyracast/current \
     || echo 'The release units were not installed; the previous units stay in place.' >&2

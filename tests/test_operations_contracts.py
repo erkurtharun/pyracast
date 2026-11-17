@@ -123,13 +123,14 @@ def matrix_combinations(matrix: dict[str, Any]) -> list[dict[str, Any]]:
             combination.update(included)
         if not extended:
             added.append(dict(included))
-    return [*original, *added] or [{}]
+    return [*original, *added]
 
 
 def ci_job_names(jobs: dict[str, Any]) -> set[str]:
     names: set[str] = set()
     for identifier, job in jobs.items():
-        for combination in matrix_combinations(job.get("strategy", {}).get("matrix", {})):
+        matrix = job.get("strategy", {}).get("matrix")
+        for combination in [{}] if matrix is None else matrix_combinations(matrix):
             name = str(job.get("name", identifier))
             for key, value in combination.items():
                 name = name.replace(f"${{{{ matrix.{key} }}}}", str(value))

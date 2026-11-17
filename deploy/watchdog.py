@@ -142,8 +142,10 @@ def recover(run: Run, compose: list[str]) -> dict[str, str]:
         if existing:
             run.command([*compose, "restart", "--timeout", "60", *existing], capture_output=True)
         wait = max(1, int(run.remaining()) - 10)
+        # Without --no-deps, up also starts stopped dependencies such as PostgreSQL.
         run.command(
-            [*compose, "up", "-d", "--wait", "--wait-timeout", str(wait)], capture_output=True
+            [*compose, "up", "-d", "--no-deps", "--wait", "--wait-timeout", str(wait), *failed],
+            capture_output=True,
         )
         unrecovered = {
             service: state

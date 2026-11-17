@@ -4,7 +4,6 @@ Requires=docker.service
 After=docker.service
 RequiresMountsFor=/var/lib/pyracast
 ConditionPathExists=/opt/pyracast/current/deploy/backup.py
-ConditionPathExists=!/var/lib/pyracast/release-blocked
 
 [Service]
 Type=oneshot

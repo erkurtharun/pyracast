@@ -161,7 +161,7 @@ services:
     mem_limit: 256m
     cpus: 0.5
     pids_limit: 100
-    # Unhealthy once a cycle has run longer than the delivery check's five-minute lag.
+    # 300 s is check_delivery_health's default lag.
     healthcheck:
       test: [CMD, python, -c, "import os, sys, time; sys.exit(time.time() - os.stat('/tmp/dispatcher-heartbeat').st_mtime > 300)"]
       interval: 60s
