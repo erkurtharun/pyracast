@@ -205,7 +205,8 @@ except ProgrammingError:
     pass
 else:
     raise SystemExit('Runtime role unexpectedly owns DDL permission')
-actor = User.objects.create_superuser(username='container-smoke', email='smoke@example.com')
+actor = User.objects.create_superuser(username='container-smoke', email='smoke@example.com',
+                                      password='container-smoke-password')
 tenant = Tenant.objects.create(name='Container smoke')
 Membership.objects.create(user=actor, tenant=tenant, role=Membership.Role.ADMIN)
 region = submit_region(actor, tenant.pk, name='Synthetic Ankara', latitude=39.9,
@@ -230,6 +231,31 @@ while time.monotonic() < deadline:
 assert job.status == 'succeeded', f'Fixture worker job status: {job.status}'
 assert ForecastResult.objects.filter(snapshot__job=job).count() == 1
 PY
+cookies="$temporary/cookies"
+csrf_token=$("${secure_curl[@]}" --cookie-jar "$cookies" https://localhost:18443/api/session/ \
+  | "${compose[@]}" exec -T api python -c '
+import json, sys
+import django
+django.setup()
+from pyracast.accounts.language import LANGUAGES
+session = json.load(sys.stdin)
+assert set(session) == {"user", "csrf_token", "language"}, session
+assert session["user"] is None and session["language"] in LANGUAGES, session
+assert isinstance(session["csrf_token"], str) and session["csrf_token"], session
+print(session["csrf_token"])
+')
+[[ $("${tls_curl[@]}" --cookie "$cookies" --cookie-jar "$cookies" \
+  -H "X-CSRFToken: $csrf_token" -H 'Origin: https://localhost:18443' \
+  --referer https://localhost:18443/app/ -H 'Content-Type: application/json' \
+  --data '{"email":"smoke@example.com","password":"not-the-container-smoke-password"}' \
+  --output "$temporary/sign-in.json" --write-out '%{http_code}' \
+  https://localhost:18443/api/auth/browser/v1/auth/login) == 400 ]]
+"${compose[@]}" exec -T api python -c '
+import json, sys
+errors = json.load(sys.stdin)["errors"]
+assert [error["code"] for error in errors] == ["email_password_mismatch"], errors
+' < "$temporary/sign-in.json"
+[[ $("${secure_curl[@]}" https://localhost:18443/app/) == *'<title>Pyracast workspace'* ]]
 "${compose[@]}" exec -T postgres pg_dump -U postgres -d pyracast --format=custom --compress=zstd:3 > "$temporary/database.dump"
 uv run --no-project --python 3.15.2 python - "$temporary" "$root" <<'PY'
 import sys
@@ -241,4 +267,4 @@ restore_archive(release, release / 'database.dump', 'local-smoke')
 PY
 "${compose[@]}" exec -T api pyracast dispatch
 "${compose[@]}" stop -t 30 dispatcher worker notifications
-echo 'Production containers, TLS routing, static assets, database roles, fixture queue publication and graceful idle shutdown passed.'
+echo 'Production containers, TLS routing, static assets, session and sign-in API, sign-in page, database roles, fixture queue publication and graceful idle shutdown passed.'
