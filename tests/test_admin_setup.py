@@ -279,7 +279,7 @@ def test_existing_key_can_be_rotated_and_invalid_site_rolls_back_rotation() -> N
     )
     system.account.refresh_from_db()
     assert decrypt_api_key(system.account.encrypted_api_key) == "replacement-key"
-    assert SiteBinding.objects.count() == 3
+    assert SiteBinding.objects.count() == 2
 
 
 def test_stale_setup_and_action_revisions_are_rejected() -> None:

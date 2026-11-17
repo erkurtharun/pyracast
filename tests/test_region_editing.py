@@ -9,6 +9,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, close_old_connections, connection
 from django.test import Client
+from django.urls import reverse
 
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.connections.models import SiteBinding
@@ -117,7 +118,7 @@ def test_location_request_api_tenant_boundary_validation_and_soft_deletion() -> 
     assert RegionLocationChangeRequest.objects.get().status == "pending"
 
 
-def test_location_review_rejects_stale_revision_and_requires_new_binding() -> None:
+def test_location_review_requires_new_binding_and_follows_binding_revisions() -> None:
     system = make_system(approved=True)
     change = request_location_change(
         system.member,
@@ -182,18 +183,8 @@ def test_location_review_rejects_stale_revision_and_requires_new_binding() -> No
         capacity_kw=1,
         capacity_semantics_verified=True,
     )
-    with pytest.raises(ValidationError, match="region_revision_changed"):
-        review_location_change(system.admin, second.pk, approve=True)
-    with pytest.raises(ValidationError, match="location_change_already_pending"):
-        request_location_change(
-            system.member,
-            system.region.pk,
-            system.tenant.pk,
-            expected_revision=3,
-            latitude=42,
-            longitude=31,
-            timezone="UTC",
-        )
+    second.refresh_from_db()
+    assert second.base_revision == 3
     rejected = review_location_change(system.admin, second.pk, approve=False)
     assert rejected.status == "rejected"
     assert review_location_change(system.admin, second.pk, approve=False).pk == second.pk
@@ -599,3 +590,17 @@ def test_concurrent_location_request_and_binding_replacement_leave_no_stale_requ
     assert not RegionLocationChangeRequest.objects.filter(status="pending").exclude(
         base_revision=system.region.revision
     )
+
+
+def test_request_left_on_an_earlier_revision_cannot_be_approved() -> None:
+    system = make_system(approved=True)
+    change = _pending_location_request(system)
+    Region.objects.filter(pk=system.region.pk).update(revision=2)
+    with pytest.raises(ValidationError, match="region_revision_changed"):
+        review_location_change(system.admin, change.pk, approve=True)
+    client, _ = verified_admin()
+    response = client.get(reverse("admin:regions_region_setup", args=(system.region.pk,)))
+    assert response.status_code == 200
+    assert b"made for an earlier revision" in response.content
+    assert b'value="approve_location"' not in response.content
+    assert b'value="reject_location"' in response.content

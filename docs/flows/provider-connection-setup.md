@@ -1,6 +1,6 @@
 # Configure and validate a plant's provider account and site binding
 
-A platform administrator opens a plant's review page in the `/admin/` console, saves a Solcast account (existing or new, with a write-only encrypted key) plus a site binding for the region's current revision, then presses Validate, which spends one counted Solcast request. Success marks the binding validated for the account's current key revision, which unlocks approval (the separate `plant-approval` flow); reconfiguring an existing binding instead opens a new pending region revision and removes approval.
+A platform administrator opens a plant's review page in the `/admin/` console, saves a Solcast account (existing or new, with a write-only encrypted key) plus a site binding for the region's current revision, then presses Validate, which spends one counted Solcast request. Success marks the binding validated for the account's current key revision, which unlocks approval (the separate `plant-approval` flow); changing an existing binding instead opens a new pending region revision and removes approval, while saving the same values keeps the binding and approval.
 
 ## Entry points
 
@@ -36,8 +36,12 @@ sequenceDiagram
         F->>DB: "ProviderAccount FOR UPDATE, check key revision"
     end
     F->>O: "BindingInput re-validation, then configure_binding"
-    O->>DB: "if a binding exists for this revision: revision+1, pending, approved_binding NULL"
-    O->>DB: "insert SiteBinding, audit binding_configured"
+    alt latest binding of this revision has the same setup columns
+        O-->>F: "existing SiteBinding, nothing written"
+    else changed setup
+        O->>DB: "if a binding exists for this revision: revision+1, pending, approved_binding NULL, rebase pending location request"
+        O->>DB: "insert SiteBinding, audit binding_configured"
+    end
     alt stale field, duplicate account or rule violation
         F-->>V: "ValidationError or DoesNotExist, ROLLBACK"
         V-->>P: "400 generic setup error"
@@ -68,13 +72,14 @@ sequenceDiagram
 
 | Table | R/W | What |
 | --- | --- | --- |
-| `regions_region` | R/W | Locked `FOR UPDATE` by configure and by the post-HTTP validation commit; a reconfigure bumps `revision`, sets `status = pending`, clears `approved_binding` |
-| `connections_sitebinding` | R/W | One insert per configure, pinned to `region_revision` and copying region coordinates and timezone; validation writes `validated_at`, `validated_credential_revision`, `health` |
+| `regions_region` | R/W | Locked `FOR UPDATE` by configure and by the post-HTTP validation commit; a changed reconfigure bumps `revision`, sets `status = pending`, clears `approved_binding` |
+| `connections_sitebinding` | R/W | One insert per changed configure, pinned to `region_revision` and copying region coordinates and timezone; validation writes `validated_at`, `validated_credential_revision`, `health` |
 | `connections_provideraccount` | R/W | Insert for a new account (canonical identity, Fernet `encrypted_api_key`, `daily_quota`, `authorized_by/at`); locked for selection and reservation; 401 sets `authentication_failed_revision`, 429 sets `request_blocked_until` |
 | `forecasts_requestattempt` | R/W | Daily count per account and UTC day; one row per validation (`purpose = validation`) or script run (`inspect_settings`, `inspect_forecast`); `outcome` uncertain, succeeded or failed |
 | `forecasts_collectionjob` | R/W | Latest due forecast job of the approved binding is re-armed to `pending` when it failed with `provider_authentication_failed`; the page lists recent jobs |
-| `regions_auditevent` | R/W | Writes `provider_account_created`, `provider_secret_rotated` (key branch), `binding_configured`, `connection_validated`; nothing for failed validations. The page reads recent activity |
-| `plants_plant`, `plants_plantsubmission`, `plants_plantconfiguration`, `metering_epiasconnection`, `accounts_tenant`, `regions_regionlocationchangerequest`, `forecasts_forecastsnapshot`, `notifications_notificationdelivery`, `mfa_authenticator` | R | Page context (`review_context`) and MFA evidence only |
+| `regions_auditevent` | R/W | Writes `provider_account_created`, `provider_secret_rotated` (key branch), `binding_configured`, `location_change_rebased`, `connection_validated`; nothing for failed validations or unchanged saves. The page reads recent activity |
+| `regions_regionlocationchangerequest` | R/W | Page context; a changed reconfigure moves a pending request's `base_revision` to the new revision |
+| `plants_plant`, `plants_plantsubmission`, `plants_plantconfiguration`, `metering_epiasconnection`, `accounts_tenant`, `forecasts_forecastsnapshot`, `notifications_notificationdelivery`, `mfa_authenticator` | R | Page context (`review_context`) and MFA evidence only |
 
 ## Authorization
 
@@ -107,7 +112,7 @@ sequenceDiagram
 
 - Lock order is Region, then ProviderAccount: configure (existing account only; a new account is inserted, and `configure_binding` reads the account unlocked), the validation commit (which then locks the latest CollectionJob) and approval. Reservation locks only ProviderAccount. `lock_timeout=5s` comes from the connection options in `settings.py`.
 - Optimistic concurrency: configure carries `expected_revision`, `expected_binding_id` and `existing_account` as `id:credential_revision`; validate carries `binding_id`, `expected_revision` and `credential_revision`. A double submit of the first setup fails the binding check instead of creating revision 2.
-- The first binding of a revision does not change the region. Every later save, even with identical values, creates revision N+1 and drops approval at once; an approved plant stops collecting (`binding_is_current` fails) until it is validated and approved again.
+- The first binding of a revision does not change the region. A save whose setup columns (account, site, capacities, basis, attestation, angles, losses, installation date, reference, coordinates and timezone) equal the latest binding of the revision returns that binding and writes nothing; the console says "Nothing changed.", or "API key replaced..." when only the key was rotated. Any other later save creates revision N+1, drops approval at once and moves a pending location request to the new revision (`location_change_rebased`); an approved plant stops collecting (`binding_is_current` fails) until it is validated and approved again.
 - Validation only proves access: `SolcastProvider.validate` fetches the forecast window and discards it. Site correctness rests on operator attestation (`settings_verification_reference`, installation date, `capacity_semantics_verified`, `tilt = 0`); reference and installation date are checked again before any quota is spent.
 - Quota: one `RequestAttempt` per request, counted per account and UTC day against `daily_quota` (1..10 for new accounts, shared by every plant on the account). The reservation commits before HTTP; no transaction is open during the call (20 s read, 5 s connect, no redirects). A post-HTTP mismatch keeps the attempt `uncertain`, which still counts.
 - 401 blocks the account for the current `credential_revision` until a key rotation; 429 extends `request_blocked_until` (provider `Retry-After`, else 900 s, plus jitter); other failures only set binding `health = error`, which nothing but a later successful validation resets.

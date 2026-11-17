@@ -59,14 +59,18 @@
             </dl>
             <p class="callout callout--warn">{% translate "Accepting the new location removes approval. Set up, validate and approve a replacement connection before collection resumes." %}</p>
             <div class="form-actions">
-              <form method="post" action="{% url 'admin:workspace_decision' region.pk %}">
-                {% csrf_token %}
-                <input type="hidden" name="{{ review_form.expected_revision.html_name }}" value="{{ review_form.expected_revision.value|unlocalize }}">
-                <input type="hidden" name="{{ review_form.expected_status.html_name }}" value="{{ review_form.expected_status.value }}">
-                <input type="hidden" name="{{ review_form.location_change_id.html_name }}" value="{{ change.id|unlocalize }}">
-                <input type="hidden" name="{{ review_form.action.html_name }}" value="approve_location">
-                <button type="submit" class="btn btn--primary">{% translate "Approve location change" %}</button>
-              </form>
+              {% if change.base_revision == region.revision %}
+                <form method="post" action="{% url 'admin:workspace_decision' region.pk %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="{{ review_form.expected_revision.html_name }}" value="{{ review_form.expected_revision.value|unlocalize }}">
+                  <input type="hidden" name="{{ review_form.expected_status.html_name }}" value="{{ review_form.expected_status.value }}">
+                  <input type="hidden" name="{{ review_form.location_change_id.html_name }}" value="{{ change.id|unlocalize }}">
+                  <input type="hidden" name="{{ review_form.action.html_name }}" value="approve_location">
+                  <button type="submit" class="btn btn--primary">{% translate "Approve location change" %}</button>
+                </form>
+              {% else %}
+                <p class="row-meta">{% translate "This request was made for an earlier revision and cannot be approved. Reject it so the customer can request the change again." %}</p>
+              {% endif %}
               <form method="post" action="{% url 'admin:workspace_decision' region.pk %}">
                 {% csrf_token %}
                 <input type="hidden" name="{{ review_form.expected_revision.html_name }}" value="{{ review_form.expected_revision.value|unlocalize }}">
@@ -160,7 +164,7 @@
       <input type="hidden" name="action" value="configure">
       {% for field in setup_form.hidden_fields %}{{ field }}{{ field.errors }}{% endfor %}
       {{ setup_form.non_field_errors }}
-      <p class="callout">{% translate "Saving always creates a new pending revision that must be validated and approved again." %}{% if binding %} {% translate "The selected account's key and daily quota are shared by every plant using that account." %}{% endif %}</p>
+      <p class="callout">{% if binding %}{% translate "Saving a changed setup creates a new pending revision that must be validated and approved again. Saving the same setup keeps the approval; with a new API key, only validation is needed." %} {% translate "The selected account's key and daily quota are shared by every plant using that account." %}{% else %}{% translate "Saving creates a pending revision that must be validated and approved." %}{% endif %}</p>
 
       <fieldset class="group">
         <legend>{% translate "Solcast account" %}</legend>

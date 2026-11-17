@@ -489,10 +489,18 @@ class RegionAdmin(ReadOnlyAdmin):
                 try:
                     actor = cast(User, request.user)
                     if action == "configure":
-                        setup_form.configure(actor, region)
-                        message = _(
-                            "Private provider setup saved. Validate the connection before approval."
-                        )
+                        saved = setup_form.configure(actor, region)
+                        if saved.pk != setup_form.cleaned_data["expected_binding_id"]:
+                            message = _(
+                                "Private provider setup saved. "
+                                "Validate the connection before approval."
+                            )
+                        elif setup_form.cleaned_data["api_key"]:
+                            message = _(
+                                "API key replaced. Validate the connection to resume collection."
+                            )
+                        else:
+                            message = _("Nothing changed.")
                     elif action in {"validate", "approve", "clear_cooldown"}:
                         current = action_form.current_binding(region)
                         if action == "validate":

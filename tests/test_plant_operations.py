@@ -784,6 +784,7 @@ def _rebind_to_stale_binding(system: System, plant: Plant) -> dict[str, Any]:
     stale = SiteBinding.objects.get(pk=system.binding.pk)
     stale.pk = None
     stale.save()
+    assert plant.current_configuration_id is not None
     PlantConfiguration.objects.filter(pk=plant.current_configuration_id).update(binding=stale)
     return {}
 
@@ -839,3 +840,21 @@ def test_a_change_of_any_saved_configuration_field_creates_a_revision(
     for name, value in submission.items():
         if name != "name":
             assert getattr(configuration, name) == value
+
+
+def test_rename_to_the_region_name_leaves_the_region_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    renamed = revise_plant(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        name="Site",
+        dc_capacity_mw=130,
+        export_limit_mw=100,
+    )
+    assert renamed.name == "Site"
+    assert PlantEvent.objects.get(action="plant_renamed").details == {"old": "Plant", "new": "Site"}
+    assert not AuditEvent.objects.filter(action="region_renamed").exists()

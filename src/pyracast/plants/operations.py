@@ -30,7 +30,7 @@ from pyracast.plants.models import (
 from pyracast.plants.numerics import POLICY_VERSION, PowerInterval
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.plants.transfer import calibration_matches_transfer
-from pyracast.regions.models import Region
+from pyracast.regions.models import AuditEvent, Region
 
 
 @dataclass(frozen=True)
@@ -115,45 +115,30 @@ def _validate_configuration(
         raise ValidationError(gettext("Only fixed mounting permits surface angles."))
 
 
-def _save_configuration(
-    actor: User,
-    plant: Plant,
-    binding: SiteBinding,
-    *,
-    name: str,
-    dc_capacity_mw: float,
-    inverter_capacity_mw: float | None,
-    export_limit_mw: float | None,
-    measurement_basis: str,
-    mounting_type: str,
-    surface_tilt: float | None,
-    surface_azimuth: float | None,
-) -> None:
+CONFIGURATION_PARAMETERS = (
+    "dc_capacity_mw",
+    "inverter_capacity_mw",
+    "export_limit_mw",
+    "measurement_basis",
+    "mounting_type",
+    "surface_tilt",
+    "surface_azimuth",
+)
+
+
+def _save_configuration(actor: User, plant: Plant, values: dict[str, object]) -> None:
     revision = 1
     if plant.current_configuration_id is not None:
         revision = PlantConfiguration.objects.get(pk=plant.current_configuration_id).revision + 1
     configuration = PlantConfiguration.objects.create(
-        plant=plant,
-        region_id=plant.region_id,
-        binding=binding,
-        revision=revision,
-        dc_capacity_mw=dc_capacity_mw,
-        inverter_capacity_mw=inverter_capacity_mw,
-        export_limit_mw=export_limit_mw,
-        measurement_basis=measurement_basis,
-        mounting_type=mounting_type,
-        surface_tilt=surface_tilt,
-        surface_azimuth=surface_azimuth,
-        created_by=actor,
+        plant=plant, region_id=plant.region_id, revision=revision, created_by=actor, **values
     )
-    plant.name = name.strip()
     plant.current_configuration = configuration
     plant.automatic_calibration_enabled = False
     plant.automatic_calibration_enabled_by = None
     plant.next_calibration_check_at = None
     plant.save(
         update_fields=(
-            "name",
             "current_configuration",
             "automatic_calibration_enabled",
             "automatic_calibration_enabled_by",
@@ -175,6 +160,23 @@ def _save_configuration(
     connection = EpiasConnection.objects.filter(plant=plant, enabled=True).first()
     if connection is not None:
         enqueue_connection(connection, timezone.now(), initial=True)
+
+
+def _rename(actor: User, plant: Plant, region: Region, name: str) -> None:
+    name = name.strip()
+    if plant.name == name:
+        return
+    PlantEvent.objects.create(
+        plant=plant, actor=actor, action="plant_renamed", details={"old": plant.name, "new": name}
+    )
+    plant.name = name
+    plant.save(update_fields=("name",))
+    if region.name != name:
+        region.name = name
+        region.save(update_fields=("name",))
+        AuditEvent.objects.create(
+            actor=actor, region=region, action="region_renamed", revision=region.revision
+        )
 
 
 def create_plant(
@@ -288,37 +290,32 @@ def _save_plant_parameters(
     surface_tilt: float | None,
     surface_azimuth: float | None,
 ) -> None:
+    parameters: dict[str, object] = {
+        "dc_capacity_mw": dc_capacity_mw,
+        "inverter_capacity_mw": inverter_capacity_mw,
+        "export_limit_mw": export_limit_mw,
+        "measurement_basis": measurement_basis,
+        "mounting_type": mounting_type,
+        "surface_tilt": surface_tilt,
+        "surface_azimuth": surface_azimuth,
+    }
     if region.status == "pending" and plant.current_configuration_id is None:
         PlantSubmission.objects.update_or_create(
-            plant=plant,
-            defaults={
-                "dc_capacity_mw": dc_capacity_mw,
-                "inverter_capacity_mw": inverter_capacity_mw,
-                "export_limit_mw": export_limit_mw,
-                "measurement_basis": measurement_basis,
-                "mounting_type": mounting_type,
-                "surface_tilt": surface_tilt,
-                "surface_azimuth": surface_azimuth,
-                "submitted_by": actor,
-            },
+            plant=plant, defaults={**parameters, "submitted_by": actor}
         )
-        plant.name = name.strip()
-        plant.save(update_fields=("name",))
+        _rename(actor, plant, region, name)
         PlantEvent.objects.create(plant=plant, actor=actor, action="submission_saved")
         return
-    _save_configuration(
-        actor,
-        plant,
-        _binding(region),
-        name=name,
-        dc_capacity_mw=dc_capacity_mw,
-        inverter_capacity_mw=inverter_capacity_mw,
-        export_limit_mw=export_limit_mw,
-        measurement_basis=measurement_basis,
-        mounting_type=mounting_type,
-        surface_tilt=surface_tilt,
-        surface_azimuth=surface_azimuth,
-    )
+    values = {"binding": _binding(region), **parameters}
+    _rename(actor, plant, region, name)
+    # `values` holds every column a revision writes, so a match on all of them is a no-op.
+    current_id = plant.current_configuration_id
+    if (
+        current_id is not None
+        and PlantConfiguration.objects.filter(pk=current_id, **values).exists()
+    ):
+        return
+    _save_configuration(actor, plant, values)
 
 
 def activate_submitted_plants(actor: User, region: Region, binding: SiteBinding) -> None:
@@ -337,15 +334,10 @@ def activate_submitted_plants(actor: User, region: Region, binding: SiteBinding)
         _save_configuration(
             actor,
             plant,
-            binding,
-            name=plant.name,
-            dc_capacity_mw=parameters.dc_capacity_mw,
-            inverter_capacity_mw=parameters.inverter_capacity_mw,
-            export_limit_mw=parameters.export_limit_mw,
-            measurement_basis=parameters.measurement_basis,
-            mounting_type=parameters.mounting_type,
-            surface_tilt=parameters.surface_tilt,
-            surface_azimuth=parameters.surface_azimuth,
+            {
+                "binding": binding,
+                **{name: getattr(parameters, name) for name in CONFIGURATION_PARAMETERS},
+            },
         )
 
 

@@ -57,6 +57,11 @@ msgstr "Başlık en fazla 200, notlar en fazla 2000 karakter olmalıdır."
 msgid "AC generation"
 msgstr "AC üretimi"
 
+msgid "API key replaced. Validate the connection to resume collection."
+msgstr ""
+"API anahtarı değiştirildi. Veri toplamanın sürmesi için bağlantıyı "
+"doğrulayın."
+
 msgid "Acceptance unknown"
 msgstr "Kabul durumu bilinmiyor"
 
@@ -566,6 +571,9 @@ msgstr "Konum değişikliği onaylandı"
 msgid "Location change rejected"
 msgstr "Konum değişikliği reddedildi"
 
+msgid "Location change request moved to the new revision"
+msgstr "Konum değişikliği talebi yeni revizyona taşındı"
+
 msgid "Location change requested"
 msgstr "Konum değişikliği talep edildi"
 
@@ -705,6 +713,9 @@ msgstr "Ayarlanmadı"
 
 msgid "Not validated"
 msgstr "Doğrulanmadı"
+
+msgid "Nothing changed."
+msgstr "Hiçbir şey değişmedi."
 
 msgid "Nothing is waiting for review."
 msgstr "İnceleme bekleyen kayıt yok."
@@ -855,6 +866,27 @@ msgstr ""
 
 msgid "A production batch must stay within 31 local days."
 msgstr "Bir üretim grubu en fazla 31 yerel günü kapsayabilir."
+
+msgid ""
+"Saving a changed setup creates a new pending revision that must be validated"
+" and approved again. Saving the same setup keeps the approval; with a new "
+"API key, only validation is needed."
+msgstr ""
+"Değiştirilmiş bir kurulumu kaydetmek, yeniden doğrulanması ve onaylanması "
+"gereken yeni bir bekleyen revizyon oluşturur. Aynı kurulumu kaydetmek onayı "
+"korur; yeni bir API anahtarıyla yalnız doğrulama gerekir."
+
+msgid "Saving creates a pending revision that must be validated and approved."
+msgstr ""
+"Kaydetme işlemi, doğrulanması ve onaylanması gereken bekleyen bir revizyon "
+"oluşturur."
+
+msgid ""
+"This request was made for an earlier revision and cannot be approved. Reject"
+" it so the customer can request the change again."
+msgstr ""
+"Bu talep önceki bir revizyon için yapıldı ve onaylanamaz. Müşterinin "
+"değişikliği yeniden talep edebilmesi için reddedin."
 
 msgid "Unknown production action."
 msgstr "Bilinmeyen üretim işlemi."
@@ -1124,13 +1156,6 @@ msgstr "Kaydedildi"
 
 msgid "Saved connection"
 msgstr "Kayıtlı bağlantı"
-
-msgid ""
-"Saving always creates a new pending revision that must be validated and "
-"approved again."
-msgstr ""
-"Kaydetme işlemi, yeniden doğrulanması ve onaylanması gereken yeni bir "
-"bekleyen revizyon oluşturur."
 
 msgid "Scheduled for"
 msgstr "Planlanan zaman"
