@@ -6,7 +6,7 @@ description: Verify Pyracast code or tooling changes and distinguish local check
 Use `uv run --locked python scripts/check.py` for the shared formatting, lint, type,
 Django and test checks; after `npm ci` in `web/` it also checks the API schema, the
 generated types and the web static checks, and without `web/node_modules` it says
-`SKIPPED web`. `--static-only` skips pytest, `--tests-only` runs only pytest, and
+`SKIPPED web`. `--static-only` skips pytest, `--tests-only` compiles the gettext catalogs and runs pytest, and
 arguments after `--` go to pytest unchanged; pass `--no-cov` with a narrowed run, because the
 coverage floor applies to the whole suite (`check.py --tests-only -- --no-cov tests/test_api.py`).
 `PYTEST_XDIST_AUTO_NUM_WORKERS` overrides the worker cap of six. Every stage prints

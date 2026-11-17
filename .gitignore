@@ -1,4 +1,3 @@
-# Python environments and build output
 .venv/
 .venv-*/
 venv/
@@ -15,7 +14,6 @@ dist/
 .pdm-python
 *.mo
 
-# Test, type checker and formatter caches
 .pytest_cache/
 .hypothesis/
 .mypy_cache/
@@ -29,7 +27,6 @@ htmlcov/
 junit.xml
 audit-requirements.txt
 
-# Credentials and local configuration
 .env
 .env.*
 !.env.example
@@ -39,7 +36,6 @@ audit-requirements.txt
 gha-creds-*.json
 local_settings.py
 
-# Local services and application data
 .dev/
 *.log
 *.pid
@@ -49,7 +45,6 @@ db.sqlite3-*
 /staticfiles/
 /docs/json_*.json
 
-# Frontend dependencies and generated output
 node_modules/
 .next/
 .next-*/
@@ -60,7 +55,6 @@ out/
 /web/test-results/
 /web/AGENTS.md
 
-# Local agent/IDE state and scanner output
 /.codex/*
 !/.codex/hooks.json
 /.claude/*
@@ -75,7 +69,6 @@ out/
 .scannerwork/
 .sonar/
 
-# Operating system and editor artifacts
 .DS_Store
 Thumbs.db
 Desktop.ini
