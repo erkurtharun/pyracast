@@ -15,6 +15,7 @@ from django.db import transaction
 from django.http import HttpRequest, HttpResponseBase
 from django.utils.translation import gettext
 
+from pyracast.accounts.authorization import requires_admin_mfa
 from pyracast.accounts.inputs import (
     SecondFactorInput,
     SecondFactorReauthenticateInput,
@@ -90,7 +91,7 @@ class ManageTOTPView(AllauthTOTPView):
         with transaction.atomic():
             request.user = User.objects.select_for_update().get(pk=request.user.pk)
             if request.method == "DELETE":
-                if request.user.is_staff or request.user.is_superuser:
+                if requires_admin_mfa(request.user):
                     raise PermissionDenied("Administrator authenticators cannot be removed.")
                 response = require_mfa_reauthentication(request)
                 if response is not None:

@@ -3,6 +3,8 @@ from allauth.account.models import EmailAddress
 from allauth.mfa.models import Authenticator
 from django.contrib.auth.models import User
 
+from pyracast.accounts.authorization import requires_admin_mfa
+
 
 def email_identity(email: str, *, for_recovery: bool = False) -> User | None:
     matches = (
@@ -25,7 +27,7 @@ def may_sign_in_with_password(user: User) -> bool:
     if not user.is_active:
         return False
     return (
-        not (user.is_staff or user.is_superuser)
+        not requires_admin_mfa(user)
         or Authenticator.objects.filter(user=user, type=Authenticator.Type.TOTP).exists()
     )
 

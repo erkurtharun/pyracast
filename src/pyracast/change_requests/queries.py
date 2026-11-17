@@ -5,8 +5,8 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db import transaction
 from django.db.models import QuerySet
 
+from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import Membership
-from pyracast.accounts.operations import workspace_membership
 from pyracast.change_requests.models import ChangeRequest
 from pyracast.change_requests.operations import (
     RequestConflictError,
@@ -27,7 +27,7 @@ from pyracast.incidents.operations import lock_incident_plant
 def inbox(
     actor: User, tenant_id: int, *, scope: str = "pending", plant_id: int | None = None
 ) -> QuerySet[ChangeRequest]:
-    membership = workspace_membership(actor, tenant_id)
+    membership = tenant_membership(actor, tenant_id)
     rows = visible_requests(actor, tenant_id)
     if membership.role != Membership.Role.ADMIN or scope == "mine":
         rows = rows.filter(proposed_by=actor, proposer_membership_id=membership.pk)
@@ -55,7 +55,7 @@ def request_detail(actor: User, tenant_id: int, request_id: int) -> dict[str, An
     request = _request(actor, tenant_id, request_id)
     plant = lock_incident_plant(tenant_id, request.plant.region_id, request.plant_id, lock=False)
     request = _request(actor, tenant_id, request_id)
-    membership = workspace_membership(actor, tenant_id)
+    membership = tenant_membership(actor, tenant_id)
     own = request.proposed_by_id == actor.pk and request.proposer_membership_id == membership.pk
     if membership.role != Membership.Role.ADMIN and not own:
         raise ChangeRequest.DoesNotExist
@@ -128,7 +128,7 @@ def request_detail(actor: User, tenant_id: int, request_id: int) -> dict[str, An
 def request_summaries(
     actor: User, tenant_id: int, rows: list[ChangeRequest]
 ) -> list[dict[str, Any]]:
-    membership = workspace_membership(actor, tenant_id)
+    membership = tenant_membership(actor, tenant_id)
     if membership.role != Membership.Role.ADMIN:
         rows = [
             row

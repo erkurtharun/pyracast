@@ -25,7 +25,6 @@ from pyracast.metering.operations import (
     connect_epias,
     disconnect_epias,
     get_epias_status,
-    read_epias_history,
 )
 from pyracast.metering.scheduler import enqueue_due_epias_jobs
 from pyracast.plants.models import Plant, PlantEvent
@@ -55,8 +54,6 @@ def test_connection_scope_identity_and_missing_configuration(
         connect(plant, stranger, client)
     with pytest.raises(PermissionDenied):
         get_epias_status(plant.pk, actor=stranger)
-    with pytest.raises(PermissionDenied):
-        read_epias_history(plant.pk, actor=stranger)
     with pytest.raises(PermissionDenied):
         disconnect_epias(plant.pk, actor=stranger)
     assert client.calls == 0
@@ -155,18 +152,6 @@ def test_daily_reconciliation_preserves_acquisitions_and_history(
         "total_mwh": "1.5",
         "sun_mwh": None,
     }
-    history = read_epias_history(plant.pk, actor=system.member)
-    assert [snapshot.pk for snapshot in history] == [acquisitions[1].pk]
-    assert (
-        read_epias_history(plant.pk, actor=system.member, start_day=NOW.date(), end_day=NOW.date())
-        == []
-    )
-    for start, end in (
-        (NOW.date(), NOW.date() - timedelta(days=1)),
-        (NOW.date() - timedelta(days=367), NOW.date()),
-    ):
-        with pytest.raises(ValidationError, match="invalid_history_window"):
-            read_epias_history(plant.pk, actor=system.member, start_day=start, end_day=end)
     status = get_epias_status(plant.pk, actor=system.member)
     assert status["archived_days"] == 1
     assert status["last_success_at"] is not None
@@ -177,7 +162,7 @@ def test_daily_reconciliation_preserves_acquisitions_and_history(
     assert event.actor_id == system.admin.pk
     assert event.details == {"provider_plant_id": 7, "eic": linked.eic, "revision": 1}
     assert enqueue_due_epias_jobs(now=next_day) == []
-    assert read_epias_history(plant.pk, actor=system.member)[0].pk == history[0].pk
+    assert EpiasSnapshot.objects.filter(pk=acquisitions[1].pk).exists()
     monkeypatch.setattr(timezone, "now", lambda: next_day + timedelta(hours=1))
     reconnected = connect(plant, system.admin)
     assert reconnected.revision == linked.revision + 1
@@ -471,7 +456,6 @@ def test_reconnection_same_clock_starts_new_jobs_and_hides_previous_mapping(
     assert EpiasCollectionJob.objects.filter(status="pending").count() == 90
     assert get_epias_status(plant.pk, actor=system.member)["archived_days"] == 1
     EpiasConnection.objects.filter(pk=linked.pk).update(provider_plant_id=100, eic="new-eic")
-    assert read_epias_history(plant.pk, actor=system.member) == []
     assert get_epias_status(plant.pk, actor=system.member)["archived_days"] == 0
     assert EpiasSnapshot.objects.count() == 1
 
@@ -502,11 +486,10 @@ def test_stale_or_revoked_attempts_cannot_finish(
         assert job.status == "superseded"
 
 
-def test_missing_connection_history_and_status_are_complete(
+def test_missing_connection_status_is_complete(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    assert read_epias_history(plant.pk, actor=system.member) == []
     status = get_epias_status(plant.pk, actor=system.member)
     assert status == {
         "connected": False,

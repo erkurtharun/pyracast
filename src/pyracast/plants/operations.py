@@ -11,7 +11,8 @@ from django.db.models import Max
 from django.utils import timezone
 from django.utils.translation import gettext
 
-from pyracast.accounts.operations import require_workspace_admin
+from pyracast.accounts.authorization import tenant_membership
+from pyracast.accounts.models import Membership
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.actuals import ACTUAL_COMPOSITION_POLICY
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
@@ -194,7 +195,7 @@ def create_plant(
         surface_azimuth,
     )
     with transaction.atomic():
-        require_workspace_admin(actor, tenant_id)
+        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
@@ -243,7 +244,7 @@ def revise_plant(
         surface_azimuth,
     )
     with transaction.atomic():
-        require_workspace_admin(actor, tenant_id)
+        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
@@ -375,7 +376,7 @@ def import_observations(
     if unit not in {"MWh", "kWh"} or not 1 <= len(observations) <= 2000:
         raise ValidationError(gettext("Use MWh or kWh and a batch of 1 to 2000 observations."))
     with transaction.atomic():
-        require_workspace_admin(actor, tenant_id)
+        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
@@ -450,7 +451,7 @@ def request_calibration(
     end_date: date,
 ) -> CalibrationRun:
     with transaction.atomic():
-        require_workspace_admin(actor, tenant_id)
+        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
@@ -606,7 +607,7 @@ def activate_calibration(
     actor: User, tenant_id: int, region_id: int, plant_id: int, calibration_id: int
 ) -> CalibrationActivation:
     with transaction.atomic():
-        require_workspace_admin(actor, tenant_id)
+        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
@@ -629,7 +630,7 @@ def reset_calibration(
     actor: User, tenant_id: int, region_id: int, plant_id: int
 ) -> CalibrationActivation:
     with transaction.atomic():
-        require_workspace_admin(actor, tenant_id)
+        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )

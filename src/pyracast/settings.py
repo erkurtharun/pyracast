@@ -29,7 +29,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "django.contrib.admin",
+    "django.contrib.admin.apps.SimpleAdminConfig",
     "django.contrib.postgres",
     "allauth",
     "allauth.account",
@@ -212,6 +212,7 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
+    "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
     "DEFAULT_RENDERER_CLASSES": ["pyracast.api.renderers.CustomerJSONRenderer"],
     "EXCEPTION_HANDLER": "pyracast.api.errors.exception_handler",
 }
@@ -219,11 +220,9 @@ SPECTACULAR_SETTINGS = {
     "TITLE": "Pyracast API",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
-    "PREPROCESSING_HOOKS": ["pyracast.api.schema.customer_endpoints"],
     "ENUM_NAME_OVERRIDES": {
         "PowerBasisEnum": [("ac", "ac"), ("dc", "dc")],
         "CalibrationStatusEnum": "pyracast.plants.serializers.calibration_status_choices",
-        "EpiasSourceKindEnum": "pyracast.metering.history.PRODUCTION_SOURCES",
         "ForecastSourceKindEnum": ["forecast", "estimated_actuals", "mixed"],
         "ProductionQualityEnum": "pyracast.plants.models.OBSERVATION_QUALITIES",
         "ChangeRequestStatusEnum": ["pending", "approved", "rejected", "withdrawn"],

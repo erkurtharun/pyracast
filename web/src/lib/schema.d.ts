@@ -228,22 +228,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/tenants/{tenant_id}/regions/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["tenants_regions_list"];
-        put?: never;
-        post: operations["tenants_regions_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/tenants/{tenant_id}/regions/{region_id}/": {
         parameters: {
             query?: never;
@@ -251,13 +235,13 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["tenants_regions_retrieve"];
-        put: operations["tenants_regions_update"];
+        get?: never;
+        put?: never;
         post?: never;
         delete: operations["tenants_regions_destroy"];
         options?: never;
         head?: never;
-        patch: operations["tenants_regions_partial_update"];
+        patch?: never;
         trace?: never;
     };
     "/api/tenants/{tenant_id}/regions/{region_id}/collection-schedule/": {
@@ -331,7 +315,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get: operations["tenants_regions_plants_retrieve"];
+        get?: never;
         put: operations["tenants_regions_plants_update"];
         post?: never;
         delete: operations["tenants_regions_plants_destroy"];
@@ -468,22 +452,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/observations/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["tenants_regions_plants_observations_list"];
-        put?: never;
-        post: operations["tenants_regions_plants_observations_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/": {
         parameters: {
             query?: never;
@@ -588,9 +556,9 @@ export interface paths {
             cookie?: never;
         };
         get: operations["tenants_regions_plants_production_source_retrieve"];
-        put: operations["tenants_regions_plants_production_source_update"];
+        put?: never;
         post?: never;
-        delete: operations["tenants_regions_plants_production_source_destroy"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -622,22 +590,6 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["tenants_regions_plants_production_preview_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/reported-production/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["tenants_regions_plants_reported_production_retrieve"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -702,22 +654,6 @@ export interface paths {
         get: operations["tenants_sites_list"];
         put?: never;
         post: operations["tenants_sites_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tenants/{tenant_id}/sites/{region_id}/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["tenants_sites_retrieve"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -949,14 +885,10 @@ export interface components {
             timezone: string;
             /** Format: date-time */
             effective_from: string;
-            daily_request_limit: number;
-            used_today: number;
-            remaining_today: number;
-            /** Format: date */
-            quota_utc_day: string;
-            requests_by_outcome: {
-                [key: string]: number;
-            };
+            /** Format: date-time */
+            last_success_at: string | null;
+            /** Format: date-time */
+            next_collection_at: string | null;
             recent_jobs: components["schemas"]["CollectionJobOutput"][];
             history_requests_reserved_per_day: number;
             history_local_time: string;
@@ -1014,10 +946,6 @@ export interface components {
          * @enum {string}
          */
         DeliveryStatusEnum: "pending" | "accepted" | "failed" | "uncertain";
-        EpiasConnectionInput: {
-            provider_plant_id: number;
-            expected_eic: string;
-        };
         EpiasConnectionOutput: {
             connected: boolean;
             provider_plant_id: number | null;
@@ -1034,73 +962,6 @@ export interface components {
             pending_jobs: number;
             archived_days: number;
         };
-        EpiasHistoryOutput: {
-            /** Format: date */
-            date: string;
-            timezone: string;
-            unit: string;
-            source_kind:
-                | (
-                      | components["schemas"]["EpiasHistoryOutputSourceKindEnum"]
-                      | components["schemas"]["NullEnum"]
-                  )
-                | null;
-            complete: boolean;
-            /** Format: double */
-            reported_total_mwh: number | null;
-            available_sources: components["schemas"]["EpiasSourceKindEnum"][];
-            calibration_eligible: boolean;
-            calibration_blocker: string | null;
-            snapshot: components["schemas"]["EpiasSnapshotOutput"] | null;
-            source_snapshots: components["schemas"]["EpiasSnapshotOutput"][];
-            readings: components["schemas"]["EpiasReadingOutput"][];
-        };
-        /**
-         * @description * `realtime_generation` - realtime_generation
-         *     * `settlement_injection` - settlement_injection
-         *     * `mixed` - mixed
-         * @enum {string}
-         */
-        EpiasHistoryOutputSourceKindEnum:
-            "realtime_generation" | "settlement_injection" | "mixed";
-        EpiasReadingOutput: {
-            source_kind:
-                | (
-                      | components["schemas"]["EpiasSourceKindEnum"]
-                      | components["schemas"]["NullEnum"]
-                  )
-                | null;
-            snapshot_id: number | null;
-            /** Format: date-time */
-            provider_timestamp: string | null;
-            /** Format: date-time */
-            period_start: string;
-            /** Format: date-time */
-            period_end: string;
-            reported: boolean;
-            /** Format: double */
-            energy_mwh: number | null;
-            /** Format: double */
-            solar_mwh: number | null;
-        };
-        EpiasSnapshotOutput: {
-            id: number;
-            configuration_id: number;
-            /** Format: date-time */
-            collected_at: string;
-            /** Format: date-time */
-            available_at: string;
-            content_sha256: string;
-            source_kind: components["schemas"]["EpiasSourceKindEnum"];
-            normalization_policy: string;
-            complete: boolean;
-        };
-        /**
-         * @description * `realtime_generation` - realtime_generation
-         *     * `settlement_injection` - settlement_injection
-         * @enum {string}
-         */
-        EpiasSourceKindEnum: "realtime_generation" | "settlement_injection";
         ForecastOutput: {
             region_id: number;
             /** Format: date */
@@ -1413,21 +1274,6 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["LocationChangeOutput"][];
         };
-        PaginatedObservationOutputList: {
-            /** @example 123 */
-            count: number;
-            /**
-             * Format: uri
-             * @example http://api.example.org/accounts/?page=4
-             */
-            next?: string | null;
-            /**
-             * Format: uri
-             * @example http://api.example.org/accounts/?page=2
-             */
-            previous?: string | null;
-            results: components["schemas"]["ObservationOutput"][];
-        };
         PaginatedPlantOutputList: {
             /** @example 123 */
             count: number;
@@ -1442,21 +1288,6 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["PlantOutput"][];
-        };
-        PaginatedRegionOutputList: {
-            /** @example 123 */
-            count: number;
-            /**
-             * Format: uri
-             * @example http://api.example.org/accounts/?page=4
-             */
-            next?: string | null;
-            /**
-             * Format: uri
-             * @example http://api.example.org/accounts/?page=2
-             */
-            previous?: string | null;
-            results: components["schemas"]["RegionOutput"][];
         };
         PaginatedSiteOutputList: {
             /** @example 123 */
@@ -1520,9 +1351,6 @@ export interface components {
         };
         PatchedCalibrationAutomationInput: {
             enabled?: boolean;
-        };
-        PatchedRegionRenameInput: {
-            name?: string;
         };
         PerformanceDay: {
             /** Format: date */
@@ -1864,14 +1692,6 @@ export interface components {
             quality: string;
             source_kind: string;
         };
-        RegionInput: {
-            name: string;
-            /** Format: double */
-            latitude: number;
-            /** Format: double */
-            longitude: number;
-            timezone: string;
-        };
         RegionOutput: {
             readonly id: number;
             readonly name: string;
@@ -1882,9 +1702,6 @@ export interface components {
             readonly timezone: string;
             readonly revision: number;
             readonly status: string;
-        };
-        RegionRenameInput: {
-            name: string;
         };
         RejectionInput: {
             reason: string;
@@ -2088,8 +1905,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["InvitationAcceptanceInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["InvitationAcceptanceInput"];
-                "multipart/form-data": components["schemas"]["InvitationAcceptanceInput"];
             };
         };
         responses: {
@@ -2132,8 +1947,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["LanguageInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["LanguageInput"];
-                "multipart/form-data": components["schemas"]["LanguageInput"];
             };
         };
         responses: {
@@ -2235,8 +2048,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ApprovalInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["ApprovalInput"];
-                "multipart/form-data": components["schemas"]["ApprovalInput"];
             };
         };
         responses: {
@@ -2263,8 +2074,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["RejectionInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["RejectionInput"];
-                "multipart/form-data": components["schemas"]["RejectionInput"];
             };
         };
         responses: {
@@ -2355,8 +2164,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["InvitationInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["InvitationInput"];
-                "multipart/form-data": components["schemas"]["InvitationInput"];
             };
         };
         responses: {
@@ -2433,107 +2240,6 @@ export interface operations {
             };
         };
     };
-    tenants_regions_list: {
-        parameters: {
-            query?: {
-                /** @description A page number within the paginated result set. */
-                page?: number;
-            };
-            header?: never;
-            path: {
-                tenant_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedRegionOutputList"];
-                };
-            };
-        };
-    };
-    tenants_regions_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                tenant_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RegionInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["RegionInput"];
-                "multipart/form-data": components["schemas"]["RegionInput"];
-            };
-        };
-        responses: {
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RegionOutput"];
-                };
-            };
-        };
-    };
-    tenants_regions_retrieve: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                region_id: number;
-                tenant_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RegionOutput"];
-                };
-            };
-        };
-    };
-    tenants_regions_update: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                region_id: number;
-                tenant_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RegionRenameInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["RegionRenameInput"];
-                "multipart/form-data": components["schemas"]["RegionRenameInput"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RegionOutput"];
-                };
-            };
-        };
-    };
     tenants_regions_destroy: {
         parameters: {
             query?: never;
@@ -2552,34 +2258,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-        };
-    };
-    tenants_regions_partial_update: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                region_id: number;
-                tenant_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["PatchedRegionRenameInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["PatchedRegionRenameInput"];
-                "multipart/form-data": components["schemas"]["PatchedRegionRenameInput"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RegionOutput"];
-                };
             };
         };
     };
@@ -2618,8 +2296,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["CollectionScheduleInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["CollectionScheduleInput"];
-                "multipart/form-data": components["schemas"]["CollectionScheduleInput"];
             };
         };
         responses: {
@@ -2701,8 +2377,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["LocationChangeInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["LocationChangeInput"];
-                "multipart/form-data": components["schemas"]["LocationChangeInput"];
             };
         };
         responses: {
@@ -2754,35 +2428,10 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["PlantInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["PlantInput"];
-                "multipart/form-data": components["schemas"]["PlantInput"];
             };
         };
         responses: {
             201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PlantOutput"];
-                };
-            };
-        };
-    };
-    tenants_regions_plants_retrieve: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                plant_id: number;
-                region_id: number;
-                tenant_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2806,8 +2455,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["PlantInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["PlantInput"];
-                "multipart/form-data": components["schemas"]["PlantInput"];
             };
         };
         responses: {
@@ -2880,8 +2527,6 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": components["schemas"]["PatchedCalibrationAutomationInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["PatchedCalibrationAutomationInput"];
-                "multipart/form-data": components["schemas"]["PatchedCalibrationAutomationInput"];
             };
         };
         responses: {
@@ -2958,8 +2603,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["CalibrationInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["CalibrationInput"];
-                "multipart/form-data": components["schemas"]["CalibrationInput"];
             };
         };
         responses: {
@@ -3035,8 +2678,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["IncidentRequestInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["IncidentRequestInput"];
-                "multipart/form-data": components["schemas"]["IncidentRequestInput"];
             };
         };
         responses: {
@@ -3064,8 +2705,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ProductionRequestInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["ProductionRequestInput"];
-                "multipart/form-data": components["schemas"]["ProductionRequestInput"];
             };
         };
         responses: {
@@ -3121,61 +2760,6 @@ export interface operations {
             };
         };
     };
-    tenants_regions_plants_observations_list: {
-        parameters: {
-            query?: {
-                /** @description A page number within the paginated result set. */
-                page?: number;
-            };
-            header?: never;
-            path: {
-                plant_id: number;
-                region_id: number;
-                tenant_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedObservationOutputList"];
-                };
-            };
-        };
-    };
-    tenants_regions_plants_observations_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                plant_id: number;
-                region_id: number;
-                tenant_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ObservationImport"];
-                "application/x-www-form-urlencoded": components["schemas"]["ObservationImport"];
-                "multipart/form-data": components["schemas"]["ObservationImport"];
-            };
-        };
-        responses: {
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ObservationImportOutput"];
-                };
-            };
-        };
-    };
     tenants_regions_plants_outages_list: {
         parameters: {
             query?: {
@@ -3216,8 +2800,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["IncidentInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["IncidentInput"];
-                "multipart/form-data": components["schemas"]["IncidentInput"];
             };
         };
         responses: {
@@ -3246,8 +2828,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["IncidentUpdate"];
-                "application/x-www-form-urlencoded": components["schemas"]["IncidentUpdate"];
-                "multipart/form-data": components["schemas"]["IncidentUpdate"];
             };
         };
         responses: {
@@ -3276,8 +2856,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["RevisionInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["RevisionInput"];
-                "multipart/form-data": components["schemas"]["RevisionInput"];
             };
         };
         responses: {
@@ -3306,8 +2884,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ResolveInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["ResolveInput"];
-                "multipart/form-data": components["schemas"]["ResolveInput"];
             };
         };
         responses: {
@@ -3410,57 +2986,6 @@ export interface operations {
             };
         };
     };
-    tenants_regions_plants_production_source_update: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                plant_id: number;
-                region_id: number;
-                tenant_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["EpiasConnectionInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["EpiasConnectionInput"];
-                "multipart/form-data": components["schemas"]["EpiasConnectionInput"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EpiasConnectionOutput"];
-                };
-            };
-        };
-    };
-    tenants_regions_plants_production_source_destroy: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                plant_id: number;
-                region_id: number;
-                tenant_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description No response body */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
     tenants_regions_plants_production_changes_create: {
         parameters: {
             query?: never;
@@ -3475,8 +3000,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ProductionChangesInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["ProductionChangesInput"];
-                "multipart/form-data": components["schemas"]["ProductionChangesInput"];
             };
         };
         responses: {
@@ -3504,8 +3027,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ObservationImport"];
-                "application/x-www-form-urlencoded": components["schemas"]["ObservationImport"];
-                "multipart/form-data": components["schemas"]["ObservationImport"];
             };
         };
         responses: {
@@ -3515,38 +3036,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProductionPreviewOutput"];
-                };
-            };
-        };
-    };
-    tenants_regions_plants_reported_production_retrieve: {
-        parameters: {
-            query?: {
-                /**
-                 * @description * `auto` - auto
-                 *     * `realtime_generation` - realtime_generation
-                 *     * `settlement_injection` - settlement_injection
-                 */
-                data_source?:
-                    "auto" | "realtime_generation" | "settlement_injection";
-                date?: string;
-            };
-            header?: never;
-            path: {
-                plant_id: number;
-                region_id: number;
-                tenant_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EpiasHistoryOutput"];
                 };
             };
         };
@@ -3609,8 +3098,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ReminderInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["ReminderInput"];
-                "multipart/form-data": components["schemas"]["ReminderInput"];
             };
         };
         responses: {
@@ -3682,34 +3169,10 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["SiteInput"];
-                "application/x-www-form-urlencoded": components["schemas"]["SiteInput"];
-                "multipart/form-data": components["schemas"]["SiteInput"];
             };
         };
         responses: {
             201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SiteOutput"];
-                };
-            };
-        };
-    };
-    tenants_sites_retrieve: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                region_id: number;
-                tenant_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -158,8 +158,9 @@ working login method. Provider sign-in retains Pyracast's local MFA requirements
 Each workspace has one administrator; other members can read data and propose production
 corrections or outage changes for that administrator's approval. Workspace
 administrators can invite members and change that workspace's customer settings, but
-gain no platform privileges. Both the API and application operations enforce these
-permissions; mutations lock the tenant before its resources. Personal account,
+gain no platform privileges. Application operations enforce these permissions through
+`accounts/authorization.py`; mutations check membership, then lock the tenant before its
+resources, and reads take no tenant lock. Personal account,
 security and language settings remain available to each user. Verified platform
 administrators reassign the role at **Workspaces**, choosing an existing active member.
 Transfers check the previous administrator, serialize with writes and retain an audit
@@ -242,7 +243,7 @@ Workspace administrators can rename a plant and its region without changing a re
 
 ## Reliability and security
 
-- Keep one authentication authority: django-allauth browser sessions, with no app-token endpoints or separate password login. Platform admin and API actions require active superuser status and MFA evidence bound to the current user and a live authenticator. Administrators require a TOTP factor provisioned through the trusted operator command before login; password possession cannot bootstrap an administrative factor. Upgrades remove an empty legacy OTP table but stop if any legacy device exists, requiring verified factor migration instead of reducing MFA to password/email enrollment. Reauthentication protects security changes, and recovery codes are one-use and shown once. MFA secrets use authenticated encryption with an HKDF context distinct from provider credentials.
+- Keep one authentication authority: django-allauth browser sessions, with no app-token endpoints or separate password login. A platform administrator is an active staff superuser; console actions also require MFA evidence bound to the current user and a live authenticator. Administrators require a TOTP factor provisioned through the trusted operator command before login; password possession cannot bootstrap an administrative factor. Upgrades remove an empty legacy OTP table but stop if any legacy device exists, requiring verified factor migration instead of reducing MFA to password/email enrollment. Reauthentication protects security changes, and recovery codes are one-use and shown once. MFA secrets use authenticated encryption with an HKDF context distinct from provider credentials.
 - Derive tenant access from authenticated membership. Scope list/detail/create/update operations, worker jobs and cache keys. Tenant ownership is not a trusted request field. Django admin does not provide tenant isolation automatically.
 - Store provider keys in a secret manager or authenticated encryption with keys outside the database. Accept credential changes through write-only admin inputs; redact secrets from responses, logs and audit payloads.
   The MFA-protected administration setup page supports existing authorized accounts
@@ -469,7 +470,7 @@ selected dataset, including hidden edge intervals, units and provenance. CSV cel
 preserve missingness, precision and quoting, and neutralize spreadsheet formulas
 in text fields.
 
-Provide authenticated region submission/list/detail, platform-admin connection validation and approve/reject/suspend actions, and dated forecast retrieval. Generate OpenAPI; use explicit units, bounded date ranges, pagination and stable error codes. Approval transitions are operations, not writable status fields.
+Route only what the customer interface calls: plant submission and listing, dated forecast retrieval and the workspace operations; provider setup, validation and approval live in the operator console. The customer DRF endpoints accept JSON bodies only. Generate OpenAPI; use explicit units, bounded date ranges, pagination and stable error codes. Approval transitions are operations, not writable status fields.
 
 Workspace administrators can move their region or plant definitions to a tenant-scoped recycle bin. Keep data for 30 elapsed days from the first deletion; repeated deletion never extends the deadline. Normal reads and writes hide deleted definitions, and region deletion also hides its children and stops collection, calibration and reminders. Restoring a region preserves approval and configuration, resumes future schedules without catch-up, and leaves independently deleted plants in the bin. A plant can only be restored under an active region. Already submitted email cannot be recalled.
 
@@ -529,7 +530,7 @@ and authentication-cache connections per serving thread.
 
 Keep the customer interface compact and responsive: primary values and actions stay visible; source details and extended guidance use disclosures. Preserve units, missing values, quality warnings and CSV access. Tables scroll within their own focusable region; navigation and forms fit narrow screens. Show the journal's local timezone once, retaining interval offsets when a daylight-saving transition makes local times ambiguous.
 
-Weather supplier identity and account/site details remain internal. Customer JSON, email and CSV use neutral source labels while preserving units, missingness, source kinds and quality warnings. Delivery projections never rewrite saved provenance. The customer OpenAPI schema excludes platform operations and their configuration components; platform endpoints retain administrator authorization.
+Weather supplier identity and account/site details remain internal. Customer JSON, email and CSV use neutral source labels while preserving units, missingness, source kinds and quality warnings. Delivery projections never rewrite saved provenance; operator provenance reaches customers only through typed allowlists, and account-level provider usage stays in the console.
 
 Auxiliary Open-Meteo weather is the narrow attribution exception: its license requires visible source and license links next to displayed data. Worker forecast deliveries archive its native hourly GHI, temperature endpoints and ground-snow indicators separately on the Hobby forecast snapshot, without using additional Solcast endpoints or quota. Regional results expose an independent weather reference with its own energy, coverage, collection time and attribution; weather failure does not prevent the Hobby result from publishing. Neither source fills the other's gaps. Existing emails and CSV exports retain their original dataset. The optional customer API key lives only in environment configuration; the free endpoint is for evaluation/non-commercial use.
 

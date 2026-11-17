@@ -1,18 +1,19 @@
-from datetime import UTC, timedelta
+from datetime import datetime, timedelta
 
 import pytest
 from django.test import Client
 
 from pyracast.connections.operations import reserve_request
-from pyracast.forecasts.models import CollectionJob, RequestAttempt
-from pyracast.forecasts.schedule import get_schedule, schedule_payload
-from pyracast.regions.operations import configure_binding, submit_region
+from pyracast.forecasts.models import CollectionJob, ForecastSnapshot, RequestAttempt
+from pyracast.forecasts.schedule import configure_schedule, get_schedule, schedule_payload
+from pyracast.forecasts.scheduler import enqueue_due
+from pyracast.regions.operations import configure_binding, submit_region, transition_region
 from tests.support.domain import NOW, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
-def test_collection_status_counts_account_attempts_by_utc_day_without_leaking_other_jobs() -> None:
+def test_collection_status_reports_the_plants_own_collection_only() -> None:
     system = make_system(approved=True)
     moment = NOW.replace(hour=23, minute=30)
     schedule = get_schedule(system.member, system.tenant.pk, system.region.pk, moment)
@@ -50,11 +51,29 @@ def test_collection_status_counts_account_attempts_by_utc_day_without_leaking_ot
             scheduled_slot=moment + timedelta(minutes=offset),
             available_at=moment,
         )
+    for job, binding in ((original, system.binding), (other_job, other_binding)):
+        collected_job = CollectionJob.objects.create(
+            binding=binding,
+            target_date=job.target_date,
+            scheduled_slot=job.scheduled_slot - timedelta(days=1),
+            available_at=moment - timedelta(days=1),
+            status="succeeded",
+        )
+        ForecastSnapshot.objects.create(
+            job=collected_job,
+            binding=binding,
+            raw_payload={},
+            normalized_intervals=[],
+            collected_at=moment - timedelta(minutes=job.pk) if job is original else moment,
+            source_kind="forecast",
+        )
     payload = schedule_payload(schedule, moment)
-    assert payload["quota_utc_day"] == moment.astimezone(UTC).date().isoformat()
-    assert payload["requests_by_outcome"] == {"succeeded": 2, "failed": 2, "uncertain": 1}
-    assert payload["used_today"] == 5
-    assert payload["remaining_today"] == 5
+    assert payload["last_success_at"] == moment - timedelta(minutes=original.pk)
+    original.refresh_from_db()
+    assert payload["next_collection_at"] == min(original.available_at, moment)
+    assert not {"used_today", "remaining_today", "requests_by_outcome", "quota_utc_day"} & set(
+        payload
+    )
     jobs = payload["recent_jobs"]
     assert isinstance(jobs, list)
     assert len(jobs) == 6
@@ -67,16 +86,85 @@ def test_collection_status_counts_account_attempts_by_utc_day_without_leaking_ot
         f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/collection-schedule/"
     )
     assert response.status_code == 200
-    assert "quota_utc_day" in response.json()
+    assert "next_collection_at" in response.json()
     assert "recent_jobs" in response.json()
 
 
-def test_collection_status_resets_at_utc_midnight() -> None:
+@pytest.mark.parametrize("native", [True, False])
+@pytest.mark.parametrize(
+    "endpoint", ["historical_import", "scaled_forecasts", "scaled_estimated_actuals"]
+)
+def test_last_success_reports_native_collection_independently_of_operator_imports(
+    endpoint: str,
+    native: bool,
+) -> None:
     system = make_system(approved=True)
-    after_midnight = NOW.replace(hour=0, minute=1) + timedelta(days=1)
-    schedule = get_schedule(system.member, system.tenant.pk, system.region.pk, after_midnight)
-    payload = schedule_payload(schedule, after_midnight)
-    assert payload["quota_utc_day"] == after_midnight.date().isoformat()
-    assert payload["used_today"] == 0
-    assert payload["requests_by_outcome"] == {"succeeded": 0, "failed": 0, "uncertain": 0}
-    assert payload["remaining_today"] == 10
+    if native:
+        job = CollectionJob.objects.get(binding=system.binding)
+        CollectionJob.objects.filter(pk=job.pk).update(status="succeeded")
+        ForecastSnapshot.objects.create(
+            job=job,
+            binding=system.binding,
+            raw_payload={},
+            normalized_intervals=[],
+            collected_at=NOW,
+            source_kind="forecast",
+        )
+    imported = CollectionJob.objects.create(
+        binding=system.binding,
+        endpoint=endpoint,
+        target_date=NOW.date(),
+        scheduled_slot=NOW + timedelta(hours=1),
+        available_at=NOW + timedelta(hours=1),
+        status="succeeded",
+    )
+    ForecastSnapshot.objects.create(
+        job=imported,
+        binding=system.binding,
+        raw_payload={},
+        normalized_intervals=[],
+        collected_at=NOW + timedelta(hours=1),
+        source_kind="estimated_actuals" if endpoint != "scaled_forecasts" else "forecast",
+    )
+    schedule = get_schedule(system.member, system.tenant.pk, system.region.pk, NOW)
+
+    assert schedule_payload(schedule, NOW)["last_success_at"] == (NOW if native else None)
+    assert ForecastSnapshot.objects.filter(binding=system.binding).count() == (2 if native else 1)
+
+
+@pytest.mark.parametrize("stop", ["disable_schedule", "suspend_plant"])
+def test_next_collection_is_the_earliest_queued_job_forecast_slot_or_nightly_window(
+    stop: str,
+) -> None:
+    system = make_system(approved=True)
+    configure_schedule(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        enabled=True,
+        times=["15:00", "09:00"],
+        now=NOW,
+    )
+    morning = (NOW + timedelta(days=1)).replace(hour=6)
+    enqueue_due(morning)
+    CollectionJob.objects.filter(status="pending").update(status="succeeded")
+
+    def next_collection(now: datetime) -> object:
+        schedule = get_schedule(system.member, system.tenant.pk, system.region.pk, now)
+        return schedule_payload(schedule, now)["next_collection_at"]
+
+    later = morning + timedelta(hours=1)
+    assert next_collection(later) == morning + timedelta(hours=6)
+    assert next_collection(morning + timedelta(hours=7)) == morning + timedelta(hours=15)
+    retry_at = later + timedelta(minutes=30)
+    CollectionJob.objects.filter(endpoint="forecasts", scheduled_slot=morning).update(
+        status="retry", available_at=retry_at
+    )
+    assert next_collection(later) == retry_at
+    if stop == "disable_schedule":
+        configure_schedule(
+            system.member, system.tenant.pk, system.region.pk, enabled=False, times=[], now=later
+        )
+    else:
+        transition_region(system.admin, system.region.pk, "suspended")
+    assert next_collection(later) is None

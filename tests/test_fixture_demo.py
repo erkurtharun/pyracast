@@ -21,7 +21,10 @@ def test_fixture_demo(settings: LazySettings) -> None:
     settings.DEBUG = True
     with pytest.raises(CommandError, match="superuser"):
         call_command("fixture_demo", "--username", "demo")
-    User.objects.create_user(username="demo", is_superuser=True)
+    demo = User.objects.create_user(username="demo", is_superuser=True)
+    with pytest.raises(CommandError, match="staff superuser"):
+        call_command("fixture_demo", "--username", "demo")
+    User.objects.filter(pk=demo.pk).update(is_staff=True)
     path = call_command("fixture_demo", "--username", "demo")
     assert "/forecast/?date=" in path
     assert ForecastResult.objects.get().payload["complete"] is True
@@ -33,7 +36,7 @@ def test_fixture_demo(settings: LazySettings) -> None:
 @pytest.fixture
 def demo_user(settings: LazySettings) -> User:
     settings.DEBUG = True
-    return User.objects.create_user(username="demo", is_superuser=True)
+    return User.objects.create_user(username="demo", is_superuser=True, is_staff=True)
 
 
 def test_fixture_demo_ends_on_a_plant_forecast(demo_user: User) -> None:
@@ -84,7 +87,7 @@ def test_fixture_demo_resumes_after_an_interrupted_run(
 
 
 def test_each_superuser_gets_an_own_demo_workspace(demo_user: User) -> None:
-    User.objects.create_user(username="second", is_superuser=True)
+    User.objects.create_user(username="second", is_superuser=True, is_staff=True)
 
     call_command("fixture_demo", "--username", "demo")
     call_command("fixture_demo", "--username", "second")

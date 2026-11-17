@@ -9,7 +9,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from pyracast import trash
-from pyracast.accounts.operations import require_member
+from pyracast.accounts.authorization import tenant_membership
 from pyracast.plants import operations
 from pyracast.plants.automation import automation_status, set_calibration_automation
 from pyracast.plants.history import plant_outlook
@@ -17,9 +17,7 @@ from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
     Plant,
-    ProductionObservation,
 )
-from pyracast.plants.observations import observation_heads
 from pyracast.plants.performance import forecast_performance
 from pyracast.plants.production import production_history
 from pyracast.plants.production_changes import (
@@ -39,7 +37,6 @@ from pyracast.plants.serializers import (
     ForecastQuery,
     ObservationImport,
     ObservationImportOutput,
-    ObservationOutput,
     PerformanceOutput,
     PerformanceQuery,
     PlantForecastOutput,
@@ -56,7 +53,7 @@ from pyracast.regions.models import Region
 class ScopedView[ModelT: Model](GenericAPIView[ModelT]):
     def plant_queryset(self) -> QuerySet[Plant]:
         tenant_id = self.kwargs["tenant_id"]
-        require_member(cast(User, self.request.user), tenant_id)
+        tenant_membership(cast(User, self.request.user), tenant_id)
         region = get_object_or_404(
             Region, pk=self.kwargs["region_id"], tenant_id=tenant_id, deleted_at__isnull=True
         )
@@ -107,10 +104,6 @@ class PlantsView(ScopedView[Plant]):
 class PlantView(ScopedView[Plant]):
     serializer_class = PlantOutput
 
-    @extend_schema(responses=PlantOutput)
-    def get(self, _request: Request, **_kwargs: Any) -> Response:
-        return Response(PlantOutput(self.plant()).data)
-
     @extend_schema(request=PlantInput, responses=PlantOutput)
     def put(self, request: Request, **_kwargs: Any) -> Response:
         scope = self.scope()
@@ -128,37 +121,6 @@ class PlantView(ScopedView[Plant]):
             kwargs["plant_id"],
         )
         return Response(status=204)
-
-
-class ObservationsView(ScopedView[ProductionObservation]):
-    serializer_class = ObservationOutput
-
-    @extend_schema(responses=ObservationOutput(many=True))
-    def get(self, _request: Request, **_kwargs: Any) -> Response:
-        from django.utils import timezone
-
-        rows = (
-            observation_heads(cutoff=timezone.now())
-            .filter(plant=self.plant(), is_reverted=False)
-            .order_by("starts_at", "id")
-        )
-        page = self.paginate_queryset(rows)
-        return self.get_paginated_response(ObservationOutput(page, many=True).data)
-
-    @extend_schema(request=ObservationImport, responses={201: ObservationImportOutput})
-    def post(self, request: Request, **_kwargs: Any) -> Response:
-        scope = self.scope()
-        data = ObservationImport(data=request.data)
-        data.is_valid(raise_exception=True)
-        values = data.validated_data
-        rows = [operations.ObservationInput(**row) for row in values["observations"]]
-        result = operations.import_observations(
-            *scope,
-            configuration_id=values["configuration_id"],
-            unit=values["unit"],
-            observations=rows,
-        )
-        return Response(result, status=201)
 
 
 class ProductionView(ScopedView[Plant]):

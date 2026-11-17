@@ -12,7 +12,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from pyracast.accounts.operations import require_admin
+from pyracast.accounts.authorization import require_platform_admin
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import CollectionJob, ForecastSnapshot, HistoricalReferenceImport
@@ -163,7 +163,7 @@ def import_historical_reference(
     *,
     trusted_root: Path | None = None,
 ) -> HistoricalReferenceImport:
-    require_admin(actor)
+    require_platform_admin(actor)
     source = parse_source_settings(asdict(source_settings))
     power = load_power(power_path, trusted_root=trusted_root)
     if not power.intervals:
