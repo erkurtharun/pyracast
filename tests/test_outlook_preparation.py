@@ -118,7 +118,7 @@ def test_region_keeps_its_selected_coverage_when_a_source_is_revoked_during_the_
     assert datetime.fromisoformat(during.json()["collected_at"]) == snapshot.collected_at
     after = client.get(path, params)
     assert after.status_code == 200
-    assert after.json()["collected_at"] != during.json()["collected_at"]
+    assert datetime.fromisoformat(after.json()["collected_at"]) == NOW - timedelta(hours=2)
 
 
 @pytest.mark.parametrize("source_kind", ["forecast", "estimated_actuals"])

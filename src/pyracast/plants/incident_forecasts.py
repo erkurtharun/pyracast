@@ -9,6 +9,7 @@ from pyracast.forecasts.intraday import (
     apply_intraday_source,
 )
 from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.forecasts.sources import mark_forecast_fallback
 from pyracast.incidents.operations import select_incidents
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.forecast_sources import apply_composition, replay_composition
@@ -138,6 +139,8 @@ def incident_scenario(
                 normal["provenance"]["selection_policy"] = provenance["selection_policy"]
             else:
                 apply_composition(normal, selected_sources[1], selected_sources[0])
+        if provenance.get("fallback_reason") == "estimated_actuals_unavailable":
+            mark_forecast_fallback(normal, datetime.fromisoformat(provenance["selection_cutoff"]))
         normal["quality_flags"].append("calibration_invalidated_by_outage_history")
         outlook["result"] = normal
         outlook["calibration_id"] = None

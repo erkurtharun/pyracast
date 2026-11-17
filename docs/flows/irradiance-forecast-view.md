@@ -30,7 +30,7 @@ sequenceDiagram
             V->>O: "region, date, source, now"
             alt "date outside window, or estimated actuals for a future day"
                 O-->>V: "OutlookRequestError"
-                V-->>P: "400 date_out_of_range or completed_day_required"
+                V-->>P: "400 date_out_of_range or completed_day_required (COMMIT)"
             else "past day, auto or estimated actuals"
                 O->>DB: "approved binding, native or scaled actual snapshots"
                 opt "auto and daylight actuals incomplete"
@@ -41,8 +41,13 @@ sequenceDiagram
             else "today or future"
                 O->>DB: "covering forecast snapshots, actuals for auto or estimated actuals today"
             end
-            O-->>V: "outlook, or ValidationError calculation_out_of_range"
-            V-->>P: "200 body, or 400 invalid_request (COMMIT)"
+            alt "calculation ValidationError"
+                O-->>V: "ValidationError calculation_out_of_range"
+                V-->>P: "400 invalid_request (ROLLBACK)"
+            else "outlook returned"
+                O-->>V: "outlook"
+                V-->>P: "200 body (COMMIT)"
+            end
         end
     end
     P-->>U: "chart, stats, weather card, or error notice"
