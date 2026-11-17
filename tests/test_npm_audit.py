@@ -155,7 +155,7 @@ def fake_npm(
     monkeypatch.setattr(subprocess, "run", run)
 
 
-@pytest.mark.parametrize(("status", "audit"), [(0, report()), (1, REPORT)])
+@pytest.mark.parametrize(("status", "audit"), [(0, report()), (0, REPORT), (1, REPORT)])
 def test_npm_reports_with_its_normal_statuses(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int, audit: dict[str, Any]
 ) -> None:
@@ -165,12 +165,11 @@ def test_npm_reports_with_its_normal_statuses(
     assert calls == [["/bin/npm", "audit", "--json"]]
 
 
-@pytest.mark.parametrize(("status", "audit"), [(0, REPORT), (1, report())])
-def test_a_status_that_contradicts_the_report_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int, audit: dict[str, Any]
+def test_a_failure_status_without_vulnerabilities_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    fake_npm(monkeypatch, json.dumps(audit), [], status=status)
-    with pytest.raises(RuntimeError, match=f"exited with {status}, contradicting its report"):
+    fake_npm(monkeypatch, json.dumps(report()), [], status=1)
+    with pytest.raises(RuntimeError, match="exited with 1, contradicting its report"):
         run_audit(tmp_path)
 
 

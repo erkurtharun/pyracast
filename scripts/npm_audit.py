@@ -9,7 +9,7 @@ from typing import Any, TypedDict
 
 GITHUB_ADVISORY = re.compile(r"https://github\.com/advisories/(GHSA(?:-[0-9a-z]{4}){3})")
 EXCEPTION_KEYS = {"advisory", "package", "reason", "expires"}
-# npm audit exits 1 exactly when it reports vulnerabilities; any other status is a failed audit.
+# npm audit exits 1 only when it reports vulnerabilities (0 below a configured audit-level).
 AUDIT_STATUSES = {0, 1}
 
 
@@ -115,9 +115,10 @@ def run_audit(web: Path) -> Any:
         raise RuntimeError(f"npm audit exited with {result.returncode}: {result.stderr.strip()}")
     report = json.loads(result.stdout)
     if (
-        isinstance(report, dict)
+        result.returncode == 1
+        and isinstance(report, dict)
         and "error" not in report
-        and result.returncode != int(bool(report.get("vulnerabilities")))
+        and not report.get("vulnerabilities")
     ):
         raise RuntimeError(
             f"npm audit exited with {result.returncode}, contradicting its report: "
