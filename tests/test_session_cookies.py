@@ -3,18 +3,25 @@ from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.test import Client, override_settings
 
+from pyracast import settings as production
+
 PASSWORD = "test-only-" + "harbor-lantern-42!"
 
 
+# tests/settings.py pins PYRACAST_DEBUG=0 before importing pyracast.settings, so this module holds
+# the production cookie configuration that the test overlay replaces.
 @pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 @override_settings(
-    SESSION_COOKIE_NAME="__Host-pyracast-sessionid",
-    CSRF_COOKIE_NAME="__Host-pyracast-csrftoken",
-    SESSION_COOKIE_SECURE=True,
-    CSRF_COOKIE_SECURE=True,
+    SESSION_COOKIE_NAME=production.SESSION_COOKIE_NAME,
+    CSRF_COOKIE_NAME=production.CSRF_COOKIE_NAME,
+    SESSION_COOKIE_SECURE=production.SESSION_COOKIE_SECURE,
+    CSRF_COOKIE_SECURE=production.CSRF_COOKIE_SECURE,
     CSRF_TRUSTED_ORIGINS=["https://testserver"],
 )
 def test_production_cookie_attributes_satisfy_the_host_prefix() -> None:
+    assert production.DEBUG is False
+    assert production.SESSION_COOKIE_NAME == "__Host-pyracast-sessionid"
+    assert production.CSRF_COOKIE_NAME == "__Host-pyracast-csrftoken"
     user = User.objects.create_user(
         username="member", email="member@example.com", password=PASSWORD
     )
@@ -33,8 +40,8 @@ def test_production_cookie_attributes_satisfy_the_host_prefix() -> None:
 
     assert login.status_code == 200
     cookies = [
-        session.cookies["__Host-pyracast-csrftoken"],
-        login.cookies["__Host-pyracast-sessionid"],
+        session.cookies[production.CSRF_COOKIE_NAME],
+        login.cookies[production.SESSION_COOKIE_NAME],
     ]
     for cookie in cookies:
         header = cookie.OutputString()

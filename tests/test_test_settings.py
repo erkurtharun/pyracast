@@ -70,9 +70,10 @@ def settings_in(directory: Path, environment: dict[str, str]) -> dict[str, str]:
         | {"DJANGO_SETTINGS_MODULE": "tests.settings", "PYTHONPATH": str(root)},
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
         timeout=60,
     )
+    assert result.returncode == 0, result.stderr
     return cast("dict[str, str]", json.loads(result.stdout))
 
 

@@ -4,7 +4,7 @@ A developer runs `scripts/check.py`, the `web` npm scripts or `scripts/check_sci
 
 ## Entry points
 
-- `scripts/check.py` `main`: default run, `--shard INDEX/COUNT --shard-output DIR`, or `--combine-shards DIR...`; `--static-only` or `--tests-only` select stages, and arguments after `--` go to pytest (a run that selects tests adds `--no-cov`, since the floor applies to the whole suite). `web_npm` decides whether the web stages run. Pytest settings live in the native `[tool.pytest]` table of `pyproject.toml` (`strict = true`, list `addopts`, `faulthandler_timeout = 300`). `scripts/pytest_shard.py` is its pytest plugin (`pytest_collection_modifyitems`) and manifest validator (`validate_shards`, `finish_shard`).
+- `scripts/check.py` `main`: default run, `--shard INDEX/COUNT --shard-output DIR`, or `--combine-shards DIR...`; `--static-only` or `--tests-only` select stages, and arguments after `--` go to pytest unchanged (pass `--no-cov` with a test selection, since the floor applies to the whole suite). `web_npm` decides whether the web stages run. Pytest settings live in the native `[tool.pytest]` table of `pyproject.toml` (`strict = true`, list `addopts`, `faulthandler_timeout = 300`). `scripts/pytest_shard.py` is its pytest plugin (`pytest_collection_modifyitems`) and manifest validator (`validate_shards`, `finish_shard`).
 - `web/package.json` scripts: `check` (static + `test`), `check:coverage` (static + `test:coverage`), `check:static` (format:check, lint, typecheck, build), `test:integration`, `api:generate`. `scripts/generate_api_schema.py --check` compares a fresh schema and types with the committed files. Configs: `web/playwright.config.ts`, `web/playwright.integration.config.ts`, `web/eslint.config.mjs`; coverage in `web/testing/run-coverage.mjs`, `coverage-options.ts`, `coverage-reporter.ts`.
 - `tests/test_browser.py` `test_browser_against_live_django`: the only automated runner of the real-backend Playwright suite in `web/integration/` (a developer can also call `npm run test:integration` by hand with the `BROWSER_*` variables).
 - `scripts/check_scientific.py` `main`: probe of the optional `scientific` extra (pvlib, h5py, HDF5); optional as a dependency, but CI runs it on every run.
@@ -33,6 +33,7 @@ flowchart TD
     P -->|"first nonzero exit"| X
     M -->|"--combine-shards"| C["validate_shards, coverage combine, report at the floor, xml"]
     F -->|"first nonzero exit"| X["stop with that exit code"]
+    WG -->|"first nonzero exit"| X
     H -->|"first nonzero exit"| X
     H --> K["finish_shard writes manifest.json beside coverage.dat"]
     K -->|"CI artifact upload and download"| C
@@ -81,7 +82,7 @@ None for users. Privilege boundaries: workflow `permissions: contents: read` and
 | xdist workers collected different shards | `finish_shard` raises `ValueError` after the tests passed; no `manifest.json`. |
 | Missing, duplicate, foreign or empty-coverage shard on combine | "Invalid test shards: ..." on stderr, exit 2. |
 | Combined coverage below the floor | `coverage report` exit 2, no `coverage.xml`. |
-| Fresh schema or types differ from the committed files | `generate_api_schema.py --check` names each stale file and the fix command `npm --prefix web run api:generate`, exit 1 (a semantic `openapi.json` difference is reported before Node runs). |
+| Fresh schema or types differ from the committed files, or a committed file is missing or not valid JSON | `generate_api_schema.py --check` names each stale file and the fix command `npm --prefix web run api:generate`, exit 1 (a semantic `openapi.json` difference is reported before Node runs). |
 | `npx`, `openapi-typescript` or prettier fails during `--check` | Its stderr and exit code (1 when `npx` is missing). |
 | New advisory in npm or Python dependencies | `npm audit --audit-level=low` or `pip-audit --strict` fails the job without a code change. |
 | Playwright test fails in CI (main config) | Retried twice; a test that passes only on a retry is flaky and fails the job (`failOnFlakyTests`). The integration config has no retries. |
@@ -109,8 +110,8 @@ None for users. Privilege boundaries: workflow `permissions: contents: read` and
 
 - `tests/test_pytest_shard.py`: shard parsing, partition, six aggregate rejections (missing, duplicate, overlap, inventory, identity, missing coverage), worker mismatch, the `--help` entrypoint, and a real two-shard xdist run merged through `check.main` (shards run by direct pytest calls, not `check.py --shard`).
 - `tests/test_quality_gate.py`: the worker count passed to every gate command (capped, fallback, explicit value kept) and its printed line; the gate covers every static `ci.yml` command except `migrate`; the web skip line and the failure when `npm` is missing beside `web/node_modules`; `--static-only`, `--tests-only`, pytest arguments after `--` (also in shard mode), contradictory modes, per-stage timing and the stop at the first failing stage.
-- `tests/test_api_schema_generation.py`: generation ignores local configuration, the runtime cookie name; `--check` reports a semantically or only formatting-wise stale `openapi.json` and stale `schema.d.ts` without writing them, accepts current files, and returns the exit code of a missing `npx` or a failing Node tool (Node calls replaced by fakes).
-- `tests/test_session_cookies.py`: under the production cookie names both `Set-Cookie` headers carry `Secure`, `Path=/` and no `Domain`.
+- `tests/test_api_schema_generation.py`: generation ignores local configuration, the runtime cookie name; `--check` reports a semantically or only formatting-wise stale `openapi.json` and stale `schema.d.ts` without writing them, reports a missing or unparsable committed file as stale, accepts current files, and returns the exit code of a missing `npx` or a failing Node tool (Node calls replaced by fakes).
+- `tests/test_session_cookies.py`: under the cookie names and `Secure` flags of `pyracast.settings` without `PYRACAST_DEBUG` both `Set-Cookie` headers carry `Secure`, `Path=/` and no `Domain`.
 - `tests/test_start_postgres.py`: `--non-durable` adds the three server options on Windows (`pg_ctl -o`) and Linux (`postgres -c` after the image) and is off by default.
 - `tests/test_test_settings.py`: both database aliases report `synchronous_commit = off`; a hostile `.env` and shell environment leave the test settings unchanged.
 - `tests/test_translations.py`: `compile_catalogs` (the translations step) and the committed catalogs.

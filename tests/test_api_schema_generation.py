@@ -141,6 +141,35 @@ def test_check_mode_reports_a_schema_that_differs_only_in_formatting(
     assert (web / "openapi.json").read_bytes() == compact
 
 
+@pytest.mark.parametrize(
+    ("damaged", "content"),
+    [
+        ("openapi.json", None),
+        ("openapi.json", b"{not json"),
+        ("src/lib/schema.d.ts", None),
+    ],
+)
+def test_check_mode_reports_a_missing_or_unreadable_committed_file_as_stale(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    damaged: str,
+    content: bytes | None,
+) -> None:
+    web = committed_web(tmp_path, monkeypatch, b"fresh types\n")
+    if content is None:
+        (web / damaged).unlink()
+    else:
+        (web / damaged).write_bytes(content)
+    node_tools(monkeypatch, b"fresh types\n")
+
+    assert generate_api_schema.main(["--check"]) == 1
+
+    output = capsys.readouterr().out
+    assert f"web/{damaged} is stale" in output
+    assert "npm --prefix web run api:generate" in output
+
+
 def test_check_mode_requires_npx(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

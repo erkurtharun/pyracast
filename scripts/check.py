@@ -103,8 +103,8 @@ def static_stages(root: Path) -> list[Stage]:
     npm = web_npm(root)
     if npm is None:
         print(
-            "SKIPPED web: web/node_modules is missing; run `npm ci` in web/ to include "
-            "the API schema and web static checks.",
+            "SKIPPED web: web/node_modules is missing; run `npm --prefix web ci "
+            "--ignore-scripts` to include the API schema and web static checks.",
             flush=True,
         )
         return stages

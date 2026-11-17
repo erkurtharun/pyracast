@@ -55,7 +55,9 @@ def generate_openapi(output: Path) -> int:
 def web_tool(*arguments: str, stdin: bytes | None = None) -> bytes:
     npx = shutil.which("npx")
     if npx is None:
-        raise RuntimeError("npx is missing; install Node.js and run `npm ci` in web/.")
+        raise RuntimeError(
+            "npx is missing; install Node.js and run `npm --prefix web ci --ignore-scripts`."
+        )
     result = run([npx, "--no-install", *arguments], WEB, stdin=stdin, capture=True)
     result.check_returncode()
     return result.stdout
@@ -68,8 +70,24 @@ def formatted(content: bytes, path: str) -> bytes:
     )
 
 
+def committed(name: str) -> bytes | None:
+    try:
+        return (WEB / name).read_bytes()
+    except FileNotFoundError:
+        return None
+
+
+def same_document(fresh: bytes, current: bytes | None) -> bool:
+    if current is None:
+        return False
+    try:
+        return bool(json.loads(fresh) == json.loads(current))
+    except ValueError:
+        return False
+
+
 def stale_files(openapi: Path) -> list[str]:
-    if json.loads(openapi.read_bytes()) != json.loads((WEB / "openapi.json").read_bytes()):
+    if not same_document(openapi.read_bytes(), committed("openapi.json")):
         return ["openapi.json"]
     generated = {
         "openapi.json": formatted(openapi.read_bytes(), "openapi.json"),
@@ -77,7 +95,7 @@ def stale_files(openapi: Path) -> list[str]:
             web_tool("openapi-typescript", str(openapi)), "src/lib/schema.d.ts"
         ),
     }
-    return [name for name, content in generated.items() if (WEB / name).read_bytes() != content]
+    return [name for name, content in generated.items() if committed(name) != content]
 
 
 def check() -> int:

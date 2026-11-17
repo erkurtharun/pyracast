@@ -1,6 +1,6 @@
 # OpenAPI schema and generated client types
 
-A developer runs `npm run api:generate` after an API change. It renders the customer-only OpenAPI document with drf-spectacular into `web/openapi.json`, then turns it into `web/src/lib/schema.d.ts`, the types the frontend imports. `generate_api_schema.py --check`, run by CI and by `scripts/check.py` when `web/node_modules` exists, regenerates both files into memory and fails if either committed file differs. A document built the same way, but in the request language, is also served to any signed-in user at `GET /api/schema/`.
+A developer runs `npm run api:generate` after an API change. It renders the customer-only OpenAPI document with drf-spectacular into `web/openapi.json`, then turns it into `web/src/lib/schema.d.ts`, the types the frontend imports. `generate_api_schema.py --check`, run by CI and by `scripts/check.py` when `web/node_modules` exists, generates the document into a temporary directory, formats both files without writing to `web/`, and fails if either committed file differs. A document built the same way, but in the request language, is also served to any signed-in user at `GET /api/schema/`.
 
 ## Entry points
 
@@ -73,8 +73,8 @@ sequenceDiagram
 | Request language Turkish (preference, cookie, `Accept-Language` or `?lang=tr`) | Served document differs from the committed English one (DRF pagination descriptions are translated) |
 | Spectacular warning (unannotated view, enum name clash) or invalid OpenAPI | `SchemaGenerationError` or `SchemaValidationError`, exit 1, `web/openapi.json` not rewritten, `schema.d.ts` not regenerated |
 | `openapi-typescript` or `prettier` fails after spectacular succeeded | `api:generate`: new `openapi.json` beside the old `schema.d.ts`, so `--check` fails. `--check`: the tool's stderr and exit code; `npx` missing gives exit 1 |
-| Committed `web/openapi.json` stale | `--check` names it and prints `npm --prefix web run api:generate`, exit 1, before Node runs; `tests/test_api_schema_generation.py` fails on content drift (it compares parsed JSON, not bytes) |
-| Committed `schema.d.ts` stale or a generated file not prettier-formatted | `--check` names the file, exit 1 (needs `web/node_modules`) |
+| Committed `web/openapi.json` stale, missing or not valid JSON | `--check` names it and prints `npm --prefix web run api:generate`, exit 1, before Node runs; `tests/test_api_schema_generation.py` fails on content drift (it compares parsed JSON, not bytes) |
+| Committed `schema.d.ts` stale or missing, or a generated file not prettier-formatted | `--check` names the file, exit 1 (needs `web/node_modules`) |
 | Generated type no longer matches component use | `npm run typecheck` (`tsc`) fails |
 | Local `.env`, `PYRACAST_*`, `DJANGO_*` or `PG*` set | Ignored: stripped from the child environment and the child runs in an empty temporary directory, so `load_environment` finds no `.env` |
 
@@ -88,7 +88,7 @@ sequenceDiagram
 
 ## Tests
 
-- `tests/test_api_schema_generation.py`: the script run with hostile environment variables and a stray `.env` must equal the committed `web/openapi.json` and carry the production cookie name; the `spectacular` command output follows `SESSION_COOKIE_NAME`; `--check` against a stale `openapi.json` exits 1 with the fix command.
+- `tests/test_api_schema_generation.py`: the script run with hostile environment variables and a stray `.env` must equal the committed `web/openapi.json` and carry the production cookie name; the `spectacular` command output follows `SESSION_COOKIE_NAME`; `--check` against a stale, missing or unparsable `openapi.json` or a stale or missing `schema.d.ts` exits 1 with the fix command, and its Node branches (current and stale types, formatting drift, missing `npx`, failing tool) run against fakes.
 - `tests/test_public_schema.py`: the authenticated endpoint has no `/api/platform/` path, no "solcast" text, no `AccountInput` component; `call_command("spectacular", validate=True, fail_on_warn=True)` succeeds and contains a region path. `tests/test_plant_api.py` `test_openapi_has_distinct_forecast_and_status_components` pins distinct forecast components and the `CalibrationStatusEnum` override.
 - `tests/test_api.py` `test_fixture_workflow_and_freshness` (authenticated 200, `/api/platform/accounts/` absent) and `tests/test_session.py` `test_session_schema_exposes_only_projection` (200, `/api/session/` documents GET but not PATCH).
-- `--check` (CI and `check.py`) and `npm run typecheck` catch drift of both files and type breakage. Gaps: no test for the anonymous 403, the YAML default, the language-dependent document, or `customer_endpoints` in isolation; the Node part of `--check` has no pytest and runs only where `web/node_modules` exists.
+- `--check` (CI and `check.py`) and `npm run typecheck` catch drift of both files and type breakage. Gaps: no test for the anonymous 403, the YAML default, the language-dependent document, or `customer_endpoints` in isolation; no pytest runs the real Node tools of `--check`, which run only where `web/node_modules` exists.

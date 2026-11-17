@@ -141,16 +141,19 @@ def test_web_stages_report_an_explicit_skip_without_node_modules(
     assert not any("check:static" in command for command in commands)
     output = capsys.readouterr().out
     assert output.count("SKIPPED web:") == 1
-    assert "npm ci" in output
+    assert "npm --prefix web ci --ignore-scripts" in output
 
 
 def test_static_only_runs_every_check_except_pytest(monkeypatch: pytest.MonkeyPatch) -> None:
     commands = record_runs(monkeypatch, "npm")
+    assert check.main([]) == 0
+    full_run = list(commands)
+    commands.clear()
 
     assert check.main(["--static-only"]) == 0
 
-    assert commands
-    assert not any(command[1:3] == ["-m", "pytest"] for command in commands)
+    assert full_run[-1][1:3] == ["-m", "pytest"]
+    assert commands == full_run[:-1]
     assert ["npm", "--prefix", "web", "run", "check:static"] in commands
 
 

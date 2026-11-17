@@ -270,7 +270,8 @@ npm --prefix web run api:generate
 
 This uses production defaults without reading local application settings or credentials.
 Commit both generated files. `uv run --locked python scripts/generate_api_schema.py --check`
-regenerates both into memory and fails on any byte difference; CI and `check.py` run it.
+generates the schema in a temporary directory, formats both files without writing to `web/`
+and fails on any byte difference with the committed files; CI and `check.py` run it.
 
 ### Dependency and static analysis
 
