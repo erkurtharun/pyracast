@@ -22,7 +22,7 @@ POLLED = {
     "api/tenants/<int:tenant_id>/sites/": ("", 19),
     "api/tenants/<int:tenant_id>/change-requests/": ("scope=pending&plant_id={plant}", 19),
     f"{REGION}forecast/": (f"date={DAY}&data_source=forecast", 24),
-    f"{REGION}collection-schedule/": ("", 23),
+    f"{REGION}collection-schedule/": ("", 22),
     f"{REGION}plants/": ("", 19),
     f"{PLANT}forecast/": (f"date={DAY}&resolution_minutes=60&data_source=forecast", 29),
     f"{PLANT}production/": (f"start_date={DAY}&end_date={DAY}&native_intervals=true", 31),
