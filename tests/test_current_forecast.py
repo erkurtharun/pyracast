@@ -11,10 +11,9 @@ from pyracast.accounts.models import Membership, Tenant
 from pyracast.connections.models import ProviderAccount
 from pyracast.forecasts.models import ForecastResult, RequestAttempt
 from pyracast.irradiance import local_day_bounds
-from pyracast.plants import current_forecast, forecasting
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import ForecastIssuance, Plant, PlantConfiguration, PlantForecast
-from pyracast.plants.operations import activate_calibration, revise_plant
+from pyracast.plants.operations import activate_calibration
 from pyracast.regions.models import Region
 from tests.test_domain import NOW
 from tests.test_plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
@@ -219,31 +218,6 @@ def test_live_requires_current_approved_configuration(
     assert result["unavailable_reason"] == "configuration_unavailable"
     assert result["result"] is None
     assert not PlantForecast.objects.exists()
-
-
-@pytest.mark.parametrize("change", ["revise", "suspend", "disable"])
-def test_live_rechecks_configuration_after_calculation(
-    monkeypatch: pytest.MonkeyPatch, change: str
-) -> None:
-    system, plant = make_plant(monkeypatch)
-    publish_snapshot(snapshot_for(system, DAY, collected_at=NOW))
-    scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
-    original = forecasting.forecast_payload
-
-    def changed(*args: Any, **kwargs: Any) -> dict[str, object]:
-        payload = original(*args, **kwargs)
-        if change == "revise":
-            revise_plant(*scope, name="Revised", dc_capacity_mw=260)
-        elif change == "suspend":
-            Region.objects.filter(pk=system.region.pk).update(status="suspended")
-        else:
-            ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=False)
-        return payload
-
-    monkeypatch.setattr(current_forecast, "forecast_payload", changed)
-    result = plant_outlook(*scope, target_date=DAY, resolution_minutes=60)
-    assert result["unavailable_reason"] == "configuration_unavailable"
-    assert result["result"] is None
 
 
 def test_live_forecast_api_keeps_tenant_boundary_and_rejects_corrupt_data(

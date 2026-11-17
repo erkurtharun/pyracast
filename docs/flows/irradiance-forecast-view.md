@@ -19,7 +19,7 @@ sequenceDiagram
     U->>P: "open Irradiance, choose day and source"
     loop "on mount and every 30 s"
         P->>V: "GET regions/r/forecast/"
-        V->>DB: "membership, region of tenant, not trashed"
+        V->>DB: "BEGIN REPEATABLE READ READ ONLY, membership, region of tenant, not trashed"
         alt "not signed in or not a member"
             V-->>P: "403 http_403"
         else "region missing, foreign or trashed"
@@ -30,7 +30,7 @@ sequenceDiagram
             V->>O: "region, date, source, now"
             alt "date outside window, or estimated actuals for a future day"
                 O-->>V: "OutlookRequestError"
-                V-->>P: "400 date_out_of_range or completed_day_required"
+                V-->>P: "400 date_out_of_range or completed_day_required (COMMIT)"
             else "past day, auto or estimated actuals"
                 O->>DB: "approved binding, native or scaled actual snapshots"
                 opt "auto and daylight actuals incomplete"
@@ -41,8 +41,13 @@ sequenceDiagram
             else "today or future"
                 O->>DB: "covering forecast snapshots, actuals for auto or estimated actuals today"
             end
-            O-->>V: "outlook, or ValidationError calculation_out_of_range"
-            V-->>P: "200 body, or 400 invalid_request"
+            alt "calculation ValidationError"
+                O-->>V: "ValidationError calculation_out_of_range"
+                V-->>P: "400 invalid_request (ROLLBACK)"
+            else "outlook returned"
+                O-->>V: "outlook"
+                V-->>P: "200 body (COMMIT)"
+            end
         end
     end
     P-->>U: "chart, stats, weather card, or error notice"
@@ -70,7 +75,7 @@ sequenceDiagram
 | Not signed in, not a member, inactive user | 403 `http_403`; region of another tenant, unknown or trashed: 404 `http_404` |
 | Missing or malformed `date`, unknown `data_source` (also `archived_forecast`), unknown query key | 400 `http_400` with DRF field details (`non_field_errors` for unknown keys) |
 | Date outside today-366 days to today+14 days (region timezone), or `estimated_actuals` after today (UI blocks only the latter) | 400 `{"code": "date_out_of_range"}` or `completed_day_required`, shown via `codes.*` |
-| Calculation raises `ValueError`/`ArithmeticError` (intraday step also `KeyError`/`TypeError`); covering snapshots change between two reads | 400 `invalid_request` with the `calculation_out_of_range` message; the race gives detail `["forecast_sources_changed"]`, which the browser shows only as a generic request failure |
+| Calculation raises `ValueError`/`ArithmeticError` (intraday step also `KeyError`/`TypeError`) | 400 `invalid_request` with the `calculation_out_of_range` message |
 | Damaged stored actuals on the past-day path, or `KeyError`/`TypeError` in plain forecast composition | unmapped, HTTP 500 (read from code, not reproduced) |
 | Same session has another request running for over 5 s | 429 `session_busy`, `Retry-After: 1`; English detail shown in every locale |
 | No eligible saved source; a missing approved binding suffices only for today, future days, past `estimated_actuals` and past `auto` without a saved fallback (past `forecast` and the past `auto` fallback can still return an older binding's data) | 200, `result: null`, `freshness: missing`, `unavailable_reason` `forecast_unavailable` or `estimated_actuals_unavailable` |
@@ -79,12 +84,12 @@ sequenceDiagram
 
 ## Rules and invariants
 
-- Every domain read is an independent autocommit query without row locks; the only lock is the per-session PostgreSQL advisory lock that `SessionRequestSerialization` holds for the whole request. Consistency comes from a cutoff (`now`, or the end of the day for the saved fallback): a source counts only when `collected_at`, `available_at`, `issued_at` and, for forecasts, `published_at` are at or before it (the past `forecast` path does not check `available_at`). Legacy and scaled past-day actuals must also be collected after the day ended; native ones contribute only intervals ended before the cutoff.
+- The view reads membership, region and every source in one `REPEATABLE READ, READ ONLY` transaction (`pyracast.db.read_snapshot`) without row locks, so the two covering-snapshot selection reads see the same rows and a concurrent write appears from the next poll on; the only lock is the per-session PostgreSQL advisory lock that `SessionRequestSerialization` holds for the whole request. Source eligibility comes from a cutoff (`now`, or the end of the day for the saved fallback): a source counts only when `collected_at`, `available_at`, `issued_at` and, for forecasts, `published_at` are at or before it (the past `forecast` path does not check `available_at`). Legacy and scaled past-day actuals must also be collected after the day ended; native ones contribute only intervals ended before the cutoff.
 - "Today" is the region's local date; day bounds use the binding timezone. Newer coverage owns its window and older forecasts fill only the rest (`latest-forecast-coverage-v2`; mixes with actuals use `estimated-actuals-then-forecast-v1`).
 - `forecast`: today and future compose current forecasts; a past day returns the newest published `ForecastResult.payload` unchanged. `estimated_actuals`: today composes completed native intervals only; a past day reads archived native or capacity-scaled actuals with no forecast filling. `auto`: future days are forecast; today mixes completed actuals with forecast and drops the forecast once actuals cover daylight; a past day uses actuals and falls back to the forecast saved before the day ended (flag `forecast_fallback`, `provenance.selection_cutoff`) until daylight is covered. Only `region.approved_binding` is current: after a binding replacement archived actual days read `missing`, while the saved fallback and the past `forecast` path may still read earlier bindings of the region.
 - `fresh` needs a current binding and every used snapshot collected within 24 h; past estimated actuals ignore age, a past `forecast` result is judged by its own age. `weather_reference` comes from the newest covering forecast snapshot, also inside mixed results and today's explicit actuals, never fills irradiance gaps and is absent from past-day actuals.
 
 ## Tests
 
-- pytest, endpoint: `tests/test_historical_region_api.py`, `test_regional_current_forecast.py`, `test_midnight_forecast_fallback.py`, `test_outlook_preparation.py` (includes the `forecast_sources_changed` race), `test_archived_actual_composition_api.py`, `test_historical_outlook.py`, `test_capacity_normalization.py`, `test_public_data.py`, `test_api.py` (foreign region 404); operations: `test_intraday_outlook.py`.
-- Playwright (API mocked with `page.route`): `web/tests/weather-reference.spec.ts`, `daylight-forecast.spec.ts`, `forecast-coverage.spec.ts`, `forecast-intervals.spec.ts`, `responsive.spec.ts`. Gaps: no endpoint test for an unknown query key or `data_source=archived_forecast`, for corrupt actuals on the region past-day path or as a viewer; no Playwright test for the date window or against the real API.
+- pytest, endpoint: `tests/test_historical_region_api.py`, `test_regional_current_forecast.py`, `test_midnight_forecast_fallback.py`, `test_outlook_preparation.py`, `test_forecast_read_contract.py` (viewer body, foreign region 404, unknown key, empty date and `archived_forecast` 400, explicit estimated actuals today with the forecast weather reference), `test_forecast_read_locks.py` (one read-only snapshot, a Region lock held elsewhere does not delay the read), `test_archived_actual_composition_api.py`, `test_historical_outlook.py`, `test_capacity_normalization.py`, `test_public_data.py`, `test_api.py` (foreign region 404); operations: `test_intraday_outlook.py`.
+- Playwright (API mocked with `page.route`): `web/tests/weather-reference.spec.ts`, `daylight-forecast.spec.ts`, `forecast-coverage.spec.ts`, `forecast-intervals.spec.ts`, `responsive.spec.ts`. Gaps: no endpoint test for corrupt actuals on the region past-day path; no Playwright test for the date window or against the real API.

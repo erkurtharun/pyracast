@@ -8,7 +8,6 @@ from django.utils import timezone
 from pyracast.forecasts.models import RequestAttempt
 from pyracast.incidents.operations import save_incident
 from pyracast.irradiance import local_day_bounds
-from pyracast.plants import current_forecast, forecasting
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import PlantConfiguration, PlantForecast
 from pyracast.plants.operations import activate_calibration
@@ -175,7 +174,7 @@ def test_calibrated_power_is_clipped_before_aggregating_source_ownership_pieces(
 
 
 @pytest.mark.parametrize("calibrated", [False, True])
-def test_outage_scenario_and_invalidated_calibration_keep_composite_morning(
+def test_outage_scenario_and_dropped_calibration_keep_composite_morning(
     monkeypatch: pytest.MonkeyPatch, calibrated: bool
 ) -> None:
     system, plant = make_plant(monkeypatch)
@@ -201,25 +200,18 @@ def test_outage_scenario_and_invalidated_calibration_keep_composite_morning(
         available_export_mw=None,
     )
     if calibrated:
-        original_payload = forecasting.forecast_payload
-
-        def record_training_outage(*args: Any, **kwargs: Any) -> dict[str, object]:
-            payload = original_payload(*args, **kwargs)
-            training_start, _ = local_day_bounds(date(2026, 11, 4), system.binding.timezone)
-            save_incident(
-                *scope,
-                kind="panels",
-                title="Corrected training outage",
-                notes="",
-                starts_at=training_start + timedelta(hours=9),
-                ends_at=training_start + timedelta(hours=10),
-                available_dc_mw=65,
-                available_inverter_mw=None,
-                available_export_mw=None,
-            )
-            return payload
-
-        monkeypatch.setattr(current_forecast, "forecast_payload", record_training_outage)
+        training_start, _ = local_day_bounds(date(2026, 11, 4), system.binding.timezone)
+        save_incident(
+            *scope,
+            kind="panels",
+            title="Corrected training outage",
+            notes="",
+            starts_at=training_start + timedelta(hours=9),
+            ends_at=training_start + timedelta(hours=10),
+            available_dc_mw=65,
+            available_inverter_mw=None,
+            available_export_mw=None,
+        )
     outlook = plant_outlook(*scope, target_date=DAY, resolution_minutes=60)
     normal = cast(dict[str, Any], outlook["result"])
     affected = cast(dict[str, Any], outlook["outage_scenario"])["result"]
@@ -239,7 +231,56 @@ def test_outage_scenario_and_invalidated_calibration_keep_composite_morning(
         assert affected["provenance"][key] == normal["provenance"][key]
     if calibrated:
         assert outlook["calibration_id"] is None
-        assert "calibration_invalidated_by_outage_history" in normal["quality_flags"]
+        assert "uncalibrated" in normal["quality_flags"]
+        assert normal["provenance"]["calibration_assessment"] == "uncalibrated"
+
+
+def test_past_day_fallback_keeps_composite_sources_after_a_late_training_outage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
+    calibration = ready_run(system, plant)
+    activate_calibration(*scope, calibration.pk)
+    old = publish_snapshot(snapshot_for(system, DAY, power_kw=0.1))
+    latest = snapshot_for(system, DAY, power_kw=0.2, collected_at=CURRENT - timedelta(hours=5))
+    latest.normalized_intervals = latest.normalized_intervals[21:]
+    publish_snapshot(latest)
+    monkeypatch.setattr(timezone, "now", lambda: CURRENT + timedelta(days=1))
+    before = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, source="auto")
+    calibrated = cast(dict[str, Any], before["result"])
+    assert calibrated["factor"] == 0.5
+    assert calibrated["energy_mwh"] == pytest.approx(243.75)
+    assert "forecast_fallback" in calibrated["quality_flags"]
+    training_start, _ = local_day_bounds(date(2026, 11, 4), system.binding.timezone)
+    save_incident(
+        *scope,
+        kind="panels",
+        title="Corrected training outage",
+        notes="",
+        starts_at=training_start + timedelta(hours=9),
+        ends_at=training_start + timedelta(hours=10),
+        available_dc_mw=65,
+        available_inverter_mw=None,
+        available_export_mw=None,
+    )
+    after = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, source="auto")
+    normal = cast(dict[str, Any], after["result"])
+    assert after["calibration_id"] is None
+    assert after["outage_scenario"] is None
+    assert normal["factor"] == 1
+    assert normal["energy_mwh"] == pytest.approx(487.5)
+    assert normal["intervals"][9]["mean_power_mw"] == pytest.approx(13)
+    assert normal["intervals"][9]["source_snapshot_ids"] == [old.pk]
+    assert normal["intervals"][13]["mean_power_mw"] == pytest.approx(26)
+    assert normal["intervals"][13]["source_snapshot_ids"] == [latest.pk]
+    assert "calibration_invalidated_by_outage_history" in normal["quality_flags"]
+    assert "forecast_fallback" in normal["quality_flags"]
+    assert normal["provenance"]["selection_policy"] == "latest-forecast-coverage-v2"
+    for key in ("fallback_reason", "selection_cutoff"):
+        assert normal["provenance"][key] == calibrated["provenance"][key]
+    for key in ("source_snapshot_ids", "source_snapshots", "source_segments", "source_intervals"):
+        assert normal["provenance"][key] == calibrated["provenance"][key]
 
 
 def test_explicit_as_of_stays_on_day_ahead_snapshot_without_vintage_composition(
