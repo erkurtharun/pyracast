@@ -4,6 +4,7 @@ import sys
 import time
 from contextlib import suppress
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -18,7 +19,7 @@ from scripts import start_postgres, start_rabbitmq
 
 @pytest.fixture
 def local_dependencies(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
-    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(dependencies, "sys", SimpleNamespace(platform="win32"))
     monkeypatch.setenv("PGHOST", "127.0.0.1")
     monkeypatch.setenv("PGPORT", "55432")
     monkeypatch.setenv("PGDATABASE", "pyracast")
@@ -183,7 +184,7 @@ def test_rejected_broker_credentials_are_reported_as_authentication(
 def test_a_broker_that_is_down_off_windows_points_to_the_documented_container(
     local_dependencies: dict[str, Any], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(dependencies, "sys", SimpleNamespace(platform="linux"))
     local_dependencies["broker_connect"].side_effect = pika.exceptions.AMQPConnectionError()
 
     with pytest.raises(RuntimeError, match="README"):
