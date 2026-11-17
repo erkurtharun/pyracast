@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import time
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -136,7 +137,9 @@ def test_rejected_database_credentials_are_reported_as_authentication(
 
 def test_starts_the_durable_broker_when_it_is_down_on_windows(
     local_dependencies: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("PYRACAST_RABBITMQ_URL", start_rabbitmq.QUEUE_URL)
     local_dependencies["broker_connect"].side_effect = [
         pika.exceptions.AMQPConnectionError("private-broker-password"),
         local_dependencies["broker"],
@@ -217,3 +220,42 @@ def test_server_start_returns_while_the_started_server_keeps_running(tmp_path: P
                 if daemon.create_time() == record["created"]:
                     daemon.terminate()
                     daemon.wait(timeout=5)
+
+
+def test_waits_for_the_broker_to_complete_amqp_startup(
+    local_dependencies: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PYRACAST_RABBITMQ_URL", start_rabbitmq.QUEUE_URL)
+    local_dependencies["broker_connect"].side_effect = [
+        pika.exceptions.AMQPConnectionError(),
+        pika.exceptions.AMQPConnectionError(),
+        local_dependencies["broker"],
+    ]
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+
+    dependencies.ensure_dependencies()
+
+    local_dependencies["rabbitmq"].assert_called_once_with([])
+    local_dependencies["broker"].close.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "amqp://custom:secret@127.0.0.1:5672/%2F",
+        "amqp://guest:secret@127.0.0.1:5672/%2F",
+        "amqp://guest:guest@127.0.0.1:5672/custom",
+        "amqps://guest:guest@127.0.0.1:5672/%2F",
+    ],
+)
+def test_automatic_broker_provisioning_requires_the_supported_configuration(
+    local_dependencies: dict[str, Any], monkeypatch: pytest.MonkeyPatch, url: str
+) -> None:
+    monkeypatch.setenv("PYRACAST_RABBITMQ_URL", url)
+    local_dependencies["broker_connect"].side_effect = pika.exceptions.AMQPConnectionError()
+
+    with pytest.raises(RuntimeError, match="guest") as failure:
+        dependencies.ensure_dependencies()
+
+    assert "secret" not in str(failure.value)
+    local_dependencies["rabbitmq"].assert_not_called()

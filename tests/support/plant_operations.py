@@ -101,7 +101,9 @@ def publish_snapshot(
     )
     with transaction.atomic():
         plant = (
-            Plant.objects.select_for_update().filter(region_id=snapshot.binding.region_id).first()
+            Plant.objects.select_for_update()
+            .filter(region_id=snapshot.binding.region_id, deleted_at__isnull=True)
+            .first()
         )
         snapshot.job.status = "succeeded"
         snapshot.job.save(update_fields=["status"])
@@ -136,7 +138,7 @@ def saved_actuals(system: System, day: date) -> ForecastSnapshot:
     source.available_at = source.collected_at
     source.coverage_start, source.coverage_end = start, end
     source.save()
-    source.job.status = "succeeded"
+    source.job.endpoint, source.job.status = "estimated_actuals", "succeeded"
     source.job.save()
     return source
 

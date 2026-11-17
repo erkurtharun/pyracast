@@ -15,6 +15,9 @@ def sibling(system: System) -> tuple[Region, SiteBinding]:
     binding = SiteBinding.objects.get(pk=system.binding.pk)
     binding.pk = None
     binding.region = region
+    binding.latitude = region.latitude
+    binding.longitude = region.longitude
+    binding.timezone = region.timezone
     binding.save()
     region.approved_binding = binding
     region.save()

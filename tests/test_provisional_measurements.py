@@ -17,6 +17,7 @@ from pyracast.plants.measurements import (
 from pyracast.plants.models import CalibrationRun, PlantConfiguration, ProductionObservation
 from tests.support.domain import NOW
 from tests.support.provisional_measurements import DAY, acquisition
+from tests.support.provisional_measurements import source as source
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

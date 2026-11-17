@@ -425,12 +425,19 @@ SENSITIVE_PATHS = [
 
 
 @pytest.mark.parametrize("path", SENSITIVE_PATHS)
-@pytest.mark.parametrize("tool_name", ["Read", "view_image", "mcp__pycharm__get_file_text_by_path"])
+@pytest.mark.parametrize(
+    ("tool_name", "path_key"),
+    [
+        ("Read", "file_path"),
+        ("view_image", "path"),
+        ("mcp__pycharm__get_file_text_by_path", "pathInProject"),
+    ],
+)
 def test_direct_reads_of_credentials_and_backups_are_denied_with_their_own_reason(
-    repository: Path, tool_name: str, path: str
+    repository: Path, tool_name: str, path_key: str, path: str
 ) -> None:
     decision = _decision(
-        _invoke(repository, "pre-read", {"tool_name": tool_name, "tool_input": {"file_path": path}})
+        _invoke(repository, "pre-read", {"tool_name": tool_name, "tool_input": {path_key: path}})
     )
 
     assert decision is not None
@@ -486,12 +493,18 @@ def test_example_environment_files_and_launcher_logs_remain_readable(
         "read_file data\\fixture.json",
         "read_file '{root}/.dev/backups/x/manifest.json'",
         'read_file "{root}/data/with space.json"',
+        "get_file_text_by_path --pathInProject data",
+        "get_file_text_by_path --pathInProject=.venv",
+        "get_file_text_by_path --pathInProject secrets",
+        "get_file_text_by_path --pathInProject .venv-quality",
+        "read_file data",
     ],
 )
 def test_ide_execute_tool_commands_naming_denied_paths_are_denied(
     repository: Path, command: str
 ) -> None:
     (repository / "data").mkdir()
+    (repository / ".venv-quality").mkdir()
     payload: dict[str, object] = {
         "tool_name": "mcp__pycharm__execute_tool",
         "tool_input": {
@@ -536,8 +549,10 @@ def test_configured_matchers_cover_reads_through_the_ide_and_shell_tools() -> No
 
     assert matchers["pre-read"].fullmatch("mcp__pycharm__execute_tool")
     assert matchers["pre-read"].fullmatch("Read")
+    assert matchers["pre-read"].fullmatch("mcp__filesystem__read")
+    assert matchers["pre-read"].fullmatch("mcp__images__view_image")
     assert not matchers["pre-read"].fullmatch("Bash")
-    for tool_name in ("Bash", "PowerShell", "shell", "exec_command"):
+    for tool_name in ("Bash", "PowerShell", "shell", "exec_command", "mcp__pycharm__execute_tool"):
         assert matchers["pre-shell"].fullmatch(tool_name)
     assert not matchers["pre-shell"].fullmatch("Read")
 
@@ -560,6 +575,18 @@ def test_configured_matchers_cover_reads_through_the_ide_and_shell_tools() -> No
         'git commit -m "Document PYRACAST_ORCHESTRATOR_PUSH=1"; git push origin main',
         "echo PYRACAST_ORCHESTRATOR_PUSH=1 && git push origin main",
         "git log --grep PYRACAST_ORCHESTRATOR_PUSH=1\ngit push origin main",
+        'bash -lc "git push origin main"',
+        "sh -c 'gh pr merge 18 --squash'",
+        'pwsh -Command "git push origin main"',
+        'powershell.exe -NoProfile -Command "gh workflow run release.yml"',
+        'cmd.exe /c "git push origin main"',
+        "cmd.exe /c git push origin main",
+        "pwsh -Command git push origin main",
+        "bash -lc 'sh -c \"git push origin main\"'",
+        "git --git-dir .git push origin main",
+        "git --work-tree . push origin main",
+        "git --namespace release push origin main",
+        "git --config-env core.editor=EDITOR push origin main",
     ],
 )
 @pytest.mark.parametrize(
@@ -596,6 +623,10 @@ def test_shell_commands_that_publish_need_the_orchestrator_marker(
         "gh pr view 18 --json state",
         "echo 'git push origin main'",
         "python scripts/check.py",
+        'bash -lc "git push origin pr/K02"',
+        'pwsh -Command "git status"',
+        'bash -lc "echo git push origin main"',
+        "git --git-dir .git push origin pr/K02",
     ],
 )
 def test_shell_commands_that_do_not_publish_are_allowed(repository: Path, command: str) -> None:
@@ -609,6 +640,59 @@ def test_shell_commands_that_do_not_publish_are_allowed(repository: Path, comman
     )
 
     assert decision is None
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "command"),
+    [
+        ("Bash", r"g\it push origin main"),
+        ("PowerShell", r"C:\tools\git.exe push origin main"),
+        ("PowerShell", r"& 'C:\Program Files\Git\bin\git.exe' push origin main"),
+    ],
+)
+def test_shell_executable_paths_and_escapes_need_the_orchestrator_marker(
+    repository: Path, tool_name: str, command: str
+) -> None:
+    decision = _decision(
+        _invoke(
+            repository,
+            "pre-shell",
+            {"tool_name": tool_name, "tool_input": {"command": command}},
+            env=_environment_without_marker(),
+        )
+    )
+
+    assert decision is not None
+    assert decision["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize(
+    ("command", "denied"),
+    [
+        ('execute_terminal_command --command "git push origin main"', True),
+        ("execute_terminal_command --command='gh pr merge 18 --squash'", True),
+        ('execute_terminal_command --command "git push origin pr/K02"', False),
+        ('execute_terminal_command --command "git status"', False),
+        ('get_file_text_by_path --pathInProject "git push origin main"', False),
+    ],
+)
+def test_ide_terminal_publishing_checks_the_nested_shell_command(
+    repository: Path, command: str, denied: bool
+) -> None:
+    decision = _decision(
+        _invoke(
+            repository,
+            "pre-shell",
+            {"tool_name": "mcp__pycharm__execute_tool", "tool_input": {"command": command}},
+            env=_environment_without_marker(),
+        )
+    )
+
+    if denied:
+        assert decision is not None
+        assert decision["permissionDecision"] == "deny"
+    else:
+        assert decision is None
 
 
 def test_shell_tools_that_pass_an_argument_vector_are_checked(repository: Path) -> None:

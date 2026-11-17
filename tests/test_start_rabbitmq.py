@@ -1,6 +1,8 @@
 import sys
 import tempfile
+from importlib import import_module
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -17,7 +19,8 @@ def windows_broker(
     def download(url: str, digest: str, archive: Path, destination: Path) -> None:
         downloads.append(url)
         if url == start_rabbitmq.ERLANG_URL:
-            (destination / "bin").mkdir(parents=True)
+            (destination / "bin").mkdir(parents=True, exist_ok=True)
+            (destination / "bin" / "erl.exe").touch()
         else:
             server = destination / "rabbitmq_server-4.4.0" / "sbin" / "rabbitmq-server.bat"
             server.parent.mkdir(parents=True)
@@ -25,6 +28,7 @@ def windows_broker(
 
     monkeypatch.setattr(start_rabbitmq, "download_and_extract", download)
     monkeypatch.setattr(start_rabbitmq, "port_open", lambda: broker["running"])
+    monkeypatch.setattr(start_rabbitmq, "amqp_ready", lambda: broker["running"])
     monkeypatch.setattr(start_rabbitmq, "start_broker", lambda root, server: starts.append(root))
     return downloads, starts, broker
 
@@ -62,3 +66,30 @@ def test_durable_broker_state_is_never_placed_under_the_temporary_directory(
         start_rabbitmq.main([])
 
     assert downloads == []
+
+
+def test_incomplete_erlang_installation_is_repaired(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    downloads, _, _ = windows_broker(monkeypatch)
+    (tmp_path / "erlang" / "bin").mkdir(parents=True)
+    monkeypatch.setattr(start_rabbitmq, "start_broker", lambda *args: None)
+
+    assert start_rabbitmq.provision_windows(tmp_path) == "started"
+    assert downloads == [start_rabbitmq.ERLANG_URL, start_rabbitmq.RABBITMQ_URL]
+
+
+def test_occupied_port_requires_an_amqp_connection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pika = import_module("pika")
+
+    monkeypatch.setattr(start_rabbitmq, "port_open", lambda: True)
+    monkeypatch.setattr(
+        pika, "BlockingConnection", MagicMock(side_effect=pika.exceptions.AMQPConnectionError())
+    )
+
+    with pytest.raises(RuntimeError, match="AMQP"):
+        start_rabbitmq.provision_windows(tmp_path / "unused")
+
+    assert not (tmp_path / "unused").exists()
