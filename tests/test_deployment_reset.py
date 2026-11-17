@@ -8,17 +8,20 @@ import os
 import re
 import runpy
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
+from email.message import Message
 from pathlib import Path
 from types import FrameType, SimpleNamespace
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 import pytest
 from django.contrib.auth.models import User
@@ -42,10 +45,7 @@ DEFERRED = (signal.SIGINT, signal.SIGTERM)
 
 
 class FakeCommands:
-    """Answers the Docker, PostgreSQL, RabbitMQ, gzip and curl commands of one host.
-
-    A dump carries the live row counts as JSON, so a restore reproduces them.
-    """
+    """A dump carries the live row counts as JSON, so a restore reproduces them."""
 
     def __init__(self, environment: Path) -> None:
         self.environment = environment
@@ -156,6 +156,8 @@ class FakeCommands:
             packed = packed[: len(packed) // 2]
         elif self.gzip_damage == "corrupt":
             packed = b"PK" + packed[2:]
+        elif self.gzip_damage == "empty":
+            packed = b""
         source.with_name(source.name + ".gz").write_bytes(packed)
         source.unlink()
 
@@ -517,6 +519,7 @@ def test_prepare_records_an_empty_solcast_export_that_reset_accepts(
         ("count-mismatch", "holds 2 snapshots; the database counts 3"),
         ("truncated", "is not gzip-compressed JSON lines"),
         ("corrupt", "is not gzip-compressed JSON lines"),
+        ("empty", "is not gzip-compressed JSON lines"),
         ("not-an-object", "is not gzip-compressed JSON lines"),
     ],
 )
@@ -528,6 +531,9 @@ def test_prepare_records_nothing_when_the_solcast_export_does_not_verify(
             commands.solcast_count = 3
         case "not-an-object":
             commands.solcast.append([13])
+        case "empty":
+            commands.solcast = []
+            commands.gzip_damage = fault
         case _:
             commands.gzip_damage = fault
     with pytest.raises(RuntimeError, match=message):
@@ -897,6 +903,7 @@ def test_solcast_export_copies_each_solcast_snapshot_with_its_binding_and_plants
                 "capacity_kw",
                 "dc_capacity_kw",
                 "power_basis",
+                "tilt_degrees",
                 "azimuth_degrees",
                 "losses_percent",
                 "installation_date",
@@ -909,6 +916,7 @@ def test_solcast_export_copies_each_solcast_snapshot_with_its_binding_and_plants
             "capacity_kw": 1000,
             "dc_capacity_kw": None,
             "power_basis": "ac",
+            "tilt_degrees": 0,
             "azimuth_degrees": 180,
             "losses_percent": 7,
             "installation_date": None,
@@ -1111,7 +1119,7 @@ def test_restore_refuses_a_kept_archive_recorded_for_another_object(
 def test_restore_refuses_an_archive_without_applied_migrations(
     host: Host, commands: FakeCommands, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    fake_bucket(monkeypatch, json.dumps({}).encode())
+    fake_bucket(monkeypatch, {FOREIGN_OBJECT: json.dumps({}).encode()})
     host.marker.parent.mkdir(parents=True)
     fail_release(commands, host)
     with pytest.raises(RefusedError, match="holds no applied migration"):
@@ -1134,16 +1142,25 @@ def test_restore_keeps_the_site_in_maintenance_when_the_release_cannot_serve_the
         reset_database.abort(host)
 
 
-def fake_bucket(monkeypatch: pytest.MonkeyPatch, content: bytes, *, md5: str | None = None) -> None:
-    digest = hashlib.md5(content, usedforsecurity=False).digest()
-    checksum = md5 or base64.b64encode(digest).decode()
+def fake_bucket(
+    monkeypatch: pytest.MonkeyPatch, objects: dict[str, bytes], *, md5: str | None = None
+) -> None:
+    prefix = "https://storage.googleapis.com/storage/v1/b/private-backups/o/"
 
     def urlopen(request: urllib.request.Request, **_kwargs: object) -> io.BytesIO:
         assert request.get_header("Authorization") == "Bearer private-token"
-        assert "/b/private-backups/o/postgres%2F2026%2F11%2F16%2F" in request.full_url
-        if request.full_url.endswith("?alt=media"):
+        assert request.full_url.startswith(prefix)
+        encoded, media, _ = request.full_url.removeprefix(prefix).partition("?alt=media")
+        assert "/" not in encoded
+        name = unquote(encoded)
+        if name not in objects:
+            raise urllib.error.HTTPError(request.full_url, 404, "Not Found", Message(), None)
+        content = objects[name]
+        if media:
             return io.BytesIO(content)
-        return io.BytesIO(json.dumps({"md5Hash": checksum, "size": str(len(content))}).encode())
+        digest = base64.b64encode(hashlib.md5(content, usedforsecurity=False).digest()).decode()
+        reported = {"md5Hash": md5 or digest, "size": str(len(content))}
+        return io.BytesIO(json.dumps(reported).encode())
 
     monkeypatch.setattr(reset_database, "access_token", lambda: "private-token")
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
@@ -1153,7 +1170,7 @@ def test_restore_downloads_and_verifies_an_archive_this_host_did_not_prepare(
     host: Host, commands: FakeCommands, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     archived = {"accounts_tenant": 4, "django_migrations": 87}
-    fake_bucket(monkeypatch, json.dumps(archived).encode())
+    fake_bucket(monkeypatch, {FOREIGN_OBJECT: json.dumps(archived).encode()})
     host.marker.parent.mkdir(parents=True)
     host.marker.touch()
     commands.running = set(SUPPORT)
@@ -1164,10 +1181,69 @@ def test_restore_downloads_and_verifies_an_archive_this_host_did_not_prepare(
     assert not host.marker.exists()
 
 
+def test_restore_fetches_a_pre_reset_archive_with_its_solcast_export_when_the_host_lost_them(
+    host: Host, commands: FakeCommands, uploads: dict[str, bytes], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    before = dict(commands.live)
+    name = prepared(host, uploads)
+    reset_database.reset(host, name)
+    shutil.rmtree(host.state)
+    fake_bucket(monkeypatch, uploads)
+    reset_database.restore(host, name)
+    export = solcast_object(name)
+    assert kept_export(host, name).read_bytes() == uploads[export]
+    assert saved_record(host, name)["solcast"] == {
+        "object": export,
+        "sha256": hashlib.sha256(uploads[export]).hexdigest(),
+        "rows": 2,
+    }
+    counted = [call for call in commands.calls if reset_database.SOLCAST_COUNT_SQL in call]
+    assert counted[-1][:2] == ["docker", "exec"]
+    assert commands.live == before
+    assert not host.marker.exists()
+
+
+@pytest.mark.parametrize(
+    ("fault", "error", "message"),
+    [
+        ("count-mismatch", RuntimeError, "holds 2 snapshots; the database counts 3"),
+        ("corrupt-export", RuntimeError, "is not gzip-compressed JSON lines"),
+        ("missing-export", urllib.error.HTTPError, "Not Found"),
+    ],
+)
+def test_restore_of_a_fetched_pre_reset_archive_stops_unless_its_solcast_export_verifies(
+    host: Host,
+    commands: FakeCommands,
+    uploads: dict[str, bytes],
+    monkeypatch: pytest.MonkeyPatch,
+    fault: str,
+    error: type[Exception],
+    message: str,
+) -> None:
+    name = prepared(host, uploads)
+    reset_database.reset(host, name)
+    shutil.rmtree(host.state)
+    objects = dict(uploads)
+    match fault:
+        case "count-mismatch":
+            commands.solcast_count = 3
+        case "corrupt-export":
+            objects[solcast_object(name)] = b"not gzip"
+        case _:
+            del objects[solcast_object(name)]
+    fake_bucket(monkeypatch, objects)
+    destroyed = len(commands.destructive_calls())
+    with pytest.raises(error, match=message):
+        reset_database.restore(host, name)
+    assert len(commands.destructive_calls()) == destroyed
+    assert not kept_archive(host, name).with_suffix(".json").exists()
+    assert host.marker.exists()
+
+
 def test_restore_refuses_a_download_that_differs_from_the_bucket_checksum(
     host: Host, commands: FakeCommands, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    fake_bucket(monkeypatch, b"{}", md5="invalid")
+    fake_bucket(monkeypatch, {FOREIGN_OBJECT: b"{}"}, md5="invalid")
     host.marker.parent.mkdir(parents=True)
     host.marker.touch()
     commands.running = set(SUPPORT)
