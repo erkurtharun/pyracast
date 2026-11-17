@@ -26,6 +26,9 @@ msgstr "Davet geçersiz veya süresi dolmuş."
 msgid "This account already belongs to the workspace."
 msgstr "Bu hesap zaten çalışma alanının üyesi."
 
+msgid "This email address is already verified."
+msgstr "Bu e-posta adresi zaten doğrulanmış."
+
 msgid "Verify the invited email address before accepting."
 msgstr "Daveti kabul etmeden önce davet edilen e-posta adresini doğrulayın."
 

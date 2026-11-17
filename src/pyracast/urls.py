@@ -98,6 +98,10 @@ urlpatterns = [
         "api/auth/browser/v1/auth/signup",
         CompanySignupView.as_api_view(client=Client.BROWSER),
     ),
+    path(
+        "api/auth/browser/v1/account/email",
+        headless.ManageEmailView.as_api_view(client=Client.BROWSER),
+    ),
     path("api/auth/", include("allauth.headless.urls")),
     path(
         "api/accounts/google/login/callback/",

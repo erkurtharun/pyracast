@@ -32,3 +32,7 @@ class ChangePasswordView(views.ChangePasswordView):
 
 class ReauthenticateView(views.ReauthenticateView):
     input_class = inputs.ReauthenticateInput
+
+
+class ManageEmailView(views.ManageEmailView):
+    input_class = views.ManageEmailView.input_class | {"PUT": inputs.ResendEmailVerificationInput}

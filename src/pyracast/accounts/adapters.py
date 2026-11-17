@@ -37,6 +37,10 @@ LOGIN_LIMITED_MESSAGE = gettext_lazy(
 
 
 class AccountAdapter(DefaultAccountAdapter):
+    error_messages = DefaultAccountAdapter.error_messages | {
+        "email_already_verified": gettext_lazy("This email address is already verified.")
+    }
+
     def validation_error(self, code: str, *args: Any) -> ValidationError:
         # allauth also answers a sign-in within the confirm_email window with this code.
         if code == "too_many_login_attempts":
