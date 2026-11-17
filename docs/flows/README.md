@@ -124,6 +124,7 @@ sections and a row here.
 | [delivery-health-check](delivery-health-check.md) | Collection and delivery health report |
 | [host-supervision-and-alerting](host-supervision-and-alerting.md) | Host watchdog, health probes and alerts |
 | [backup-and-restore-rehearsal](backup-and-restore-rehearsal.md) | Hourly and pre-release database backups and restore rehearsal |
+| [database-reset-and-restore](database-reset-and-restore.md) | Reset the production database or restore it from a verified archive |
 | [database-migration](database-migration.md) | Database service, role bootstrap and locked schema migrations |
 | [release-pipeline](release-pipeline.md) | CI image build, verification and production release |
 | [infrastructure-provisioning](infrastructure-provisioning.md) | Provision the Google Cloud environment with Terraform |

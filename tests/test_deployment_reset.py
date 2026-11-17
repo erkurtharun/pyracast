@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 
 from deploy import reset_database
-from deploy.reset_database import Host, Refused
+from deploy.reset_database import Host, RefusedError
 
 ROOT = Path(__file__).resolve().parents[1]
 REVISION = "a" * 40
@@ -35,6 +35,7 @@ class FakeCommands:
         self.calls: list[list[str]] = []
         self.inputs: list[str] = []
         self.running = APPLICATION | SUPPORT
+        self.stuck: set[str] = set()
         self.live: dict[str, int] = {"accounts_tenant": 2, "django_migrations": 88}
         self.throwaway: dict[str, int] = {}
         self.verification_counts: dict[str, int] | None = None
@@ -65,7 +66,7 @@ class FakeCommands:
         if "ps" in command:
             stdout = "".join(f"{service}\n" for service in sorted(self.running))
         elif "stop" in command:
-            self.running -= set(command[command.index("stop") + 3 :])
+            self.running -= set(command[command.index("stop") + 3 :]) - self.stuck
         elif "up" in command:
             named = set(command[command.index("--wait-timeout") + 2 :])
             self.running |= named or APPLICATION | SUPPORT
@@ -135,7 +136,7 @@ def host(tmp_path: Path) -> Host:
         config=tmp_path / "host.json",
         release=release,
         bucket="private-backups",
-        runtime_secret_version="projects/example/secrets/runtime/versions/7",
+        runtime_version="projects/example/secrets/runtime/versions/7",
         marker=tmp_path / "lib/release-blocked",
         lock=tmp_path / "lock/release.lock",
         state=tmp_path / "lib/reset",
@@ -221,7 +222,7 @@ def test_prepare_refuses_while_a_release_is_blocked(
 ) -> None:
     host.marker.parent.mkdir(parents=True)
     host.marker.touch()
-    with pytest.raises(Refused, match="release-blocked"):
+    with pytest.raises(RefusedError, match="release-blocked"):
         reset_database.prepare(host)
     assert not any("stop" in call for call in commands.calls)
     assert uploads == {}
@@ -231,7 +232,7 @@ def test_prepare_refuses_when_the_site_is_not_ready(
     host: Host, commands: FakeCommands, uploads: dict[str, bytes]
 ) -> None:
     commands.ready = False
-    with pytest.raises(Refused, match="health/ready"):
+    with pytest.raises(RefusedError, match="health/ready"):
         reset_database.prepare(host)
     assert not host.marker.exists()
     assert commands.running == APPLICATION | SUPPORT
@@ -241,10 +242,21 @@ def test_prepare_refuses_while_another_operation_holds_the_release_lock(
     host: Host, commands: FakeCommands, uploads: dict[str, bytes]
 ) -> None:
     commands.lock_held = True
-    with pytest.raises(Refused, match="release lock"):
+    with pytest.raises(RefusedError, match="release lock"):
         reset_database.prepare(host)
     assert commands.calls == []
     assert not host.marker.exists()
+
+
+def test_prepare_dumps_nothing_while_an_application_container_keeps_running(
+    host: Host, commands: FakeCommands, uploads: dict[str, bytes]
+) -> None:
+    commands.stuck = {"worker"}
+    with pytest.raises(RuntimeError, match="still run: worker"):
+        reset_database.prepare(host)
+    assert host.marker.exists()
+    assert not any("pg_dump" in call for call in commands.calls)
+    assert uploads == {}
 
 
 def test_prepare_records_nothing_when_the_verification_restore_differs(
@@ -255,7 +267,7 @@ def test_prepare_records_nothing_when_the_verification_restore_differs(
         reset_database.prepare(host)
     assert host.marker.exists()
     name = next(iter(uploads))
-    with pytest.raises(Refused, match="No verified archive"):
+    with pytest.raises(RefusedError, match="No verified archive"):
         reset_database.reset(host, name)
     assert commands.destructive_calls() == []
 
@@ -338,7 +350,7 @@ def test_abort_refuses_once_the_database_was_replaced(
     name = prepared(host, uploads)
     reset_database.reset(host, name)
     calls = len(commands.calls)
-    with pytest.raises(Refused, match=f"restore --confirm {name}"):
+    with pytest.raises(RefusedError, match=f"restore --confirm {name}"):
         reset_database.abort(host)
     assert commands.calls[calls:] == []
     assert host.marker.exists()
@@ -423,7 +435,7 @@ def test_reset_refuses_before_any_destructive_step(
             commands.running.add("worker")
         case "missing-roles":
             commands.roles = "1"
-    with pytest.raises(Refused):
+    with pytest.raises(RefusedError):
         reset_database.reset(host, name)
     assert commands.destructive_calls() == []
 
@@ -510,7 +522,7 @@ def test_restore_refuses_a_download_that_differs_from_the_bucket_checksum(
     host.marker.parent.mkdir(parents=True)
     host.marker.touch()
     commands.running = set(SUPPORT)
-    with pytest.raises(Refused, match="checksum"):
+    with pytest.raises(RefusedError, match="checksum"):
         reset_database.restore(host, FOREIGN_OBJECT)
     assert not kept_archive(host, FOREIGN_OBJECT).exists()
     assert commands.destructive_calls() == []
@@ -542,6 +554,8 @@ def test_host_configuration_selects_the_production_paths(tmp_path: Path) -> None
     config.write_text(json.dumps({"backup_bucket": "Invalid Bucket"}))
     with pytest.raises(ValueError, match="bucket"):
         reset_database.load_host(config)
+    assert reset_database.main([str(config), "abort"]) == 2
+    assert reset_database.main([str(tmp_path / "missing.json"), "abort"]) == 2
 
 
 def test_command_line_reports_refusals_failures_and_the_next_step(
@@ -572,6 +586,14 @@ def test_command_line_reports_refusals_failures_and_the_next_step(
     assert reset_database.main([config, "reset", "--confirm", name]) == 0
     assert reset_database.main([config, "restore", "--confirm", name]) == 0
     assert not host.marker.exists()
+    capsys.readouterr()
+    host.marker.touch()
+    commands.running = set(SUPPORT)
+    commands.ready = False
+    assert reset_database.main([config, "restore", "--confirm", name]) == 1
+    error = capsys.readouterr().err
+    assert "restore failed: The release started, but /health/ready/ did not answer ok." in error
+    assert f"reset_database.py {config} restore --confirm {name} again" in error
 
 
 def test_script_entry_point_prints_usage(monkeypatch: pytest.MonkeyPatch) -> None:

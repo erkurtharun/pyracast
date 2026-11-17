@@ -71,6 +71,7 @@ line-length = 100
 "deploy/operations_log.py" = "py312"
 "deploy/pin_release_images.py" = "py312"
 "deploy/release_scope.py" = "py312"
+"deploy/reset_database.py" = "py312"
 "deploy/runtime_secrets.py" = "py312"
 "deploy/watchdog.py" = "py312"
 
