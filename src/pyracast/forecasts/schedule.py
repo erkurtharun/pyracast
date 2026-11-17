@@ -1,18 +1,19 @@
 import re
-from datetime import UTC, datetime
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Max, Min
 from django.utils.translation import gettext
 
-from pyracast.accounts.operations import require_member, require_workspace_admin
+from pyracast.accounts.authorization import tenant_membership
+from pyracast.accounts.models import Membership
 from pyracast.collection_window import HISTORY_CLOCK, HISTORY_END_CLOCK, NIGHT_RETRY_DELAY
 from pyracast.forecasts.jobs import binding_is_current
-from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
+from pyracast.forecasts.models import CollectionJob, CollectionSchedule, ForecastSnapshot
 from pyracast.regions.models import AuditEvent, Region
 
 MAX_COLLECTION_TIMES = 1440
@@ -23,7 +24,7 @@ def forecast_time_limit(daily_quota: int) -> int:
 
 
 def get_schedule(actor: User, tenant_id: int, region_id: int, now: datetime) -> CollectionSchedule:
-    require_member(actor, tenant_id)
+    tenant_membership(actor, tenant_id)
     region = Region.objects.select_related("approved_binding__provider_account").get(
         pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
     )
@@ -41,7 +42,7 @@ def configure_schedule(
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
     with transaction.atomic():
-        require_workspace_admin(actor, tenant_id)
+        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
         region = (
             Region.objects.select_for_update(of=("self",))
             .select_related("approved_binding__provider_account")
@@ -95,26 +96,27 @@ def configure_schedule(
         return schedule
 
 
-def schedule_payload(schedule: CollectionSchedule, now: datetime) -> dict[str, object]:
+def schedule_payload(schedule: CollectionSchedule) -> dict[str, object]:
     binding = schedule.region.approved_binding
     limit = binding.provider_account.daily_quota if binding else 10
-    outcomes = {"succeeded": 0, "failed": 0, "uncertain": 0}
-    utc_day = now.astimezone(UTC).date()
-    if binding:
-        counts = (
-            RequestAttempt.objects.filter(
-                provider_account_id=binding.provider_account_id, utc_day=now.astimezone(UTC).date()
-            )
-            .values("outcome")
-            .annotate(count=Count("pk"))
-        )
-        outcomes.update({row["outcome"]: row["count"] for row in counts})
-    used = sum(outcomes.values())
-    recent = (
-        list(
-            CollectionJob.objects.filter(binding=binding)
-            .order_by("-scheduled_slot", "-pk")
-            .values(
+    jobs = CollectionJob.objects.filter(binding=binding)
+    return {
+        "enabled": schedule.enabled,
+        "times": schedule.times,
+        "timezone": schedule.region.timezone,
+        "effective_from": schedule.effective_from,
+        "last_success_at": ForecastSnapshot.objects.filter(binding=binding).aggregate(
+            last=Max("collected_at")
+        )["last"]
+        if binding
+        else None,
+        "next_collection_at": jobs.filter(status__in=("pending", "retry")).aggregate(
+            next=Min("available_at")
+        )["next"]
+        if binding
+        else None,
+        "recent_jobs": list(
+            jobs.order_by("-scheduled_slot", "-pk").values(
                 "id",
                 "endpoint",
                 "status",
@@ -126,19 +128,7 @@ def schedule_payload(schedule: CollectionSchedule, now: datetime) -> dict[str, o
             )[:6]
         )
         if binding
-        else []
-    )
-    return {
-        "enabled": schedule.enabled,
-        "times": schedule.times,
-        "timezone": schedule.region.timezone,
-        "effective_from": schedule.effective_from,
-        "daily_request_limit": limit,
-        "used_today": used,
-        "remaining_today": max(limit - used, 0),
-        "quota_utc_day": utc_day.isoformat(),
-        "requests_by_outcome": outcomes,
-        "recent_jobs": recent,
+        else [],
         "history_requests_reserved_per_day": 1,
         "history_local_time": HISTORY_CLOCK,
         "history_retry_until_local": HISTORY_END_CLOCK,

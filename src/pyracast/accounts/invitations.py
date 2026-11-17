@@ -14,9 +14,9 @@ from django.template.loader import render_to_string
 from django.utils import timezone, translation
 from django.utils.translation import gettext as _
 
+from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.language import user_language
 from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation
-from pyracast.accounts.operations import require_workspace_admin
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ def pending_invitation(token: str, email: str) -> WorkspaceInvitation:
 
 @transaction.atomic
 def invite_workspace_member(actor: User, tenant_id: int, email: str) -> WorkspaceInvitation:
-    require_workspace_admin(actor, tenant_id)
+    tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
     email = email.strip().lower()
     validate_email(email)
     if Membership.objects.filter(tenant_id=tenant_id, user__email__iexact=email).exists():
@@ -119,7 +119,7 @@ def accept_workspace_invitation(actor: User, token: str) -> Membership:
 
 @transaction.atomic
 def revoke_workspace_invitation(actor: User, tenant_id: int, invitation_id: int) -> None:
-    require_workspace_admin(actor, tenant_id)
+    tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
     invitation = (
         WorkspaceInvitation.objects.select_for_update()
         .filter(tenant_id=tenant_id, pk=invitation_id)

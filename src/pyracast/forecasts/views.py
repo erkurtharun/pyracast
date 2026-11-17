@@ -38,11 +38,8 @@ class CollectionJobOutput(serializers.Serializer[dict[str, object]]):
 class CollectionScheduleOutput(CollectionScheduleInput):
     timezone = serializers.CharField()
     effective_from = serializers.DateTimeField()
-    daily_request_limit = serializers.IntegerField()
-    used_today = serializers.IntegerField()
-    remaining_today = serializers.IntegerField()
-    quota_utc_day = serializers.DateField()
-    requests_by_outcome = serializers.DictField(child=serializers.IntegerField())
+    last_success_at = serializers.DateTimeField(allow_null=True)
+    next_collection_at = serializers.DateTimeField(allow_null=True)
     recent_jobs = CollectionJobOutput(many=True)
     history_requests_reserved_per_day = serializers.IntegerField()
     history_local_time = serializers.CharField()
@@ -54,16 +51,18 @@ class CollectionScheduleOutput(CollectionScheduleInput):
 class CollectionScheduleView(APIView):
     @extend_schema(responses=CollectionScheduleOutput)
     def get(self, request: Request, tenant_id: int, region_id: int) -> Response:
-        now = timezone.now()
-        schedule = get_schedule(cast(User, request.user), tenant_id, region_id, now)
-        return Response(schedule_payload(schedule, now))
+        schedule = get_schedule(cast(User, request.user), tenant_id, region_id, timezone.now())
+        return Response(schedule_payload(schedule))
 
     @extend_schema(request=CollectionScheduleInput, responses=CollectionScheduleOutput)
     def put(self, request: Request, tenant_id: int, region_id: int) -> Response:
         data = CollectionScheduleInput(data=request.data)
         data.is_valid(raise_exception=True)
-        now = timezone.now()
         schedule = configure_schedule(
-            cast(User, request.user), tenant_id, region_id, now=now, **data.validated_data
+            cast(User, request.user),
+            tenant_id,
+            region_id,
+            now=timezone.now(),
+            **data.validated_data,
         )
-        return Response(schedule_payload(schedule, now))
+        return Response(schedule_payload(schedule))

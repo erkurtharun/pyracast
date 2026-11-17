@@ -29,11 +29,10 @@ from django.http import (
     HttpRequest,
     HttpResponse,
     HttpResponseBase,
-    HttpResponseNotFound,
     HttpResponseRedirect,
 )
 from django.template.loader import render_to_string
-from django.views.decorators.http import require_GET, require_http_methods
+from django.views.decorators.http import require_GET
 
 from pyracast.accounts.signup import workspace_signup_transaction
 from pyracast.accounts.social import locked_social_user
@@ -144,11 +143,6 @@ class ManageProvidersView(AllauthManageProvidersView):
             if user is None:
                 return AuthenticationResponse(request)
             return super().dispatch(request, *args, **kwargs)
-
-
-@require_http_methods(["GET", "POST"])
-def disabled_provider_token(_request: HttpRequest) -> HttpResponseNotFound:
-    return HttpResponseNotFound()
 
 
 @require_GET

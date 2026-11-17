@@ -5,6 +5,7 @@ from django.contrib.auth.models import User
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 from django.utils import timezone
 
+from pyracast.accounts.authorization import is_platform_admin
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.calculation import calculate
 from pyracast.connections.operations import create_account, validate_binding
@@ -22,11 +23,9 @@ class Command(BaseCommand):
     def handle(self, *args: Any, **options: Any) -> str:
         if not settings.DEBUG:
             raise CommandError("Fixture demonstration requires PYRACAST_DEBUG=1.")
-        actor = User.objects.filter(
-            username=options["username"], is_superuser=True, is_active=True
-        ).first()
-        if actor is None:
-            raise CommandError("Create an active superuser first.")
+        actor = User.objects.filter(username=options["username"]).first()
+        if actor is None or not is_platform_admin(actor):
+            raise CommandError("Create an active staff superuser first.")
         tenant, _ = Tenant.objects.get_or_create(name="Fixture demonstration")
         Membership.objects.get_or_create(
             user=actor, tenant=tenant, defaults={"role": Membership.Role.ADMIN}

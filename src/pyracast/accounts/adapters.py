@@ -17,6 +17,7 @@ from django.template.loader import render_to_string
 from django.utils import translation
 from django.utils.translation import gettext_lazy
 
+from pyracast.accounts.authorization import requires_admin_mfa
 from pyracast.accounts.language import user_language
 from pyracast.accounts.security import normalize_client_ip
 from pyracast.mail_delivery import NotSentError
@@ -68,7 +69,7 @@ class AccountAdapter(DefaultAccountAdapter):
         user = cast(User | None, super().authenticate(request, **credentials))
         if (
             user is not None
-            and (user.is_staff or user.is_superuser)
+            and requires_admin_mfa(user)
             and not Authenticator.objects.filter(user=user, type=Authenticator.Type.TOTP).exists()
         ):
             return None

@@ -10,6 +10,7 @@ from django.db import close_old_connections, connection, connections, transactio
 from django.test import Client, override_settings
 from django.utils import timezone
 
+from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.invitations import (
     accept_workspace_invitation,
     invitation_digest,
@@ -27,7 +28,6 @@ from pyracast.accounts.operations import reassign_workspace_admin, remove_worksp
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import create_plant
 from pyracast.regions.models import AuditEvent, Region
-from pyracast.regions.operations import update_region
 from tests.test_domain import make_system
 from tests.test_workspaces import invitation_token
 
@@ -70,7 +70,8 @@ def test_removal_revokes_access_in_existing_session_and_preserves_account_and_re
     viewer_client.force_login(viewer)
     base = f"/api/tenants/{system.tenant.pk}/"
     region_url = f"{base}regions/{system.region.pk}/"
-    assert viewer_client.get(region_url).status_code == 200
+    location_url = f"{region_url}location-change-requests/"
+    assert viewer_client.get(location_url).status_code == 200
     before = (Region.objects.count(), Plant.objects.count(), AuditEvent.objects.count())
     client = Client(enforce_csrf_checks=True)
     client.force_login(system.member)
@@ -79,9 +80,9 @@ def test_removal_revokes_access_in_existing_session_and_preserves_account_and_re
     csrf = client.get("/api/session/").json()["csrf_token"]
     assert client.delete(url, HTTP_X_CSRFTOKEN=csrf).status_code == 204
     assert client.delete(url, HTTP_X_CSRFTOKEN=csrf).status_code == 204
-    assert viewer_client.get(region_url).status_code == 403
-    assert viewer_client.get(f"{base}regions/").status_code == 403
-    assert viewer_client.patch(region_url, {"name": "Forbidden"}).status_code == 403
+    assert viewer_client.get(location_url).status_code == 403
+    assert viewer_client.get(f"{base}sites/").status_code == 403
+    assert viewer_client.delete(region_url).status_code == 403
     assert viewer_client.get("/api/session/").json()["user"]["id"] == viewer.pk
     assert [row["id"] for row in viewer_client.get("/api/tenants/").json()["results"]] == [other.pk]
     assert viewer_client.get(f"/api/tenants/{other.pk}/members/").status_code == 200
@@ -254,7 +255,7 @@ def test_removal_serializes_with_transfer_and_invitation_acceptance(
         assert WorkspaceAdminChange.objects.count() == 1
         assert not WorkspaceMemberRemoval.objects.exists()
         with pytest.raises(PermissionDenied):
-            update_region(administrator, 999999, tenant.pk, name="Forbidden")
+            tenant_membership(administrator, tenant.pk, role=Membership.Role.ADMIN)
     else:
         assert not Membership.objects.filter(tenant=tenant, user=viewer).exists()
         assert WorkspaceMemberRemoval.objects.count() == 1

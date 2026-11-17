@@ -8,6 +8,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.utils import timezone
 
+from pyracast.accounts.models import Membership
 from pyracast.plants.models import (
     CalibrationActivation,
     CalibrationRun,
@@ -179,3 +180,37 @@ def test_csv_path_and_header_guards(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     )
     with pytest.raises(CommandError):
         call_command("import_production", file=path, **params)
+
+
+def test_production_import_reports_the_specific_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    system = make_system(approved=True)
+    saved_actuals(system, date(2020, 1, 1))
+    call_command(
+        "configure_plant",
+        username="member",
+        region_id=system.region.pk,
+        name="Plant",
+        dc_capacity_mw=1.0,
+    )
+    plant = Plant.objects.get()
+    monkeypatch.chdir(tmp_path)
+    path = tmp_path / "meter.csv"
+    path.write_text(
+        "starts_at,ends_at,energy\n2020-01-01T09:00:00Z,2020-01-01T09:30:00Z,1\n",
+        encoding="utf-8",
+    )
+    viewer = User.objects.create_user(username="viewer")
+    Membership.objects.create(user=viewer, tenant=system.tenant)
+    params = dict(plant_id=plant.pk, configuration_id=plant.current_configuration_id, file=path)
+    with pytest.raises(CommandError, match="Workspace administrator required"):
+        call_command("import_production", username="viewer", unit="MWh", **params)
+    call_command("import_production", username="member", unit="MWh", stdout=StringIO(), **params)
+    path.write_text(
+        "starts_at,ends_at,energy\n2020-01-01T09:00:00Z,2020-01-01T09:30:00Z,2\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(CommandError, match="Conflicting or overlapping observation"):
+        call_command("import_production", username="member", unit="MWh", **params)
+    assert ProductionObservation.objects.get().energy_mwh == 1

@@ -12,13 +12,14 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from pyracast.accounts.authorization import has_platform_admin_session, requires_admin_mfa
 from pyracast.accounts.language import (
     LANGUAGES,
     save_user_language,
     set_language_cookie,
     user_language,
 )
-from pyracast.accounts.security import has_verified_mfa
+from pyracast.api.serializers import InputSerializer
 
 
 class SessionUserOutput(serializers.Serializer[Any]):
@@ -36,12 +37,10 @@ class SessionUserOutput(serializers.Serializer[Any]):
 
     @staticmethod
     def get_mfa_required(user: User) -> bool:
-        return bool(user.is_staff or user.is_superuser)
+        return requires_admin_mfa(user)
 
     def get_can_admin(self, user: User) -> bool:
-        return bool(
-            user.is_staff and user.is_superuser and has_verified_mfa(self.context["request"])
-        )
+        return has_platform_admin_session(self.context["request"])
 
 
 class SessionOutput(serializers.Serializer[Any]):
@@ -73,7 +72,7 @@ class SessionView(APIView):
         return Response(session_output(request))
 
 
-class LanguageInput(serializers.Serializer[Any]):
+class LanguageInput(InputSerializer):
     language = serializers.ChoiceField(choices=LANGUAGES)
 
 

@@ -21,6 +21,7 @@ from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponseRedirect
 
 from pyracast.accounts.audit import record_security_event
+from pyracast.accounts.authorization import requires_admin_mfa
 
 
 class UnavailableSocialAppError(SocialApp.DoesNotExist, ValueError):
@@ -92,9 +93,12 @@ class SocialAccountAdapter(DefaultSocialAccountAdapter):
             self.connect_account(request, sociallogin)
         if sociallogin.is_existing:
             user = cast(User, sociallogin.user)
-            if (user.is_staff or user.is_superuser) and not Authenticator.objects.filter(
-                user=user, type=Authenticator.Type.TOTP
-            ).exists():
+            if (
+                requires_admin_mfa(user)
+                and not Authenticator.objects.filter(
+                    user=user, type=Authenticator.Type.TOTP
+                ).exists()
+            ):
                 raise PermissionDenied(
                     "Administrator sign-in requires a provisioned authenticator."
                 )

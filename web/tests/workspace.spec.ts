@@ -469,17 +469,14 @@ test("region collection schedule validates and saves distinct local times", asyn
         enabled: true,
         times: ["09:00"],
         timezone: region.timezone,
-        daily_request_limit: 10,
-        used_today: 2,
-        remaining_today: 8,
+        last_success_at: null as string | null,
+        next_collection_at: "2026-01-01T07:00:00Z",
         history_requests_reserved_per_day: 1,
         history_local_time: "03:00",
         history_retry_until_local: "09:00",
         history_retry_minutes: 30,
         max_forecast_times: 9,
         effective_from: "2026-01-01T00:00:00Z",
-        quota_utc_day: "2026-01-01",
-        requests_by_outcome: { succeeded: 1, failed: 1, uncertain: 0 },
         recent_jobs: [
             {
                 id: 1,
@@ -577,7 +574,7 @@ test("region collection schedule validates and saves distinct local times", asyn
         page.getByText("Each collection time must be unique."),
     ).toBeVisible();
     await page.getByLabel("Collection time 2 (Europe/Istanbul)").fill("11:00");
-    schedule.used_today = 3;
+    schedule.last_success_at = "2026-01-01T06:00:00Z";
     schedule.effective_from = "2026-01-01T00:00:30Z";
     const refreshed = page.waitForResponse(
         (response) =>
@@ -589,9 +586,9 @@ test("region collection schedule validates and saves distinct local times", asyn
     await expect(
         page.getByLabel("Collection time 2 (Europe/Istanbul)"),
     ).toHaveValue("11:00");
-    await expect(page.getByText("Requests used").locator("..")).toContainText(
-        "3",
-    );
+    await expect(
+        page.getByText("Last successful collection").locator(".."),
+    ).not.toContainText("Not yet");
     await page.getByRole("button", { name: "+ Add time" }).click();
     await page.getByLabel("Collection time 3 (Europe/Istanbul)").fill("10:00");
     await page

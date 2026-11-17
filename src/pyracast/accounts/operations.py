@@ -1,11 +1,12 @@
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
-from django.core.exceptions import PermissionDenied, ValidationError
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models.functions import Lower
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
+from pyracast.accounts.authorization import require_platform_admin, tenant_membership
 from pyracast.accounts.models import (
     Membership,
     Tenant,
@@ -15,54 +16,9 @@ from pyracast.accounts.models import (
 )
 
 
-def require_member(actor: User, tenant_id: int) -> None:
-    if (
-        not actor.is_active
-        or not Membership.objects.filter(user=actor, tenant_id=tenant_id).exists()
-    ):
-        raise PermissionDenied("Tenant membership required.")
-
-
-def require_admin(actor: User) -> None:
-    if not actor.is_active or not getattr(actor, "is_superuser", False):
-        raise PermissionDenied("Platform administrator required.")
-
-
-def require_workspace_admin(actor: User, tenant_id: int) -> None:
-    # The tenant lock serializes authorization with platform administrator reassignment.
-    tenant = Tenant.objects.select_for_update().filter(pk=tenant_id).first()
-    if (
-        tenant is None
-        or not Membership.objects.filter(
-            user_id=actor.pk, user__is_active=True, tenant_id=tenant_id, role=Membership.Role.ADMIN
-        ).exists()
-    ):
-        raise PermissionDenied(_("Workspace administrator required."))
-
-
-def workspace_membership(actor: User, tenant_id: int, *, lock: bool = False) -> Membership:
-    if lock:
-        Tenant.objects.select_for_update().get(pk=tenant_id)
-    membership = Membership.objects.filter(
-        user_id=actor.pk, user__is_active=True, tenant_id=tenant_id
-    ).first()
-    if membership is None:
-        raise PermissionDenied("Tenant membership required.")
-    return membership
-
-
-def require_workspace_member(actor: User, tenant_id: int) -> Membership:
-    membership = workspace_membership(actor, tenant_id, lock=True)
-    if membership.role != Membership.Role.VIEWER:
-        raise PermissionDenied(
-            _("Workspace members submit requests; administrators edit directly.")
-        )
-    return membership
-
-
 @transaction.atomic
 def remove_workspace_member(actor: User, tenant_id: int, user_id: int) -> None:
-    require_workspace_admin(actor, tenant_id)
+    tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
     membership = Membership.objects.filter(tenant_id=tenant_id, user_id=user_id).first()
     if membership is None:
         return
@@ -91,7 +47,7 @@ def remove_workspace_member(actor: User, tenant_id: int, user_id: int) -> None:
 def reassign_workspace_admin(
     actor: User, tenant_id: int, user_id: int, *, expected_admin_id: int | None
 ) -> Membership:
-    require_admin(actor)
+    require_platform_admin(actor)
     Tenant.objects.select_for_update().get(pk=tenant_id)
     current_admin_id = (
         Membership.objects.filter(tenant_id=tenant_id, role=Membership.Role.ADMIN)

@@ -1,11 +1,12 @@
 from collections.abc import Callable, Iterator
-from typing import Any
+from typing import Any, cast
 
 import pytest
+from django import forms
 from django.contrib import admin as django_admin
 from django.contrib.auth.models import User
 from django.test import Client
-from django.urls import URLPattern, URLResolver, get_resolver
+from django.urls import NoReverseMatch, URLPattern, URLResolver, get_resolver, reverse
 
 from pyracast.admin import site
 from pyracast.admin_forms import ProviderSetupForm
@@ -307,8 +308,8 @@ def test_no_http_route_accepts_the_fixture_provider() -> None:
     assert response.status_code == 404
     assert not ProviderAccount.objects.filter(external_account_id="fixture-http").exists()
     make_system()
-    choices = dict(ProviderSetupForm().fields["existing_account"].choices)
-    assert all(not value or "fixture" not in str(label) for value, label in choices.items())
+    field = cast(forms.ChoiceField, ProviderSetupForm().fields["existing_account"])
+    assert [value for value, _ in cast(list[tuple[str, str]], field.choices) if value] == []
 
 
 @pytest.mark.django_db
@@ -326,7 +327,8 @@ def test_console_offers_no_bulk_or_raw_write_actions() -> None:
     assert client.post("/admin/notifications/notificationsettings/add/", {}).status_code == 403
     settings_row.refresh_from_db()
     assert settings_row.max_recipients == 5
-    assert client.get(f"/admin/regions/region/{system.region.pk}/setup/").status_code == 404
+    with pytest.raises(NoReverseMatch):
+        reverse("admin:regions_region_setup", args=(system.region.pk,))
     assert client.get("/admin/autocomplete/").status_code == 404
     assert client.get("/admin/password_change/done/").status_code == 404
     assert django_admin.site._registry == {}

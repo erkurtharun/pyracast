@@ -1,13 +1,14 @@
 import json
 from collections.abc import Iterator
 from datetime import UTC, timedelta
+from io import StringIO
 from typing import Any
 
 import pytest
+from django.core.management import call_command
 from django.test import Client
 from django.urls import URLPattern, URLResolver, get_resolver
 from django.utils import timezone
-from drf_spectacular.generators import SchemaGenerator
 
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.secrets import encrypt_secret
@@ -351,7 +352,9 @@ def _get_routes(patterns: list[URLPattern | URLResolver], prefix: str = "") -> I
 
 
 def test_customer_schema_fields_are_an_allowlist() -> None:
-    schema = SchemaGenerator().get_schema(request=None, public=True)
+    output = StringIO()
+    call_command("spectacular", format="openapi-json", stdout=output)
+    schema = json.loads(output.getvalue())
     fields = set(_schema_fields(schema["components"]))
     for operations in schema["paths"].values():
         for operation in operations.values():
@@ -566,7 +569,7 @@ def test_collection_schedule_reports_only_the_plants_own_collection() -> None:
         outcome="succeeded",
     )
     after = client.get(path).json()
-    assert after == before
+    assert {**after, "effective_from": None} == {**before, "effective_from": None}
     assert not {
         "daily_request_limit",
         "used_today",

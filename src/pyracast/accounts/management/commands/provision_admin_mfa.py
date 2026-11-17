@@ -14,6 +14,7 @@ from django.db import transaction
 from django.views.decorators.debug import sensitive_variables
 
 from pyracast.accounts.audit import record_security_event
+from pyracast.accounts.authorization import is_platform_admin
 from pyracast.accounts.mfa import MFAAdapter
 
 
@@ -58,8 +59,10 @@ class Command(BaseCommand):
     def handle(self, *args: Any, **options: Any) -> None:
         with transaction.atomic():
             user = User.objects.select_for_update().filter(username=options["username"]).first()
-            if user is None or not user.is_active or not (user.is_staff or user.is_superuser):
-                raise CommandError("An active administrator account is required.")
+            if user is None or not is_platform_admin(user):
+                raise CommandError(
+                    "An active administrator account with staff and superuser status is required."
+                )
             if Authenticator.objects.filter(user=user).exists():
                 raise CommandError(
                     "An authenticator already exists; provisioning never replaces a factor."

@@ -116,7 +116,7 @@ def test_signup_requires_verification_before_tenant_access() -> None:
             "unread_outcome_count": 0,
         }
     ]
-    assert client.get(f"/api/tenants/{other.pk}/regions/").status_code == 403
+    assert client.get(f"/api/tenants/{other.pk}/sites/").status_code == 403
 
 
 @pytest.mark.parametrize(

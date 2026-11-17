@@ -1,4 +1,3 @@
-import re
 from io import StringIO
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
@@ -12,7 +11,6 @@ from django.contrib.auth.models import User
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import Client, RequestFactory
-from django.urls import URLPattern, get_resolver
 
 from pyracast.accounts.mfa import MFAAdapter
 
@@ -58,29 +56,6 @@ def test_authenticated_admin_cannot_use_customer_totp_enrollment(method: str) ->
     assert not Authenticator.objects.filter(user=user).exists()
 
 
-def test_every_platform_route_rejects_a_privileged_session_without_mfa_evidence() -> None:
-    user = administrator()
-    Authenticator.objects.create(user=user, type="totp", data={})
-    client = Client()
-    client.force_login(user)
-    routes = {
-        re.sub(r"<int:\w+>", "1", str(route.pattern))
-        for route in get_resolver().url_patterns
-        if isinstance(route, URLPattern) and str(route.pattern).startswith("api/platform/")
-    }
-    assert routes == {
-        "api/platform/accounts/",
-        "api/platform/accounts/1/rotate-secret/",
-        "api/platform/regions/1/bindings/",
-        "api/platform/bindings/1/validate/",
-        "api/platform/regions/1/approve/",
-        "api/platform/regions/1/transition/",
-    }
-    for route in routes:
-        assert client.get("/" + route).status_code == 403
-        assert client.post("/" + route, {}, content_type="application/json").status_code == 403
-
-
 def test_trusted_command_provisions_encrypted_factor_and_never_replaces_it() -> None:
     user = administrator()
     output = StringIO()
@@ -121,10 +96,15 @@ def test_provisioning_retains_uri_fallback_when_console_cannot_encode_qr() -> No
     assert MFAAdapter().decrypt(authenticator.data["secret"]) == secret
 
 
-@pytest.mark.parametrize("kind", ["missing", "customer", "inactive"])
+@pytest.mark.parametrize("kind", ["missing", "customer", "inactive", "staff", "superuser"])
 def test_trusted_command_rejects_ineligible_accounts(kind: str) -> None:
     if kind != "missing":
-        User.objects.create_user(username="ineligible", is_active=kind != "inactive")
+        User.objects.create_user(
+            username="ineligible",
+            is_active=kind != "inactive",
+            is_staff=kind in {"inactive", "staff"},
+            is_superuser=kind in {"inactive", "superuser"},
+        )
     with pytest.raises(CommandError, match="active administrator"):
         call_command("provision_admin_mfa", username="ineligible", stdout=StringIO())
     assert not Authenticator.objects.exists()
@@ -151,7 +131,7 @@ def test_verified_admin_uses_common_password_change_and_strict_csp() -> None:
 
 
 def test_legacy_administrator_requires_explicit_email_and_proves_ownership_later() -> None:
-    user = User.objects.create_user(username="legacy", is_staff=True)
+    user = User.objects.create_user(username="legacy", is_staff=True, is_superuser=True)
     with pytest.raises(CommandError, match="--email is required"):
         call_command("provision_admin_mfa", username=user.username, stdout=StringIO())
     assert not Authenticator.objects.exists()
@@ -168,7 +148,7 @@ def test_legacy_administrator_requires_explicit_email_and_proves_ownership_later
 
 @pytest.mark.parametrize("registered", [False, True])
 def test_conflicting_email_cannot_leave_an_orphaned_administrator_factor(registered: bool) -> None:
-    user = User.objects.create_user(username="legacy", is_superuser=True)
+    user = User.objects.create_user(username="legacy", is_staff=True, is_superuser=True)
     other = User.objects.create_user(username="other", email="owner@example.com")
     if registered:
         EmailAddress.objects.create(user=other, email=other.email, verified=True, primary=True)
@@ -184,7 +164,7 @@ def test_conflicting_email_cannot_leave_an_orphaned_administrator_factor(registe
 
 @pytest.mark.parametrize("email", ["invalid", "x" * 245 + "@example.com"])
 def test_provisioning_rejects_invalid_email_without_changes(email: str) -> None:
-    user = User.objects.create_user(username="legacy", is_superuser=True)
+    user = User.objects.create_user(username="legacy", is_staff=True, is_superuser=True)
     with pytest.raises(CommandError, match="valid email"):
         call_command("provision_admin_mfa", username=user.username, email=email, stdout=StringIO())
     assert not EmailAddress.objects.exists()
@@ -205,7 +185,7 @@ def test_provisioning_does_not_replace_an_existing_email_identity() -> None:
 
 
 def test_provisioning_requires_resolution_of_nonprimary_email_identity() -> None:
-    user = User.objects.create_user(username="legacy", is_superuser=True)
+    user = User.objects.create_user(username="legacy", is_staff=True, is_superuser=True)
     EmailAddress.objects.create(user=user, email="old@example.com", verified=False, primary=False)
     with pytest.raises(CommandError, match="Resolve the existing"):
         call_command(

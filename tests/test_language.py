@@ -154,7 +154,9 @@ def test_authenticated_preference_survives_new_device_and_is_owned_by_caller() -
         ).status_code
         == 403
     )
-    response = choose(client, "tr", user_id=other.pk)
+    assert choose(client, "tr", user_id=other.pk).status_code == 400
+    assert not UserLanguagePreference.objects.exists()
+    response = choose(client, "tr")
     assert response.json()["user"]["id"] == owner.pk
     assert response.json()["user"]["language_preference"] == "tr"
     assert not UserLanguagePreference.objects.filter(user=other).exists()

@@ -127,19 +127,11 @@ msgstr "Onayla"
 msgid "Approve location change"
 msgstr "Konum değişikliğini onayla"
 
-msgid "Approve location change (new binding validation and approval required)"
-msgstr ""
-"Konum değişikliğini onayla (yeni bağlantının doğrulanması ve onaylanması "
-"gerekir)"
-
 msgid "Approve plant"
 msgstr "Santrali onayla"
 
 msgid "Approve the plant's current technical configuration before connecting."
 msgstr "Bağlamadan önce santralin güncel teknik yapılandırmasını onaylayın."
-
-msgid "Approve validated reference binding"
-msgstr "Doğrulanmış referans bağlantısını onayla"
 
 msgid "Approved"
 msgstr "Onaylandı"
@@ -1009,9 +1001,6 @@ msgstr "Konum değişikliğini reddet"
 msgid "Reject plant"
 msgstr "Santrali reddet"
 
-msgid "Reject region"
-msgstr "Bölgeyi reddet"
-
 msgid "Reject this plant"
 msgstr "Bu santrali reddet"
 
@@ -1225,9 +1214,6 @@ msgstr "Yüzey açıları sonlu ve izin verilen sınırlar içinde olmalıdır."
 msgid "Suspend plant"
 msgstr "Santrali askıya al"
 
-msgid "Suspend region"
-msgstr "Bölgeyi askıya al"
-
 msgid "Suspend this plant"
 msgstr "Bu santrali askıya al"
 
@@ -1314,9 +1300,6 @@ msgstr ""
 msgid "The provider's request budget is unavailable. Try validation later."
 msgstr ""
 "Sağlayıcının istek bütçesi kullanılamıyor. Doğrulamayı daha sonra deneyin."
-
-msgid "The request is stale or already reviewed; review the current region."
-msgstr "Talep güncelliğini yitirdi veya incelendi; güncel bölgeyi inceleyin."
 
 msgid "The review could not be applied. Reload and review the current plant."
 msgstr "İnceleme uygulanamadı. Yeniden yükleyip güncel santrali inceleyin."
@@ -1469,9 +1452,6 @@ msgstr "Doğrula ve onayla"
 
 msgid "Validate connection"
 msgstr "Bağlantıyı doğrula"
-
-msgid "Validate the current binding before approval."
-msgstr "Onaydan önce güncel bağlantıyı doğrulayın."
 
 msgid "Validate the current private key before collections resume."
 msgstr "Veri toplamaya devam etmeden önce güncel özel anahtarı doğrulayın."

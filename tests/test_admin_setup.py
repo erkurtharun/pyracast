@@ -34,7 +34,7 @@ def admin_system() -> System:
 
 
 def setup_url(system: System) -> str:
-    return reverse("admin:regions_region_setup", args=(system.region.pk,))
+    return reverse("admin:workspace_plant", args=(system.region.pk,))
 
 
 def setup_input(system: System, **changes: object) -> dict[str, object]:
@@ -171,7 +171,7 @@ def test_setup_csrf_deleted_regions_and_missing_binding_states() -> None:
     region = Region.objects.create(
         tenant=system.tenant, name="Empty", latitude=41, longitude=30, timezone="Europe/Istanbul"
     )
-    response = client.get(reverse("admin:regions_region_setup", args=(region.pk,)))
+    response = client.get(reverse("admin:workspace_plant", args=(region.pk,)))
     assert response.status_code == 200
     assert b"No plant has been submitted" in response.content
     assert (
@@ -180,7 +180,7 @@ def test_setup_csrf_deleted_regions_and_missing_binding_states() -> None:
     )
     assert b"Save the private connection to continue" in response.content
     Plant.objects.create(region=region, name="Legacy plant")
-    response = client.get(reverse("admin:regions_region_setup", args=(region.pk,)))
+    response = client.get(reverse("admin:workspace_plant", args=(region.pk,)))
     assert b"No saved technical configuration or customer submission" in response.content
     system.region.deleted_at = timezone.now()
     system.region.save(update_fields=("deleted_at",))
@@ -428,7 +428,7 @@ def test_initial_setup_duplicate_post_does_not_replace_the_first_binding() -> No
         longitude=30,
         timezone="Europe/Istanbul",
     )
-    path = reverse("admin:regions_region_setup", args=(region.pk,))
+    path = reverse("admin:workspace_plant", args=(region.pk,))
     data = setup_input(system, expected_binding_id="")
     assert client.post(path, data).status_code == 302
     binding = SiteBinding.objects.get(region=region)

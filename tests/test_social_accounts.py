@@ -488,14 +488,6 @@ def test_provider_callbacks_reject_unsupported_methods_without_consuming_state(
     assert complete(client, state, provider)["Location"] == CALLBACK
 
 
-def test_disabled_provider_token_rejects_unsupported_methods() -> None:
-    client = Client()
-    for method in ("PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"):
-        response = client.generic(method, AUTH + "auth/provider/token")
-        assert response.status_code == 405
-        assert response["Allow"] == "GET, POST"
-
-
 @pytest.mark.parametrize(
     "failure", ["user_changed", "logged_out", "reauth_expired", "reauth_missing", "origin_missing"]
 )

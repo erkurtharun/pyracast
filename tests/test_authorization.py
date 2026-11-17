@@ -47,7 +47,7 @@ def test_tenant_membership_returns_the_active_row_with_the_required_role() -> No
 
 
 @pytest.mark.parametrize(
-    ("active", "staff", "superuser"), itertools.product((True, False), repeat=3)
+    ("active", "staff", "superuser"), list(itertools.product((True, False), repeat=3))
 )
 def test_platform_administrator_is_an_active_staff_superuser(
     active: bool, staff: bool, superuser: bool

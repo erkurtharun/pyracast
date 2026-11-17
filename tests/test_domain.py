@@ -8,8 +8,8 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, connection, transaction
 
+from pyracast.accounts.authorization import require_platform_admin, tenant_membership
 from pyracast.accounts.models import Membership, Tenant
-from pyracast.accounts.operations import require_admin, require_member
 from pyracast.connections.contracts import ProviderData, ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import (
@@ -28,7 +28,6 @@ from pyracast.regions.operations import (
     review_location_change,
     submit_region,
     transition_region,
-    update_region,
     validate_location,
 )
 
@@ -66,7 +65,7 @@ class System:
 
 def make_system(*, approved: bool = False) -> System:
     member = User.objects.create(username="member")
-    admin = User.objects.create(username="admin", is_superuser=True)
+    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
     tenant = Tenant.objects.create(name="Tenant")
     Membership.objects.create(user=member, tenant=tenant, role=Membership.Role.ADMIN)
     region = submit_region(
@@ -91,24 +90,15 @@ def test_tenant_and_platform_authorization() -> None:
     system = make_system()
     other = Tenant.objects.create(name="Other")
     with pytest.raises(PermissionDenied):
-        require_member(system.member, other.pk)
+        tenant_membership(system.member, other.pk)
     with pytest.raises(PermissionDenied):
-        require_admin(system.member)
+        require_platform_admin(system.member)
     system.admin.is_active = False
     with pytest.raises(PermissionDenied):
-        require_admin(system.admin)
-    system.member.is_active = False
+        require_platform_admin(system.admin)
+    User.objects.filter(pk=system.member.pk).update(is_active=False)
     with pytest.raises(PermissionDenied):
-        require_member(system.member, system.tenant.pk)
-    system.member.is_active = True
-    Membership.objects.create(user=system.member, tenant=other, role=Membership.Role.ADMIN)
-    with pytest.raises(Region.DoesNotExist):
-        update_region(
-            system.member,
-            system.region.pk,
-            other.pk,
-            name="Other",
-        )
+        tenant_membership(system.member, system.tenant.pk)
 
 
 @pytest.mark.parametrize(
@@ -133,13 +123,6 @@ def test_region_names_are_bounded(name: str) -> None:
     with pytest.raises(ValidationError):
         submit_region(
             system.member, system.tenant.pk, name=name, latitude=0, longitude=0, timezone="UTC"
-        )
-    with pytest.raises(ValidationError):
-        update_region(
-            system.member,
-            system.region.pk,
-            system.tenant.pk,
-            name=name,
         )
 
 
