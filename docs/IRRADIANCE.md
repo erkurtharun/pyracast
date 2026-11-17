@@ -173,8 +173,15 @@ solar position at sea level. Zero reference power, zenith of 87° or more, or GH
 1 W/m² give gain 1, and the ratio is capped at 6. These are versioned assumptions flagged
 `assumed_tracker_geometry`: declared axis, row spacing, bifacial gain and terrain are not
 modeled. Other configurations keep `reference-power-transfer-v1` and `geometry_not_modeled`.
-The pure-Python gain agrees with an independent pvlib 0.16.1 chain within 0.012 on the
-tested cases.
+The reference gains in `tests/fixtures/tracking_gain_reference.json` come from an
+independent pvlib 0.16.1 chain: the same GHI estimate, `erbs`, `singleaxis` (axis azimuth
+180°, ±55°, backtracking, GCR 0.4), Hay–Davies `get_total_irradiance` with pvlib's
+extraterrestrial irradiance (solar constant 1366.1 W/m², where the model uses 1361) and
+albedo 0.20, and the cell-temperature factor from `pvsyst_cell` at 29 W/m²K.
+The stored gains are that chain's values rounded to four decimals.
+`scripts/check_scientific.py` recomputes the chain in CI on Windows and Ubuntu and requires
+the stored gains within 0.0001 of it and the pure-Python gain within 0.012; the unit tests
+hold the model to the stored gains with the same 0.012.
 
 Evidence from the authorized case, 2025-11-05 to 2026-11-03, against hourly settlement
 energy: a weekly rolling origin refit the factor on the trailing 30/60/90 days and scored the
@@ -509,14 +516,23 @@ The versioned `astral-3.2-sea-level-v1` policy uses the apparent upper solar lim
 standard refraction and a sea-level horizon, without terrain or shading inference.
 Collect UTC sunrise/sunset events around the local day to preserve DST, date-line
 and midnight-crossing daylight. Astral searches each event per UTC date and can miss one
-whose neighbour falls across 00:00 UTC, so a 30-minute scan of the same horizon test
-brackets every crossing of the local day: a bracket keeps Astral's event of the same
-direction within 60 s and otherwise bisects the crossing to the second, the resolution of
-Astral's zenith. An Astral event outside every bracket remains only with an opposite one
-less than a scan step away: such a pair is a daylight or night shorter than the step,
-which falls between two samples; such a dip is lost when Astral reports only one of its
-events. Any valid coordinate and timezone yields windows; only a local date the
-timezone skips is rejected. Polar day requires the full local day; polar night
+whose neighbour falls across 00:00 UTC, so the same horizon test is also sampled every
+30 minutes, from 30 minutes before the local day to 30 minutes after it. When two
+neighbouring samples show the same state but the sun could reach the horizon and return
+between them (the solar altitude changes by at most 16° per hour), the interval is
+halved, down to one second. Astral's zenith is constant within each whole second, so an
+interval of at most one second has both of its seconds sampled: every change of the
+horizon test is bracketed, also a daylight or night of a few seconds that Astral does not
+report. A bracket keeps Astral's event of the same direction when it lies within 60 s of
+the bracket and the horizon test changes state within 60 s around it; when Astral reports
+one crossing for two UTC dates, the report nearer the bracket is kept. Otherwise the
+crossing is bisected to the millisecond. Astral events that no bracket claims are
+dropped. Every window boundary inside the local day is thus within 60 s of a horizon
+crossing, each crossing yields one event, and Astral's timing is kept wherever the
+horizon test changes state within 60 s around it, which keeps Turkish windows identical.
+The local day keeps the events in `[start, end)`: an event exactly at its start belongs
+to it, one exactly at its end to the next day. Any valid coordinate and timezone yields
+windows; only a local date the timezone skips is rejected. Polar day requires the full local day; polar night
 does not count as a calibration day. The journal and calibration use the same
 windows. A time interval ending exactly at sunrise or starting at sunset has no
 daylight overlap. The journal hides night slots but retains original saved readings.

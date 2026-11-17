@@ -7,7 +7,7 @@ A developer runs `scripts/check.py`, the `web` npm scripts or `scripts/check_sci
 - `scripts/check.py` `main`: default run, `--shard INDEX/COUNT --shard-output DIR`, or `--combine-shards DIR...`; `--static-only` or `--tests-only` select stages, and arguments after `--` go to pytest unchanged (pass `--no-cov` with a test selection, since the floor applies to the whole suite). `web_npm` decides whether the web stages run. Pytest settings live in the native `[tool.pytest]` table of `pyproject.toml` (`strict = true`, list `addopts`, `faulthandler_timeout = 300`). `scripts/pytest_shard.py` is its pytest plugin (`pytest_collection_modifyitems`) and manifest validator (`validate_shards`, `finish_shard`).
 - `web/package.json` scripts: `check` (static + `test`), `check:coverage` (static + `test:coverage`), `check:static` (format:check, lint, typecheck, build), `test:integration`, `api:generate`. `scripts/generate_api_schema.py --check` compares a fresh schema and types with the committed files. Configs: `web/playwright.config.ts`, `web/playwright.integration.config.ts`, `web/eslint.config.mjs`; coverage in `web/testing/run-coverage.mjs`, `coverage-options.ts`, `coverage-reporter.ts`.
 - `tests/test_browser.py` `test_browser_against_live_django`: the only automated runner of the real-backend Playwright suite in `web/integration/` (a developer can also call `npm run test:integration` by hand with the `BROWSER_*` variables).
-- `scripts/check_scientific.py` `main`: probe of the optional `scientific` extra (pvlib, h5py, HDF5); optional as a dependency, but CI runs it on every run.
+- `scripts/check_scientific.py` `main`: probe of the optional `scientific` extra (pvlib, h5py, HDF5), then recomputes the tracker gain reference table (`tests/fixtures/tracking_gain_reference.json`) with pvlib and compares the table and `tracking_gain` with it; optional as a dependency, but CI runs it on every run.
 - `tests/conftest.py`: registers the Hypothesis profiles `gate` (derandomized, no deadline, no example database), loaded unless `HYPOTHESIS_PROFILE` names another, and `explore` (randomized, 2000 examples) for local searches with `--hypothesis-profile=explore`.
 - `.github/workflows/ci.yml`: `verify_ubuntu` (whole `check.py`), `verify_windows_shards` (two `--shard` runs) then `verify_windows` (`--combine-shards`), `web_ubuntu` (`generate_api_schema.py --check`, `check:coverage`) and `web_windows` (the same with `check`), `scientific` (both OS), `audit` (`pip-audit`), `sonar`. Before `check.py` the verify jobs start a non-durable PostgreSQL (`start_postgres.py --non-durable`, as do the web jobs) and RabbitMQ, run `pyracast migrate`, `migrate --check` and `pyracast check`. The `deployment` job belongs to the release pipeline flow.
 
@@ -44,7 +44,7 @@ flowchart TD
     R -->|"check (Windows CI)"| TN["Playwright on port 3100: npm start in CI, npm run dev locally"]
     TC --> LC["reporter requires every authored source once in LCOV"]
     BR --> I["npm run test:integration: npm run dev on port 3101 against live Django"]
-    S --> D["download HDF5, verify SHA256, uv sync scientific extra, smoke script"]
+    S --> D["download HDF5, verify SHA256, uv sync scientific extra, smoke script, tracker gain comparison"]
     D -->|"download, checksum, sync or smoke failure"| E["exception, nonzero exit"]
 ```
 

@@ -1,4 +1,6 @@
+import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -15,27 +17,20 @@ from pyracast.plants.transfer import (
 )
 
 LATITUDE, LONGITUDE = 37.80375, 34.460913
-
-
-# Expected values come from an independent pvlib 0.16.1 chain: Erbs decomposition,
-# singleaxis(gcr=0.4, max_angle=55, backtrack=True) and Hay-Davies transposition.
-@pytest.mark.parametrize(
-    ("reference", "zenith", "azimuth", "day_of_year", "expected"),
-    [
-        (0.4738, 58.35, 83.49, 172, 1.7547),
-        (0.1699, 70.37, 284.97, 172, 1.2285),
-        (0.2210, 73.77, 135.86, 10, 1.9169),
-        (0.4795, 60.00, 186.79, 10, 1.0191),
-        (0.3051, 65.86, 249.66, 79, 1.7326),
-        (0.1255, 33.17, 138.60, 108, 0.9691),
-    ],
+# Gains of an independent pvlib chain rounded to four decimals; scripts/check_scientific.py
+# recomputes and compares them.
+REFERENCE_CHAIN = json.loads(
+    (Path(__file__).parent / "fixtures" / "tracking_gain_reference.json").read_text("utf-8")
 )
-def test_tracking_gain_matches_independent_reference_chain(
-    reference: float, zenith: float, azimuth: float, day_of_year: int, expected: float
-) -> None:
-    assert tracking_gain(reference, zenith, azimuth, day_of_year) == pytest.approx(
-        expected, abs=0.012
+assert REFERENCE_CHAIN, "Tracker gain reference table must contain cases."
+
+
+@pytest.mark.parametrize("case", REFERENCE_CHAIN)
+def test_tracking_gain_matches_independent_reference_chain(case: dict[str, float]) -> None:
+    gain = tracking_gain(
+        case["reference_fraction"], case["zenith"], case["azimuth"], int(case["day_of_year"])
     )
+    assert gain == pytest.approx(case["gain"], abs=0.012)
 
 
 def test_tracker_is_flat_at_solar_noon_and_never_adjusts_night_or_low_sun() -> None:
