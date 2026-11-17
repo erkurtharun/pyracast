@@ -173,8 +173,14 @@ solar position at sea level. Zero reference power, zenith of 87° or more, or GH
 1 W/m² give gain 1, and the ratio is capped at 6. These are versioned assumptions flagged
 `assumed_tracker_geometry`: declared axis, row spacing, bifacial gain and terrain are not
 modeled. Other configurations keep `reference-power-transfer-v1` and `geometry_not_modeled`.
-The pure-Python gain agrees with an independent pvlib 0.16.1 chain within 0.012 on the
-tested cases.
+The reference gains in `tests/fixtures/tracking_gain_reference.json` come from an
+independent pvlib 0.16.1 chain: the same GHI estimate, `erbs`, `singleaxis` (axis azimuth
+180°, ±55°, backtracking, GCR 0.4), Hay–Davies `get_total_irradiance` with pvlib's
+extraterrestrial irradiance (solar constant 1366.1 W/m², where the model uses 1361) and
+albedo 0.20, and the cell-temperature factor from `pvsyst_cell` at 29 W/m²K.
+`scripts/check_scientific.py` recomputes that chain in CI on Windows and Ubuntu and requires
+the stored gains within 0.001 of it and the pure-Python gain within 0.012; the unit tests
+hold the model to the stored gains with the same 0.012.
 
 Evidence from the authorized case, 2025-11-05 to 2026-11-03, against hourly settlement
 energy: a weekly rolling origin refit the factor on the trailing 30/60/90 days and scored the

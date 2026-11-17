@@ -16,13 +16,18 @@ LINUX_ARCHIVE = "hdf5-2.2.0-ubuntu-2404_gcc.tar.gz"
 LINUX_SHA256 = "efa520a59202830a0d48ac7da1312314507ec1fcc40c744cf7b1c37a5edfaaeb"
 
 SMOKE = """
+import importlib.util
+import json
 import os
 import platform
+import sys
+from math import sqrt
 from pathlib import Path
 
 if platform.system() == "Windows":
     handle = os.add_dll_directory(str(Path(os.environ["HDF5_DIR"]) / "bin"))
 import h5py
+import numpy as np
 import pandas as pd
 import pvlib
 
@@ -35,6 +40,58 @@ assert 29.0 < zenith < 29.4, zenith
 assert 243.8 < azimuth < 244.3, azimuth
 print(f"h5py {h5py.__version__}, HDF5 {h5py.version.hdf5_version}, pvlib {pvlib.__version__}")
 print(f"solar position: zenith {zenith:.6f}, azimuth {azimuth:.6f}")
+
+root = Path(sys.argv[1])
+# Loaded by path: the package root reads installed metadata the scientific venv need not have.
+spec = importlib.util.spec_from_file_location(
+    "tracking", root / "src" / "pyracast" / "plants" / "tracking.py"
+)
+tracking = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(tracking)
+
+
+def scalar(values):
+    return float(np.ravel(values)[0])
+
+
+def chain_gain(reference, zenith, azimuth, day_of_year):
+    # GHI from p = 0.9964 g - 0.1484 g^2 (g = GHI / 1000), the documented model input.
+    ghi = 1000 * (sqrt(0.9964**2 - 4 * 0.1484 * reference) - 0.9964) / (2 * -0.1484)
+    parts = pvlib.irradiance.erbs(ghi, zenith, day_of_year)
+    tracker = pvlib.tracking.singleaxis(
+        zenith, azimuth, axis_tilt=0, axis_azimuth=180, max_angle=55, backtrack=True, gcr=0.4
+    )
+    plane = scalar(
+        pvlib.irradiance.get_total_irradiance(
+            scalar(tracker["surface_tilt"]),
+            scalar(tracker["surface_azimuth"]),
+            zenith,
+            azimuth,
+            scalar(parts["dni"]),
+            ghi,
+            scalar(parts["dhi"]),
+            dni_extra=pvlib.irradiance.get_extra_radiation(day_of_year),
+            model="haydavies",
+            albedo=0.2,
+        )["poa_global"]
+    )
+
+    def cell(irradiance):
+        return pvlib.temperature.pvsyst_cell(
+            irradiance, 0.0, u_c=29.0, u_v=0.0, module_efficiency=0.0, alpha_absorption=1.0
+        )
+
+    return plane / ghi * (1 - 0.0035 * (cell(plane) - cell(ghi)))
+
+
+table = root / "tests" / "fixtures" / "tracking_gain_reference.json"
+for case in json.loads(table.read_text("utf-8")):
+    inputs = (case["reference_fraction"], case["zenith"], case["azimuth"], case["day_of_year"])
+    expected = chain_gain(*inputs)
+    model = tracking.tracking_gain(*inputs)
+    assert abs(expected - case["gain"]) <= 0.001, (case, expected)
+    assert abs(model - expected) <= 0.012, (case, model, expected)
+    print(f"tracker gain {inputs}: pvlib {expected:.4f}, model {model:.4f}")
 """
 
 
@@ -89,7 +146,8 @@ def main() -> None:
             check=True,
         )
         python = root / "venv" / ("Scripts/python.exe" if windows else "bin/python")
-        subprocess.run([str(python), "-c", SMOKE], env=env, check=True)  # noqa: S603
+        root_directory = str(Path(__file__).resolve().parents[1])
+        subprocess.run([str(python), "-c", SMOKE, root_directory], env=env, check=True)  # noqa: S603
 
 
 if __name__ == "__main__":

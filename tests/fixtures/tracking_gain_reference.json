@@ -1,0 +1,8 @@
+[
+  {"reference_fraction": 0.4738, "zenith": 58.35, "azimuth": 83.49, "day_of_year": 172, "gain": 1.7547},
+  {"reference_fraction": 0.1699, "zenith": 70.37, "azimuth": 284.97, "day_of_year": 172, "gain": 1.2285},
+  {"reference_fraction": 0.2210, "zenith": 73.77, "azimuth": 135.86, "day_of_year": 10, "gain": 1.9169},
+  {"reference_fraction": 0.4795, "zenith": 60.00, "azimuth": 186.79, "day_of_year": 10, "gain": 1.0191},
+  {"reference_fraction": 0.3051, "zenith": 65.86, "azimuth": 249.66, "day_of_year": 79, "gain": 1.7326},
+  {"reference_fraction": 0.1255, "zenith": 33.17, "azimuth": 138.60, "day_of_year": 108, "gain": 0.9691}
+]
