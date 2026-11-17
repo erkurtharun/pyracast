@@ -17,7 +17,6 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
-from email.message import Message
 from pathlib import Path
 from types import FrameType, SimpleNamespace
 from typing import Any
@@ -1154,7 +1153,7 @@ def fake_bucket(
         assert "/" not in encoded
         name = unquote(encoded)
         if name not in objects:
-            raise urllib.error.HTTPError(request.full_url, 404, "Not Found", Message(), None)
+            raise urllib.error.URLError(f"{name} not found")
         content = objects[name]
         if media:
             return io.BytesIO(content)
@@ -1208,7 +1207,7 @@ def test_restore_fetches_a_pre_reset_archive_with_its_solcast_export_when_the_ho
     [
         ("count-mismatch", RuntimeError, "holds 2 snapshots; the database counts 3"),
         ("corrupt-export", RuntimeError, "is not gzip-compressed JSON lines"),
-        ("missing-export", urllib.error.HTTPError, "Not Found"),
+        ("missing-export", urllib.error.URLError, r"\.solcast\.jsonl\.gz not found"),
     ],
 )
 def test_restore_of_a_fetched_pre_reset_archive_stops_unless_its_solcast_export_verifies(
