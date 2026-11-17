@@ -73,7 +73,7 @@ sequenceDiagram
 | No usable password, no fresh reauthentication | 401 with `is_authenticated` true; UI opens `ReauthenticationForm`, replays once, then `reauthStillRequired` |
 | Current password wrong, or missing for an account that has one | 400 on `current_password` (`enter_current_password` or required) |
 | New password under 12 characters, common, too similar, or over 1024 characters | 400 on `new_password` (for example `password_too_short`) |
-| Mail delivery raises | Unhandled exception after the hash is saved and the session flushed; no `password_changed` event (inferred, see observations) |
+| Mail delivery raises | Contained and logged by the account mail adapter (`account-mail-notifications`); the change completes as on success: hash saved, session flushed, `password_changed`/`password_set` event logged, 401 with `meta.password_changed` true; the notice is not resent |
 | Success | 401, `meta.password_changed` true, `meta.is_authenticated` false |
 
 ## Rules and invariants
@@ -86,5 +86,5 @@ sequenceDiagram
 
 ## Tests
 
-- `tests/test_session.py` `test_password_change_requires_current_password_and_invalidates_all_sessions`, `test_expired_session_cannot_report_a_successful_password_change` (an anonymous client, not a timed-out session); `tests/test_auth_lifecycle.py` `test_password_change_requires_at_least_twelve_characters`, `test_password_whitespace_is_preserved_across_login_reauthentication_and_change`; `tests/test_social_accounts.py` `test_last_enabled_provider_cannot_be_removed` (set password after email reauthentication, status and hash only), `tests/test_transactional_mail.py` (templates only), `tests/test_admin_mfa_bootstrap.py` (admin redirect).
-- Playwright: `web/tests/social-auth.spec.ts` (first password, expired session; mocked API), `web/integration/auth-security.spec.ts` (full change, then login). Gaps: no test of the notification mail after a real change, the rate limit, the 1024-character cap on `new_password`, the audit events, a mail failure or the reauthentication replay.
+- `tests/test_session.py` `test_password_change_requires_current_password_and_invalidates_all_sessions`, `test_expired_session_cannot_report_a_successful_password_change` (an anonymous client, not a timed-out session); `tests/test_auth_lifecycle.py` `test_password_change_requires_at_least_twelve_characters`, `test_password_whitespace_is_preserved_across_login_reauthentication_and_change`; `tests/test_social_accounts.py` `test_last_enabled_provider_cannot_be_removed` (set password after email reauthentication, status and hash only), `tests/test_transactional_mail.py` (templates only), `tests/test_admin_mfa_bootstrap.py` (admin redirect), `tests/test_account_mail_failures.py` `test_password_change_with_failing_mail_completes_and_is_audited` (401, flag, new hash and `password_changed` event with a failing mailer).
+- Playwright: `web/tests/social-auth.spec.ts` (first password, expired session; mocked API), `web/integration/auth-security.spec.ts` (full change, then login). Gaps: no test of the notification mail after a real change, the rate limit, the 1024-character cap on `new_password`, the `password_set` event or the reauthentication replay.

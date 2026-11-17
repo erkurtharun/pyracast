@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from collections.abc import Callable, Iterator, Sequence
 from smtplib import SMTPRecipientsRefused
@@ -25,7 +26,10 @@ from tests.test_auth_lifecycle import PASSWORD, member, submit
 from tests.test_company_registration import signup
 from tests.test_social_accounts import CALLBACK, PROVIDERS, begin, complete
 
-pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+pytestmark = [
+    pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"]),
+    pytest.mark.usefixtures("failing_mail"),
+]
 AUTH = "/api/auth/browser/v1/"
 CODE = re.compile(r"[A-Z0-9]{4}-[A-Z0-9]{4}")
 
@@ -38,6 +42,10 @@ def smtp_refusal(message: EmailMessage) -> Exception:
 
 def gmail_rejection(message: EmailMessage) -> Exception:
     return NotSentError(f"Gmail rejected the message for {', '.join(message.to)}")
+
+
+def relay_timeout(message: EmailMessage) -> Exception:
+    return TimeoutError(f"timed out reaching the relay for {', '.join(message.to)}")
 
 
 class FailingBackend(BaseEmailBackend):
@@ -56,7 +64,10 @@ class FailingBackend(BaseEmailBackend):
         return len(email_messages)
 
 
-@pytest.fixture(autouse=True, params=[smtp_refusal, gmail_rejection], ids=["smtp", "gmail"])
+@pytest.fixture(
+    params=[smtp_refusal, gmail_rejection, relay_timeout],
+    ids=["smtp", "gmail", "timeout"],
+)
 def failing_mail(request: pytest.FixtureRequest) -> Iterator[None]:
     FailingBackend.failure = request.param
     FailingBackend.attempted, FailingBackend.raised = [], []
@@ -102,8 +113,14 @@ def attempted_code() -> str:
 def assert_no_failure_detail(response: Any) -> None:
     for error in FailingBackend.raised:
         assert type(error).__name__.encode() not in response.content
+        assert str(error).encode() not in response.content
     assert b"mailbox unavailable" not in response.content
     assert b"Gmail rejected" not in response.content
+    assert b"timed out" not in response.content
+
+
+def mail_failure_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [record for record in caplog.records if "account_mail_failed" in record.getMessage()]
 
 
 def signed_in(user: User, *, reauthenticated: bool = False) -> Client:
@@ -116,7 +133,9 @@ def signed_in(user: User, *, reauthenticated: bool = False) -> Client:
     return client
 
 
-def test_signup_with_failing_mail_reaches_verification_stage() -> None:
+def test_signup_with_failing_mail_reaches_verification_stage(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     client = Client(enforce_csrf_checks=True)
 
     response = signup(client)
@@ -128,6 +147,10 @@ def test_signup_with_failing_mail_reaches_verification_stage() -> None:
     assert Membership.objects.get(user=user).tenant == Tenant.objects.get()
     assert not EmailAddress.objects.get(user=user).verified
     assert [message.to for message in FailingBackend.attempted] == [["owner@example.com"]]
+    [record] = mail_failure_records(caplog)
+    assert f" user_id={user.pk} " in record.getMessage()
+    assert user.email not in record.getMessage()
+    assert f"={user.get_username()} " not in record.getMessage()
 
     FailingBackend.failure = None
     cache.clear()
@@ -248,15 +271,17 @@ def test_account_mail_failure_is_logged_once_without_address_or_code(
     assert response.status_code == 200
     assert_no_failure_detail(response)
     code = attempted_code()
-    records = [record for record in caplog.records if "account_mail_failed" in record.getMessage()]
-    assert len(records) == 1
-    record = records[0]
+    [record] = mail_failure_records(caplog)
     assert record.name == "pyracast.accounts.adapters"
     assert record.levelname == "ERROR"
     assert record.exc_info is None
+    error = FailingBackend.raised[-1]
     assert "template=account/email/login_code" in record.getMessage()
-    assert f"error_type={type(FailingBackend.raised[-1]).__name__}" in record.getMessage()
+    assert f"error_type={type(error).__name__}" in record.getMessage()
+    expected_code = error.code if isinstance(error, NotSentError) else None
+    assert record.getMessage().endswith(f" error_code={expected_code}")
     assert user.email not in caplog.text
     assert code not in caplog.text
+    assert str(error) not in caplog.text
     assert "mailbox unavailable" not in caplog.text
     assert submit(client, "auth/reauthenticate/code/confirm", {"code": code}).status_code == 200

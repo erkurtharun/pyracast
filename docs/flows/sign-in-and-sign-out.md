@@ -76,6 +76,7 @@ sequenceDiagram
 | Wrong or reused MFA code | 400 `incorrect_code`; beyond 5 attempts per user (or 10 per IP, shared with password failures) in 10 min 400 `too_many_login_attempts`; success clears both counters |
 | Stored TOTP secret cannot be decrypted | 403 from `MFAAdapter.decrypt` |
 | 2fa authenticate without a pending stage or after 15 minutes | 401 with flows; screen shows `unableSignIn` |
+| Mail backend error on the verification code of an unverified login | Contained and logged by the account mail adapter (`account-mail-notifications`); 401 pending `verify_email` as on success |
 | Sign-out DELETE or the following refetch fails | Notice with the message; if only the refetch failed, the server session is already gone |
 
 ## Rules and invariants

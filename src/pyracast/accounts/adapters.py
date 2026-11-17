@@ -1,3 +1,4 @@
+import logging
 from typing import Any, cast
 
 from allauth.account import app_settings as account_settings
@@ -17,6 +18,9 @@ from django.utils import translation
 
 from pyracast.accounts.language import user_language
 from pyracast.accounts.security import normalize_client_ip
+from pyracast.mail_delivery import NotSentError
+
+logger = logging.getLogger(__name__)
 
 
 class AccountAdapter(DefaultAccountAdapter):
@@ -90,6 +94,17 @@ class AccountAdapter(DefaultAccountAdapter):
 
         def send() -> None:
             with translation.override(language):
-                super(AccountAdapter, self).send_mail(template_prefix, email, context)
+                try:
+                    super(AccountAdapter, self).send_mail(template_prefix, email, context)
+                except Exception as error:
+                    # Transport errors can carry the recipient address, so neither the message
+                    # nor the traceback is logged.
+                    logger.error(
+                        "account_mail_failed template=%s user_id=%s error_type=%s error_code=%s",
+                        template_prefix,
+                        user.pk if isinstance(user, User) else None,
+                        type(error).__name__,
+                        error.code if isinstance(error, NotSentError) else None,
+                    )
 
         transaction.on_commit(send)
