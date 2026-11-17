@@ -153,7 +153,7 @@ def _audit_event(monkeypatch: pytest.MonkeyPatch) -> models.Model:
 
 def _account(monkeypatch: pytest.MonkeyPatch) -> models.Model:
     return create_account(
-        User.objects.create(username="platform", is_superuser=True),
+        User.objects.create(username="platform", is_superuser=True, is_staff=True),
         provider="solcast",
         external_account_id="vocabulary",
         api_key=provider_key(),
@@ -200,7 +200,7 @@ STORED_VOCABULARIES = (
 
 
 def _create_account(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
-    administrator = User.objects.create(username="platform", is_superuser=True)
+    administrator = User.objects.create(username="platform", is_superuser=True, is_staff=True)
     return lambda provider: create_account(
         administrator,
         provider=provider,
