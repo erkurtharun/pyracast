@@ -224,11 +224,24 @@ SPECTACULAR_SETTINGS = {
         "ChangeRequestStatusEnum": "pyracast.change_requests.models.ChangeRequestStatus",
         "ProductionChangeActionEnum": "pyracast.change_requests.models.ProductionChangeAction",
         "IncidentChangeActionEnum": "pyracast.change_requests.models.IncidentChangeAction",
-        "CalibrationStatusEnum": "pyracast.plants.serializers.calibration_status_choices",
-        "EpiasSourceKindEnum": "pyracast.metering.history.PRODUCTION_SOURCES",
+        "DispatcherPhaseEnum": "pyracast.forecasts.models.DispatcherPhase",
+        "CollectionEndpointEnum": "pyracast.forecasts.models.CollectionEndpoint",
+        "CollectionJobStatusEnum": "pyracast.forecasts.models.CollectionJobStatus",
+        "RequestPurposeEnum": "pyracast.forecasts.models.RequestPurpose",
+        "RequestOutcomeEnum": "pyracast.forecasts.models.RequestOutcome",
+        "SnapshotSourceKindEnum": "pyracast.forecasts.models.SnapshotSourceKind",
         "ForecastSourceKindEnum": ["forecast", "estimated_actuals", "mixed"],
-        "ProductionQualityEnum": "pyracast.plants.models.OBSERVATION_QUALITIES",
-        "IncidentKindEnum": ["inverter", "panels", "grid", "other", "multiple"],
+        "EpiasSourceKindEnum": "pyracast.metering.models.EpiasSourceKind",
+        "EpiasJobStatusEnum": "pyracast.metering.models.EpiasJobStatus",
+        "MeasurementBasisEnum": "pyracast.plants.models.MeasurementBasis",
+        "MountingTypeEnum": "pyracast.plants.models.MountingType",
+        "ObservationQualityEnum": "pyracast.plants.models.ObservationQuality",
+        "CalibrationStatusEnum": "pyracast.plants.models.CalibrationStatus",
+        "PlantEventActionEnum": "pyracast.plants.models.PlantEventAction",
+        "IncidentKindEnum": "pyracast.incidents.models.IncidentKind",
+        "NotificationDeliveryStatusEnum": (
+            "pyracast.notifications.models.NotificationDeliveryStatus"
+        ),
     },
 }
 LANGUAGE_CODE = "en"

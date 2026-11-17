@@ -401,7 +401,7 @@ def test_capture_shares_account_budget_and_prevents_duplicate_daily_kind(
     ]
     with pytest.raises(QuotaExceededError):
         reserve_account_request(
-            capture_binding.provider_account, timezone.now(), purpose="collection"
+            capture_binding.provider_account, timezone.now(), purpose="forecast"
         )
 
 

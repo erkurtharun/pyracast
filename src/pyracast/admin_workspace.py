@@ -28,7 +28,7 @@ from pyracast.admin_health_queries import (
     regions_for_issue,
 )
 from pyracast.connections.models import SiteBinding
-from pyracast.forecasts.models import DispatcherStatus, ForecastSnapshot
+from pyracast.forecasts.models import DispatcherPhase, DispatcherStatus, ForecastSnapshot
 from pyracast.forecasts.monitoring import delivery_health
 from pyracast.notifications.models import NotificationSettings
 from pyracast.notifications.operations import recipient_limit
@@ -385,7 +385,7 @@ def operations_context(issue: str = "") -> dict[str, Any]:
                 "unhealthy": name in unhealthy_phases,
                 "state_label": _("Needs attention") if name in unhealthy_phases else _("Current"),
             }
-            for name, label in DispatcherStatus.Phase.choices
+            for name, label in DispatcherPhase.choices
         ],
         **recent_work_context(issue=issue, now=now),
     }

@@ -63,14 +63,14 @@ def collection(
     binding: SiteBinding,
     status: str,
     *,
-    scheduled: datetime = NOW,
+    scheduled: datetime | None = None,
     available: datetime = NOW,
     lease: datetime | None = None,
 ) -> CollectionJob:
+    unique_slot = NOW - timedelta(days=30, seconds=CollectionJob.objects.count())
     return CollectionJob.objects.create(
         binding=binding,
-        endpoint=f"test-{CollectionJob.objects.count()}",
-        scheduled_slot=scheduled,
+        scheduled_slot=scheduled or unique_slot,
         target_date=NOW.date(),
         available_at=available,
         status=status,

@@ -14,7 +14,12 @@ from pyracast.connections.identity import canonical_account_identity
 from pyracast.connections.models import BindingHealth, Provider, ProviderAccount, SiteBinding
 from pyracast.connections.secrets import encrypt_secret
 from pyracast.forecasts.budget import remaining_forecast_requests
-from pyracast.forecasts.models import CollectionJob, RequestAttempt
+from pyracast.forecasts.models import (
+    CollectionJob,
+    RequestAttempt,
+    RequestOutcome,
+    RequestPurpose,
+)
 from pyracast.provider_retry import next_retry_at, rate_limit_retry_after
 from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionStatus
 
@@ -140,7 +145,7 @@ def reserve_account_request(
             raise QuotaExceededError
         if (
             job is not None
-            and purpose == "estimated_actuals"
+            and purpose == RequestPurpose.ESTIMATED_ACTUALS
             and used + 1 + remaining_forecast_requests(account, now) > account.daily_quota
         ):
             raise ForecastBudgetReservedError
@@ -189,11 +194,11 @@ def validate_binding(
         not binding.settings_verification_reference or binding.installation_date is None
     ):
         raise ValidationError("Confirmed site settings and installation date are required.")
-    attempt = reserve_request(binding, now, purpose="validation")
+    attempt = reserve_request(binding, now, purpose=RequestPurpose.VALIDATION)
     try:
         adapter.validate(binding)
     except ProviderError as exc:
-        RequestAttempt.objects.filter(pk=attempt.pk).update(outcome="failed")
+        RequestAttempt.objects.filter(pk=attempt.pk).update(outcome=RequestOutcome.FAILED)
         SiteBinding.objects.filter(pk=binding.pk).update(health=BindingHealth.ERROR)
         record_provider_failure(
             binding.provider_account, exc, now + timedelta(seconds=time.monotonic() - started)

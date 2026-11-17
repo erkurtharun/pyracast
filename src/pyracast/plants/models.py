@@ -6,16 +6,69 @@ from django.contrib.postgres.fields import DateTimeRangeField, RangeBoundary, Ra
 from django.db import models
 from django.db.models import F, Q
 
+from pyracast.db import choices_check
 from pyracast.plants.measurement_policy import MEASUREMENT_POLICY
 
-MEASUREMENT_BASES = (("net_export", "Net export"), ("ac_generation", "AC generation"))
-MOUNTING_TYPES = (("unknown", "Unknown"), ("fixed", "Fixed"), ("tracking", "Tracking"))
-OBSERVATION_QUALITIES = (
-    ("valid", "Valid"),
-    ("outage", "Outage"),
-    ("curtailed", "Curtailed"),
-    ("invalid", "Invalid"),
-)
+
+class MeasurementBasis(models.TextChoices):
+    NET_EXPORT = "net_export", "Net export"
+    AC_GENERATION = "ac_generation", "AC generation"
+
+
+class MountingType(models.TextChoices):
+    UNKNOWN = "unknown", "Unknown"
+    FIXED = "fixed", "Fixed"
+    TRACKING = "tracking", "Tracking"
+
+
+class ObservationQuality(models.TextChoices):
+    VALID = "valid", "Valid"
+    OUTAGE = "outage", "Outage"
+    CURTAILED = "curtailed", "Curtailed"
+    INVALID = "invalid", "Invalid"
+
+
+class CalibrationStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    RUNNING = "running", "Running"
+    READY = "ready", "Ready"
+    INSUFFICIENT = "insufficient", "Insufficient"
+    REJECTED = "rejected", "Rejected"
+    FAILED = "failed", "Failed"
+    SUPERSEDED = "superseded", "Superseded"
+
+
+class PlantEventAction(models.TextChoices):
+    SUBMISSION_SAVED = "submission_saved", "Submission saved"
+    CONFIGURATION_CREATED = "configuration_created", "Configuration created"
+    PLANT_RENAMED = "plant_renamed", "Plant renamed"
+    OBSERVATIONS_IMPORTED = "observations_imported", "Observations imported"
+    PRODUCTION_CHANGED = "production_changed", "Production changed"
+    EPIAS_CONNECTED = "epias_connected", "EPIAS connected"
+    EPIAS_DISCONNECTED = "epias_disconnected", "EPIAS disconnected"
+    CALIBRATION_REQUESTED = "calibration_requested", "Calibration requested"
+    CALIBRATION_SCHEDULED = "calibration_scheduled", "Calibration scheduled"
+    CALIBRATION_COMPLETED = "calibration_completed", "Calibration completed"
+    CALIBRATION_ACTIVATED = "calibration_activated", "Calibration activated"
+    CALIBRATION_AUTOMATICALLY_ACTIVATED = (
+        "calibration_automatically_activated",
+        "Calibration automatically activated",
+    )
+    CALIBRATION_RESET = "calibration_reset", "Calibration reset"
+    CALIBRATION_AUTOMATION_ENABLED = (
+        "calibration_automation_enabled",
+        "Automatic calibration enabled",
+    )
+    CALIBRATION_AUTOMATION_DISABLED = (
+        "calibration_automation_disabled",
+        "Automatic calibration disabled",
+    )
+    CALIBRATION_AUTOMATIC_SKIPPED = (
+        "calibration_automatic_skipped",
+        "Automatic calibration skipped",
+    )
+
+
 CONFIGURATION_PARAMETERS = (
     "dc_capacity_mw",
     "inverter_capacity_mw",
@@ -58,14 +111,10 @@ class PlantSubmission(models.Model):
     inverter_capacity_mw = models.FloatField(null=True)
     export_limit_mw = models.FloatField(null=True)
     measurement_basis = models.CharField(
-        max_length=20,
-        choices=MEASUREMENT_BASES,
-        default="net_export",
+        max_length=20, choices=MeasurementBasis, default=MeasurementBasis.NET_EXPORT
     )
     mounting_type = models.CharField(
-        max_length=10,
-        choices=MOUNTING_TYPES,
-        default="unknown",
+        max_length=10, choices=MountingType, default=MountingType.UNKNOWN
     )
     surface_tilt = models.FloatField(null=True)
     surface_azimuth = models.FloatField(null=True)
@@ -88,14 +137,10 @@ class PlantSubmission(models.Model):
                 | Q(export_limit_mw__gt=0, export_limit_mw__lt=float("inf")),
                 name="submission_export_finite",
             ),
-            models.CheckConstraint(
-                condition=Q(measurement_basis__in=("net_export", "ac_generation")),
-                name="submission_measurement_basis",
+            choices_check(
+                "measurement_basis", MeasurementBasis, name="submission_measurement_basis"
             ),
-            models.CheckConstraint(
-                condition=Q(mounting_type__in=("unknown", "fixed", "tracking")),
-                name="submission_mounting_supported",
-            ),
+            choices_check("mounting_type", MountingType, name="submission_mounting_supported"),
             models.CheckConstraint(
                 condition=Q(surface_tilt__isnull=True)
                 | Q(surface_tilt__gte=0, surface_tilt__lte=90),
@@ -107,7 +152,7 @@ class PlantSubmission(models.Model):
                 name="submission_azimuth_valid",
             ),
             models.CheckConstraint(
-                condition=Q(mounting_type="fixed")
+                condition=Q(mounting_type=MountingType.FIXED)
                 | Q(surface_tilt__isnull=True, surface_azimuth__isnull=True),
                 name="submission_angles_require_fixed",
             ),
@@ -123,16 +168,12 @@ class PlantConfiguration(models.Model):
     inverter_capacity_mw = models.FloatField(null=True)
     export_limit_mw = models.FloatField(null=True)
     mounting_type = models.CharField(
-        max_length=10,
-        choices=MOUNTING_TYPES,
-        default="unknown",
+        max_length=10, choices=MountingType, default=MountingType.UNKNOWN
     )
     surface_tilt = models.FloatField(null=True)
     surface_azimuth = models.FloatField(null=True)
     measurement_basis = models.CharField(
-        max_length=20,
-        choices=MEASUREMENT_BASES,
-        default="net_export",
+        max_length=20, choices=MeasurementBasis, default=MeasurementBasis.NET_EXPORT
     )
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -149,9 +190,8 @@ class PlantConfiguration(models.Model):
             models.CheckConstraint(
                 condition=Q(revision__gte=1), name="plant_config_revision_positive"
             ),
-            models.CheckConstraint(
-                condition=Q(measurement_basis__in=("net_export", "ac_generation")),
-                name="plant_measurement_basis_valid",
+            choices_check(
+                "measurement_basis", MeasurementBasis, name="plant_measurement_basis_valid"
             ),
             models.CheckConstraint(
                 condition=Q(dc_capacity_mw__gt=0, dc_capacity_mw__lt=float("inf")),
@@ -167,10 +207,7 @@ class PlantConfiguration(models.Model):
                 | Q(export_limit_mw__gt=0, export_limit_mw__lt=float("inf")),
                 name="plant_export_limit_finite",
             ),
-            models.CheckConstraint(
-                condition=Q(mounting_type__in=("unknown", "fixed", "tracking")),
-                name="plant_mounting_type_supported",
-            ),
+            choices_check("mounting_type", MountingType, name="plant_mounting_type_supported"),
             models.CheckConstraint(
                 condition=Q(surface_tilt__isnull=True)
                 | Q(surface_tilt__gte=0, surface_tilt__lte=90),
@@ -182,7 +219,7 @@ class PlantConfiguration(models.Model):
                 name="plant_surface_azimuth_valid",
             ),
             models.CheckConstraint(
-                condition=Q(mounting_type="fixed")
+                condition=Q(mounting_type=MountingType.FIXED)
                 | Q(surface_tilt__isnull=True, surface_azimuth__isnull=True),
                 name="plant_angles_require_fixed",
             ),
@@ -196,9 +233,7 @@ class ProductionObservation(models.Model):
     ends_at = models.DateTimeField()
     energy_mwh = models.FloatField()
     quality = models.CharField(
-        max_length=20,
-        choices=OBSERVATION_QUALITIES,
-        default="valid",
+        max_length=20, choices=ObservationQuality, default=ObservationQuality.VALID
     )
     source = models.CharField(max_length=200)
     recorded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
@@ -225,10 +260,7 @@ class ProductionObservation(models.Model):
                 condition=Q(energy_mwh__gte=0, energy_mwh__lt=float("inf")),
                 name="plant_observation_energy_finite",
             ),
-            models.CheckConstraint(
-                condition=Q(quality__in=("valid", "outage", "curtailed", "invalid")),
-                name="plant_observation_quality_valid",
-            ),
+            choices_check("quality", ObservationQuality, name="plant_observation_quality_valid"),
             ExclusionConstraint(
                 name="plant_observation_no_overlap",
                 condition=Q(is_current=True, is_reverted=False),
@@ -264,20 +296,7 @@ class CalibrationRun(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     completed_at = models.DateTimeField(null=True)
     status = models.CharField(
-        max_length=20,
-        choices=tuple(
-            (s, s)
-            for s in (
-                "pending",
-                "running",
-                "ready",
-                "insufficient",
-                "rejected",
-                "failed",
-                "superseded",
-            )
-        ),
-        default="pending",
+        max_length=20, choices=CalibrationStatus, default=CalibrationStatus.PENDING
     )
     assessment = models.CharField(max_length=200, default="")
     factor = models.FloatField(null=True)
@@ -293,7 +312,7 @@ class CalibrationRun(models.Model):
         constraints = (
             models.UniqueConstraint(
                 fields=("plant",),
-                condition=Q(status__in=("pending", "running")),
+                condition=Q(status__in=(CalibrationStatus.PENDING, CalibrationStatus.RUNNING)),
                 name="plant_one_pending_calibration",
             ),
             models.UniqueConstraint(
@@ -306,20 +325,7 @@ class CalibrationRun(models.Model):
                 condition=Q(factor__isnull=True) | Q(factor__gt=0, factor__lt=float("inf")),
                 name="calibration_factor_finite",
             ),
-            models.CheckConstraint(
-                condition=Q(
-                    status__in=(
-                        "pending",
-                        "running",
-                        "ready",
-                        "insufficient",
-                        "rejected",
-                        "failed",
-                        "superseded",
-                    )
-                ),
-                name="calibration_status_valid",
-            ),
+            choices_check("status", CalibrationStatus, name="calibration_status_valid"),
         )
 
 
@@ -376,6 +382,9 @@ class ForecastIssuance(models.Model):
 class PlantEvent(models.Model):
     plant = models.ForeignKey(Plant, on_delete=models.PROTECT)
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT)
-    action = models.CharField(max_length=50)
+    action = models.CharField(max_length=50, choices=PlantEventAction)
     details = models.JSONField(default=dict)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = (choices_check("action", PlantEventAction),)

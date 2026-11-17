@@ -136,7 +136,7 @@ def linked_records(system: System, plant: Plant) -> tuple[ForecastSnapshot, Remi
         job=source.job,
         utc_day=NOW.date(),
         created_at=NOW,
-        purpose="forecasts",
+        purpose="forecast",
         outcome="succeeded",
     )
     schedule = ReminderSchedule.objects.create(
@@ -284,7 +284,7 @@ def test_purge_region_removes_owned_dependencies_and_preserves_shared_quota_ledg
         job=other_job,
         utc_day=NOW.date(),
         created_at=NOW,
-        purpose="forecasts",
+        purpose="forecast",
     )
     all_attempts = RequestAttempt.objects.count()
     owned_attempt_ids = list(

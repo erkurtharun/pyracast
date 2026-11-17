@@ -4,8 +4,13 @@ from datetime import datetime, timedelta
 from django.db.models import Count, F, OuterRef, Q, Subquery
 
 from pyracast.connections.models import ProviderAccount
-from pyracast.forecasts.models import CollectionJob, DispatcherStatus, ForecastSnapshot
-from pyracast.metering.models import EpiasCollectionJob
+from pyracast.forecasts.models import (
+    CollectionJob,
+    DispatcherPhase,
+    DispatcherStatus,
+    ForecastSnapshot,
+)
+from pyracast.metering.models import EpiasCollectionJob, EpiasJobStatus
 from pyracast.notifications.models import PAUSED_DELIVERY_ERRORS, NotificationDelivery
 from pyracast.notifications.operations import invalid_reminder_recipient_count
 from pyracast.regions.models import Region
@@ -46,7 +51,7 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
     phases = {row.phase: row for row in DispatcherStatus.objects.all()}
     stale_phases = [
         name
-        for name in DispatcherStatus.Phase.values
+        for name in DispatcherPhase.values
         if (phase := phases.get(name)) is None
         or phase.succeeded_at is None
         or phase.succeeded_at < cutoff
@@ -84,8 +89,8 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
         Q(latest_acquisition__isnull=True) | Q(latest_acquisition__lt=now - timedelta(hours=26))
     )
     metering = EpiasCollectionJob.objects.filter(
-        Q(status__in=("pending", "retry", "running"))
-        | Q(status="failed", scheduled_for__gte=recent),
+        Q(status__in=(EpiasJobStatus.PENDING, EpiasJobStatus.RUNNING))
+        | Q(status=EpiasJobStatus.FAILED, scheduled_for__gte=recent),
         plant__region__deleted_at__isnull=True,
     )
     notification_counts = deliveries.aggregate(
@@ -153,9 +158,13 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
         ),
         **notification_counts,
         **metering.aggregate(
-            overdue_metering=Count("pk", filter=waiting_jobs & Q(next_attempt_at__lt=cutoff)),
+            overdue_metering=Count(
+                "pk", filter=Q(status=EpiasJobStatus.PENDING, next_attempt_at__lt=cutoff)
+            ),
             interrupted_metering=Count("pk", filter=interrupted_jobs),
-            failed_metering=Count("pk", filter=Q(status="failed", scheduled_for__gte=recent)),
+            failed_metering=Count(
+                "pk", filter=Q(status=EpiasJobStatus.FAILED, scheduled_for__gte=recent)
+            ),
         ),
     }
     return {

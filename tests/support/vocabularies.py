@@ -257,7 +257,7 @@ def _observation(monkeypatch: pytest.MonkeyPatch) -> models.Model:
     system, plant = make_plant(monkeypatch)
     return ProductionObservation.objects.create(
         plant=plant,
-        configuration_id=plant.current_configuration_id,
+        configuration=PlantConfiguration.objects.get(plant=plant),
         starts_at=NOW - timedelta(hours=1),
         ends_at=NOW,
         energy_mwh=1,
@@ -270,7 +270,7 @@ def _calibration_run(monkeypatch: pytest.MonkeyPatch) -> models.Model:
     system, plant = make_plant(monkeypatch)
     return CalibrationRun.objects.create(
         plant=plant,
-        configuration_id=plant.current_configuration_id,
+        configuration=PlantConfiguration.objects.get(plant=plant),
         binding=system.binding,
         requested_by=system.member,
         window_start=NOW.date() - timedelta(days=7),
@@ -396,19 +396,21 @@ def _submit_production(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], objec
     )
 
 
-def _create_plant(field: str) -> Operation:
-    def operation(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
-        system = make_system()
-        return lambda value: create_plant(
-            system.member,
-            system.tenant.pk,
-            system.region.pk,
-            name="Plant",
-            dc_capacity_mw=1,
-            **{field: value},
-        )
+def _create_plant(monkeypatch: pytest.MonkeyPatch) -> Callable[..., object]:
+    system = make_system()
+    return lambda **values: create_plant(
+        system.member, system.tenant.pk, system.region.pk, name="Plant", dc_capacity_mw=1, **values
+    )
 
-    return operation
+
+def _measurement_basis(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
+    create = _create_plant(monkeypatch)
+    return lambda basis: create(measurement_basis=basis)
+
+
+def _mounting_type(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
+    create = _create_plant(monkeypatch)
+    return lambda mounting: create(mounting_type=mounting)
 
 
 def _import_observation(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
@@ -515,11 +517,9 @@ INPUT_VOCABULARIES = (
         PlantInput,
         PLANT_DATA,
         "measurement_basis",
-        _create_plant("measurement_basis"),
+        _measurement_basis,
     ),
-    InputVocabulary(
-        "mounting_type", PlantInput, PLANT_DATA, "mounting_type", _create_plant("mounting_type")
-    ),
+    InputVocabulary("mounting_type", PlantInput, PLANT_DATA, "mounting_type", _mounting_type),
     InputVocabulary(
         "observation_quality", ObservationRow, OBSERVATION_DATA, "quality", _import_observation
     ),

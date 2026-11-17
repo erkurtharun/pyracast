@@ -62,9 +62,33 @@ class Migration(migrations.Migration):
                 ("provider_plant", models.JSONField()),
                 ("target_day", models.DateField()),
                 ("period_end_day", models.DateField(null=True)),
-                ("source_kind", models.CharField(default="realtime_generation", max_length=30)),
+                (
+                    "source_kind",
+                    models.CharField(
+                        choices=[
+                            ("realtime_generation", "Real-time generation"),
+                            ("settlement_injection", "Settlement injection"),
+                        ],
+                        default="realtime_generation",
+                        max_length=30,
+                    ),
+                ),
                 ("scheduled_for", models.DateTimeField()),
-                ("status", models.CharField(default="pending", max_length=20)),
+                (
+                    "status",
+                    models.CharField(
+                        choices=[
+                            ("pending", "Pending"),
+                            ("running", "Running"),
+                            ("succeeded", "Succeeded"),
+                            ("failed", "Failed"),
+                            ("superseded", "Superseded"),
+                            ("awaiting_publication", "Awaiting publication"),
+                        ],
+                        default="pending",
+                        max_length=20,
+                    ),
+                ),
                 ("lease_token", models.UUIDField(null=True)),
                 ("lease_expires_at", models.DateTimeField(null=True)),
                 ("attempts", models.PositiveSmallIntegerField(default=0)),
@@ -103,7 +127,17 @@ class Migration(migrations.Migration):
                 ),
                 ("attempt", models.PositiveSmallIntegerField()),
                 ("target_day", models.DateField()),
-                ("source_kind", models.CharField(default="realtime_generation", max_length=30)),
+                (
+                    "source_kind",
+                    models.CharField(
+                        choices=[
+                            ("realtime_generation", "Real-time generation"),
+                            ("settlement_injection", "Settlement injection"),
+                        ],
+                        default="realtime_generation",
+                        max_length=30,
+                    ),
+                ),
                 ("provider_plant", models.JSONField(default=dict)),
                 ("endpoint", models.URLField(default="")),
                 (
@@ -197,7 +231,7 @@ class Migration(migrations.Migration):
             model_name="epiascollectionjob",
             constraint=models.CheckConstraint(
                 condition=models.Q(
-                    ("source_kind__in", ("realtime_generation", "settlement_injection"))
+                    ("source_kind__in", ["realtime_generation", "settlement_injection"])
                 ),
                 name="epias_job_source_valid",
             ),
@@ -208,14 +242,14 @@ class Migration(migrations.Migration):
                 condition=models.Q(
                     (
                         "status__in",
-                        (
+                        [
                             "pending",
                             "running",
                             "succeeded",
                             "failed",
                             "superseded",
                             "awaiting_publication",
-                        ),
+                        ],
                     )
                 ),
                 name="epias_job_status_valid",
@@ -244,7 +278,7 @@ class Migration(migrations.Migration):
             model_name="epiassnapshot",
             constraint=models.CheckConstraint(
                 condition=models.Q(
-                    ("source_kind__in", ("realtime_generation", "settlement_injection"))
+                    ("source_kind__in", ["realtime_generation", "settlement_injection"])
                 ),
                 name="epias_acquisition_source_valid",
             ),

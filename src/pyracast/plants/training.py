@@ -25,6 +25,7 @@ from pyracast.plants.models import (
     Plant,
     PlantConfiguration,
     PlantEvent,
+    PlantEventAction,
 )
 from pyracast.plants.numerics import (
     FitResult,
@@ -166,7 +167,7 @@ def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now:
         PlantEvent.objects.create(
             plant_id=run.plant_id,
             actor=None,
-            action="calibration_completed",
+            action=PlantEventAction.CALIBRATION_COMPLETED,
             details={
                 "calibration_id": run.pk,
                 "status": run.status,

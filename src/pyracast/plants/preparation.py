@@ -23,6 +23,7 @@ from pyracast.plants.models import (
     Plant,
     PlantConfiguration,
     PlantEvent,
+    PlantEventAction,
     ProductionObservation,
 )
 from pyracast.plants.numerics import (
@@ -171,7 +172,7 @@ def prepare_calibration(plant_id: int, now: datetime | None = None) -> Calibrati
         PlantEvent.objects.create(
             plant=plant,
             actor=actor,
-            action="calibration_scheduled",
+            action=PlantEventAction.CALIBRATION_SCHEDULED,
             details={"calibration_id": run.pk, "observation_id_cutoff": watermark},
         )
         return run

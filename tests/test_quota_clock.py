@@ -47,7 +47,7 @@ def test_quota_uses_utc_day_after_account_lock_wait(
 def test_prebinding_requests_share_the_account_ledger() -> None:
     system = make_system()
     ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=1)
-    attempt = reserve_account_request(system.account, NOW, purpose="site_settings")
+    attempt = reserve_account_request(system.account, NOW, purpose="inspect_settings")
     assert attempt.binding_id is None
     assert attempt.job_id is None
     assert attempt.outcome == "uncertain"
@@ -67,7 +67,7 @@ def test_prebinding_and_forecast_reservations_serialize_one_budget() -> None:
         try:
             barrier.wait(timeout=10)
             if before_binding:
-                reserve_account_request(system.account, NOW, purpose="site_settings")
+                reserve_account_request(system.account, NOW, purpose="inspect_settings")
             else:
                 reserve_request(system.binding, NOW, purpose="forecast")
             return True
@@ -90,7 +90,7 @@ def test_prebinding_reservations_recheck_account_authorization(state: str) -> No
     else:
         ProviderAccount.objects.filter(pk=system.account.pk).update(authorized_at=None)
     with pytest.raises(QuotaExceededError):
-        reserve_account_request(system.account, NOW, purpose="site_settings")
+        reserve_account_request(system.account, NOW, purpose="inspect_settings")
     assert not RequestAttempt.objects.exists()
 
 

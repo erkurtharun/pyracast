@@ -9,8 +9,14 @@ from django.utils import timezone
 from pyracast.accounts.operations import require_admin, require_member
 from pyracast.epias import EpiasClient
 from pyracast.metering.client import get_epias_client
-from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
-from pyracast.plants.models import Plant, PlantEvent
+from pyracast.metering.models import (
+    EpiasCollectionJob,
+    EpiasConnection,
+    EpiasJobStatus,
+    EpiasSnapshot,
+    EpiasSourceKind,
+)
+from pyracast.plants.models import Plant, PlantEvent, PlantEventAction
 from pyracast.plants.operations import configuration_is_current
 from pyracast.regions.models import Region
 
@@ -59,8 +65,9 @@ def connect_epias(
         else:
             connection.revision += 1
             EpiasCollectionJob.objects.filter(
-                connection=connection, status__in=("pending", "running")
-            ).update(status="superseded", lease_token=None, lease_expires_at=None)
+                connection=connection,
+                status__in=(EpiasJobStatus.PENDING, EpiasJobStatus.RUNNING),
+            ).update(status=EpiasJobStatus.SUPERSEDED, lease_token=None, lease_expires_at=None)
         connection.provider_plant_id = selected.id
         connection.settlement_plant_id = settlement.id if settlement else None
         connection.settlement_checked_at = timezone.now()
@@ -72,7 +79,7 @@ def connect_epias(
         PlantEvent.objects.create(
             plant=plant,
             actor=actor,
-            action="epias_connected",
+            action=PlantEventAction.EPIAS_CONNECTED,
             details={
                 "provider_plant_id": connection.provider_plant_id,
                 "eic": connection.eic,
@@ -100,7 +107,7 @@ def disconnect_epias(plant_id: int, *, actor: User) -> None:
         PlantEvent.objects.create(
             plant=plant,
             actor=actor,
-            action="epias_disconnected",
+            action=PlantEventAction.EPIAS_DISCONNECTED,
             details={
                 "provider_plant_id": connection.provider_plant_id,
                 "eic": connection.eic,
@@ -108,8 +115,9 @@ def disconnect_epias(plant_id: int, *, actor: User) -> None:
             },
         )
         EpiasCollectionJob.objects.filter(
-            connection=connection, status__in=("pending", "running")
-        ).update(status="superseded", lease_token=None, lease_expires_at=None)
+            connection=connection,
+            status__in=(EpiasJobStatus.PENDING, EpiasJobStatus.RUNNING),
+        ).update(status=EpiasJobStatus.SUPERSEDED, lease_token=None, lease_expires_at=None)
 
 
 def get_epias_status(plant_id: int, *, actor: User) -> dict[str, object]:
@@ -136,7 +144,7 @@ def epias_connection_status(connection: EpiasConnection | None) -> dict[str, obj
     jobs = EpiasCollectionJob.objects.filter(connection=connection)
     snapshots = EpiasSnapshot.objects.filter(_source_identity(connection), connection=connection)
     populated = snapshots.exclude(readings=[])
-    settlement_dates = populated.filter(source_kind="settlement_injection").aggregate(
+    settlement_dates = populated.filter(source_kind=EpiasSourceKind.SETTLEMENT_INJECTION).aggregate(
         first=Min("target_day"), last=Max("target_day")
     )
     latest = populated.order_by("-available_at", "-pk").first()
@@ -151,18 +159,21 @@ def epias_connection_status(connection: EpiasConnection | None) -> dict[str, obj
         "name": connection.name,
         "last_success_at": latest.available_at if latest else None,
         "last_error": last_job.last_error if last_job else "",
-        "pending_jobs": jobs.filter(status__in=("pending", "running")).count(),
+        "pending_jobs": jobs.filter(
+            status__in=(EpiasJobStatus.PENDING, EpiasJobStatus.RUNNING)
+        ).count(),
         "archived_days": populated.values("target_day").distinct().count(),
     }
 
 
 def _source_identity(connection: EpiasConnection) -> Q:
     sources = Q(
-        source_kind="realtime_generation", job__provider_plant__id=connection.provider_plant_id
+        source_kind=EpiasSourceKind.REALTIME_GENERATION,
+        job__provider_plant__id=connection.provider_plant_id,
     )
     if connection.settlement_plant_id is not None:
         sources |= Q(
-            source_kind="settlement_injection",
+            source_kind=EpiasSourceKind.SETTLEMENT_INJECTION,
             job__provider_plant__id=connection.settlement_plant_id,
         )
     return sources & Q(job__provider_plant__eic=connection.eic)
@@ -174,14 +185,14 @@ def read_epias_history(
     actor: User,
     start_day: date | None = None,
     end_day: date | None = None,
-    source_kind: str | None = "realtime_generation",
+    source_kind: str | None = EpiasSourceKind.REALTIME_GENERATION,
 ) -> list[EpiasSnapshot]:
     plant = member_plant(plant_id, actor)
     end_day = end_day or timezone.now().date()
     start_day = start_day or end_day - timedelta(days=30)
     if end_day < start_day or (end_day - start_day).days > 366:
         raise ValidationError("invalid_history_window")
-    if source_kind not in {None, "realtime_generation", "settlement_injection"}:
+    if source_kind is not None and source_kind not in EpiasSourceKind.values:
         raise ValidationError("invalid_production_source")
     connection = EpiasConnection.objects.filter(plant=plant).first()
     if connection is None:

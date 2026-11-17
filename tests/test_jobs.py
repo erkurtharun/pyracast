@@ -187,7 +187,7 @@ def test_quota_retry_after_midnight_waits_for_the_following_utc_day(
     before_midnight = NOW.replace(hour=23, minute=59, second=59)
     after_midnight = before_midnight + timedelta(seconds=2)
     ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=1)
-    reserve_request(system.binding, after_midnight, purpose="already_used")
+    reserve_request(system.binding, after_midnight, purpose="validation")
     clock = [0.0]
     original_claim = jobs.claim
 

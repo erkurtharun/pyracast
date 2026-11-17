@@ -31,11 +31,14 @@ from pyracast.connections.operations import (
 )
 from pyracast.forecasts.acquisition import missing_actuals_window
 from pyracast.forecasts.models import (
+    CollectionEndpoint,
     CollectionJob,
     CollectionSchedule,
     ForecastResult,
     ForecastSnapshot,
     RequestAttempt,
+    RequestOutcome,
+    RequestPurpose,
 )
 from pyracast.forecasts.projections import prepare_daily_payloads
 from pyracast.forecasts.sources import snapshot_data
@@ -506,9 +509,9 @@ def collect(
             attempt = reserve_request(
                 lease.binding,
                 now + timedelta(seconds=time.monotonic() - started),
-                purpose="estimated_actuals"
-                if lease.endpoint == "estimated_actuals"
-                else "forecast",
+                purpose=RequestPurpose.ESTIMATED_ACTUALS
+                if lease.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
+                else RequestPurpose.FORECAST,
                 job=job,
             )
         except RequestDeferredError as exc:
@@ -540,7 +543,7 @@ def collect(
             return False
         request_at = now + timedelta(seconds=time.monotonic() - started)
         if job.retry_until is not None and request_at >= job.retry_until:
-            RequestAttempt.objects.filter(pk=attempt.pk).update(outcome="failed")
+            RequestAttempt.objects.filter(pk=attempt.pk).update(outcome=RequestOutcome.FAILED)
             retry(lease, request_at, "history_window_closed", quota=True)
             return False
         try:
@@ -550,7 +553,7 @@ def collect(
                 else adapter.fetch(lease.binding, lease.target_date)
             )
         except ProviderError as exc:
-            RequestAttempt.objects.filter(pk=attempt.pk).update(outcome="failed")
+            RequestAttempt.objects.filter(pk=attempt.pk).update(outcome=RequestOutcome.FAILED)
             record_provider_failure(
                 lease.binding.provider_account,
                 exc,
@@ -584,7 +587,7 @@ def collect(
                 "provider_unexpected_failure",
             )
             return False
-        RequestAttempt.objects.filter(pk=attempt.pk).update(outcome="succeeded")
+        RequestAttempt.objects.filter(pk=attempt.pk).update(outcome=RequestOutcome.SUCCEEDED)
         logger.info("Provider request succeeded correlation_id=%s", attempt.correlation_id)
         if weather_provider is not None:
             data = replace(data, weather=None, weather_error="weather_acquisition_interrupted")

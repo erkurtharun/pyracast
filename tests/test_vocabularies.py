@@ -93,7 +93,8 @@ def test_stored_vocabulary_is_exported_by_name_to_the_api_schema(
     if exported[0] in components:
         assert components[exported[0]]["enum"] == values
         union = " | ".join(json.dumps(value) for value in values)
-        assert f" {exported[0]}: {union};" in " ".join(TYPESCRIPT.read_text("utf-8").split())
+        declarations = " ".join(TYPESCRIPT.read_text("utf-8").split()).replace(": | ", ": ")
+        assert f" {exported[0]}: {union};" in declarations
 
 
 @pytest.mark.parametrize(("vocabulary", "value"), _stored_values())

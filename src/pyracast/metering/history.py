@@ -7,12 +7,10 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 
 from pyracast.metering import operations
-from pyracast.metering.models import EpiasConnection, EpiasSnapshot
+from pyracast.metering.models import EpiasConnection, EpiasSnapshot, EpiasSourceKind
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import configuration_is_current
 from pyracast.solar import daylight_window
-
-PRODUCTION_SOURCES = ("realtime_generation", "settlement_injection")
 
 
 def _intervals(snapshot: EpiasSnapshot | None, day: date) -> list[dict[str, object]]:
@@ -55,7 +53,7 @@ def _automatic_intervals(
 ) -> tuple[list[dict[str, object]], list[EpiasSnapshot]]:
     candidates = [
         (snapshot, _intervals(snapshot, day))
-        for source in reversed(PRODUCTION_SOURCES)
+        for source in reversed(EpiasSourceKind.values)
         if (snapshot := by_source.get(source)) is not None and snapshot.readings
     ]
     if not candidates:
@@ -133,7 +131,7 @@ def _reported_total(
 def read_production_day(
     plant: Plant, *, actor: User, day: date, source_kind: str = "auto"
 ) -> dict[str, object]:
-    if source_kind not in ("auto", *PRODUCTION_SOURCES):
+    if source_kind not in ("auto", *EpiasSourceKind.values):
         raise ValidationError("invalid_production_source")
     snapshots = operations.read_epias_history(
         plant.pk, actor=actor, start_day=day, end_day=day, source_kind=None

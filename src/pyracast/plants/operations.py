@@ -16,22 +16,28 @@ from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.actuals import ACTUAL_COMPOSITION_POLICY
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.jobs import binding_is_current
+from pyracast.forecasts.models import SnapshotSourceKind
 from pyracast.plants.availability import interval_is_covered, reference_intervals
 from pyracast.plants.measurement_policy import MEASUREMENT_POLICY
 from pyracast.plants.models import (
     CONFIGURATION_PARAMETERS,
     CalibrationActivation,
     CalibrationRun,
+    CalibrationStatus,
+    MeasurementBasis,
+    MountingType,
+    ObservationQuality,
     Plant,
     PlantConfiguration,
     PlantEvent,
+    PlantEventAction,
     PlantSubmission,
     ProductionObservation,
 )
 from pyracast.plants.numerics import POLICY_VERSION, PowerInterval
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.plants.transfer import calibration_matches_transfer
-from pyracast.regions.models import AuditAction, AuditEvent, Region
+from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionStatus
 
 
 @dataclass(frozen=True)
@@ -39,7 +45,7 @@ class ObservationInput:
     starts_at: datetime
     ends_at: datetime
     energy: float
-    quality: str = "valid"
+    quality: str = ObservationQuality.VALID
     source: str = "operator"
 
 
@@ -96,9 +102,9 @@ def _validate_configuration(
     for value in (dc_capacity_mw, inverter_capacity_mw, export_limit_mw):
         if value is not None and (isinstance(value, bool) or not isfinite(value) or value <= 0):
             raise ValidationError(gettext("Capacities must be finite and positive."))
-    if measurement_basis not in {"net_export", "ac_generation"}:
+    if measurement_basis not in MeasurementBasis.values:
         raise ValidationError(gettext("Unsupported meter basis."))
-    if mounting_type not in {"unknown", "fixed", "tracking"}:
+    if mounting_type not in MountingType.values:
         raise ValidationError(gettext("Unsupported mounting type."))
     for angle, bound, exclusive in ((surface_tilt, 90, False), (surface_azimuth, 360, True)):
         if angle is not None and (
@@ -111,7 +117,9 @@ def _validate_configuration(
             raise ValidationError(
                 gettext("Surface angles must be finite and inside the allowed bounds.")
             )
-    if mounting_type != "fixed" and (surface_tilt is not None or surface_azimuth is not None):
+    if mounting_type != MountingType.FIXED and (
+        surface_tilt is not None or surface_azimuth is not None
+    ):
         raise ValidationError(gettext("Only fixed mounting permits surface angles."))
 
 
@@ -134,13 +142,18 @@ def _save_configuration(actor: User, plant: Plant, values: dict[str, object]) ->
             "next_calibration_check_at",
         )
     )
-    CalibrationRun.objects.filter(plant=plant, status__in=("pending", "running")).update(
-        status="superseded", completed_at=timezone.now(), lease_token=None, lease_expires_at=None
+    CalibrationRun.objects.filter(
+        plant=plant, status__in=(CalibrationStatus.PENDING, CalibrationStatus.RUNNING)
+    ).update(
+        status=CalibrationStatus.SUPERSEDED,
+        completed_at=timezone.now(),
+        lease_token=None,
+        lease_expires_at=None,
     )
     PlantEvent.objects.create(
         plant=plant,
         actor=actor,
-        action="configuration_created",
+        action=PlantEventAction.CONFIGURATION_CREATED,
         details={"configuration_id": configuration.pk},
     )
     from pyracast.metering.models import EpiasConnection
@@ -156,7 +169,10 @@ def _rename(actor: User, plant: Plant, region: Region, name: str) -> None:
     if plant.name == name:
         return
     PlantEvent.objects.create(
-        plant=plant, actor=actor, action="plant_renamed", details={"old": plant.name, "new": name}
+        plant=plant,
+        actor=actor,
+        action=PlantEventAction.PLANT_RENAMED,
+        details={"old": plant.name, "new": name},
     )
     plant.name = name
     plant.save(update_fields=("name",))
@@ -177,8 +193,8 @@ def create_plant(
     dc_capacity_mw: float,
     inverter_capacity_mw: float | None = None,
     export_limit_mw: float | None = None,
-    measurement_basis: str = "net_export",
-    mounting_type: str = "unknown",
+    measurement_basis: str = MeasurementBasis.NET_EXPORT,
+    mounting_type: str = MountingType.UNKNOWN,
     surface_tilt: float | None = None,
     surface_azimuth: float | None = None,
 ) -> Plant:
@@ -226,8 +242,8 @@ def revise_plant(
     dc_capacity_mw: float,
     inverter_capacity_mw: float | None = None,
     export_limit_mw: float | None = None,
-    measurement_basis: str = "net_export",
-    mounting_type: str = "unknown",
+    measurement_basis: str = MeasurementBasis.NET_EXPORT,
+    mounting_type: str = MountingType.UNKNOWN,
     surface_tilt: float | None = None,
     surface_azimuth: float | None = None,
 ) -> Plant:
@@ -286,14 +302,16 @@ def _save_plant_parameters(
         "surface_tilt": surface_tilt,
         "surface_azimuth": surface_azimuth,
     }
-    if region.status == "pending" and plant.current_configuration_id is None:
+    if region.status == RegionStatus.PENDING and plant.current_configuration_id is None:
         _rename(actor, plant, region, name)
         if PlantSubmission.objects.filter(plant=plant, **parameters).exists():
             return
         PlantSubmission.objects.update_or_create(
             plant=plant, defaults={**parameters, "submitted_by": actor}
         )
-        PlantEvent.objects.create(plant=plant, actor=actor, action="submission_saved")
+        PlantEvent.objects.create(
+            plant=plant, actor=actor, action=PlantEventAction.SUBMISSION_SAVED
+        )
         return
     values = {"binding": _binding(region), **parameters}
     _rename(actor, plant, region, name)
@@ -349,7 +367,7 @@ def _observation(
     value = observation.energy
     if isinstance(value, bool) or not isfinite(value) or value < 0:
         raise ValidationError(gettext("Observed energy must be finite and nonnegative."))
-    if observation.quality not in {"valid", "outage", "curtailed", "invalid"}:
+    if observation.quality not in ObservationQuality.values:
         raise ValidationError(gettext("Unsupported observation quality."))
     source = observation.source.strip()
     if not source or len(source) > 200:
@@ -427,7 +445,7 @@ def import_observations(
             PlantEvent.objects.create(
                 plant=plant,
                 actor=actor,
-                action="observations_imported",
+                action=PlantEventAction.OBSERVATIONS_IMPORTED,
                 details={"configuration_id": configuration.pk, "created": created, "ids": ids},
             )
             prepare_calibration(plant.pk)
@@ -460,7 +478,7 @@ def request_calibration(
         ):
             raise ValidationError(gettext("Use 7 to 90 completed local days."))
         pending = CalibrationRun.objects.filter(
-            plant=plant, status__in=("pending", "running")
+            plant=plant, status__in=(CalibrationStatus.PENDING, CalibrationStatus.RUNNING)
         ).first()
         if pending is not None:
             if (pending.configuration_id, pending.window_start, pending.window_end) == (
@@ -512,7 +530,7 @@ def request_calibration(
         PlantEvent.objects.create(
             plant=plant,
             actor=actor,
-            action="calibration_requested",
+            action=PlantEventAction.CALIBRATION_REQUESTED,
             details={"calibration_id": run.pk},
         )
         return run
@@ -535,11 +553,11 @@ def _activate(
         plant=plant,
         actor=actor,
         action=(
-            "calibration_automatically_activated"
+            PlantEventAction.CALIBRATION_AUTOMATICALLY_ACTIVATED
             if actor is None
-            else "calibration_activated"
+            else PlantEventAction.CALIBRATION_ACTIVATED
             if run
-            else "calibration_reset"
+            else PlantEventAction.CALIBRATION_RESET
         ),
         details={
             "activation_id": activation.pk,
@@ -573,7 +591,7 @@ def _validate_activation(
         raise ValidationError(gettext("The active calibration changed; request a new comparison."))
     if (
         run.binding_id != configuration.binding_id
-        or run.status != "ready"
+        or run.status != CalibrationStatus.READY
         or run.factor is None
         or not isfinite(run.factor)
         or run.factor <= 0
@@ -588,7 +606,7 @@ def _validate_activation(
         or not calibration_matches_transfer(run, configuration)
         or run.dataset_manifest.get("selection_policy")
         not in (HISTORY_SELECTION_POLICY, ACTUAL_COMPOSITION_POLICY)
-        or run.dataset_manifest.get("source_kind") != "estimated_actuals"
+        or run.dataset_manifest.get("source_kind") != SnapshotSourceKind.ESTIMATED_ACTUALS
     ):
         raise ValidationError(
             gettext("Only a completed, held-out evaluated calibration can be activated.")

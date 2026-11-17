@@ -14,8 +14,8 @@ from rest_framework.response import Response
 from pyracast.api.views import PlatformAdmin
 from pyracast.epias import EpiasError
 from pyracast.metering import operations
-from pyracast.metering.history import PRODUCTION_SOURCES, read_production_day
-from pyracast.metering.models import EpiasConnection, EpiasSnapshot
+from pyracast.metering.history import read_production_day
+from pyracast.metering.models import EpiasConnection, EpiasSnapshot, EpiasSourceKind
 from pyracast.plants.api import ScopedView
 from pyracast.plants.models import Plant
 
@@ -41,7 +41,7 @@ class EpiasConnectionOutput(serializers.Serializer[Any]):
 
 class EpiasDateQuery(serializers.Serializer[Any]):
     date = serializers.DateField(required=False)
-    data_source = serializers.ChoiceField(choices=("auto", *PRODUCTION_SOURCES), default="auto")
+    data_source = serializers.ChoiceField(choices=("auto", *EpiasSourceKind.values), default="auto")
 
 
 class EpiasSnapshotOutput(serializers.Serializer[Any]):
@@ -50,13 +50,13 @@ class EpiasSnapshotOutput(serializers.Serializer[Any]):
     collected_at = serializers.DateTimeField()
     available_at = serializers.DateTimeField()
     content_sha256 = serializers.CharField()
-    source_kind = serializers.ChoiceField(choices=PRODUCTION_SOURCES)
+    source_kind = serializers.ChoiceField(choices=EpiasSourceKind.choices)
     normalization_policy = serializers.CharField()
     complete = serializers.BooleanField()
 
 
 class EpiasReadingOutput(serializers.Serializer[Any]):
-    source_kind = serializers.ChoiceField(choices=PRODUCTION_SOURCES, allow_null=True)
+    source_kind = serializers.ChoiceField(choices=EpiasSourceKind.choices, allow_null=True)
     snapshot_id = serializers.IntegerField(allow_null=True)
     provider_timestamp = serializers.DateTimeField(allow_null=True)
     period_start = serializers.DateTimeField()
@@ -70,11 +70,13 @@ class EpiasHistoryOutput(serializers.Serializer[Any]):
     date = serializers.DateField()
     timezone = serializers.CharField()
     unit = serializers.CharField()
-    source_kind = serializers.ChoiceField(choices=(*PRODUCTION_SOURCES, "mixed"), allow_null=True)
+    source_kind = serializers.ChoiceField(
+        choices=(*EpiasSourceKind.choices, ("mixed", "Mixed")), allow_null=True
+    )
     complete = serializers.BooleanField()
     reported_total_mwh = serializers.FloatField(allow_null=True)
     available_sources = serializers.ListField(
-        child=serializers.ChoiceField(choices=PRODUCTION_SOURCES)
+        child=serializers.ChoiceField(choices=EpiasSourceKind.choices)
     )
     calibration_eligible = serializers.BooleanField()
     calibration_blocker = serializers.CharField(allow_null=True)

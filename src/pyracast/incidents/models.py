@@ -4,7 +4,16 @@ from django.contrib.postgres.fields import RangeBoundary, RangeOperators
 from django.db import models
 from django.db.models import F, Q
 
+from pyracast.db import choices_check
 from pyracast.plants.models import TsTzRange
+
+
+class IncidentKind(models.TextChoices):
+    INVERTER = "inverter", "Inverter"
+    PANELS = "panels", "Panels"
+    GRID = "grid", "Grid"
+    OTHER = "other", "Other"
+    MULTIPLE = "multiple", "Multiple"
 
 
 class PlantIncident(models.Model):
@@ -12,7 +21,7 @@ class PlantIncident(models.Model):
     declared_configuration = models.ForeignKey(
         "plants.PlantConfiguration", on_delete=models.PROTECT
     )
-    kind = models.CharField(max_length=20)
+    kind = models.CharField(max_length=20, choices=IncidentKind)
     title = models.CharField(max_length=200)
     notes = models.CharField(max_length=2000, blank=True)
     starts_at = models.DateTimeField()
@@ -45,10 +54,7 @@ class PlantIncident(models.Model):
                 condition=Q(ends_at__isnull=True) | Q(ends_at__gt=F("starts_at")),
                 name="incident_valid_interval",
             ),
-            models.CheckConstraint(
-                condition=Q(kind__in=("inverter", "panels", "grid", "other", "multiple")),
-                name="incident_kind_valid",
-            ),
+            choices_check("kind", IncidentKind, name="incident_kind_valid"),
             models.CheckConstraint(
                 condition=Q(available_dc_mw__isnull=True)
                 | Q(available_dc_mw__gte=0, available_dc_mw__lt=float("inf")),

@@ -297,7 +297,7 @@ def test_history_retries_after_utc_budget_reset_inside_local_night_window() -> N
         provider_account=system.account,
         utc_day=before_reset.date(),
         created_at=before_reset,
-        purpose="operator",
+        purpose="validation",
         outcome="uncertain",
     )
     enqueue_due(before_reset)

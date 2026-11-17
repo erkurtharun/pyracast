@@ -101,7 +101,23 @@ class Migration(migrations.Migration):
                     ),
                 ),
                 ("scheduled_for", models.DateTimeField()),
-                ("status", models.CharField(default="pending", max_length=20)),
+                (
+                    "status",
+                    models.CharField(
+                        choices=[
+                            ("pending", "Pending"),
+                            ("retry", "Retry"),
+                            ("sending", "Sending"),
+                            ("sent", "Sent"),
+                            ("failed", "Failed"),
+                            ("uncertain", "Uncertain"),
+                            ("skipped", "Skipped"),
+                            ("cancelled", "Cancelled"),
+                        ],
+                        default="pending",
+                        max_length=20,
+                    ),
+                ),
                 ("available_at", models.DateTimeField()),
                 ("attempts", models.PositiveIntegerField(default=0)),
                 ("lease_token", models.UUIDField(null=True)),
@@ -152,7 +168,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="reminderschedule",
             constraint=models.CheckConstraint(
-                condition=models.Q(("language__in", ("en", "tr"))),
+                condition=models.Q(("language__in", ["en", "tr"])),
                 name="reminder_schedule_language_valid",
             ),
         ),
@@ -173,7 +189,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="notificationdelivery",
             constraint=models.CheckConstraint(
-                condition=models.Q(("language__in", ("en", "tr"))),
+                condition=models.Q(("language__in", ["en", "tr"])),
                 name="notification_delivery_language_valid",
             ),
         ),
@@ -183,7 +199,7 @@ class Migration(migrations.Migration):
                 condition=models.Q(
                     (
                         "status__in",
-                        (
+                        [
                             "pending",
                             "retry",
                             "sending",
@@ -192,7 +208,7 @@ class Migration(migrations.Migration):
                             "uncertain",
                             "skipped",
                             "cancelled",
-                        ),
+                        ],
                     )
                 ),
                 name="notification_delivery_status_valid",

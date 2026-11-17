@@ -4,7 +4,7 @@ import pytest
 from django.utils import timezone
 
 from pyracast.admin_workspace import operations_context, plant_list_context, recent_work_context
-from pyracast.forecasts.models import DispatcherStatus
+from pyracast.forecasts.models import DispatcherPhase
 from pyracast.forecasts.monitoring import record_dispatch_phase
 from pyracast.metering.models import EpiasCollectionJob
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
@@ -22,7 +22,7 @@ def test_historical_health_reasons_are_visible_and_link_to_the_matching_records(
     monkeypatch.setattr(timezone, "now", lambda: NOW)
     system, plant, _ = connected(monkeypatch)
     recent_forecast(system)
-    for phase in DispatcherStatus.Phase.values:
+    for phase in DispatcherPhase.values:
         record_dispatch_phase(phase, NOW)
     EpiasCollectionJob.objects.update(status="succeeded")
     failed = EpiasCollectionJob.objects.first()

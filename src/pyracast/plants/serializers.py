@@ -7,11 +7,11 @@ from rest_framework import serializers
 from pyracast.api.serializers import InputSerializer
 from pyracast.change_requests.models import ProductionChangeAction
 from pyracast.plants.models import (
-    MEASUREMENT_BASES,
-    MOUNTING_TYPES,
-    OBSERVATION_QUALITIES,
     CalibrationActivation,
     CalibrationRun,
+    MeasurementBasis,
+    MountingType,
+    ObservationQuality,
     Plant,
     PlantConfiguration,
     PlantSubmission,
@@ -46,8 +46,12 @@ class PlantInput(InputSerializer):
     dc_capacity_mw = FiniteFloat(min_value=0)
     inverter_capacity_mw = FiniteFloat(min_value=0, allow_null=True, required=False, default=None)
     export_limit_mw = FiniteFloat(min_value=0, allow_null=True, required=False, default=None)
-    measurement_basis = serializers.ChoiceField(choices=MEASUREMENT_BASES, default="net_export")
-    mounting_type = serializers.ChoiceField(choices=MOUNTING_TYPES, default="unknown")
+    measurement_basis = serializers.ChoiceField(
+        choices=MeasurementBasis.choices, default=MeasurementBasis.NET_EXPORT
+    )
+    mounting_type = serializers.ChoiceField(
+        choices=MountingType.choices, default=MountingType.UNKNOWN
+    )
     surface_tilt = FiniteFloat(
         min_value=0, max_value=90, allow_null=True, required=False, default=None
     )
@@ -107,7 +111,9 @@ class ObservationRow(InputSerializer):
     starts_at = AwareDateTime()
     ends_at = AwareDateTime()
     energy = FiniteFloat(min_value=0)
-    quality = serializers.ChoiceField(choices=OBSERVATION_QUALITIES, default="valid")
+    quality = serializers.ChoiceField(
+        choices=ObservationQuality.choices, default=ObservationQuality.VALID
+    )
     source = serializers.CharField(max_length=200)  # type: ignore[assignment]
 
 
@@ -132,11 +138,13 @@ class ProductionChangeRow(InputSerializer):
     expected_revision_id = serializers.IntegerField(min_value=1, allow_null=True)
     action = serializers.ChoiceField(choices=ProductionChangeAction.choices)
     energy = FiniteFloat(min_value=0, required=False)
-    quality = serializers.ChoiceField(choices=OBSERVATION_QUALITIES, default="valid")
+    quality = serializers.ChoiceField(
+        choices=ObservationQuality.choices, default=ObservationQuality.VALID
+    )
     source = serializers.CharField(max_length=200, default="operator")  # type: ignore[assignment]
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
-        if attrs["action"] == "set" and "energy" not in attrs:
+        if attrs["action"] == ProductionChangeAction.SET and "energy" not in attrs:
             raise serializers.ValidationError({"energy": gettext("This field is required.")})
         return attrs
 
@@ -458,7 +466,3 @@ class PlantForecastOutput(serializers.Serializer[dict[str, Any]]):
     regional_irradiance = serializers.JSONField(allow_null=True)
     outage_scenario = serializers.JSONField(allow_null=True, default=None)
     production_diagnostic = serializers.JSONField(allow_null=True, default=None)
-
-
-def calibration_status_choices() -> Any:
-    return CalibrationRun._meta.get_field("status").choices

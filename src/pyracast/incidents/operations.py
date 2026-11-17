@@ -12,7 +12,7 @@ from django.utils.translation import gettext, gettext_lazy
 from rest_framework.exceptions import APIException
 
 from pyracast.accounts.operations import require_workspace_admin
-from pyracast.incidents.models import IncidentRevision, PlantIncident
+from pyracast.incidents.models import IncidentKind, IncidentRevision, PlantIncident
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.regions.models import Region
 
@@ -150,7 +150,7 @@ def _validate(values: dict[str, Any], configuration: PlantConfiguration, now: da
                 "end must be after start and no later than now."
             )
         )
-    if values["kind"] not in {"inverter", "panels", "grid", "other", "multiple"}:
+    if values["kind"] not in IncidentKind.values:
         raise ValidationError(gettext("Unsupported incident kind."))
     if (
         not isinstance(values["title"], str)

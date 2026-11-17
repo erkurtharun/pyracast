@@ -3611,7 +3611,7 @@
                     "superseded"
                 ],
                 "type": "string",
-                "description": "* `pending` - pending\n* `running` - running\n* `ready` - ready\n* `insufficient` - insufficient\n* `rejected` - rejected\n* `failed` - failed\n* `superseded` - superseded"
+                "description": "* `pending` - Pending\n* `running` - Running\n* `ready` - Ready\n* `insufficient` - Insufficient\n* `rejected` - Rejected\n* `failed` - Failed\n* `superseded` - Superseded"
             },
             "CalibrationSummaryOutput": {
                 "type": "object",
@@ -4324,7 +4324,7 @@
                     "mixed"
                 ],
                 "type": "string",
-                "description": "* `realtime_generation` - realtime_generation\n* `settlement_injection` - settlement_injection\n* `mixed` - mixed"
+                "description": "* `realtime_generation` - Real-time generation\n* `settlement_injection` - Settlement injection\n* `mixed` - Mixed"
             },
             "EpiasReadingOutput": {
                 "type": "object",
@@ -4426,7 +4426,7 @@
             "EpiasSourceKindEnum": {
                 "enum": ["realtime_generation", "settlement_injection"],
                 "type": "string",
-                "description": "* `realtime_generation` - realtime_generation\n* `settlement_injection` - settlement_injection"
+                "description": "* `realtime_generation` - Real-time generation\n* `settlement_injection` - Settlement injection"
             },
             "ForecastOutput": {
                 "type": "object",
@@ -4656,7 +4656,7 @@
             "IncidentKindEnum": {
                 "enum": ["inverter", "panels", "grid", "other", "multiple"],
                 "type": "string",
-                "description": "* `inverter` - inverter\n* `panels` - panels\n* `grid` - grid\n* `other` - other\n* `multiple` - multiple"
+                "description": "* `inverter` - Inverter\n* `panels` - Panels\n* `grid` - Grid\n* `other` - Other\n* `multiple` - Multiple"
             },
             "IncidentOutput": {
                 "type": "object",
@@ -4670,7 +4670,11 @@
                         "readOnly": true
                     },
                     "kind": {
-                        "type": "string",
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/IncidentKindEnum"
+                            }
+                        ],
                         "readOnly": true
                     },
                     "title": {
@@ -5023,6 +5027,20 @@
                 "type": "string",
                 "description": "* `unknown` - Unknown\n* `fixed` - Fixed\n* `tracking` - Tracking"
             },
+            "NotificationDeliveryStatusEnum": {
+                "enum": [
+                    "pending",
+                    "retry",
+                    "sending",
+                    "sent",
+                    "failed",
+                    "uncertain",
+                    "skipped",
+                    "cancelled"
+                ],
+                "type": "string",
+                "description": "* `pending` - Pending\n* `retry` - Retry\n* `sending` - Sending\n* `sent` - Sent\n* `failed` - Failed\n* `uncertain` - Uncertain\n* `skipped` - Skipped\n* `cancelled` - Cancelled"
+            },
             "NullEnum": {
                 "enum": [null]
             },
@@ -5094,7 +5112,7 @@
                     "quality": {
                         "allOf": [
                             {
-                                "$ref": "#/components/schemas/ProductionQualityEnum"
+                                "$ref": "#/components/schemas/ObservationQualityEnum"
                             }
                         ],
                         "readOnly": true
@@ -5134,6 +5152,11 @@
                     "supersedes_id"
                 ]
             },
+            "ObservationQualityEnum": {
+                "enum": ["valid", "outage", "curtailed", "invalid"],
+                "type": "string",
+                "description": "* `valid` - Valid\n* `outage` - Outage\n* `curtailed` - Curtailed\n* `invalid` - Invalid"
+            },
             "ObservationRow": {
                 "type": "object",
                 "properties": {
@@ -5153,7 +5176,7 @@
                     "quality": {
                         "allOf": [
                             {
-                                "$ref": "#/components/schemas/ProductionQualityEnum"
+                                "$ref": "#/components/schemas/ObservationQualityEnum"
                             }
                         ],
                         "default": "valid"
@@ -6039,7 +6062,7 @@
                     "quality": {
                         "allOf": [
                             {
-                                "$ref": "#/components/schemas/ProductionQualityEnum"
+                                "$ref": "#/components/schemas/ObservationQualityEnum"
                             }
                         ],
                         "default": "valid"
@@ -6535,11 +6558,6 @@
                     "starts_at"
                 ]
             },
-            "ProductionQualityEnum": {
-                "enum": ["valid", "outage", "curtailed", "invalid"],
-                "type": "string",
-                "description": "* `valid` - Valid\n* `outage` - Outage\n* `curtailed` - Curtailed\n* `invalid` - Invalid"
-            },
             "ProductionRequestInput": {
                 "type": "object",
                 "properties": {
@@ -6769,7 +6787,7 @@
                         "format": "date-time"
                     },
                     "status": {
-                        "type": "string"
+                        "$ref": "#/components/schemas/NotificationDeliveryStatusEnum"
                     },
                     "last_error": {
                         "type": "string"

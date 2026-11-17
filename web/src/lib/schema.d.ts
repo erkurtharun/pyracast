@@ -793,13 +793,13 @@ export interface components {
             readonly dataset_sha256: string;
         };
         /**
-         * @description * `pending` - pending
-         *     * `running` - running
-         *     * `ready` - ready
-         *     * `insufficient` - insufficient
-         *     * `rejected` - rejected
-         *     * `failed` - failed
-         *     * `superseded` - superseded
+         * @description * `pending` - Pending
+         *     * `running` - Running
+         *     * `ready` - Ready
+         *     * `insufficient` - Insufficient
+         *     * `rejected` - Rejected
+         *     * `failed` - Failed
+         *     * `superseded` - Superseded
          * @enum {string}
          */
         CalibrationStatusEnum:
@@ -1016,9 +1016,9 @@ export interface components {
             readings: components["schemas"]["EpiasReadingOutput"][];
         };
         /**
-         * @description * `realtime_generation` - realtime_generation
-         *     * `settlement_injection` - settlement_injection
-         *     * `mixed` - mixed
+         * @description * `realtime_generation` - Real-time generation
+         *     * `settlement_injection` - Settlement injection
+         *     * `mixed` - Mixed
          * @enum {string}
          */
         EpiasHistoryOutputSourceKindEnum:
@@ -1056,8 +1056,8 @@ export interface components {
             complete: boolean;
         };
         /**
-         * @description * `realtime_generation` - realtime_generation
-         *     * `settlement_injection` - settlement_injection
+         * @description * `realtime_generation` - Real-time generation
+         *     * `settlement_injection` - Settlement injection
          * @enum {string}
          */
         EpiasSourceKindEnum: "realtime_generation" | "settlement_injection";
@@ -1140,18 +1140,18 @@ export interface components {
             available_export_mw?: number | null;
         };
         /**
-         * @description * `inverter` - inverter
-         *     * `panels` - panels
-         *     * `grid` - grid
-         *     * `other` - other
-         *     * `multiple` - multiple
+         * @description * `inverter` - Inverter
+         *     * `panels` - Panels
+         *     * `grid` - Grid
+         *     * `other` - Other
+         *     * `multiple` - Multiple
          * @enum {string}
          */
         IncidentKindEnum: "inverter" | "panels" | "grid" | "other" | "multiple";
         IncidentOutput: {
             readonly id: number;
             readonly revision: number;
-            readonly kind: string;
+            readonly kind: components["schemas"]["IncidentKindEnum"];
             readonly title: string;
             readonly notes: string;
             /** Format: date-time */
@@ -1286,6 +1286,26 @@ export interface components {
          * @enum {string}
          */
         MountingTypeEnum: "unknown" | "fixed" | "tracking";
+        /**
+         * @description * `pending` - Pending
+         *     * `retry` - Retry
+         *     * `sending` - Sending
+         *     * `sent` - Sent
+         *     * `failed` - Failed
+         *     * `uncertain` - Uncertain
+         *     * `skipped` - Skipped
+         *     * `cancelled` - Cancelled
+         * @enum {string}
+         */
+        NotificationDeliveryStatusEnum:
+            | "pending"
+            | "retry"
+            | "sending"
+            | "sent"
+            | "failed"
+            | "uncertain"
+            | "skipped"
+            | "cancelled";
         /** @enum {unknown} */
         NullEnum: null;
         ObservationImport: {
@@ -1308,7 +1328,7 @@ export interface components {
             readonly ends_at: string;
             /** Format: double */
             readonly energy_mwh: number;
-            readonly quality: components["schemas"]["ProductionQualityEnum"];
+            readonly quality: components["schemas"]["ObservationQualityEnum"];
             readonly source: string;
             recorded_by_id: number;
             /** Format: date-time */
@@ -1316,6 +1336,14 @@ export interface components {
             supersedes_id: number | null;
             readonly is_reverted: boolean;
         };
+        /**
+         * @description * `valid` - Valid
+         *     * `outage` - Outage
+         *     * `curtailed` - Curtailed
+         *     * `invalid` - Invalid
+         * @enum {string}
+         */
+        ObservationQualityEnum: "valid" | "outage" | "curtailed" | "invalid";
         ObservationRow: {
             /** Format: date-time */
             starts_at: string;
@@ -1324,7 +1352,7 @@ export interface components {
             /** Format: double */
             energy: number;
             /** @default valid */
-            quality: components["schemas"]["ProductionQualityEnum"];
+            quality: components["schemas"]["ObservationQualityEnum"];
             source: string;
         };
         PaginatedCalibrationSummaryOutputList: {
@@ -1653,7 +1681,7 @@ export interface components {
             /** Format: double */
             energy?: number;
             /** @default valid */
-            quality: components["schemas"]["ProductionQualityEnum"];
+            quality: components["schemas"]["ObservationQualityEnum"];
             /** @default operator */
             source: string;
         };
@@ -1781,14 +1809,6 @@ export interface components {
             content_sha256: string;
             provisional: boolean;
         };
-        /**
-         * @description * `valid` - Valid
-         *     * `outage` - Outage
-         *     * `curtailed` - Curtailed
-         *     * `invalid` - Invalid
-         * @enum {string}
-         */
-        ProductionQualityEnum: "valid" | "outage" | "curtailed" | "invalid";
         ProductionRequestInput: {
             configuration_id: number;
             unit: components["schemas"]["UnitEnum"];
@@ -1861,7 +1881,7 @@ export interface components {
             recipients: string[];
             /** Format: date-time */
             scheduled_for: string;
-            status: string;
+            status: components["schemas"]["NotificationDeliveryStatusEnum"];
             last_error: string;
             forecast_status: string | null;
             forecast_complete: boolean | null;

@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from django.db.models import F, OuterRef, Q, QuerySet, Subquery
 
 from pyracast.forecasts.models import CollectionJob, ForecastSnapshot
-from pyracast.metering.models import EpiasCollectionJob
+from pyracast.metering.models import EpiasCollectionJob, EpiasJobStatus
 from pyracast.notifications.models import (
     PAUSED_DELIVERY_ERRORS,
     NotificationDelivery,
@@ -70,7 +70,7 @@ def metering_jobs_for_issue(
 ) -> QuerySet[EpiasCollectionJob]:
     jobs = EpiasCollectionJob.objects.filter(plant__region__deleted_at__isnull=True)
     if issue == "overdue_metering":
-        return jobs.filter(status__in=("pending", "retry"), next_attempt_at__lt=now - maximum_lag)
+        return jobs.filter(status=EpiasJobStatus.PENDING, next_attempt_at__lt=now - maximum_lag)
     if issue == "interrupted_metering":
         return jobs.filter(
             Q(lease_expires_at__lte=now) | Q(lease_expires_at__isnull=True), status="running"

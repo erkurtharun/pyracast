@@ -27,6 +27,7 @@ from pyracast.plants.models import (
     Plant,
     PlantConfiguration,
     PlantEvent,
+    PlantEventAction,
     ProductionObservation,
 )
 from pyracast.plants.observations import observation_heads
@@ -473,7 +474,7 @@ def production_identity_at(run: CalibrationRun, as_of: datetime) -> bool:
         return True
     event = (
         PlantEvent.objects.filter(
-            plant_id=run.plant_id, action="epias_connected", created_at__lte=as_of
+            plant_id=run.plant_id, action=PlantEventAction.EPIAS_CONNECTED, created_at__lte=as_of
         )
         .order_by("-created_at", "-pk")
         .first()
