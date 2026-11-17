@@ -24,7 +24,7 @@ sequenceDiagram
     V->>O: "rotate_secret"
     O->>DB: "encrypted_api_key replaced, credential_revision + 1, audit provider_secret_rotated"
     V->>O: "configure_binding"
-    O->>DB: "unchanged setup: existing SiteBinding; changed with a binding of the revision: region revision + 1 and pending, new SiteBinding, audit; first binding: new SiteBinding at the current revision, audit; COMMIT"
+    O->>DB: "unchanged setup: existing SiteBinding; changed with a binding of the revision: region revision + 1 and pending, pending location request moved to the new revision (location_change_rebased), new SiteBinding, audit; first binding: new SiteBinding at the current revision, audit; COMMIT"
     alt stale revision, invalid key or binding rule
         V-->>A: "400 field or generic setup error, rotation rolled back"
     else saved
