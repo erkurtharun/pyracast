@@ -1,7 +1,7 @@
 # Working agreement
 
 Pyracast is a multi-tenant backend for authorized irradiance forecasts and daily energy estimates.
-Read `docs/ARCHITECTURE.md` for scope and `docs/IRRADIANCE.md` when changing provider data or calculations.
+Start at `docs/README.md`: it indexes the stack reference, the per-flow maps and the data model. Read `docs/IRRADIANCE.md` when changing provider data or calculations.
 Write code, documents and commits in English; explain progress and decisions in Turkish.
 
 ## Engineering

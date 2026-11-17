@@ -66,6 +66,7 @@ out/
 !/.claude/settings.json
 /.mcp.json
 /CLAUDE.local.md
+/docs/agents/work/
 .code-review-graph/
 .code-review-graph.db*
 .idea/
