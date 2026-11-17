@@ -60,11 +60,12 @@ DETACHED = frozenset({"forecasts.RequestAttempt"})
 
 
 def _references(model: type[models.Model]) -> set[tuple[str, str]]:
-    return {
-        (field.related_model._meta.label, field.remote_field.on_delete.__name__)
-        for field in model._meta.concrete_fields
-        if field.is_relation and field.related_model is not None
-    }
+    references: set[tuple[str, str]] = set()
+    for field in model._meta.concrete_fields:
+        if isinstance(field, models.ForeignKey) and field.remote_field.on_delete is not None:
+            rule = field.remote_field.on_delete.__name__
+            references.add((field.related_model._meta.label, rule))
+    return references
 
 
 def _dependants() -> set[str]:

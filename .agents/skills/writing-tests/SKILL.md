@@ -4,7 +4,10 @@ description: Choose meaningful test boundaries for Pyracast tenant operations, d
 ---
 
 Test observable behavior at the narrowest boundary that proves it. Keep fixtures
-local unless shared and build test subjects inside tests or fixtures. Tests are
+local unless shared and build test subjects inside tests or fixtures. Shared builders,
+fakes and query budgets live in `tests/support/`; a test module never imports another
+(`scripts/move_test_support.py` moves such imports). `tests/conftest.py` marks modules
+`tooling`, `subprocess`, `migration`, `browser` or `live` for selection. Tests are
 included in strict mypy. Shared pytest and coverage settings live in `pyproject.toml`.
 
 Keep numerical tests independent of Django, HTTP and queues. Use independently

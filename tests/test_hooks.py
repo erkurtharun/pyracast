@@ -488,7 +488,7 @@ def test_ide_execute_tool_commands_naming_denied_paths_are_denied(
     repository: Path, command: str
 ) -> None:
     (repository / "data").mkdir()
-    payload = {
+    payload: dict[str, object] = {
         "tool_name": "mcp__pycharm__execute_tool",
         "tool_input": {
             "command": command.format(root=repository.as_posix()),
@@ -515,7 +515,7 @@ def test_ide_execute_tool_commands_naming_denied_paths_are_denied(
 def test_ide_execute_tool_commands_without_denied_paths_are_allowed(
     repository: Path, command: str
 ) -> None:
-    payload = {
+    payload: dict[str, object] = {
         "tool_name": "mcp__pycharm__execute_tool",
         "tool_input": {"command": command, "projectPath": str(repository)},
     }
@@ -601,7 +601,10 @@ def test_shell_commands_that_do_not_publish_are_allowed(repository: Path, comman
 
 
 def test_shell_tools_that_pass_an_argument_vector_are_checked(repository: Path) -> None:
-    payload = {"tool_name": "shell", "tool_input": {"command": ["bash", "-lc", "git push"]}}
+    payload: dict[str, object] = {
+        "tool_name": "shell",
+        "tool_input": {"command": ["bash", "-lc", "git push"]},
+    }
 
     decision = _decision(
         _invoke(repository, "pre-shell", payload, env=_environment_without_marker())
