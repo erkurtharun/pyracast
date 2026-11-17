@@ -330,8 +330,8 @@ jobs:
       - run: npm run check:coverage
         if: runner.os == 'Linux'
         working-directory: web
-      - run: npm audit --audit-level=low
-        working-directory: web
+      - name: Audit web dependencies against dated exceptions
+        run: uv run --locked --no-sync --no-build python scripts/npm_audit.py web
       - name: Exercise browser against Django and PostgreSQL
         run: uv run --locked --no-sync --no-build python -m pytest tests/test_browser.py -n 1 --no-cov
       - name: Upload Playwright failure traces
