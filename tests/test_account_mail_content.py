@@ -469,6 +469,26 @@ LANGUAGE_RULE = (
     "language, alternating by position; a combination without mail has nothing to localize and "
     "runs in English"
 )
+# Session gates precede account rules; otherwise a strictly narrower row wins.
+# These EXPECTED row pairs declare the remaining input/reauthentication precedence.
+PRECEDENCE_EXCEPTIONS: dict[tuple[str, int, int], str] = {
+    ("reset-request", 15, 17): "an inactive owner gets no reset code regardless of client state",
+    (
+        "reset-request",
+        16,
+        17,
+    ): "an unverified owner uses request language regardless of client state",
+    ("add-address", 38, 39): "an existing address is refused before reauthentication",
+    ("add-address", 39, 40): "adding an address requires reauthentication before sending",
+    ("make-primary", 46, 48): "an unverified address is refused before reauthentication",
+    ("make-primary", 47, 48): "an address outside the account is refused before reauthentication",
+    ("make-primary", 48, 49): "selecting the current primary still requires reauthentication",
+    ("make-primary", 48, 50): "changing the primary requires reauthentication before sending",
+    ("remove-address", 52, 55): "the primary address is refused before reauthentication",
+    ("remove-address", 53, 55): "an address outside the account is refused before reauthentication",
+    ("remove-address", 55, 56): "removing a secondary requires reauthentication before sending",
+    ("totp-on", 64, 66): "an unverified address prevents activation before reauthentication",
+}
 
 
 def notifies(endpoint: str, template: str) -> tuple[Expect, ...]:
@@ -1262,6 +1282,32 @@ def test_every_combination_is_declared_or_excluded_by_a_rule() -> None:
     assert [str(case) for case in CASES if case.expected is None] == []
     assert all(reason for reason, _ in NOT_APPLICABLE)
     assert LANGUAGE_RULE
+
+
+def test_overlapping_rows_follow_declared_precedence() -> None:
+    ambiguous: set[tuple[str, int, int]] = set()
+    for case in CASES:
+        matches = [i for i, row in enumerate(EXPECTED) if row.matches(case.combination)]
+        first = EXPECTED[matches[0]]
+        if gated(case.combination):
+            assert isinstance(first.outcome, NoMail)
+            assert first.states is not None
+            assert first.states <= GATED[case.combination.endpoint]
+            continue
+        for index in matches[1:]:
+            later = EXPECTED[index]
+            constraints = (
+                (first.shapes, later.shapes),
+                (first.targets, later.targets),
+                (first.states, later.states),
+            )
+            more_specific = all(
+                b is None or (a is not None and a <= b) for a, b in constraints
+            ) and any(a != b for a, b in constraints)
+            if not more_specific:
+                ambiguous.add((case.combination.endpoint, matches[0], index))
+    assert ambiguous == set(PRECEDENCE_EXCEPTIONS)
+    assert all(PRECEDENCE_EXCEPTIONS.values())
 
 
 def test_every_sending_row_runs_in_both_languages() -> None:
