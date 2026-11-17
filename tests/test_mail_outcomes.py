@@ -261,7 +261,7 @@ def workspace() -> tuple[Tenant, User]:
 @pytest.mark.parametrize(
     ("failure", "status"),
     [
-        (None, "accepted"),
+        (None, "sent"),
         (NotSentError("private relay detail"), "failed"),
         (PermanentlyNotSentError("private relay detail"), "failed"),
         (DeliveryUncertainError("private relay detail"), "uncertain"),
