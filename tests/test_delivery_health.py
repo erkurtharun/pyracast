@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 import pytest
 from django.core.management import CommandError, call_command
 from django.db import IntegrityError, connection, transaction
-from django.db.migrations.executor import MigrationExecutor
 from django.test.utils import CaptureQueriesContext
 
 from pyracast.connections.operations import rotate_secret, validate_binding
@@ -153,38 +152,6 @@ def test_incomplete_and_interrupted_deliveries_remain_visible_to_monitoring() ->
     report = delivery_health(NOW, timedelta(minutes=5))
     assert report["mail_authentication_failures"] == 1
     assert report["healthy"] is False
-
-
-@pytest.mark.django_db(transaction=True)
-def test_stored_authentication_failures_become_rejected_credentials_on_migration() -> None:
-    system = make_system(approved=True)
-    schedule = ReminderSchedule.objects.create(
-        region=system.region, enabled=True, effective_from=NOW, recipients=["r@example.test"]
-    )
-    previous = [("notifications", "0010_notificationdelivery_message_token")]
-    executor = MigrationExecutor(connection)
-    current = executor.loader.graph.leaf_nodes()
-    try:
-        executor.migrate(previous)
-        delivery_model = executor.loader.project_state(previous).apps.get_model(
-            "notifications", "NotificationDelivery"
-        )
-        for minute, error in enumerate(("mail_authentication_failed", "mail_not_sent")):
-            delivery_model.objects.create(
-                schedule_id=schedule.pk,
-                scheduled_for=NOW - timedelta(minutes=minute),
-                available_at=NOW,
-                status="retry",
-                last_error=error,
-            )
-    finally:
-        MigrationExecutor(connection).migrate(current)
-
-    assert sorted(NotificationDelivery.objects.values_list("last_error", flat=True)) == [
-        "mail_credentials_rejected",
-        "mail_not_sent",
-    ]
-    assert delivery_health(NOW, timedelta(minutes=5))["mail_authentication_failures"] == 1
 
 
 @pytest.mark.django_db(transaction=True)

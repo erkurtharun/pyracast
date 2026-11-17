@@ -117,6 +117,7 @@ class Migration(migrations.Migration):
                         choices=[
                             ("pending", "Pending"),
                             ("accepted", "Accepted"),
+                            ("failed", "Failed"),
                             ("uncertain", "Uncertain"),
                         ],
                         default="pending",
