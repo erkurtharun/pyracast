@@ -6,12 +6,15 @@ if [[ ! -f /.dockerenv || $EUID != 0 || $$ != 1 || ! -f /source/install-release.
   exit 2
 fi
 trap 'cat /result /calls >&2' ERR
-mkdir -p /mock-bin /fixture/deploy /etc/pyracast /var/lib/pyracast /opt/pyracast/releases /run/lock
+mkdir -p /mock-bin /fixture/deploy /etc/pyracast /etc/systemd/system /var/lib/pyracast /opt/pyracast/releases /run/lock
 cat >/etc/pyracast/host.json <<'JSON'
 {"domain":"example.com","acme_email":"ops@example.com","backup_bucket":"pyracast-backups"}
 JSON
 printf 'name: fixture\n' >/fixture/deploy/compose.yaml
 touch /fixture/deploy/runtime_secrets.py /fixture/deploy/bootstrap_database.py /fixture/deploy/backup.py
+cp /source/install-units.sh /fixture/deploy/
+cp -R /source/systemd /fixture/deploy/
+units=(pyracast-backup.service pyracast-backup.timer pyracast-watchdog.service pyracast-watchdog.timer)
 cat >/mock-bin/python3 <<'SH'
 #!/bin/bash
 if [[ ${1:-} == */runtime_secrets.py ]]; then
@@ -20,6 +23,8 @@ if [[ ${1:-} == */runtime_secrets.py ]]; then
   else
     printf 'PGUSER=new-runtime\n' >/run/pyracast/runtime.env
     printf 'RABBITMQ_DEFAULT_PASS=new-password\n' >/run/pyracast/broker.env
+    if [[ $MODE == secrets ]]; then exit 52; fi
+    printf 'POSTGRES_PASSWORD=new-password\n' >/run/pyracast/database.env
   fi
 elif [[ ${1:-} == */bootstrap_database.py || ${1:-} == */backup.py ]]; then
   printf 'python3 %s\n' "$*" >>/calls
@@ -55,6 +60,12 @@ SH
 cat >/mock-bin/systemctl <<'SH'
 #!/bin/bash
 printf 'systemctl %s\n' "$*" >>/calls
+if [[ $MODE == final-start && "$*" == 'start pyracast.service' ]]; then exit 53; fi
+SH
+cat >/mock-bin/systemd-analyze <<'SH'
+#!/bin/bash
+printf 'systemd-analyze %s\n' "$*" >>/calls
+if [[ $MODE == units-invalid ]]; then exit 54; fi
 SH
 cat >/mock-bin/flock <<'SH'
 #!/bin/bash
@@ -80,7 +91,7 @@ if [[ "$*" == *' up -d postgres' || "$*" == *' up -d rabbitmq' ]]; then
   touch /support-changed
 fi
 case "$MODE:$*" in
-  preflight:*' --profile release pull --quiet') exit 41 ;;
+  preflight:*' --profile release pull --quiet' | redeploy-preflight:*' --profile release pull --quiet') exit 41 ;;
   deploy-check:*' run --rm --no-deps migrate pyracast check --deploy --fail-level WARNING') exit 48 ;;
   plan:*' run --rm --no-deps migrate pyracast migrate --plan') exit 49 ;;
   support-rabbit:*' up -d rabbitmq') exit 42 ;;
@@ -98,15 +109,25 @@ SH
 chmod 755 /mock-bin/*
 export PATH=/mock-bin:$PATH
 revision=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-image=us-docker.pkg.dev/project/repo/backend@sha256:0000000000000000000000000000000000000000000000000000000000000000
-postgres_image=us-docker.pkg.dev/project/repo/postgres@sha256:1111111111111111111111111111111111111111111111111111111111111111
+repository=us-docker.pkg.dev/project/repo
+backend_image=$repository/backend@sha256:0000000000000000000000000000000000000000000000000000000000000000
+rebuilt_backend_image=$repository/backend@sha256:4444444444444444444444444444444444444444444444444444444444444444
+web_image=$repository/web@sha256:2222222222222222222222222222222222222222222222222222222222222222
+gateway_image=$repository/gateway@sha256:3333333333333333333333333333333333333333333333333333333333333333
+postgres_image=$repository/postgres@sha256:1111111111111111111111111111111111111111111111111111111111111111
+
+release_directory() {
+  printf '/opt/pyracast/releases/%s-%s' "$revision" "$(printf '%s\n' "$@" | sha256sum | cut -c1-12)"
+}
+new_release=$(release_directory "$backend_image" "$web_image" "$gateway_image" "$postgres_image")
+previous_build=$(release_directory "$rebuilt_backend_image" "$web_image" "$gateway_image" "$postgres_image")
 
 run_release() {
   if [[ $MODE != lock-* ]]; then
-    bash /source/install-release.sh "$revision" "$image" "$image" "$image" "$postgres_image" /fixture /migration.json
+    bash /source/install-release.sh "$revision" "${images[@]}" /fixture /migration.json
     return
   fi
-  /usr/local/bin/python3 - "$MODE" /source/install-release.sh "$revision" "$image" "$image" "$image" "$postgres_image" /fixture /migration.json <<'PY'
+  /usr/local/bin/python3 - "$MODE" /source/install-release.sh "$revision" "${images[@]}" /fixture /migration.json <<'PY'
 import os
 import select
 import subprocess
@@ -153,14 +174,54 @@ raise SystemExit(status)
 PY
 }
 
-for MODE in preflight deploy-check plan drain backup support-postgres support-rabbit migration health tls response success first-success first-backup killed-backup killed lock-wait lock-timeout; do
+absent() {
+  if grep -q -- "$1" /calls; then
+    echo "Unexpected call matching: $1" >&2
+    return 1
+  fi
+}
+
+units_untouched() {
+  for unit in "${units[@]}"; do grep -Fxq 'previous unit' "/etc/systemd/system/$unit"; done
+  absent daemon-reload
+}
+
+units_installed() {
+  for unit in "${units[@]}"; do cmp "/source/systemd/$unit" "/etc/systemd/system/$unit"; done
+  grep -Fxq 'host-owned unit' /etc/systemd/system/pyracast.service
+  grep -Fxq 'systemctl enable --now pyracast-backup.timer pyracast-watchdog.timer' /calls
+}
+
+for MODE in preflight deploy-check plan secrets units-invalid image live-artifact redeploy-preflight drain backup support-postgres support-rabbit migration health tls response success first-success redeploy final-start first-backup killed-backup killed lock-wait lock-timeout; do
   export MODE
   rm -rf /opt/pyracast/current /opt/pyracast/current.next /opt/pyracast/releases/* /run/pyracast
   rm -f /var/lib/pyracast/release-blocked /migration-entered /backup-entered /backup-complete /support-changed /database-initialized
   mkdir -p /opt/pyracast/releases/old/deploy /run/pyracast
-  if [[ $MODE != first-* ]]; then ln -s /opt/pyracast/releases/old /opt/pyracast/current; fi
+  live=/opt/pyracast/releases/old
+  case "$MODE" in
+    first-*) live= ;;
+    redeploy*) live=$previous_build ;;
+    live-artifact) live=$new_release ;;
+  esac
+  if [[ -n $live ]]; then
+    mkdir -p "$live/deploy"
+    printf 'BACKEND_IMAGE=%s\n' "$rebuilt_backend_image" >"$live/deploy/release.env"
+    cp "$live/deploy/release.env" /live-release.env
+    ln -s "$live" /opt/pyracast/current
+  fi
+  for unit in "${units[@]}"; do
+    if [[ $MODE == redeploy ]]; then
+      cp "/source/systemd/$unit" "/etc/systemd/system/$unit"
+    else
+      printf 'previous unit\n' >"/etc/systemd/system/$unit"
+    fi
+  done
+  printf 'host-owned unit\n' >/etc/systemd/system/pyracast.service
+  images=("$backend_image" "$web_image" "$gateway_image" "$postgres_image")
+  if [[ $MODE == image ]]; then images[2]=$web_image; fi
   printf 'PGUSER=old-runtime\n' >/run/pyracast/runtime.env
   printf 'RABBITMQ_DEFAULT_PASS=old-password\n' >/run/pyracast/broker.env
+  printf 'POSTGRES_PASSWORD=old-password\n' >/run/pyracast/database.env
   printf '{"PGUSER":"owner","PGPASSWORD":"password"}\n' >/migration.json
   : >/calls
   if run_release >/result 2>&1; then
@@ -175,6 +236,11 @@ for MODE in preflight deploy-check plan drain backup support-postgres support-ra
     test -f /migration.json
     test ! -s /calls
     test "$(readlink /opt/pyracast/current)" == /opt/pyracast/releases/old
+  elif [[ $MODE == image ]]; then
+    test "$result" == 2
+    grep -Fxq 'Invalid gateway image reference; expected an Artifact Registry digest.' /result
+    test ! -s /calls
+    [[ $(ls /opt/pyracast/releases) == old ]]
   elif [[ $MODE == killed || $MODE == killed-backup ]]; then
     test "$result" == 137
     if [[ $MODE == killed ]]; then
@@ -192,19 +258,33 @@ for MODE in preflight deploy-check plan drain backup support-postgres support-ra
     test ! -e /migration.json
     test ! -e /run/pyracast/migration.env
     case "$MODE" in
-      preflight|deploy-check|plan)
+      live-artifact)
+        test "$result" == 2
+        grep -Fq "Release $revision with these images is already live" /result
+        test ! -s /calls
+        test "$(readlink /opt/pyracast/current)" == "$new_release"
+        cmp /live-release.env "$new_release/deploy/release.env"
+        test ! -e /var/lib/pyracast/release-blocked
+        ;;
+      preflight|deploy-check|plan|secrets|units-invalid|redeploy-preflight)
         case "$MODE" in
-          preflight) test "$result" == 41 ;;
+          preflight|redeploy-preflight) test "$result" == 41 ;;
           deploy-check) test "$result" == 48 ;;
           plan) test "$result" == 49 ;;
+          secrets) test "$result" == 52 ;;
+          units-invalid) test "$result" == 54 ;;
         esac
-        test "$(readlink /opt/pyracast/current)" == /opt/pyracast/releases/old
+        test "$(readlink /opt/pyracast/current)" == "$live"
+        cmp /live-release.env "$live/deploy/release.env"
+        test "$new_release" != "$live"
         test ! -e /var/lib/pyracast/release-blocked
-        grep -Fxq "POSTGRES_IMAGE=$postgres_image" "/opt/pyracast/releases/$revision/deploy/release.env"
+        grep -Fxq "POSTGRES_IMAGE=$postgres_image" "$new_release/deploy/release.env"
         grep -Fxq 'PGUSER=old-runtime' /run/pyracast/runtime.env
         grep -Fxq 'RABBITMQ_DEFAULT_PASS=old-password' /run/pyracast/broker.env
+        grep -Fxq 'POSTGRES_PASSWORD=old-password' /run/pyracast/database.env
         test ! -e /backup-entered
-        ! grep -q ' stop ' /calls
+        absent ' stop '
+        units_untouched
         ;;
       drain|backup|first-backup|support-postgres|support-rabbit|migration|health|tls|response)
         case "$MODE" in
@@ -218,35 +298,59 @@ for MODE in preflight deploy-check plan drain backup support-postgres support-ra
           response) test "$result" == 1 ;;
         esac
         test -f /var/lib/pyracast/release-blocked
-        grep -q 'stop -t 100 gateway api web' /calls
         grep -q 'stop -t 660 dispatcher' /calls
         grep -q 'stop -t 660 worker notifications' /calls
+        grep -q 'stop -t 100 gateway api web' /calls
         if [[ $MODE == first-* ]]; then
           test ! -e /opt/pyracast/current
           test -f /database-initialized
         else
           test "$(readlink /opt/pyracast/current)" == /opt/pyracast/releases/old
         fi
-        ! grep -q 'current/deploy/compose.yaml up -d --wait' /calls
+        absent 'current/deploy/compose.yaml up -d --wait'
         if [[ $MODE == backup || $MODE == first-backup || $MODE == drain ]]; then
           test ! -e /support-changed
         fi
+        units_untouched
         ;;
-      success|first-success|lock-wait)
-        test "$result" == 0
-        test "$(readlink /opt/pyracast/current)" == "/opt/pyracast/releases/$revision"
+      final-start)
+        test "$result" == 53
+        test "$(readlink /opt/pyracast/current)" == "$new_release"
         test ! -e /var/lib/pyracast/release-blocked
-        grep -Fxq "POSTGRES_IMAGE=$postgres_image" "/opt/pyracast/releases/$revision/deploy/release.env"
+        test "$(grep -c ' stop -t ' /calls)" == 3
+        grep -Fq "Release $revision is serving" /result
+        units_installed
+        ;;
+      success|first-success|redeploy|lock-wait)
+        test "$result" == 0
+        test "$(readlink /opt/pyracast/current)" == "$new_release"
+        test ! -e /var/lib/pyracast/release-blocked
+        grep -Fxq "POSTGRES_IMAGE=$postgres_image" "$new_release/deploy/release.env"
         grep -q 'curl .*https://example.com/health/ready/' /calls
+        units_installed
+        if [[ $MODE == redeploy ]]; then
+          cmp /live-release.env "$previous_build/deploy/release.env"
+          absent daemon-reload
+        else
+          grep -Fxq 'systemctl daemon-reload' /calls
+        fi
+        test "$(tail -n 1 /calls)" == 'systemctl start pyracast.service'
         awk -v first="$([[ $MODE == first-success ]] && echo 1 || echo 0)" '
-          / stop -t 100 gateway api web$/ { ingress=NR }
-          / stop -t 660 dispatcher$/ { if (!ingress) exit 1; producer=NR }
-          / stop -t 660 worker notifications$/ { if (!producer) exit 1; drained=NR }
+          /^systemd-analyze verify / { verified=NR }
+          /^systemctl enable pyracast.service$/ { enabled=NR }
+          /^systemctl reset-failed pyracast.service$/ { if (!enabled) exit 1; reset=NR }
+          / up -d --no-recreate --wait --wait-timeout 180 postgres$/ { if (!verified || !reset) exit 1 }
+          / stop -t 660 dispatcher$/ { if (!verified || !reset) exit 1; producer=NR }
+          / stop -t 660 worker notifications$/ { if (!producer) exit 1; workers=NR }
+          / stop -t 100 gateway api web$/ { if (!workers) exit 1; drained=NR }
           / --kind prerelease$/ { if (!first && !drained) exit 1; backup=NR }
           / up -d postgres$/ { if (!backup) exit 1; postgres=NR }
           / up -d rabbitmq$/ { if (!postgres) exit 1; broker=NR }
           / run --rm --no-deps migrate$/ { if (!broker) exit 1; migration=NR }
-          END { if (!postgres || !backup || !broker || !migration) exit 1 }
+          /^curl / { if (!migration) exit 1; ready=NR }
+          /^systemctl enable --now / { if (!ready) exit 1; installed=NR }
+          /^systemctl start pyracast.service$/ { if (!installed) exit 1 }
+          END { if (!reset || !postgres || !backup || !broker || !migration || !ready || !installed) exit 1 }
         ' /calls
         ;;
     esac

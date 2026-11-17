@@ -16,10 +16,13 @@ from django.contrib.auth.models import User
 from django.urls import URLPattern, URLResolver
 from dramatiq.brokers.stub import StubBroker
 
-from deploy import authorize_gmail, watchdog
+from deploy import authorize_gmail, backup, host, watchdog
 from pyracast import gmail
 from pyracast.accounts.authentication import email_identity
 from pyracast.forecasts.historical_upload import MAX_UPLOAD_BYTES
+from pyracast.forecasts.management.commands.check_delivery_health import (
+    Command as DeliveryHealthCommand,
+)
 from pyracast.forecasts.management.commands.worker import Command as WorkerCommand
 from pyracast.metering.runtime import make_epias_actor
 from pyracast.notifications.runtime import make_notification_actor
@@ -511,3 +514,118 @@ def test_host_configuration_provides_every_key_the_host_scripts_read() -> None:
 
     assert read
     assert read <= provided
+
+
+def shipped_unit(name: str) -> dict[str, list[str]]:
+    values: dict[str, list[str]] = {}
+    for line in text(DEPLOY / "systemd" / name).splitlines():
+        if "=" in line and not line.startswith(("#", "[")):
+            key, value = line.split("=", 1)
+            values.setdefault(key, []).append(value)
+    return values
+
+
+def test_release_ships_the_watchdog_and_backup_units_and_the_host_keeps_its_own() -> None:
+    shipped = {path.name for path in (DEPLOY / "systemd").iterdir()}
+    installed = re.search(r"^units=\((.*)\)$", text(DEPLOY / "install-units.sh"), re.M)
+    template = text(TERRAFORM / "templates" / "startup.sh.tftpl")
+
+    assert shipped == {
+        "pyracast-backup.service",
+        "pyracast-backup.timer",
+        "pyracast-watchdog.service",
+        "pyracast-watchdog.timer",
+    }
+    assert installed
+    assert set(installed[1].split()) == shipped
+    assert not any(f"/etc/systemd/system/{name}" in template for name in shipped)
+    assert "cat >/etc/systemd/system/pyracast.service" in template
+    assert "deploy/install-units.sh install /opt/pyracast/current" in template
+
+
+def test_watchdog_unit_outlasts_its_deadline_and_runs_while_a_release_is_blocked() -> None:
+    unit = shipped_unit("pyracast-watchdog.service")
+    application = systemd_unit("pyracast.service")
+    drain = max(timeout for timeout, _ in stop_groups(text(DEPLOY / "install-release.sh"), "old"))
+
+    assert int(unit["TimeoutStartSec"][0]) >= watchdog.DEADLINE_SECONDS + 60
+    assert unit["ConditionPathExists"] == ["/opt/pyracast/current/deploy/watchdog.py"]
+    assert int(application["TimeoutStopSec"]) > watchdog.DEADLINE_SECONDS + drain
+
+
+def test_hourly_backup_unit_leaves_locking_to_the_backup_and_keeps_its_files_private() -> None:
+    unit = shipped_unit("pyracast-backup.service")
+
+    assert unit["ExecStart"] == [
+        "/usr/bin/python3 /opt/pyracast/current/deploy/backup.py /etc/pyracast/host.json"
+    ]
+    assert unit["PrivateTmp"] == ["true"]
+    assert f"!{host.RELEASE_BLOCKED.as_posix()}" in unit["ConditionPathExists"]
+    budget = int(unit["TimeoutStartSec"][0])
+    assert budget > backup.HOURLY_LOCK_WAIT_SECONDS + backup.DUMP_TIMEOUT_SECONDS
+
+
+def test_host_paths_agree_between_scripts_units_and_helpers() -> None:
+    installer = text(DEPLOY / "install-release.sh")
+    application = systemd_unit("pyracast.service")
+    lock = host.RELEASE_LOCK.as_posix()
+    blocked = host.RELEASE_BLOCKED.as_posix()
+
+    assert f"exec 9>{lock}" in installer
+    assert application["ExecStop"].startswith(f"/usr/bin/flock {lock} ")
+    assert f"touch {blocked}" in installer
+    assert application["ConditionPathExists"] == f"!{blocked}"
+    for name in ("pyracast-backup.service", "pyracast-watchdog.service"):
+        (command,) = shipped_unit(name)["ExecStart"]
+        assert f" {host.CURRENT_RELEASE.as_posix()}/deploy/" in command
+
+
+def test_dispatcher_is_unhealthy_once_its_heartbeat_is_older_than_the_delivery_lag() -> None:
+    dispatcher = compose_services()["dispatcher"]
+    heartbeat = dispatcher["command"][dispatcher["command"].index("--heartbeat-file") + 1]
+    probe = dispatcher["healthcheck"]["test"][-1]
+    threshold = re.search(r"> (\d+)\)$", probe)
+    lag = (
+        DeliveryHealthCommand()
+        .create_parser("pyracast", "check_delivery_health")
+        .get_default("max_lag_minutes")
+    )
+
+    assert Path(heartbeat).parent.as_posix() == dispatcher["tmpfs"][0].split(":", 1)[0]
+    assert f"'{heartbeat}'" in probe
+    assert threshold
+    assert int(threshold[1]) == 60 * lag
+
+
+def test_api_restarts_on_liveness_and_releases_wait_for_readiness() -> None:
+    assert "/health/live/" in compose_services()["api"]["healthcheck"]["test"][-1]
+    assert "/health/ready/" in text(DEPLOY / "install-release.sh")
+
+
+def test_a_silent_watchdog_is_alerted() -> None:
+    monitoring = text(TERRAFORM / "monitoring.tf")
+    metric = re.search(
+        r'resource "google_logging_metric" "watchdog_heartbeat" \{(.*?)\n\}', monitoring, re.S
+    )
+    policy = re.search(
+        r'resource "google_monitoring_alert_policy" "watchdog_heartbeat" \{(.*?)\n\}',
+        monitoring,
+        re.S,
+    )
+
+    assert metric
+    assert r"jsonPayload.event=\"pyracast_watchdog_heartbeat\"" in metric[1]
+    assert policy
+    assert "condition_absent" in policy[1]
+    assert "google_logging_metric.watchdog_heartbeat.name" in policy[1]
+    assert "pyracast_watchdog_heartbeat" in reported_events()["INFO"]
+
+
+def test_release_drains_producers_and_workers_while_the_site_still_serves() -> None:
+    drain = stop_groups(text(DEPLOY / "install-release.sh"), "old")
+
+    assert [group for _, group in drain] == [
+        ("dispatcher",),
+        ("worker", "notifications"),
+        ("gateway", "api", "web"),
+    ]

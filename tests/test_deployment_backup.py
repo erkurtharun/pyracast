@@ -5,11 +5,12 @@ import json
 import subprocess
 import time
 import urllib.request
+from collections.abc import Iterator
 from email.message import Message
 from http.client import HTTPException
 from pathlib import Path
 from typing import BinaryIO, cast
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -32,11 +33,10 @@ def test_backup_upload_verifies_content_and_prevents_overwriting(
         requests.append(request)
         assert request.data is not None
         assert cast(BinaryIO, request.data).read() == contents
-        checksum = base64.b64encode(hashlib.md5(contents).digest()).decode()  # noqa: S324
         return io.BytesIO(
             json.dumps(
                 {
-                    "md5Hash": checksum if valid_checksum else "invalid",
+                    "md5Hash": md5(contents) if valid_checksum else "invalid",
                     "size": str(len(contents)),
                 }
             ).encode()
@@ -76,7 +76,7 @@ def test_failed_dump_cannot_publish_a_successful_backup(
     monkeypatch.setattr(subprocess, "run", failed_dump)
     monkeypatch.setattr(backup, "upload_backup", upload)
     with pytest.raises(subprocess.CalledProcessError):
-        backup.create_backup(tmp_path, "private-backups", "hourly", tmp_path)
+        backup.create_backup(tmp_path, "private-backups", "prerelease", tmp_path)
     assert uploaded == []
 
 
@@ -120,8 +120,7 @@ def test_backup_recovers_when_upload_committed_before_response_was_lost(
         methods.append(request.get_method())
         if request.get_method() == "POST":
             raise HTTPError(request.full_url, 412, "Already exists", Message(), None)
-        checksum = base64.b64encode(hashlib.md5(b"PGDMP").digest()).decode()  # noqa: S324
-        return io.BytesIO(json.dumps({"md5Hash": checksum, "size": "5"}).encode())
+        return io.BytesIO(json.dumps({"md5Hash": md5(b"PGDMP"), "size": "5"}).encode())
 
     monkeypatch.setattr(backup, "access_token", lambda: "private-token")
     monkeypatch.setattr(urllib.request, "urlopen", upload)
@@ -270,3 +269,188 @@ def test_malformed_backup_confirmation_has_a_bounded_redacted_failure(
     monkeypatch.setattr(time, "sleep", lambda _seconds: None)
     with pytest.raises(ValueError, match="Uploaded backup checksum does not match"):
         backup.upload_backup("private-backups", "postgres/hourly.dump", archive)
+
+
+def md5(contents: bytes) -> str:
+    return base64.b64encode(hashlib.md5(contents, usedforsecurity=False).digest()).decode()
+
+
+def refusal(request: urllib.request.Request, status: int) -> HTTPError:
+    return HTTPError(request.full_url, status, "refused", Message(), None)
+
+
+def test_upload_asks_cloud_storage_to_validate_the_md5(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "database.dump"
+    archive.write_bytes(b"PGDMP")
+    hashes: list[str | None] = []
+
+    def upload(request: urllib.request.Request, **_kwargs: object) -> io.BytesIO:
+        hashes.append(request.get_header("X-goog-hash"))
+        return io.BytesIO(json.dumps({"md5Hash": md5(b"PGDMP"), "size": "5"}).encode())
+
+    monkeypatch.setattr(backup, "access_token", lambda: "private-token")
+    monkeypatch.setattr(urllib.request, "urlopen", upload)
+    backup.upload_backup("private-backups", "postgres/hourly.dump", archive)
+    assert hashes == [f"md5={md5(b'PGDMP')}"]
+
+
+@pytest.mark.parametrize(("status", "attempts"), [(400, 1), (401, 1), (403, 1), (404, 1)])
+def test_permanent_upload_refusals_are_not_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int, attempts: int
+) -> None:
+    archive = tmp_path / "database.dump"
+    archive.write_bytes(b"PGDMP")
+    requests: list[str] = []
+
+    def upload(request: urllib.request.Request, **_kwargs: object) -> io.BytesIO:
+        requests.append(request.get_method())
+        raise refusal(request, status)
+
+    monkeypatch.setattr(backup, "access_token", lambda: "private-token")
+    monkeypatch.setattr(urllib.request, "urlopen", upload)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    with pytest.raises(HTTPError):
+        backup.upload_backup("private-backups", "postgres/hourly.dump", archive)
+    assert len(requests) == attempts
+
+
+@pytest.mark.parametrize("status", [408, 429, 500, 503])
+def test_transient_upload_statuses_are_retried_within_the_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    archive = tmp_path / "database.dump"
+    archive.write_bytes(b"PGDMP")
+    requests: list[str] = []
+
+    def upload(request: urllib.request.Request, **_kwargs: object) -> io.BytesIO:
+        requests.append(request.get_method())
+        raise refusal(request, status)
+
+    monkeypatch.setattr(backup, "access_token", lambda: "private-token")
+    monkeypatch.setattr(urllib.request, "urlopen", upload)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    with pytest.raises(HTTPError):
+        backup.upload_backup("private-backups", "postgres/hourly.dump", archive)
+    assert requests == ["POST", "POST", "POST"]
+
+
+def test_metadata_check_after_a_lost_upload_response_retries_transport_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "database.dump"
+    archive.write_bytes(b"PGDMP")
+    methods: list[str] = []
+
+    def upload(request: urllib.request.Request, **_kwargs: object) -> io.BytesIO:
+        methods.append(request.get_method())
+        if request.get_method() == "POST":
+            raise refusal(request, 412)
+        if methods.count("GET") == 1:
+            raise URLError("metadata connection reset")
+        return io.BytesIO(json.dumps({"md5Hash": md5(b"PGDMP"), "size": "5"}).encode())
+
+    monkeypatch.setattr(backup, "access_token", lambda: "private-token")
+    monkeypatch.setattr(urllib.request, "urlopen", upload)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    backup.upload_backup("private-backups", "postgres/hourly.dump", archive)
+    assert methods == ["POST", "GET", "POST", "GET"]
+
+
+def test_existing_object_with_another_checksum_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "database.dump"
+    archive.write_bytes(b"PGDMP")
+
+    def upload(request: urllib.request.Request, **_kwargs: object) -> io.BytesIO:
+        if request.get_method() == "POST":
+            raise refusal(request, 412)
+        return io.BytesIO(json.dumps({"md5Hash": md5(b"other"), "size": "5"}).encode())
+
+    monkeypatch.setattr(backup, "access_token", lambda: "private-token")
+    monkeypatch.setattr(urllib.request, "urlopen", upload)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    with pytest.raises(ValueError, match="Existing backup checksum does not match"):
+        backup.upload_backup("private-backups", "postgres/hourly.dump", archive)
+
+
+@pytest.mark.parametrize("corrupt", [False, True])
+def test_rehearsal_verifies_the_downloaded_archive_before_restoring_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, corrupt: bool
+) -> None:
+    contents = b"PGDMP-archive"
+    restored: list[bytes] = []
+
+    def download(request: urllib.request.Request, **_kwargs: object) -> io.BytesIO:
+        if "alt=media" in request.full_url:
+            return io.BytesIO(contents + (b"-truncated-elsewhere" if corrupt else b""))
+        return io.BytesIO(json.dumps({"md5Hash": md5(contents), "size": "13"}).encode())
+
+    def restore(_release: Path, archive: Path, _name: str) -> None:
+        restored.append(archive.read_bytes())
+
+    monkeypatch.setattr(backup, "access_token", lambda: "private-token")
+    monkeypatch.setattr(urllib.request, "urlopen", download)
+    monkeypatch.setattr(backup, "restore_archive", restore)
+    if corrupt:
+        with pytest.raises(ValueError, match="Downloaded backup does not match"):
+            backup.rehearse_restore(tmp_path, "private-backups", "postgres/x.dump", tmp_path)
+        assert restored == []
+    else:
+        backup.rehearse_restore(tmp_path, "private-backups", "postgres/x.dump", tmp_path)
+        assert restored == [contents]
+
+
+@pytest.fixture
+def fresh_instance_metadata() -> Iterator[None]:
+    operations_log.log_resource.cache_clear()
+    yield
+    operations_log.log_resource.cache_clear()
+
+
+@pytest.mark.usefixtures("fresh_instance_metadata")
+def test_instance_metadata_is_read_once_per_process_with_a_short_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    values = {
+        "project/project-id": "private-project",
+        "instance/id": "1",
+        "instance/zone": "projects/1/zones/europe-west1-b",
+        "instance/service-accounts/default/token": json.dumps({"access_token": "token"}),
+    }
+    reads: list[tuple[str, object]] = []
+    written: list[dict[str, object]] = []
+
+    def urlopen(request: urllib.request.Request, timeout: float) -> io.BytesIO:
+        if "metadata.google.internal" in request.full_url:
+            path = request.full_url.split("/computeMetadata/v1/", 1)[1]
+            reads.append((path, timeout))
+            return io.BytesIO(values[path].encode())
+        assert request.data is not None
+        written.append(json.loads(cast(bytes, request.data)))
+        return io.BytesIO(b"{}")
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    operations_log.report("pyracast_watchdog_heartbeat", "INFO", state="ok")
+    operations_log.report("pyracast_watchdog_heartbeat", "INFO", state="blocked")
+
+    assert [path for path, _ in reads] == [
+        "project/project-id",
+        "instance/id",
+        "instance/zone",
+        "instance/service-accounts/default/token",
+        "instance/service-accounts/default/token",
+    ]
+    assert {timeout for _, timeout in reads} == {2}
+    assert [entry["resource"] for entry in written] == [
+        {
+            "type": "gce_instance",
+            "labels": {
+                "project_id": "private-project",
+                "instance_id": "1",
+                "zone": "europe-west1-b",
+            },
+        }
+    ] * 2

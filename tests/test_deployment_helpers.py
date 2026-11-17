@@ -11,6 +11,7 @@ import pytest
     [
         "backup.py",
         "bootstrap_database.py",
+        "host.py",
         "operations_log.py",
         "pin_release_images.py",
         "release_scope.py",
