@@ -35,7 +35,7 @@ def _bound_name(node: ast.stmt) -> str | None:
 
 
 def _start_line(node: ast.stmt, lines: list[str]) -> int:
-    decorators = getattr(node, "decorator_list", [])
+    decorators: list[ast.expr] = getattr(node, "decorator_list", [])
     start = min([node.lineno, *(decorator.lineno for decorator in decorators)])
     while start > 1 and lines[start - 2].lstrip().startswith("#"):
         start -= 1
@@ -150,15 +150,12 @@ def tidy(paths: list[Path]) -> None:
     arguments = [str(path) for path in sorted(set(paths))]
     if not arguments:
         return
-    ruff = [sys.executable, "-m", "ruff"]
-    subprocess.run(  # noqa: S603 -- fixed ruff invocation on files this script wrote.
-        [*ruff, "check", "--fix", "--select", "F401,I001", "--quiet", *arguments],
-        cwd=ROOT,
-        check=False,
-    )
-    subprocess.run(  # noqa: S603 -- fixed ruff invocation on files this script wrote.
-        [*ruff, "format", "--quiet", *arguments], cwd=ROOT, check=True
-    )
+    for command in (["check", "--fix", "--select", "F401,I001"], ["format"]):
+        subprocess.run(  # noqa: S603 -- fixed ruff invocation on files this script wrote.
+            [sys.executable, "-m", "ruff", *command, "--quiet", *arguments],
+            cwd=ROOT,
+            check=command[0] == "format",
+        )
 
 
 def main(tests: Path = ROOT / "tests") -> dict[str, set[str]]:

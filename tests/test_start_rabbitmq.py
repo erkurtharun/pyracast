@@ -1,4 +1,5 @@
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -54,7 +55,7 @@ def test_durable_broker_state_is_never_placed_under_the_temporary_directory(
 ) -> None:
     monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-    monkeypatch.setattr(start_rabbitmq.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
     downloads, _, _ = windows_broker(monkeypatch)
 
     with pytest.raises(RuntimeError, match="temporary directory"):

@@ -39,6 +39,9 @@ def windows_server_options(
     monkeypatch.setattr(start_postgres, "windows_workspace", lambda: tmp_path)
     monkeypatch.setattr(start_postgres, "windows_preflight", lambda binary, env: None)
     monkeypatch.setattr(
+        start_postgres, "start_server", lambda command, env: commands.append(tuple(command))
+    )
+    monkeypatch.setattr(
         start_postgres, "ARCHIVE_SHA256", hashlib.sha256(archive.read_bytes()).hexdigest()
     )
     monkeypatch.setenv("PYRACAST_POSTGRES_ARCHIVE", str(archive))

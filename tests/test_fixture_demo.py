@@ -1,6 +1,7 @@
 import pytest
 from django.conf import LazySettings
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
 
@@ -78,6 +79,18 @@ def test_each_superuser_gets_an_own_demo_workspace(demo_user: User) -> None:
 
     assert Tenant.objects.count() == 2
     assert Plant.objects.count() == 2
+
+
+def test_fixture_demo_reports_a_refused_step_as_a_command_error(
+    demo_user: User, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refused(*args: object, **kwargs: object) -> Plant:
+        raise ValidationError("plant_limit_reached")
+
+    monkeypatch.setattr(fixture_demo, "create_plant", refused)
+
+    with pytest.raises(CommandError, match=r"stopped: .*plant_limit_reached"):
+        call_command("fixture_demo", "--username", "demo")
 
 
 @pytest.mark.parametrize(("status", "succeeds"), [("succeeded", True), ("retry", False)])

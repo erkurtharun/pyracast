@@ -613,7 +613,7 @@ def test_failed_frontend_start_rolls_back_new_api_and_preserves_existing_worker(
     (root / "web").mkdir()
     monkeypatch.setenv("PYTHONPATH", str(root))
     monkeypatch.setattr(launcher, "PORTS", {})
-    monkeypatch.setattr(launcher, "ensure_dependencies", lambda state: None)
+    monkeypatch.setattr(launcher, "ensure_dependencies", lambda: None)
     monkeypatch.setattr(launcher, "run_setup", lambda root, args: None)
     monkeypatch.setattr(
         launcher,
@@ -699,7 +699,7 @@ def test_failed_dispatcher_start_requests_worker_shutdown_and_preserves_timeout_
     monkeypatch.setattr(launcher, "terminate_tree", force_stop)
     monkeypatch.setenv("PYTHONPATH", str(root))
     monkeypatch.setattr(launcher, "PORTS", {})
-    monkeypatch.setattr(launcher, "ensure_dependencies", lambda state: None)
+    monkeypatch.setattr(launcher, "ensure_dependencies", lambda: None)
     monkeypatch.setattr(launcher, "run_setup", lambda root, args: None)
     monkeypatch.setattr(launcher, "frontend_command", lambda *args, **kwargs: [])
 

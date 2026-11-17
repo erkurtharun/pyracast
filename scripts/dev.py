@@ -240,6 +240,23 @@ def run_setup(root: Path, args: list[str]) -> None:
         raise RuntimeError("Setup failed; see .dev/setup.log.")
 
 
+def npm_cli(npm: str, node: str) -> Path:
+    resolved = Path(npm).resolve()
+    node_directory = Path(node).resolve().parent
+    package = Path("node_modules/npm/bin/npm-cli.js")
+    candidates = [
+        *([resolved] if resolved.suffix == ".js" else []),
+        resolved.parent / package,
+        node_directory / package,
+        node_directory.parent / "lib" / package,
+    ]
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    tried = ", ".join(str(candidate) for candidate in candidates)
+    raise RuntimeError(f"Cannot locate npm-cli.js for the installed Node.js; tried {tried}.")
+
+
 def frontend_command(root: Path, *, running: bool = False) -> list[str]:
     node = shutil.which("node")
     npm = shutil.which("npm")
@@ -254,18 +271,14 @@ def frontend_command(root: Path, *, running: bool = False) -> list[str]:
     if installed != lock_hash or not (root / "web/node_modules/next").is_dir():
         if running:
             raise RuntimeError("Frontend dependencies changed. Run stop.cmd, then start.cmd.")
-        npm_cli = Path(npm).resolve()
-        if npm_cli.suffix != ".js":
-            npm_cli = npm_cli.parent / "node_modules/npm/bin/npm-cli.js"
-        if not npm_cli.is_file():
-            raise RuntimeError("Cannot locate npm-cli.js for the installed Node.js.")
+        cli = npm_cli(npm, node)
         print(
             "Installing locked frontend dependencies (first start or lockfile change)...",
             flush=True,
         )
         run_setup(
             root,
-            [node, str(npm_cli), "--prefix", "web", "ci", "--ignore-scripts", "--prefer-offline"],
+            [node, str(cli), "--prefix", "web", "ci", "--ignore-scripts", "--prefer-offline"],
         )
         marker.write_text(lock_hash, encoding="utf-8")
     return [
@@ -316,11 +329,8 @@ def start(root: Path, state: dict[str, Any]) -> None:
         process = existing[role]
         if listener_pid(port) is not None and (process is None or not owns_port(process, port)):
             raise RuntimeError(f"Port {port} belongs to another process; no services were started.")
-    try:
-        print("Checking PostgreSQL and RabbitMQ...", flush=True)
-        ensure_dependencies(state)
-    finally:
-        save_state(root, state)
+    print("Checking PostgreSQL and RabbitMQ...", flush=True)
+    ensure_dependencies()
     commands = {
         "api": [sys.executable, "-m", "django", "runserver", "127.0.0.1:8000", "--noreload"],
         "frontend": frontend_command(root, running=existing["frontend"] is not None),

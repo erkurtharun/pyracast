@@ -12,7 +12,7 @@ import psycopg
 import pytest
 
 from scripts import dev_dependencies as dependencies
-from scripts import start_postgres
+from scripts import start_postgres, start_rabbitmq
 
 
 @pytest.fixture
@@ -34,8 +34,8 @@ def local_dependencies(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(pika, "BlockingConnection", broker_connect)
     postgres = MagicMock()
     rabbitmq = MagicMock()
-    monkeypatch.setattr(dependencies.start_postgres, "main", postgres)
-    monkeypatch.setattr(dependencies.start_rabbitmq, "main", rabbitmq)
+    monkeypatch.setattr(start_postgres, "main", postgres)
+    monkeypatch.setattr(start_rabbitmq, "main", rabbitmq)
     return {
         "connection": connection,
         "connect": connect,

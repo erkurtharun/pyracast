@@ -12,12 +12,15 @@ import time
 import urllib.request
 import zipfile
 from pathlib import Path
+from typing import Any
 
 ARCHIVE_URL = "https://sbp.enterprisedb.com/getfile.jsp?fileid=1260609"
 ARCHIVE_SHA256 = "e2246ba91d22345bc3d017586c09ede52d9df180b1eeb480f050445f1cad84e2"
 POSTGRES_IMAGE = (
     "postgres:18.6@sha256:e3d24f6906d0760bf4da0dae872415391ededefad23fd471c47dc53b0ddf3c42"
 )
+CONTAINER = "pyracast-postgres"
+VOLUME = "pyracast-postgres-data"
 # Only for throwaway clusters: a crash can lose or corrupt data that was not flushed.
 NON_DURABLE_OPTIONS = (
     "-c",
@@ -29,24 +32,52 @@ NON_DURABLE_OPTIONS = (
 )
 
 
+def execute(
+    command: list[str] | tuple[str, ...], **options: Any
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, text=True, **options)  # noqa: S603 -- fixed commands and local paths.
+
+
 def run(*args: str, env: dict[str, str] | None = None) -> None:
-    subprocess.run(args, check=True, env=env)  # noqa: S603 -- fixed CI commands and local paths.
+    execute(args, check=True, env=env)
+
+
+def durable_root() -> Path:
+    if sys.platform == "win32":
+        base = Path(os.environ["LOCALAPPDATA"])
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+    return base / "pyracast"
+
+
+def require_durable(path: Path, temporary: Path | None = None) -> None:
+    temporary = Path(tempfile.gettempdir()) if temporary is None else temporary
+    if path.resolve().is_relative_to(temporary.resolve()):
+        raise RuntimeError(
+            f"Development data must not live under the temporary directory {temporary}; "
+            "OS cleanup deletes it."
+        )
+
+
+def grant_current_user(root: Path) -> None:
+    system = Path(os.environ["SYSTEMROOT"]) / "System32"
+    identity = execute(
+        [str(system / "whoami.exe"), "/user", "/fo", "csv", "/nh"],
+        check=True,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+    ).stdout
+    sid = next(csv.reader(identity.splitlines()))[1]
+    if re.fullmatch(r"S-\d+(?:-\d+)+", sid) is None:
+        raise RuntimeError("Windows user SID could not be determined")
+    # initdb drops Administrators; an elevated owner of the directory may be that group.
+    run(str(system / "icacls.exe"), str(root), "/grant", f"*{sid}:(OI)(CI)F", "/Q")
 
 
 def windows_workspace() -> Path:
     root = Path(tempfile.mkdtemp(prefix="pyracast-postgres-"))
-    system = Path(os.environ["SYSTEMROOT"]) / "System32"
-    identity = subprocess.check_output(  # noqa: S603 -- fixed Windows identity query.
-        [str(system / "whoami.exe"), "/user", "/fo", "csv", "/nh"],
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    sid = next(csv.reader(identity.splitlines()))[1]
-    if re.fullmatch(r"S-\d+(?:-\d+)+", sid) is None:
-        raise RuntimeError("Windows user SID could not be determined")
-    # initdb drops Administrators; an elevated mkdtemp owner may be that group, not the user.
-    run(str(system / "icacls.exe"), str(root), "/grant", f"*{sid}:(OI)(CI)F", "/Q")
+    grant_current_user(root)
     return root
 
 
@@ -91,41 +122,59 @@ def windows_preflight(binary: Path, env: dict[str, str]) -> None:
         raise
 
 
-def server_options(argv: list[str] | None) -> tuple[str, ...]:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--non-durable",
-        action="store_true",
-        help="turn off fsync, synchronous_commit and full_page_writes on a throwaway cluster",
+def accepts_connections(port: str) -> bool:
+    with socket.socket() as probe:
+        probe.settimeout(0.5)
+        return probe.connect_ex(("127.0.0.1", int(port))) == 0
+
+
+def install_binaries(root: Path) -> Path:
+    binary = root / "pgsql" / "bin"
+    if (binary / "pg_ctl.exe").is_file():
+        return binary
+    root.mkdir(parents=True, exist_ok=True)
+    local_archive = os.environ.get("PYRACAST_POSTGRES_ARCHIVE")
+    archive = Path(local_archive) if local_archive else root / "postgres.zip"
+    if not local_archive:
+        urllib.request.urlretrieve(ARCHIVE_URL, archive)
+    with archive.open("rb") as stream:
+        if hashlib.file_digest(stream, "sha256").hexdigest() != ARCHIVE_SHA256:
+            raise RuntimeError("PostgreSQL archive checksum mismatch")
+    with zipfile.ZipFile(archive) as source:
+        for item in source.namelist():
+            if item.startswith(("pgsql/bin/", "pgsql/lib/", "pgsql/share/")):
+                source.extract(item, root)
+    if not local_archive:
+        archive.unlink()
+    return binary
+
+
+def start_server(command: list[str], env: dict[str, str]) -> None:
+    # pg_ctl's server inherits the caller's handles; a pipe would keep the caller waiting.
+    execute(
+        command,
+        env=env,
+        check=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=90,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
-    return NON_DURABLE_OPTIONS if parser.parse_args(argv).non_durable else ()
 
 
-def main(argv: list[str] | None = None) -> None:
-    options = server_options(argv)
-    port = str(int(os.environ.get("PGPORT", "55432")))
-    if sys.platform == "win32":
-        root = windows_workspace()
-        archive = root / "postgres.zip"
-        local_archive = os.environ.get("PYRACAST_POSTGRES_ARCHIVE")
-        if local_archive:
-            archive = Path(local_archive)
-        else:
-            urllib.request.urlretrieve(ARCHIVE_URL, archive)
-        with archive.open("rb") as stream:
-            if hashlib.file_digest(stream, "sha256").hexdigest() != ARCHIVE_SHA256:
-                raise RuntimeError("PostgreSQL archive checksum mismatch")
-        with zipfile.ZipFile(archive) as source:
-            for item in source.namelist():
-                if item.startswith(("pgsql/bin/", "pgsql/lib/", "pgsql/share/")):
-                    source.extract(item, root)
-        binary = root / "pgsql" / "bin"
-        env = os.environ.copy()
-        env["PATH"] = os.pathsep.join(
-            (str(binary), str(binary.parent / "lib"), env.get("PATH", ""))
-        )
+def provision_windows(root: Path, port: str, options: tuple[str, ...]) -> str:
+    data = root / "data"
+    if (data / "PG_VERSION").is_file() and accepts_connections(port):
+        return "running"
+    if not (data / "PG_VERSION").is_file() and data.exists() and any(data.iterdir()):
+        raise RuntimeError(f"{data} is not a PostgreSQL cluster; nothing was changed.")
+    binary = install_binaries(root)
+    env = os.environ.copy()
+    env["PATH"] = os.pathsep.join((str(binary), str(binary.parent / "lib"), env.get("PATH", "")))
+    created = not (data / "PG_VERSION").is_file()
+    if created:
         windows_preflight(binary, env)
-        data = root / "data"
         run(
             str(binary / "initdb.exe"),
             "-D",
@@ -137,40 +186,73 @@ def main(argv: list[str] | None = None) -> None:
             "--no-locale",
             env=env,
         )
-        run(
-            str(binary / "pg_ctl.exe"),
-            "-D",
-            str(data),
-            "-l",
-            str(root / "postgres.log"),
-            "-o",
-            " ".join(("-h", "127.0.0.1", "-p", port, *options)),
-            "start",
-            env=env,
-        )
-        run(
-            str(binary / "createdb.exe"),
-            "-h",
-            "127.0.0.1",
-            "-p",
-            port,
-            "-U",
-            "pyracast",
-            "pyracast",
-            env=env,
-        )
-    elif sys.platform == "linux":
-        docker = shutil.which("docker")
-        if docker is None:
-            raise RuntimeError("Docker is required on Linux")
+    server = " ".join(("-h", "127.0.0.1", "-p", port, *options))
+    log = root / "postgres.log"
+    pg_ctl = str(binary / "pg_ctl.exe")
+    start_server(
+        [pg_ctl, "-D", str(data), "-l", str(log), "-o", server, "-w", "-t", "60", "start"], env
+    )
+    if not created:
+        return "started"
+    run(
+        str(binary / "createdb.exe"),
+        "-h",
+        "127.0.0.1",
+        "-p",
+        port,
+        "-U",
+        "pyracast",
+        "pyracast",
+        env=env,
+    )
+    return "created"
+
+
+def container_state(docker: str, name: str) -> str | None:
+    result = execute(
+        [docker, "inspect", "--format", "{{.State.Running}}", name],
+        capture_output=True,
+        check=False,
+    )
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def wait_for_container(docker: str) -> None:
+    for _ in range(60):
+        if (
+            execute(
+                (docker, "exec", CONTAINER, "pg_isready", "-U", "pyracast"),
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).returncode
+            == 0
+        ):
+            return
+        time.sleep(1)
+    raise RuntimeError("PostgreSQL did not become ready")
+
+
+def provision_docker(
+    docker: str, port: str, options: tuple[str, ...], *, volume: str | None
+) -> str:
+    state = container_state(docker, CONTAINER) if volume else None
+    if state == "true":
+        return "running"
+    if state is not None:
+        run(docker, "start", CONTAINER)
+        status = "started"
+    else:
+        storage = ("--volume", f"{volume}:/var/lib/postgresql") if volume else ()
         run(
             docker,
             "run",
             "--detach",
             "--name",
-            "pyracast-postgres",
+            CONTAINER,
             "-p",
             f"127.0.0.1:{port}:5432",
+            *storage,
             "-e",
             "POSTGRES_USER=pyracast",
             "-e",
@@ -180,24 +262,55 @@ def main(argv: list[str] | None = None) -> None:
             POSTGRES_IMAGE,
             *(("postgres", *options) if options else ()),
         )
-        for _ in range(60):
-            if (
-                subprocess.run(  # noqa: S603 -- fixed Docker command.
-                    (docker, "exec", "pyracast-postgres", "pg_isready", "-U", "pyracast"),
-                    check=False,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                ).returncode
-                == 0
-            ):
-                break
-            time.sleep(1)
+        status = "created"
+    wait_for_container(docker)
+    return status
+
+
+def parse(argv: list[str] | None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Start the development PostgreSQL; it keeps its data in the per-user data "
+        "directory unless --ephemeral is given."
+    )
+    parser.add_argument("--ephemeral", action="store_true", help="create a throwaway cluster (CI)")
+    parser.add_argument(
+        "--non-durable",
+        action="store_true",
+        help="turn off fsync, synchronous_commit and full_page_writes; needs --ephemeral",
+    )
+    arguments = parser.parse_args(argv)
+    if arguments.non_durable and not arguments.ephemeral:
+        parser.error("--non-durable is only for a throwaway cluster; add --ephemeral")
+    return arguments
+
+
+def main(argv: list[str] | None = None) -> None:
+    arguments = parse(argv)
+    options = NON_DURABLE_OPTIONS if arguments.non_durable else ()
+    port = str(int(os.environ.get("PGPORT", "55432")))
+    if sys.platform == "win32":
+        if arguments.ephemeral:
+            root = windows_workspace()
         else:
-            raise RuntimeError("PostgreSQL did not become ready")
+            root = durable_root() / "postgres"
+            require_durable(root)
+            if not root.exists():
+                root.mkdir(parents=True)
+                grant_current_user(root)
+        status = provision_windows(root, port, options)
+        where = str(root)
+    elif sys.platform == "linux":
+        docker = shutil.which("docker")
+        if docker is None:
+            raise RuntimeError("Docker is required on Linux")
+        volume = None if arguments.ephemeral else VOLUME
+        status = provision_docker(docker, port, options, volume=volume)
+        where = f"Docker volume {volume}" if volume else "a throwaway container"
     else:
         raise RuntimeError(f"Unsupported platform: {sys.platform}")
     with socket.create_connection(("127.0.0.1", int(port)), timeout=10):
         pass
+    print(f"PostgreSQL {status} on 127.0.0.1:{port}; data in {where}.", flush=True)
 
 
 if __name__ == "__main__":
