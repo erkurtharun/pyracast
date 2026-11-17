@@ -93,9 +93,7 @@ def workspace_regions() -> QuerySet[WithAnnotations[Region, WorkspaceAnnotations
         .select_related("tenant")
         .annotate(
             workspace_plant_name=Subquery(
-                Plant.objects.filter(region_id=OuterRef("pk"), deleted_at__isnull=True)
-                .order_by("pk")
-                .values("name")[:1]
+                Plant.objects.filter(region_id=OuterRef("pk")).order_by("pk").values("name")[:1]
             ),
             workspace_binding_id=Subquery(binding.values("pk")[:1]),
             workspace_binding_health=Subquery(binding.values("health")[:1]),
@@ -171,7 +169,7 @@ def plant_list_context(query: str, status: str, page: str, issue: str = "") -> d
         regions = regions.filter(
             Q(name__icontains=query)
             | Q(tenant__name__icontains=query)
-            | Q(plant__name__icontains=query, plant__deleted_at__isnull=True)
+            | Q(plant__name__icontains=query)
         ).distinct()
     if status in dict(STATUS_CHOICES):
         regions = regions.filter(status=status)
@@ -239,7 +237,6 @@ def recent_activity_context(
         "rejected": _("Plant rejected"),
         "suspended": _("Plant suspended"),
         "binding_configured": _("Provider connection configured"),
-        "binding_validated": _("Provider connection validated"),
         "connection_validated": _("Provider connection validated"),
         "location_change_requested": _("Location change requested"),
         "location_change_approved": _("Location change approved"),
@@ -274,9 +271,7 @@ def recent_work_context(
     collection_rows = collection_jobs_for_issue(issue, now).annotate(
         display_plant_name=Coalesce(
             Subquery(
-                Plant.objects.filter(
-                    region_id=OuterRef("binding__region_id"), deleted_at__isnull=True
-                )
+                Plant.objects.filter(region_id=OuterRef("binding__region_id"))
                 .order_by("pk")
                 .values("name")[:1]
             ),
@@ -286,9 +281,7 @@ def recent_work_context(
     delivery_rows = notification_deliveries_for_issue(issue, now).annotate(
         display_plant_name=Coalesce(
             Subquery(
-                Plant.objects.filter(
-                    region_id=OuterRef("schedule__region_id"), deleted_at__isnull=True
-                )
+                Plant.objects.filter(region_id=OuterRef("schedule__region_id"))
                 .order_by("pk")
                 .values("name")[:1]
             ),

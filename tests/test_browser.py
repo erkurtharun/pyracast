@@ -220,7 +220,6 @@ def test_browser_against_live_django(
     assert plant.current_configuration.mounting_type == "fixed"
     assert plant.current_configuration.surface_tilt == 33
     assert plant.current_configuration.surface_azimuth == 180
-    assert plant.deleted_at is None
     system.region.refresh_from_db()
     assert system.region.deleted_at is None
     revisions = list(ProductionObservation.objects.filter(plant=plant).order_by("id"))

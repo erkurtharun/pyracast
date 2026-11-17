@@ -276,29 +276,6 @@ def test_partial_tomorrow_survives_missing_today_and_does_not_invent_daily_total
     assert delivery.prepared_message["tomorrow_complete"] is False
 
 
-def test_legacy_unprepared_recipient_reuses_existing_slot_content() -> None:
-    system, schedule = configured()
-    snapshot = complete_saved(system)
-    delivery_id = enqueue_due(SLOT)[0]
-    assert process_notification(delivery_id, SLOT)
-    extra = NotificationDelivery.objects.create(
-        schedule=schedule,
-        binding=system.binding,
-        snapshot=snapshot,
-        scheduled_for=SLOT,
-        recipients=["legacy@example.com"],
-        grouped=False,
-        available_at=SLOT,
-    )
-    schedule.recipients = ["legacy@example.com"]
-    schedule.save()
-    assert process_notification(extra.pk, SLOT)
-    original = NotificationDelivery.objects.get(pk=delivery_id)
-    extra.refresh_from_db()
-    assert original.prepared_message == extra.prepared_message
-    assert mail.outbox[0].body == mail.outbox[1].body
-
-
 def test_legacy_preparation_uses_slot_cutoff_without_grace() -> None:
     system, _ = configured()
     old = complete_saved(system)

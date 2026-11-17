@@ -29,7 +29,6 @@ from pyracast.forecasts.history import select_actual_snapshot
 from pyracast.forecasts.models import CollectionJob, ForecastSnapshot, HistoricalReferenceImport
 from pyracast.irradiance import local_day_bounds
 from pyracast.irradiance.pairs import load_power
-from pyracast.plants.models import Plant
 from pyracast.plants.operations import create_plant
 from pyracast.regions.models import AuditEvent, Region
 from tests.test_domain import NOW, System, make_system
@@ -501,7 +500,6 @@ def test_calibration_is_prepared_once_after_whole_archive_commits(
     plant = create_plant(
         system.member, system.tenant.pk, system.region.pk, name="Plant", dc_capacity_mw=1
     )
-    Plant.objects.create(region=system.region, name="Unconfigured", deleted_at=NOW)
     path = power_file(tmp_path)
     observed: list[int] = []
 

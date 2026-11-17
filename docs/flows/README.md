@@ -100,8 +100,8 @@ sections and a row here.
 | --- | --- |
 | [plant-configuration-revision](plant-configuration-revision.md) | Edit a plant's name and technical configuration |
 | [location-change](location-change.md) | Request a site location change and review it |
-| [plant-trash-and-restore](plant-trash-and-restore.md) | Move a site or plant to the recycle bin and restore it |
-| [trash-retention-purge](trash-retention-purge.md) | Purge trashed sites and plants after 30 days |
+| [plant-trash-and-restore](plant-trash-and-restore.md) | Move a site to the recycle bin and restore it |
+| [trash-retention-purge](trash-retention-purge.md) | Purge trashed sites after 30 days |
 
 ## Platform administration
 

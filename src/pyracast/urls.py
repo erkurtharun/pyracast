@@ -19,7 +19,7 @@ from pyracast.accounts.social_views import (
 from pyracast.admin import site
 from pyracast.api import error_pages
 from pyracast.api.session import SessionLanguageView, SessionView
-from pyracast.api.trash import RestoreRegionView, TrashedPlantsView, TrashedRegionsView
+from pyracast.api.trash import RestoreRegionView, TrashedRegionsView
 from pyracast.api.views import (
     AccountView,
     ApproveView,
@@ -128,7 +128,6 @@ urlpatterns = [
     path("api/tenants/<int:tenant_id>/sites/", SitesView.as_view()),
     path("api/tenants/<int:tenant_id>/sites/<int:region_id>/", SiteView.as_view()),
     path("api/tenants/<int:tenant_id>/trash/regions/", TrashedRegionsView.as_view()),
-    path("api/tenants/<int:tenant_id>/trash/plants/", TrashedPlantsView.as_view()),
     path("api/tenants/<int:tenant_id>/regions/", RegionsView.as_view()),
     path("api/tenants/<int:tenant_id>/regions/<int:region_id>/", RegionView.as_view()),
     path(

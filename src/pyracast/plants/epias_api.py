@@ -100,7 +100,6 @@ class EpiasConnectionView(ScopedView[EpiasConnection]):
             pk=self.kwargs["plant_id"],
             region_id=self.kwargs["region_id"],
             region__tenant_id=self.kwargs["tenant_id"],
-            deleted_at__isnull=True,
             region__deleted_at__isnull=True,
         )
 

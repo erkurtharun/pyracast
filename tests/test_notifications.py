@@ -434,10 +434,13 @@ def test_delivery_failure_and_retry_policy(mode: str, monkeypatch: pytest.Monkey
         assert delivery.attempts == 8
 
 
-def test_interrupted_sending_never_retries_ambiguous_delivery() -> None:
+def test_interrupted_transmission_never_retries_ambiguous_delivery() -> None:
     delivery = ready()
     NotificationDelivery.objects.filter(pk=delivery.pk).update(
-        status="sending", lease_expires_at=SLOT + LEASE_DURATION
+        status="sending",
+        prepared_message={"kind": "unavailable"},
+        transmit_started_at=SLOT,
+        lease_expires_at=SLOT + LEASE_DURATION,
     )
     assert not process_notification(delivery.pk, SLOT)
     assert not pending_notification_ids(SLOT)
@@ -981,7 +984,6 @@ def test_multiple_recipients_share_one_private_message_and_delivery_outcome(outc
     assert process_notification(delivery_id, SLOT, sender=sender) is (outcome == "sent")
     delivery = NotificationDelivery.objects.get(pk=delivery_id)
     assert delivery.recipients == addresses
-    assert delivery.grouped
     assert delivery.status == outcome
     assert pending_notification_ids(delivery.available_at) == (
         [delivery_id] if outcome == "retry" else []
@@ -1060,7 +1062,6 @@ def test_multiple_recipient_concurrent_dispatch_pins_one_grouped_delivery() -> N
     assert first == second
     assert len(first) == NotificationDelivery.objects.count() == 1
     delivery = NotificationDelivery.objects.get()
-    assert delivery.grouped
     assert delivery.recipients == ["a@example.com", "b@example.com"]
 
 
@@ -1121,9 +1122,7 @@ def test_new_administrator_replaces_one_shared_recipient_list_within_the_cap() -
     assert payload["recipients"] == ["PERSON0@example.com"]
     assert payload["language"] == "tr"
     assert "person1@example.com" not in str(payload)
-    assert (
-        ReminderSchedule.objects.filter(region=system.region, retired_at__isnull=True).count() == 1
-    )
+    assert ReminderSchedule.objects.filter(region=system.region).count() == 1
     with pytest.raises(PermissionDenied):
         configure_reminders(
             system.member,
@@ -1260,20 +1259,10 @@ def test_configurer_inactivity_or_departure_keeps_the_shared_recipient_list(chan
     assert reminder_schedule_payload(schedule, NOW)["recipients"] == ["external@example.com"]
 
 
-def test_email_changes_and_retired_lists_do_not_expand_current_recipient_cap() -> None:
+def test_email_changes_do_not_expand_current_recipient_cap() -> None:
     system, current = configured()
     other = User.objects.create(username="other", email="default@example.com")
     Membership.objects.create(user=other, tenant=system.tenant)
-    ReminderSchedule.objects.create(
-        configured_by=other,
-        region=system.region,
-        enabled=False,
-        recipients=["historical@example.com"],
-        times=["10:00"],
-        language="en",
-        effective_from=NOW,
-        retired_at=NOW,
-    )
     NotificationSettings.objects.filter(pk=1).update(max_recipients=1)
     saved(system)
     ids = enqueue_due(SLOT)

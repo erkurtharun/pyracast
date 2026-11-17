@@ -170,8 +170,6 @@ def test_invalid_recipient_health_count_only_includes_current_approved_schedules
     ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=True)
     ReminderSchedule.objects.filter(pk=schedule.pk).update(recipients=[None])
     assert invalid_reminder_recipient_count() == 1
-    ReminderSchedule.objects.filter(pk=schedule.pk).update(retired_at=NOW)
-    assert invalid_reminder_recipient_count() == 0
 
 
 def test_a_terminated_connection_is_recovered_before_processing_another_tenant(

@@ -432,7 +432,7 @@ def import_historical_upload(
         if expected_configuration_ids is not None:
             configurations = tuple(
                 Plant.objects.select_for_update()
-                .filter(region=region, deleted_at__isnull=True)
+                .filter(region=region)
                 .order_by("pk")
                 .values_list("pk", "current_configuration_id")
             )

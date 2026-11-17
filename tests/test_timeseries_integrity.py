@@ -112,7 +112,10 @@ def test_configuration_owner_keys_protect_parent_updates(
         transaction.atomic(),
     ):
         if parent == "plant":
-            Plant.objects.filter(pk=first.plant_id).update(region=second.region, deleted_at=NOW)
+            empty = Region.objects.create(
+                tenant=second.region.tenant, name="Empty", latitude=42, longitude=31, timezone="UTC"
+            )
+            Plant.objects.filter(pk=first.plant_id).update(region=empty)
         else:
             SiteBinding.objects.filter(pk=first.binding_id).update(region=second.region)
 
@@ -358,8 +361,8 @@ def test_authorized_retention_purge_removes_epias_archive_explicitly(
         readings=[],
         content_sha256="a" * 64,
     )
-    Plant.objects.filter(pk=first.plant_id).update(deleted_at=NOW)
-    assert purge_expired(NOW + RETENTION) == {"regions": 0, "plants": 1}
+    Region.objects.filter(pk=first.region_id).update(deleted_at=NOW)
+    assert purge_expired(NOW + RETENTION) == {"regions": 1, "plants": 1}
     assert not EpiasSnapshot.objects.exists()
     assert not EpiasCollectionJob.objects.exists()
     assert not EpiasConnection.objects.exists()

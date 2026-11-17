@@ -4,6 +4,7 @@ from typing import Any
 import pytest
 from django.db import IntegrityError, transaction
 
+from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import CollectionJob
 from pyracast.plants.models import (
     CalibrationRun,
@@ -11,6 +12,7 @@ from pyracast.plants.models import (
     PlantConfiguration,
     ProductionObservation,
 )
+from pyracast.regions.operations import submit_region
 from tests.test_domain import NOW, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -19,7 +21,19 @@ pytestmark = pytest.mark.django_db(transaction=True)
 def test_observation_overlap_is_scoped_to_plant_and_not_configuration() -> None:
     system = make_system()
     plant = Plant.objects.create(region=system.region, name="One")
-    other = Plant.objects.create(region=system.region, name="Two", deleted_at=NOW)
+    other_region = submit_region(
+        system.member,
+        system.tenant.pk,
+        name="Other",
+        latitude=41,
+        longitude=29,
+        timezone="Europe/Istanbul",
+    )
+    other_binding = SiteBinding.objects.get(pk=system.binding.pk)
+    other_binding.pk = None
+    other_binding.region = other_region
+    other_binding.save()
+    other = Plant.objects.create(region=other_region, name="Two")
     config = PlantConfiguration.objects.create(
         region_id=plant.region_id,
         plant=plant,
@@ -39,7 +53,7 @@ def test_observation_overlap_is_scoped_to_plant_and_not_configuration() -> None:
     other_config = PlantConfiguration.objects.create(
         region_id=other.region_id,
         plant=other,
-        binding=system.binding,
+        binding=other_binding,
         revision=1,
         dc_capacity_mw=1,
         created_by=system.member,

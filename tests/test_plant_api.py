@@ -12,6 +12,7 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from pyracast.accounts.models import Membership, Tenant
+from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.models import CollectionJob, ForecastSnapshot
 from pyracast.plants.models import (
@@ -22,6 +23,7 @@ from pyracast.plants.models import (
 )
 from pyracast.plants.numerics import POLICY_VERSION
 from pyracast.plants.serializers import AwareDateTime, FiniteFloat
+from pyracast.regions.models import Region
 from tests.test_domain import make_system
 from tests.test_plant_operations import publish_snapshot, saved_actuals
 
@@ -177,13 +179,22 @@ def test_tenant_scope_observation_import_and_validation() -> None:
         == 400
     )
     current = PlantConfiguration.objects.get(pk=config)
-    other_plant = Plant.objects.create(
-        region_id=plant["region_id"], name="Other PV", deleted_at=timezone.now()
+    other_region = Region.objects.create(
+        tenant_id=current.binding.region.tenant_id,
+        name="Other location",
+        latitude=41,
+        longitude=30,
+        timezone="UTC",
     )
+    other_binding = SiteBinding.objects.get(pk=current.binding_id)
+    other_binding.pk = None
+    other_binding.region = other_region
+    other_binding.save()
+    other_plant = Plant.objects.create(region=other_region, name="Other PV")
     foreign_config = PlantConfiguration.objects.create(
         region_id=other_plant.region_id,
         plant=other_plant,
-        binding=current.binding,
+        binding=other_binding,
         revision=1,
         dc_capacity_mw=2,
         created_by=current.created_by,

@@ -49,7 +49,7 @@ def plant_outlook(
     with read_snapshot():
         require_member(actor, tenant_id)
         region = Region.objects.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
-        plant = Plant.objects.get(pk=plant_id, region=region, deleted_at__isnull=True)
+        plant = Plant.objects.get(pk=plant_id, region=region)
         plant.region = region
         result = _plant_outlook(
             actor,

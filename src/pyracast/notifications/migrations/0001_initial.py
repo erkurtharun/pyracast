@@ -75,7 +75,6 @@ class Migration(migrations.Migration):
                         choices=[("en", "English"), ("tr", "Türkçe")], default="en", max_length=2
                     ),
                 ),
-                ("retired_at", models.DateTimeField(null=True)),
                 (
                     "configured_by",
                     models.ForeignKey(
@@ -109,7 +108,6 @@ class Migration(migrations.Migration):
                 ("lease_expires_at", models.DateTimeField(null=True)),
                 ("recipients", models.JSONField(default=list)),
                 ("recipient_memberships", models.JSONField(default=dict)),
-                ("grouped", models.BooleanField(default=True)),
                 ("revoked_recipients", models.JSONField(default=list)),
                 (
                     "language",
@@ -150,9 +148,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="reminderschedule",
             constraint=models.UniqueConstraint(
-                condition=models.Q(("retired_at__isnull", True)),
-                fields=("region",),
-                name="one_current_region_reminder_schedule",
+                fields=("region",), name="one_reminder_schedule_per_region"
             ),
         ),
         migrations.AddConstraint(
@@ -173,9 +169,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="notificationdelivery",
             constraint=models.UniqueConstraint(
-                condition=models.Q(("grouped", True)),
-                fields=("schedule", "scheduled_for"),
-                name="unique_reminder_group_slot",
+                fields=("schedule", "scheduled_for"), name="unique_reminder_group_slot"
             ),
         ),
         migrations.AddConstraint(
@@ -199,12 +193,22 @@ class Migration(migrations.Migration):
                             "failed",
                             "uncertain",
                             "skipped",
-                            "unavailable",
                             "cancelled",
                         ),
                     )
                 ),
                 name="notification_delivery_status_valid",
+            ),
+        ),
+        migrations.AddConstraint(
+            model_name="notificationdelivery",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    models.Q(("status", "sending"), _negated=True),
+                    ("prepared_message__isnull", False),
+                    _connector="OR",
+                ),
+                name="notification_delivery_sending_prepared",
             ),
         ),
     ]

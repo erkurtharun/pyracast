@@ -238,7 +238,6 @@
             "location_already_exists": "Bu konum şirketinizin portföyünde zaten var. Mevcut santrali açın.",
             "calculation_out_of_range": "Bu tahmin hesaplanamadı. Başka bir gün seçin veya yöneticinizle iletişime geçin.",
             "trash_retention_expired": "30 günlük geri yükleme süresi doldu.",
-            "parent_region_trashed": "Santrali geri yüklemeden önce konumunu geri yükleyin.",
             "date_out_of_range": "Kullanılabilir tahmin aralığında bir tarih seçin.",
             "completed_day_required": "Geçmiş tahminleri için tamamlanmış bir yerel gün seçin.",
             "not_found": "Bu kayıt kullanılamıyor. Santral listesine dönüp tekrar deneyin.",

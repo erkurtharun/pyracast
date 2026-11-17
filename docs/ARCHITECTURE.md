@@ -473,7 +473,7 @@ in text fields.
 
 Provide authenticated region submission/list/detail, platform-admin connection validation and approve/reject/suspend actions, and dated forecast retrieval. Generate OpenAPI; use explicit units, bounded date ranges, pagination and stable error codes. Approval transitions are operations, not writable status fields.
 
-Workspace administrators can move their region or plant definitions to a tenant-scoped recycle bin. Keep data for 30 elapsed days from the first deletion; repeated deletion never extends the deadline. Normal reads and writes hide deleted definitions, and region deletion also hides its children and stops collection, calibration and reminders. Restoring a region preserves approval and configuration, resumes future schedules without catch-up, and leaves independently deleted plants in the bin. A plant can only be restored under an active region. Already submitted email cannot be recalled.
+Workspace administrators can move a region, with its one plant, to a tenant-scoped recycle bin; a plant is never deleted on its own. Keep data for 30 elapsed days from the first deletion; repeated deletion never extends the deadline. Normal reads and writes hide deleted regions and their children, and deletion stops collection, calibration and reminders. Restoring a region preserves approval and configuration and resumes future schedules without catch-up. Already submitted email cannot be recalled.
 
 The dispatcher permanently purges expired definitions and their owned records in bounded transactional batches. Restore is unavailable at the deadline even if a purge batch is pending. Retain shared provider accounts and account request-attempt counters without deleted region/job links, so deletion cannot reset quota. Preserve historical data during the recovery period; deleting a definition is separate from replacing a forecast vintage.
 
@@ -614,8 +614,7 @@ editable through the MFA-protected admin's **Email reminder settings**. Lowering
 preserves the schedule but pauses deliveries until its list fits; each paused time is
 recorded as a skipped delivery with its reason. Membership growth
 above the limit also pauses delivery without truncating the group; reducing an excess
-or disabling the schedule remains possible. Retired schedules preserve delivery
-history but cannot send or consume the current schedule's recipient allowance.
+or disabling the schedule remains possible.
 
 The current provider plan's daily request limit also caps daily reminder times; this is a product limit, not a quota reservation. Emails make **zero provider requests** and do not consume the request ledger. A reduced plan limit retains only the earliest configured times within the current limit.
 

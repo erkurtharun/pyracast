@@ -39,7 +39,6 @@ class Plant(models.Model):
         "PlantConfiguration", null=True, on_delete=models.PROTECT, related_name="+"
     )
     created_at = models.DateTimeField(auto_now_add=True)
-    deleted_at = models.DateTimeField(null=True, db_index=True)
     automatic_calibration_enabled = models.BooleanField(default=False)
     automatic_calibration_enabled_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT, related_name="+"
@@ -49,11 +48,7 @@ class Plant(models.Model):
     class Meta:
         constraints = (
             models.UniqueConstraint(fields=("id", "region"), name="plant_region_identity"),
-            models.UniqueConstraint(
-                fields=("region",),
-                condition=Q(deleted_at__isnull=True),
-                name="one_active_plant_per_region",
-            ),
+            models.UniqueConstraint(fields=("region",), name="one_plant_per_region"),
         )
 
 

@@ -149,6 +149,7 @@ def test_incomplete_and_interrupted_deliveries_remain_visible_to_monitoring() ->
         available_at=NOW,
         status="sending",
         recipients=["recipient@example.test"],
+        prepared_message={"kind": "current", "tomorrow_complete": True},
         lease_expires_at=None,
     )
     assert delivery_health(NOW, timedelta(minutes=5))["interrupted_notifications"] == 1
@@ -287,8 +288,7 @@ def test_interrupted_metering_is_unhealthy_even_with_recent_forecasts_and_health
     assert delivery_health(NOW, timedelta(minutes=5))["healthy"] is True
     job.lease_expires_at = None
     job.save(update_fields=("lease_expires_at",))
-    plant.deleted_at = NOW
-    plant.save(update_fields=("deleted_at",))
+    Region.objects.filter(pk=plant.region_id).update(deleted_at=NOW)
     assert delivery_health(NOW, timedelta(minutes=5))["interrupted_metering"] == 0
 
 

@@ -36,7 +36,7 @@ from pyracast.plants.operations import (
 )
 from pyracast.plants.training import run_calibration
 from pyracast.regions.models import Region
-from pyracast.trash import purge_expired, trash_plant, trash_region
+from pyracast.trash import purge_expired, trash_region
 from tests.test_domain import NOW, System
 from tests.test_plant_operations import make_plant, ready_run
 from tests.test_plant_training import actual_snapshot_for
@@ -609,9 +609,7 @@ def test_concurrent_daily_dispatchers_advance_the_due_slot_once(
     assert plant.next_calibration_check_at > NOW + timedelta(days=1)
 
 
-@pytest.mark.parametrize(
-    "mutation", ["disable", "trash_plant", "trash_region", "purge_plant", "purge_region"]
-)
+@pytest.mark.parametrize("mutation", ["disable", "trash_region", "purge_region"])
 def test_due_scan_rechecks_a_concurrent_disable_or_definition_removal(
     monkeypatch: pytest.MonkeyPatch, mutation: str
 ) -> None:
@@ -642,8 +640,6 @@ def test_due_scan_rechecks_a_concurrent_disable_or_definition_removal(
             assert before_lock.wait(timeout=10)
             if mutation == "disable":
                 set_calibration_automation(*scope, enabled=False)
-            elif mutation in {"trash_plant", "purge_plant"}:
-                trash_plant(*scope)
             else:
                 trash_region(system.member, system.tenant.pk, system.region.pk)
             if mutation.startswith("purge"):

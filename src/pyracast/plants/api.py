@@ -8,7 +8,6 @@ from rest_framework.generics import GenericAPIView
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from pyracast import trash
 from pyracast.accounts.operations import require_member
 from pyracast.plants import operations
 from pyracast.plants.automation import automation_status, set_calibration_automation
@@ -61,7 +60,7 @@ class ScopedView[ModelT: Model](GenericAPIView[ModelT]):
             Region, pk=self.kwargs["region_id"], tenant_id=tenant_id, deleted_at__isnull=True
         )
         return (
-            Plant.objects.filter(region=region, deleted_at__isnull=True)
+            Plant.objects.filter(region=region)
             .select_related("current_configuration", "submission")
             .order_by("id")
         )
@@ -118,16 +117,6 @@ class PlantView(ScopedView[Plant]):
         data.is_valid(raise_exception=True)
         plant = operations.revise_plant(*scope, **data.validated_data)
         return Response(PlantOutput(plant).data)
-
-    @extend_schema(responses={204: None})
-    def delete(self, request: Request, **kwargs: Any) -> Response:
-        trash.trash_plant(
-            cast(User, request.user),
-            kwargs["tenant_id"],
-            kwargs["region_id"],
-            kwargs["plant_id"],
-        )
-        return Response(status=204)
 
 
 class ObservationsView(ScopedView[ProductionObservation]):

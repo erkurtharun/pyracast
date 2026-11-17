@@ -16,9 +16,7 @@ from pyracast.regions.models import Region
 
 
 def member_plant(plant_id: int, actor: User) -> Plant:
-    plant = Plant.objects.select_related("region").get(
-        pk=plant_id, deleted_at__isnull=True, region__deleted_at__isnull=True
-    )
+    plant = Plant.objects.select_related("region").get(pk=plant_id, region__deleted_at__isnull=True)
     require_member(actor, plant.region.tenant_id)
     return plant
 
@@ -32,9 +30,7 @@ def connect_epias(
     client: EpiasClient | None = None,
 ) -> EpiasConnection:
     require_admin(actor)
-    plant = Plant.objects.select_related("region").get(
-        pk=plant_id, deleted_at__isnull=True, region__deleted_at__isnull=True
-    )
+    plant = Plant.objects.select_related("region").get(pk=plant_id, region__deleted_at__isnull=True)
     if isinstance(provider_plant_id, bool) or provider_plant_id <= 0 or not expected_eic.strip():
         raise ValidationError("invalid_epias_plant")
     if plant.current_configuration is None or not configuration_is_current(
@@ -52,8 +48,7 @@ def connect_epias(
         plant = Plant.objects.select_for_update().get(pk=plant.pk)
         require_admin(User.objects.select_for_update().get(pk=actor.pk))
         if (
-            plant.deleted_at is not None
-            or plant.region.deleted_at is not None
+            plant.region.deleted_at is not None
             or plant.current_configuration is None
             or not configuration_is_current(plant.current_configuration)
         ):
@@ -92,9 +87,7 @@ def connect_epias(
 
 def disconnect_epias(plant_id: int, *, actor: User) -> None:
     require_admin(actor)
-    plant = Plant.objects.select_related("region").get(
-        pk=plant_id, deleted_at__isnull=True, region__deleted_at__isnull=True
-    )
+    plant = Plant.objects.select_related("region").get(pk=plant_id, region__deleted_at__isnull=True)
     with transaction.atomic():
         Region.objects.select_for_update().get(pk=plant.region_id)
         Plant.objects.select_for_update().get(pk=plant.pk)

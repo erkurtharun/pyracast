@@ -135,7 +135,6 @@ class Migration(migrations.Migration):
                 ),
                 ("name", models.CharField(max_length=200)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
-                ("deleted_at", models.DateTimeField(db_index=True, null=True)),
                 ("automatic_calibration_enabled", models.BooleanField(default=False)),
                 ("next_calibration_check_at", models.DateTimeField(db_index=True, null=True)),
                 (
@@ -545,11 +544,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name="plant",
-            constraint=models.UniqueConstraint(
-                condition=models.Q(("deleted_at__isnull", True)),
-                fields=("region",),
-                name="one_active_plant_per_region",
-            ),
+            constraint=models.UniqueConstraint(fields=("region",), name="one_plant_per_region"),
         ),
         migrations.AddIndex(
             model_name="forecastissuance",

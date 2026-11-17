@@ -84,35 +84,27 @@ def test_database_failure_during_preparation_remains_durable_unsent_work(
     assert delivery.prepared_message is None
 
 
-def test_renderer_failure_preserves_an_already_frozen_sibling(
+def test_render_failure_on_retry_keeps_the_prepared_forecast_vintage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     delivery = ready()
-    sibling = NotificationDelivery.objects.create(
-        schedule=delivery.schedule,
-        binding=delivery.binding,
-        recipients=["frozen@example.com"],
-        grouped=False,
-        scheduled_for=delivery.scheduled_for,
-        available_at=delivery.available_at,
-        preparation_deadline=delivery.preparation_deadline,
-    )
-    assert prepare_delivery(sibling, SLOT)
-    sibling.refresh_from_db()
-    prepared, snapshot_id = sibling.prepared_message, sibling.snapshot_id
-    assert prepared is not None
-    assert snapshot_id is not None
+    assert prepare_delivery(delivery, SLOT)
+    delivery.save()
+    prepared = delivery.prepared_message
+    assert isinstance(prepared, dict)
+    assert delivery.snapshot_id is not None
 
     def broken(*args: object, **kwargs: object) -> EmailMultiAlternatives:
         raise RuntimeError("Rendering became unavailable after the slot was prepared.")
 
     monkeypatch.setattr(jobs, "build_message", broken)
     assert jobs.process_notification(delivery.pk, SLOT)
-    sibling.refresh_from_db()
-    assert sibling.prepared_message == prepared
-    assert sibling.snapshot_id == snapshot_id
-    assert sibling.status == "pending"
-    assert sibling.attempts == 0
+    stored = NotificationDelivery.objects.get(pk=delivery.pk)
+    assert stored.status == "sent"
+    assert stored.snapshot_id == delivery.snapshot_id
+    assert isinstance(stored.prepared_message, dict)
+    assert stored.prepared_message["format"] == "plain"
+    assert stored.prepared_message["prepared_at"] == prepared["prepared_at"]
 
 
 def test_forecast_published_during_claim_lock_wait_is_available_to_preparation(

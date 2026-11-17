@@ -1057,9 +1057,6 @@ msgstr "Çözünürlük 30 veya 60 dakika olmalıdır."
 msgid "Resource ID"
 msgstr "Kaynak kimliği"
 
-msgid "Restore this plant's location before restoring the plant."
-msgstr "Santrali geri yüklemeden önce konumunu geri yükleyin."
-
 msgid "Retention"
 msgstr "Saklama"
 

@@ -49,9 +49,9 @@ sequenceDiagram
 | Table | R/W | What |
 | --- | --- | --- |
 | `forecasts_dispatcherstatus` | R (W by dispatcher) | One row per phase: attempted, succeeded, last error code; `duration_ms` and `published` are written but not read |
-| `forecasts_collectionjob`, `metering_epiascollectionjob` | R | Waiting, running or last-24h failed jobs of non-deleted regions (collection) or plants (EPIAS) |
+| `forecasts_collectionjob`, `metering_epiascollectionjob` | R | Waiting, running or last-24h failed jobs of non-deleted regions |
 | `notifications_notificationdelivery` | R | Waiting, sending or last-24h deliveries, including prepared message kind |
-| `notifications_reminderschedule`, `accounts_membership`, `account_emailaddress`, `auth_user` | R | Enabled current schedules of approved regions; recipients resolved and validated in Python, membership and address reads per schedule when needed |
+| `notifications_reminderschedule`, `accounts_membership`, `account_emailaddress`, `auth_user` | R | Enabled schedules of approved regions; recipients resolved and validated in Python, membership and address reads per schedule when needed |
 | `connections_provideraccount` | R | Cooldown and authentication-failed revision of enabled accounts used by approved regions |
 | `regions_region`, `connections_sitebinding`, `forecasts_collectionschedule` | R | Approved regions on enabled accounts, validated credential revision, collection switch |
 | `forecasts_forecastsnapshot`, `forecasts_forecastresult` | R | Newest succeeded (job status) published forecast per binding |
@@ -78,7 +78,7 @@ sequenceDiagram
 
 - Unhealthy phase: no row, `succeeded_at` null or older than `now - lag`, or non-empty `last_error`. A failed run keeps the earlier `succeeded_at`; a failed status write leaves the row to go stale.
 - Waiting work is `pending` or `retry` with `available_at` (EPIAS: `next_attempt_at`) older than the lag. Interrupted is `running` or `sending` with an expired or null lease. `awaiting_publication` EPIAS jobs count as neither.
-- Failed, uncertain and unavailable outcomes and delivery-shaped counters look back 24 hours by scheduled time. A later success does not clear them.
+- Failed and uncertain outcomes and delivery-shaped counters look back 24 hours by scheduled time. A later success does not clear them.
 - Cooldowns, credential blocks and unvalidated credentials make the CLI unhealthy even though the console classes cooldowns as "delay" and failed or missed outcomes as "review". Only `saved_forecast_notifications` and `paused_notifications` (last-24h `skipped` deliveries with `recipient_limit_exceeded`, `no_recipients` or `invalid_recipient`) are informational and never affect `healthy`, so a customer's own over-limit or empty recipient list does not page the operator; the console still lists paused deliveries as "review". A stored invalid address also keeps raising `invalid_reminder_recipients`, which does affect `healthy`.
 - A region is stale when it is approved, on an enabled account, not switched off by its schedule, and its newest succeeded published forecast is missing or older than 26 hours. Collection and email rows of soft-deleted regions and EPIAS rows of soft-deleted plants are excluded.
 - `admin_health_queries` repeats the predicates of `delivery_health`; parity is test-pinned, not shared in code. Cooldown and blocked-credential counters count provider accounts while their links list every affected region. Calibration runs are not monitored; the calibration phase only proves the dispatch step ran.

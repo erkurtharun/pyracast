@@ -14,7 +14,7 @@ from pyracast.incidents.models import IncidentRevision, PlantIncident
 from pyracast.incidents.operations import pinned_incidents, save_incident, select_incidents
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import create_plant, revise_plant
-from pyracast.trash import RETENTION, purge_expired, restore_plant, trash_plant
+from pyracast.trash import RETENTION, purge_expired, restore_region, trash_region
 from tests.test_domain import make_system
 from tests.test_trash_operations import sibling
 
@@ -311,12 +311,12 @@ def test_incident_history_survives_restore_and_is_purged_with_plant() -> None:
     revision_ids = list(
         IncidentRevision.objects.filter(incident=incident).values_list("pk", flat=True)
     )
-    trash_plant(*parent, plant.pk)
-    restore_plant(*parent, plant.pk)
+    trash_region(*parent)
+    restore_region(*parent)
     assert len(pinned_incidents(plant.pk, revision_ids)) == 2
-    trash_plant(*parent, plant.pk)
+    trash_region(*parent)
     assert purge_expired(timezone.now() + RETENTION + timedelta(seconds=1)) == {
-        "regions": 0,
+        "regions": 1,
         "plants": 1,
     }
     assert not Plant.objects.filter(pk=plant.pk).exists()

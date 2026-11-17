@@ -229,7 +229,6 @@ class PlatformAdminSite(admin.AdminSite):
                 "administrator_form": form,
                 "has_automatic_calibration": Plant.objects.filter(
                     region__tenant=tenant,
-                    deleted_at__isnull=True,
                     automatic_calibration_enabled=True,
                 ).exists(),
             },
@@ -388,7 +387,7 @@ class RegionAdmin(ReadOnlyAdmin):
             .order_by("-created_at", "-pk")
             .first()
         )
-        plants = Plant.objects.filter(region=region, deleted_at__isnull=True).select_related(
+        plants = Plant.objects.filter(region=region).select_related(
             "current_configuration__binding__region"
         )
         plant = plants.first()

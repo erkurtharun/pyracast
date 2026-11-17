@@ -238,7 +238,6 @@
             "location_already_exists": "This location is already in your company's portfolio. Open the existing plant.",
             "calculation_out_of_range": "This forecast could not be calculated. Choose another day or contact your administrator.",
             "trash_retention_expired": "The 30-day restore period has ended.",
-            "parent_region_trashed": "Restore this plant's location before restoring the plant.",
             "date_out_of_range": "Choose a date within the available forecast range.",
             "completed_day_required": "Choose a completed local day for historical estimates.",
             "not_found": "This item is unavailable. Return to the plant list and try again.",

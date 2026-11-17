@@ -289,7 +289,6 @@ function ReminderSettings({
         uncertain: t("acceptanceUnconfirmed"),
         skipped: t("skipped"),
         cancelled: t("cancelled"),
-        unavailable: t("forecastUnavailable"),
     };
     const forecastLabels: Record<string, string> = {
         current: t("newForecast"),

@@ -53,8 +53,6 @@ def test_workspace_write_permission_rejects_anonymous_callers() -> None:
         ("put", "regions/{region}/reminders/"),
         ("post", "regions/{region}/plants/"),
         ("put", "regions/{region}/plants/{plant}/"),
-        ("delete", "regions/{region}/plants/{plant}/"),
-        ("post", "regions/{region}/plants/{plant}/restore/"),
         ("post", "regions/{region}/plants/{plant}/observations/"),
         ("post", "regions/{region}/plants/{plant}/calibrations/"),
         ("post", "regions/{region}/plants/{plant}/calibrations/1/activate/"),
@@ -87,9 +85,7 @@ def test_viewer_cannot_mutate_any_workspace_endpoint(method: str, suffix: str) -
     assert response.status_code == 403, response.content
     assert (Region.objects.count(), Plant.objects.count(), AuditEvent.objects.count()) == before
     system.region.refresh_from_db()
-    plant.refresh_from_db()
     assert system.region.deleted_at is None
-    assert plant.deleted_at is None
     assert not CollectionSchedule.objects.exists()
     assert not ReminderSchedule.objects.exists()
 
@@ -161,8 +157,6 @@ def mutation_calls(system: System, actor: User, plant: Plant) -> list[Callable[[
         ),
         lambda: trash.trash_region(actor, tenant_id, region_id),
         lambda: trash.restore_region(actor, tenant_id, region_id),
-        lambda: trash.trash_plant(actor, tenant_id, region_id, plant_id),
-        lambda: trash.restore_plant(actor, tenant_id, region_id, plant_id),
     ]
 
 
@@ -205,7 +199,6 @@ def test_viewer_reads_shared_records_and_changes_own_language() -> None:
         "regions/",
         f"regions/{system.region.pk}/",
         "trash/regions/",
-        "trash/plants/",
     ):
         assert client.get(base + suffix).status_code == 200
     response = client.post(

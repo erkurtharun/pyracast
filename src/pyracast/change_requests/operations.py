@@ -239,7 +239,6 @@ def visible_requests(actor: User, tenant_id: int) -> QuerySet[ChangeRequest]:
         plant__region__tenant_id=tenant_id,
         plant__region__tenant__membership__pk=membership.pk,
         plant__region__tenant__membership__user__is_active=True,
-        plant__deleted_at__isnull=True,
         plant__region__deleted_at__isnull=True,
     )
 

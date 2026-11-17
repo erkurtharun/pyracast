@@ -14,6 +14,7 @@ from pyracast.metering import operations
 from pyracast.metering.jobs import run_epias_job
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
 from pyracast.plants.models import Plant, ProductionObservation
+from pyracast.regions.models import Region
 from tests.test_api import verified_admin
 from tests.test_epias import PASSWORD, PLANT, USERNAME
 from tests.test_plant_api import setup_plant
@@ -175,8 +176,7 @@ def test_epias_api_scopes_every_action_before_provider_access(
             == 403
         )
     plant = Plant.objects.get(pk=plant_data["id"])
-    plant.deleted_at = timezone.now()
-    plant.save(update_fields=("deleted_at",))
+    Region.objects.filter(pk=plant.region_id).update(deleted_at=timezone.now())
     assert client.get(detail + "production-source/").status_code == 404
     assert client.get(detail + "reported-production/").status_code == 404
     assert admin.delete(detail + "production-source/").status_code == 404

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 from django.contrib.auth.models import User
@@ -74,9 +74,7 @@ def test_transfer_preserves_one_shared_schedule_and_its_deliveries(
     response = new_client.put(url, values, content_type="application/json")
     assert response.status_code == 200, response.content
     schedule.refresh_from_db()
-    assert (
-        ReminderSchedule.objects.filter(region=system.region, retired_at__isnull=True).count() == 1
-    )
+    assert ReminderSchedule.objects.filter(region=system.region).count() == 1
     assert schedule.configured_by_id == replacement.pk
     assert schedule.recipients == ["new@example.com"]
     assert schedule.times == ["11:00"]
@@ -187,121 +185,3 @@ def test_reminder_language_is_explicit_and_empty_recipients_resolve_once() -> No
         content_type="application/json",
     )
     assert response.status_code == 400
-
-
-def test_shared_read_includes_retired_schedule_delivery_history() -> None:
-    system = make_system()
-    current = configure_reminders(
-        system.member,
-        system.tenant.pk,
-        system.region.pk,
-        enabled=False,
-        recipients=["current@example.com"],
-        times=[],
-        language="en",
-        now=NOW,
-    )
-    retired = ReminderSchedule.objects.create(
-        region=system.region,
-        enabled=False,
-        recipients=["historical@example.com"],
-        times=["10:00"],
-        language="tr",
-        effective_from=NOW - timedelta(days=2),
-        retired_at=NOW,
-    )
-    delivery = NotificationDelivery.objects.create(
-        schedule=retired,
-        recipients=["historical@example.com"],
-        scheduled_for=NOW - timedelta(days=1),
-        available_at=NOW - timedelta(days=1),
-        status="sent",
-        sent_at=NOW - timedelta(days=1),
-        language="tr",
-    )
-    viewer = User.objects.create_user(username="history-viewer")
-    Membership.objects.create(user=viewer, tenant=system.tenant)
-    assert get_reminder_schedule(viewer, system.tenant.pk, system.region.pk, NOW).pk == current.pk
-    client = Client()
-    client.force_login(viewer)
-    response = client.get(f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/reminders/")
-    assert response.status_code == 200
-    assert response.json()["recipients"] == ["current@example.com"]
-    assert response.json()["language"] == "en"
-    assert response.json()["deliveries"][0]["id"] == delivery.pk
-    assert response.json()["deliveries"][0]["recipients"] == ["historical@example.com"]
-
-
-@pytest.mark.parametrize("render_failure", [False, True])
-def test_current_slot_preparation_never_reads_or_updates_retired_delivery_content(
-    monkeypatch: pytest.MonkeyPatch,
-    render_failure: bool,
-) -> None:
-    monkeypatch.setattr(timezone, "now", lambda: NOW)
-    system = make_system(approved=True)
-    configure_reminders(
-        system.member,
-        system.tenant.pk,
-        system.region.pk,
-        enabled=True,
-        recipients=["current@example.com"],
-        times=["10:00"],
-        language="en",
-        now=NOW,
-    )
-    retired = ReminderSchedule.objects.create(
-        region=system.region,
-        enabled=False,
-        recipients=["old@example.com", "pending@example.com"],
-        times=["10:00"],
-        language="en",
-        effective_from=NOW,
-        retired_at=NOW,
-    )
-    original = {
-        "format": "plain",
-        "kind": "unavailable",
-        "prepared_at": (NOW - timedelta(days=50)).isoformat(),
-        "retired_evidence": True,
-    }
-    frozen = NotificationDelivery.objects.create(
-        schedule=retired,
-        binding=system.binding,
-        recipients=["old@example.com"],
-        grouped=False,
-        scheduled_for=SLOT,
-        available_at=SLOT,
-        status="sent",
-        language="en",
-        prepared_message=original,
-    )
-    untouched = NotificationDelivery.objects.create(
-        schedule=retired,
-        binding=system.binding,
-        recipients=["pending@example.com"],
-        grouped=False,
-        scheduled_for=SLOT,
-        available_at=SLOT,
-        status="pending",
-        language="en",
-    )
-    identifiers = enqueue_due(SLOT)
-    assert len(identifiers) == 1
-    if render_failure:
-
-        def broken_preparation(delivery: NotificationDelivery, now: datetime) -> bool:
-            raise RuntimeError("Cannot render the saved forecast.")
-
-        monkeypatch.setattr("pyracast.notifications.jobs.prepare_delivery", broken_preparation)
-    assert process_notification(identifiers[0], SLOT, sender=lambda message: None)
-    current = NotificationDelivery.objects.get(pk=identifiers[0])
-    assert isinstance(current.prepared_message, dict)
-    assert "retired_evidence" not in current.prepared_message
-    assert datetime.fromisoformat(current.prepared_message["prepared_at"]) >= SLOT
-    frozen.refresh_from_db()
-    untouched.refresh_from_db()
-    assert frozen.prepared_message == original
-    assert frozen.language == "en"
-    assert frozen.recipients == ["old@example.com"]
-    assert untouched.prepared_message is None
-    assert untouched.status == "pending"

@@ -275,7 +275,6 @@ def pending_calibration_ids(now: datetime, limit: int = 100) -> list[int]:
             Q(status="pending")
             | Q(status="running", lease_expires_at__lte=now)
             | Q(status="running", lease_expires_at__isnull=True),
-            plant__deleted_at__isnull=True,
             plant__region__deleted_at__isnull=True,
         )
         .order_by("created_at", "pk")

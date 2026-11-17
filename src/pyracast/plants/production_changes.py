@@ -72,7 +72,7 @@ def lock_production_configuration(
         regions = regions.select_for_update()
         plants = plants.select_for_update()
     region = regions.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
-    plant = plants.get(pk=plant_id, region=region, deleted_at__isnull=True)
+    plant = plants.get(pk=plant_id, region=region)
     configuration = PlantConfiguration.objects.select_related("binding").get(
         pk=configuration_id, plant=plant
     )

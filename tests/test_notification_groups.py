@@ -305,37 +305,24 @@ def test_removal_and_group_transmission_serialize_on_workspace_lock() -> None:
     assert sent == [[retained.email]]
 
 
-def test_group_uniqueness_and_legacy_slot_prevent_duplicate_dispatch() -> None:
+def test_one_delivery_per_reminder_slot_prevents_duplicate_dispatch() -> None:
     _, schedule = configured()
     first = NotificationDelivery.objects.create(
         schedule=schedule,
         scheduled_for=SLOT,
         available_at=SLOT,
-        recipients=["legacy@example.com"],
-        grouped=False,
+        recipients=["sent@example.com"],
         status="sent",
     )
-    second = NotificationDelivery.objects.create(
-        schedule=schedule,
-        scheduled_for=SLOT,
-        available_at=SLOT,
-        recipients=["uncertain@example.com"],
-        grouped=False,
-        status="uncertain",
-    )
-    assert enqueue_due(SLOT) == [first.pk, second.pk]
+    assert enqueue_due(SLOT) == [first.pk]
     assert not process_notification(first.pk, SLOT)
-    assert not process_notification(second.pk, SLOT)
-    new_slot = SLOT + timedelta(days=1)
-    ids = enqueue_due(new_slot)
     with pytest.raises(IntegrityError), transaction.atomic():
         NotificationDelivery.objects.create(
             schedule=schedule,
-            scheduled_for=new_slot,
-            available_at=new_slot,
+            scheduled_for=SLOT,
+            available_at=SLOT,
             recipients=["duplicate@example.com"],
         )
-    assert ids[-1] not in {first.pk, second.pk}
 
 
 def test_unverified_alias_cannot_claim_or_remove_an_external_recipient() -> None:

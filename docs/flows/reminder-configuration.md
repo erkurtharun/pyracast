@@ -50,7 +50,7 @@ sequenceDiagram
 
 | Table | R/W | What |
 | --- | --- | --- |
-| `notifications_reminderschedule` | R/W | The one current row per region (`retired_at IS NULL`): created lazily on first PUT, then updated in place, including `configured_by` |
+| `notifications_reminderschedule` | R/W | One row per region (`one_reminder_schedule_per_region`): created lazily on first PUT, then updated in place, including `configured_by` |
 | `notifications_notificationsettings` | R/W | Singleton limit row: `FOR UPDATE` and created if missing on PUT, plain read for every payload |
 | `accounts_tenant`, `accounts_membership` | R | Tenant `FOR UPDATE` in `require_workspace_admin`; role checks, workspace recipients, membership ids for pinning |
 | `auth_user`, `account_emailaddress` | R | Active flag, primary email, verified addresses; actor email re-read after the tenant and settings locks |

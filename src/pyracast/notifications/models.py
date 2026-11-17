@@ -46,15 +46,10 @@ class ReminderSchedule(models.Model):
     language = models.CharField(
         max_length=2, choices=(("en", "English"), ("tr", "Türkçe")), default="en"
     )
-    retired_at = models.DateTimeField(null=True)
 
     class Meta:
         constraints = (
-            models.UniqueConstraint(
-                fields=("region",),
-                condition=models.Q(retired_at__isnull=True),
-                name="one_current_region_reminder_schedule",
-            ),
+            models.UniqueConstraint(fields=("region",), name="one_reminder_schedule_per_region"),
             models.CheckConstraint(
                 condition=models.Q(language__in=("en", "tr")),
                 name="reminder_schedule_language_valid",
@@ -75,7 +70,7 @@ class NotificationDelivery(models.Model):
     lease_expires_at = models.DateTimeField(null=True)
     recipients = models.JSONField(default=list)
     recipient_memberships = models.JSONField(default=dict)
-    grouped = models.BooleanField(default=True)
+
     revoked_recipients = models.JSONField(default=list)
     language = models.CharField(
         max_length=2, choices=(("en", "English"), ("tr", "Türkçe")), default="en"
@@ -91,9 +86,7 @@ class NotificationDelivery(models.Model):
     class Meta:
         constraints = (
             models.UniqueConstraint(
-                fields=("schedule", "scheduled_for"),
-                condition=models.Q(grouped=True),
-                name="unique_reminder_group_slot",
+                fields=("schedule", "scheduled_for"), name="unique_reminder_group_slot"
             ),
             models.CheckConstraint(
                 condition=models.Q(language__in=("en", "tr")),
@@ -109,11 +102,14 @@ class NotificationDelivery(models.Model):
                         "failed",
                         "uncertain",
                         "skipped",
-                        "unavailable",
                         "cancelled",
                     )
                 ),
                 name="notification_delivery_status_valid",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(status="sending") | models.Q(prepared_message__isnull=False),
+                name="notification_delivery_sending_prepared",
             ),
         )
         indexes = (

@@ -35,7 +35,7 @@ def enqueue_due(now: datetime) -> list[int]:
     ids: list[int] = []
     failures = 0
     for schedule in ReminderSchedule.objects.filter(
-        enabled=True, retired_at__isnull=True, region__deleted_at__isnull=True
+        enabled=True, region__deleted_at__isnull=True
     ).select_related("region__approved_binding__provider_account"):
         try:
             ids.extend(_enqueue_schedule(schedule, now))
@@ -71,7 +71,7 @@ def slot_recipients(schedule: ReminderSchedule, limit: int) -> tuple[list[str], 
 def _enqueue_schedule(schedule: ReminderSchedule, now: datetime) -> list[int]:
     ids: list[int] = []
     region, binding = schedule.region, schedule.region.approved_binding
-    if schedule.retired_at is not None or binding is None or not binding_can_notify(binding):
+    if binding is None or not binding_can_notify(binding):
         return []
     zone = ZoneInfo(region.timezone)
     today = now.astimezone(zone).date()
@@ -84,9 +84,7 @@ def _enqueue_schedule(schedule: ReminderSchedule, now: datetime) -> list[int]:
                 Tenant.objects.select_for_update().get(pk=region.tenant_id)
                 limit = recipient_limit(lock=True)
                 locked_region = Region.objects.select_for_update().filter(pk=region.pk).first()
-                current = ReminderSchedule.objects.filter(
-                    pk=schedule.pk, retired_at__isnull=True
-                ).first()
+                current = ReminderSchedule.objects.filter(pk=schedule.pk).first()
                 if (
                     locked_region is None
                     or current is None

@@ -27,7 +27,7 @@ from pyracast.plants.models import (
     PlantConfiguration,
     PlantEvent,
 )
-from pyracast.trash import RETENTION, purge_expired, trash_plant
+from pyracast.trash import RETENTION, purge_expired, trash_region
 from tests.test_domain import NOW
 from tests.test_plant_operations import make_plant, ready_run, snapshot_for
 from tests.test_provisional_measurements import acquisition
@@ -299,7 +299,6 @@ def test_preparation_excludes_missing_or_later_configuration_and_mixed_sources(
     assert len(prepared) == 1
     for absent in (
         None,
-        replace_plant(plant, deleted_at=NOW),
         replace_plant(plant, current_configuration_id=None),
     ):
         save_forecast_issuances(prepared, source, source.collected_at, plant=absent)
@@ -463,13 +462,13 @@ def test_database_requires_matching_calibration_and_pre_acquisition_activation(
     assert issued.calibration_id == run.pk
 
 
-def test_expired_plant_purge_removes_issuance_before_protected_history(
+def test_expired_location_purge_removes_issuance_before_protected_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
     source = snapshot_for(system, DAY)
     freeze(source, plant)
-    trash_plant(system.member, system.tenant.pk, system.region.pk, plant.pk)
-    assert purge_expired(NOW + RETENTION) == {"plants": 1, "regions": 0}
+    trash_region(system.member, system.tenant.pk, system.region.pk)
+    assert purge_expired(NOW + RETENTION) == {"plants": 1, "regions": 1}
     assert not ForecastIssuance.objects.exists()
-    assert ForecastSnapshot.objects.filter(pk=source.pk).exists()
+    assert not ForecastSnapshot.objects.filter(pk=source.pk).exists()

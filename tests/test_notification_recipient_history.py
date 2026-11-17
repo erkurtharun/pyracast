@@ -68,8 +68,7 @@ def test_sent_history_revokes_an_address_that_another_delivery_pinned_as_externa
     assert mail.outbox[0].bcc == ["retained@example.com"]
 
 
-@pytest.mark.parametrize("retired", [False, True])
-def test_later_schedule_alias_evidence_prunes_earlier_external_schedule(retired: bool) -> None:
+def test_later_schedule_alias_evidence_prunes_earlier_external_schedule() -> None:
     system, _ = configured()
     first = group(system, ["OLD@example.com", "retained@example.com"])
     assert first.recipient_memberships == {}
@@ -88,7 +87,6 @@ def test_later_schedule_alias_evidence_prunes_earlier_external_schedule(retired:
         effective_from=NOW,
         recipients=[user.email],
         recipient_memberships={user.email: [membership.pk]},
-        retired_at=NOW if retired else None,
     )
     user.email = "new@example.com"
     user.save(update_fields=["email"])
@@ -99,10 +97,8 @@ def test_later_schedule_alias_evidence_prunes_earlier_external_schedule(retired:
     evidence.refresh_from_db()
     assert first.recipients == ["retained@example.com"]
     assert effective_recipients(first) == ["retained@example.com"]
-    assert evidence.recipients == (["old@example.com"] if retired else [])
-    assert evidence.recipient_memberships == (
-        {"old@example.com": [membership.pk]} if retired else {}
-    )
+    assert evidence.recipients == []
+    assert evidence.recipient_memberships == {}
 
 
 def test_historical_alias_does_not_revoke_a_different_pinned_member() -> None:

@@ -47,7 +47,7 @@ sequenceDiagram
 |---|---|---|
 | accounts_tenant, connections_sitebinding, forecasts_collectionjob, forecasts_forecastresult, forecasts_requestattempt, forecasts_dispatcherstatus, regions_auditevent, regions_region, regions_regionlocationchangerequest | R | Changelist and detail rows, every column; detail pages also load the rows behind displayed foreign keys |
 | plants_plant, plants_plantconfiguration, plants_productionobservation, plants_calibrationrun, plants_calibrationactivation, plants_plantevent | R | Same |
-| notifications_notificationdelivery, notifications_reminderschedule, forecasts_forecastsnapshot | R | Delivery detail limited to the listed `fields` (`lease_token`, `lease_expires_at`, `prepared_message`, `recipient_memberships`, `revoked_recipients`, `grouped`, `language` hidden); schedule and snapshot are joined for search and display |
+| notifications_notificationdelivery, notifications_reminderschedule, forecasts_forecastsnapshot | R | Delivery detail limited to the listed `fields` (`lease_token`, `lease_expires_at`, `prepared_message`, `recipient_memberships`, `revoked_recipients`, `language` hidden); schedule and snapshot are joined for search and display |
 | django_admin_log | R | Stock history page. Written only by `NotificationSettings` saves and by `admin_workspace.WorkspaceSettingsForm.apply` |
 | django_session, usersessions_usersession | R/W | Per-request session and MFA evidence; `SessionLifetime` refreshes `last_activity_at` and `UserSessionsMiddleware` records activity |
 | auth_user, mfa_authenticator | R | Role flags for the site gate; `has_verified_mfa` only checks that the session's authenticator still exists |

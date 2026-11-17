@@ -1,9 +1,9 @@
 import uuid
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Barrier
-from typing import Literal
 
 import pytest
 from django.conf import settings
@@ -39,9 +39,7 @@ from pyracast.regions.models import AuditEvent, Region
 from pyracast.trash import (
     RETENTION,
     purge_expired,
-    restore_plant,
     restore_region,
-    trash_plant,
     trash_region,
 )
 from tests.test_domain import NOW, System
@@ -170,6 +168,7 @@ def linked_records(system: System, plant: Plant) -> tuple[ForecastSnapshot, Remi
             schedule=schedule,
             snapshot=source,
             status=status,
+            prepared_message={"kind": "current"} if status == "sending" else None,
             scheduled_for=NOW + timedelta(minutes=index),
             available_at=NOW,
             lease_token=uuid.uuid4(),
@@ -197,7 +196,7 @@ def test_region_trash_preserves_history_and_invalidates_pending_work(
     assert region.deleted_at == NOW
     assert region.status == "approved"
     assert region.approved_binding_id == system.binding.pk
-    assert Plant.objects.get(pk=plant.pk).deleted_at is None
+    assert Plant.objects.filter(pk=plant.pk).exists()
     assert ForecastSnapshot.objects.get(pk=source.pk).raw_payload == source.raw_payload
     assert CollectionJob.objects.get(pk=source.job_id).status == "succeeded"
     stale = CollectionJob.objects.exclude(pk=source.job_id).get()
@@ -227,40 +226,23 @@ def test_region_trash_preserves_history_and_invalidates_pending_work(
     assert AuditEvent.objects.filter(region=region, action="region_trashed").count() == 1
 
 
-def test_restore_parent_preserves_individual_plant_trash_and_restarts_future_schedules(
+def test_restore_is_idempotent_and_restarts_future_schedules(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
     _, schedule = linked_records(system, plant)
     args = (system.member, system.tenant.pk, system.region.pk)
     assert restore_region(*args).deleted_at is None
-    assert restore_plant(*args, plant.pk).deleted_at is None
-    trashed = trash_plant(*args, plant.pk)
-    assert trashed.deleted_at == NOW
-    active = create_plant(
-        system.member, system.tenant.pk, system.region.pk, name="Active", dc_capacity_mw=1
-    )
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=1))
-    assert trash_plant(*args, plant.pk).deleted_at == NOW
     trash_region(*args)
-    with pytest.raises(ValidationError, match="parent_region_trashed"):
-        restore_plant(*args, plant.pk)
     restored_at = NOW + timedelta(days=2)
     monkeypatch.setattr(timezone, "now", lambda: restored_at)
     region = restore_region(*args)
     assert region.deleted_at is None
-    assert Plant.objects.get(pk=plant.pk).deleted_at == NOW
-    assert Plant.objects.get(pk=active.pk).deleted_at is None
     assert CollectionSchedule.objects.get(region=region).effective_from == restored_at
     schedule.refresh_from_db()
     assert schedule.effective_from == restored_at
     assert schedule.times == ["16:00"]
-    with pytest.raises(ValidationError, match="location_already_has_plant"):
-        restore_plant(*args, plant.pk)
-    trash_plant(*args, active.pk)
-    assert restore_plant(*args, plant.pk).deleted_at is None
-    assert PlantEvent.objects.filter(plant=plant, action="plant_trashed").count() == 1
-    assert PlantEvent.objects.filter(plant=plant, action="plant_restored").count() == 1
     assert CalibrationRun.objects.get().status == "superseded"
     assert restore_region(*args).deleted_at is None
     assert AuditEvent.objects.filter(region=region, action="region_restored").count() == 1
@@ -283,40 +265,19 @@ def test_restore_creates_missing_schedule_without_recovering_trashed_slots(
     assert enqueue_due(restored_at) == []
 
 
-def test_inherited_plant_trash_cannot_start_an_independent_deadline(
+def test_restore_deadline_is_strict_and_purge_boundary_is_inclusive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
     args = (system.member, system.tenant.pk, system.region.pk)
     trash_region(*args)
-    with pytest.raises(ValidationError, match="parent_region_trashed"):
-        trash_plant(*args, plant.pk)
-    plant.refresh_from_db()
-    assert plant.deleted_at is None
-    assert not PlantEvent.objects.filter(plant=plant, action="plant_trashed").exists()
-
-
-@pytest.mark.parametrize("kind", ["region", "plant"])
-def test_restore_deadline_is_strict_and_purge_boundary_is_inclusive(
-    monkeypatch: pytest.MonkeyPatch, kind: str
-) -> None:
-    system, plant = make_plant(monkeypatch)
-    args = (system.member, system.tenant.pk, system.region.pk)
-    if kind == "region":
-        trash_region(*args)
-    else:
-        trash_plant(*args, plant.pk)
     assert purge_expired(NOW + RETENTION - timedelta(microseconds=1)) == {"regions": 0, "plants": 0}
     monkeypatch.setattr(timezone, "now", lambda: NOW + RETENTION)
-    if kind == "region":
-        with pytest.raises(ValidationError, match="trash_retention_expired"):
-            restore_region(*args)
-    else:
-        with pytest.raises(ValidationError, match="trash_retention_expired"):
-            restore_plant(*args, plant.pk)
-    assert purge_expired() == {"regions": int(kind == "region"), "plants": 1}
+    with pytest.raises(ValidationError, match="trash_retention_expired"):
+        restore_region(*args)
+    assert purge_expired() == {"regions": 1, "plants": 1}
     assert not Plant.objects.filter(pk=plant.pk).exists()
-    assert Region.objects.filter(pk=system.region.pk).exists() == (kind == "plant")
+    assert not Region.objects.filter(pk=system.region.pk).exists()
     assert purge_expired() == {"regions": 0, "plants": 0}
 
 
@@ -374,9 +335,11 @@ def test_purge_region_removes_owned_dependencies_and_preserves_shared_quota_ledg
     assert AuditEvent.objects.filter(provider_account=system.account).count() == provider_audits
 
 
-def test_purge_plant_keeps_region_history_and_reminders(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_purge_removes_a_calibration_that_compared_an_activation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     system, plant = make_plant(monkeypatch)
-    source, schedule = linked_records(system, plant)
+    linked_records(system, plant)
     previous = CalibrationRun.objects.get(plant=plant)
     CalibrationRun.objects.create(
         plant=plant,
@@ -389,82 +352,47 @@ def test_purge_plant_keeps_region_history_and_reminders(monkeypatch: pytest.Monk
         status="rejected",
         comparison_activation=CalibrationActivation.objects.get(plant=plant),
     )
-    args = (system.member, system.tenant.pk, system.region.pk)
-    trash_plant(*args, plant.pk)
-    assert CollectionJob.objects.get(pk=source.job_id).status == "succeeded"
-    assert NotificationDelivery.objects.filter(status="pending").exists()
-    assert purge_expired(NOW + RETENTION) == {"regions": 0, "plants": 1}
-    assert Region.objects.filter(pk=system.region.pk).exists()
-    assert SiteBinding.objects.filter(pk=system.binding.pk).exists()
-    assert ForecastSnapshot.objects.filter(pk=source.pk).exists()
-    assert ForecastResult.objects.filter(snapshot=source).exists()
-    assert ReminderSchedule.objects.filter(pk=schedule.pk).exists()
-    assert NotificationDelivery.objects.count() == 5
+    trash_region(system.member, system.tenant.pk, system.region.pk)
+    assert purge_expired(NOW + RETENTION) == {"regions": 1, "plants": 1}
+    assert not CalibrationRun.objects.exists()
+    assert not CalibrationActivation.objects.exists()
 
 
-@pytest.mark.parametrize(
-    "action", ["trash_region", "restore_region", "trash_plant", "restore_plant"]
-)
+@pytest.mark.parametrize("operation", [trash_region, restore_region])
 def test_lifecycle_requires_membership_and_exact_tenant_scope(
-    monkeypatch: pytest.MonkeyPatch, action: str
+    monkeypatch: pytest.MonkeyPatch, operation: Callable[[User, int, int], Region]
 ) -> None:
-    system, plant = make_plant(monkeypatch)
+    system, _ = make_plant(monkeypatch)
     other = Tenant.objects.create(name="Other")
     user = User.objects.create_user(username="outsider")
     Membership.objects.create(user=user, tenant=other, role=Membership.Role.ADMIN)
-    region_actions = {"trash_region": trash_region, "restore_region": restore_region}
-    if action in region_actions:
-        operation = region_actions[action]
-        with pytest.raises(PermissionDenied):
-            operation(user, system.tenant.pk, system.region.pk)
-        with pytest.raises(Region.DoesNotExist):
-            operation(user, other.pk, system.region.pk)
-    else:
-        plant_operation = trash_plant if action == "trash_plant" else restore_plant
-        with pytest.raises(PermissionDenied):
-            plant_operation(user, system.tenant.pk, system.region.pk, plant.pk)
-        with pytest.raises(Region.DoesNotExist):
-            plant_operation(user, other.pk, system.region.pk, plant.pk)
-        region, _ = sibling(system)
-        with pytest.raises(Plant.DoesNotExist):
-            plant_operation(system.member, system.tenant.pk, region.pk, plant.pk)
+    with pytest.raises(PermissionDenied):
+        operation(user, system.tenant.pk, system.region.pk)
+    with pytest.raises(Region.DoesNotExist):
+        operation(user, other.pk, system.region.pk)
 
 
-@pytest.mark.parametrize("kind", ["region", "plant"])
-def test_concurrent_trash_is_idempotent(monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
-    system, plant = make_plant(monkeypatch)
+def test_concurrent_trash_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
+    system, _ = make_plant(monkeypatch)
     barrier = Barrier(2)
 
     def remove() -> datetime | None:
         close_old_connections()
         try:
             barrier.wait(timeout=10)
-            args = (system.member, system.tenant.pk, system.region.pk)
-            if kind == "region":
-                return trash_region(*args).deleted_at
-            return trash_plant(*args, plant.pk).deleted_at
+            return trash_region(system.member, system.tenant.pk, system.region.pk).deleted_at
         finally:
             connection.close()
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(lambda _: remove(), range(2)))
     assert results == [NOW, NOW]
-    if kind == "region":
-        assert AuditEvent.objects.filter(region=system.region, action="region_trashed").count() == 1
-    else:
-        assert PlantEvent.objects.filter(plant=plant, action="plant_trashed").count() == 1
+    assert AuditEvent.objects.filter(region=system.region, action="region_trashed").count() == 1
 
 
-@pytest.mark.parametrize("kind", ["region", "plant"])
-def test_concurrent_purge_removes_each_definition_once(
-    monkeypatch: pytest.MonkeyPatch, kind: Literal["region", "plant"]
-) -> None:
-    system, plant = make_plant(monkeypatch)
-    args = (system.member, system.tenant.pk, system.region.pk)
-    if kind == "region":
-        trash_region(*args)
-    else:
-        trash_plant(*args, plant.pk)
+def test_concurrent_purge_removes_each_definition_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    system, _ = make_plant(monkeypatch)
+    trash_region(system.member, system.tenant.pk, system.region.pk)
     barrier = Barrier(2)
     original = Region.objects.select_for_update
 
@@ -484,7 +412,7 @@ def test_concurrent_purge_removes_each_definition_once(
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(lambda _: purge(), range(2)))
     assert sum(item["plants"] for item in results) == 1
-    assert sum(item["regions"] for item in results) == int(kind == "region")
+    assert sum(item["regions"] for item in results) == 1
 
 
 def test_purge_validates_clock_and_bounds_each_batch(monkeypatch: pytest.MonkeyPatch) -> None:

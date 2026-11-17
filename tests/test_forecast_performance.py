@@ -22,6 +22,7 @@ from pyracast.plants.models import (
     ProductionObservation,
 )
 from pyracast.plants.performance import forecast_performance
+from pyracast.regions.models import Region
 from pyracast.solar import daylight_window
 from tests.test_domain import NOW, System
 from tests.test_plant_operations import make_plant, snapshot_for
@@ -261,10 +262,9 @@ def test_performance_scope_and_date_validation(monkeypatch: pytest.MonkeyPatch) 
     assert response.status_code == 200
     assert response.json()["requested_days"] == 1
     assert client.get(path, {"start_date": "bad"}).status_code == 400
-    plant.deleted_at = NOW
-    plant.save()
+    Region.objects.filter(pk=plant.region_id).update(deleted_at=NOW)
     assert client.get(path).status_code == 404
-    plant.deleted_at = None
+    Region.objects.filter(pk=plant.region_id).update(deleted_at=None)
     plant.current_configuration = None
     plant.save()
     empty = forecast_performance(plant)

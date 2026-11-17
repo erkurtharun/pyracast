@@ -28,6 +28,7 @@ NOW = datetime(2026, 11, 15, 12, tzinfo=UTC)
 LAG = timedelta(minutes=5)
 RECENT = NOW - timedelta(days=1)
 BEFORE = timedelta(microseconds=1)
+PREPARED = {"kind": "current", "tomorrow_complete": True}
 
 
 def another_region(
@@ -127,10 +128,18 @@ def delivery(
     error: str = "",
     message: dict[str, object] | None = None,
 ) -> NotificationDelivery:
+    count = NotificationDelivery.objects.count()
+    region = Region.objects.create(
+        tenant_id=schedule.region.tenant_id,
+        name=f"Delivery {count}",
+        latitude=-40 - count / 100,
+        longitude=29,
+        timezone="Europe/Istanbul",
+        deleted_at=schedule.region.deleted_at,
+    )
     return NotificationDelivery.objects.create(
-        schedule=schedule,
-        recipients=[f"recipient-{NotificationDelivery.objects.count()}@example.com"],
-        grouped=False,
+        schedule=ReminderSchedule.objects.create(region=region, effective_from=NOW),
+        recipients=[f"recipient-{count}@example.com"],
         scheduled_for=scheduled,
         available_at=available,
         status=status,
@@ -153,7 +162,7 @@ def delivery(
         "paused_notifications",
     ],
 )
-def test_notification_filters_match_counter_boundaries_and_include_historical_schedule_rows(
+def test_notification_filters_match_counter_boundaries_across_schedules(
     issue: str,
 ) -> None:
     system = make_system(approved=True)
@@ -162,12 +171,11 @@ def test_notification_filters_match_counter_boundaries_and_include_historical_sc
         "pending": delivery(schedule, "pending", available=NOW - LAG - BEFORE),
         "retry": delivery(schedule, "retry", available=NOW - LAG - BEFORE),
         "cutoff": delivery(schedule, "pending", available=NOW - LAG),
-        "null_lease": delivery(schedule, "sending"),
-        "expired_lease": delivery(schedule, "sending", lease=NOW),
-        "live_lease": delivery(schedule, "sending", lease=NOW + BEFORE),
+        "null_lease": delivery(schedule, "sending", message=PREPARED),
+        "expired_lease": delivery(schedule, "sending", lease=NOW, message=PREPARED),
+        "live_lease": delivery(schedule, "sending", lease=NOW + BEFORE, message=PREPARED),
         "failed": delivery(schedule, "failed", scheduled=RECENT),
         "uncertain": delivery(schedule, "uncertain"),
-        "unavailable": delivery(schedule, "unavailable"),
         "old_failed": delivery(schedule, "failed", scheduled=RECENT - BEFORE),
         "missed": delivery(schedule, "skipped", error="missed_schedule"),
         "deadline": delivery(schedule, "failed", error="delivery_deadline_exceeded"),
@@ -197,8 +205,6 @@ def test_notification_filters_match_counter_boundaries_and_include_historical_sc
             schedule, "skipped", scheduled=RECENT - BEFORE, error="no_recipients"
         ),
     }
-    schedule.retired_at = NOW
-    schedule.save(update_fields=["retired_at"])
     for _ in range(25):
         delivery(schedule, "sent")
     deleted, _ = another_region(system, "Deleted")
@@ -209,7 +215,7 @@ def test_notification_filters_match_counter_boundaries_and_include_historical_sc
     names = {
         "overdue_notifications": ("pending", "retry"),
         "interrupted_notifications": ("null_lease", "expired_lease"),
-        "failed_notifications": ("failed", "uncertain", "unavailable", "deadline"),
+        "failed_notifications": ("failed", "uncertain", "deadline"),
         "missed_notifications": ("missed", "deadline"),
         "unavailable_forecasts": ("missing",),
         "partial_forecasts": ("partial",),
@@ -285,8 +291,7 @@ def test_metering_filters_match_counter_boundaries_and_find_failures_behind_new_
     assert metering_jobs_for_issue("unknown", NOW).count() == len(rows) + 25
     assert metering_jobs_for_issue("failed_collections", NOW).count() == len(rows) + 25
     assert metering_jobs_for_issue("overdue_metering", NOW, timedelta(minutes=6)).count() == 0
-    plant.deleted_at = NOW
-    plant.save(update_fields=["deleted_at"])
+    Region.objects.filter(pk=plant.region_id).update(deleted_at=NOW)
     assert not metering_jobs_for_issue(issue, NOW).exists()
     assert not metering_jobs_for_issue("unknown", NOW).exists()
 
@@ -430,10 +435,6 @@ def test_invalid_recipient_filter_matches_validation_and_current_enabled_region_
     disabled, _ = another_region(system, "Disabled schedule")
     ReminderSchedule.objects.create(
         region=disabled, effective_from=NOW, enabled=False, recipients=["invalid"]
-    )
-    retired, _ = another_region(system, "Retired schedule")
-    ReminderSchedule.objects.create(
-        region=retired, effective_from=NOW, enabled=True, recipients=["invalid"], retired_at=NOW
     )
     disabled_collection, _ = another_region(system, "Disabled collection")
     CollectionSchedule.objects.create(region=disabled_collection, enabled=False, effective_from=NOW)

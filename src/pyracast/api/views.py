@@ -73,7 +73,6 @@ class TenantsView(GenericAPIView[Tenant]):
         counters = (
             ChangeRequest.objects.filter(
                 plant__region__tenant_id__in=[row.pk for row in page],
-                plant__deleted_at__isnull=True,
                 plant__region__deleted_at__isnull=True,
             )
             .values("plant__region__tenant_id")

@@ -53,7 +53,6 @@ class ObservationImportResult(TypedDict):
 def configuration_is_current(configuration: PlantConfiguration) -> bool:
     return Plant.objects.filter(
         pk=configuration.plant_id,
-        deleted_at__isnull=True,
         region__deleted_at__isnull=True,
         current_configuration_id=configuration.pk,
         region_id=configuration.binding.region_id,
@@ -198,7 +197,7 @@ def create_plant(
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
-        if Plant.objects.filter(region=region, deleted_at__isnull=True).exists():
+        if Plant.objects.filter(region=region).exists():
             raise ValidationError("location_already_has_plant")
         plant = Plant.objects.create(region=region, name=name.strip())
         _save_plant_parameters(
@@ -247,9 +246,7 @@ def revise_plant(
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
-        plant = Plant.objects.select_for_update().get(
-            pk=plant_id, region=region, deleted_at__isnull=True
-        )
+        plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
         _save_plant_parameters(
             actor,
             plant,
@@ -311,7 +308,7 @@ def _save_plant_parameters(
 
 
 def activate_submitted_plants(actor: User, region: Region, binding: SiteBinding) -> None:
-    plants = Plant.objects.select_for_update().filter(region=region, deleted_at__isnull=True)
+    plants = Plant.objects.select_for_update().filter(region=region)
     for plant in plants:
         parameters: PlantConfiguration | PlantSubmission
         if plant.current_configuration_id is not None:
@@ -379,9 +376,7 @@ def import_observations(
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
-        plant = Plant.objects.select_for_update().get(
-            pk=plant_id, region=region, deleted_at__isnull=True
-        )
+        plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
         configuration = PlantConfiguration.objects.select_related("binding").get(
             pk=configuration_id, plant=plant
         )
@@ -454,9 +449,7 @@ def request_calibration(
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
-        plant = Plant.objects.select_for_update().get(
-            pk=plant_id, region=region, deleted_at__isnull=True
-        )
+        plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
         configuration = _configuration(plant)
         now = timezone.now()
         if configuration_id != configuration.pk:
@@ -610,9 +603,7 @@ def activate_calibration(
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
-        plant = Plant.objects.select_for_update().get(
-            pk=plant_id, region=region, deleted_at__isnull=True
-        )
+        plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
         configuration = _configuration(plant)
         run = CalibrationRun.objects.get(
             pk=calibration_id, plant=plant, configuration=configuration
@@ -633,9 +624,7 @@ def reset_calibration(
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
-        plant = Plant.objects.select_for_update().get(
-            pk=plant_id, region=region, deleted_at__isnull=True
-        )
+        plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
         from pyracast.plants.automation import update_automation
 
         update_automation(plant, actor, enabled=False, now=timezone.now())

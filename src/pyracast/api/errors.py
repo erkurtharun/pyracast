@@ -47,9 +47,6 @@ VALIDATION_DETAILS = {
         "This forecast could not be calculated. Choose another day or contact your administrator."
     ),
     "trash_retention_expired": gettext_noop("The 30-day restore period has ended."),
-    "parent_region_trashed": gettext_noop(
-        "Restore this plant's location before restoring the plant."
-    ),
     "date_out_of_range": gettext_noop("Choose a date within the available forecast range."),
     "completed_day_required": gettext_noop(
         "Choose a completed local day for historical estimates."

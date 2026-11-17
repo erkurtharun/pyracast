@@ -147,7 +147,7 @@ def _prepare_region_calibrations(region_id: int) -> None:
     from pyracast.plants.preparation import prepare_calibration
 
     for plant_id in Plant.objects.filter(
-        region_id=region_id, deleted_at__isnull=True, current_configuration__isnull=False
+        region_id=region_id, current_configuration__isnull=False
     ).values_list("pk", flat=True):
         prepare_calibration(plant_id)
 

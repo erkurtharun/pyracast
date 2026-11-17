@@ -163,7 +163,6 @@ def saved_report_context(
     plant = Plant.objects.filter(
         region_id=delivery.schedule.region_id,
         region__tenant_id=binding.region.tenant_id,
-        deleted_at__isnull=True,
     ).first()
     configuration = (
         PlantConfiguration.objects.select_related("binding", "plant")

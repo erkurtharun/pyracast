@@ -123,7 +123,7 @@ def lock_incident_plant(
         regions = regions.select_for_update()
         plants = plants.select_for_update(of=("self",))
     regions.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
-    return plants.get(pk=plant_id, region_id=region_id, deleted_at__isnull=True)
+    return plants.get(pk=plant_id, region_id=region_id)
 
 
 def _validate(values: dict[str, Any], configuration: PlantConfiguration, now: datetime) -> None:

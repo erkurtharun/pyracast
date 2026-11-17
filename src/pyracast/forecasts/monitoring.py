@@ -86,14 +86,14 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
     metering = EpiasCollectionJob.objects.filter(
         Q(status__in=("pending", "retry", "running"))
         | Q(status="failed", scheduled_for__gte=recent),
-        plant__deleted_at__isnull=True,
+        plant__region__deleted_at__isnull=True,
     )
     notification_counts = deliveries.aggregate(
         overdue_notifications=Count("pk", filter=waiting_jobs & Q(available_at__lt=cutoff)),
         interrupted_notifications=Count("pk", filter=Q(status="sending") & expired_leases),
         failed_notifications=Count(
             "pk",
-            filter=Q(status__in=("failed", "uncertain", "unavailable"), scheduled_for__gte=recent),
+            filter=Q(status__in=("failed", "uncertain"), scheduled_for__gte=recent),
         ),
         missed_notifications=Count(
             "pk",

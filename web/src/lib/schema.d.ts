@@ -334,7 +334,7 @@ export interface paths {
         get: operations["tenants_regions_plants_retrieve"];
         put: operations["tenants_regions_plants_update"];
         post?: never;
-        delete: operations["tenants_regions_plants_destroy"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -644,22 +644,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/restore/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["tenants_regions_plants_restore_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/tenants/{tenant_id}/regions/{region_id}/reminders/": {
         parameters: {
             query?: never;
@@ -716,22 +700,6 @@ export interface paths {
             cookie?: never;
         };
         get: operations["tenants_sites_retrieve"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/tenants/{tenant_id}/trash/plants/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["tenants_trash_plants_list"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1487,21 +1455,6 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["TenantOutput"][];
         };
-        PaginatedTrashedPlantOutputList: {
-            /** @example 123 */
-            count: number;
-            /**
-             * Format: uri
-             * @example http://api.example.org/accounts/?page=4
-             */
-            next?: string | null;
-            /**
-             * Format: uri
-             * @example http://api.example.org/accounts/?page=2
-             */
-            previous?: string | null;
-            results: components["schemas"]["TrashedPlantOutput"][];
-        };
         PaginatedTrashedRegionOutputList: {
             /** @example 123 */
             count: number;
@@ -2014,18 +1967,6 @@ export interface components {
             readonly role: components["schemas"]["RoleEnum"];
             readonly pending_review_count: number | null;
             readonly unread_outcome_count: number;
-        };
-        TrashedPlantOutput: {
-            readonly id: number;
-            readonly name: string;
-            region_id: number;
-            region_name: string;
-            readonly parent_deleted: boolean;
-            /** Format: date-time */
-            deleted_at: string;
-            /** Format: date-time */
-            readonly purge_after: string;
-            readonly can_restore: boolean;
         };
         TrashedRegionOutput: {
             readonly id: number;
@@ -2820,28 +2761,6 @@ export interface operations {
             };
         };
     };
-    tenants_regions_plants_destroy: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                plant_id: number;
-                region_id: number;
-                tenant_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description No response body */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
     tenants_regions_plants_calibration_automation_retrieve: {
         parameters: {
             query?: never;
@@ -3550,29 +3469,6 @@ export interface operations {
             };
         };
     };
-    tenants_regions_plants_restore_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                plant_id: number;
-                region_id: number;
-                tenant_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PlantOutput"];
-                };
-            };
-        };
-    };
     tenants_regions_reminders_retrieve: {
         parameters: {
             query?: never;
@@ -3714,30 +3610,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SiteOutput"];
-                };
-            };
-        };
-    };
-    tenants_trash_plants_list: {
-        parameters: {
-            query?: {
-                /** @description A page number within the paginated result set. */
-                page?: number;
-            };
-            header?: never;
-            path: {
-                tenant_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedTrashedPlantOutputList"];
                 };
             };
         };

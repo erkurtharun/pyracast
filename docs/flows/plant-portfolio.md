@@ -54,7 +54,7 @@ sequenceDiagram
 | --- | --- | --- |
 | `accounts_membership` | R | `require_member` on every request |
 | `regions_region` | R | Active rows of the tenant by id, plus the page `COUNT`: name, coordinates, timezone, revision, status |
-| `plants_plant` | R | Active plant per region (`one_active_plant_per_region`) |
+| `plants_plant` | R | One plant per region (`one_plant_per_region`) |
 | `plants_plantconfiguration`, `plants_plantsubmission` | R | Approved configuration (absent until approval) and the customer declaration shown before it |
 | `usersessions_usersession`, `django_session` | W | Middleware on every poll: allauth `last_seen_at` each request, `last_activity_at` at most once a minute |
 

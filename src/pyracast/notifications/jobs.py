@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 def _skip_reason(delivery: NotificationDelivery, limit: int) -> str | None:
     schedule = delivery.schedule
     clock = delivery.scheduled_for.astimezone(ZoneInfo(schedule.region.timezone)).strftime("%H:%M")
-    if not schedule.enabled or schedule.retired_at is not None or clock not in schedule.times:
+    if not schedule.enabled or clock not in schedule.times:
         return "cancelled_by_settings_change"
     if reason := slot_recipients(schedule, limit)[1]:
         return reason
@@ -55,8 +55,7 @@ def _skip_reason(delivery: NotificationDelivery, limit: int) -> str | None:
 
 
 def _recover_interrupted(delivery: NotificationDelivery, now: datetime) -> None:
-    # Legacy sends have no prepared content and cannot prove that transmission was unstarted.
-    if delivery.transmit_started_at is not None or delivery.prepared_message is None:
+    if delivery.transmit_started_at is not None:
         delivery.status, delivery.last_error = "uncertain", "interrupted_send"
     else:
         delivery.status = (
@@ -153,16 +152,8 @@ def process_notification(
             delivery.status, delivery.last_error = "skipped", "missed_schedule"
             delivery.save()
             return False
-        slot_deliveries = NotificationDelivery.objects.filter(
-            schedule_id=delivery.schedule_id,
-            binding_id=delivery.binding_id,
-            scheduled_for=delivery.scheduled_for,
-        )
-        frozen = list(
-            slot_deliveries.filter(prepared_message__isnull=False)
-            .order_by("language", "pk")
-            .distinct("language")
-        )
+        frozen = cast(dict[str, object] | None, delivery.prepared_message)
+        frozen_snapshot_id = delivery.snapshot_id
         try:
             if not prepare_delivery(delivery, now):
                 return False
@@ -176,35 +167,13 @@ def process_notification(
                 type(error).__name__,
             )
             prepared_at = now
-            delivery.snapshot = None
-            if frozen:
-                delivery.snapshot = frozen[0].snapshot
-                existing = cast(dict[str, object], frozen[0].prepared_message)
+            delivery.snapshot_id = None
+            if frozen is not None:
+                delivery.snapshot_id = frozen_snapshot_id
                 prepared_at = datetime.fromisoformat(
-                    cast(str, existing.get("prepared_at", delivery.scheduled_for.isoformat()))
+                    cast(str, frozen.get("prepared_at", delivery.scheduled_for.isoformat()))
                 )
             message, delivery.prepared_message = build_unavailable_message(delivery, prepared_at)
-            unprepared = slot_deliveries.filter(
-                attempts=0,
-                status__in=("pending", "retry"),
-                prepared_message__isnull=True,
-            )
-            payloads = {
-                record.language: cast(dict[str, object], record.prepared_message)
-                for record in frozen
-            }
-            payloads.setdefault(
-                delivery.language, cast(dict[str, object], delivery.prepared_message)
-            )
-            for record in unprepared:
-                if record.language not in payloads:
-                    payloads[record.language] = dict(
-                        build_unavailable_message(record, prepared_at)[1]
-                    )
-            for language, payload in payloads.items():
-                unprepared.filter(language=language).update(
-                    snapshot=delivery.snapshot, prepared_message=payload
-                )
         token = uuid.uuid4()
         delivery.status, delivery.lease_token = "sending", token
         delivery.lease_expires_at = now + LEASE_DURATION

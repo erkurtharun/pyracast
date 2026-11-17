@@ -128,9 +128,7 @@ def set_calibration_automation(
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
-        plant = Plant.objects.select_for_update().get(
-            pk=plant_id, region=region, deleted_at__isnull=True
-        )
+        plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
         if enabled and (
             plant.current_configuration is None
             or not configuration_is_current(plant.current_configuration)
@@ -276,7 +274,6 @@ def prepare_due_calibrations(now: datetime, limit: int = 100) -> list[int]:
         Plant.objects.filter(
             Q(next_calibration_check_at__isnull=True) | Q(next_calibration_check_at__lte=now),
             automatic_calibration_enabled=True,
-            deleted_at__isnull=True,
             region__deleted_at__isnull=True,
         )
         .order_by("next_calibration_check_at", "pk")
@@ -292,7 +289,6 @@ def prepare_due_calibrations(now: datetime, limit: int = 100) -> list[int]:
             plant = Plant.objects.select_for_update().filter(pk=plant_id).first()
             if (
                 plant is None
-                or plant.deleted_at is not None
                 or not plant.automatic_calibration_enabled
                 or (
                     plant.next_calibration_check_at is not None

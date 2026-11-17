@@ -233,8 +233,8 @@ def test_worker_drain_waits_for_active_notification(monkeypatch: pytest.MonkeyPa
     from tests.test_notifications import ready
 
     delivery = ready()
-    delivery.status = "sending"
-    delivery.save(update_fields=["status"])
+    delivery.status, delivery.prepared_message = "sending", {"kind": "current"}
+    delivery.save(update_fields=["status", "prepared_message"])
 
     def finish_send(_: float) -> None:
         delivery.status = "sent"
@@ -253,8 +253,8 @@ def test_worker_drain_timeout_preserves_active_notification() -> None:
     from tests.test_notifications import ready
 
     delivery = ready()
-    delivery.status = "sending"
-    delivery.save(update_fields=["status"])
+    delivery.status, delivery.prepared_message = "sending", {"kind": "current"}
+    delivery.save(update_fields=["status", "prepared_message"])
 
     with pytest.raises(RuntimeError, match="worker was left running"):
         launcher.wait_for_jobs(timeout=0)

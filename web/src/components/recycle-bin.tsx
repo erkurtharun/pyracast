@@ -6,7 +6,6 @@ import type { components } from "@/lib/schema";
 import { Empty, Notice, useCollection } from "./ui";
 
 type DeletedRegion = components["schemas"]["TrashedRegionOutput"];
-type DeletedPlant = components["schemas"]["TrashedPlantOutput"];
 
 export function MoveToRecycleBin({
     name,
@@ -14,7 +13,6 @@ export function MoveToRecycleBin({
     token,
     onDeleted,
 }: {
-    kind: "region" | "plant";
     name: string;
     url: string;
     token: string;
@@ -83,16 +81,17 @@ export function RecycleBin({
     const locale = useLocale();
 
     const [version, setVersion] = useState(0);
-    const [working, setWorking] = useState("");
+    const [working, setWorking] = useState<number | null>(null);
     const [error, setError] = useState("");
     const [message, setMessage] = useState("");
-    const [restored, setRestored] = useState<string[]>([]);
+    const [restored, setRestored] = useState<number[]>([]);
     const base = `/api/tenants/${tenant}/`;
     const regions = useCollection<DeletedRegion>(
         `${base}trash/regions/`,
         version,
     );
-    const plants = useCollection<DeletedPlant>(`${base}trash/plants/`, version);
+    const rows =
+        regions.data?.results.filter((row) => !restored.includes(row.id)) ?? [];
     const date = (value: string) =>
         new Date(value).toLocaleString(locale, {
             year: "numeric",
@@ -102,27 +101,24 @@ export function RecycleBin({
             minute: "2-digit",
             timeZoneName: "short",
         });
-    async function restore(
-        kind: "region" | "plant",
-        row: DeletedRegion | DeletedPlant,
-    ) {
-        const key = `${kind}-${row.id}`;
-        setWorking(key);
+    async function restore(row: DeletedRegion) {
+        setWorking(row.id);
         setError("");
         setMessage("");
-        const url =
-            kind === "region"
-                ? `${base}regions/${row.id}/restore/`
-                : `${base}regions/${(row as DeletedPlant).region_id}/plants/${row.id}/restore/`;
         try {
-            await request(url, "POST", {}, token);
-            setRestored((current) => [...current, key]);
+            await request(
+                `${base}regions/${row.id}/restore/`,
+                "POST",
+                {},
+                token,
+            );
+            setRestored((current) => [...current, row.id]);
             setVersion((current) => current + 1);
             setMessage(t("restored", { name: row.name }));
         } catch (failure) {
             setError((failure as Error).message);
         } finally {
-            setWorking("");
+            setWorking(null);
         }
     }
     return (
@@ -135,154 +131,66 @@ export function RecycleBin({
             </div>
             {error && <Notice error>{error}</Notice>}
             {message && <Notice>{message}</Notice>}
-            {(
-                [
-                    ["region", regions],
-                    ["plant", plants],
-                ] as const
-            )
-                .filter(
-                    ([kind, resource]) =>
-                        kind === "region" ||
-                        resource.loading ||
-                        resource.error ||
-                        resource.data?.results.some(
-                            (row) => !restored.includes(`${kind}-${row.id}`),
-                        ),
-                )
-                .map(([kind, resource]) => (
-                    <section className="panel" key={kind}>
-                        <h2>
-                            {kind === "region"
-                                ? t("deletedPlants")
-                                : t("earlierPlantRecords")}
-                        </h2>
-                        {resource.loading ? (
-                            <p role="status">{t("loadingDeletedPlants")}</p>
-                        ) : resource.error ? (
-                            <Notice error>{resource.error}</Notice>
-                        ) : resource.data?.results.filter(
-                              (row) => !restored.includes(`${kind}-${row.id}`),
-                          ).length ? (
-                            <ul
-                                className="trash-list"
-                                aria-label={
-                                    kind === "region"
-                                        ? t("deletedPlants")
-                                        : t("earlierPlantRecords")
-                                }
-                            >
-                                {resource.data.results
-                                    .filter(
-                                        (row) =>
-                                            !restored.includes(
-                                                `${kind}-${row.id}`,
-                                            ),
-                                    )
-                                    .map((row) => {
-                                        const parentDeleted =
-                                            "parent_deleted" in row &&
-                                            row.parent_deleted;
-                                        return (
-                                            <li
-                                                className="trash-item"
-                                                key={row.id}
-                                            >
-                                                <div>
-                                                    <strong>{row.name}</strong>
-                                                    {kind === "plant" && (
-                                                        <p className="fine">
-                                                            {t("locationName", {
-                                                                name: (
-                                                                    row as DeletedPlant
-                                                                ).region_name,
-                                                            })}
-                                                        </p>
-                                                    )}
-                                                    <dl className="trash-meta">
-                                                        <div>
-                                                            <dt>
-                                                                {t("deleted")}
-                                                            </dt>
-                                                            <dd>
-                                                                <time
-                                                                    dateTime={
-                                                                        row.deleted_at
-                                                                    }
-                                                                >
-                                                                    {date(
-                                                                        row.deleted_at,
-                                                                    )}
-                                                                </time>
-                                                            </dd>
-                                                        </div>
-                                                        <div>
-                                                            <dt>
-                                                                {t(
-                                                                    "permanentDeletion",
-                                                                )}
-                                                            </dt>
-                                                            <dd>
-                                                                <time
-                                                                    dateTime={
-                                                                        row.purge_after
-                                                                    }
-                                                                >
-                                                                    {date(
-                                                                        row.purge_after,
-                                                                    )}
-                                                                </time>
-                                                            </dd>
-                                                        </div>
-                                                    </dl>
-                                                </div>
-                                                <div>
-                                                    <button
-                                                        className="button secondary"
-                                                        disabled={
-                                                            !!working ||
-                                                            !row.can_restore ||
-                                                            !!parentDeleted
-                                                        }
-                                                        onClick={() =>
-                                                            void restore(
-                                                                kind,
-                                                                row,
-                                                            )
-                                                        }
-                                                    >
-                                                        {working ===
-                                                        `${kind}-${row.id}`
-                                                            ? t("restoring")
-                                                            : t("restore", {
-                                                                  name: row.name,
-                                                              })}
-                                                    </button>
-                                                    {parentDeleted ? (
-                                                        <p className="fine">
-                                                            {t(
-                                                                "restoreItsLocationFirst",
-                                                            )}
-                                                        </p>
-                                                    ) : !row.can_restore ? (
-                                                        <p className="fine">
-                                                            {t(
-                                                                "restoreExpired",
-                                                            )}
-                                                        </p>
-                                                    ) : null}
-                                                </div>
-                                            </li>
-                                        );
-                                    })}
-                            </ul>
-                        ) : (
-                            <Empty title={t("noDeletedPlants")}>
-                                {t("nothingToRestore")}
-                            </Empty>
-                        )}
-                    </section>
-                ))}
+            <section className="panel">
+                <h2>{t("deletedPlants")}</h2>
+                {regions.loading ? (
+                    <p role="status">{t("loadingDeletedPlants")}</p>
+                ) : regions.error ? (
+                    <Notice error>{regions.error}</Notice>
+                ) : rows.length ? (
+                    <ul className="trash-list" aria-label={t("deletedPlants")}>
+                        {rows.map((row) => (
+                            <li className="trash-item" key={row.id}>
+                                <div>
+                                    <strong>{row.name}</strong>
+                                    <dl className="trash-meta">
+                                        <div>
+                                            <dt>{t("deleted")}</dt>
+                                            <dd>
+                                                <time dateTime={row.deleted_at}>
+                                                    {date(row.deleted_at)}
+                                                </time>
+                                            </dd>
+                                        </div>
+                                        <div>
+                                            <dt>{t("permanentDeletion")}</dt>
+                                            <dd>
+                                                <time
+                                                    dateTime={row.purge_after}
+                                                >
+                                                    {date(row.purge_after)}
+                                                </time>
+                                            </dd>
+                                        </div>
+                                    </dl>
+                                </div>
+                                <div>
+                                    <button
+                                        className="button secondary"
+                                        disabled={
+                                            working !== null || !row.can_restore
+                                        }
+                                        onClick={() => void restore(row)}
+                                    >
+                                        {working === row.id
+                                            ? t("restoring")
+                                            : t("restore", { name: row.name })}
+                                    </button>
+                                    {!row.can_restore && (
+                                        <p className="fine">
+                                            {t("restoreExpired")}
+                                        </p>
+                                    )}
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
+                ) : (
+                    <Empty title={t("noDeletedPlants")}>
+                        {t("nothingToRestore")}
+                    </Empty>
+                )}
+            </section>
         </>
     );
 }

@@ -400,23 +400,20 @@ def test_current_authorization_is_required_before_the_approval_button_is_enabled
     assert client.get(url).context["can_approve"] is False
 
 
-def test_recent_work_uses_the_active_plant_name_with_a_legacy_location_fallback() -> None:
+def test_recent_work_uses_the_plant_name_with_a_location_fallback() -> None:
     system = make_system(approved=True)
     now = timezone.now()
-    Plant.objects.create(region=system.region, name="Archived plant", deleted_at=now)
-    plant = Plant.objects.create(region=system.region, name="Named solar plant")
     schedule = ReminderSchedule.objects.create(
         configured_by=system.member, region=system.region, effective_from=now
     )
     NotificationDelivery.objects.create(schedule=schedule, scheduled_for=now, available_at=now)
-    for context in (recent_work_context(), recent_work_context(system.region.pk, limit=5)):
-        assert context["collections"][0]["plant_name"] == "Named solar plant"
-        assert context["deliveries"][0]["plant_name"] == "Named solar plant"
-    plant.deleted_at = now
-    plant.save(update_fields=("deleted_at",))
     context = recent_work_context()
     assert context["collections"][0]["plant_name"] == system.region.name
     assert context["deliveries"][0]["plant_name"] == system.region.name
+    Plant.objects.create(region=system.region, name="Named solar plant")
+    for context in (recent_work_context(), recent_work_context(system.region.pk, limit=5)):
+        assert context["collections"][0]["plant_name"] == "Named solar plant"
+        assert context["deliveries"][0]["plant_name"] == "Named solar plant"
 
 
 def test_workspace_logout_returns_to_shared_sign_in_and_requires_csrf() -> None:
