@@ -1219,10 +1219,12 @@ dev = [
     { name = "pytest-cov" },
     { name = "pytest-django" },
     { name = "pytest-xdist" },
+    { name = "pyyaml" },
     { name = "ruff" },
     { name = "types-openpyxl" },
     { name = "types-polib" },
     { name = "types-psutil" },
+    { name = "types-pyyaml" },
 ]
 
 [package.metadata]
@@ -1262,10 +1264,12 @@ dev = [
     { name = "pytest-cov" },
     { name = "pytest-django", specifier = ">=4.14.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "ruff" },
     { name = "types-openpyxl", specifier = "==3.1.5.20261017" },
     { name = "types-polib", specifier = ">=1.2.0.20260518" },
     { name = "types-psutil", specifier = ">=7.2.2.20261111" },
+    { name = "types-pyyaml", specifier = ">=6.0.12.20261103" },
 ]
 
 [[package]]
