@@ -127,7 +127,7 @@ def run_scripts(commands: str) -> dict[str, str]:
 
 
 def locked_installs(commands: str, scripts: dict[str, str]) -> tuple[str, ...]:
-    direct = re.findall(r"^uv sync --locked.*$", commands, re.M)
+    direct = re.findall(r"uv sync --locked.*", commands)
     delegated = [
         path for path, source in scripts.items() if re.search(r'"sync",\s*"--locked"', source)
     ]
