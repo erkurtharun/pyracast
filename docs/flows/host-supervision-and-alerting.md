@@ -87,4 +87,5 @@ sequenceDiagram
 ## Tests
 
 - `tests/test_health.py` (live, ready, 503 body, 405), `tests/test_deployment_watchdog.py` (capacity thresholds, recovery only while `pyracast.service` is `active`, release-blocked no-op), `tests/test_deployment_backup.py` (`report` fallback and propagation), `tests/test_deployment_helpers.py` (Python 3.12 syntax), `deploy/smoke.sh` (`ready` through the gateway), `deploy/test-release.sh` (installer lock wait and readiness gate).
-- Gaps: `inspect_services`, delivery failure event, backup staleness, unrecovered services, `main` locking, `report` payload, unit files and `monitoring.tf` filters are untested.
+- `tests/test_operations_contracts.py`: `watchdog.SERVICES` equals the long-running Compose services; every `monitoring.tf` policy event is reported by a host script and every `ERROR` event has a policy; the `pyracast.service` stop timeouts cover the Compose stop grace periods.
+- Gaps: `inspect_services`, delivery failure event, backup staleness, unrecovered services, `main` locking and the `report` payload are untested; the watchdog unit's `TimeoutStartSec` is not asserted against its subprocess timeouts.

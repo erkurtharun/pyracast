@@ -428,7 +428,16 @@ HTTPS checks validate the certificate chain and hostname. It applies migrations 
 checks that the runtime role cannot create tables, checks frontend/API/static
 routing and forged proxy headers, including a simulated Cloudflare socket peer
 with a forged forwarding prefix, publishes one synthetic forecast through the
-real RabbitMQ worker, and exercises dispatcher and idle worker stop.
+real RabbitMQ worker, and exercises dispatcher and idle worker stop. Through the
+gateway it also checks the anonymous `/api/session/` JSON shape, that a
+wrong-password sign-in gets the normal 400 `email_password_mismatch` refusal and
+that the `/app/` workspace app shell loads.
+`tests/test_operations_contracts.py` keeps the values that `deploy/`,
+`infra/terraform` and the workflows restate in agreement: worker queues, the
+watchdog and drain service lists, stop grace periods, alert event names,
+Cloudflare ranges, the gateway trust anchor, router prefixes, timeouts, the
+body limit, the CI jobs the release waits for, Gmail constants and `host.json`
+keys. Change those values together with that test.
 It does not prove GCP IAM, backup upload/restore, metadata firewall rules, public
 DNS, ACME, Cloud Logging or live Gmail/SMTP/provider behavior. `compose.smoke.yaml` is test
 configuration only. Never apply it to a production Compose project.

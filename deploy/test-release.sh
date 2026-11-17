@@ -81,6 +81,8 @@ if [[ "$*" == *' up -d postgres' || "$*" == *' up -d rabbitmq' ]]; then
 fi
 case "$MODE:$*" in
   preflight:*' --profile release pull --quiet') exit 41 ;;
+  deploy-check:*' run --rm --no-deps migrate pyracast check --deploy --fail-level WARNING') exit 48 ;;
+  plan:*' run --rm --no-deps migrate pyracast migrate --plan') exit 49 ;;
   support-rabbit:*' up -d rabbitmq') exit 42 ;;
   support-postgres:*' up -d postgres') exit 46 ;;
   drain:*' stop -t 660 worker notifications') exit 47 ;;
@@ -151,7 +153,7 @@ raise SystemExit(status)
 PY
 }
 
-for MODE in preflight drain backup support-postgres support-rabbit migration health tls response success first-success first-backup killed-backup killed lock-wait lock-timeout; do
+for MODE in preflight deploy-check plan drain backup support-postgres support-rabbit migration health tls response success first-success first-backup killed-backup killed lock-wait lock-timeout; do
   export MODE
   rm -rf /opt/pyracast/current /opt/pyracast/current.next /opt/pyracast/releases/* /run/pyracast
   rm -f /var/lib/pyracast/release-blocked /migration-entered /backup-entered /backup-complete /support-changed /database-initialized
@@ -190,11 +192,18 @@ for MODE in preflight drain backup support-postgres support-rabbit migration hea
     test ! -e /migration.json
     test ! -e /run/pyracast/migration.env
     case "$MODE" in
-      preflight)
-        test "$result" == 41
+      preflight|deploy-check|plan)
+        case "$MODE" in
+          preflight) test "$result" == 41 ;;
+          deploy-check) test "$result" == 48 ;;
+          plan) test "$result" == 49 ;;
+        esac
         test "$(readlink /opt/pyracast/current)" == /opt/pyracast/releases/old
         test ! -e /var/lib/pyracast/release-blocked
         grep -Fxq "POSTGRES_IMAGE=$postgres_image" "/opt/pyracast/releases/$revision/deploy/release.env"
+        grep -Fxq 'PGUSER=old-runtime' /run/pyracast/runtime.env
+        grep -Fxq 'RABBITMQ_DEFAULT_PASS=old-password' /run/pyracast/broker.env
+        test ! -e /backup-entered
         ! grep -q ' stop ' /calls
         ;;
       drain|backup|first-backup|support-postgres|support-rabbit|migration|health|tls|response)
