@@ -61,7 +61,7 @@ None. No table is read or written; the flow only reads and rewrites `request.MET
 | Condition | Result |
 | --- | --- |
 | `REMOTE_ADDR` empty, malformed or a list | 403 from `handler403` (`PermissionDenied("Invalid client address.")`, message not shown): `{"code": "permission_denied"}` on `/api/`, HTML elsewhere, both `Cache-Control: private, no-store` |
-| Trusted peer sends proto other than `http`/`https`, no or malformed `X-Real-IP` (without upstream ranges), no or malformed `X-Forwarded-For` (with upstream ranges), or a chain whose only entry is a Cloudflare address | Same 403 (`Invalid trusted proxy headers.`); `pyracast.security` logs `invalid_proxy_headers` with the proxy peer address |
+| Trusted peer sends proto other than `http`/`https`, no or malformed `X-Real-IP` (without upstream ranges), no or malformed `X-Forwarded-For` (with upstream ranges), or a chain whose only entry is a Cloudflare address | 403 from `handler403` (`InvalidProxyHeaders`): `{"code": "invalid_proxy_headers"}` on `/api/`, HTML elsewhere, both no-store; `pyracast.security` logs `invalid_proxy_headers` with the proxy peer address |
 | Peer not trusted (or trust off) | Headers silently stripped, request continues with the socket peer as client |
 | Request not secure (untrusted peer, proto `http`, or trust off) with `DEBUG` off | `SecurityMiddleware` 301 to https, except `/health/live/` and `/health/ready/` |
 | Trust on but `PYRACAST_TRUSTED_PROXY_CIDRS` empty | `ImproperlyConfigured` at middleware load; an invalid CIDR raises `ValueError` there |

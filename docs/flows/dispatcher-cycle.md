@@ -101,7 +101,7 @@ flowchart TD
 - Lock orders: notifications tenant, recipient-limit row, region; calibration tenant, region, plant, enabling user, membership; collection region; metering region, plant, connection; retention region, plants, provider accounts.
 - Per-item isolation exists only in collection (per region) and notifications (per schedule); calibration, metering and retention abort the phase on the first failing item.
 - Shutdown is checked only between cycles and while waiting (0.1 s polling): a started cycle completes all five phases. Compose allows 660 s.
-- Recorded `attempted_at` is the phase end time, not its start; error codes are class names only, never messages (provider responses and broker URLs are not logged).
+- Recorded `attempted_at` is the phase end time, not its start; error codes are class names or `collection_regions_failed:<n>` (number of regions whose scheduling failed), never messages (provider responses and broker URLs are not logged).
 - Bounds per cycle: 100 ids per queue, 100 due calibration plants, 100 regions plus 100 plants purged. Collection, notification and metering scheduling scan every approved region, enabled schedule and enabled connection with no batch limit.
 - Database sessions use `lock_timeout=5s` and `statement_timeout=60s`. The metering settlement lookup is an EPIAS call outside any transaction (5 s connect, 20 s read per request) and is not recorded in any request ledger.
 - The health check's 5-minute lag must exceed a full cycle plus the poll interval; a slow cycle marks every phase stale.

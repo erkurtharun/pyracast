@@ -3,7 +3,7 @@ import math
 from typing import Any
 from uuid import uuid4
 
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import BadRequest, ObjectDoesNotExist, SuspiciousOperation
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import DatabaseError
 from django.http import HttpRequest
@@ -73,12 +73,14 @@ def log_server_error(
     code: str = "server_error",
 ) -> str:
     request_id = uuid4().hex
+    # The path is client controlled: escape it so it cannot forge further log lines.
+    path = getattr(request, "path", "-").encode("unicode_escape").decode("ascii")
     logger.error(
         "api_%s request_id=%s method=%s path=%s view=%s",
         code,
         request_id,
         getattr(request, "method", "-"),
-        getattr(request, "path", "-"),
+        path,
         view,
         exc_info=error,
     )
@@ -111,7 +113,7 @@ def _view_name(context: dict[str, Any]) -> str:
     return "-" if view is None else type(view).__name__
 
 
-def exception_handler(exc: Exception, context: dict[str, Any]) -> Response:
+def exception_handler(exc: Exception, context: dict[str, Any]) -> Response | None:
     if (
         isinstance(exc, DatabaseError)
         and (response := _database_response(exc, context)) is not None
@@ -148,6 +150,9 @@ def exception_handler(exc: Exception, context: dict[str, Any]) -> Response:
         return Response({"code": "quota_exhausted"}, status=429)
     if isinstance(exc, ProviderError):
         return Response({"code": "provider_unavailable"}, status=502)
+    if isinstance(exc, SuspiciousOperation | BadRequest):
+        # Django answers these through handler400 and logs them on django.security.
+        return None
     response = drf_exception_handler(exc, context)
     if response is not None:
         response.data = {"code": f"http_{response.status_code}", "detail": response.data}

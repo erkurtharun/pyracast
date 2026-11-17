@@ -1,4 +1,4 @@
-import { ApiError } from "./api";
+import { ApiError, failureMessage } from "./api";
 import { browserErrors } from "@/i18n/browser";
 
 export class AuthResponseError extends ApiError {
@@ -79,7 +79,7 @@ export async function authRequest<TData = AuthData>(
         const errors = result.errors ?? [];
         throw new AuthResponseError(
             errors.map((error) => error.message).join(" ") ||
-                t("request", { status: response.status }),
+                failureMessage(data, response.status),
             response.status,
             Object.fromEntries(
                 errors

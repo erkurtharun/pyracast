@@ -60,7 +60,7 @@ sequenceDiagram
 
 - Command and watchdog: no application check. Access is shell or Docker access on the host.
 - Console views: `PlatformAdminSite.has_permission` requires an active staff superuser (Django's `is_active` and `is_staff` check plus `is_superuser`) with verified MFA (`has_verified_mfa`); each route is wrapped in `admin_view` (index through Django's own wrap). Others are redirected via the admin login to `/app/?next=/admin/`.
-- The report holds `checked_at`, counts and phase names only, no error codes, tenant data, addresses or keys (key and invalid address absence pinned by tests). The Operations page adds phase error codes (exception class names), company and plant names and recipient addresses for the administrator.
+- The report holds `checked_at`, counts and phase names only, no error codes, tenant data, addresses or keys (key and invalid address absence pinned by tests). The Operations page adds phase error codes (exception class names or `collection_regions_failed:<n>`), company and plant names and recipient addresses for the administrator.
 
 ## Failure paths
 

@@ -252,7 +252,8 @@
             "database_conflict": "Another update conflicted with this one. Try again shortly.",
             "session_ended": "Your session ended. Refresh the page and sign in again.",
             "permission_denied": "You do not have permission for this action.",
-            "bad_request": "The request was not valid. Refresh the page and try again."
+            "bad_request": "The request was not valid. Refresh the page and try again.",
+            "invalid_proxy_headers": "The connection could not be verified. Please try again later."
         }
     },
     "ProductionCsv": {

@@ -59,7 +59,7 @@ sequenceDiagram
 | String containing `solcast` inside a technical subtree | Whole string equal to `solcast_forecast` or `solcast_estimated_actuals` becomes `forecast` or `estimated_actuals` (under any technical key); a string directly under `quality_flags` gets `reference` for the word; anything else becomes `source_details_unavailable` |
 | Error body whose `detail` mentions the provider | String becomes `source_details_unavailable`; the web client drops snake_case tokens without a message key and falls back to the code message or a generic one (`web/src/lib/api.ts` `errorMessage`) |
 | Provider name in an unlisted field outside a technical subtree (for example `label`) | Passes through unchanged |
-| View raises an exception `exception_handler` does not map (handler returns `None`) | DRF re-raises; Django answers its 500 page, which this renderer never sees |
+| View raises an exception `exception_handler` does not map | The handler answers 500 `{code: "server_error", message, request_id}`, which passes through this renderer like any other body |
 | Redaction raises inside `render` | Not handled by the exception handler; Django answers 500 (reasoned, not exercised by any test) |
 
 ## Rules and invariants

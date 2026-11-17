@@ -1,20 +1,12 @@
 import sys
 
 from django.contrib.sessions.exceptions import SessionInterrupted
-from django.core.signals import got_request_exception
-from django.dispatch import receiver
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils.cache import patch_cache_control
 from django.views import defaults
 
+from pyracast.accounts.middleware import InvalidProxyHeaders
 from pyracast.api.errors import log_server_error, server_error_body
-
-_REQUEST_ID = "pyracast.request_id"
-
-
-@receiver(got_request_exception, dispatch_uid="pyracast.api.server_error")
-def record_server_error(sender: object, request: HttpRequest, **kwargs: object) -> None:
-    request.META[_REQUEST_ID] = log_server_error(request, "-", sys.exc_info()[1])
 
 
 def _api(request: HttpRequest) -> bool:
@@ -40,7 +32,12 @@ def bad_request(request: HttpRequest, exception: Exception) -> HttpResponse:
 def permission_denied(request: HttpRequest, exception: Exception) -> HttpResponse:
     if not _api(request):
         return _private(defaults.permission_denied(request, exception))
-    return _json(403, {"code": "permission_denied"})
+    code = (
+        "invalid_proxy_headers"
+        if isinstance(exception, InvalidProxyHeaders)
+        else "permission_denied"
+    )
+    return _json(403, {"code": code})
 
 
 def page_not_found(request: HttpRequest, exception: Exception) -> HttpResponse:
@@ -52,4 +49,6 @@ def page_not_found(request: HttpRequest, exception: Exception) -> HttpResponse:
 def server_error(request: HttpRequest) -> HttpResponse:
     if not _api(request):
         return _private(defaults.server_error(request))
-    return _json(500, server_error_body(request.META.get(_REQUEST_ID, "-")))
+    # Django calls handler500 inside its except block, so the unhandled exception is current.
+    request_id = log_server_error(request, "-", sys.exc_info()[1])
+    return _json(500, server_error_body(request_id))

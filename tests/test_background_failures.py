@@ -43,7 +43,23 @@ def test_log_failure_without_pyracast_frame_names_no_origin(
     ]
 
 
-def test_log_failure_follows_implicit_context_and_stops_at_cycles(
+def test_log_failure_follows_the_implicit_exception_context(
+    pyracast_logs: pytest.LogCaptureFixture,
+) -> None:
+    implicit = KeyError("secret")
+    try:
+        normalize_client_ip("secret-address")
+    except ValueError as error:
+        implicit.__context__ = error
+    log_failure(logger, "implicit_context", implicit)
+    line = normalize_client_ip.__code__.co_firstlineno + 1
+    assert [record.getMessage() for record in pyracast_logs.records] == [
+        "implicit_context error_type=KeyError "
+        f"origin=pyracast.accounts.security:{line}:normalize_client_ip"
+    ]
+
+
+def test_log_failure_honours_suppressed_context_and_stops_at_cycles(
     pyracast_logs: pytest.LogCaptureFixture,
 ) -> None:
     hidden = wrapped_failure()

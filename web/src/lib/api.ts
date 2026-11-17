@@ -77,25 +77,29 @@ async function send<T>(
         response.status === 204
             ? null
             : await response.json().catch(() => null);
-    if (!response.ok) {
-        const t = browserErrors();
-        const message =
-            errorMessage(data) || t("request", { status: response.status });
-        const reference = requestReference(data);
+    if (!response.ok)
         throw new ApiError(
-            reference ? `${message} ${t("reference", { reference })}` : message,
+            failureMessage(data, response.status),
             validationFields(data),
         );
-    }
     return data as T;
 }
-function requestReference(data: unknown): string {
-    return data &&
-        typeof data === "object" &&
-        "request_id" in data &&
-        typeof data.request_id === "string"
-        ? data.request_id
-        : "";
+export function failureMessage(data: unknown, status: number): string {
+    const t = browserErrors();
+    if (!data || typeof data !== "object" || Array.isArray(data))
+        return errorMessage(data) || t("request", { status });
+    const reference = "request_id" in data ? data.request_id : undefined;
+    const message =
+        errorMessage(
+            Object.fromEntries(
+                Object.entries(data).filter(
+                    ([key]) => !["message", "request_id"].includes(key),
+                ),
+            ),
+        ) || t("request", { status });
+    return typeof reference === "string" && reference
+        ? `${message} ${t("reference", { reference })}`
+        : message;
 }
 function errorMessage(data: unknown): string {
     const t = browserErrors();
@@ -113,7 +117,7 @@ function errorMessage(data: unknown): string {
         return data.map(errorMessage).filter(Boolean).join(" ");
     if (data && typeof data === "object") {
         const detail = Object.entries(data)
-            .filter(([key]) => !["code", "message", "request_id"].includes(key))
+            .filter(([key]) => key !== "code")
             .map(([key, value]) => {
                 const message = errorMessage(value);
                 return message

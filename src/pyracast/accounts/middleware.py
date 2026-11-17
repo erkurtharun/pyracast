@@ -14,6 +14,10 @@ from pyracast.accounts.checks import validate_public_origin
 from pyracast.accounts.security import normalize_client_ip
 
 
+class InvalidProxyHeaders(PermissionDenied):
+    pass
+
+
 class TrustedProxyHeaders:
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponse]) -> None:
         self.get_response = get_response
@@ -72,7 +76,7 @@ class TrustedProxyHeaders:
     def _refuse(peer: IPv4Address | IPv6Address) -> NoReturn:
         # The allauth adapter cannot resolve the client here: it would refuse the same headers.
         record_security_event("invalid_proxy_headers", client_ip=str(peer))
-        raise PermissionDenied("Invalid trusted proxy headers.")
+        raise InvalidProxyHeaders("Invalid trusted proxy headers.")
 
     def _forwarded_client_ip(self, forwarded_for: str | None) -> str:
         if not forwarded_for:
