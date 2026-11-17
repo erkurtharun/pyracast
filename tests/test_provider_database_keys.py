@@ -7,7 +7,7 @@ from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount
 from pyracast.connections.operations import create_account
 from pyracast.connections.secrets import decrypt_api_key, encrypt_secret
-from tests.test_domain import make_system
+from tests.support.domain import make_system
 
 
 def test_environment_reference_is_rejected_even_when_the_variable_exists(

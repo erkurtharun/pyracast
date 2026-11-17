@@ -16,10 +16,10 @@ from pyracast.plants.models import (
 )
 from pyracast.plants.operations import ObservationInput, import_observations
 from pyracast.plants.training import run_calibration
-from tests.test_domain import NOW
-from tests.test_historical_reference_import import source_settings
-from tests.test_plant_operations import make_plant
-from tests.test_plant_training import actual_snapshot_for
+from tests.support.domain import NOW
+from tests.support.historical_reference_import import source_settings
+from tests.support.plant_operations import make_plant
+from tests.support.plant_training import actual_snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

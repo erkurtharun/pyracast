@@ -1,0 +1,25 @@
+version: "1.0"
+linter: qodana-js
+withinDocker: false
+
+# Run as `qodana scan --only-directory web --config qodana-js.yaml`.
+profile:
+  base:
+    name: qodana.recommended
+  inspections:
+    - inspection: VulnerableLibrariesLocal
+      enabled: true
+    - group: "category:JavaScript and TypeScript"
+      enabled: true
+
+include:
+  - name: Eslint
+
+exclude:
+  - name: All
+    paths:
+      - web/src/lib/schema.d.ts
+  - name: DuplicatedCode
+    paths:
+      - web/tests
+      - web/integration

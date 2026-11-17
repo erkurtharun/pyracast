@@ -16,7 +16,7 @@ from pyracast.forecasts.models import (
     ForecastSnapshot,
     RequestAttempt,
 )
-from tests.test_domain import NOW, make_system
+from tests.support.domain import NOW, make_system
 
 
 @pytest.mark.skipif(

@@ -3,7 +3,6 @@ node_modules/
 .next-*/
 playwright-report/
 test-results/
-test-results-*/
 integration-results/
 .env.local
 *.tsbuildinfo

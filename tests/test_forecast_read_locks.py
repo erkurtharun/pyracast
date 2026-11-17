@@ -21,8 +21,8 @@ from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import activate_calibration, revise_plant
 from pyracast.regions.models import Region
-from tests.test_domain import NOW, System
-from tests.test_plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
+from tests.support.domain import NOW, System
+from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 10)

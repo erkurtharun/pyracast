@@ -14,10 +14,10 @@ from pyracast.plants.models import Plant, PlantConfiguration, ProductionObservat
 from pyracast.plants.performance import forecast_performance
 from pyracast.plants.production import production_history
 from pyracast.regions.models import Region
-from tests.test_forecast_performance import publish, selected_factor
-from tests.test_plant_operations import make_plant, snapshot_for
-from tests.test_production_changes import provider
-from tests.test_provisional_measurements import DAY, acquisition
+from tests.support.forecast_performance import publish, selected_factor
+from tests.support.plant_operations import make_plant, snapshot_for
+from tests.support.production_changes import provider
+from tests.support.provisional_measurements import DAY, acquisition
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

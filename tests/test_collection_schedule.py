@@ -1,6 +1,4 @@
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from threading import Barrier
 from typing import cast
@@ -25,33 +23,15 @@ from pyracast.forecasts.models import (
 )
 from pyracast.forecasts.schedule import configure_schedule, get_schedule, schedule_payload
 from pyracast.forecasts.scheduler import enqueue_due
-from pyracast.providers import FixtureProvider, SolcastProvider
+from pyracast.providers import SolcastProvider
 from pyracast.regions.models import AuditEvent, Region
-from tests.test_domain import NOW, FakeAdapter, make_system
-from tests.test_jobs import calculate
-from tests.test_providers import binding_for
+from tests.support.collection_schedule import HistoricalFixture, no_calculation
+from tests.support.domain import NOW, FakeAdapter, make_system
+from tests.support.jobs import calculate
+from tests.support.providers import binding_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 NIGHT = NOW.replace(hour=0)
-
-
-class HistoricalFixture(FixtureProvider):
-    def __init__(self, now: datetime = NOW, action: Callable[[], None] = lambda: None) -> None:
-        self.now = now
-        self.action = action
-        self.days: list[int] = []
-
-    def fetch_history(self, binding: SiteBinding, target_date: date, days: int) -> ProviderData:
-        assert not connection.in_atomic_block
-        self.action()
-        self.days.append(days)
-        return replace(super().fetch_history(binding, target_date, days), collected_at=self.now)
-
-
-def no_calculation(
-    binding: SiteBinding, target_date: date, data: ProviderData
-) -> dict[str, object]:
-    pytest.fail("Estimated actuals must not enter forecast calculation")
 
 
 def test_daily_actuals_request_archives_seven_completed_days_per_immutable_vintage() -> None:

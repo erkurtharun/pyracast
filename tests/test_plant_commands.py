@@ -14,8 +14,8 @@ from pyracast.plants.models import (
     Plant,
     ProductionObservation,
 )
-from tests.test_domain import make_system
-from tests.test_plant_operations import saved_actuals
+from tests.support.domain import make_system
+from tests.support.plant_operations import saved_actuals
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

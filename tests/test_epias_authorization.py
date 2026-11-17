@@ -11,10 +11,10 @@ from pyracast.metering import operations
 from pyracast.metering.jobs import run_epias_job
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection
 from pyracast.plants.models import Plant, PlantEvent
-from tests.test_api import verified_admin
-from tests.test_metering import PROVIDER_PLANT, FixtureClient, connect, day_data
-from tests.test_plant_api import setup_plant
-from tests.test_plant_operations import make_plant
+from tests.support.api import verified_admin
+from tests.support.metering import PROVIDER_PLANT, FixtureClient, connect, day_data
+from tests.support.plant_api import setup_plant
+from tests.support.plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

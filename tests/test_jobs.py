@@ -31,15 +31,10 @@ from pyracast.forecasts.models import (
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.regions.models import AuditEvent, Region
 from pyracast.regions.operations import approve_region, transition_region
-from tests.test_domain import NOW, FakeAdapter, make_system
+from tests.support.domain import NOW, FakeAdapter, make_system
+from tests.support.jobs import calculate
 
 pytestmark = pytest.mark.django_db(transaction=True)
-
-
-def calculate(binding: SiteBinding, target_date: object, data: ProviderData) -> dict[str, object]:
-    assert not connection.in_atomic_block
-    assert data.collected_at is not None
-    return {"energy_kwh_m2": None, "complete": False, "flags": ["incomplete_day"]}
 
 
 def test_duplicate_delivery_publishes_one_immutable_vintage() -> None:

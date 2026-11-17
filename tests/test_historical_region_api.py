@@ -11,8 +11,8 @@ from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import ForecastResult, ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.regions.models import Region
-from tests.test_domain import NOW, System, make_system
-from tests.test_plant_operations import snapshot_for
+from tests.support.domain import NOW, System, make_system
+from tests.support.plant_operations import snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 7)

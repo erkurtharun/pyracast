@@ -7,7 +7,7 @@ from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.plants.operations import create_plant
 from pyracast.regions.operations import approve_region, configure_binding, submit_region
 from pyracast.trash import restore_plant, trash_plant
-from tests.test_domain import NOW, FakeAdapter, make_system
+from tests.support.domain import NOW, FakeAdapter, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
