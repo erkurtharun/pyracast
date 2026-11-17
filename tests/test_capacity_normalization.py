@@ -169,8 +169,16 @@ def test_regional_composition_preserves_primary_normalization_and_each_source_id
     assert payload["intervals"][21]["source_snapshot_ids"] == [primary_id]
     normalization = payload["reference_capacity_normalization"]
     if normalized_primary:
-        assert normalization["source_snapshot_id"] == original.pk
-        assert normalization["source_binding_id"] == system.binding.pk
+        stored = ForecastSnapshot.objects.get(pk=copied_id).capacity_normalization
+        assert stored.source_snapshot_id == original.pk
+        assert stored.source_snapshot.job.binding_id == system.binding.pk
+        assert normalization == {
+            "policy": "authorized-reference-capacity-scale-v1",
+            "source_capacity_kw": 1,
+            "target_capacity_kw": 1000,
+            "factor": 1000,
+            "normalized_at": stored.created_at.isoformat(),
+        }
         assert normalization["target_capacity_kw"] == 1000
         assert normalization["factor"] == 1000
     else:

@@ -16,6 +16,7 @@ from pyracast.forecasts.models import CollectionJob, ForecastSnapshot
 from pyracast.plants.models import (
     CalibrationRun,
     Plant,
+    PlantConfiguration,
     PlantForecast,
     ProductionObservation,
 )
@@ -139,6 +140,26 @@ def test_tenant_scope_and_production_input_validation() -> None:
         "observations": [observation],
     }
     preview = detail + "production/preview/"
+    configuration = PlantConfiguration.objects.get(pk=payload["configuration_id"])
+    other_plant = Plant.objects.create(
+        region=configuration.region, name="Archived PV", deleted_at=timezone.now()
+    )
+    foreign_configuration = PlantConfiguration.objects.create(
+        plant=other_plant,
+        region=configuration.region,
+        binding=configuration.binding,
+        revision=1,
+        dc_capacity_mw=1,
+        created_by=configuration.created_by,
+    )
+    assert (
+        client.post(
+            preview,
+            {**payload, "configuration_id": foreign_configuration.pk},
+            content_type="application/json",
+        ).status_code
+        == 404
+    )
     for change in (
         {"energy": True},
         {"energy": "NaN"},
@@ -164,12 +185,18 @@ def test_tenant_scope_and_production_input_validation() -> None:
     assert not ProductionObservation.objects.exists()
     other = Tenant.objects.create(name="Other")
     user = User.objects.create_user(username="other")
-    Membership.objects.create(tenant=other, user=user)
+    Membership.objects.create(tenant=other, user=user, role=Membership.Role.ADMIN)
     client.force_login(user)
     assert client.get(base).status_code == 403
     assert client.post(preview, payload, content_type="application/json").status_code == 403
     own_scope = f"/api/tenants/{other.pk}/regions/{plant['region_id']}/plants/{plant['id']}/"
     assert client.get(own_scope + "calibrations/").status_code == 404
+    assert (
+        client.post(
+            own_scope + "production/preview/", payload, content_type="application/json"
+        ).status_code
+        == 404
+    )
 
 
 def test_calibration_pending_forecast_and_csrf() -> None:
