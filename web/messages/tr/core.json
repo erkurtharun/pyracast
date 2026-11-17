@@ -41,6 +41,7 @@
         "resendWait": "Yeni bir kod istemeden önce bir dakika bekleyin.",
         "resendLimit": "Bu oturum açma için daha fazla kod gönderilemez. Yeni bir kod almak için tekrar oturum açın.",
         "tooManyAttempts": "Çok fazla deneme yapıldı. Birkaç dakika bekleyip tekrar deneyin veya parolanızı sıfırlayın.",
+        "tooManyRequests": "Çok fazla istek gönderildi. Birkaç dakika bekleyip tekrar deneyin.",
         "codeRequested": "Yeni bir kod istendi.",
         "forgotPassword": "Şifrenizi mi unuttunuz?",
         "passwordChanged": "Parolanız kaydedildi. Yeni parolanızla giriş yapın."

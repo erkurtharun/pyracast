@@ -41,6 +41,7 @@
         "resendWait": "Wait a minute before requesting another code.",
         "resendLimit": "No more codes can be sent for this sign-in. Sign in again to receive a new code.",
         "tooManyAttempts": "Too many attempts. Wait a few minutes and try again, or reset your password.",
+        "tooManyRequests": "Too many requests. Wait a few minutes and try again.",
         "codeRequested": "A new code was requested.",
         "forgotPassword": "Forgot password?",
         "passwordChanged": "Password saved. Sign in with your new password."

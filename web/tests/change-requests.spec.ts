@@ -822,3 +822,26 @@ for (const removal of ["decision", "concurrent"] as const) {
         }
     });
 }
+
+test("the inbox label counts several updates in the plural", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/api/tenants/", (route) =>
+        route.fulfill({
+            json: paged([
+                {
+                    id: 1,
+                    name: "Workspace",
+                    role: "admin",
+                    pending_review_count: 1,
+                    unread_outcome_count: 1,
+                },
+            ]),
+        }),
+    );
+    await page.goto("/app/");
+    await expect(
+        page.getByRole("button", { name: "Inbox, 2 updates", exact: true }),
+    ).toBeVisible();
+});

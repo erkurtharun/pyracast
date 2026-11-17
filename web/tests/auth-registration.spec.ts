@@ -363,6 +363,28 @@ test("an unexplained 429 on sign-in offers a password reset", async ({
     ).toBeVisible();
 });
 
+test("an unexplained 429 on sign-up asks to wait", async ({ page }) => {
+    await mockApi(page, { anonymous: true });
+    await page.route("**/api/auth/browser/v1/auth/signup", (route) =>
+        route.fulfill({ status: 429, json: { status: 429 } }),
+    );
+    await page.goto("/app/");
+    await page
+        .getByRole("button", { name: "Create account", exact: true })
+        .click();
+    await page.getByLabel("Company name").fill("Smart Solar Energy");
+    await page.getByLabel("Email").fill("owner@example.test");
+    await page
+        .getByLabel("Password", { exact: true })
+        .fill("Test-only-cobalt-79!");
+    await page
+        .getByRole("button", { name: "Create company account", exact: true })
+        .click();
+    await expect(page.locator("form").getByRole("alert")).toContainText(
+        "Too many requests. Wait a few minutes and try again.",
+    );
+});
+
 test("requires the second factor before opening the workspace", async ({
     page,
 }) => {

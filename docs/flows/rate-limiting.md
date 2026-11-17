@@ -66,8 +66,8 @@ sequenceDiagram
 
 | Condition | Result |
 |---|---|
-| `login` 20/min per IP, `signup` 5/h per IP (password and social share it), `reset_password` 5/h per IP or 3/h per email, `reset_password_from_key` 10/h per IP, `confirm_email` 1 per min per address on resend or email change, allauth per-user defaults | 429, body `{"status": 429}`, no `Retry-After`; the sign-in form asks the user to wait or reset the password, the verification resend asks to wait a minute, other screens show "Request failed (429). Please try again." |
-| `login_failed` 10 per 10 min per IP or 5 per 10 min per email, or MFA code key; correct password for an unverified address within 3 min of the last code | 400 with allauth code `too_many_login_attempts` (`rate_limited` when enrolling TOTP) |
+| `login` 20/min per IP, `signup` 5/h per IP (password and social share it), `reset_password` 5/h per IP or 3/h per email, `reset_password_from_key` 10/h per IP, `confirm_email` 1 per min per address on resend or email change, allauth per-user defaults | 429, body `{"status": 429}`, no `Retry-After`; the sign-in form asks the user to wait or reset the password, sign-up, social sign-up, code and second-factor submits ask to wait a few minutes, the verification resend asks to wait a minute, other screens show "Request failed (429). Please try again." |
+| `login_failed` 10 per 10 min per IP or 5 per 10 min per email, or MFA code key; correct password for an unverified address within a minute of the last code | 400 with allauth code `too_many_login_attempts` (`rate_limited` when enrolling TOTP) |
 | Cache database error, or `auth_cache` inside a transaction | Exception, HTTP 500 (`ImproperlyConfigured` for the latter) |
 | Unparsable client address, or proxy bypassed while trust is on | 403 `PermissionDenied` |
 | Session lock busy for 5 s | 429 `session_busy`, `Retry-After: 1`, same audit event |

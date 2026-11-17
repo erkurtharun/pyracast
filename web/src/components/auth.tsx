@@ -299,12 +299,15 @@ export function Auth({
                                     payload,
                                 ).catch((error: unknown) => {
                                     if (
-                                        mode === "login" &&
                                         error instanceof AuthResponseError &&
                                         error.status === 429
                                     )
                                         throw new ApiError(
-                                            t("tooManyAttempts"),
+                                            t(
+                                                mode === "login"
+                                                    ? "tooManyAttempts"
+                                                    : "tooManyRequests",
+                                            ),
                                         );
                                     throw error;
                                 });
