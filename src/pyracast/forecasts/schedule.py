@@ -104,7 +104,11 @@ def configure_schedule(
 
 def _next_collection_at(schedule: CollectionSchedule, now: datetime) -> datetime | None:
     binding = schedule.region.approved_binding
-    if binding is None or binding.validated_at is None or not binding_is_current(binding):
+    if (
+        binding is None
+        or binding.validated_at is None
+        or not binding_is_current(binding, schedule.region)
+    ):
         return None
     jobs = CollectionJob.objects.filter(binding=binding)
     timing = effective_forecast_schedule(
