@@ -14,7 +14,7 @@ from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import rotate_secret
 from pyracast.connections.secrets import decrypt_api_key, encrypt_secret
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
-from pyracast.plants.models import Plant, PlantSubmission
+from pyracast.plants.models import Plant, PlantConfiguration, PlantSubmission
 from pyracast.regions.models import AuditEvent, Region
 from tests.test_api import verified_admin
 from tests.test_domain import FakeAdapter, System, make_system
@@ -436,3 +436,72 @@ def test_initial_setup_duplicate_post_does_not_replace_the_first_binding() -> No
     region.refresh_from_db()
     assert region.revision == 1
     assert list(SiteBinding.objects.filter(region=region)) == [binding]
+
+
+def approved_admin_system() -> tuple[System, list[int]]:
+    from pyracast.plants.operations import create_plant
+
+    system = make_system(approved=True)
+    system.account.provider = "solcast"
+    system.account.encrypted_api_key = encrypt_secret("original-fixture-key")
+    system.account.save(update_fields=("provider", "encrypted_api_key"))
+    system.binding.installation_date = date(2020, 1, 1)
+    system.binding.settings_verification_reference = "Verified synthetic site settings"
+    system.binding.save(update_fields=("installation_date", "settings_verification_reference"))
+    create_plant(system.member, system.tenant.pk, system.region.pk, name="Plant", dc_capacity_mw=1)
+    return system, list(PlantConfiguration.objects.order_by("pk").values_list("pk", flat=True))
+
+
+def unchanged_setup_input(system: System, **changes: object) -> dict[str, object]:
+    return setup_input(
+        system,
+        site_id="site",
+        capacity_kw=1,
+        settings_verification_reference="Verified synthetic site settings",
+        **changes,
+    )
+
+
+def assert_setup_kept(system: System, configurations: list[int]) -> None:
+    system.region.refresh_from_db()
+    assert (system.region.revision, system.region.status, system.region.approved_binding_id) == (
+        1,
+        "approved",
+        system.binding.pk,
+    )
+    assert list(SiteBinding.objects.values_list("pk", flat=True)) == [system.binding.pk]
+    assert (
+        list(PlantConfiguration.objects.order_by("pk").values_list("pk", flat=True))
+        == configurations
+    )
+    assert Plant.objects.get().current_configuration_id == configurations[-1]
+    assert not AuditEvent.objects.filter(action="binding_configured", revision=2).exists()
+
+
+def test_identical_setup_save_changes_nothing() -> None:
+    system, configurations = approved_admin_system()
+    client, _ = verified_admin()
+    response = client.post(setup_url(system), unchanged_setup_input(system), follow=True)
+    assert response.status_code == 200
+    assert b"Nothing changed." in response.content
+    assert_setup_kept(system, configurations)
+    system.account.refresh_from_db()
+    assert system.account.credential_revision == 1
+
+
+def test_key_only_setup_save_rotates_key_and_keeps_approval() -> None:
+    system, configurations = approved_admin_system()
+    client, actor = verified_admin()
+    response = client.post(
+        setup_url(system),
+        unchanged_setup_input(system, api_key="replacement-key", confirm_key_rotation=True),
+        follow=True,
+    )
+    assert response.status_code == 200
+    assert b"API key replaced. Validate the connection to resume collection." in response.content
+    assert_setup_kept(system, configurations)
+    system.account.refresh_from_db()
+    assert system.account.credential_revision == 2
+    assert decrypt_api_key(system.account.encrypted_api_key) == "replacement-key"
+    rotated = AuditEvent.objects.get(action="provider_secret_rotated")
+    assert (rotated.actor_id, rotated.provider_account_id) == (actor.pk, system.account.pk)
