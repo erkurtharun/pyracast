@@ -480,10 +480,7 @@ test("a customer manages one plant site through the real API", async ({
         return response.status;
     }, plantUrl);
     expect(childDeleteStatus).toBe(405);
-    await page
-        .getByRole("navigation", { name: "Main navigation" })
-        .getByRole("button", { name: "Plants", exact: true })
-        .click();
+    await page.getByRole("button", { name: "All plants", exact: true }).click();
     await page.getByRole("button", { name: /Browser plant/ }).click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page
