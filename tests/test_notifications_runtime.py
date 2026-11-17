@@ -15,9 +15,8 @@ from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.notifications import runtime
 from pyracast.notifications.models import NotificationDelivery
 from tests.test_notifications import SLOT, ready
-from tests.test_notifications import memory_mail as memory_mail
 
-pytestmark = [pytest.mark.django_db(transaction=True), pytest.mark.usefixtures("memory_mail")]
+pytestmark = pytest.mark.django_db(transaction=True)
 
 
 def test_notification_queue_delivers_idempotently(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,4 +1,3 @@
-from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from io import BytesIO
@@ -13,7 +12,6 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.mail import EmailMessage, EmailMultiAlternatives
 from django.db import IntegrityError, close_old_connections, connection, connections, transaction
 from django.db.migrations.executor import MigrationExecutor
-from django.test import override_settings
 from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
 from rest_framework.test import APIClient
@@ -63,14 +61,6 @@ def attached_sheet(message: EmailMessage) -> Worksheet:
     sheet = load_workbook(BytesIO(content), data_only=True).active
     assert isinstance(sheet, Worksheet)
     return sheet
-
-
-@pytest.fixture(autouse=True)
-def memory_mail() -> Iterator[None]:
-    with override_settings(
-        MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
-    ):
-        yield
 
 
 def configured() -> tuple[System, ReminderSchedule]:

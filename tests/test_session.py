@@ -1,4 +1,3 @@
-from collections.abc import Iterator
 from typing import Any
 
 import pytest
@@ -6,21 +5,13 @@ from allauth.account.models import EmailAddress
 from allauth.mfa.models import Authenticator
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.test import Client, override_settings
+from django.test import Client
 
 from tests.test_api import verified_admin
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 PASSWORD = "test-only-" + "x" * 40
 AUTH = "/api/auth/browser/v1/"
-
-
-@pytest.fixture(autouse=True)
-def local_mail() -> Iterator[None]:
-    with override_settings(
-        MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
-    ):
-        yield
 
 
 def member(*, email: str = "member@example.com", active: bool = True) -> User:

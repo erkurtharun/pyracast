@@ -1,4 +1,3 @@
-from collections.abc import Iterator
 from datetime import timedelta
 
 import pytest
@@ -7,7 +6,6 @@ from django.core import mail
 from django.db import connection
 from django.db.migrations.exceptions import IrreversibleError
 from django.db.migrations.executor import MigrationExecutor
-from django.test import override_settings
 
 from pyracast.accounts.models import Membership
 from pyracast.accounts.operations import remove_workspace_member
@@ -21,14 +19,6 @@ from tests.test_notification_groups import group, member
 from tests.test_notifications import SLOT, configured
 
 pytestmark = pytest.mark.django_db(transaction=True)
-
-
-@pytest.fixture(autouse=True)
-def memory_mail() -> Iterator[None]:
-    with override_settings(
-        MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
-    ):
-        yield
 
 
 def test_sent_history_revokes_an_address_that_another_delivery_pinned_as_external() -> None:

@@ -16,9 +16,8 @@ from pyracast.notifications.scheduler import enqueue_due
 from tests.test_notification_groups import group, member
 from tests.test_notification_transmission import OpeningBackend
 from tests.test_notifications import SLOT, configured
-from tests.test_notifications import memory_mail as memory_mail
 
-pytestmark = [pytest.mark.django_db(transaction=True), pytest.mark.usefixtures("memory_mail")]
+pytestmark = pytest.mark.django_db(transaction=True)
 
 
 def test_external_recipient_removed_after_join_cannot_rejoin_an_old_pending_group() -> None:
