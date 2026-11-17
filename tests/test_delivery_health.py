@@ -205,6 +205,44 @@ def test_long_cooldown_stale_forecasts_and_missed_delivery_are_not_healthy() -> 
     assert report["healthy"] is False
 
 
+PAUSE_CODES = ("recipient_limit_exceeded", "no_recipients", "invalid_recipient")
+
+
+def paused_deliveries(system: System, scheduled_for: datetime = NOW) -> None:
+    schedule, _ = ReminderSchedule.objects.get_or_create(
+        region=system.region, defaults={"enabled": True, "effective_from": NOW}
+    )
+    for index, code in enumerate(PAUSE_CODES):
+        NotificationDelivery.objects.create(
+            schedule=schedule,
+            binding=system.binding,
+            scheduled_for=scheduled_for - timedelta(minutes=index),
+            available_at=NOW,
+            status="skipped",
+            last_error=code,
+            recipients=[],
+        )
+
+
+@pytest.mark.django_db(transaction=True)
+def test_paused_notifications_are_reported_without_turning_health_red() -> None:
+    system = make_system(approved=True)
+    recent_forecast(system)
+    for phase in DispatcherStatus.Phase.values:
+        record_dispatch_phase(phase, NOW)
+    paused_deliveries(system)
+    paused_deliveries(system, NOW - timedelta(days=2))
+    report = delivery_health(NOW, timedelta(minutes=5))
+    assert report["paused_notifications"] == len(PAUSE_CODES)
+    assert report["healthy"] is True
+
+
+@pytest.mark.django_db(transaction=True)
+def test_missed_count_ignores_pause_codes() -> None:
+    paused_deliveries(make_system(approved=True))
+    assert delivery_health(NOW, timedelta(minutes=5))["missed_notifications"] == 0
+
+
 @pytest.mark.django_db
 def test_health_command_emits_json_and_nonzero_for_degraded_work(
     monkeypatch: pytest.MonkeyPatch,

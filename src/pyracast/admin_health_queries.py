@@ -5,7 +5,11 @@ from django.db.models import F, OuterRef, Q, QuerySet, Subquery
 
 from pyracast.forecasts.models import CollectionJob, ForecastSnapshot
 from pyracast.metering.models import EpiasCollectionJob
-from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
+from pyracast.notifications.models import (
+    PAUSED_DELIVERY_ERRORS,
+    NotificationDelivery,
+    ReminderSchedule,
+)
 from pyracast.notifications.operations import effective_recipients, validate_recipient
 from pyracast.regions.models import Region
 
@@ -56,6 +60,10 @@ def notification_deliveries_for_issue(
         )
     if issue == "mail_authentication_failures":
         return deliveries.filter(last_error="mail_authentication_failed", scheduled_for__gte=recent)
+    if issue == "paused_notifications":
+        return deliveries.filter(
+            status="skipped", last_error__in=PAUSED_DELIVERY_ERRORS, scheduled_for__gte=recent
+        )
     return deliveries
 
 

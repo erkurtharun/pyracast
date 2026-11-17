@@ -13,9 +13,14 @@ from django.test import override_settings
 from pyracast.notifications import jobs
 from pyracast.notifications.jobs import LEASE_DURATION, process_notification
 from pyracast.notifications.mail import NotSentError, build_message
-from pyracast.notifications.models import NotificationDelivery
+from pyracast.notifications.models import (
+    NotificationDelivery,
+    NotificationSettings,
+    ReminderSchedule,
+)
 from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.scheduler import MAX_LATENESS
+from pyracast.regions.models import Region
 from tests.test_notifications import SLOT, ready
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -107,9 +112,20 @@ def test_late_smtp_response_resolves_the_original_uncertain_lease(
     assert delivery.transmit_started_at is not None
 
 
-@pytest.mark.parametrize("change", ["authority", "deadline", "deleted", "token"])
+@pytest.mark.parametrize(
+    ("change", "code"),
+    [
+        ("authority", "schedule_or_authority_changed"),
+        ("settings", "cancelled_by_settings_change"),
+        ("limit", "recipient_limit_exceeded"),
+        ("deadline", "delivery_deadline_exceeded"),
+        ("deleted", ""),
+        ("token", ""),
+    ],
+)
 def test_open_connection_does_not_authorize_a_changed_delivery(
     change: str,
+    code: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     delivery = ready()
@@ -121,8 +137,15 @@ def test_open_connection_does_not_authorize_a_changed_delivery(
 
     def change_delivery() -> None:
         if change == "authority":
+            Region.objects.filter(pk=delivery.schedule.region_id).update(status="suspended")
+        elif change == "settings":
             delivery.schedule.enabled = False
             delivery.schedule.save(update_fields=("enabled",))
+        elif change == "limit":
+            NotificationSettings.objects.filter(pk=1).update(max_recipients=1)
+            ReminderSchedule.objects.filter(pk=delivery.schedule_id).update(
+                recipients=[*delivery.recipients, "other@example.com"]
+            )
         elif change == "deadline":
             clock[0] = 2
         elif change == "deleted":
@@ -133,14 +156,9 @@ def test_open_connection_does_not_authorize_a_changed_delivery(
     OpeningBackend.action = change_delivery
     assert not process_notification(delivery.pk, start)
     assert not OpeningBackend.sent
-    if change in {"authority", "deadline"}:
+    if code:
         delivery.refresh_from_db()
-        assert delivery.status == "skipped"
-        assert delivery.last_error == (
-            "schedule_or_authority_changed"
-            if change == "authority"
-            else "delivery_deadline_exceeded"
-        )
+        assert (delivery.status, delivery.last_error) == ("skipped", code)
 
 
 @pytest.mark.parametrize("exhausted", [False, True])

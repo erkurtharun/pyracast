@@ -63,9 +63,14 @@ def normalize_recipients(recipients: list[str]) -> list[str]:
     return normalized
 
 
-def region_recipient_count(region: Region) -> int:
-    schedule = ReminderSchedule.objects.filter(region=region, retired_at__isnull=True).first()
-    return len(effective_recipients(schedule)) if schedule else 0
+def _reminder_settings(schedule: ReminderSchedule) -> tuple[object, ...]:
+    return (
+        schedule.enabled,
+        list(schedule.recipients),
+        schedule.include_workspace_members,
+        list(schedule.times),
+        schedule.language,
+    )
 
 
 def get_reminder_schedule(
@@ -106,9 +111,11 @@ def configure_reminders(
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
-        schedule, _ = ReminderSchedule.objects.get_or_create(
+        schedule, created = ReminderSchedule.objects.get_or_create(
             region=region, retired_at__isnull=True, defaults={"effective_from": now}
         )
+        stored = _reminder_settings(schedule)
+        stored_memberships = dict(schedule.recipient_memberships)
         current_count = len(effective_recipients(schedule))
         disabling_unchanged = (
             not enabled
@@ -153,6 +160,10 @@ def configure_reminders(
         schedule.recipients = addresses
         schedule.times = sorted(times)
         schedule.language = language
+        if not created and _reminder_settings(schedule) == stored:
+            if schedule.recipient_memberships != stored_memberships:
+                schedule.save(update_fields=["recipient_memberships"])
+            return schedule
         schedule.configured_by = actor
         schedule.effective_from = now
         schedule.save()

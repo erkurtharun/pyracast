@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from io import BytesIO
 from threading import Barrier
+from typing import cast
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -19,6 +20,7 @@ from rest_framework.test import APIClient
 
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.accounts.operations import reassign_workspace_admin
+from pyracast.admin_health_queries import notification_deliveries_for_issue
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import ProviderAccount
@@ -28,6 +30,7 @@ from pyracast.forecasts.models import (
     ForecastSnapshot,
     RequestAttempt,
 )
+from pyracast.forecasts.monitoring import delivery_health
 from pyracast.notifications.jobs import (
     LEASE_DURATION,
     pending_notification_ids,
@@ -391,11 +394,13 @@ def test_worker_checks_resource_policy_independently_of_configurer(change: str) 
             daily_quota=0
         )
     delivered = process_notification(delivery.pk, SLOT)
-    assert delivered is (change in {"inactive", "membership"})
+    assert delivered is (change in {"inactive", "membership", "schedule"})
     delivery.refresh_from_db()
     assert delivery.status == ("sent" if delivered else "skipped")
     if change == "recipient":
-        assert delivery.last_error == "missing_recipient"
+        assert delivery.last_error == "invalid_recipient"
+    if change == "disabled":
+        assert delivery.last_error == "cancelled_by_settings_change"
 
 
 @pytest.mark.parametrize("mode", ["safe", "uncertain", "permanent"])
@@ -756,42 +761,175 @@ def test_recipient_limit_reduction_blocks_whole_queued_list_without_truncation()
     ids = enqueue_due(SLOT)
     assert len(ids) == 1
     NotificationSettings.objects.filter(pk=1).update(max_recipients=1)
-    assert not enqueue_due(SLOT + timedelta(days=1))
+    enqueue_due(SLOT + timedelta(days=1))
+    paused = NotificationDelivery.objects.get(scheduled_for=SLOT + timedelta(days=1))
+    assert (paused.status, paused.last_error) == ("skipped", "recipient_limit_exceeded")
+    assert paused.recipients == []
     assert all(not process_notification(delivery_id, SLOT) for delivery_id in ids)
-    assert set(NotificationDelivery.objects.values_list("status", flat=True)) == {"skipped"}
+    assert set(NotificationDelivery.objects.values_list("status", "last_error")) == {
+        ("skipped", "recipient_limit_exceeded")
+    }
     schedule.refresh_from_db()
     assert schedule.recipients == addresses
     assert not mail.outbox
 
 
-def test_recipient_change_cancels_every_old_pending_delivery() -> None:
-    system, _ = configured()
-    configure_reminders(
+def reconfigure(
+    system: System,
+    recipients: list[str],
+    *,
+    times: tuple[str, ...] = ("10:00",),
+    enabled: bool = True,
+    now: datetime = SLOT + timedelta(seconds=1),
+) -> ReminderSchedule:
+    return configure_reminders(
         system.member,
         system.tenant.pk,
         system.region.pk,
         language="en",
-        enabled=True,
-        recipients=["a@example.com", "b@example.com"],
-        times=["10:00"],
-        now=NOW,
+        enabled=enabled,
+        recipients=recipients,
+        times=list(times),
+        now=now,
     )
+
+
+def test_recipient_change_keeps_the_queued_row_for_still_permitted_recipients() -> None:
+    system, _ = configured()
+    reconfigure(system, ["a@example.com", "b@example.com"], now=NOW)
     saved(system)
     ids = enqueue_due(SLOT)
-    configure_reminders(
+    reconfigure(system, ["b@example.com", "c@example.com"])
+    assert process_notification(ids[0], SLOT + timedelta(seconds=2))
+    assert mail.outbox[0].bcc == ["b@example.com"]
+    assert NotificationDelivery.objects.get(pk=ids[0]).recipients == ["b@example.com"]
+
+
+def test_unchanged_resave_keeps_the_queued_email() -> None:
+    system, schedule = configured()
+    saved(system)
+    key = enqueue_due(SLOT)[0]
+    resaved = reconfigure(system, [])
+    assert resaved.pk == schedule.pk
+    assert resaved.effective_from == NOW
+    assert process_notification(key, SLOT + timedelta(seconds=2))
+    assert mail.outbox[0].bcc == ["default@example.com"]
+
+
+def test_unchanged_save_records_a_new_member_pin_and_keeps_a_due_slot() -> None:
+    system, schedule = configured()
+    reconfigure(system, ["joined@example.com"], now=NOW)
+    saved(system)
+    joined = User.objects.create(username="joined", email="joined@example.com")
+    member = Membership.objects.create(user=joined, tenant=system.tenant)
+    resaved = reconfigure(system, ["joined@example.com"])
+    stored = ReminderSchedule.objects.get(pk=schedule.pk)
+    assert (resaved.effective_from, stored.effective_from) == (NOW, NOW)
+    assert stored.recipient_memberships == {"joined@example.com": [member.pk]}
+    (key,) = enqueue_due(SLOT + timedelta(seconds=2))
+    assert process_notification(key, SLOT + timedelta(seconds=3))
+    assert mail.outbox[0].bcc == ["joined@example.com"]
+
+
+def test_retry_row_survives_a_recipient_addition() -> None:
+    system, _ = configured()
+    reconfigure(system, ["a@example.com"], now=NOW)
+    saved(system)
+    key = enqueue_due(SLOT)[0]
+    NotificationDelivery.objects.filter(pk=key).update(status="retry", attempts=1)
+    reconfigure(system, ["a@example.com", "b@example.com"])
+    assert process_notification(key, SLOT + timedelta(seconds=2))
+    assert mail.outbox[0].bcc == ["a@example.com"]
+
+
+@pytest.mark.parametrize(
+    ("change", "code"),
+    [
+        ("limit", "recipient_limit_exceeded"),
+        ("removed", "no_recipients"),
+        ("malformed", "invalid_recipient"),
+        ("invalid", "invalid_recipient"),
+    ],
+)
+def test_queued_delivery_records_recipient_problem_found_by_the_worker(
+    change: str, code: str
+) -> None:
+    system, schedule = configured()
+    reconfigure(system, ["a@example.com", "b@example.com"], now=NOW)
+    saved(system)
+    key = enqueue_due(SLOT)[0]
+    if change == "limit":
+        NotificationSettings.objects.filter(pk=1).update(max_recipients=1)
+    elif change == "removed":
+        reconfigure(system, ["c@example.com"])
+    elif change == "malformed":
+        ReminderSchedule.objects.filter(pk=schedule.pk).update(recipients=[None])
+    else:
+        ReminderSchedule.objects.filter(pk=schedule.pk).update(
+            recipients=["a@example.com", "not-an-address"]
+        )
+    assert not process_notification(key, SLOT + timedelta(seconds=2))
+    delivery = NotificationDelivery.objects.get(pk=key)
+    assert (delivery.status, delivery.last_error) == ("skipped", code)
+    assert delivery_health(SLOT, timedelta(minutes=5))["paused_notifications"] == 1
+    assert set(notification_deliveries_for_issue("paused_notifications", SLOT)) == {delivery}
+    assert not mail.outbox
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"enabled": False},
+        {"recipients": ["b@example.com"]},
+        {"include_workspace_members": True},
+        {"times": ["11:00"]},
+        {"language": "tr"},
+    ],
+)
+def test_single_setting_change_is_stored_with_a_new_effective_date(
+    change: dict[str, object],
+) -> None:
+    system, _ = configured()
+    reconfigure(system, ["a@example.com"], now=NOW)
+    arguments = {
+        "language": "en",
+        "enabled": True,
+        "recipients": ["a@example.com"],
+        "times": ["10:00"],
+        "include_workspace_members": False,
+    } | change
+    later = NOW + timedelta(hours=1)
+    schedule = configure_reminders(
         system.member,
         system.tenant.pk,
         system.region.pk,
-        language="en",
-        enabled=True,
-        recipients=["b@example.com", "c@example.com"],
-        times=["10:00"],
-        now=SLOT + timedelta(seconds=1),
+        enabled=bool(arguments["enabled"]),
+        recipients=cast(list[str], arguments["recipients"]),
+        times=cast(list[str], arguments["times"]),
+        language=str(arguments["language"]),
+        include_workspace_members=bool(arguments["include_workspace_members"]),
+        now=later,
     )
-    assert all(
-        not process_notification(delivery_id, SLOT + timedelta(seconds=2)) for delivery_id in ids
-    )
-    assert set(NotificationDelivery.objects.values_list("status", flat=True)) == {"skipped"}
+    stored = ReminderSchedule.objects.get(pk=schedule.pk)
+    assert stored.effective_from == later
+    for field, value in change.items():
+        assert getattr(stored, field) == value
+
+
+@pytest.mark.parametrize("status", ["pending", "retry"])
+@pytest.mark.parametrize("change", ["time", "disabled"])
+def test_removed_time_cancels_with_settings_change_code(change: str, status: str) -> None:
+    system, _ = configured()
+    saved(system)
+    key = enqueue_due(SLOT)[0]
+    NotificationDelivery.objects.filter(pk=key).update(status=status)
+    if change == "time":
+        reconfigure(system, [], times=("11:00",))
+    else:
+        reconfigure(system, [], enabled=False)
+    assert not process_notification(key, SLOT + timedelta(seconds=2))
+    delivery = NotificationDelivery.objects.get(pk=key)
+    assert (delivery.status, delivery.last_error) == ("skipped", "cancelled_by_settings_change")
     assert not mail.outbox
 
 

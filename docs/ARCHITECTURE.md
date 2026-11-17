@@ -602,7 +602,8 @@ schedules. The configuring user is nullable audit information, not the schedule 
 The default limit is five distinct, case-insensitively compared addresses per plant,
 including automatically included members,
 editable through the MFA-protected admin's **Email reminder settings**. Lowering it
-preserves the schedule but pauses deliveries until its list fits. Membership growth
+preserves the schedule but pauses deliveries until its list fits; each paused time is
+recorded as a skipped delivery with its reason. Membership growth
 above the limit also pauses delivery without truncating the group; reducing an excess
 or disabling the schedule remains possible. Migration `notifications.0008` retains
 the current administrator's legacy schedule when available, otherwise an existing

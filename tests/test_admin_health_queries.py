@@ -150,6 +150,7 @@ def delivery(
         "unavailable_forecasts",
         "partial_forecasts",
         "mail_authentication_failures",
+        "paused_notifications",
     ],
 )
 def test_notification_filters_match_counter_boundaries_and_include_historical_schedule_rows(
@@ -189,6 +190,12 @@ def test_notification_filters_match_counter_boundaries_and_include_historical_sc
             scheduled=RECENT - BEFORE,
             message={"kind": "unavailable", "tomorrow_complete": False},
         ),
+        "over_limit": delivery(schedule, "skipped", error="recipient_limit_exceeded"),
+        "no_recipients": delivery(schedule, "skipped", scheduled=RECENT, error="no_recipients"),
+        "invalid": delivery(schedule, "skipped", error="invalid_recipient"),
+        "old_paused": delivery(
+            schedule, "skipped", scheduled=RECENT - BEFORE, error="no_recipients"
+        ),
     }
     schedule.retired_at = NOW
     schedule.save(update_fields=["retired_at"])
@@ -207,6 +214,7 @@ def test_notification_filters_match_counter_boundaries_and_include_historical_sc
         "unavailable_forecasts": ("missing",),
         "partial_forecasts": ("partial",),
         "mail_authentication_failures": ("auth",),
+        "paused_notifications": ("over_limit", "no_recipients", "invalid"),
     }[issue]
     assert set(
         notification_deliveries_for_issue(issue, NOW)

@@ -12,7 +12,6 @@ from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.notifications.operations import (
     effective_recipients,
     recipient_limit,
-    region_recipient_count,
     validate_recipient,
 )
 from pyracast.notifications.recipients import pin_recipient_memberships
@@ -55,6 +54,20 @@ def enqueue_due(now: datetime) -> list[int]:
     return ids
 
 
+def slot_recipients(schedule: ReminderSchedule, limit: int) -> tuple[list[str], str]:
+    try:
+        recipients = effective_recipients(schedule)
+        for address in recipients:
+            validate_recipient(address)
+    except ValidationError, TypeError:
+        return [], "invalid_recipient"
+    if not recipients:
+        return [], "no_recipients"
+    if len(recipients) > limit:
+        return [], "recipient_limit_exceeded"
+    return recipients, ""
+
+
 def _enqueue_schedule(schedule: ReminderSchedule, now: datetime) -> list[int]:
     ids: list[int] = []
     region, binding = schedule.region, schedule.region.approved_binding
@@ -83,11 +96,6 @@ def _enqueue_schedule(schedule: ReminderSchedule, now: datetime) -> list[int]:
                     or clock not in current.times[: binding.provider_account.daily_quota]
                 ):
                     continue
-                recipients = effective_recipients(current)
-                for address in recipients:
-                    validate_recipient(address)
-                if not recipients or region_recipient_count(locked_region) > limit:
-                    continue
                 existing_ids = list(
                     NotificationDelivery.objects.filter(schedule=current, scheduled_for=slot)
                     .order_by("pk")
@@ -95,6 +103,25 @@ def _enqueue_schedule(schedule: ReminderSchedule, now: datetime) -> list[int]:
                 )
                 if existing_ids:
                     ids.extend(existing_ids)
+                    continue
+                recipients, reason = slot_recipients(current, limit)
+                if reason:
+                    logger.info(
+                        "notification_slot_skipped schedule_id=%s reason=%s", current.pk, reason
+                    )
+                    paused = NotificationDelivery.objects.create(
+                        schedule=current,
+                        scheduled_for=slot,
+                        recipients=[],
+                        recipient_memberships={},
+                        language=current.language,
+                        binding=binding,
+                        preparation_deadline=slot + PREPARATION_GRACE,
+                        available_at=now,
+                        status="skipped",
+                        last_error=reason,
+                    )
+                    ids.append(paused.pk)
                     continue
                 snapshot = (
                     ForecastSnapshot.objects.filter(

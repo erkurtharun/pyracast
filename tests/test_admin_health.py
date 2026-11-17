@@ -18,6 +18,7 @@ COUNTERS = [
     ("failed_notifications", "review", "deliveries"),
     ("missed_notifications", "review", "deliveries"),
     ("mail_authentication_failures", "review", "deliveries"),
+    ("paused_notifications", "review", "deliveries"),
     ("unavailable_forecasts", "review", "deliveries"),
     ("partial_forecasts", "review", "deliveries"),
     ("overdue_metering", "action", "metering"),
