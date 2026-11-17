@@ -57,7 +57,7 @@ sequenceDiagram
 
 ## Authorization
 
-- The adapter authenticates nothing. The triggering view and allauth flow enforce CSRF, session, reauthentication and rate limits: project `reset_password` 5/h/ip and 3/h/key, `confirm_email` 1/1m/key; allauth default `reauthenticate` 10/m/user for the reauthentication code.
+- The adapter authenticates nothing. The triggering view and allauth flow enforce CSRF, session, reauthentication and rate limits: project `reset_password` 5/h/ip and 3/h/key, `confirm_email` 1/1m/key and 6/h/key; allauth default `reauthenticate` 10/m/user for the reauthentication code.
 - The recipient is chosen by the flow: the primary address for notifications, the old address for `email_changed`, the typed address for verification codes and notices, and for reauthentication codes one of the user's own verified addresses (allauth input validation).
 - Anti-enumeration is allauth policy: unknown or registered addresses get a notice mail and the same HTTP answer as a real account. Resend sends no notices. No database constraint is involved.
 - Deployment check `accounts.E001` (`pyracast.accounts.checks`) refuses production without SMTP host or full Gmail credentials (with sender equal to `DEFAULT_FROM_EMAIL`) and a non-localhost sender.

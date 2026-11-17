@@ -5,8 +5,8 @@ from allauth.account import app_settings as account_settings
 from allauth.account.adapter import DefaultAccountAdapter
 from allauth.account.models import EmailAddress
 from allauth.core.exceptions import ImmediateHttpResponse
+from allauth.core.internal.ratelimit import RateLimitUsage
 from allauth.headless.internal.restkit.response import ErrorResponse
-from allauth.mfa.models import Authenticator
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -17,7 +17,9 @@ from django.template.loader import render_to_string
 from django.utils import translation
 from django.utils.translation import gettext_lazy
 
+from pyracast.accounts.audit import record_security_event
 from pyracast.accounts.language import user_language
+from pyracast.accounts.login_limits import reserve_address_failure, reserve_client_failure
 from pyracast.accounts.security import normalize_client_ip
 from pyracast.mail_delivery import NotSentError
 
@@ -30,6 +32,9 @@ LOGIN_LIMITED_MESSAGE = gettext_lazy(
 
 
 class AccountAdapter(DefaultAccountAdapter):
+    _client_failure: RateLimitUsage | None = None
+    _login_failed_rl_usage: RateLimitUsage | None = None
+
     def validation_error(self, code: str, *args: Any) -> ValidationError:
         # allauth also answers a sign-in within the confirm_email window with this code.
         if code == "too_many_login_attempts":
@@ -64,14 +69,24 @@ class AccountAdapter(DefaultAccountAdapter):
             )
         return message
 
+    def pre_authenticate(self, request: HttpRequest, **credentials: Any) -> None:
+        # Replaces allauth's consume of `login_failed`, which keeps the 10-minute hit when the
+        # daily rate refuses; allauth's success path rolls `_login_failed_rl_usage` back.
+        self._client_failure = reserve_client_failure(request)
+        if self._client_failure is None:
+            record_security_event("login_locked", request=request)
+            raise self.validation_error("too_many_login_attempts")
+        key = self._get_login_attempts_cache_key(request, **credentials)
+        self._login_failed_rl_usage = reserve_address_failure(request, key)
+        if self._login_failed_rl_usage is None:
+            self._client_failure.rollback()
+            record_security_event("login_locked", request=request)
+            raise self.validation_error("too_many_login_attempts")
+
     def authenticate(self, request: HttpRequest, **credentials: Any) -> User | None:
         user = cast(User | None, super().authenticate(request, **credentials))
-        if (
-            user is not None
-            and (user.is_staff or user.is_superuser)
-            and not Authenticator.objects.filter(user=user, type=Authenticator.Type.TOTP).exists()
-        ):
-            return None
+        if user is not None and self._client_failure is not None:
+            self._client_failure.rollback()
         return user
 
     def get_client_ip(self, request: HttpRequest) -> str:
