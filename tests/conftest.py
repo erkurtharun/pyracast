@@ -1,8 +1,15 @@
+import os
 from collections.abc import Iterator
 
 import pytest
 from django.db.backends.base.base import NO_DB_ALIAS, BaseDatabaseWrapper
 from django.db.backends.signals import connection_created
+from hypothesis import settings
+
+# The gate must be reproducible across runs and workers; `explore` is for local searches.
+settings.register_profile("gate", derandomize=True, deadline=None, database=None)
+settings.register_profile("explore", max_examples=2000, deadline=None)
+settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "gate"))
 
 
 @pytest.fixture(name="django_db_modify_db_settings", scope="session")

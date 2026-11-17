@@ -1,11 +1,86 @@
 from dataclasses import FrozenInstanceError
 from datetime import UTC, date, datetime, time, timedelta, tzinfo
+from hashlib import sha256
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pytest
-from astral import Observer
+from astral import Observer, refraction_at_zenith
+from astral.sun import zenith
 
+from pyracast.irradiance import local_day_bounds
 from pyracast.solar import DAYLIGHT_POLICY, daylight_window
+
+# Astral's sunrise convention: upper solar limb on the sea-level horizon, with refraction.
+HORIZON_ZENITH = 90 + 32 / 120 + refraction_at_zenith(90 + 32 / 120)
+TURKEY_DIGESTS = {
+    (36.0, 26.0): "67f510b333291704130acdcc38d358ade5867cbbe91e3304c24addebf1fbbb67",
+    (42.0, 44.0): "fda713d08caed8622cdf6429e14802c3b559d7b7e6bc23e97c82384a30f252ba",
+    (41.0082, 28.9784): "d251c42f6971c372fb7aba9aa75a39548995e89e95ae2d319d06fc99284bdf80",
+    (39.9334, 32.8597): "aee470bdb6505d00e3c661cd138fb5fd2bdf266e95c942c9bc70b25f2ffc5c73",
+    (37.0, 35.3213): "240667890325062198f1c658969e3107e872a5bed11f04b6fcf23ef33cc1297f",
+    (38.4237, 44.0): "594d06f1a2f7f13fe96fba7d04637342c0396947328299d10944caa63f102b21",
+}
+
+
+def sun_is_up(observer: Observer, moment: datetime) -> bool:
+    return zenith(observer, moment, with_refraction=False) < HORIZON_ZENITH
+
+
+def horizon_crossings(
+    observer: Observer, start: datetime, end: datetime, step: timedelta = timedelta(minutes=2)
+) -> list[datetime]:
+    crossings = []
+    left, up = start, sun_is_up(observer, start)
+    while left < end:
+        right = min(left + step, end)
+        if sun_is_up(observer, right) != up:
+            low, high = left, right
+            while high - low > timedelta(seconds=1):
+                middle = low + (high - low) / 2
+                low, high = (middle, high) if sun_is_up(observer, middle) == up else (low, middle)
+            crossings.append(high)
+            up = not up
+        left = right
+    return [moment for moment in crossings if start < moment < end]
+
+
+@pytest.mark.parametrize(("latitude", "longitude"), list(TURKEY_DIGESTS))
+def test_turkey_grid_daylight_is_bit_identical(latitude: float, longitude: float) -> None:
+    digest = sha256()
+    day = date(2026, 1, 1)
+    while day.year == 2026:
+        result = daylight_window(day, "Europe/Istanbul", latitude, longitude)
+        digest.update(
+            repr((day, result.windows, result.sunrise, result.sunset, result.status)).encode()
+        )
+        day += timedelta(days=1)
+    assert digest.hexdigest() == TURKEY_DIGESTS[latitude, longitude]
+
+
+@pytest.mark.parametrize(
+    ("day", "zone", "latitude", "longitude"),
+    [
+        (date(2026, 5, 8), "America/New_York", 40.7128, -74.006),
+        (date(2026, 8, 10), "America/New_York", 40.7128, -74.006),
+        (date(2026, 5, 17), "Asia/Kolkata", 28.6, 77.2),
+        (date(2026, 5, 14), "Europe/Oslo", 69.65, 18.96),
+    ],
+)
+def test_every_horizon_crossing_is_found(
+    day: date, zone: str, latitude: float, longitude: float
+) -> None:
+    start, end = local_day_bounds(day, zone)
+    result = daylight_window(day, zone, latitude, longitude)
+    crossings = horizon_crossings(Observer(latitude, longitude, elevation=0.0), start, end)
+    boundaries = sorted(
+        moment for window in result.windows for moment in window if moment not in (start, end)
+    )
+    assert result.status == "normal"
+    assert len(result.windows) == 1
+    assert len(boundaries) == len(crossings) == 2
+    for boundary, crossing in zip(boundaries, crossings, strict=True):
+        assert abs((boundary - crossing).total_seconds()) < 60
+    assert result.windows == ((result.sunrise, result.sunset),)
 
 
 def test_published_observatory_reference_and_immutable_policy() -> None:
