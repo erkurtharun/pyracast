@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 import requests
 from allauth.account.models import EmailAddress
+from allauth.core.internal import ratelimit
 from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
 from allauth.mfa.totp.internal import auth as totp_auth
 from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
@@ -31,6 +32,7 @@ from tests.test_social_accounts import CALLBACK, PROVIDERS, begin, complete
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 AUTH = "/api/auth/browser/v1/"
 FIREFOX = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:139.0) Gecko/20100101 Firefox/139.0"
+HOSTILE_AGENT = f'{FIREFOX} <script>alert("agent")</script>\r\nX-Injected: agent'
 CODE = re.compile(r"^\s*([A-Z0-9]{4}-[A-Z0-9]{4}|[0-9]{6})\s*$", re.MULTILINE)
 OTHER = {"en": "tr", "tr": "en"}
 CODE_COPY = {
@@ -214,7 +216,13 @@ def language(request: pytest.FixtureRequest) -> str:
 
 
 @pytest.fixture
-def social_providers(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def social_providers(monkeypatch: pytest.MonkeyPatch) -> Iterator[dict[str, Any]]:
+    profile: dict[str, Any] = {
+        "sub": "google-identity",
+        "email": "solar@gmail.com",
+        "email_verified": True,
+    }
+
     def request(
         self: requests.Session, method: str, url: str, *args: Any, **kwargs: Any
     ) -> requests.Response:
@@ -224,7 +232,7 @@ def social_providers(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         response._content = json.dumps(
             {"access_token": "test-access-token", "token_type": "Bearer", "expires_in": 3600}
             if url.endswith("/token")
-            else {"sub": "google-identity", "email": "solar@gmail.com", "email_verified": True}
+            else profile
         ).encode()
         return response
 
@@ -234,11 +242,24 @@ def social_providers(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         HEADLESS_FRONTEND_URLS=settings.HEADLESS_FRONTEND_URLS
         | {"socialaccount_login_error": CALLBACK},
     ):
-        yield
+        yield profile
 
 
-def browser(language: str) -> Client:
-    return Client(enforce_csrf_checks=True, HTTP_USER_AGENT=FIREFOX, HTTP_ACCEPT_LANGUAGE=language)
+def one_minute_later(monkeypatch: pytest.MonkeyPatch) -> None:
+    # confirm_email allows one mail per address and minute; only the limiter's clock moves.
+    later = time.time() + 61
+    monkeypatch.setattr(
+        ratelimit,
+        "time",
+        SimpleNamespace(time=lambda: later, monotonic=time.monotonic, sleep=time.sleep),
+    )
+
+
+def browser(language: str | None = None) -> Client:
+    headers = {"User-Agent": HOSTILE_AGENT}
+    if language is not None:
+        headers["Accept-Language"] = language
+    return Client(enforce_csrf_checks=True, headers=headers)
 
 
 def account(language: str) -> User:
@@ -247,8 +268,8 @@ def account(language: str) -> User:
     return user
 
 
-def signed_in(user: User, browser_language: str, *, reauthenticated: bool = False) -> Client:
-    client = browser(browser_language)
+def signed_in(user: User, *, reauthenticated: bool = False) -> Client:
+    client = browser()
     assert (
         submit(client, "auth/login", {"email": user.email, "password": PASSWORD}).status_code == 200
     )
@@ -262,7 +283,7 @@ def two_factor_account(language: str) -> tuple[Client, User]:
     user = account(language)
     TOTP.activate(user, generate_totp_secret())
     first, second, *_ = RecoveryCodes.activate(user).generate_codes()
-    client = browser(OTHER[language])
+    client = browser()
     assert (
         submit(client, "auth/login", {"email": user.email, "password": PASSWORD}).status_code == 401
     )
@@ -272,9 +293,9 @@ def two_factor_account(language: str) -> tuple[Client, User]:
     return client, user
 
 
-def delete(client: Client, path: str, data: dict[str, str] | None = None) -> Any:
+def call(client: Client, method: str, path: str, data: dict[str, Any] | None = None) -> Any:
     token = client.get("/api/session/").json()["csrf_token"]
-    return client.delete(
+    return getattr(client, method)(
         AUTH + path, data or {}, content_type="application/json", HTTP_X_CSRFTOKEN=token
     )
 
@@ -346,6 +367,8 @@ def assert_security_details(
         assert any(time in content for time in times)
         assert copy["device"] in content
         assert FIREFOX not in content
+        assert "<script" not in content
+        assert "X-Injected" not in content
         assert copy["ip"] in content
         assert copy["warning"] in content
         assert "https://testserver/app/" in content
@@ -370,6 +393,50 @@ def test_signup_mails_the_verification_code_in_the_request_language(language: st
         language=language,
         minutes=10,
     )
+
+
+def test_unverified_sign_in_mails_a_new_code_in_the_stored_language(
+    language: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert signup(browser(language)).status_code == 401
+    mail.outbox.clear()
+    one_minute_later(monkeypatch)
+    credentials = {"email": "owner@example.com", "password": PASSWORD}
+
+    response = submit(browser(OTHER[language]), "auth/login", credentials)
+
+    assert response.status_code == 401
+    assert {"id": "verify_email", "is_pending": True} in response.json()["data"]["flows"]
+    assert_code_mail(
+        only_mail(),
+        prefix="account/email/email_confirmation_signup",
+        to="owner@example.com",
+        language=language,
+        minutes=10,
+    )
+
+
+def test_verification_resend_mails_a_new_code_in_the_stored_language(
+    language: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = browser(language)
+    assert signup(client).status_code == 401
+    first = mailed_code()
+    one_minute_later(monkeypatch)
+    client.defaults["HTTP_ACCEPT_LANGUAGE"] = OTHER[language]
+
+    response = submit(client, "auth/email/verify/resend", {})
+
+    assert response.status_code == 200
+    message = only_mail()
+    assert_code_mail(
+        message,
+        prefix="account/email/email_confirmation_signup",
+        to="owner@example.com",
+        language=language,
+        minutes=10,
+    )
+    assert first not in str(message.body)
 
 
 def test_signup_with_a_taken_address_notifies_the_owner_in_their_language(language: str) -> None:
@@ -439,7 +506,7 @@ def test_password_reset_completion_sends_a_security_notice(language: str) -> Non
 
 def test_password_change_sends_a_security_notice(language: str) -> None:
     user = account(language)
-    client = signed_in(user, OTHER[language])
+    client = signed_in(user)
     since = datetime.now(UTC)
 
     response = submit(
@@ -460,7 +527,7 @@ def test_password_set_sends_a_security_notice(language: str) -> None:
     user = account(language)
     user.set_unusable_password()
     user.save(update_fields=["password"])
-    client = browser(OTHER[language])
+    client = browser()
     client.force_login(user)
     request = {"email": user.email}
     assert submit(client, "auth/reauthenticate/code/request", request).status_code == 200
@@ -476,9 +543,9 @@ def test_password_set_sends_a_security_notice(language: str) -> None:
     assert_security_details(message, language=language, since=since)
 
 
-def test_reauthentication_code_follows_the_account_language(language: str) -> None:
+def test_reauthentication_code_is_mailed_in_the_stored_language(language: str) -> None:
     user = account(language)
-    client = signed_in(user, OTHER[language])
+    client = signed_in(user)
 
     response = submit(client, "auth/reauthenticate/code/request", {"email": user.email})
 
@@ -492,9 +559,23 @@ def test_reauthentication_code_follows_the_account_language(language: str) -> No
     )
 
 
+def test_reauthentication_code_resend_is_disabled_and_mails_nothing() -> None:
+    user = member()
+    client = signed_in(user)
+    assert (
+        submit(client, "auth/reauthenticate/code/request", {"email": user.email}).status_code == 200
+    )
+    mail.outbox.clear()
+
+    response = submit(client, "auth/reauthenticate/code/resend", {})
+
+    assert response.status_code == 409
+    assert mail.outbox == []
+
+
 def test_email_change_mails_the_code_to_the_new_address(language: str) -> None:
     user = account(language)
-    client = signed_in(user, OTHER[language], reauthenticated=True)
+    client = signed_in(user, reauthenticated=True)
 
     response = submit(client, "account/email", {"email": "new@example.com"})
 
@@ -508,10 +589,74 @@ def test_email_change_mails_the_code_to_the_new_address(language: str) -> None:
     )
 
 
+def test_put_resends_the_pending_change_code_to_the_new_address(
+    language: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = account(language)
+    client = signed_in(user, reauthenticated=True)
+    assert submit(client, "account/email", {"email": "new@example.com"}).status_code == 200
+    first = mailed_code()
+    one_minute_later(monkeypatch)
+
+    response = call(client, "put", "account/email", {"email": "new@example.com"})
+
+    assert response.status_code == 200
+    message = only_mail()
+    assert_code_mail(
+        message,
+        prefix="account/email/email_confirmation",
+        to="new@example.com",
+        language=language,
+        minutes=10,
+    )
+    assert first not in str(message.body)
+
+
+def test_put_mails_a_code_to_a_stored_unverified_address(language: str) -> None:
+    user = account(language)
+    EmailAddress.objects.create(user=user, email="pending@example.com")
+    client = signed_in(user)
+
+    response = call(client, "put", "account/email", {"email": "pending@example.com"})
+
+    assert response.status_code == 200
+    assert_code_mail(
+        only_mail(),
+        prefix="account/email/email_confirmation",
+        to="pending@example.com",
+        language=language,
+        minutes=10,
+    )
+
+
+def test_primary_address_change_notifies_the_previous_primary_address(language: str) -> None:
+    user = account(language)
+    old = user.email
+    EmailAddress.objects.create(user=user, email="second@example.com", verified=True)
+    client = signed_in(user, reauthenticated=True)
+    since = datetime.now(UTC)
+
+    response = call(
+        client, "patch", "account/email", {"email": "second@example.com", "primary": True}
+    )
+
+    assert response.status_code == 200
+    message = only_mail()
+    assert_notice(
+        message,
+        prefix="account/email/email_changed",
+        to=old,
+        language=language,
+        from_email=old,
+        to_email="second@example.com",
+    )
+    assert_security_details(message, language=language, since=since)
+
+
 def test_email_change_notifies_the_old_address(language: str) -> None:
     user = account(language)
     old = user.email
-    client = signed_in(user, OTHER[language], reauthenticated=True)
+    client = signed_in(user, reauthenticated=True)
     assert submit(client, "account/email", {"email": "new@example.com"}).status_code == 200
     code = mailed_code()
     since = datetime.now(UTC)
@@ -534,10 +679,10 @@ def test_email_change_notifies_the_old_address(language: str) -> None:
 def test_removing_an_address_notifies_the_primary_address(language: str) -> None:
     user = account(language)
     EmailAddress.objects.create(user=user, email="second@example.com", verified=True)
-    client = signed_in(user, OTHER[language], reauthenticated=True)
+    client = signed_in(user, reauthenticated=True)
     since = datetime.now(UTC)
 
-    response = delete(client, "account/email", {"email": "second@example.com"})
+    response = call(client, "delete", "account/email", {"email": "second@example.com"})
 
     assert response.status_code == 200
     message = only_mail()
@@ -555,7 +700,7 @@ def test_totp_activation_sends_a_security_notice(
     language: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     user = account(language)
-    client = signed_in(user, OTHER[language], reauthenticated=True)
+    client = signed_in(user, reauthenticated=True)
     setup = client.get(AUTH + "account/authenticators/totp")
     assert setup.status_code == 404
     now = time.time()
@@ -576,7 +721,7 @@ def test_totp_deactivation_sends_a_security_notice(language: str) -> None:
     client, user = two_factor_account(language)
     since = datetime.now(UTC)
 
-    response = delete(client, "account/authenticators/totp")
+    response = call(client, "delete", "account/authenticators/totp")
 
     assert response.status_code == 200
     message = only_mail()
@@ -601,7 +746,7 @@ def test_recovery_code_regeneration_sends_a_security_notice(language: str) -> No
 @pytest.mark.usefixtures("social_providers")
 def test_provider_connect_sends_a_security_notice(language: str) -> None:
     user = account(language)
-    client = signed_in(user, OTHER[language], reauthenticated=True)
+    client = signed_in(user, reauthenticated=True)
     since = datetime.now(UTC)
 
     complete(client, begin(client, process="connect"))
@@ -621,11 +766,11 @@ def test_provider_connect_sends_a_security_notice(language: str) -> None:
 def test_provider_disconnect_sends_a_security_notice(language: str) -> None:
     user = account(language)
     linked = SocialAccount.objects.create(user=user, provider="google", uid="google-identity")
-    client = signed_in(user, OTHER[language], reauthenticated=True)
+    client = signed_in(user, reauthenticated=True)
     since = datetime.now(UTC)
 
-    response = delete(
-        client, "account/providers", {"provider": linked.provider, "account": linked.uid}
+    response = call(
+        client, "delete", "account/providers", {"provider": linked.provider, "account": linked.uid}
     )
 
     assert response.status_code == 200
@@ -638,6 +783,51 @@ def test_provider_disconnect_sends_a_security_notice(language: str) -> None:
         provider="Google",
     )
     assert_security_details(message, language=language, since=since)
+
+
+def test_provider_signup_with_an_unverified_address_mails_the_code(
+    language: str, social_providers: dict[str, Any]
+) -> None:
+    social_providers["email_verified"] = False
+    client = browser(language)
+    complete(client, begin(client))
+
+    response = submit(
+        client, "auth/provider/signup", {"email": "solar@gmail.com", "company_name": "Social Solar"}
+    )
+
+    assert response.status_code == 401
+    assert_code_mail(
+        only_mail(),
+        prefix="account/email/email_confirmation_signup",
+        to="solar@gmail.com",
+        language=language,
+        minutes=10,
+    )
+
+
+def test_provider_signup_with_a_registered_address_notifies_the_owner_in_their_language(
+    language: str, social_providers: dict[str, Any]
+) -> None:
+    user = account(language)
+    social_providers["email"] = user.email
+    client = browser(OTHER[language])
+    complete(client, begin(client))
+
+    response = submit(
+        client, "auth/provider/signup", {"email": user.email, "company_name": "Other"}
+    )
+
+    assert response.status_code == 401
+    message = only_mail()
+    prefix = "account/email/account_already_exists"
+    assert_notice(message, prefix=prefix, to=user.email, language=language, email=user.email)
+    assert_action(
+        message,
+        prefix=prefix,
+        language=language,
+        url=settings.HEADLESS_FRONTEND_URLS["account_reset_password"],
+    )
 
 
 def test_email_verified_notice_without_a_trigger_renders_the_product_copy() -> None:
@@ -668,6 +858,7 @@ def test_email_verified_notice_without_a_trigger_renders_the_product_copy() -> N
     ("user_agent", "label"),
     [
         (FIREFOX, "Firefox on Windows"),
+        (HOSTILE_AGENT, "Firefox on Windows"),
         (
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/137.0 Safari/537.36",
             "Chrome on Linux",
