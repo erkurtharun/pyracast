@@ -78,7 +78,7 @@ sequenceDiagram
 ## Rules and invariants
 
 - Window: 300 s from the latest `reauthenticated` record, not extended by use. Session idle (30 min) and age (12 h) limits still apply; logout drops the records with the session.
-- Email code: 3 minutes (`LOGIN_BY_CODE_TIMEOUT` default), 3 attempts (the third wrong code ends the state), no resends (`LOGIN_BY_CODE_SUPPORTS_RESEND` unset). `AccountAdapter.send_mail` defers to `transaction.on_commit`, which runs at once because no request transaction is open; no queue.
+- Email code: 3 minutes (`ACCOUNT_LOGIN_BY_CODE_TIMEOUT`), 3 attempts (the third wrong code ends the state), no resends (`LOGIN_BY_CODE_SUPPORTS_RESEND` unset). `AccountAdapter.send_mail` defers to `transaction.on_commit`, which runs at once because no request transaction is open; no queue.
 - Limits stack: a password check also consumes `login_failed` (10/10m per IP, 5/10m per key); MFA proof consumes `login_failed` under `mfa-auth-user-<pk>`; `2fa/reauthenticate` and `code/confirm` have no `reauthenticate` decorator.
 - Lock order: requests of one session serialize on an advisory lock (`session_lock` middleware) before `mfa_views` takes the `auth_user` row lock.
 - TOTP activation never replays: after proof the form returns to enrolment and a fresh code must be entered; showing the new recovery codes then needs a separate MFA proof. Other operations get exactly one replay.

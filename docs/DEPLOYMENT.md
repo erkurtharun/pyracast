@@ -219,9 +219,9 @@ uv run --locked python deploy/authorize_gmail.py --sender info@pyracast.app
 
 Approve send access as `info@pyracast.app` in the browser. The helper uses a random
 loopback port, state and PKCE; it requests only `gmail.send` with offline access.
-It atomically adds the Gmail credentials/backend/sender to `secrets/runtime.json`
-while preserving the existing application keys. It does not send mail or upload
-secrets. Use `--no-browser` for a manually opened authorization URL, or `--replace`
+It sends one check mail from the sender to itself and only then atomically adds the
+Gmail credentials/backend/sender to `secrets/runtime.json`, preserving the existing
+application keys. It does not upload secrets. Use `--no-browser` for a manually opened authorization URL, or `--replace`
 when deliberately replacing existing Gmail credentials. Do not print or paste the
 client JSON or refresh token. An external application left in **Testing** expires
 its Gmail refresh token after seven days; it is unsuitable for unattended delivery.
@@ -343,8 +343,14 @@ docker compose --env-file deploy/release.env -f deploy/compose.yaml exec api \
 ```
 
 Enroll the private authenticator URI immediately; do not put it in logs or tickets.
-Open the HTTPS site and test signup, verification mail, login, MFA and one authorized
-plant. Check the Cloud Monitoring notification address and confirm a test alert.
+Run `pyracast check_mail --send-to YOUR_ADDRESS` in the `api` container to send one
+reminder-shaped test mail; without `--send-to` it only opens the transport, as the
+release does after each install (a failure is a warning in the release log). Exit
+codes: 0 accepted, 1 invalid `--send-to` address, 2 configuration invalid, 3 credentials
+rejected, 4 Gmail authorization revoked (run `authorize_gmail.py --replace`), 5 sender
+forbidden, 6 message rejected, 7 rate limited, 8 not sent, 9 outcome uncertain,
+10 preparation failed. Open the HTTPS site and test signup, verification mail,
+login, MFA and one authorized plant. Check the Cloud Monitoring notification address and confirm a test alert.
 Test an actual provider collection and mail acceptance separately; synthetic CI
 fixtures do not establish provider access or inbox delivery.
 
