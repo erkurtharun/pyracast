@@ -69,7 +69,7 @@ sequenceDiagram
 | Missing or wrong CSRF token | 403 |
 | Wrong password, unknown or ambiguous email, staff without TOTP | 400 `email_password_mismatch` on `password`, identical in every case |
 | Password over 1024 characters | 400 `max_length` on `password`, rejected before hashing |
-| `login_failed` limit (10 per 10 min per IP, 5 per address), or an unverified address mailed a code under 3 minutes ago (`confirm_email`) | 400 `too_many_login_attempts` |
+| `login_failed` limit (10 per 10 min per IP, 5 per address), or an unverified address mailed a code under a minute ago (`confirm_email`) | 400 `too_many_login_attempts`; `AccountAdapter.validation_error` words it to cover both causes |
 | `login` limit (20 per minute per IP) or session lock held for 5 s | 429 (`session_busy`, `Retry-After: 1` for the lock); both log `authentication_request_throttled` |
 | POST login while signed in | 409, after the credentials were validated |
 | Inactive user with correct password | 401 without errors; screen shows `unableSignIn` |

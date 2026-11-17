@@ -118,6 +118,7 @@ curl --silent --ssl-revoke-best-effort --output /dev/null https://localhost:1844
 headers=$("${secure_curl[@]}" --head https://localhost:18443/)
 [[ ${headers,,} == *'strict-transport-security: max-age=31536000'* ]]
 [[ ${headers,,} == *'x-content-type-options: nosniff'* ]]
+[[ ${headers,,} == *'referrer-policy: same-origin'* ]]
 [[ $(curl --silent --show-error --output /dev/null --write-out '%{redirect_url}' \
   http://localhost:18080/) == https://localhost:18443/ ]]
 [[ $(head -c 8388609 /dev/zero | "${tls_curl[@]}" \

@@ -247,6 +247,44 @@ test("search discovery contains only public canonical pages", async ({
     }
 });
 
+test("discovery files are served without page headers", async ({ request }) => {
+    for (const path of [
+        "/sitemap.xml",
+        "/robots.txt",
+        "/icon.svg",
+        "/opengraph-image",
+        "/tr/opengraph-image",
+        "/identity/google.png",
+    ]) {
+        const response = await request.get(path);
+        expect(response.status(), path).toBe(200);
+        const headers = response.headers();
+        expect(headers["x-robots-tag"], path).toBeUndefined();
+        expect(headers["content-security-policy"], path).toBeUndefined();
+        expect(headers["cache-control"], path).not.toBe("private, no-store");
+    }
+});
+
+test("an unknown path answers a localized not-found page", async ({ page }) => {
+    const response = await page.goto("/tr/foo/");
+    expect(response?.status()).toBe(404);
+    expect(response?.headers()["x-robots-tag"]).toBe("noindex, nofollow");
+    await expect(page.locator("h1")).toHaveText("Page not found");
+    await expect(
+        page.getByRole("heading", { name: "Sayfa bulunamadı", exact: true }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("link", { name: "Go to the homepage", exact: true }),
+    ).toHaveAttribute("href", "/");
+    await expect(
+        page.getByRole("link", { name: "Ana sayfaya git", exact: true }),
+    ).toHaveAttribute("href", "/tr/");
+    await expect(page.locator('meta[name="robots"]').first()).toHaveAttribute(
+        "content",
+        /noindex/,
+    );
+});
+
 test("previous account links retain their parameters on the private route", async ({
     request,
 }) => {

@@ -1,10 +1,9 @@
 import type { MetadataRoute } from "next";
 import { languages } from "@/i18n/language";
-import { publicPath, siteOrigin, type PublicPage } from "@/lib/public-metadata";
+import { publicPages, publicPath, siteOrigin } from "@/lib/public-metadata";
 
 export default function sitemap(): MetadataRoute.Sitemap {
-    const pages: PublicPage[] = ["home", "privacy", "terms"];
-    return pages.flatMap((page) =>
+    return publicPages.flatMap((page) =>
         languages.map((language) => ({
             url: `${siteOrigin}${publicPath(language, page)}`,
             alternates: {

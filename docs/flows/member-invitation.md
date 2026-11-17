@@ -82,7 +82,7 @@ sequenceDiagram
 - Lock order: tenant row, then invitation row (revoke). The tenant lock serializes issuance per tenant, so the rate-limit count is race-free. Only the SHA-256 digest is stored; the plaintext token exists only in the mail, in a URL fragment. Reissue first expires every unaccepted, unexpired row for the same lower-cased address.
 - Expiry is the revocation mechanism: reissue, member removal and administrator transfer set `expires_at` to now, cancel to `min(expires_at, now)`. No code path deletes rows.
 - The mail runs in `transaction.on_commit`, so a rolled-back invitation sends nothing. `delivery_status` is `pending` until the callback ends, then `accepted` (the backend took the message, not the invitation) or `uncertain`.
-- Mail language is the administrator's saved language (fallback `en`), not the invitee's. The role is always viewer; no role choice, no resend. Limits are literals in `invite_workspace_member`: 20 per hour per tenant, 1 per minute per address, 7 days. The templates repeat "seven days".
+- Mail language is the administrator's saved language, else the request language, not the invitee's. The role is always viewer; no role choice, no resend. Limits are literals in `invite_workspace_member`: 20 per hour per tenant, 1 per minute per address, 7 days. The templates repeat "seven days".
 
 ## Tests
 

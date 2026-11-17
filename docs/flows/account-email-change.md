@@ -73,7 +73,7 @@ sequenceDiagram
 | Address belongs to another account | 200 (enumeration prevention) and a code is mailed to it; at verify 400 `email_taken` only if the other account holds it verified, otherwise the change succeeds |
 | No reauthentication in the last 300 s | 401 `is_authenticated=true`; UI shows `confirmIdentity`, no inline reauthentication form |
 | Session expired while sending | 409 (anonymous POST); UI shows "Request failed (409)"; the `sessionExpired` branch is not reached |
-| Any send to the same address (by any user) within 3 minutes, more than 10 email requests a minute, or a session request running for 5 s | 429 (`session_busy` for the latter); UI shows "Request failed (429)" |
+| Any send to the same address (by any user) within 1 minute, more than 10 email requests a minute, or a session request running for 5 s | 429 (`session_busy` for the latter); UI shows "Request failed (429)" |
 | Verify without pending process, after 600 s, after abort or with an expired session | 409; UI shows "Request failed (409)" |
 | Wrong code | 400 `incorrect_code`; the third failure deletes the pending process |
 | Address verified elsewhere meanwhile | 400 `email_taken` (the pre-check keeps the code but counts an attempt; a race at confirmation consumes it) |
@@ -83,9 +83,9 @@ sequenceDiagram
 
 - Lock order at confirmation: session advisory lock (whole request) -> `auth_user` row (`AccountAdapter.confirm_email`) -> `account_emailaddress` writes. Concurrent confirmations of one user serialize; the constraint admits one owner across users.
 - `ACCOUNT_CHANGE_EMAIL=True`: confirmation replaces the old address; mail is deferred with `transaction.on_commit`, so a rolled-back confirmation sends no notice.
-- Code policy: 600 s lifetime, 3 attempts, one send per target address every 3 minutes across all users (`ACCOUNT_RATE_LIMITS["confirm_email"]` overrides allauth's 10 s default). A new POST replaces the pending process and its code. A pending address cannot sign in or recover (`email_identity`).
+- Code policy: 600 s lifetime, 3 attempts, one send per target address per minute across all users (`ACCOUNT_RATE_LIMITS["confirm_email"]` overrides allauth's 10 s default). A new POST replaces the pending process and its code. A pending address cannot sign in or recover (`email_identity`).
 
 ## Tests
 
 - `tests/test_auth_lifecycle.py`: reauthentication and initiating-session rule, notice to the old address after an HTTP change (recipient only, not content), pending address unusable for login and recovery, concurrent confirmations admit one owner. `tests/test_account_email_confirmation.py`: saved reminder recipients kept through the endpoints, user-row lock order, integrity errors not swallowed. `tests/test_session_serialization.py` exercises this flow only in `test_ordinary_api_response_cannot_restore_stale_code_attempts`; its CSRF, safe-method and expired-session tests use signup or reset. `tests/test_account_session_revocation.py` sends `email_changed` directly; `tests/test_notifications.py` changes `auth_user.email` with an update, not through the flow.
-- Playwright (`web/tests/account-security.spec.ts`, `two-factor-settings.spec.ts`, `workspace-roles.spec.ts`) only mocks the endpoints and never submits the send form. Gaps: send-form errors (409, 429) not tested end to end; no test of the 3-minute limit or the notice mail's content; PUT, PATCH, DELETE untested.
+- Playwright (`web/tests/account-security.spec.ts`, `two-factor-settings.spec.ts`, `workspace-roles.spec.ts`) only mocks the endpoints and never submits the send form. Gaps: send-form errors (409, 429) not tested end to end; no test of the one-minute limit or the notice mail's content; PUT, PATCH, DELETE untested.

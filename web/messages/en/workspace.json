@@ -373,7 +373,6 @@
         "previous": "Previous",
         "next": "Next",
         "inbox": "Inbox",
-        "inboxCount": "Inbox, {count} updates",
         "pending": "Pending review",
         "history": "History",
         "mine": "My submissions",

@@ -1,12 +1,25 @@
 import type { Metadata } from "next";
-import type { Language } from "@/i18n/language";
+import { languages, type Language } from "@/i18n/language";
 
 export const siteOrigin = "https://pyracast.app";
-export type PublicPage = "home" | "privacy" | "terms";
+export const publicPages = ["home", "privacy", "terms"] as const;
+export type PublicPage = (typeof publicPages)[number];
 
 export function publicPath(language: Language, page: PublicPage): string {
     const prefix = language === "tr" ? "/tr" : "";
     return `${prefix}${page === "home" ? "" : `/${page}`}/`;
+}
+
+export function publicRoute(
+    pathname: string,
+): { language: Language; page: PublicPage } | undefined {
+    for (const language of languages)
+        for (const page of publicPages) {
+            const path = publicPath(language, page);
+            if (pathname === path || (path !== "/" && `${pathname}/` === path))
+                return { language, page };
+        }
+    return undefined;
 }
 
 const descriptions = {

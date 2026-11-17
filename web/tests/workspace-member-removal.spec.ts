@@ -189,6 +189,32 @@ test("lost administrator access refreshes workspace role and removes write contr
     ).toHaveCount(0);
 });
 
+test("switching to a viewer workspace on Members shows Plants as current", async ({
+    page,
+}) => {
+    await mockMembers(page);
+    await page.route("**/api/tenants/", (route) =>
+        route.fulfill({
+            json: paged([
+                { id: 1, name: "Sunfield Energy", role: "admin" },
+                { id: 9, name: "Viewer workspace", role: "viewer" },
+            ]),
+        }),
+    );
+    await page.route(/\/api\/tenants\/9\/(regions|sites)\/$/, (route) =>
+        route.fulfill({ json: paged([]) }),
+    );
+    await openMembers(page);
+    await page
+        .getByRole("combobox", { name: "Workspace", exact: true })
+        .selectOption("9");
+    const overview = page
+        .getByRole("navigation")
+        .getByRole("button", { name: "Plants", exact: true });
+    await expect(overview).toHaveAttribute("aria-current", "page");
+    await expect(page.locator(".topbar strong")).toHaveText("Plants");
+});
+
 test("switching workspace discards a pending confirmation and uses the new tenant URL", async ({
     page,
 }) => {

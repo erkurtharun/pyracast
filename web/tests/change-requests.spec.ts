@@ -381,7 +381,7 @@ test("mobile admin reviews current context, refreshes a conflict and approves ex
     });
     await page.goto("/app/");
     await page
-        .getByRole("button", { name: "Inbox, 1 updates", exact: true })
+        .getByRole("button", { name: "Inbox, 1 update", exact: true })
         .click();
     await page
         .getByRole("button", { name: "Review details", exact: true })
@@ -420,7 +420,7 @@ test("mobile admin reviews current context, refreshes a conflict and approves ex
         detail.getByRole("button", { name: "Approve and apply" }),
     ).toBeEnabled();
     await expect(
-        page.getByRole("button", { name: "Inbox, 1 updates", exact: true }),
+        page.getByRole("button", { name: "Inbox, 1 update", exact: true }),
     ).toBeVisible();
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({
@@ -715,7 +715,7 @@ test("workspace and current role changes clear review controls and previous tena
     );
     await page.goto("/app/");
     await page
-        .getByRole("button", { name: "Inbox, 1 updates", exact: true })
+        .getByRole("button", { name: "Inbox, 1 update", exact: true })
         .click();
     await page
         .getByRole("button", { name: "Review details", exact: true })
@@ -822,3 +822,26 @@ for (const removal of ["decision", "concurrent"] as const) {
         }
     });
 }
+
+test("the inbox label counts several updates in the plural", async ({
+    page,
+}) => {
+    await mockApi(page);
+    await page.route("**/api/tenants/", (route) =>
+        route.fulfill({
+            json: paged([
+                {
+                    id: 1,
+                    name: "Workspace",
+                    role: "admin",
+                    pending_review_count: 1,
+                    unread_outcome_count: 1,
+                },
+            ]),
+        }),
+    );
+    await page.goto("/app/");
+    await expect(
+        page.getByRole("button", { name: "Inbox, 2 updates", exact: true }),
+    ).toBeVisible();
+});

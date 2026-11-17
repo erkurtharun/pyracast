@@ -37,7 +37,11 @@
         "showPassword": "Show password",
         "authenticatorCode": "Authenticator or recovery code",
         "resendCode": "Resend verification code",
-        "verificationExpired": "The verification session has expired. Please start again.",
+        "resendIn": "Resend code in {seconds} s",
+        "resendWait": "Wait a minute before requesting another code.",
+        "resendLimit": "No more codes can be sent for this sign-in. Sign in again to receive a new code.",
+        "tooManyAttempts": "Too many attempts. Wait a few minutes and try again, or reset your password.",
+        "tooManyRequests": "Too many requests. Wait a few minutes and try again.",
         "codeRequested": "A new code was requested.",
         "forgotPassword": "Forgot password?",
         "passwordChanged": "Password saved. Sign in with your new password."
@@ -170,7 +174,7 @@
         "members": "Members",
         "readOnly": "Member · changes require approval",
         "inbox": "Inbox",
-        "inboxCount": "Inbox, {count} updates"
+        "inboxCount": "Inbox, {count, plural, one {# update} other {# updates}}"
     },
     "Common": {
         "invalidPage": "The server returned an invalid next page.",
@@ -202,8 +206,14 @@
             "sent": "sent",
             "cancelled": "cancelled",
             "skipped": "skipped",
-            "uncertain": "uncertain"
+            "uncertain": "uncertain",
+            "superseded": "superseded"
         }
+    },
+    "AppError": {
+        "title": "This page could not be displayed",
+        "description": "Something went wrong while showing this page. Try again; if the problem continues, reload the page.",
+        "retry": "Try again"
     },
     "Language": {
         "label": "Language",

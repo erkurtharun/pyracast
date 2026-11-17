@@ -261,10 +261,10 @@ function Workspace({
 }) {
     const t = useTranslations("Dashboard");
     const searchParams = useSearchParams();
-    const [accessVersion, setAccessVersion] = useState(0);
+    const [tenantsVersion, setTenantsVersion] = useState(0);
     const tenants = useCollection<Tenant>(
         "/api/tenants/",
-        accessVersion,
+        tenantsVersion,
         30_000,
     );
     const [selected, setSelected] = useState<number>(),
@@ -279,7 +279,13 @@ function Workspace({
     const pendingReviews = canManage ? (tenant?.pending_review_count ?? 0) : 0;
     const unreadOutcomes = tenant?.unread_outcome_count ?? 0;
     const inboxCount = pendingReviews + unreadOutcomes;
-    const refreshChangeRequests = () => setAccessVersion((value) => value + 1);
+    const page =
+        view === "profile" ||
+        (view === "inbox" && tenant) ||
+        ((view === "members" || view === "trash") && canManage)
+            ? view
+            : "regions";
+    const refreshTenants = () => setTenantsVersion((value) => value + 1);
     return (
         <div className="shell">
             <a
@@ -324,12 +330,12 @@ function Workspace({
                     )}
                     <button
                         className={
-                            view === "regions" || view === "trash"
+                            page === "regions" || page === "trash"
                                 ? "active"
                                 : ""
                         }
                         aria-current={
-                            view === "regions" || view === "trash"
+                            page === "regions" || page === "trash"
                                 ? "page"
                                 : undefined
                         }
@@ -339,9 +345,9 @@ function Workspace({
                     </button>
                     {canManage && (
                         <button
-                            className={view === "members" ? "active" : ""}
+                            className={page === "members" ? "active" : ""}
                             aria-current={
-                                view === "members" ? "page" : undefined
+                                page === "members" ? "page" : undefined
                             }
                             onClick={() => setView("members")}
                         >
@@ -350,8 +356,8 @@ function Workspace({
                     )}
                     {tenant && (
                         <button
-                            className={view === "inbox" ? "active" : ""}
-                            aria-current={view === "inbox" ? "page" : undefined}
+                            className={page === "inbox" ? "active" : ""}
+                            aria-current={page === "inbox" ? "page" : undefined}
                             aria-label={
                                 inboxCount
                                     ? t("inboxCount", { count: inboxCount })
@@ -371,8 +377,8 @@ function Workspace({
                         </button>
                     )}
                     <button
-                        className={view === "profile" ? "active" : ""}
-                        aria-current={view === "profile" ? "page" : undefined}
+                        className={page === "profile" ? "active" : ""}
+                        aria-current={page === "profile" ? "page" : undefined}
                         onClick={() => setView("profile")}
                     >
                         <span aria-hidden="true">⚙</span> {t("account")}
@@ -413,13 +419,13 @@ function Workspace({
                     <span>
                         {t("workspace")} <span className="separator">/</span>{" "}
                         <strong>
-                            {view === "regions"
+                            {page === "regions"
                                 ? t("overview")
-                                : view === "trash"
+                                : page === "trash"
                                   ? t("recycleBin")
-                                  : view === "members"
+                                  : page === "members"
                                     ? t("members")
-                                    : view === "inbox"
+                                    : page === "inbox"
                                       ? t("inbox")
                                       : t("accountSettings")}
                         </strong>
@@ -430,16 +436,16 @@ function Workspace({
                     id="main"
                     tabIndex={-1}
                     className={
-                        view === "profile" ? "account-settings" : undefined
+                        page === "profile" ? "account-settings" : undefined
                     }
                 >
                     {logoutError && <Notice error>{logoutError}</Notice>}
                     {tenants.error && <Notice error>{tenants.error}</Notice>}
-                    <ChangeRequestUpdates value={refreshChangeRequests}>
+                    <ChangeRequestUpdates value={refreshTenants}>
                         <WorkspaceAccess
-                            value={view === "profile" || canManage}
+                            value={page === "profile" || canManage}
                         >
-                            {view === "profile" ? (
+                            {page === "profile" ? (
                                 <>
                                     <div className="page-heading">
                                         <div>
@@ -565,23 +571,21 @@ function Workspace({
                                         onSession={onSession}
                                     />
                                 </>
-                            ) : tenant && view === "inbox" ? (
+                            ) : tenant && page === "inbox" ? (
                                 <OperationalInbox
                                     key={`${tenant.id}:${tenant.role}`}
                                     tenant={tenant}
                                     token={session.csrf_token}
                                 />
-                            ) : tenant && canManage && view === "members" ? (
+                            ) : tenant && page === "members" ? (
                                 <WorkspaceMembers
                                     key={tenant.id}
                                     tenant={tenant}
                                     token={session.csrf_token}
                                     userId={session.user!.id}
-                                    onAccessChange={() =>
-                                        setAccessVersion((value) => value + 1)
-                                    }
+                                    onAccessChange={refreshTenants}
                                 />
-                            ) : tenant && canManage && view === "trash" ? (
+                            ) : tenant && page === "trash" ? (
                                 <>
                                     <button
                                         className="back-button"

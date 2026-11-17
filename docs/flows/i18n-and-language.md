@@ -27,6 +27,9 @@ sequenceDiagram
     M->>DB: read language preference when signed in
     Note over M: preference then cookie then Accept-Language then CF country then en
     M-->>S: session language plus Content-Language and Vary
+    opt saved preference differs from the request cookie and the view set no cookie
+        M-->>S: language cookie re-synced to the preference
+    end
     opt guest arrived with language hand-off and language differs
         S->>V: POST language with CSRF token
     end
@@ -49,7 +52,7 @@ sequenceDiagram
 | Table | R/W | What |
 | --- | --- | --- |
 | `accounts_userlanguagepreference` | R | One query per authenticated request in `RequestLanguage`, again in `SessionUserOutput`, mail adapters |
-| `accounts_userlanguagepreference` | W | `save_user_language` (API, console), `CompanySignupForm.signup` creates it from the cookie |
+| `accounts_userlanguagepreference` | W | `save_user_language` (API, console), `CompanySignupForm.signup` creates it from the request language |
 | `auth_user` | lock | `select_for_update` inside `save_user_language` |
 | `notifications_notificationdelivery` | R | `language` selects the reminder catalog; the scheduler copies it from `notifications_reminderschedule` |
 
@@ -75,16 +78,17 @@ sequenceDiagram
 ## Rules and invariants
 
 - Precedence is account preference, cookie, `Accept-Language` best q, `CF-IPCountry` `TR`, `en`. `tr;q=0` or `*;q=0` suppresses the Turkish country fallback. `TrustedProxyHeaders` pops `CF-IPCountry` and restores it only when the peer is a trusted proxy, upstream CIDRs are configured and the last `X-Forwarded-For` hop is in them.
-- Automatic detection is never persisted. Only the dropdown, the guest `?language=` hand-off (skipped for signed-in users and matching sessions), the console switcher and signup (from an explicit cookie) write.
+- Only the dropdown, the guest `?language=` hand-off (skipped for signed-in users and matching sessions), the console switcher and signup write the account preference. Signup saves the language the form was shown in, so a detected language becomes the new account's preference.
 - API and console writes lock the `auth_user` row first so concurrent devices serialize on one preference row; `update_or_create` is last-write-wins. Signup inserts without the lock.
+- `RequestLanguage` reads the preference once before the view; after it, when the preference differs from the request cookie and the response sets no language cookie, it writes the preference as the cookie, so the next full load renders the saved language on the server.
 - Cookie: one year, `Secure` unless DEBUG, `HttpOnly`, `SameSite=Lax`, so only server code (Django and `request.ts`) reads it. The SPA learns the language from `Session.language`.
 - Next.js server locale uses the public path header, else the cookie, else `en`; it never reads the account preference. The SPA overrides it from the session in `SessionLanguage` before any workspace content renders (`DashboardView` shows a neutral spinner until `current` exists).
 - `lib/api.ts` `request` queues `/api/session/` mutations, so a language POST waits behind other session calls.
-- Mail pins its language at send time: auth mail uses the user's preference or the request language and runs in `transaction.on_commit`; invitation mail uses the inviting administrator's preference, else `en`, and is delivered on commit; reminder mail renders under the delivery's `language`.
+- Mail pins its language at send time: auth mail uses the user's preference or the request language and runs in `transaction.on_commit`; invitation mail uses the inviting administrator's preference, else the request language, and is delivered on commit; an unsaved reminder schedule offers the request language; reminder mail renders under the delivery's `language`.
 - Catalogs: `.po` files live in `accounts`, `notifications` and `regions` `locale/tr`; `.mo` files are committed. The check fails on untranslated or fuzzy entries, changed `%(name)` placeholders and a `.mo` that differs from the compiled `.po`. Web catalogs are `web/messages/{en,tr}/*.json`, merged shallowly in `i18n/messages.ts`.
 
 ## Tests
 
-- `tests/test_language.py`: priority, q-values, cookie flags, CSRF, ownership, concurrency, trusted country, signup copy, mail pinning, console switcher and redirect safety. Also `tests/test_admin_language_controls.py`, `test_api_localization.py`, `test_translations.py` (catalog check, over-long header), `test_transactional_mail.py`, `test_notification_language.py`, `test_session.py`, and `test_workspaces.py` (invitation mail).
+- `tests/test_language.py`: priority, q-values, cookie flags, CSRF, ownership, concurrency, trusted country, cookie re-sync and its guard, signup language, mail pinning, console switcher and redirect safety. Also `tests/test_admin_language_controls.py`, `test_api_localization.py`, `test_translations.py` (catalog check, over-long header), `test_transactional_mail.py`, `test_notification_language.py`, `test_session.py`, and `test_workspaces.py` (invitation mail, request-language fallback), `test_notifications.py` (unsaved reminder language).
 - Playwright: `web/tests/localization.spec.ts` (hand-off, stale cookie, failure, ICU parity, and a coded forecast error resolved by `browserErrors` in Turkish, then in English after a switch), `web/tests/public-site.spec.ts` (path language, spoofed header), `web/integration/language.spec.ts` (preference on a new browser).
-- Gaps: no test of `i18n/request.ts` precedence against a real preference, none for the language of `session_busy`, none for the invitation fallback to `en`, none for the `auth_user` lock timeout.
+- Gaps: no test of `i18n/request.ts` precedence against a real preference, none for the language of `session_busy`, none for the `auth_user` lock timeout.

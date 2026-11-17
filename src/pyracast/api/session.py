@@ -2,7 +2,6 @@ from typing import Any
 
 from django.contrib.auth.models import User
 from django.middleware.csrf import get_token
-from django.utils import translation
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_protect
@@ -92,7 +91,6 @@ class SessionLanguageView(APIView):
         if request.user.is_authenticated:
             save_user_language(request.user, language)
         request._request.LANGUAGE_CODE = language
-        translation.activate(language)
         response = Response(session_output(request))
         set_language_cookie(response, language)
         return response

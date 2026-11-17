@@ -100,8 +100,8 @@ Forecast snapshots pin their job's binding under a composite foreign key, suppor
 
 The private application at `/app/` shares URLs across English and Turkish. Language selection uses the account's
 explicit preference, then its browser cookie, supported `Accept-Language` ranges,
-trusted Cloudflare country information and finally English. Automatic detection
-never becomes an account preference. Language changes require CSRF; authenticated
+trusted Cloudflare country information and finally English. Sign-up saves the
+language the form was shown in as the new account's preference. Language changes require CSRF; authenticated
 choices belong to the current user and survive new sessions and devices.
 
 The customer shell stays neutral until the session supplies its language.

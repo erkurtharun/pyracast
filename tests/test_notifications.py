@@ -656,6 +656,16 @@ def test_api_shares_region_reads_and_restricts_writes_to_admin() -> None:
     )
 
 
+def test_unsaved_reminder_schedule_defaults_to_request_language() -> None:
+    system = make_system(approved=True)
+    client = APIClient()
+    client.force_authenticate(system.member)
+    url = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/reminders/"
+    assert client.get(url, HTTP_ACCEPT_LANGUAGE="tr").json()["language"] == "tr"
+    assert client.get(url, HTTP_ACCEPT_LANGUAGE="en").json()["language"] == "en"
+    assert not ReminderSchedule.objects.exists()
+
+
 def test_recipient_api_accepts_five_and_admin_limit_changes_apply_immediately() -> None:
     system, _ = configured()
     client = APIClient()

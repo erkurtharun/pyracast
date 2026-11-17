@@ -195,7 +195,7 @@
     },
     "Calibrations": {
         "calibration_history": "Calibration history",
-        "future_forecasts_only_reset_also_turns_off": "Future forecasts only. Reset also turns off automatic calibration.",
+        "selection_effect": "Issued forecasts keep their calibration. New forecasts and estimated past days use the selected calibration from its first training day. Reset also turns off automatic calibration.",
         "download_calibration_csv": "Download calibration CSV",
         "refresh": "Refresh",
         "reset_to_baseline": "Reset to baseline",

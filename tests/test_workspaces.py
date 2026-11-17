@@ -393,6 +393,26 @@ def test_invitation_mail_uses_administrators_saved_language(
     assert "salt okunur erişim" in str(mail.outbox[-1].body)
 
 
+@override_settings(
+    MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
+)
+def test_invitation_without_preference_uses_request_language(
+    workspace: tuple[Tenant, User, User],
+) -> None:
+    tenant, administrator, _ = workspace
+    client = Client(enforce_csrf_checks=True, HTTP_ACCEPT_LANGUAGE="tr")
+    client.force_login(administrator)
+    token = client.get("/api/session/").json()["csrf_token"]
+    response = client.post(
+        f"/api/tenants/{tenant.pk}/invitations/",
+        {"email": "new@example.com"},
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=token,
+    )
+    assert response.status_code == 201
+    assert "salt okunur erişim" in str(mail.outbox[-1].body)
+
+
 def test_workspace_invitation_hourly_limit_is_durable(
     workspace: tuple[Tenant, User, User],
 ) -> None:

@@ -23,7 +23,7 @@ sequenceDiagram
     alt "not a member or region not found"
         O-->>V: "PermissionDenied or DoesNotExist"
         V-->>U: "403 or 404"
-    else "row found, or unsaved virtual row"
+    else "row found, or unsaved virtual row in the request language"
         V->>D: "payload reads: limit, workspace recipients, 20 deliveries"
         V-->>U: "200 payload"
     end

@@ -5,8 +5,8 @@ A signed-in customer opens `/app/`, whose shell polls `GET /api/tenants/` every 
 ## Entry points
 
 - Screen: `web/src/components/dashboard.tsx` `Workspace` at `/app/` (`web/src/app/app/page.tsx` -> `Dashboard` -> `DashboardView`), mounted once `/api/session/` returns a user and no invitation token is pending, keyed by user id. Platform administrators are redirected to `/admin/` unless the URL asks for `?workspace=customer` or `?account=security`. The sidebar `<select>` switches workspace.
-- Poll hook: `web/src/components/ui.tsx` `useCollection("/api/tenants/", accessVersion, 30_000)`, which follows `next` links through all pages (counters are computed per page).
-- Immediate refetch: `accessVersion` is bumped through the `ChangeRequestUpdates` context (`web/src/components/change-request-updates.tsx`) after a review or read-receipt action in `operational-inbox.tsx` and after a proposal in `outages.tsx` or `production-history.tsx`, and by `WorkspaceMembers.onAccessChange` only after a failed member removal.
+- Poll hook: `web/src/components/ui.tsx` `useCollection("/api/tenants/", tenantsVersion, 30_000)`, which follows `next` links through all pages (counters are computed per page).
+- Immediate refetch: `refreshTenants` bumps `tenantsVersion` through the `ChangeRequestUpdates` context (`web/src/components/change-request-updates.tsx`) after a review or read-receipt action in `operational-inbox.tsx` and after a proposal in `outages.tsx` or `production-history.tsx`, and by `WorkspaceMembers.onAccessChange` only after a failed member removal.
 - Endpoint: `GET /api/tenants/` -> `pyracast.api.views.TenantsView.get` (route in `src/pyracast/urls.py`). Actor: any authenticated active user (workspace administrator or viewer). No command, job or external call.
 
 ## Sequence
@@ -20,7 +20,7 @@ sequenceDiagram
     participant V as TenantsView
     participant D as PostgreSQL
     U->>W: "open /app/"
-    loop "on mount, every 30 s, on accessVersion change"
+    loop "on mount, every 30 s, on tenantsVersion change"
         H->>M: "GET /api/tenants/ (and next pages)"
         alt "same session holds the advisory lock over 5 s"
             M-->>H: "429 session_busy, Retry-After 1"

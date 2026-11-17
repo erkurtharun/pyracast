@@ -1,5 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
-import { test, expect } from "./support/test";
+import { test, expect, type Page } from "./support/test";
 import { mockApi, user } from "./support/workspace";
 
 test("signup entry opens registration with public information links", async ({
@@ -245,6 +245,199 @@ test("pending verification requires the code before completing", async ({
         page.getByText("Email verified. You can sign in now."),
     ).toBeVisible();
     expect(posts).toBe(1);
+});
+
+async function pendingVerification(page: Page) {
+    await mockApi(page, { anonymous: true });
+    await page.route("**/api/auth/browser/v1/auth/session", (route) =>
+        route.fulfill({
+            status: 401,
+            json: {
+                status: 401,
+                data: { flows: [{ id: "verify_email", is_pending: true }] },
+                meta: { is_authenticated: false },
+            },
+        }),
+    );
+}
+
+test("resend is disabled with a countdown after a code is sent", async ({
+    page,
+}) => {
+    await page.clock.install();
+    await mockApi(page, { anonymous: true });
+    await page.route("**/api/auth/browser/v1/auth/signup", (route) =>
+        route.fulfill({
+            status: 401,
+            json: {
+                status: 401,
+                data: { flows: [{ id: "verify_email", is_pending: true }] },
+                meta: { is_authenticated: false },
+            },
+        }),
+    );
+    let resends = 0;
+    await page.route(
+        "**/api/auth/browser/v1/auth/email/verify/resend",
+        (route) => {
+            resends += 1;
+            return route.fulfill({ json: { status: 200 } });
+        },
+    );
+    await page.goto("/app/?signup=1");
+    await page.getByLabel("Company name").fill("Solar Company");
+    await page.getByLabel("Email").fill("owner@example.test");
+    await page
+        .getByLabel("Password", { exact: true })
+        .fill("Test-only-cobalt-79!");
+    await page
+        .getByRole("button", { name: "Create company account", exact: true })
+        .click();
+    await expect(
+        page.getByRole("button", { name: "Resend code in 60 s", exact: true }),
+    ).toBeDisabled();
+    await page.clock.runFor(30_000);
+    await expect(
+        page.getByRole("button", { name: "Resend code in 30 s", exact: true }),
+    ).toBeDisabled();
+    await page.clock.runFor(30_000);
+    await page
+        .getByRole("button", { name: "Resend verification code", exact: true })
+        .click();
+    await expect(page.getByText("A new code was requested.")).toBeVisible();
+    await expect(
+        page.getByRole("button", { name: "Resend code in 60 s", exact: true }),
+    ).toBeDisabled();
+    expect(resends).toBe(1);
+});
+
+for (const [status, text] of [
+    [429, "Wait a minute before requesting another code."],
+    [
+        409,
+        "No more codes can be sent for this sign-in. Sign in again to receive a new code.",
+    ],
+] as const) {
+    test(`a resend answered with ${status} explains what to do next`, async ({
+        page,
+    }) => {
+        await pendingVerification(page);
+        await page.route(
+            "**/api/auth/browser/v1/auth/email/verify/resend",
+            (route) => route.fulfill({ status, json: { status } }),
+        );
+        await page.goto("/app/");
+        await page
+            .getByRole("button", {
+                name: "Resend verification code",
+                exact: true,
+            })
+            .click();
+        const alert = page.locator("form").getByRole("alert");
+        await expect(alert).toContainText(text);
+        await expect(alert).not.toContainText("Request failed");
+    });
+}
+
+test("a resend that ends the pending sign-in asks to sign in again", async ({
+    page,
+}) => {
+    await pendingVerification(page);
+    await page.route(
+        "**/api/auth/browser/v1/auth/email/verify/resend",
+        (route) =>
+            route.fulfill({
+                status: 401,
+                json: {
+                    status: 401,
+                    data: { flows: [{ id: "login" }] },
+                    meta: { is_authenticated: false },
+                },
+            }),
+    );
+    await page.goto("/app/");
+    const resend = page.getByRole("button", {
+        name: "Resend verification code",
+        exact: true,
+    });
+    await resend.click();
+    await expect(page.locator("form").getByRole("alert")).toContainText(
+        "No more codes can be sent for this sign-in. Sign in again to receive a new code.",
+    );
+    await expect(resend).toBeDisabled();
+});
+
+test("a failed resend shows the server message and can be retried", async ({
+    page,
+}) => {
+    await pendingVerification(page);
+    await page.route(
+        "**/api/auth/browser/v1/auth/email/verify/resend",
+        (route) =>
+            route.fulfill({
+                status: 500,
+                json: {
+                    status: 500,
+                    errors: [{ message: "Mail is unavailable." }],
+                },
+            }),
+    );
+    await page.goto("/app/");
+    const resend = page.getByRole("button", {
+        name: "Resend verification code",
+        exact: true,
+    });
+    await resend.click();
+    await expect(page.locator("form").getByRole("alert")).toContainText(
+        "Mail is unavailable.",
+    );
+    await expect(resend).toBeEnabled();
+});
+
+test("an unexplained 429 on sign-in offers a password reset", async ({
+    page,
+}) => {
+    await mockApi(page, { anonymous: true });
+    await page.route("**/api/auth/browser/v1/auth/login", (route) =>
+        route.fulfill({ status: 429, json: { status: 429 } }),
+    );
+    await page.goto("/app/");
+    await page.getByLabel("Email", { exact: true }).fill("owner@example.test");
+    await page
+        .getByLabel("Password", { exact: true })
+        .fill("Test-only-cobalt-79!");
+    await page.locator("form").getByRole("button", { name: "Sign in" }).click();
+    await expect(page.locator("form").getByRole("alert")).toContainText(
+        "Too many attempts. Wait a few minutes and try again, or reset your password.",
+    );
+    await page
+        .getByRole("button", { name: "Forgot password?", exact: true })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "Reset your password" }),
+    ).toBeVisible();
+});
+
+test("an unexplained 429 on sign-up asks to wait", async ({ page }) => {
+    await mockApi(page, { anonymous: true });
+    await page.route("**/api/auth/browser/v1/auth/signup", (route) =>
+        route.fulfill({ status: 429, json: { status: 429 } }),
+    );
+    await page.goto("/app/");
+    await page
+        .getByRole("button", { name: "Create account", exact: true })
+        .click();
+    await page.getByLabel("Company name").fill("Smart Solar Energy");
+    await page.getByLabel("Email").fill("owner@example.test");
+    await page
+        .getByLabel("Password", { exact: true })
+        .fill("Test-only-cobalt-79!");
+    await page
+        .getByRole("button", { name: "Create company account", exact: true })
+        .click();
+    await expect(page.locator("form").getByRole("alert")).toContainText(
+        "Too many requests. Wait a few minutes and try again.",
+    );
 });
 
 test("requires the second factor before opening the workspace", async ({

@@ -76,8 +76,7 @@ def browser_language(header: str) -> tuple[Language | None, frozenset[str]]:
     return None, frozenset(rejected)
 
 
-def request_language(request: HttpRequest) -> Language:
-    preference = user_language(request.user)
+def request_language(request: HttpRequest, preference: Language | None) -> Language:
     cookie = explicit_language(request.COOKIES.get(LANGUAGE_COOKIE))
     if preference is not None or cookie is not None:
         return preference or cast(Language, cookie)
@@ -93,9 +92,16 @@ class RequestLanguage:
         self.get_response = get_response
 
     def __call__(self, request: HttpRequest) -> HttpResponse:
-        request.LANGUAGE_CODE = request_language(request)
+        preference = user_language(request.user)
+        request.LANGUAGE_CODE = request_language(request, preference)
         with translation.override(request.LANGUAGE_CODE):
             response = self.get_response(request)
+        if (
+            preference is not None
+            and preference != request.COOKIES.get(LANGUAGE_COOKIE)
+            and LANGUAGE_COOKIE not in response.cookies
+        ):
+            set_language_cookie(response, preference)
         response.headers["Content-Language"] = request.LANGUAGE_CODE
         patch_vary_headers(response, ("Accept-Language", "Cookie"))
         return response

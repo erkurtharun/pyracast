@@ -101,9 +101,7 @@ export function Calibrations({
                 <div className="section-heading">
                     <div>
                         <h2>{t("calibration_history")}</h2>
-                        <p className="fine">
-                            {t("future_forecasts_only_reset_also_turns_off")}
-                        </p>
+                        <p className="fine">{t("selection_effect")}</p>
                     </div>
                     <div className="button-group">
                         {resource.data &&
@@ -117,7 +115,11 @@ export function Calibrations({
                             )}
                         <button
                             className="button secondary"
-                            onClick={() => setVersion((current) => current + 1)}
+                            onClick={() => {
+                                if (actionState.status !== "pending")
+                                    setActionState({ status: "idle" });
+                                setVersion((current) => current + 1);
+                            }}
                         >
                             {t("refresh")}
                         </button>
