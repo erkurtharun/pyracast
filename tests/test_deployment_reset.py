@@ -3,6 +3,7 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 import re
 import runpy
 import shlex
@@ -28,6 +29,7 @@ BACKEND_IMAGE = "registry.example/backend@sha256:" + "1" * 64
 SUPPORT = {"postgres", "rabbitmq"}
 APPLICATION = {"gateway", "api", "web", "dispatcher", "worker", "notifications"}
 FOREIGN_OBJECT = "postgres/2026/11/16/20261116T220000Z-prerelease-0123456789abcdef.dump"
+DEFERRED = (signal.SIGINT, signal.SIGTERM)
 
 
 class FakeCommands:
@@ -190,6 +192,15 @@ def uploads(monkeypatch: pytest.MonkeyPatch) -> dict[str, bytes]:
 
     monkeypatch.setattr(reset_database, "upload_backup", upload)
     return stored
+
+
+@pytest.fixture(autouse=True)
+def restored_signal_handlers() -> Iterator[None]:
+    """A failed start defers SIGINT and SIGTERM until main restores them; direct calls do not."""
+    saved = [(number, signal.getsignal(number)) for number in DEFERRED]
+    yield
+    for number, handler in saved:
+        signal.signal(number, handler)
 
 
 def prepared(host: Host, uploads: dict[str, bytes]) -> str:
@@ -916,14 +927,43 @@ def test_command_line_reports_refusals_failures_and_the_next_step(
     assert not host.marker.exists()
 
 
+CLEANUP_HEADER = "Writing the maintenance marker back and stopping the application again"
+ORDERED_STOPS = [["gateway", "api", "web"], ["dispatcher"], ["worker", "notifications"]]
+STOP_POINTS = {
+    "ingress stop": "gateway, api, web",
+    "dispatcher stop": "dispatcher",
+    "consumer stop": "worker, notifications",
+}
+STOP_SUMMARY = "Stop commands in the installer's order: "
+ARRIVED = "{} arrived after the start failed; every cleanup step was still attempted."
+STOP_OUTCOMES = {
+    "error": "failed",
+    "failure": "failed",
+    "sigint failure": "failed",
+    "interrupt": "interrupted",
+}
 FAULT_POINTS: dict[str, Callable[[list[str], Host], bool]] = {
     "start": lambda call, _host: "up" in call and call[-1] == "180",
     "readiness": lambda call, _host: call[0] == "curl",
     "unit": lambda call, _host: call[:2] == ["systemctl", "start"],
     "marker sync": lambda call, host: call == ["sync", "-f", str(host.marker)],
-    "shutdown": lambda call, _host: "stop" in call,
+    "ingress stop": lambda call, _host: "stop" in call and "gateway" in call,
+    "dispatcher stop": lambda call, _host: "stop" in call and "dispatcher" in call,
+    "consumer stop": lambda call, _host: "stop" in call and "worker" in call,
     "status": lambda call, _host: "ps" in call,
 }
+
+
+def stop_calls(calls: list[list[str]]) -> list[list[str]]:
+    return [call[call.index("stop") + 3 :] for call in calls if "stop" in call]
+
+
+def stop_summary(faults: dict[str, str]) -> str:
+    groups = (
+        f"{names} {STOP_OUTCOMES.get(faults.get(point, ''), 'done')}"
+        for point, names in STOP_POINTS.items()
+    )
+    return STOP_SUMMARY + "; ".join(groups) + "."
 
 
 def inject_faults(
@@ -932,8 +972,9 @@ def inject_faults(
     """Arms each fault at its point once the release start begins; returns every command tried.
 
     "error" fails before the command or file operation runs, "interrupt", "failure" (non-zero
-    exit with captured stderr) and "timeout" (killed at its timeout with captured stderr bytes, not
-    valid UTF-8) after the command ran, and "stuck" lets the worker survive its stop.
+    exit with captured stderr), "timeout" (killed at its timeout with captured stderr bytes, not
+    valid UTF-8) and "sigint failure" (a real SIGINT reaches the tool, then the command fails as a
+    terminal Ctrl-C makes it) after the command ran, and "stuck" lets the worker survive its stop.
     """
     attempted: list[list[str]] = []
     started = [False]
@@ -953,6 +994,9 @@ def inject_faults(
         result = commands(command, **kwargs)
         if fault == "interrupt":
             raise KeyboardInterrupt
+        if fault == "sigint failure":
+            signal.raise_signal(signal.SIGINT)
+            fault = "failure"
         if fault == "failure":
             raise subprocess.CalledProcessError(1, command, "", f"{point} failure detail")
         if fault == "timeout":
@@ -1035,19 +1079,56 @@ def inject_faults(
         ),
         pytest.param(
             "abort",
-            {"unit": "failure", "shutdown": "error"},
+            {"unit": "failure", "ingress stop": "error"},
             "held",
-            APPLICATION,
+            {"gateway", "api", "web"},
             1,
             id="shutdown-error",
         ),
         pytest.param(
             "abort",
-            {"readiness": "interrupt", "shutdown": "interrupt"},
+            {"readiness": "interrupt", "ingress stop": "interrupt"},
             "held",
-            {"dispatcher", "notifications", "worker"},
+            set(),
             130,
             id="shutdown-interrupt-after-readiness-interrupt",
+        ),
+        pytest.param(
+            "abort",
+            {"unit": "failure", "dispatcher stop": "error"},
+            "held",
+            {"dispatcher"},
+            1,
+            id="dispatcher-stop-error",
+        ),
+        pytest.param(
+            "abort",
+            {
+                "unit": "failure",
+                "ingress stop": "error",
+                "dispatcher stop": "error",
+                "consumer stop": "error",
+            },
+            "held",
+            APPLICATION,
+            1,
+            id="every-stop-error",
+        ),
+        pytest.param(
+            "abort",
+            {"unit": "failure", "marker write": "error", "ingress stop": "failure"},
+            "missing",
+            set(),
+            1,
+            id="ingress-stop-failure-without-marker",
+        ),
+        pytest.param(
+            "abort",
+            {"unit": "failure", "marker write": "error", "ingress stop": "sigint failure"},
+            "missing",
+            set(),
+            130,
+            id="sigint-failing-the-ingress-stop-without-marker",
         ),
         pytest.param(
             "abort", {"unit": "failure", "status": "error"}, "held", None, 1, id="status-error"
@@ -1081,7 +1162,7 @@ def inject_faults(
         ),
         pytest.param(
             "restore",
-            {"unit": "failure", "marker write": "error", "shutdown": "stuck"},
+            {"unit": "failure", "marker write": "error", "consumer stop": "stuck"},
             "missing",
             {"worker"},
             1,
@@ -1125,7 +1206,7 @@ def test_a_failed_start_attempts_the_shutdown_and_reports_the_state_it_observed(
     capsys.readouterr()
     attempted = inject_faults(monkeypatch, host, commands, faults)
     assert reset_database.main([str(host.config), *arguments]) == code
-    assert any("stop" in call for call in attempted)
+    assert stop_calls(attempted) == ORDERED_STOPS
     assert commands.running & APPLICATION == (running or set())
     assert commands.running == SUPPORT | (running or set())
     assert host.marker.is_file() == (marker != "missing")
@@ -1138,7 +1219,10 @@ def test_a_failed_start_attempts_the_shutdown_and_reports_the_state_it_observed(
     assert error.count("was interrupted.") == kinds.count("interrupt")
     assert error.count("Input/output error") == kinds.count("error")
     for point, fault in faults.items():
-        assert (f"{point} failure detail" in error) == (fault in ("failure", "timeout"))
+        detailed = fault in ("failure", "timeout", "sigint failure")
+        assert (f"{point} failure detail" in error) == detailed
+    assert (ARRIVED.format("SIGINT") in error) == ("sigint failure" in kinds)
+    assert stop_summary(faults) in error
     shown = shlex.quote(identity)
     assert {
         "held": f"The maintenance marker {host.marker} is present and holds {shown}.",
@@ -1158,11 +1242,6 @@ def test_a_failed_start_attempts_the_shutdown_and_reports_the_state_it_observed(
     assert (" ps --services --status running" in error) == (running is None)
     assert (f"Next: run {rerun} again." in error) == (marker == "held" and running == set())
     assert error.rstrip().endswith(f"run {rerun} again.")
-
-
-CLEANUP_HEADER = "Writing the maintenance marker back and stopping the application again"
-ORDERED_STOPS = [["gateway", "api", "web"], ["dispatcher"], ["worker", "notifications"]]
-DEFERRED = (signal.SIGINT, signal.SIGTERM)
 
 
 def raise_interrupt(_number: int, _frame: FrameType | None) -> None:
@@ -1206,21 +1285,25 @@ class FailingConsole(io.StringIO):
         super().flush()
 
 
-def abort_after_failed_readiness(
+def run_abort(
     host: Host,
-    commands: FakeCommands,
     monkeypatch: pytest.MonkeyPatch,
-    console: contextlib.AbstractContextManager[Any],
+    console: contextlib.AbstractContextManager[Any] | None = None,
 ) -> int:
     monkeypatch.setattr(reset_database, "load_host", lambda _path: host)
-    commands.ready = False
-    with console:
-        return reset_database.main([str(host.config), "abort"])
+    try:
+        with console or contextlib.nullcontext():
+            return reset_database.main([str(host.config), "abort"])
+    except KeyboardInterrupt:
+        pytest.fail("KeyboardInterrupt escaped main")
 
 
 def cleanup_stops(commands: FakeCommands) -> list[list[str]]:
-    later = commands.calls[full_start(commands) :]
-    return [call[call.index("stop") + 3 :] for call in later if "stop" in call]
+    return stop_calls(commands.calls[full_start(commands) :])
+
+
+def handlers() -> list[object]:
+    return [signal.getsignal(number) for number in DEFERRED]
 
 
 @pytest.mark.usefixtures("interrupting_handlers")
@@ -1247,39 +1330,126 @@ def test_a_failed_start_shuts_down_despite_a_failing_console_or_a_signal(
     prepared(host, uploads)
     identity = host.marker.read_text()
     capsys.readouterr()
-    console = contextlib.redirect_stdout(FailingConsole(trigger, fault))
-    code = abort_after_failed_readiness(host, commands, monkeypatch, console)
+    commands.ready = False
+    code = run_abort(host, monkeypatch, contextlib.redirect_stdout(FailingConsole(trigger, fault)))
     signalled = fault.startswith("SIG")
     assert code == (130 if signalled else 1)
     assert cleanup_stops(commands) == ORDERED_STOPS
     assert commands.running == SUPPORT
-    assert [signal.getsignal(number) for number in DEFERRED] == [raise_interrupt] * 2
+    assert handlers() == [raise_interrupt] * 2
     assert host.marker.read_text() == identity
     error = capsys.readouterr().err
     assert error.startswith(
         "abort failed: The release started, but /health/ready/ did not answer ok.\n"
     )
-    assert "Stopping the application" not in error
-    deferred = f"{fault} arrived during the cleanup; every step was still attempted."
-    assert (deferred in error) == signalled
+    assert stop_summary({}) in error
+    assert (ARRIVED.format(fault) in error) == signalled
     assert f"{host.marker} is present and holds {shlex.quote(identity)}." in error
     assert "No application container runs: the site is down." in error
     assert error.rstrip().endswith(f"Next: run {host.command('abort')} again.")
 
 
 @pytest.mark.usefixtures("interrupting_handlers")
-def test_a_failed_start_keeps_its_exit_status_when_the_report_cannot_be_written(
-    host: Host, commands: FakeCommands, uploads: dict[str, bytes], monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("fault", "code"),
+    [pytest.param("broken pipe", 1, id="broken-stderr"), pytest.param("SIGINT", 130, id="sigint")],
+)
+def test_a_failed_start_keeps_its_exit_status_while_the_report_is_written(
+    host: Host,
+    commands: FakeCommands,
+    uploads: dict[str, bytes],
+    monkeypatch: pytest.MonkeyPatch,
+    fault: str,
+    code: int,
 ) -> None:
     prepared(host, uploads)
     identity = host.marker.read_text()
-    console = contextlib.redirect_stderr(FailingConsole("abort failed", "broken pipe"))
-    code = abort_after_failed_readiness(host, commands, monkeypatch, console)
-    assert code == 1
+    commands.ready = False
+    console = FailingConsole("abort failed", fault)
+    assert run_abort(host, monkeypatch, contextlib.redirect_stderr(console)) == code
     assert cleanup_stops(commands) == ORDERED_STOPS
     assert commands.running == SUPPORT
-    assert [signal.getsignal(number) for number in DEFERRED] == [raise_interrupt] * 2
+    assert handlers() == [raise_interrupt] * 2
     assert host.marker.read_text() == identity
+    report = console.getvalue()
+    assert report.startswith("abort failed: ") == (fault == "SIGINT")
+    assert report.rstrip().endswith(f"Next: run {host.command('abort')} again.") == (
+        fault == "SIGINT"
+    )
+
+
+@pytest.mark.usefixtures("interrupting_handlers")
+def test_a_sigint_right_after_the_handlers_are_restored_keeps_the_report(
+    host: Host,
+    commands: FakeCommands,
+    uploads: dict[str, bytes],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    prepared(host, uploads)
+    identity = host.marker.read_text()
+    capsys.readouterr()
+    faults = {"unit": "failure", "marker write": "error", "consumer stop": "stuck"}
+    attempted = inject_faults(monkeypatch, host, commands, faults)
+    install = signal.signal
+    delivered: list[int] = []
+
+    def restore_then_interrupt(number: int, handler: Any) -> Any:
+        previous = install(number, handler)
+        if number == signal.SIGINT and handler is raise_interrupt and not delivered:
+            delivered.append(number)
+            signal.raise_signal(signal.SIGINT)
+        return previous
+
+    monkeypatch.setattr(signal, "signal", restore_then_interrupt)
+    assert run_abort(host, monkeypatch) == 130
+    assert delivered == [signal.SIGINT]
+    assert handlers() == [raise_interrupt] * 2
+    assert stop_calls(attempted) == ORDERED_STOPS
+    assert commands.running == SUPPORT | {"worker"}
+    assert not host.marker.exists()
+    error = capsys.readouterr().err
+    assert error.startswith("abort failed: ")
+    assert "The marker stays" not in error
+    assert f"The maintenance marker {host.marker} is missing." in error
+    assert "Application containers still run: worker." in error
+    shown = shlex.quote(identity)
+    assert f"write the identity back with printf %s {shown} > {host.marker} && sync" in error
+    assert error.rstrip().endswith(f"run {host.command('abort')} again.")
+
+
+@pytest.mark.parametrize(("delivered", "code"), [("none", 1), ("SIGINT", 130)])
+def test_the_process_exits_with_the_status_of_main_when_its_console_is_gone(
+    tmp_path: Path, delivered: str, code: int
+) -> None:
+    environment = {**os.environ, "PYTHONPATH": str(ROOT), "RESET_EXIT_SIGNAL": delivered}
+    child = subprocess.run(
+        [sys.executable, "-m", "tests.reset_exit_driver"],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env=environment,
+        timeout=120,
+        check=False,
+    )
+    assert child.returncode == code, child.stderr
+    assert child.stderr.startswith("abort failed: The release started")
+    assert (ARRIVED.format("SIGINT") in child.stderr) == (delivered == "SIGINT")
+    assert child.stderr.rstrip().endswith(f"{tmp_path / 'host.json'} abort again.")
+
+
+def test_a_console_that_is_gone_is_pointed_at_the_null_device() -> None:
+    reader, writer = os.pipe()
+    os.close(reader)
+    closed = io.StringIO()
+    closed.close()
+    with open(writer, "w") as broken:
+        broken.write("lost")
+        with contextlib.redirect_stdout(broken), contextlib.redirect_stderr(closed):
+            reset_database.release_broken_streams()
+            reset_database.release_broken_streams()
+        broken.write("discarded")
+        broken.flush()
 
 
 def test_command_line_names_the_next_step_after_an_interruption(
