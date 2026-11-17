@@ -1,4 +1,4 @@
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -16,6 +16,11 @@ _HORIZON_ZENITH = 90 + _SOLAR_RADIUS + refraction_at_zenith(90 + _SOLAR_RADIUS)
 _SCAN_STEP = timedelta(minutes=30)
 _MATCH_SLACK = timedelta(seconds=60)
 _CROSSING_PRECISION = timedelta(milliseconds=1)
+# Degrees per second: Earth's rotation moves the solar altitude by at most 15 degrees per hour
+# and 16 covers the declination drift. Astral's zenith is constant within a whole second, so
+# a span is compared with one second more travel and never split below one second.
+_ALTITUDE_RATE = 16 / 3600
+_FINEST_SPAN = timedelta(seconds=1)
 
 type Event = tuple[datetime, bool]
 
@@ -148,8 +153,13 @@ def daylight_window(day: date, timezone: str, latitude: float, longitude: float)
     )
 
 
+def _height(observer: Observer, moment: datetime) -> float:
+    """Degrees above the horizon test; positive exactly while the sun is up."""
+    return _HORIZON_ZENITH - zenith(observer, moment, with_refraction=False)
+
+
 def _sun_is_up(observer: Observer, moment: datetime) -> bool:
-    return zenith(observer, moment, with_refraction=False) < _HORIZON_ZENITH
+    return _height(observer, moment) > 0
 
 
 def _astral_events(observer: Observer, start: datetime, end: datetime) -> list[Event]:
@@ -172,44 +182,65 @@ def _bisect_crossing(observer: Observer, left: datetime, right: datetime) -> dat
     return right
 
 
-def _hidden_pairs(unmatched: list[Event]) -> list[Event]:
-    # Both samples around an unmatched event show one state, so it is a crossing only together
-    # with an opposite event inside the same step.
-    return [
-        event
-        for event in unmatched
-        if any(
-            other[1] != event[1] and abs(other[0] - event[0]) < _SCAN_STEP for other in unmatched
-        )
-    ]
+def _brackets(
+    observer: Observer, left: datetime, right: datetime, low: float, high: float
+) -> Iterator[tuple[datetime, datetime, bool]]:
+    """Yield (left, right, rising) around each crossing in [left, right], given both heights.
+
+    A span whose ends show one state is halved while the sun could reach the horizon and come
+    back inside it (|low| + |high| degrees of travel), so only a dip of at most a second is lost.
+    """
+    if (low > 0) != (high > 0):
+        yield left, right, high > 0
+        return
+    span = right - left
+    if span <= _FINEST_SPAN or abs(low) + abs(high) > _ALTITUDE_RATE * (span.total_seconds() + 1):
+        return
+    middle = left + span / 2
+    height = _height(observer, middle)
+    yield from _brackets(observer, left, middle, low, height)
+    yield from _brackets(observer, middle, right, height, high)
 
 
 def _horizon_events(observer: Observer, start: datetime, end: datetime) -> list[Event]:
-    # Astral's event is kept wherever the scan brackets one, so its timings stay unchanged; the
-    # scan fills the crossings Astral misses near 00:00 UTC. Hazard: a daylight or night shorter
-    # than the scan step hides between samples; only Astral's set-and-rise pairs recover it.
+    # Astral's event is kept wherever a bracket claims it, so its timings stay unchanged; the
+    # scan finds the crossings Astral misses near 00:00 UTC or inside one step. The scan starts
+    # one step early so that an event exactly at the start of the day has a bracket.
     unmatched = _astral_events(observer, start, end)
     events: list[Event] = []
-    left, up = start, _sun_is_up(observer, start)
+    left = start - _SCAN_STEP
+    low = _height(observer, left)
     while left < end:
         right = min(left + _SCAN_STEP, end)
-        if _sun_is_up(observer, right) != up:
-            up = not up
-            match = next(
-                (
-                    event
-                    for event in unmatched
-                    if event[1] == up and left - _MATCH_SLACK <= event[0] <= right + _MATCH_SLACK
-                ),
-                None,
-            )
-            if match is None:
-                events.append((_bisect_crossing(observer, left, right), up))
-            else:
-                unmatched.remove(match)
-                events.append(match)
-        left = right
-    return sorted(events + _hidden_pairs(unmatched))
+        high = _height(observer, right)
+        events.extend(
+            _claim(observer, unmatched, *bracket)
+            for bracket in _brackets(observer, left, right, low, high)
+        )
+        left, low = right, high
+    return sorted(events)
+
+
+def _claim(
+    observer: Observer, unmatched: list[Event], left: datetime, right: datetime, rising: bool
+) -> Event:
+    # Near the poles the sun grazes the horizon and Astral's event can sit minutes from the
+    # crossing, so an event is kept only where the horizon test flips within the slack.
+    match = next(
+        (
+            event
+            for event in unmatched
+            if event[1] == rising
+            and left - _MATCH_SLACK <= event[0] <= right + _MATCH_SLACK
+            and _sun_is_up(observer, event[0] - _MATCH_SLACK) != rising
+            and _sun_is_up(observer, event[0] + _MATCH_SLACK) == rising
+        ),
+        None,
+    )
+    if match is None:
+        return _bisect_crossing(observer, left, right), rising
+    unmatched.remove(match)
+    return match
 
 
 def daylight_from_events(

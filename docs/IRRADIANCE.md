@@ -509,13 +509,19 @@ The versioned `astral-3.2-sea-level-v1` policy uses the apparent upper solar lim
 standard refraction and a sea-level horizon, without terrain or shading inference.
 Collect UTC sunrise/sunset events around the local day to preserve DST, date-line
 and midnight-crossing daylight. Astral searches each event per UTC date and can miss one
-whose neighbour falls across 00:00 UTC, so a 30-minute scan of the same horizon test
-brackets every crossing of the local day: a bracket keeps Astral's event of the same
-direction within 60 s and otherwise bisects the crossing to the second, the resolution of
-Astral's zenith. An Astral event outside every bracket remains only with an opposite one
-less than a scan step away: such a pair is a daylight or night shorter than the step,
-which falls between two samples; such a dip is lost when Astral reports only one of its
-events. Any valid coordinate and timezone yields windows; only a local date the
+whose neighbour falls across 00:00 UTC, so the same horizon test is also sampled every
+30 minutes, starting 30 minutes before the local day. When two neighbouring samples show
+the same state but the sun could reach the horizon and return between them (the solar
+altitude changes by at most 16° per hour), the interval is halved, down to one second.
+Every daylight or night longer than about a second is therefore bracketed, including one
+shorter than the step that Astral does not report. A bracket keeps Astral's event of the
+same direction when it lies within 60 s of the bracket and the horizon test changes state
+within 60 s around it; otherwise the crossing is bisected to the second, the resolution of
+Astral's zenith. Astral events that no bracket claims are dropped. Every window boundary
+inside the local day is thus within 60 s of a horizon crossing, and Astral's timings stay
+unchanged wherever it finds the event, which keeps Turkish windows identical. An event
+exactly at the start of the local day belongs to it; one exactly at its end belongs to the
+next day. Any valid coordinate and timezone yields windows; only a local date the
 timezone skips is rejected. Polar day requires the full local day; polar night
 does not count as a calibration day. The journal and calibration use the same
 windows. A time interval ending exactly at sunrise or starting at sunset has no

@@ -68,6 +68,8 @@ def test_turkey_grid_daylight_is_bit_identical(latitude: float, longitude: float
         (date(2026, 7, 7), "Asia/Kolkata", 28.6, 77.2),
         (date(2026, 9, 25), "Etc/GMT-6", 90.0, 90.0),
         (date(2026, 12, 25), "UTC", 67.39, 3.75),
+        (date(2026, 9, 25), "UTC", 89.5, 18.0),
+        (date(2026, 3, 23), "UTC", -89.5, -74.006),
     ],
 )
 def test_every_horizon_crossing_is_found(
