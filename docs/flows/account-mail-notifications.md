@@ -1,6 +1,6 @@
 # Account mails: codes, security notifications and anti-enumeration notices
 
-Every mail django-allauth sends about an account goes through one adapter: verification, reset and reauthentication codes, security notifications and the notices that replace a code when the address is unknown or already registered. Other flows trigger it from inside their headless requests; the adapter pins a language, waits for the surrounding transaction to commit, renders the template and sends synchronously through the default mailer. There is no queue, worker or retry. Actors: any account holder or anonymous requester; no command, script or job.
+Every mail django-allauth sends about an account goes through one adapter: verification, reset and reauthentication codes, security notifications and the notices that replace a code when the address is unknown or already registered. Other flows trigger it from inside their headless requests; the adapter pins a language, waits for the surrounding transaction to commit, renders the template and sends synchronously through the default mailer. A send that raises is logged and contained, so the triggering request completes as on success. There is no queue, worker or retry. Actors: any account holder or anonymous requester; no command, script or job.
 
 ## Entry points
 
@@ -39,8 +39,9 @@ sequenceDiagram
             A->>T: "wrap text in mail/transactional.html"
         end
         A->>M: "message.send"
-        alt transport error
-            M-->>F: "exception propagates, state already committed"
+        alt render or transport error
+            M-->>A: "exception"
+            A->>A: "log account_mail_failed, return normally"
         end
     end
 ```
@@ -69,8 +70,8 @@ sequenceDiagram
 | `EMAIL_NOTIFICATIONS` off, or no primary address and no `user.email` | Notification silently skipped |
 | Verification resend within 3 minutes of the previous mail, or a fourth resend | 429, or 409; the UI shows "The verification session has expired" for both |
 | Client IP unparsable when a notification is built | `PermissionDenied`, 403, after the account change is saved; no mail |
-| SMTP or Gmail error during send | Exception escapes the adapter, nothing catches it; the request fails (assumed 500, not exercised by a test) after the change is committed |
-| Mail error in password change or set | Hash saved and session logged out, but no `password_changed`/`password_set` signal, so no audit event |
+| SMTP or Gmail error (or a rendering error) during send | Caught inside the deferred send: one ERROR line `account_mail_failed template=<prefix> user_id=<id or None> error_type=<class> error_code=<NotSentError code or None>` on `pyracast.accounts.adapters`, without the exception text or traceback (both can carry the address). `user_id` is set only for confirmation mails, the only ones whose context carries a `User`; for password, email and MFA notifications the account is named by the `pyracast.security` event logged in the same request, while provider-link notices and reset, reauthentication and notice mails are found by time and template. The request answers as on success; the committed change and any code in the session stay; the mail is not retried, a resend or new request is the retry |
+| Mail error in password change or set | Hash saved, session logged out, `password_changed`/`password_set` signal and audit event emitted as on success |
 | Unknown or registered address | Same response as success; the notice mail goes out |
 
 ## Rules and invariants
@@ -86,5 +87,6 @@ sequenceDiagram
 - `tests/test_transactional_mail.py`: HTML plus text parity, expiry minutes per code kind (including `login_code`) and HTML escaping for the notification templates, all by direct `render_mail` with hand-made context and `ACCOUNT_EMAIL_SUBJECT_PREFIX` overridden.
 - `tests/test_language.py`: `test_authentication_mail_pins_language_until_transaction_commit` (direct `send_mail` with a `user`), `test_signup_copies_only_explicit_language`; `tests/test_session_serialization.py`: `test_verification_resend_is_throttled_capped_and_invalidates_older_codes`.
 - `tests/test_auth_lifecycle.py`, `tests/test_company_registration.py`: mailed codes in the reset, signup and email-change flows through the real views; `test_email_change_requires_reauthentication_and_initiating_session_verification` also asserts a mail to the old address; `tests/test_social_accounts.py`: `test_last_enabled_provider_cannot_be_removed` uses a mailed reauthentication code through the real views.
+- `tests/test_account_mail_failures.py`: a mailer raising an SMTP recipient refusal, a Gmail `NotSentError` or a relay `TimeoutError` through the real views; signup reaches the verification stage, logs its user id and resend works, reset request answers alike for known and unknown addresses, password change answers 401 and is audited, provider connect and disconnect, recovery-code regeneration, and one `account_mail_failed` line without address, code or traceback for a reauthentication code request.
 - `web/tests/auth-registration.spec.ts`, `web/tests/account-security.spec.ts`: UI only, with mocked responses; no real mail.
-- Gaps: no integrated test that a password, TOTP or provider change produces its notification, none for `unknown_account` or `account_already_exists` content, none for the reset-code language of a user with a saved preference, none for a failing mail backend, and none for the production subject prefix.
+- Gaps: no integrated test that a password, TOTP or provider change produces its notification, none for `unknown_account` or `account_already_exists` content, none for the reset-code language of a user with a saved preference, and none for the production subject prefix.

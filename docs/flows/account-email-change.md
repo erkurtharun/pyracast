@@ -77,6 +77,7 @@ sequenceDiagram
 | Verify without pending process, after 600 s, after abort or with an expired session | 409; UI shows "Request failed (409)" |
 | Wrong code | 400 `incorrect_code`; the third failure deletes the pending process |
 | Address verified elsewhere meanwhile | 400 `email_taken` (the pre-check keeps the code but counts an attempt; a race at confirmation consumes it) |
+| Mail backend error on the code or the old-address notice | Contained and logged by the account mail adapter (`account-mail-notifications`); the request answers as on success |
 
 ## Rules and invariants
 

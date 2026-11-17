@@ -77,6 +77,7 @@ sequenceDiagram
 | Unverified email | 409 on GET totp, 400 on POST totp |
 | Same session busy for more than 5 s | 429 `session_busy`, `Retry-After: 1` |
 | No recovery codes on GET after MFA reauthentication | 404, UI shows "Request failed (404)" |
+| Mail backend error on a TOTP or recovery-code notification | Contained and logged by the account mail adapter (`account-mail-notifications`); the change is kept and the request answers as on success |
 
 ## Rules and invariants
 

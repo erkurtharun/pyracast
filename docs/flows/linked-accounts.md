@@ -76,6 +76,7 @@ sequenceDiagram
 | Last account without usable password or verified email; remaining accounts all disabled; unknown account | 400 `no_password`, `no_verified_email`, `disconnect_last` or `account_not_found`, alert with retry |
 | Session lock wait over 5 s, or another `callback_url` | 429 `session_busy`, or 400 JSON on the native form post |
 | Provider not configured; cancelled at the provider, provider or network error; missing or used state | 302 `error=provider_unavailable` (no `error_process`); `error=cancelled` or another code with `error_process=connect`; `error=unknown` with `error_process=login`, since no state is found. Every connect error shows one generic `callbackError` notice; `error_process` is not read |
+| Notification mail fails after commit | Contained and logged by the account mail adapter (`account-mail-notifications`); connect still redirects to the callback and disconnect answers 200 with the remaining list; the committed change stays and the mail is not resent |
 
 ## Rules and invariants
 
@@ -86,5 +87,5 @@ sequenceDiagram
 
 ## Tests
 
-- `tests/test_social_accounts.py` (link, unlink, audit, last-provider rule, disabled provider removal, concurrent disconnect and claim, lock recheck, callback user binding, callback URL, provider errors), `tests/test_configured_social_apps.py` (apps from environment); `web/tests/social-auth.spec.ts` (email-code disconnect, callback error consumed once); `web/integration/social-auth.spec.ts` (connect up to the provider redirect).
+- `tests/test_social_accounts.py` (link, unlink, audit, last-provider rule, disabled provider removal, concurrent disconnect and claim, lock recheck, callback user binding, callback URL, provider errors), `tests/test_account_mail_failures.py` (connect and disconnect with a failing mailer), `tests/test_configured_social_apps.py` (apps from environment); `web/tests/social-auth.spec.ts` (email-code disconnect, callback error consumed once); `web/integration/social-auth.spec.ts` (connect up to the provider redirect).
 - Gaps: no assertion on the connect or disconnect mails or on the 400 error codes (tests check status only), no non-Google/Microsoft row in the list, no frontend test of the success return or of `connected_other`.

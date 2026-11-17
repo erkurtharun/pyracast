@@ -71,7 +71,7 @@ sequenceDiagram
 | `login_failed` (password: IP and primary email; MFA: `mfa-auth-user-<pk>`) or `request_login_code` exceeded | 400 `too_many_login_attempts` |
 | `reauthenticate` limit (10/min per user, shared by password and code request), or the same session's lock busy for 5 s | 429 (lock: `session_busy`, `Retry-After: 1`); generic request-failed message |
 | Email code expired, exhausted (3 attempts) or never requested | 409; generic request-failed message, no resend control |
-| Mail backend error on code request | Exception propagates (500, not run); no code state saved |
+| Mail backend error on code request | Contained and logged by the account mail adapter (`account-mail-notifications`); 200 with the code state saved as on success, so the form asks for a code that did not arrive and offers no resend; the user closes and reopens the form to request a new code, which the API accepts. A failed recovery-code notification after regeneration is contained the same way; the new codes are returned |
 | Replay still 401 | `reauthStillRequired`: two-factor panel returns to its previous view; password form shows it inside the form; linked accounts show it above the still-open form |
 | Administrator removes TOTP | 403 `PermissionDenied` before any reauth check; GET or POST `totp` is 403 from `PrivilegedAuthenticatorEnrollment` |
 
@@ -86,5 +86,5 @@ sequenceDiagram
 ## Tests
 
 - `tests/test_admin_recovery_security.py`: MFA gate against password proof, expiry at 301 s, invalid timestamps, deleted factor, user binding, HEAD, row-lock race, admin TOTP removal.
-- `tests/test_auth_lifecycle.py`: login is not proof, wrong then right password, password proof for TOTP activation and email change, MFA proof for recovery codes. `tests/test_social_accounts.py`: password proof for link and unlink, email-code proof for an unlink, missing or expired proof at the callback.
+- `tests/test_auth_lifecycle.py`: login is not proof, wrong then right password, password proof for TOTP activation and email change, MFA proof for recovery codes. `tests/test_social_accounts.py`: password proof for link and unlink, email-code proof for an unlink, missing or expired proof at the callback. `tests/test_account_mail_failures.py`: code request with a failing mailer (200, one log line, code still confirms) and recovery-code regeneration with a failing notification.
 - Gaps: Playwright (`web/tests/two-factor-settings.spec.ts`, `account-security.spec.ts`, `social-auth.spec.ts`) uses mocked routes only; no test for a wrong emailed or MFA code, the `reauthenticate` 429, email-code expiry or attempt exhaustion, resend, or `session_busy` on these endpoints (only on login); the form's 409 handling is untested.

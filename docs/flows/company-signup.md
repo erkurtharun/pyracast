@@ -71,7 +71,7 @@ sequenceDiagram
 | Workspace name blank, over 200, taken, or lost to a concurrent signup | 400 `company_name`, nothing committed |
 | Invitation token unknown, expired, used or for another email | 400 non-field "The invitation is invalid or expired." |
 | Email already registered | 401 `verify_email`, identical to success; 429 if that address was mailed in the last 3 minutes (derived) |
-| Mail backend error after commit (derived, untested) | 500; user and workspace stay, no pending code in the session |
+| Mail backend error after commit | Contained and logged by the account mail adapter (`account-mail-notifications`); 401 `verify_email` as on success, user and workspace stay and the code is pending in the session; the resend (after its 3-minute throttle) delivers a new code |
 | Wrong code (third wrong attempt discards the code) / address verified for another account meanwhile | 400 `key` / 400 `email_taken` |
 | No pending code in this session, 10 minutes after signup, or attempts used | 409 |
 | Resend within 3 minutes of the last mail / after 3 resends / no pending code | 429 / 409 / 409 |
@@ -85,5 +85,5 @@ sequenceDiagram
 ## Tests
 
 - `tests/test_company_registration.py`: end to end signup, verification and tenant access, no partial rows, duplicate email, rollback, password bounds, attempt limit, concurrent mailbox and workspace races.
-- Also `tests/test_session_serialization.py` (resend throttle and cap), `tests/test_language.py` (language copy), `tests/test_workspaces.py` (invited and duplicate-name signup); `tests/test_account_email_confirmation.py` covers the shared `confirm_email` lock only through email change.
-- `web/tests/auth-registration.spec.ts` and `web/tests/workspace-roles.spec.ts` mock the API; no browser test reaches Django. Untested: the password endpoint's 5/h/ip limit, the 429 on a repeated signup, mail failure during signup, the resend button.
+- Also `tests/test_session_serialization.py` (resend throttle and cap), `tests/test_language.py` (language copy), `tests/test_workspaces.py` (invited and duplicate-name signup), `tests/test_account_mail_failures.py` (signup with a failing mailer reaches the code stage, then resend and verification); `tests/test_account_email_confirmation.py` covers the shared `confirm_email` lock only through email change.
+- `web/tests/auth-registration.spec.ts` and `web/tests/workspace-roles.spec.ts` mock the API; no browser test reaches Django. Untested: the password endpoint's 5/h/ip limit, the 429 on a repeated signup, the resend button.

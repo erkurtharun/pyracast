@@ -74,7 +74,7 @@ sequenceDiagram
 | Wrong code, or missing or empty code | 400 `incorrect_code` on `key`, or `required` on `key`; each costs an attempt and the third also aborts the state |
 | Password short, common, similar or over 1024 | 400 on `password`, state kept |
 | Another account verified the address meanwhile | Verification is skipped silently (`can_set_verified`), reset still returns 401; a racing verification raises an unhandled `IntegrityError` after the hash is saved |
-| Mail backend raises | Not handled in project code; 500, on reset after the password is saved |
+| Mail backend raises | Contained and logged by the account mail adapter (`account-mail-notifications`): the request answers the same 401 and pending flow for known and unknown addresses and keeps the code state, so a code that never arrived can be replaced by a new request; the reset still saves the password and answers 401 |
 
 ## Rules and invariants
 
@@ -86,5 +86,5 @@ sequenceDiagram
 
 ## Tests
 
-- `tests/test_auth_lifecycle.py`: generic response, session binding, single use, revocation, 12-character minimum, expiry, attempt limit, unsafe identity states, ownership proof. `tests/test_session_serialization.py`: parallel wrong and correct codes, missing or expired session, non-POST methods, CSRF denial. `tests/test_company_registration.py`: recovery after the signup race. `tests/test_transactional_mail.py`: code mail layout and expiry (direct `render_mail`). Playwright: `web/tests/auth-registration.spec.ts` (mocked happy path, pending-flow precedence), `web/integration/auth-security.spec.ts` (real stack reset, then TOTP login).
-- Gaps: no test of the 429 limits, `unknown_account` and `password_reset` mails, `login_failed` clearing, an address verified elsewhere before the reset, `UserSession` revocation on the verification branch, mail failure, or any frontend error state.
+- `tests/test_auth_lifecycle.py`: generic response, session binding, single use, revocation, 12-character minimum, expiry, attempt limit, unsafe identity states, ownership proof. `tests/test_session_serialization.py`: parallel wrong and correct codes, missing or expired session, non-POST methods, CSRF denial. `tests/test_company_registration.py`: recovery after the signup race. `tests/test_transactional_mail.py`: code mail layout and expiry (direct `render_mail`). Playwright: `web/tests/auth-registration.spec.ts` (mocked happy path, pending-flow precedence), `web/integration/auth-security.spec.ts` (real stack reset, then TOTP login). `tests/test_account_mail_failures.py`: with a failing mailer the request answers alike for known and unknown addresses and the reset completes.
+- Gaps: no test of the 429 limits, `unknown_account` and `password_reset` mails, `login_failed` clearing, an address verified elsewhere before the reset, `UserSession` revocation on the verification branch, or any frontend error state.
