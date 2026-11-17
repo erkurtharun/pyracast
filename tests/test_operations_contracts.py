@@ -122,6 +122,18 @@ def ci_job_names() -> set[str]:
     return {name for job in ci_jobs().values() for name in job_names(job)}
 
 
+def run_scripts(commands: str) -> dict[str, str]:
+    return {path: text(ROOT / path) for path in set(re.findall(r"scripts/\w+\.py", commands))}
+
+
+def locked_installs(commands: str, scripts: dict[str, str]) -> tuple[str, ...]:
+    direct = re.findall(r"^uv sync --locked.*$", commands, re.M)
+    delegated = [
+        path for path, source in scripts.items() if re.search(r'"sync",\s*"--locked"', source)
+    ]
+    return tuple(sorted({*direct, *delegated}))
+
+
 def release_required_jobs() -> set[str]:
     workflow = text(WORKFLOWS / "release.yml")
     listed = re.search(r"const required = \[(.*?)\];", workflow, re.S)
@@ -323,19 +335,29 @@ def test_windows_tests_run_in_four_shards_that_the_verify_job_combines() -> None
 
 
 def test_every_ci_job_caches_exactly_the_locked_dependencies_it_installs() -> None:
+    installs_by_key: dict[str, set[tuple[str, ...]]] = {}
     for key, job in ci_jobs().items():
         commands = "\n".join(step.get("run", "") for step in job["steps"])
+        scripts = run_scripts(commands)
+        installs = locked_installs(commands, scripts)
         actions = {
             step["uses"].split("@", 1)[0]: step.get("with", {})
             for step in job["steps"]
             if "uses" in step
         }
         if "astral-sh/setup-uv" in actions:
-            # One cache key serves every job on an OS; the first job to finish saves it.
-            installs = "uv sync --locked" in commands
-            assert actions["astral-sh/setup-uv"].get("enable-cache") is installs, key
+            uv = actions["astral-sh/setup-uv"]
+            assert uv.get("enable-cache") is bool(installs), key
+            if installs:
+                assert all(
+                    "--no-cache" not in source for source in [commands, *scripts.values()]
+                ), key
+                installs_by_key.setdefault(uv.get("cache-suffix", ""), set()).add(installs)
         if "npm ci" in commands:
             assert actions["actions/setup-node"].get("cache") == "npm", key
+
+    # One key per OS and suffix serves every job; the first job to finish saves it.
+    assert all(len(installs) == 1 for installs in installs_by_key.values()), installs_by_key
 
 
 def test_gmail_authorization_helper_matches_the_backend_configuration() -> None:
