@@ -4,6 +4,7 @@ import itertools
 import re
 import runpy
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -15,9 +16,12 @@ from django.contrib.auth.models import User
 from django.urls import URLPattern, URLResolver
 from dramatiq.brokers.stub import StubBroker
 
-from deploy import authorize_gmail, watchdog
+from deploy import authorize_gmail, backup, host, release_record, reset_database, watchdog
 from pyracast.accounts.authentication import email_identity
 from pyracast.forecasts.historical_upload import MAX_UPLOAD_BYTES
+from pyracast.forecasts.management.commands.check_delivery_health import (
+    Command as DeliveryHealthCommand,
+)
 from pyracast.forecasts.management.commands.worker import Command as WorkerCommand
 from pyracast.mail import gmail
 from pyracast.metering.runtime import make_epias_actor
@@ -63,7 +67,9 @@ def gateway_environment() -> dict[str, str]:
 
 
 def stop_groups(script: str, command: str) -> list[tuple[int, tuple[str, ...]]]:
-    pattern = re.compile(rf'^\s*"\$\{{{command}\[@\]\}}" stop -t (\d+) ([a-z ]+?)(?: \|\| true)?$')
+    pattern = re.compile(
+        rf'^\s*"\$\{{{command}\[@\]\}}" stop -t (\d+) ([a-z ]+?)(?: \|\| stopped=0)?$'
+    )
     return [
         (int(match[1]), tuple(match[2].split()))
         for line in script.splitlines()
@@ -103,23 +109,45 @@ def ci_jobs() -> dict[str, dict[str, Any]]:
     return jobs
 
 
-def job_names(job: dict[str, Any]) -> set[str]:
-    matrix = {
-        key: values
-        for key, values in job.get("strategy", {}).get("matrix", {}).items()
-        if key not in {"include", "exclude"}
-    }
+def matrix_combinations(matrix: dict[str, Any]) -> list[dict[str, Any]]:
+    axes = {key: values for key, values in matrix.items() if key not in {"include", "exclude"}}
+    original: list[dict[str, Any]] = []
+    for values in itertools.product(*axes.values()) if axes else ():
+        combination = dict(zip(axes, values, strict=True))
+        if not any(
+            all(combination.get(key) == value for key, value in rule.items())
+            for rule in matrix.get("exclude", [])
+        ):
+            original.append(combination)
+    added: list[dict[str, Any]] = []
+    for included in matrix.get("include", []):
+        extended = [
+            combination
+            for combination in original
+            if all(combination[key] == value for key, value in included.items() if key in axes)
+        ]
+        for combination in extended:
+            combination.update(included)
+        if not extended:
+            added.append(dict(included))
+    return [*original, *added]
+
+
+def job_names(identifier: str, job: dict[str, Any]) -> set[str]:
+    matrix = job.get("strategy", {}).get("matrix")
     names: set[str] = set()
-    for combination in itertools.product(*matrix.values()):
-        name = job["name"]
-        for key, value in zip(matrix, combination, strict=True):
+    for combination in [{}] if matrix is None else matrix_combinations(matrix):
+        name = str(job.get("name", identifier))
+        for key, value in combination.items():
             name = name.replace(f"${{{{ matrix.{key} }}}}", str(value))
+        if "${{" in name:
+            raise ValueError(f"Unsupported expression in CI job name: {name}")
         names.add(name)
     return names
 
 
-def ci_job_names() -> set[str]:
-    return {name for job in ci_jobs().values() for name in job_names(job)}
+def ci_job_names(jobs: dict[str, Any]) -> set[str]:
+    return {name for identifier, job in jobs.items() for name in job_names(identifier, job)}
 
 
 def run_scripts(commands: str) -> dict[str, str]:
@@ -134,13 +162,17 @@ def locked_installs(commands: str, scripts: dict[str, str]) -> tuple[str, ...]:
     return tuple(sorted({*direct, *delegated}))
 
 
-def release_required_jobs() -> set[str]:
-    workflow = text(WORKFLOWS / "release.yml")
+def release_required_jobs(workflow: str) -> set[str]:
     listed = re.search(r"const required = \[(.*?)\];", workflow, re.S)
-    assert listed
-    names = set(re.findall(r"'([^']+)'", listed[1]))
-    names.update(re.findall(r"required\.push\('([^']+)'\)", workflow))
-    assert names
+    if listed is None:
+        raise ValueError("The release workflow lists no required CI job.")
+    entries = [entry.strip() for entry in listed[1].split(",")]
+    names = set()
+    for entry in [*entries, *re.findall(r"required\.push\((.*?)\)", workflow)]:
+        literal = re.fullmatch(r"'([^'\\]+)'", entry)
+        if literal is None:
+            raise ValueError(f"Unsupported required CI job entry: {entry}")
+        names.add(literal[1])
     return names
 
 
@@ -153,10 +185,90 @@ def top_level_route_prefixes() -> set[str]:
     return prefixes
 
 
-def backend_router_prefixes() -> set[str]:
+Route = Callable[[str, str], bool]
+Token = str | tuple[str, str]
+RULE_TOKEN = re.compile(r"\s*(?:(\|\||&&|!|\(|\))|(Host|Path|PathPrefix)\(`([^`]*)`\))")
+MATCHERS: dict[str, Callable[[str], Route]] = {
+    "Host": lambda value: lambda host, _path: host == value,
+    "Path": lambda value: lambda _host, path: path == value,
+    "PathPrefix": lambda value: lambda _host, path: path.startswith(value),
+}
+
+
+def either(left: Route, right: Route) -> Route:
+    return lambda host, path: left(host, path) or right(host, path)
+
+
+def both(left: Route, right: Route) -> Route:
+    return lambda host, path: left(host, path) and right(host, path)
+
+
+def negated(route: Route) -> Route:
+    return lambda host, path: not route(host, path)
+
+
+def rule_disjunction(tokens: list[Token]) -> tuple[Route, list[Token]]:
+    route, tokens = rule_conjunction(tokens)
+    while tokens[:1] == ["||"]:
+        right, tokens = rule_conjunction(tokens[1:])
+        route = either(route, right)
+    return route, tokens
+
+
+def rule_conjunction(tokens: list[Token]) -> tuple[Route, list[Token]]:
+    route, tokens = rule_term(tokens)
+    while tokens[:1] == ["&&"]:
+        right, tokens = rule_term(tokens[1:])
+        route = both(route, right)
+    return route, tokens
+
+
+def rule_term(tokens: list[Token]) -> tuple[Route, list[Token]]:
+    if not tokens:
+        raise ValueError("Incomplete router rule.")
+    head, rest = tokens[0], tokens[1:]
+    if head == "!":
+        route, rest = rule_term(rest)
+        return negated(route), rest
+    if head == "(":
+        route, rest = rule_disjunction(rest)
+        if rest[:1] != [")"]:
+            raise ValueError("Unbalanced router rule.")
+        return route, rest[1:]
+    if isinstance(head, tuple):
+        return MATCHERS[head[0]](head[1]), rest
+    raise ValueError(f"Unexpected router rule token: {head}")
+
+
+def router_rule(rule: str) -> Route:
+    tokens: list[Token] = []
+    rule = rule.strip()
+    position = 0
+    while position < len(rule):
+        match = RULE_TOKEN.match(rule, position)
+        if match is None:
+            raise ValueError(f"Unsupported router rule syntax: {rule[position:]}")
+        tokens.append(match[1] or (match[2], match[3]))
+        position = match.end()
+    route, rest = rule_disjunction(tokens)
+    if rest:
+        raise ValueError("Unbalanced router rule.")
+    return route
+
+
+def backend_route() -> Route:
     routes = yaml.safe_load(text(DEPLOY / "routes.yml"))
     rule: str = routes["http"]["routers"]["backend"]["rule"]
-    return set(re.findall(r"PathPrefix\(`([^`]+)`\)", rule))
+    return router_rule(rule.replace('{{ env "SITE_ADDRESS" }}', "pyracast.example"))
+
+
+def yaml_scalar(document: str, *keys: str) -> str:
+    node = yaml.compose(document, Loader=yaml.SafeLoader)
+    for key in keys:
+        assert isinstance(node, yaml.MappingNode), key
+        node = next(value for name, value in node.value if name.value == key)
+    assert isinstance(node, yaml.ScalarNode)
+    return str(node.value)
 
 
 def test_every_actor_queue_is_consumed_by_exactly_one_compose_worker() -> None:
@@ -263,14 +375,59 @@ def test_trusted_proxy_is_the_gateway_static_address_outside_the_dynamic_range()
     (allocation,) = network["ipam"]["config"]
     address = ipaddress.ip_address(gateway)
 
+    smoke = yaml_scalar(
+        text(DEPLOY / "compose.smoke.yaml"),
+        "services",
+        "gateway",
+        "networks",
+        "application",
+        "ipv4_address",
+    )
+
     assert compose_environment()["PYRACAST_TRUSTED_PROXY_CIDRS"] == f"{gateway}/32"
     assert address in ipaddress.ip_network(allocation["subnet"])
     assert address not in ipaddress.ip_network(allocation["ip_range"])
     assert f'REMOTE_ADDR="{gateway}"' in text(DEPLOY / "smoke.sh")
+    assert smoke == gateway
 
 
-def test_gateway_routes_every_django_prefix_to_the_backend() -> None:
-    assert top_level_route_prefixes() <= backend_router_prefixes()
+def test_gateway_routes_every_django_prefix_and_nothing_else_to_the_backend() -> None:
+    routed = backend_route()
+
+    for prefix in top_level_route_prefixes():
+        assert routed("pyracast.example", prefix + "probe"), prefix
+    assert routed("pyracast.example", "/api")
+    assert routed("pyracast.example", "/admin")
+    assert not routed("pyracast.example", "/")
+    assert not routed("pyracast.example", "/app/")
+    assert not routed("pyracast.example", "/apiary")
+    assert not routed("other.example", "/api/session/")
+
+
+def test_router_rule_evaluation_catches_a_branch_that_can_never_match() -> None:
+    routed = router_rule(
+        "Host(`pyracast.example`) && "
+        "(Path(`/admin`) && PathPrefix(`/admin/`) || PathPrefix(`/api/`))"
+    )
+
+    assert routed("pyracast.example", "/api/session/")
+    assert not routed("pyracast.example", "/admin/login/")
+    assert not router_rule("!PathPrefix(`/api/`)")("pyracast.example", "/api/session/")
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        "Host(`a`) && Query(`x=1`)",
+        "Host(`a`) && (PathPrefix(`/api/`)",
+        "Host(`a`) &&",
+        "Host(`a`) )",
+        "( )",
+    ],
+)
+def test_router_rule_evaluation_refuses_syntax_it_cannot_read(rule: str) -> None:
+    with pytest.raises(ValueError, match="router rule"):
+        router_rule(rule)
 
 
 def test_gateway_timeout_covers_gunicorn_and_grace_periods_fit_service_limits() -> None:
@@ -296,13 +453,77 @@ def test_gateway_body_limit_admits_the_largest_upload_and_smoke_probes_one_byte_
 
 
 def test_release_waits_only_for_jobs_that_ci_defines() -> None:
-    assert release_required_jobs() <= ci_job_names()
+    required = release_required_jobs(text(WORKFLOWS / "release.yml"))
+
+    assert required
+    assert required <= ci_job_names(ci_jobs())
+
+
+def test_ci_job_names_apply_matrix_include_and_exclude() -> None:
+    jobs = {
+        "scientific": {
+            "name": "Scientific (${{ matrix.os }})",
+            "strategy": {
+                "matrix": {
+                    "os": ["ubuntu-latest", "windows-latest"],
+                    "exclude": [{"os": "windows-latest"}],
+                    "include": [{"os": "macos-latest"}, {"os": "ubuntu-latest", "extra": "x"}],
+                }
+            },
+        },
+        "shards": {
+            "name": "Shard ${{ matrix.shard }}",
+            "strategy": {"matrix": {"include": [{"shard": 1}, {"shard": 2}]}},
+        },
+        "lint": {},
+    }
+
+    assert ci_job_names(jobs) == {
+        "Scientific (ubuntu-latest)",
+        "Scientific (macos-latest)",
+        "Shard 1",
+        "Shard 2",
+        "lint",
+    }
+    with pytest.raises(ValueError, match="Unsupported expression"):
+        ci_job_names({"job": {"name": "Job ${{ matrix.missing }}"}})
+
+
+def test_ci_job_whose_matrix_excludes_every_combination_defines_no_job() -> None:
+    jobs = {
+        "required": {
+            "name": "Required test",
+            "strategy": {"matrix": {"os": ["ubuntu-latest"], "exclude": [{"os": "ubuntu-latest"}]}},
+        }
+    }
+
+    assert ci_job_names(jobs) == set()
+
+
+@pytest.mark.parametrize(
+    "workflow",
+    [
+        "const required = ['A', \"Missing CI job\"];",
+        "const required = ['A', NAME];",
+        "const required = ['A'];\nrequired.push(name);",
+        "const jobs = ['A'];",
+    ],
+)
+def test_required_job_parser_refuses_entries_it_cannot_read(workflow: str) -> None:
+    with pytest.raises(ValueError, match="required CI job"):
+        release_required_jobs(workflow)
+
+
+def test_required_job_parser_reads_conditional_additions() -> None:
+    workflow = "const required = ['A',\n  'B'];\nif (x) required.push('C');"
+
+    assert release_required_jobs(workflow) == {"A", "B", "C"}
 
 
 def test_release_requires_every_ci_job_directly_or_through_needs() -> None:
     jobs = ci_jobs()
-    required = release_required_jobs()
-    direct = [key for key, job in jobs.items() if job_names(job) & required]
+    required = release_required_jobs(text(WORKFLOWS / "release.yml"))
+    direct = [key for key, job in jobs.items() if job_names(key, job) & required]
     gating: set[str] = set()
     pending = list(direct)
     while pending:
@@ -312,7 +533,7 @@ def test_release_requires_every_ci_job_directly_or_through_needs() -> None:
             needs = jobs[key].get("needs", [])
             pending.extend([needs] if isinstance(needs, str) else needs)
 
-    assert all(job_names(jobs[key]) <= required for key in direct)
+    assert all(job_names(key, jobs[key]) <= required for key in direct)
     assert gating == set(jobs)
 
 
@@ -326,7 +547,9 @@ def test_windows_tests_run_in_four_shards_that_the_verify_job_combines() -> None
 
     assert count == 4
     assert indexes == list(range(1, count + 1))
-    assert job_names(shards) == {f"Windows tests ({index}/{count})" for index in indexes}
+    assert job_names("verify_windows_shards", shards) == {
+        f"Windows tests ({index}/{count})" for index in indexes
+    }
     assert f"--shard ${{{{ env.TEST_SHARD }}}}/{count} " in partition
     assert re.findall(r"windows-shard-\$\{\{ github\.run_attempt \}\}-(\d+)\"", combine) == [
         str(index) for index in indexes
@@ -388,3 +611,171 @@ def test_host_configuration_provides_every_key_the_host_scripts_read() -> None:
 
     assert read
     assert read <= provided
+
+
+def shipped_unit(name: str) -> dict[str, list[str]]:
+    values: dict[str, list[str]] = {}
+    for line in text(DEPLOY / "systemd" / name).splitlines():
+        if "=" in line and not line.startswith(("#", "[")):
+            key, value = line.split("=", 1)
+            values.setdefault(key, []).append(value)
+    return values
+
+
+def test_release_ships_the_watchdog_and_backup_units_and_the_host_keeps_its_own() -> None:
+    shipped = {path.name for path in (DEPLOY / "systemd").iterdir()}
+    installed = re.search(r"^units=\((.*)\)$", text(DEPLOY / "install-units.sh"), re.M)
+    template = text(TERRAFORM / "templates" / "startup.sh.tftpl")
+
+    assert shipped == {
+        "pyracast-backup.service",
+        "pyracast-backup.timer",
+        "pyracast-watchdog.service",
+        "pyracast-watchdog.timer",
+    }
+    assert installed
+    assert set(installed[1].split()) == shipped
+    assert not any(f"/etc/systemd/system/{name}" in template for name in shipped)
+    assert "cat >/etc/systemd/system/pyracast.service" in template
+    assert "deploy/install-units.sh install /opt/pyracast/current" in template
+
+
+def test_watchdog_unit_outlasts_its_deadline_and_runs_while_a_release_is_blocked() -> None:
+    unit = shipped_unit("pyracast-watchdog.service")
+    application = systemd_unit("pyracast.service")
+    drain = max(timeout for timeout, _ in stop_groups(text(DEPLOY / "install-release.sh"), "old"))
+
+    assert int(unit["TimeoutStartSec"][0]) >= watchdog.DEADLINE_SECONDS + 60
+    assert unit["ConditionPathExists"] == ["/opt/pyracast/current/deploy/watchdog.py"]
+    assert int(application["TimeoutStopSec"]) > watchdog.DEADLINE_SECONDS + drain
+
+
+def test_hourly_backup_unit_leaves_the_release_lock_and_block_to_the_backup() -> None:
+    unit = shipped_unit("pyracast-backup.service")
+
+    assert unit["ExecStart"] == [
+        "/usr/bin/python3 /opt/pyracast/current/deploy/backup.py /etc/pyracast/host.json"
+    ]
+    assert unit["PrivateTmp"] == ["true"]
+    assert unit["ConditionPathExists"] == ["/opt/pyracast/current/deploy/backup.py"]
+    budget = int(unit["TimeoutStartSec"][0])
+    assert budget > backup.HOURLY_LOCK_WAIT_SECONDS + backup.DUMP_TIMEOUT_SECONDS
+
+
+def test_host_paths_agree_between_scripts_units_and_helpers() -> None:
+    installer = text(DEPLOY / "install-release.sh")
+    application = systemd_unit("pyracast.service")
+    lock = host.RELEASE_LOCK.as_posix()
+    blocked = host.RELEASE_BLOCKED.as_posix()
+
+    assert f"exec 9>{lock}" in installer
+    assert application["ExecStop"].startswith(f"/usr/bin/flock {lock} ")
+    assert f"touch {blocked}" in installer
+    assert application["ConditionPathExists"] == f"!{blocked}"
+    for name in ("pyracast-backup.service", "pyracast-watchdog.service"):
+        (command,) = shipped_unit(name)["ExecStart"]
+        assert f" {host.CURRENT_RELEASE.as_posix()}/deploy/" in command
+
+
+def test_dispatcher_is_unhealthy_once_its_heartbeat_is_older_than_the_delivery_lag() -> None:
+    dispatcher = compose_services()["dispatcher"]
+    heartbeat = dispatcher["command"][dispatcher["command"].index("--heartbeat-file") + 1]
+    probe = dispatcher["healthcheck"]["test"][-1]
+    threshold = re.search(r"> (\d+)\)$", probe)
+    lag = (
+        DeliveryHealthCommand()
+        .create_parser("pyracast", "check_delivery_health")
+        .get_default("max_lag_minutes")
+    )
+
+    assert Path(heartbeat).parent.as_posix() == dispatcher["tmpfs"][0].split(":", 1)[0]
+    assert f"'{heartbeat}'" in probe
+    assert threshold
+    assert int(threshold[1]) == 60 * lag
+
+
+def test_api_restarts_on_liveness_and_releases_wait_for_readiness() -> None:
+    assert "/health/live/" in compose_services()["api"]["healthcheck"]["test"][-1]
+    assert "/health/ready/" in text(DEPLOY / "install-release.sh")
+
+
+def test_a_silent_watchdog_is_alerted() -> None:
+    monitoring = text(TERRAFORM / "monitoring.tf")
+    metric = re.search(
+        r'resource "google_logging_metric" "watchdog_heartbeat" \{(.*?)\n\}', monitoring, re.S
+    )
+    policy = re.search(
+        r'resource "google_monitoring_alert_policy" "watchdog_heartbeat" \{(.*?)\n\}',
+        monitoring,
+        re.S,
+    )
+
+    assert metric
+    assert r"jsonPayload.event=\"pyracast_watchdog_heartbeat\"" in metric[1]
+    assert policy
+    assert "condition_absent" in policy[1]
+    assert "google_logging_metric.watchdog_heartbeat.name" in policy[1]
+    assert "pyracast_watchdog_heartbeat" in reported_events()["INFO"]
+
+
+def test_release_drains_producers_and_workers_while_the_site_still_serves() -> None:
+    drain = stop_groups(text(DEPLOY / "install-release.sh"), "old")
+
+    assert [group for _, group in drain] == [
+        ("dispatcher",),
+        ("worker", "notifications"),
+        ("gateway", "api", "web"),
+    ]
+
+
+def test_reset_tool_stops_the_application_in_the_installers_drain_order() -> None:
+    drain = stop_groups(text(DEPLOY / "install-release.sh"), "old")
+
+    assert [(int(timeout), group) for timeout, group in reset_database.STOP_ORDER] == drain
+
+
+def test_failed_maintenance_names_the_recorded_prerelease_object_for_the_reset_tool() -> None:
+    script = text(DEPLOY / "install-release.sh")
+    deployment = text(ROOT / "docs" / "DEPLOYMENT.md")
+    tool = "python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json"
+    record = f'"$release/{release_record.RECORD}"'
+    dump = script.index("--kind prerelease")
+
+    assert script.index(record) < dump < script.index(record, dump)
+    assert script.index(record, dump) < script.index("run --rm --no-deps migrate\n")
+    assert f"recovery='{tool}'" in script
+    assert "$recovery abort" in script
+    assert "$recovery restore --confirm $prerelease_object" in script
+    assert f"{tool} abort" in deployment
+    assert f"{tool} restore --confirm OBJECT" in deployment
+    assert f"/opt/pyracast/releases/<sha>-<hash>/{release_record.RECORD}" in deployment
+    assert "last-backup.json` and run" not in deployment
+
+
+def test_installer_takes_the_recorded_object_only_from_the_validating_reader() -> None:
+    script = text(DEPLOY / "install-release.sh")
+    reader = (
+        f'if ! candidate=$(python3 "$release/deploy/release_record.py" '
+        f'"$release/{release_record.RECORD}"); then'
+    )
+
+    assert re.findall(r"prerelease_object=\S*", script) == [
+        "prerelease_object=",
+        "prerelease_object=$candidate",
+    ]
+    assert reader in script
+    assert script.index(reader) < script.index("prerelease_object=$candidate")
+    assert script.count(release_record.RECORD) == script.count(f"$release/{release_record.RECORD}")
+    assert '["object"]' not in script
+
+
+def test_a_release_that_cannot_get_the_lock_says_nothing_changed() -> None:
+    script = text(DEPLOY / "install-release.sh")
+    wait = re.search(
+        r"^flock --timeout (\d+) 9 \|\| \{ echo '([^']*)' >&2; exit 1; \}$", script, re.M
+    )
+
+    assert wait
+    assert "backup" in wait[2]
+    assert "nothing was changed" in wait[2]
+    assert script.index(wait[0]) < script.index("mkdir -p /run/pyracast")

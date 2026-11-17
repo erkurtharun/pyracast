@@ -303,12 +303,15 @@ successful `main` CI runs trigger it automatically. The workflow:
    SBOM and provenance are preserved; all four release references are immutable.
 2. Rejects HIGH/CRITICAL image vulnerabilities and tests the exact image digests.
 3. Transfers the release through IAP using a short-lived OIDC identity.
-4. Checks configuration and database access, stops producers and drains workers,
-   takes a database dump and waits for its off-host upload before upgrading
+4. Checks configuration, database access and the shipped systemd units, stops the
+   dispatcher and drains workers while the site still serves, stops ingress, takes a
+   database dump and waits for its off-host upload before upgrading
    PostgreSQL/RabbitMQ, migrates with the schema owner, and starts the tested
    revision. A failed backup leaves the application stopped and blocks migration.
 5. Promotes `current` only after container readiness checks and a local HTTPS request
-   verify the public certificate, routing and database health.
+   verify the public certificate, routing and database health, then installs the
+   release's watchdog and backup units. Each build has its own release directory;
+   a redeploy never edits the live one.
 
 Image artifacts expire after one day and are deleted after successful deployment.
 Retry a failed Release while its artifact remains available; otherwise run
@@ -374,19 +377,30 @@ fixtures do not establish provider access or inbox delivery.
   uncertain email delivery, failed/stale backups and VM disk/memory pressure.
   A worker that exhausts its five automatic retries stays stopped until restarted.
   Do not automatically resend an email marked `uncertain`.
+- **Host supervision:** `pyracast-watchdog.timer` runs independent checks (capacity,
+  backup age, containers, delivery at most every five minutes, origin certificate)
+  within one deadline and ends each run with a `pyracast_watchdog_heartbeat` whose
+  `state` is `ok`, `blocked`, `unit_failed` or `lock_busy`; a missing heartbeat
+  alerts. It restarts application containers only under the release lock and never
+  restarts or starts a stopped PostgreSQL or RabbitMQ; it only recreates missing
+  ones. The watchdog and backup units ship in
+  `deploy/systemd/` and are installed by each release and at boot; change them there,
+  not on the host.
 - **Planned host maintenance:** run `sudo systemctl stop pyracast` and wait before
   restarting Docker, rebooting or stopping the VM. Workers get 660 seconds for
   their existing 600-second drain and broker cleanup. Google host failure or a
   forced console stop can interrupt that budget; DB leases and idempotency recover
   safe work. No configuration can promise graceful completion after host failure.
-- **Failed deployment:** preflight failures preserve the running release. Before
-  stopping ingress and producers, the script durably creates
-  `/var/lib/pyracast/release-blocked`; only then does it drain workers, back up the
-  existing database and upgrade support services. A first deployment initializes
-  PostgreSQL under the same block before its initial backup. Any maintenance
-  failure leaves the application stopped without downgrading support images
-  (`reset_database.py` `abort` and `restore` later start PostgreSQL and RabbitMQ
-  from the previous release's Compose file).
+- **Failed deployment:** preflight failures preserve the running release and its
+  environment files. Before stopping anything, the script durably creates
+  `/var/lib/pyracast/release-blocked`; only then does it drain the dispatcher and
+  workers, stop ingress, back up the existing database and upgrade support services.
+  A first deployment initializes PostgreSQL under the same block before its initial
+  backup. Any maintenance failure stops the application again, reports whether
+  every stop command succeeded and downgrades no support image (`reset_database.py` `abort` and `restore` later start
+  PostgreSQL and RabbitMQ from the previous release's Compose file). A failure after
+  promotion stops nothing: the new release keeps serving and the log prints the
+  command that finishes the release.
   The block clears only after readiness and release promotion; even
   after an abrupt host restart, systemd refuses automatic application startup
   while this marker exists. Application containers retry process failures up to
@@ -400,8 +414,13 @@ fixtures do not establish provider access or inbox delivery.
   fix or explicit database restore; moving an image tag does not undo a database.
 - **Backups:** the host's hourly timer uploads a custom-format PostgreSQL dump to
   the private backup bucket; each release requires another successful dump before
-  migration. Cloud Storage lifecycle cleanup expires objects after seven days;
-  deletion is asynchronous. Check the last successful upload, not just timer
+  migration. The hourly backup waits up to ten minutes for the release lock and
+  reports `pyracast_backup_skipped` when a release keeps the lock or stays blocked.
+  Hourly backups and releases exclude each other through that lock from the dump to
+  the replacement of `/var/lib/pyracast/last-backup.json`, so the pointer always
+  names the newest snapshot; a release waits up to its 300-second lock timeout for a
+  running backup and otherwise stops without changing anything. Cloud Storage lifecycle cleanup expires objects after
+  seven days; deletion is asynchronous. Check the last successful upload, not just timer
   activation. A one-hour recovery point depends on successful hourly backups;
   failures increase possible data loss, and there is no WAL/PITR recovery. Keep
   the external encryption key separately. Rehearse `pg_restore` into a separate
@@ -494,8 +513,8 @@ verification and restart on the real host in about five minutes of downtime.
    ```
 
    Expect `==> Blocking automatic starts with /var/lib/pyracast/release-blocked`,
-   `==> Stopping gateway, api, web`, `==> Stopping dispatcher`,
-   `==> Stopping worker, notifications`, `==> Dumping database pyracast`,
+   `==> Stopping dispatcher`, `==> Stopping worker, notifications`,
+   `==> Stopping gateway, api, web`, `==> Dumping database pyracast`,
    `==> Uploading gs://BUCKET/postgres/...-prereset-....dump`,
    `==> Restoring the archive into a throwaway PostgreSQL`,
    `==> Exporting the Solcast snapshots` and its upload line, then
@@ -570,19 +589,32 @@ An interrupted `prepare` is recovered with `abort`, then `prepare` again; runnin
 ### A release that fails during maintenance
 
 The Release run is red in "Transfer the verified release and deploy through IAP"
-and its log ends with "Release failed during maintenance. Application remains
-stopped". Check the installer log and `readlink -f /opt/pyracast/current` first.
-If promotion completed, `current` points to the new release: fix the reported host
-or service-unit error and rerun that release. The cases below apply when `current`
-still points to the release that served before maintenance.
+and its log has "Release failed during maintenance." with the outcome of the stop
+commands: either every one succeeded and the application is stopped, or one failed
+and the log names the `docker compose ... ps` command that shows what still runs;
+stop it before recovery. Both `abort` and `restore` refuse without the marker (the
+log says when writing it failed) and `restore` also refuses while an application
+container runs, but `abort` does not check for running containers. The log then
+prints the recovery commands. On an upgrade `current` still points to the release
+that served before maintenance. On an upgrade, a preflight failure prints none of this, keeps the
+running release and its environment files and creates no marker (it may have
+written the new release directory and enabled or reset `pyracast.service`); during
+a reset the marker `reset` left stays. A
+failure after promotion prints "Release SHA is serving" instead, stops nothing and
+names the command that finishes it; a rerun of that release is refused because it
+is already live.
 
 - During the one-time reset: step 6 above.
 - Failure before `migrate`: run `reset_database.py /etc/pyracast/host.json abort`.
   It refuses when the previous release cannot serve the database.
-- Failure in or after `migrate`: release a forward fix, or read the pre-release
-  dump's object name with `cat /var/lib/pyracast/last-backup.json` and run
-  `reset_database.py /etc/pyracast/host.json restore --confirm OBJECT`. It
-  downloads and verifies that object before it drops anything.
+- Failure in or after `migrate`: release a forward fix, or run the printed
+  `restore --confirm` command. It names the pre-release dump that this run took,
+  recorded before `migrate` in
+  `/opt/pyracast/releases/<sha>-<hash>/prerelease-backup.json`, the path the log
+  prints as "Pre-release record"; a rerun of the same release replaces that record,
+  so note the object first. When the record is unreadable the log says so and
+  offers only `abort`. `restore` downloads and verifies the object before it drops
+  anything.
 
 ## Verification boundary
 
@@ -604,7 +636,8 @@ the site is ready. `deploy/test-release.sh` runs the installer with a reset sess
 already in the marker: success removes it; a migration failure keeps its content.
 `tests/test_operations_contracts.py` keeps the values that `deploy/`,
 `infra/terraform` and the workflows restate in agreement: worker queues, the
-watchdog and drain service lists, stop grace periods, alert event names,
+watchdog and drain service lists, the shipped units and host paths, stop grace
+periods, alert event names,
 Cloudflare ranges, the gateway trust anchor, router prefixes, timeouts, the
 body limit, the CI jobs the release waits for, Gmail constants and `host.json`
 keys. Change those values together with that test.

@@ -1,0 +1,12 @@
+[Unit]
+Description=Pyracast PostgreSQL off-host backup
+Requires=docker.service
+After=docker.service
+RequiresMountsFor=/var/lib/pyracast
+ConditionPathExists=/opt/pyracast/current/deploy/backup.py
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/pyracast/current/deploy/backup.py /etc/pyracast/host.json
+PrivateTmp=true
+TimeoutStartSec=2400

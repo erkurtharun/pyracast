@@ -77,9 +77,10 @@ resource "google_monitoring_alert_policy" "readiness" {
 
 resource "google_monitoring_alert_policy" "operations" {
   for_each = {
-    backup  = { event = "pyracast_backup_failed", description = "Database backup failed; inspect pyracast-backup.service and verify the latest private-bucket backup before releasing." }
-    runtime = { event = "pyracast_runtime_unhealthy", description = "A required container remains unhealthy after supervision; inspect workers and release-blocked before restarting." }
-    host    = { event = "pyracast_host_capacity", description = "The VM has less than 15 percent disk space or 10 percent available memory; inspect capacity before jobs are interrupted." }
+    backup      = { event = "pyracast_backup_failed", description = "Database backup failed; inspect pyracast-backup.service and verify the latest private-bucket backup before releasing." }
+    runtime     = { event = "pyracast_runtime_unhealthy", description = "A required container remains unhealthy after supervision; inspect workers and release-blocked before restarting." }
+    host        = { event = "pyracast_host_capacity", description = "The VM has less than 15 percent disk space or 10 percent available memory; inspect capacity before jobs are interrupted." }
+    certificate = { event = "pyracast_certificate_expiring", description = "The origin certificate has less than a quarter of its lifetime left, so its renewal is failing; inspect the gateway logs and port 80 reachability for the ACME challenge." }
   }
   display_name          = "${var.name} ${each.key} failure"
   combiner              = "OR"
@@ -108,5 +109,59 @@ resource "google_monitoring_alert_policy" "operations" {
   documentation {
     mime_type = "text/markdown"
     content   = each.value.description
+  }
+}
+
+resource "google_logging_metric" "watchdog_heartbeat" {
+  name = "${var.name}-watchdog-heartbeat"
+
+  filter = join(" AND ", [
+    "resource.type=\"gce_instance\"",
+    "logName=\"projects/${var.project_id}/logs/pyracast-operations\"",
+    "jsonPayload.event=\"pyracast_watchdog_heartbeat\"",
+  ])
+
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_monitoring_alert_policy" "watchdog_heartbeat" {
+  display_name          = "${var.name} watchdog heartbeat missing"
+  combiner              = "OR"
+  enabled               = true
+  notification_channels = [google_monitoring_notification_channel.operator.name]
+  user_labels           = local.labels
+
+  conditions {
+    display_name = "No watchdog heartbeat for fifteen minutes"
+    condition_absent {
+      filter = join(" AND ", [
+        "metric.type=\"logging.googleapis.com/user/${google_logging_metric.watchdog_heartbeat.name}\"",
+        "resource.type=\"gce_instance\"",
+      ])
+      duration = "900s"
+
+      aggregations {
+        alignment_period   = "300s"
+        per_series_aligner = "ALIGN_SUM"
+      }
+
+      trigger {
+        count = 1
+      }
+    }
+  }
+
+  alert_strategy {
+    auto_close = "86400s"
+  }
+
+  documentation {
+    mime_type = "text/markdown"
+    content   = "The host watchdog has reported nothing for fifteen minutes: the VM is down or pyracast-watchdog.timer stopped. Inspect systemctl status pyracast-watchdog.timer and journalctl -u pyracast-watchdog.service."
   }
 }

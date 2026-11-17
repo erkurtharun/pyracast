@@ -38,11 +38,13 @@ class Command(BaseCommand):
         parser.add_argument("--loop", action="store_true")
         parser.add_argument("--poll-seconds", type=float, default=60.0)
         parser.add_argument("--stop-file", type=Path)
+        parser.add_argument("--heartbeat-file", type=Path)
 
     def handle(self, *args: Any, **options: Any) -> None:
         interval = options["poll_seconds"]
         if not math.isfinite(interval) or interval <= 0:
             raise CommandError("--poll-seconds must be positive and finite")
+        heartbeat: Path | None = options.get("heartbeat_file")
         with shutdown_control(options.get("stop_file")) as shutdown:
             if shutdown.requested:
                 return
@@ -63,6 +65,8 @@ class Command(BaseCommand):
                     ("metering", _published(partial(dispatch_epias, epias_actor))),
                 )
                 while not shutdown.requested:
+                    if heartbeat is not None:
+                        heartbeat.touch()
                     failures = []
                     for name, operation in phases:
                         started = time.monotonic()
