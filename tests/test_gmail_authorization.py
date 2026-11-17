@@ -3,7 +3,11 @@ import hashlib
 import http.client
 import json
 import sys
+import urllib.error
 from concurrent.futures import ThreadPoolExecutor
+from email import policy
+from email.message import Message
+from email.parser import BytesParser
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
@@ -14,7 +18,9 @@ import pytest
 from deploy.authorize_gmail import (
     AUTHORIZATION_URL,
     GMAIL_SCOPE,
+    GMAIL_SEND_ENDPOINT,
     OAUTH_EXCHANGE_ENDPOINT,
+    Grant,
     OAuthClient,
     authorize,
     exchange_code,
@@ -180,15 +186,12 @@ def test_oauth_loopback_rejects_forged_state_and_exchanges_pkce_offline_code(
 
     monkeypatch.setattr("deploy.authorize_gmail.urllib.request.urlopen", respond)
     with ThreadPoolExecutor(max_workers=1) as executor:
-        assert (
-            authorize(
-                OAuthClient("client", "private-client"),
-                "info@pyracast.app",
-                timeout_seconds=5,
-                open_browser=lambda url: executor.submit(complete, url),
-            )
-            == "private-refresh"
-        )
+        assert authorize(
+            OAuthClient("client", "private-client"),
+            "info@pyracast.app",
+            timeout_seconds=5,
+            open_browser=lambda url: executor.submit(complete, url),
+        ) == Grant("private-access", "private-refresh")
     assert parameters["scope"] == [GMAIL_SCOPE]
     assert parameters["access_type"] == ["offline"]
     assert parameters["prompt"] == ["consent"]
@@ -245,3 +248,51 @@ def test_oauth_main_redacts_failures_and_preserves_existing_runtime(
     assert "private" not in str(error.value)
     assert "private" not in str(capsys.readouterr())
     assert runtime.read_bytes() == before
+
+
+@pytest.mark.parametrize("accepted", [True, False])
+def test_credentials_are_saved_only_after_the_sender_mails_itself(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    accepted: bool,
+) -> None:
+    runtime = tmp_path / "runtime.json"
+    runtime.write_text('{"PYRACAST_SECRET_KEY":"preserved"}')
+    before = runtime.read_bytes()
+    client = client_file(tmp_path / "client.json")
+    requests: list[Request] = []
+
+    def respond(request: Request, *, timeout: int) -> BytesIO:
+        requests.append(request)
+        if not accepted:
+            raise urllib.error.HTTPError(
+                request.full_url, 403, "Forbidden", Message(), BytesIO(b"private")
+            )
+        return BytesIO(b'{"id": "sent"}')
+
+    grant = Grant("private-access", "private-refresh")
+    monkeypatch.setattr("deploy.authorize_gmail.authorize", lambda *_args, **_kwargs: grant)
+    monkeypatch.setattr("deploy.authorize_gmail.urllib.request.urlopen", respond)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["authorize_gmail", "--client", str(client), "--runtime", str(runtime), "--no-browser"],
+    )
+
+    if accepted:
+        main()
+        saved = json.loads(runtime.read_text())
+        assert saved["PYRACAST_GMAIL_REFRESH_TOKEN"] == grant.refresh_token
+    else:
+        with pytest.raises(SystemExit):
+            main()
+        assert runtime.read_bytes() == before
+    (request,) = requests
+    assert request.full_url == GMAIL_SEND_ENDPOINT
+    assert request.get_header("Authorization") == "Bearer private-access"
+    assert isinstance(request.data, bytes)
+    raw = base64.urlsafe_b64decode(json.loads(request.data)["raw"])
+    mail = BytesParser(policy=policy.default).parsebytes(raw)
+    assert str(mail["From"]) == str(mail["To"]) == "info@pyracast.app"
+    assert "private" not in str(capsys.readouterr())
