@@ -30,11 +30,12 @@ session=$(mktemp -d /run/pyracast/release.XXXXXX)
 environment_files=(runtime.env broker.env database.env)
 maintenance_started=0
 promoted=0
+prerelease_object=
+recovery='python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json'
 begin_maintenance() {
   maintenance_started=1
-  touch /var/lib/pyracast/release-blocked
-  sync -f /var/lib/pyracast/release-blocked
-  sync -f /var/lib/pyracast
+  touch /var/lib/pyracast/release-blocked && sync -f /var/lib/pyracast/release-blocked \
+    && sync -f /var/lib/pyracast
 }
 cleanup() {
   result=$?
@@ -44,11 +45,26 @@ cleanup() {
       rm -f /var/lib/pyracast/release-blocked
       echo "Release $revision is serving, but a step after promotion failed; nothing was stopped. Finish with: bash $release/deploy/install-units.sh install $release && systemctl start pyracast.service" >&2
     elif (( maintenance_started == 1 )); then
-      begin_maintenance || true
-      "${compose[@]}" stop -t 660 dispatcher || true
-      "${compose[@]}" stop -t 660 worker notifications || true
-      "${compose[@]}" stop -t 100 gateway api web || true
-      echo 'Release failed during maintenance. Application remains stopped. Before migrate, recover with python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json abort; in or after migrate, with python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json restore --confirm OBJECT (see "A release that fails during maintenance" in the deployment guide).' >&2
+      blocked=1
+      stopped=1
+      begin_maintenance || blocked=0
+      "${compose[@]}" stop -t 660 dispatcher || stopped=0
+      "${compose[@]}" stop -t 660 worker notifications || stopped=0
+      "${compose[@]}" stop -t 100 gateway api web || stopped=0
+      if (( stopped == 1 )); then
+        echo 'Release failed during maintenance. Every stop command succeeded; the application is stopped.' >&2
+      else
+        echo "Release failed during maintenance. A stop command failed; the application may still run. Check with: ${compose[*]} ps" >&2
+      fi
+      if (( blocked == 0 )); then
+        echo 'Writing /var/lib/pyracast/release-blocked failed; recreate it before recovery.' >&2
+      fi
+      if [[ -n $prerelease_object ]]; then
+        echo "Before migrate, recover with: $recovery abort. In or after migrate, with: $recovery restore --confirm $prerelease_object" >&2
+      else
+        echo "Recover with: $recovery abort" >&2
+      fi
+      echo 'See "A release that fails during maintenance" in the deployment guide.' >&2
     else
       for name in "${environment_files[@]}"; do
         if [[ -f "$session/$name" ]]; then cp "$session/$name" "/run/pyracast/$name"; fi
@@ -137,7 +153,12 @@ if [[ -L /opt/pyracast/current ]]; then
   "${old[@]}" stop -t 100 gateway api web
 fi
 # Back up the running database before a new support image can modify its data directory.
+rm -f "$release/prerelease-backup.json"
 python3 "$release/deploy/backup.py" /etc/pyracast/host.json --release-dir "$release" --kind prerelease
+sync -f "$release"
+prerelease_object=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["object"])' \
+  "$release/prerelease-backup.json")
+[[ $prerelease_object =~ ^postgres/[A-Za-z0-9/_.-]+\.dump$ ]]
 "${compose[@]}" up -d postgres
 wait_for_database
 "${compose[@]}" up -d rabbitmq

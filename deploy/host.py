@@ -23,6 +23,14 @@ def try_lock(stream: IO[str]) -> bool:
 
 
 @contextmanager
+def pointer_lock() -> Iterator[None]:
+    locks = importlib.import_module("fcntl")
+    with LAST_BACKUP.with_suffix(".lock").open("a") as stream:
+        locks.flock(stream, locks.LOCK_EX)
+        yield
+
+
+@contextmanager
 def release_lock(wait_seconds: float) -> Iterator[bool]:
     deadline = time.monotonic() + wait_seconds
     with RELEASE_LOCK.open("a") as stream:

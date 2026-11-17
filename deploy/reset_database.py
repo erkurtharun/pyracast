@@ -31,7 +31,7 @@ if __package__ in (None, ""):
 from deploy.backup import compose_command, upload_backup
 from deploy.operations_log import access_token
 
-# The installer's drain order: ingress first, then the producer, then the consumers.
+# The installer's drain order (contract-tested): the producer, the consumers, then ingress.
 STOP_ORDER = (
     ("660", ("dispatcher",)),
     ("660", ("worker", "notifications")),

@@ -67,7 +67,9 @@ def gateway_environment() -> dict[str, str]:
 
 
 def stop_groups(script: str, command: str) -> list[tuple[int, tuple[str, ...]]]:
-    pattern = re.compile(rf'^\s*"\$\{{{command}\[@\]\}}" stop -t (\d+) ([a-z ]+?)(?: \|\| true)?$')
+    pattern = re.compile(
+        rf'^\s*"\$\{{{command}\[@\]\}}" stop -t (\d+) ([a-z ]+?)(?: \|\| stopped=0)?$'
+    )
     return [
         (int(match[1]), tuple(match[2].split()))
         for line in script.splitlines()

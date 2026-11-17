@@ -390,8 +390,8 @@ fixtures do not establish provider access or inbox delivery.
   `/var/lib/pyracast/release-blocked`; only then does it drain the dispatcher and
   workers, stop ingress, back up the existing database and upgrade support services.
   A first deployment initializes PostgreSQL under the same block before its initial
-  backup. Any maintenance failure leaves the application stopped without
-  downgrading support images (`reset_database.py` `abort` and `restore` later start
+  backup. Any maintenance failure stops the application again, reports whether
+  every stop command succeeded and downgrades no support image (`reset_database.py` `abort` and `restore` later start
   PostgreSQL and RabbitMQ from the previous release's Compose file). A failure after
   promotion stops nothing: the new release keeps serving and the log prints the
   command that finishes the release.
@@ -410,7 +410,9 @@ fixtures do not establish provider access or inbox delivery.
   the private backup bucket; each release requires another successful dump before
   migration. The hourly dump waits up to ten minutes for the release lock, holds it
   only while dumping and reports `pyracast_backup_skipped` when a release keeps the
-  lock or stays blocked. Cloud Storage lifecycle cleanup expires objects after
+  lock or stays blocked. `/var/lib/pyracast/last-backup.json` names the newest
+  snapshot by dump time: an hourly upload that finishes after a newer pre-release
+  dump does not replace it. Cloud Storage lifecycle cleanup expires objects after
   seven days; deletion is asynchronous. Check the last successful upload, not just timer
   activation. A one-hour recovery point depends on successful hourly backups;
   failures increase possible data loss, and there is no WAL/PITR recovery. Keep
@@ -580,19 +582,28 @@ An interrupted `prepare` is recovered with `abort`, then `prepare` again; runnin
 ### A release that fails during maintenance
 
 The Release run is red in "Transfer the verified release and deploy through IAP"
-and its log ends with "Release failed during maintenance. Application remains
-stopped" and the two recovery commands; `current` still points to the release that
-served before maintenance. A failure after promotion prints "Release SHA is serving"
-instead, stops nothing and names the command that finishes it; a rerun of that
-release is refused because it is already live.
+and its log has "Release failed during maintenance." with the outcome of the stop
+commands: either every one succeeded and the application is stopped, or one failed
+and the log names the `docker compose ... ps` command that shows what still runs;
+stop it before recovery, because `abort` and `restore` refuse while an application
+container runs or the marker is missing (the log also says when writing the marker
+failed). The log then prints the recovery commands. On an upgrade `current` still
+points to the release that served before maintenance. A preflight failure prints
+none of this and changes nothing; during a reset the marker `reset` left stays. A
+failure after promotion prints "Release SHA is serving" instead, stops nothing and
+names the command that finishes it; a rerun of that release is refused because it
+is already live.
 
 - During the one-time reset: step 6 above.
 - Failure before `migrate`: run `reset_database.py /etc/pyracast/host.json abort`.
   It refuses when the previous release cannot serve the database.
-- Failure in or after `migrate`: release a forward fix, or read the pre-release
-  dump's object name with `cat /var/lib/pyracast/last-backup.json` and run
-  `reset_database.py /etc/pyracast/host.json restore --confirm OBJECT`. It
-  downloads and verifies that object before it drops anything.
+- Failure in or after `migrate`: release a forward fix, or run the printed
+  `restore --confirm` command. It names the pre-release dump that this run took,
+  recorded before `migrate` in
+  `/opt/pyracast/releases/<sha>-<hash>/prerelease-backup.json` (the newest entry of
+  `ls -t /opt/pyracast/releases`); a rerun of the same release replaces that record, so note
+  the object first. `restore` downloads and verifies the object before it drops
+  anything.
 
 ## Verification boundary
 
