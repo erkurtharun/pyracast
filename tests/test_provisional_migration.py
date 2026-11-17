@@ -6,8 +6,8 @@ from django.db.migrations.executor import MigrationExecutor
 
 from pyracast.plants.measurement_policy import LEGACY_MEASUREMENT_POLICY, MEASUREMENT_POLICY
 from pyracast.plants.models import CalibrationRun
-from tests.test_domain import NOW
-from tests.test_plant_operations import make_plant
+from tests.support.domain import NOW
+from tests.support.plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

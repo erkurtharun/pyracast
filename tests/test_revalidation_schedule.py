@@ -8,8 +8,8 @@ from pyracast.forecasts.models import CollectionJob, CollectionSchedule, Request
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.regions.models import Region
 from pyracast.regions.operations import approve_region
-from tests.test_domain import NOW, FakeAdapter, make_system
-from tests.test_jobs import calculate
+from tests.support.domain import NOW, FakeAdapter, make_system
+from tests.support.jobs import calculate
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

@@ -19,31 +19,18 @@ from pyracast.plants.availability import (
 from pyracast.plants.models import Plant, ProductionObservation
 from pyracast.plants.numerics import PowerInterval
 from pyracast.plants.operations import (
-    ObservationImportResult,
     ObservationInput,
     import_observations,
     revise_plant,
 )
 from pyracast.plants.production import production_history
 from pyracast.regions.models import Region
-from tests.test_domain import NOW, System
-from tests.test_plant_operations import make_plant, saved_actuals, snapshot_for
+from tests.support.domain import NOW, System
+from tests.support.plant_operations import make_plant, saved_actuals, snapshot_for
+from tests.support.production_history import upload
 
 pytestmark = pytest.mark.django_db(transaction=True)
 DAY = date(2026, 11, 8)
-
-
-def upload(system: System, plant: Plant, rows: list[ObservationInput]) -> ObservationImportResult:
-    assert plant.current_configuration_id is not None
-    return import_observations(
-        system.member,
-        system.tenant.pk,
-        system.region.pk,
-        plant.pk,
-        configuration_id=plant.current_configuration_id,
-        unit="MWh",
-        observations=rows,
-    )
 
 
 def test_seven_saved_days_do_not_enable_ten_and_batch_rolls_back(

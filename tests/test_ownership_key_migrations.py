@@ -9,7 +9,7 @@ from pyracast.metering.models import EpiasCollectionJob, EpiasConnection
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.regions.models import Region
 from pyracast.regions.operations import configure_binding
-from tests.test_domain import NOW, make_system
+from tests.support.domain import NOW, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

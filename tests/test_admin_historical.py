@@ -12,8 +12,8 @@ from django.urls import reverse
 from pyracast.admin_historical import PREVIEW_SALT
 from pyracast.forecasts.models import HistoricalReferenceImport
 from pyracast.plants.models import Plant
-from tests.test_api import verified_admin
-from tests.test_historical_reference_import import system_for_import
+from tests.support.api import verified_admin
+from tests.support.historical_reference_import import system_for_import
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

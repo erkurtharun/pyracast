@@ -11,7 +11,7 @@ from pyracast.notifications.models import NotificationDelivery
 from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.preparation import prepare_delivery
 from pyracast.notifications.scheduler import enqueue_due
-from tests.test_notifications import SLOT, configured, ready, saved
+from tests.support.notifications import SLOT, configured, ready, saved
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

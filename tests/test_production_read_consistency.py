@@ -8,9 +8,9 @@ from django.db import connection
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import ProductionObservation
 from pyracast.plants.production import production_history
-from tests.test_plant_operations import make_plant
-from tests.test_production_changes import provider
-from tests.test_provisional_measurements import DAY, acquisition
+from tests.support.plant_operations import make_plant
+from tests.support.production_changes import provider
+from tests.support.provisional_measurements import DAY, acquisition
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

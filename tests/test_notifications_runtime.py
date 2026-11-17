@@ -14,7 +14,7 @@ from pyracast import runtime as forecast_runtime
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.notifications import runtime
 from pyracast.notifications.models import NotificationDelivery
-from tests.test_notifications import SLOT, ready
+from tests.support.notifications import SLOT, ready
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

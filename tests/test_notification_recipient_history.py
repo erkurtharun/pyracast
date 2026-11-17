@@ -14,9 +14,9 @@ from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.notifications.recipients import effective_recipients
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.regions.operations import submit_region
-from tests.test_domain import NOW
-from tests.test_notification_groups import group, member
-from tests.test_notifications import SLOT, configured
+from tests.support.domain import NOW
+from tests.support.notification_groups import group, member
+from tests.support.notifications import SLOT, configured
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

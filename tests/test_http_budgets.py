@@ -7,8 +7,8 @@ from django.urls import URLPattern, URLResolver, get_resolver
 
 from pyracast.regions.operations import submit_region
 from tests.support.budgets import assert_scale_invariant, query_budget
-from tests.test_domain import NOW, System
-from tests.test_plant_operations import make_plant
+from tests.support.domain import NOW, System
+from tests.support.plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

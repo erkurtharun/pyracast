@@ -7,6 +7,8 @@ from django.db.backends.base.base import NO_DB_ALIAS, BaseDatabaseWrapper
 from django.db.backends.signals import connection_created
 from hypothesis import settings
 
+pytest.register_assert_rewrite("tests.support")
+
 # The gate must be reproducible across runs and workers; `explore` is for local searches.
 settings.register_profile("gate", derandomize=True, deadline=None, database=None)
 settings.register_profile("explore", max_examples=2000, deadline=None)

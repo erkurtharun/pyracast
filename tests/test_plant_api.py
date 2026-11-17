@@ -1,7 +1,6 @@
 import json
 from datetime import UTC, datetime, time, timedelta
 from io import StringIO
-from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -23,23 +22,11 @@ from pyracast.plants.models import (
 )
 from pyracast.plants.numerics import POLICY_VERSION
 from pyracast.plants.serializers import AwareDateTime, FiniteFloat
-from tests.test_domain import make_system
-from tests.test_plant_operations import publish_snapshot, saved_actuals
+from tests.support.domain import make_system
+from tests.support.plant_api import setup_plant
+from tests.support.plant_operations import publish_snapshot
 
 pytestmark = pytest.mark.django_db(transaction=True)
-
-
-def setup_plant() -> tuple[Client, str, dict[str, Any]]:
-    system = make_system(approved=True)
-    saved_actuals(system, datetime(2020, 1, 1).date())
-    client = Client()
-    client.force_login(system.member)
-    base = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/"
-    response = client.post(
-        base, {"name": "PV", "dc_capacity_mw": 1}, content_type="application/json"
-    )
-    assert response.status_code == 201, response.content
-    return client, base, response.json()
 
 
 def test_mounting_geometry_is_validated_and_versioned_in_api() -> None:

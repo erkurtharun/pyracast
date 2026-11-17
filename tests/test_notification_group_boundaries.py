@@ -15,9 +15,9 @@ from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.trash import purge_expired, trash_region
-from tests.test_domain import NOW
-from tests.test_notifications import SLOT, configured, ready
-from tests.test_trash_boundaries import _race_before_region_lock
+from tests.support.domain import NOW
+from tests.support.notifications import SLOT, configured, ready
+from tests.support.trash_boundaries import _race_before_region_lock
 
 pytestmark = pytest.mark.django_db(transaction=True)
 

@@ -19,8 +19,8 @@ from pyracast.plants.models import (
     PlantForecast,
 )
 from pyracast.plants.operations import activate_calibration, reset_calibration
-from tests.test_domain import NOW
-from tests.test_plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
+from tests.support.domain import NOW
+from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
 DAY = NOW.date() - timedelta(days=1)

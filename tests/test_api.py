@@ -4,9 +4,7 @@ from datetime import date
 from time import time
 
 import pytest
-from allauth.account.internal.flows.login import record_authentication
 from allauth.account.models import EmailAddress
-from allauth.mfa.models import Authenticator
 from allauth.mfa.totp.internal.auth import (
     TOTP,
     format_hotp_value,
@@ -32,6 +30,7 @@ from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import CollectionJob, ForecastResult
 from pyracast.providers import FixtureProvider
 from pyracast.regions.models import Region
+from tests.support.api import verified_admin
 
 pytestmark = pytest.mark.django_db
 
@@ -44,19 +43,6 @@ def customer() -> tuple[Client, User, Tenant]:
     client = Client()
     client.force_login(user)
     return client, user, tenant
-
-
-def verified_admin(*, enforce_csrf_checks: bool = False) -> tuple[Client, User]:
-    user = User.objects.create_user(username="operator", is_superuser=True, is_staff=True)
-    authenticator = Authenticator.objects.create(user=user, type="totp", data={})
-    client = Client(enforce_csrf_checks=enforce_csrf_checks)
-    client.force_login(user)
-    request = RequestFactory().get("/admin/")
-    request.user = user
-    request.session = client.session
-    record_authentication(request, user, method="mfa", type="totp", id=authenticator.pk)
-    request.session.save()
-    return client, user
 
 
 def region_input() -> dict[str, object]:
