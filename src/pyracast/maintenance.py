@@ -1,6 +1,6 @@
 import json
 import socket
-from http.cookies import CookieError, SimpleCookie
+from http.cookies import _unquote
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from pyracast.languages import LANGUAGE_COOKIE, Language, negotiated_language
@@ -50,11 +50,14 @@ def api_body(language: Language) -> bytes:
 
 
 def cookie_language(header: str) -> str | None:
-    try:
-        morsel = SimpleCookie(header).get(LANGUAGE_COOKIE)
-    except CookieError:
-        return None
-    return None if morsel is None else morsel.value
+    # Django's parse_cookie: every ;-separated pair counts, the last of a name wins, values are
+    # unquoted alike.
+    language = None
+    for chunk in header.split(";"):
+        key, separator, value = chunk.partition("=")
+        if separator and key.strip() == LANGUAGE_COOKIE:
+            language = _unquote(value.strip())
+    return language
 
 
 class Notice(BaseHTTPRequestHandler):
