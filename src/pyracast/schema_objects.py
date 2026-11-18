@@ -141,6 +141,21 @@ _OBSERVATION_GUARD = """
             """
 
 
+# The collection stores a snapshot, then attaches its weather and publishes it by setting
+# available_at (forecasts/jobs.py); every other column is the acquisition and never changes.
+_SNAPSHOT_GUARD = """
+            BEGIN
+                IF OLD.available_at IS NOT NULL
+                    OR to_jsonb(NEW) - 'available_at' - 'weather_payload' - 'weather_error'
+                        <> to_jsonb(OLD) - 'available_at' - 'weather_payload' - 'weather_error' THEN
+                    RAISE EXCEPTION 'Forecast snapshot acquisitions are immutable'
+                        USING ERRCODE = '23514';
+                END IF;
+                RETURN NEW;
+            END;
+            """
+
+
 def _immutable(table: str, rows: str, migration: MigrationKey) -> RowTrigger:
     short = table.split("_", 1)[1]
     body = f"""
@@ -348,6 +363,14 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
     _immutable(
         "forecasts_historicalreferenceimport",
         "Stored historical reference imports",
+        ("forecasts", "0003_lease_import_and_archive_checks"),
+    ),
+    RowTrigger(
+        "forecastsnapshot_publication_guard",
+        "forecasts_forecastsnapshot",
+        "BEFORE UPDATE",
+        "guard_forecastsnapshot_publication",
+        _SNAPSHOT_GUARD,
         ("forecasts", "0003_lease_import_and_archive_checks"),
     ),
     _immutable(

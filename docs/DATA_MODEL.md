@@ -562,6 +562,7 @@ erDiagram
 
 #### `forecasts_forecastsnapshot`
 
+- `forecastsnapshot_publication_guard`: `TRIGGER BEFORE UPDATE FOR EACH ROW EXECUTE FUNCTION guard_forecastsnapshot_publication()`
 - `forecastsnapshot_weather_error_chk`: `CHECK ("weather_error" IN ('', 'invalid_weather_number', 'invalid_weather_coordinates', 'invalid_weather_schema', 'invalid_weather_timezone', 'invalid_weather_units', 'empty_weather_response', 'invalid_weather_interval', 'invalid_weather_window', 'unsafe_weather_response', 'invalid_weather_collection_time', 'weather_request_failed', 'weather_acquisition_failed', 'weather_acquisition_interrupted'))`
 - `snapshot_binding_identity`: `UNIQUE ("id", "binding_id")`
 - `snapshot_binding_source_age`: `INDEX ("binding_id", "source_kind", "collected_at" DESC, "available_at" DESC, "id" DESC)`

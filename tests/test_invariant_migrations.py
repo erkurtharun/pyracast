@@ -72,6 +72,7 @@ NEW_CHECKS = {
 }
 PLANT_TABLES = ("plants_calibrationrun", "plants_plant")
 NEW_TRIGGERS = {
+    "forecastsnapshot_publication_guard",
     "historicalreferenceimport_immutable",
     "epiassnapshot_immutable",
     "productionobservation_revision_guard",
