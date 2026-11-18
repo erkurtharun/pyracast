@@ -559,7 +559,7 @@ def test_api_shares_region_reads_and_restricts_writes_to_admin() -> None:
     Membership.objects.create(user=other, tenant=system.tenant)
     client = APIClient()
     url = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/reminders/"
-    assert client.get(url).status_code == 403
+    assert client.get(url).status_code == 401
     client.force_authenticate(other)
     assert client.get(url).json()["enabled"]
     assert (
@@ -1258,8 +1258,9 @@ def test_reminder_api_requires_an_explicit_recipient_list() -> None:
     )
     assert response.status_code == 400
     assert response.json() == {
-        "code": "http_400",
-        "detail": {"recipients": ["This field is required."]},
+        "code": "invalid_request",
+        "message": "Check the highlighted values and try again.",
+        "fields": {"recipients": "This field is required."},
     }
     response = client.put(
         f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/reminders/",
@@ -1274,6 +1275,6 @@ def test_reminder_api_requires_an_explicit_recipient_list() -> None:
     )
     assert response.status_code == 400
     assert response.json() == {
-        "code": "http_400",
-        "detail": {"non_field_errors": ["Unknown fields are not accepted."]},
+        "code": "invalid_request",
+        "message": "Unknown fields are not accepted.",
     }

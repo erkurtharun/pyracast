@@ -6,7 +6,6 @@ from datetime import timedelta
 from allauth.account.models import EmailAddress
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.mail import EmailMultiAlternatives
 from django.core.validators import validate_email
 from django.db import transaction
@@ -23,14 +22,11 @@ from pyracast.accounts.models import (
     WorkspaceInvitation,
     WorkspaceRole,
 )
+from pyracast.errors import DomainError, ErrorCode, ForbiddenError
 from pyracast.mail.errors import NotSentError
 from pyracast.mail.send import send
 
 logger = logging.getLogger(__name__)
-
-
-class InvitationRateLimitError(Exception):
-    pass
 
 
 def invitation_digest(token: str) -> str:
@@ -45,7 +41,7 @@ def pending_invitation(token: str, email: str) -> WorkspaceInvitation:
         expires_at__gt=timezone.now(),
     ).first()
     if invitation is None:
-        raise ValidationError(_("The invitation is invalid or expired."))
+        raise DomainError(ErrorCode.INVITATION_UNAVAILABLE)
     return invitation
 
 
@@ -55,14 +51,14 @@ def invite_workspace_member(actor: User, tenant_id: int, email: str) -> Workspac
     email = email.strip().lower()
     validate_email(email)
     if Membership.objects.filter(tenant_id=tenant_id, user__email__iexact=email).exists():
-        raise ValidationError(_("This account already belongs to the workspace."))
+        raise DomainError(ErrorCode.INVITATION_MEMBER_EXISTS)
     now = timezone.now()
     recent = WorkspaceInvitation.objects.filter(tenant_id=tenant_id)
     if (
         recent.filter(created_at__gte=now - timedelta(hours=1)).count() >= 20
         or recent.filter(email=email, created_at__gte=now - timedelta(minutes=1)).exists()
     ):
-        raise InvitationRateLimitError
+        raise DomainError(ErrorCode.INVITATION_RATE_LIMITED, status=429, retry_after=60)
     WorkspaceInvitation.objects.filter(
         tenant_id=tenant_id, email=email, accepted_at__isnull=True, expires_at__gt=now
     ).update(expires_at=now)
@@ -116,18 +112,18 @@ def invite_workspace_member(actor: User, tenant_id: int, email: str) -> Workspac
 def accept_workspace_invitation(actor: User, token: str) -> Membership:
     invitation = WorkspaceInvitation.objects.filter(token_hash=invitation_digest(token)).first()
     if invitation is None:
-        raise ValidationError(_("The invitation is invalid or expired."))
+        raise DomainError(ErrorCode.INVITATION_UNAVAILABLE)
     Tenant.objects.select_for_update().get(pk=invitation.tenant_id)
     invitation = WorkspaceInvitation.objects.select_for_update().get(pk=invitation.pk)
     if invitation.accepted_at is not None or invitation.expires_at <= timezone.now():
-        raise ValidationError(_("The invitation is invalid or expired."))
+        raise DomainError(ErrorCode.INVITATION_UNAVAILABLE)
     if (
         not User.objects.filter(pk=actor.pk, is_active=True).exists()
         or not EmailAddress.objects.filter(
             user=actor, email__iexact=invitation.email, verified=True
         ).exists()
     ):
-        raise PermissionDenied(_("Verify the invited email address before accepting."))
+        raise ForbiddenError(ErrorCode.INVITATION_EMAIL_UNVERIFIED)
     membership, _created = Membership.objects.get_or_create(
         tenant_id=invitation.tenant_id, user=actor, defaults={"role": WorkspaceRole.VIEWER}
     )
@@ -145,6 +141,6 @@ def revoke_workspace_invitation(actor: User, tenant_id: int, invitation_id: int)
         .first()
     )
     if invitation is None:
-        raise ValidationError(_("The invitation is invalid or expired."))
+        raise DomainError(ErrorCode.INVITATION_UNAVAILABLE)
     invitation.expires_at = min(invitation.expires_at, timezone.now())
     invitation.save(update_fields=["expires_at"])

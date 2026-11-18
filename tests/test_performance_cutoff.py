@@ -30,7 +30,7 @@ def test_performance_api_rejects_offset_cutoff_strings(
         {"start_date": DAY.isoformat(), "end_date": DAY.isoformat(), "issuance_cutoff": cutoff},
     )
     assert response.status_code == 400
-    assert "issuance_cutoff" in response.json()["detail"]
+    assert "issuance_cutoff" in response.json()["fields"]
 
 
 @pytest.mark.parametrize(

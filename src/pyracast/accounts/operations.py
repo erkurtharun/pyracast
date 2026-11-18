@@ -1,10 +1,8 @@
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models.functions import Lower
 from django.utils import timezone
-from django.utils.translation import gettext as _
 
 from pyracast.accounts.authorization import require_platform_admin, tenant_membership
 from pyracast.accounts.models import (
@@ -15,6 +13,7 @@ from pyracast.accounts.models import (
     WorkspaceMemberRemoval,
     WorkspaceRole,
 )
+from pyracast.errors import ConflictError, DomainError, ErrorCode
 
 
 @transaction.atomic
@@ -24,7 +23,7 @@ def remove_workspace_member(actor: User, tenant_id: int, user_id: int) -> None:
     if membership is None:
         return
     if membership.role == WorkspaceRole.ADMIN or user_id == actor.pk:
-        raise ValidationError(_("The workspace administrator cannot be removed."))
+        raise DomainError(ErrorCode.WORKSPACE_ADMIN_NOT_REMOVABLE)
     emails = set(EmailAddress.objects.filter(user_id=user_id).values_list("email", flat=True))
     emails.add(membership.user.email)
     from pyracast.notifications.recipients import remove_member_recipients
@@ -56,12 +55,12 @@ def reassign_workspace_admin(
         .first()
     )
     if current_admin_id != expected_admin_id:
-        raise ValidationError(_("The workspace administrator changed. Reload before saving."))
+        raise ConflictError(ErrorCode.WORKSPACE_ADMIN_CHANGED)
     membership = Membership.objects.filter(
         tenant_id=tenant_id, user_id=user_id, user__is_active=True
     ).first()
     if membership is None:
-        raise ValidationError(_("Choose an active member of this workspace."))
+        raise DomainError(ErrorCode.MEMBER_UNAVAILABLE)
     if membership.role != WorkspaceRole.ADMIN:
         from pyracast.plants.automation import disable_workspace_automation
 

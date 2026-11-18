@@ -2,12 +2,12 @@ from datetime import date, datetime, timedelta
 from typing import Literal, cast
 from zoneinfo import ZoneInfo
 
-from django.core.exceptions import ValidationError
 from django.db.models import Case, IntegerField, Q, Value, When
 
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import SiteBinding
+from pyracast.errors import DomainError, ErrorCode
 from pyracast.forecasts.actuals import (
     ACTUAL_COMPOSITION_POLICY,
     archived_actual_irradiance,
@@ -32,12 +32,6 @@ from pyracast.plants.forecast_sources import apply_composition, compose_snapshot
 from pyracast.regions.models import Region
 
 HISTORY_SELECTION_POLICY = "native-then-authorized-scale-complete-actuals-v4"
-
-
-class OutlookRequestError(Exception):
-    def __init__(self, code: Literal["date_out_of_range", "completed_day_required"]) -> None:
-        self.code = code
-        super().__init__(code)
 
 
 def select_actual_snapshot(
@@ -161,9 +155,9 @@ def regional_outlook(
 ) -> dict[str, object]:
     today = now.astimezone(ZoneInfo(region.timezone)).date()
     if not today - timedelta(days=366) <= target_date <= today + timedelta(days=14):
-        raise OutlookRequestError("date_out_of_range")
+        raise DomainError(ErrorCode.DATE_OUT_OF_RANGE)
     if source == "estimated_actuals" and target_date > today:
-        raise OutlookRequestError("completed_day_required")
+        raise DomainError(ErrorCode.COMPLETED_DAY_REQUIRED)
     if source == "estimated_actuals" and target_date == today:
         return _regional_composed_forecast(
             region, target_date, now, now, region.approved_binding, actuals_only=True
@@ -295,7 +289,7 @@ def _regional_composed_forecast(
             else None
         )
     except (ValueError, ArithmeticError, KeyError, TypeError) as exc:
-        raise ValidationError("calculation_out_of_range") from exc
+        raise DomainError(ErrorCode.CALCULATION_OUT_OF_RANGE) from exc
     source_kind = "estimated_actuals" if actuals_only else "forecast"
     if source is not None:
         snapshots = source.snapshots
@@ -333,7 +327,7 @@ def _regional_composed_forecast(
                 source for source in snapshots if source.pk in composition.snapshot_ids
             ]
         except (ValueError, ArithmeticError) as exc:
-            raise ValidationError("calculation_out_of_range") from exc
+            raise DomainError(ErrorCode.CALCULATION_OUT_OF_RANGE) from exc
     fresh = (
         binding is not None
         and binding_is_current(binding)

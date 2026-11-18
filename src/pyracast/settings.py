@@ -203,7 +203,7 @@ CACHES = {
     }
 }
 REST_FRAMEWORK = {
-    "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.SessionAuthentication"],
+    "DEFAULT_AUTHENTICATION_CLASSES": ["pyracast.api.authentication.SessionAuthentication"],
     "DEFAULT_PERMISSION_CLASSES": [
         "rest_framework.permissions.IsAuthenticated",
         "pyracast.api.permissions.WorkspaceWritePermission",
@@ -221,9 +221,11 @@ SPECTACULAR_SETTINGS = {
     "SERVE_INCLUDE_SCHEMA": False,
     "POSTPROCESSING_HOOKS": [
         "drf_spectacular.hooks.postprocess_schema_enums",
+        "pyracast.api.schema.error_components",
         "pyracast.api.schema.stored_vocabularies",
     ],
     "ENUM_NAME_OVERRIDES": {
+        "ErrorCode": "pyracast.errors.ErrorCode",
         "LanguageEnum": "pyracast.accounts.models.Language",
         "WorkspaceRoleEnum": "pyracast.accounts.models.WorkspaceRole",
         "InvitationDeliveryStatusEnum": "pyracast.accounts.models.InvitationDeliveryStatus",
@@ -261,6 +263,7 @@ SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 PYRACAST_SESSION_IDLE_SECONDS = 30 * 60
 CSRF_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_HTTPONLY = True
+CSRF_FAILURE_VIEW = "pyracast.api.error_pages.csrf_failure"
 SECURE_REFERRER_POLICY = "same-origin"
 SECURE_CSP = {
     "default-src": [CSP.SELF],

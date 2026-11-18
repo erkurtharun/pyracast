@@ -1,6 +1,7 @@
 import { test, expect } from "./support/test";
 import { mockApi, paged, plant, region } from "./support/workspace";
 import AxeBuilder from "@axe-core/playwright";
+import { errorBody } from "./support/errors";
 
 test("renames a plant without changing its location", async ({ page }) => {
     await mockApi(page);
@@ -65,7 +66,7 @@ test("requests a location change and preserves the current location", async ({
                 fail = false;
                 await route.fulfill({
                     status: 400,
-                    json: { detail: "Please try again." },
+                    json: errorBody("invalid_request", "Please try again."),
                 });
                 return;
             }

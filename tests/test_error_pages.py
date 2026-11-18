@@ -18,19 +18,23 @@ from pyracast.accounts import inputs, session_lock
 from pyracast.accounts.audit import logger as security_logger
 from pyracast.api import error_pages
 from pyracast.api.session import SessionView
+from pyracast.errors import MESSAGES, ErrorCode
 
 pytestmark = pytest.mark.django_db
 
 
-def assert_private_json(response: Any, status: int, body: dict[str, object]) -> None:
+def assert_private_json(response: Any, status: int, code: str) -> None:
     assert response.status_code == status
     assert response["Content-Type"] == "application/json"
     assert "no-store" in response["Cache-Control"]
-    assert json.loads(response.content) == body
+    assert json.loads(response.content) == {
+        "code": code,
+        "message": str(MESSAGES[ErrorCode(code)]),
+    }
 
 
 def test_unknown_api_path_answers_json_404() -> None:
-    assert_private_json(Client().get("/api/does-not-exist/"), 404, {"code": "not_found"})
+    assert_private_json(Client().get("/api/does-not-exist/"), 404, "not_found")
 
 
 def test_paths_outside_the_api_keep_html_errors() -> None:
@@ -50,7 +54,7 @@ def test_invalid_trusted_proxy_headers_answer_json_403_without_caching(
     response = Client(REMOTE_ADDR="10.0.0.7").get(
         "/api/session/", HTTP_X_FORWARDED_PROTO="https", HTTP_X_REAL_IP="not-an-address"
     )
-    assert_private_json(response, 403, {"code": "invalid_proxy_headers"})
+    assert_private_json(response, 403, "invalid_proxy_headers")
     assert [json.loads(record.getMessage()) for record in caplog.records] == [
         {"client_ip": "10.0.0.7", "event": "invalid_proxy_headers", "user_id": None}
     ]
@@ -65,7 +69,7 @@ def test_interrupted_session_answers_session_ended(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(session_lock, "serialize_session", interrupted)
     client = Client()
     client.cookies["sessionid"] = "a" * 32
-    assert_private_json(client.get("/api/session/"), 400, {"code": "session_ended"})
+    assert_private_json(client.get("/api/session/"), 400, "session_ended")
 
 
 def api_errors(logs: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
@@ -80,7 +84,7 @@ def test_session_interrupted_inside_a_view_answers_session_ended(
 
     monkeypatch.setattr(SessionView, "get", interrupted)
     response = Client(raise_request_exception=False).get("/api/session/")
-    assert_private_json(response, 400, {"code": "session_ended"})
+    assert_private_json(response, 400, "session_ended")
     assert api_errors(pyracast_logs) == []
 
 
@@ -91,7 +95,7 @@ def test_too_many_form_fields_answer_bad_request(
     response = Client(raise_request_exception=False).post(
         "/api/auth/browser/v1/auth/provider/redirect", {f"field{index}": "x" for index in range(4)}
     )
-    assert_private_json(response, 400, {"code": "bad_request"})
+    assert_private_json(response, 400, "bad_request")
     assert api_errors(pyracast_logs) == []
 
 
@@ -100,7 +104,7 @@ def test_privileged_totp_enrollment_refusal_is_json() -> None:
     client = Client()
     client.force_login(staff)
     response = client.get("/api/auth/browser/v1/account/authenticators/totp")
-    assert_private_json(response, 403, {"code": "permission_denied"})
+    assert_private_json(response, 403, "permission_denied")
 
 
 @pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
@@ -189,4 +193,4 @@ def test_error_handlers_answer_html_outside_the_api(
 
 def test_other_api_bad_requests_answer_bad_request() -> None:
     response = error_pages.bad_request(RequestFactory().get("/api/session/"), BadRequest())
-    assert_private_json(response, 400, {"code": "bad_request"})
+    assert_private_json(response, 400, "bad_request")

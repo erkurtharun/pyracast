@@ -32,7 +32,11 @@ def test_lock_contention_returns_retryable_response_without_exposing_database_de
 
     assert response is not None
     assert response.status_code == 503
-    assert response.data == {"code": "workspace_busy"}
+    assert response.data == {
+        "code": "busy",
+        "message": "The workspace is busy. Try again in a moment.",
+        "retry_after": 1,
+    }
     assert response["Retry-After"] == "1"
     tenant.refresh_from_db()
     assert tenant.name == "Contended workspace"
@@ -44,7 +48,11 @@ def test_deadlock_is_retryable_but_not_reported_as_lock_timeout() -> None:
     response = exception_handler(error, {})
     assert response is not None
     assert response.status_code == 503
-    assert response.data == {"code": "database_conflict"}
+    assert response.data == {
+        "code": "database_conflict",
+        "message": "The change collided with another change. Try again.",
+        "retry_after": 1,
+    }
     assert response["Retry-After"] == "1"
 
 
@@ -76,7 +84,7 @@ def test_statement_timeout_answers_503_request_timeout(
         raise AssertionError("The statement finished before its timeout.")
     assert response is not None
     assert response.status_code == 503
-    assert set(response.data) == {"code", "request_id"}
+    assert set(response.data) == {"code", "message", "request_id"}
     assert response.data["code"] == "request_timeout"
     [record] = [record for record in pyracast_logs.records if record.name == "pyracast.api"]
     assert record.levelno == logging.ERROR
