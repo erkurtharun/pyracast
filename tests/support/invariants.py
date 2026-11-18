@@ -151,14 +151,16 @@ def archived_rows() -> dict[str, dict[int, dict[str, Any]]]:
     return rows
 
 
+OBSERVATIONS = "plants_productionobservation"
+
+
 def superseded_revisions(
     before: dict[str, dict[int, dict[str, Any]]], after: dict[str, dict[int, dict[str, Any]]]
 ) -> set[int]:
-    observations = "plants_productionobservation"
     return {
         key
-        for key, row in before[observations].items()
-        if row["is_current"] and not after[observations].get(key, row)["is_current"]
+        for key, row in before[OBSERVATIONS].items()
+        if row["is_current"] and not after[OBSERVATIONS].get(key, row)["is_current"]
     }
 
 
@@ -172,7 +174,7 @@ def rewritten_archive_rows(
     for table, rows in before.items():
         for key, row in rows.items():
             stored = after[table].get(key)
-            if stored is not None and key in superseded:
+            if stored is not None and table == OBSERVATIONS and key in superseded:
                 stored = {**stored, "is_current": True}
             if stored != row:
                 changed.setdefault(table, []).append(key)
