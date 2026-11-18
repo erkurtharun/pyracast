@@ -61,7 +61,11 @@ def test_provider_account_rejects_an_impossible_quota_or_credential_state(
 
 @pytest.mark.parametrize(
     "values",
-    [{"validated_at": NOW}, {"validated_credential_revision": 1}],
+    [
+        {"validated_at": NOW},
+        {"validated_credential_revision": 1},
+        {"validated_at": NOW, "validated_credential_revision": 0},
+    ],
 )
 def test_binding_validation_is_stored_as_one_moment_and_revision(values: dict[str, Any]) -> None:
     system = make_system()

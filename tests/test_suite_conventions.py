@@ -96,6 +96,7 @@ def test_the_invariant_audit_names_existing_database_modules() -> None:
     from tests.conftest import INVARIANT_AUDIT
 
     assert _modules_matching(r"django_db") >= INVARIANT_AUDIT
+    assert {"test_admin_health_queries", "test_admin_health_views"} <= INVARIANT_AUDIT
 
 
 def test_selection_markers_are_applied_by_module(request: pytest.FixtureRequest) -> None:

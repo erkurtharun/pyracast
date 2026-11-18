@@ -361,6 +361,7 @@ def test_observation_migration_refuses_a_revision_of_another_interval(
         ),
         (SiteBinding, {"validated_at": None}, "validation"),
         (SiteBinding, {"validated_credential_revision": None}, "validation"),
+        (SiteBinding, {"validated_credential_revision": 0}, "validation"),
     ],
 )
 def test_provider_migration_refuses_accounts_and_bindings_no_writer_produces(

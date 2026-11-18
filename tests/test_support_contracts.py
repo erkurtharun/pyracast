@@ -10,11 +10,33 @@ from tests.support.delivery_health import recent_forecast
 from tests.support.domain import NOW, make_system
 from tests.support.epias_api import archive_source, connected_source
 from tests.support.invariants import rewritten_archive_rows
+from tests.support.metering import connected
 from tests.support.plant_operations import saved_actuals
+from tests.support.settlement_calibration import settlement
 from tests.support.trash_operations import sibling
 from tests.support.weather_collection import WeatherFixture
 
 pytestmark = pytest.mark.django_db(transaction=True)
+
+
+@pytest.mark.parametrize(
+    ("identity", "expected"),
+    [(None, {"id": 77, "eic": "EIC", "name": "Plant"}), ({}, {}), ({"id": 7}, {"id": 7})],
+)
+def test_settlement_fixture_preserves_explicit_provider_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    identity: dict[str, object] | None,
+    expected: dict[str, object],
+) -> None:
+    _, plant, connection = connected(monkeypatch)
+    configuration = plant.current_configuration
+    assert configuration is not None
+
+    snapshot = settlement(connection, configuration, NOW.date(), identity=identity)
+
+    snapshot.refresh_from_db()
+    assert snapshot.provider_plant == expected
+    assert snapshot.job.provider_plant == expected
 
 
 @pytest.mark.parametrize("missing", [False, True])
