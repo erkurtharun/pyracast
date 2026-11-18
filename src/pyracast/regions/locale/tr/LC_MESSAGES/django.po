@@ -2151,6 +2151,9 @@ msgstr "Mevcut yönetici izleyici olur ve bekleyen davetler iptal edilir."
 msgid "Only active members can be chosen."
 msgstr "Yalnızca etkin üyeler seçilebilir."
 
+msgid "Pending invitations are revoked."
+msgstr "Bekleyen davetler iptal edilir."
+
 msgid "Change administrator"
 msgstr "Yöneticiyi değiştir"
 

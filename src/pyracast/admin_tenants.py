@@ -65,7 +65,9 @@ class WorkspaceMemberChoice(MemberChoice):
 
 class WorkspaceAdministratorForm(forms.Form):
     administrator = WorkspaceMemberChoice(
-        queryset=User.objects.none(), label=gettext_lazy("Administrator")
+        queryset=User.objects.none(),
+        label=gettext_lazy("Administrator"),
+        help_text=gettext_lazy("Only active members can be chosen."),
     )
     expected_admin_id = forms.IntegerField(required=False, widget=forms.HiddenInput)
 
