@@ -586,7 +586,7 @@ def test_a_signup_waits_after_its_session_is_released(monkeypatch: pytest.Monkey
     [
         "Sunfield\nEnergy",
         "Sunfield​Energy",
-        "Sunfield‮Energy",
+        "Sunfield\u202eEnergy",
         "Visit https://sunfield.test now",
         "www.sunfield",
         "Sunfield.energy",
