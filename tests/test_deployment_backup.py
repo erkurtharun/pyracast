@@ -76,8 +76,9 @@ def test_failed_dump_cannot_publish_a_successful_backup(
     monkeypatch.setattr(subprocess, "run", failed_dump)
     monkeypatch.setattr(backup, "upload_backup", upload)
     monkeypatch.setattr(host, "LAST_BACKUP", tmp_path / "last-backup.json")
+    monkeypatch.setattr(host, "holds_release_lock", lambda descriptor: descriptor == 9)
     with pytest.raises(subprocess.CalledProcessError):
-        backup.create_backup(tmp_path, "private-backups", "prerelease", tmp_path)
+        backup.create_backup(tmp_path, "private-backups", "prerelease", tmp_path, 9)
     assert uploaded == []
 
 

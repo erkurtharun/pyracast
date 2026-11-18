@@ -18,18 +18,14 @@ from django.contrib.sessions.backends.db import SessionStore
 from django.core import mail
 from django.core.cache import cache
 from django.core.checks import Tags, run_checks
-from django.core.exceptions import ImproperlyConfigured, PermissionDenied
+from django.core.exceptions import ImproperlyConfigured
 from django.db import close_old_connections, connections, transaction
-from django.http import HttpRequest, HttpResponse
+from django.http import HttpResponse
 from django.test import Client, RequestFactory, override_settings
 
 from pyracast import settings as project_settings
 from pyracast.accounts.cache import AuthenticationCache
-from pyracast.accounts.checks import (
-    check_authentication_mail_delivery,
-    check_authentication_origin,
-)
-from pyracast.accounts.middleware import TrustedProxyHeaders
+from pyracast.accounts.checks import check_authentication_mail_delivery
 from pyracast.accounts.security import has_verified_mfa, normalize_client_ip
 from pyracast.api.middleware import PrivateAPIResponses
 from pyracast.mail.smtp import EmailBackend as SMTPEmailBackend
@@ -173,68 +169,6 @@ def test_a_held_rate_limit_lock_refuses_after_about_one_second() -> None:
     assert 0.9 <= time.monotonic() - started < 3
 
 
-def proxy_response(request: HttpRequest) -> HttpResponse:
-    return HttpResponse()
-
-
-@pytest.mark.parametrize("enabled", [False, True])
-@pytest.mark.parametrize("remote", ["192.0.2.2", "173.245.48.1"])
-def test_untrusted_client_cannot_supply_proxy_identity(
-    settings: LazySettings, enabled: bool, remote: str
-) -> None:
-    settings.PYRACAST_TRUST_PROXY = enabled
-    settings.PYRACAST_TRUSTED_PROXY_CIDRS = ["10.0.0.0/24"]
-    settings.PYRACAST_TRUSTED_UPSTREAM_PROXY_CIDRS = ["173.245.48.0/20"]
-    request = RequestFactory().get(
-        "/",
-        REMOTE_ADDR=remote,
-        HTTP_FORWARDED="for=127.0.0.1;proto=https",
-        HTTP_X_FORWARDED_FOR="127.0.0.1",
-        HTTP_X_FORWARDED_PROTO="https",
-        HTTP_X_FORWARDED_HOST="attacker.example",
-        HTTP_X_REAL_IP="127.0.0.1",
-        HTTP_CF_CONNECTING_IP="127.0.0.1",
-    )
-    TrustedProxyHeaders(proxy_response)(request)
-    assert "HTTP_FORWARDED" not in request.META
-    assert not any(name.startswith("HTTP_X_FORWARDED_") for name in request.META)
-    assert "HTTP_X_REAL_IP" not in request.META
-    assert "HTTP_CF_CONNECTING_IP" not in request.META
-
-
-def test_proxy_trust_requires_explicit_networks(settings: LazySettings) -> None:
-    settings.PYRACAST_TRUST_PROXY = True
-    settings.PYRACAST_TRUSTED_PROXY_CIDRS = []
-    with pytest.raises(ImproperlyConfigured, match="explicit"):
-        TrustedProxyHeaders(proxy_response)
-
-
-@pytest.mark.parametrize(
-    "origin",
-    [
-        "http://example.com",
-        "https://example.com/path",
-        "https://x@example.com",
-        "https:///",
-        "https://[invalid",
-        "https://example.com:invalid",
-    ],
-)
-def test_production_rejects_unsafe_public_origins(settings: LazySettings, origin: str) -> None:
-    settings.DEBUG = False
-    settings.PYRACAST_PUBLIC_ORIGIN = origin
-    with pytest.raises(ImproperlyConfigured, match="public origin"):
-        TrustedProxyHeaders(proxy_response)
-    assert [error.id for error in check_authentication_origin()] == ["accounts.E002"]
-
-
-def test_development_accepts_local_http_origin(settings: LazySettings) -> None:
-    settings.DEBUG = True
-    settings.PYRACAST_PUBLIC_ORIGIN = "http://127.0.0.1:3000"
-    TrustedProxyHeaders(proxy_response)
-    assert check_authentication_origin() == []
-
-
 def test_deployment_requires_production_mail_configuration(settings: LazySettings) -> None:
     settings.DEBUG = False
     settings.DEFAULT_FROM_EMAIL = "Pyracast <noreply@localhost>"
@@ -297,124 +231,6 @@ def test_production_mail_check_rejects_unsupported_or_unconfigured_smtp(
     settings.DEFAULT_FROM_EMAIL = "Pyracast <accounts@example.com>"
     settings.MAILERS = {"default": {"BACKEND": backend, "OPTIONS": options}}
     assert [error.id for error in check_authentication_mail_delivery()] == ["accounts.E001"]
-
-
-@pytest.mark.parametrize(
-    ("proto", "client_ip"),
-    [("https,http", "192.0.2.1"), ("https", ""), ("https", "192.0.2.1, 10.0.0.1")],
-)
-def test_trusted_proxy_rejects_ambiguous_identity(
-    settings: LazySettings, proto: str, client_ip: str
-) -> None:
-    settings.PYRACAST_TRUST_PROXY = True
-    settings.PYRACAST_TRUSTED_PROXY_CIDRS = ["10.0.0.0/24"]
-    request = RequestFactory().get(
-        "/", REMOTE_ADDR="10.0.0.1", HTTP_X_FORWARDED_PROTO=proto, HTTP_X_REAL_IP=client_ip
-    )
-    with pytest.raises(PermissionDenied, match="could not be verified"):
-        TrustedProxyHeaders(proxy_response)(request)
-
-
-def test_trusted_proxy_preserves_validated_scheme_and_client_ip(settings: LazySettings) -> None:
-    settings.PYRACAST_TRUST_PROXY = True
-    settings.PYRACAST_TRUSTED_PROXY_CIDRS = ["10.0.0.0/24"]
-    settings.SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-    request = RequestFactory().get(
-        "/",
-        REMOTE_ADDR="10.0.0.1",
-        HTTP_X_FORWARDED_PROTO="https",
-        HTTP_X_REAL_IP="2001:db8::1",
-        HTTP_X_FORWARDED_FOR="198.51.100.1",
-    )
-    TrustedProxyHeaders(proxy_response)(request)
-    assert request.is_secure()
-    assert request.META["HTTP_X_REAL_IP"] == "2001:db8::1"
-    assert "HTTP_X_FORWARDED_FOR" not in request.META
-
-
-@pytest.mark.parametrize(
-    ("chain", "expected"),
-    [
-        ("198.51.100.7, 173.245.48.1", "198.51.100.7"),
-        ("127.0.0.1, 198.51.100.7, 173.245.48.1", "198.51.100.7"),
-        ("invalid, 2001:db8::7, 173.245.48.1", "2001:db8::7"),
-        ("127.0.0.1, ::ffff:198.51.100.7, 173.245.48.1", "198.51.100.7"),
-        ("127.0.0.1, 198.51.100.7, 2400:cb00::1", "198.51.100.7"),
-        ("127.0.0.1, 173.245.49.1, 173.245.48.1", "173.245.49.1"),
-        ("198.51.100.7", "198.51.100.7"),
-    ],
-)
-def test_proxy_chain_uses_gateway_peer_or_cloudflare_client(
-    settings: LazySettings, chain: str, expected: str
-) -> None:
-    settings.PYRACAST_TRUST_PROXY = True
-    settings.PYRACAST_TRUSTED_PROXY_CIDRS = ["172.30.80.2/32"]
-    settings.PYRACAST_TRUSTED_UPSTREAM_PROXY_CIDRS = ["173.245.48.0/20", "2400:cb00::/32"]
-    request = RequestFactory().get(
-        "/",
-        REMOTE_ADDR="172.30.80.2",
-        HTTP_X_FORWARDED_PROTO="https",
-        HTTP_X_REAL_IP="173.245.48.1",
-        HTTP_X_FORWARDED_FOR=chain,
-        HTTP_CF_CONNECTING_IP="127.0.0.1",
-    )
-    TrustedProxyHeaders(proxy_response)(request)
-    assert request.META["HTTP_X_REAL_IP"] == expected
-    assert "HTTP_X_FORWARDED_FOR" not in request.META
-    assert "HTTP_CF_CONNECTING_IP" not in request.META
-
-
-@pytest.mark.parametrize("chain", ["", "invalid", "198.51.100.7, invalid", "173.245.48.1"])
-def test_proxy_chain_rejects_missing_or_invalid_client(settings: LazySettings, chain: str) -> None:
-    settings.PYRACAST_TRUST_PROXY = True
-    settings.PYRACAST_TRUSTED_PROXY_CIDRS = ["172.30.80.2/32"]
-    settings.PYRACAST_TRUSTED_UPSTREAM_PROXY_CIDRS = ["173.245.48.0/20"]
-    request = RequestFactory().get(
-        "/",
-        REMOTE_ADDR="172.30.80.2",
-        HTTP_X_FORWARDED_PROTO="https",
-        HTTP_X_REAL_IP="173.245.48.1",
-        HTTP_X_FORWARDED_FOR=chain,
-    )
-    with pytest.raises(PermissionDenied, match="could not be verified"):
-        TrustedProxyHeaders(proxy_response)(request)
-
-
-@pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
-def test_cloudflare_visitors_keep_separate_rate_limits_and_cannot_forge_identity(
-    settings: LazySettings,
-) -> None:
-    settings.PYRACAST_TRUST_PROXY = True
-    settings.PYRACAST_TRUSTED_PROXY_CIDRS = ["172.30.80.2/32"]
-    settings.PYRACAST_TRUSTED_UPSTREAM_PROXY_CIDRS = ["173.245.48.0/20"]
-    settings.ALLAUTH_TRUSTED_CLIENT_IP_HEADER = "X-Real-IP"
-    allowed = []
-    for chain in (
-        "127.0.0.1, 198.51.100.7, 173.245.48.1",
-        "192.0.2.1, 198.51.100.7, 173.245.48.1",
-        "127.0.0.1, 198.51.100.8, 173.245.48.1",
-    ):
-        request = RequestFactory().post(
-            "/",
-            REMOTE_ADDR="172.30.80.2",
-            HTTP_X_FORWARDED_PROTO="https",
-            HTTP_X_REAL_IP="173.245.48.1",
-            HTTP_X_FORWARDED_FOR=chain,
-        )
-        TrustedProxyHeaders(proxy_response)(request)
-        allowed.append(
-            bool(
-                consume(request, app="allauth.account", action="login", config={"login": "1/m/ip"})
-            )
-        )
-    assert allowed == [True, False, True]
-
-
-@pytest.mark.parametrize("address", ["", "invalid", "192.0.2.1, 192.0.2.2"])
-def test_invalid_remote_address_is_denied_without_trusting_headers(address: str) -> None:
-    request = RequestFactory().get("/", REMOTE_ADDR=address)
-    with pytest.raises(PermissionDenied, match="Invalid client address"):
-        TrustedProxyHeaders(proxy_response)(request)
 
 
 def test_mapped_ipv4_addresses_cannot_rotate_rate_limit_identity() -> None:

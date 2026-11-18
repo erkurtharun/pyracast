@@ -151,21 +151,46 @@ curl --silent --ssl-revoke-best-effort --output /dev/null https://localhost:1844
 [[ $untrusted_status == 60 ]]
 "${secure_curl[@]}" https://localhost:18443/static/admin/css/base.css >/dev/null
 [[ $("${secure_curl[@]}" https://localhost:18443/health/ready/) == ok ]]
-headers=$("${secure_curl[@]}" --head https://localhost:18443/)
-[[ ${headers,,} == *'strict-transport-security: max-age=31536000'* ]]
-[[ ${headers,,} == *'x-content-type-options: nosniff'* ]]
-[[ ${headers,,} == *'referrer-policy: same-origin'* ]]
+# The gateway owns the transport headers; each appears once with exactly this value.
+exact_headers() {
+  local headers expected
+  headers=$("${secure_curl[@]}" --output /dev/null --dump-header - "https://localhost:18443$1")
+  headers=${headers,,}
+  headers=${headers//$'\r'/}
+  for expected in \
+    'strict-transport-security: max-age=31536000' \
+    'x-content-type-options: nosniff' \
+    'permissions-policy: camera=(), microphone=(), geolocation=()' \
+    'cross-origin-opener-policy: same-origin' \
+    'referrer-policy: same-origin'; do
+    [[ $(grep -c "^${expected%%:*}:" <<<"$headers") == 1 ]]
+    grep -qxF "$expected" <<<"$headers"
+  done
+  if grep -q '^server:' <<<"$headers"; then return 1; fi
+}
+exact_headers /
+exact_headers /app/
+exact_headers /api/session/
+exact_headers /admin/login/
+exact_headers /health/live/
 [[ $(curl --silent --show-error --output /dev/null --write-out '%{redirect_url}' \
   http://localhost:18080/) == https://localhost:18443/ ]]
-[[ $(head -c 8388609 /dev/zero | "${tls_curl[@]}" \
-  --data-binary @- --output /dev/null --write-out '%{http_code}' \
-  https://localhost:18443/health/ready/) == 413 ]]
+# Each router refuses one byte over its body limit; the API answers with its error body.
+too_large() {
+  head -c "$1" /dev/zero | "${tls_curl[@]}" --data-binary @- --output "$temporary/too-large" \
+    --write-out '%{http_code}' "https://localhost:18443$2"
+}
+[[ $(too_large 2621441 /api/session/) == 413 ]]
+[[ $(<"$temporary/too-large") == '{"code": "request_too_large", "message": "The request is too large to be accepted."}' ]]
+[[ $(too_large 8388609 /admin/login/) == 413 ]]
+[[ $(too_large 1048577 /health/ready/) == 413 ]]
+[[ $(too_large 1048577 /) == 413 ]]
 [[ $("${secure_curl[@]}" -H 'X-Real-IP: invalid' -H 'X-Forwarded-Proto: http' \
   -H 'X-Forwarded-For: invalid' -H 'Forwarded: for=invalid' https://localhost:18443/health/ready/) == ok ]]
 [[ $("${secure_curl[@]}" -H 'X_Real_IP: invalid' -H 'X_Forwarded_Proto: http' \
   -H 'X_Forwarded_For: invalid' https://localhost:18443/health/ready/) == ok ]]
 "${secure_curl[@]}" -H 'X-Real-IP: invalid' -H 'X_Real_IP: invalid' \
-  -H 'X.Real.IP: invalid' \
+  -H 'X.Real.IP: invalid' -H 'X-Pyracast-Client-IP: 127.0.0.1' \
   -H 'X-Forwarded-Proto: http' -H 'X_Forwarded_Proto: http' \
   -H 'X.Forwarded.Proto: http' \
   -H 'X-Forwarded-For: invalid' -H 'X_Forwarded_For: invalid' \
@@ -179,7 +204,8 @@ ipaddress.ip_address(headers["x-real-ip"])
 for address in headers["x-forwarded-for"].split(","):
     ipaddress.ip_address(address.strip())
 assert not {"forwarded", "x_real_ip", "x_forwarded_proto", "x_forwarded_for",
-            "x.real.ip", "x.forwarded.proto", "x.forwarded.for"} & headers.keys(), headers
+            "x.real.ip", "x.forwarded.proto", "x.forwarded.for",
+            "x-pyracast-client-ip"} & headers.keys(), headers
 '
 # The internal network gives the probe an actual socket peer in a trusted Cloudflare range.
 cloudflare_headers=$("${compose[@]}" exec -T --env "SMOKE_CA=$(cat "$temporary/ca.pem")" header-probe python - <<'PY'
@@ -207,15 +233,50 @@ import django
 django.setup()
 from django.http import HttpResponse
 from django.test import RequestFactory
-from pyracast.accounts.middleware import TrustedProxyHeaders
+from pyracast.proxy import TrustedProxyHeaders
 headers = {key.lower(): value for key, value in json.load(sys.stdin).items()}
 assert headers["x-forwarded-for"].split(",")[-1].strip() == "173.245.48.3", headers
 request = RequestFactory().get("/", REMOTE_ADDR="172.30.80.2", **{
     "HTTP_" + key.upper().replace("-", "_"): value for key, value in headers.items()})
 TrustedProxyHeaders(lambda request: HttpResponse())(request)
-assert request.META["HTTP_X_REAL_IP"] == "198.51.100.7", request.META
+assert request.META["HTTP_X_PYRACAST_CLIENT_IP"] == "198.51.100.7", request.META
 assert "HTTP_CF_CONNECTING_IP" not in request.META
 '
+# Through the production routers each client has its own rate budget, keyed by the edge's address.
+"${compose[@]}" exec -T --env "SMOKE_CA=$(cat "$temporary/ca.pem")" header-probe python - <<'PY'
+import http.client
+import os
+import socket
+import ssl
+context = ssl.create_default_context(cadata=os.environ['SMOKE_CA'])
+
+def connect():
+    connection = http.client.HTTPSConnection('localhost', 8443, timeout=10)
+    connection.sock = context.wrap_socket(
+        socket.create_connection(('173.245.48.2', 8443), timeout=10), server_hostname='localhost')
+    return connection
+
+def statuses(path, client, count):
+    connection = connect()
+    seen = []
+    for _ in range(count):
+        connection.request('GET', path, headers={'Host': 'localhost', 'X-Forwarded-For': client})
+        response = connection.getresponse()
+        response.read()
+        seen.append(response.status)
+        if response.will_close:
+            connection.close()
+            connection = connect()
+    connection.close()
+    return seen
+
+flood = statuses('/health/live/', '198.51.100.21', 400)
+assert flood[0] == 200 and 429 in flood and set(flood) == {200, 429}, flood
+assert statuses('/health/live/', '198.51.100.22', 1) == [200]
+sign_in = statuses('/api/auth/browser/v1/config', '198.51.100.23', 40)
+assert sign_in[0] == 200 and 429 in sign_in and set(sign_in) == {200, 429}, sign_in
+assert statuses('/api/session/', '198.51.100.24', 1) == [200]
+PY
 [[ $(docker inspect --format '{{.Config.User}}' "$("${compose[@]}" ps -q gateway)") == 10001:10001 ]]
 "${compose[@]}" exec -T api python -c '
 import django
@@ -459,4 +520,53 @@ except ProgrammingError:
 else:
     raise SystemExit('Runtime role unexpectedly owns DDL permission after the restore')
 PY
-echo 'Production containers, TLS routing, static assets, Turkish catalogs, session and sign-in API, workspace app shell, database roles and access rules, fixture queue publication, graceful idle shutdown, the maintenance notice, and database reset and restore passed.'
+# Authenticated Origin Pulls: once the host names the edge's authority, a handshake needs its certificate.
+"${compose[@]}" run --rm -T --no-deps --entrypoint python api - > "$temporary/edge.json" <<'PY'
+import datetime
+import json
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+now = datetime.datetime.now(datetime.UTC)
+authority_key = ec.generate_private_key(ec.SECP256R1())
+authority_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'Pyracast smoke edge CA')])
+authority = (x509.CertificateBuilder().subject_name(authority_name).issuer_name(authority_name)
+      .public_key(authority_key.public_key()).serial_number(x509.random_serial_number())
+      .not_valid_before(now - datetime.timedelta(minutes=1))
+      .not_valid_after(now + datetime.timedelta(days=1))
+      .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+      .sign(authority_key, hashes.SHA256()))
+key = ec.generate_private_key(ec.SECP256R1())
+certificate = (x509.CertificateBuilder()
+      .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'Pyracast smoke edge')]))
+      .issuer_name(authority.subject).public_key(key.public_key())
+      .serial_number(x509.random_serial_number())
+      .not_valid_before(now - datetime.timedelta(minutes=1))
+      .not_valid_after(now + datetime.timedelta(days=1))
+      .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False)
+      .sign(authority_key, hashes.SHA256()))
+print(json.dumps({
+    'authority': authority.public_bytes(serialization.Encoding.PEM).decode(),
+    'certificate': certificate.public_bytes(serialization.Encoding.PEM).decode(),
+    'key': key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                             serialization.NoEncryption()).decode(),
+}))
+PY
+for part in authority certificate key; do
+  jq -er ".$part" "$temporary/edge.json" > "$temporary/edge-$part.pem"
+done
+chmod 644 "$temporary/edge-authority.pem"
+edge_authority="$temporary/edge-authority.pem"
+if command -v cygpath >/dev/null; then edge_authority=$(cygpath -m "$edge_authority"); fi
+ORIGIN_PULL=required ORIGIN_PULL_CA="$edge_authority" \
+  "${compose[@]}" up -d --no-deps --wait --wait-timeout 120 gateway
+refused=0
+"${secure_curl[@]}" --output /dev/null https://localhost:18443/health/ready/ 2>/dev/null || refused=$?
+[[ $refused != 0 ]]
+[[ $("${secure_curl[@]}" --cert "$temporary/edge-certificate.pem" --key "$temporary/edge-key.pem" \
+  https://localhost:18443/health/ready/) == ok ]]
+"${compose[@]}" up -d --no-deps --wait --wait-timeout 120 gateway
+ready
+echo 'Production containers, TLS routing, exact gateway headers, body and rate limits, static assets, Turkish catalogs, session and sign-in API, workspace app shell, database roles and access rules, fixture queue publication, graceful idle shutdown, the maintenance notice, database reset and restore, and Authenticated Origin Pulls passed.'

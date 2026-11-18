@@ -32,6 +32,8 @@ class BackupHost:
         self.events: list[tuple[str, str, dict[str, object]]] = []
         self.handlers: dict[int, Callable[[int, object], None]] = {}
         self.replaced: list[tuple[str, bool]] = []
+        self.lock_holder: int | None = 9
+        self.checked: list[int] = []
 
     @contextmanager
     def release_lock(self, wait_seconds: float) -> Iterator[bool]:
@@ -45,6 +47,10 @@ class BackupHost:
             yield True
         finally:
             self.held = False
+
+    def holds_release_lock(self, descriptor: int) -> bool:
+        self.checked.append(descriptor)
+        return descriptor == self.lock_holder
 
     def run(self, command: list[str], **options: Any) -> subprocess.CompletedProcess[bytes]:
         self.commands.append(command)
@@ -70,6 +76,7 @@ def backup_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> BackupHost:
     monkeypatch.setattr(host, "RELEASE_BLOCKED", fake.blocked)
     monkeypatch.setattr(host, "LAST_BACKUP", fake.last_backup)
     monkeypatch.setattr(host, "release_lock", fake.release_lock)
+    monkeypatch.setattr(host, "holds_release_lock", fake.holds_release_lock)
     monkeypatch.setattr(backup, "upload_backup", fake.upload)
     monkeypatch.setattr(backup, "report", fake.report)
     monkeypatch.setattr(subprocess, "run", fake.run)
@@ -166,7 +173,7 @@ def test_prerelease_backup_after_an_hourly_one_leaves_the_pointer_on_the_prerele
         backup_host.release, "private-backups", "hourly", backup_host.directory
     )
     prerelease = backup.create_backup(
-        backup_host.release, "private-backups", "prerelease", backup_host.directory
+        backup_host.release, "private-backups", "prerelease", backup_host.directory, 9
     )
 
     assert hourly is not None
@@ -180,7 +187,7 @@ def test_prerelease_backup_records_its_object_in_the_release_directory(
     backup_host: BackupHost,
 ) -> None:
     name = backup.create_backup(
-        backup_host.release, "private-backups", "prerelease", backup_host.directory
+        backup_host.release, "private-backups", "prerelease", backup_host.directory, 9
     )
 
     record = backup_host.release / host.PRERELEASE_RECORD
@@ -198,13 +205,80 @@ def test_prerelease_backup_never_waits_for_the_lock_its_installer_holds(
     backup_host: BackupHost,
 ) -> None:
     name = backup.create_backup(
-        backup_host.release, "private-backups", "prerelease", backup_host.directory
+        backup_host.release, "private-backups", "prerelease", backup_host.directory, 9
     )
 
     assert backup_host.waits == []
+    assert backup_host.checked == [9]
     assert len(backup_host.dumps) == 1
     assert name is not None
     assert "-prerelease-" in name
+
+
+@pytest.mark.parametrize("descriptor", [None, 7])
+def test_prerelease_backup_refuses_unless_its_caller_holds_the_release_lock(
+    backup_host: BackupHost, descriptor: int | None
+) -> None:
+    with pytest.raises(backup.ReleaseLockNotHeld):
+        backup.create_backup(
+            backup_host.release, "private-backups", "prerelease", backup_host.directory, descriptor
+        )
+
+    assert backup_host.dumps == []
+    assert backup_host.uploads == []
+    assert not backup_host.last_backup.exists()
+    assert list(backup_host.release.iterdir()) == []
+    assert backup_host.events == []
+
+
+@pytest.mark.parametrize("descriptor", [[], ["--lock-fd", "7"]])
+def test_a_prerelease_run_outside_a_release_is_refused_and_changes_nothing(
+    backup_host: BackupHost,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    descriptor: list[str],
+) -> None:
+    configuration = tmp_path / "host.json"
+    configuration.write_text(json.dumps({"backup_bucket": "private-backups"}))
+
+    status = backup.run(
+        [
+            str(configuration),
+            "--release-dir",
+            str(backup_host.release),
+            *descriptor,
+            "--kind",
+            "prerelease",
+        ]
+    )
+
+    assert status == 2
+    assert capsys.readouterr().err == (
+        "Refused: a prerelease backup runs only inside a release, which passes the release "
+        "lock it holds with --lock-fd. Nothing was dumped.\n"
+    )
+    assert backup_host.dumps == []
+    assert not backup_host.last_backup.exists()
+    assert backup_host.events == []
+
+
+def test_a_prerelease_run_under_the_release_lock_succeeds(
+    backup_host: BackupHost, tmp_path: Path
+) -> None:
+    configuration = tmp_path / "host.json"
+    configuration.write_text(json.dumps({"backup_bucket": "private-backups"}))
+    arguments = [
+        "--release-dir",
+        str(backup_host.release),
+        "--lock-fd",
+        "9",
+        "--kind",
+        "prerelease",
+    ]
+
+    assert backup.run([str(configuration), *arguments]) == 0
+    assert backup_host.checked == [9]
+    assert (backup_host.release / host.PRERELEASE_RECORD).exists()
 
 
 def test_dump_names_its_session_and_ends_it_when_the_dump_times_out(

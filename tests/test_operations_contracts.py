@@ -41,11 +41,11 @@ from pyracast.notifications.runtime import make_notification_actor
 from pyracast.plants.runtime import make_calibration_actor
 from pyracast.runtime import make_actor
 from pyracast.urls import urlpatterns
+from tests.support.workflows import ci_job_names, ci_jobs, job_names
 
 ROOT = Path(__file__).resolve().parents[1]
 DEPLOY = ROOT / "deploy"
 TERRAFORM = ROOT / "infra" / "terraform"
-WORKFLOWS = ROOT / ".github" / "workflows"
 SUPPORT_SERVICES = {"postgres", "rabbitmq"}
 EDGE_SERVICES = {"gateway", "maintenance"}
 
@@ -116,52 +116,6 @@ def reported_events() -> dict[str, set[str]]:
     return events
 
 
-def ci_jobs() -> dict[str, dict[str, Any]]:
-    jobs: dict[str, dict[str, Any]] = yaml.safe_load(text(WORKFLOWS / "ci.yml"))["jobs"]
-    return jobs
-
-
-def matrix_combinations(matrix: dict[str, Any]) -> list[dict[str, Any]]:
-    axes = {key: values for key, values in matrix.items() if key not in {"include", "exclude"}}
-    original: list[dict[str, Any]] = []
-    for values in itertools.product(*axes.values()) if axes else ():
-        combination = dict(zip(axes, values, strict=True))
-        if not any(
-            all(combination.get(key) == value for key, value in rule.items())
-            for rule in matrix.get("exclude", [])
-        ):
-            original.append(combination)
-    added: list[dict[str, Any]] = []
-    for included in matrix.get("include", []):
-        extended = [
-            combination
-            for combination in original
-            if all(combination[key] == value for key, value in included.items() if key in axes)
-        ]
-        for combination in extended:
-            combination.update(included)
-        if not extended:
-            added.append(dict(included))
-    return [*original, *added]
-
-
-def job_names(identifier: str, job: dict[str, Any]) -> set[str]:
-    matrix = job.get("strategy", {}).get("matrix")
-    names: set[str] = set()
-    for combination in [{}] if matrix is None else matrix_combinations(matrix):
-        name = str(job.get("name", identifier))
-        for key, value in combination.items():
-            name = name.replace(f"${{{{ matrix.{key} }}}}", str(value))
-        if "${{" in name:
-            raise ValueError(f"Unsupported expression in CI job name: {name}")
-        names.add(name)
-    return names
-
-
-def ci_job_names(jobs: dict[str, Any]) -> set[str]:
-    return {name for identifier, job in jobs.items() for name in job_names(identifier, job)}
-
-
 def run_scripts(commands: str) -> dict[str, str]:
     return {path: text(ROOT / path) for path in set(re.findall(r"scripts/\w+\.py", commands))}
 
@@ -172,20 +126,6 @@ def locked_installs(commands: str, scripts: dict[str, str]) -> tuple[str, ...]:
         path for path, source in scripts.items() if re.search(r'"sync",\s*"--locked"', source)
     ]
     return tuple(sorted({*direct, *delegated}))
-
-
-def release_required_jobs(workflow: str) -> set[str]:
-    listed = re.search(r"const required = \[(.*?)\];", workflow, re.S)
-    if listed is None:
-        raise ValueError("The release workflow lists no required CI job.")
-    entries = [entry.strip() for entry in listed[1].split(",")]
-    names = set()
-    for entry in [*entries, *re.findall(r"required\.push\((.*?)\)", workflow)]:
-        literal = re.fullmatch(r"'([^'\\]+)'", entry)
-        if literal is None:
-            raise ValueError(f"Unsupported required CI job entry: {entry}")
-        names.add(literal[1])
-    return names
 
 
 def top_level_route_prefixes() -> set[str]:
@@ -268,10 +208,39 @@ def router_rule(rule: str) -> Route:
     return route
 
 
-def backend_route() -> Route:
-    routes = yaml.safe_load(text(DEPLOY / "routes.yml"))
-    rule: str = routes["http"]["routers"]["backend"]["rule"]
+def routes() -> dict[str, Any]:
+    document: dict[str, Any] = yaml.safe_load(text(DEPLOY / "routes.yml"))
+    return document
+
+
+def routers() -> dict[str, dict[str, Any]]:
+    found: dict[str, dict[str, Any]] = routes()["http"]["routers"]
+    return found
+
+
+def middleware(name: str) -> dict[str, Any]:
+    found: dict[str, Any] = routes()["http"]["middlewares"][name]
+    return found
+
+
+def router_route(name: str) -> Route:
+    rule: str = routers()[name]["rule"]
     return router_rule(rule.replace('{{ env "SITE_ADDRESS" }}', "pyracast.example"))
+
+
+def backend_routers() -> list[str]:
+    return [name for name, router in routers().items() if router["service"] == "backend"]
+
+
+def routed_router(path: str) -> str | None:
+    matching = [name for name in routers() if router_route(name)("pyracast.example", path)]
+    if not matching:
+        return None
+    return max(matching, key=lambda name: int(routers()[name]["priority"]))
+
+
+def backend_route() -> Route:
+    return lambda host, path: any(router_route(name)(host, path) for name in backend_routers())
 
 
 def yaml_scalar(document: str, *keys: str) -> str:
@@ -496,19 +465,34 @@ def test_gateway_timeout_covers_gunicorn_and_grace_periods_fit_service_limits() 
     )
 
 
-def test_gateway_body_limit_admits_the_largest_upload_and_smoke_probes_one_byte_over() -> None:
-    routes = yaml.safe_load(text(DEPLOY / "routes.yml"))
-    limit = routes["http"]["middlewares"]["body-limit"]["buffering"]["maxRequestBodyBytes"]
+def body_limit(router: str) -> int:
+    (limit,) = [
+        middleware(name)["buffering"]["maxRequestBodyBytes"]
+        for name in routers()[router]["middlewares"]
+        if "buffering" in middleware(name)
+    ]
+    assert isinstance(limit, int)
+    return limit
 
-    assert limit > MAX_UPLOAD_BYTES
-    assert f"head -c {limit + 1} /dev/zero" in text(DEPLOY / "smoke.sh")
 
+def test_each_router_admits_its_largest_body_and_the_smoke_probes_one_byte_over() -> None:
+    smoke = text(DEPLOY / "smoke.sh")
 
-def test_release_waits_only_for_jobs_that_ci_defines() -> None:
-    required = release_required_jobs(text(WORKFLOWS / "release.yml"))
-
-    assert required
-    assert required <= ci_job_names(ci_jobs())
+    assert {
+        name: routed_router(path)
+        for name, path in [
+            ("api", "/api/tenants/1/sites/"),
+            ("authentication", "/api/auth/browser/v1/auth/login"),
+            ("admin", "/admin/historical/"),
+            ("backend", "/health/ready/"),
+            ("frontend", "/app/"),
+        ]
+    } == {name: name for name in ("api", "authentication", "admin", "backend", "frontend")}
+    assert body_limit("admin") > MAX_UPLOAD_BYTES
+    assert body_limit("api") == body_limit("authentication") == settings.DATA_UPLOAD_MAX_MEMORY_SIZE
+    assert body_limit("backend") == body_limit("frontend") < body_limit("api")
+    for router in ("api", "admin", "backend", "frontend"):
+        assert f"head -c {body_limit(router) + 1} /dev/zero" in smoke, router
 
 
 def test_ci_job_names_apply_matrix_include_and_exclude() -> None:
@@ -550,43 +534,6 @@ def test_ci_job_whose_matrix_excludes_every_combination_defines_no_job() -> None
     }
 
     assert ci_job_names(jobs) == set()
-
-
-@pytest.mark.parametrize(
-    "workflow",
-    [
-        "const required = ['A', \"Missing CI job\"];",
-        "const required = ['A', NAME];",
-        "const required = ['A'];\nrequired.push(name);",
-        "const jobs = ['A'];",
-    ],
-)
-def test_required_job_parser_refuses_entries_it_cannot_read(workflow: str) -> None:
-    with pytest.raises(ValueError, match="required CI job"):
-        release_required_jobs(workflow)
-
-
-def test_required_job_parser_reads_conditional_additions() -> None:
-    workflow = "const required = ['A',\n  'B'];\nif (x) required.push('C');"
-
-    assert release_required_jobs(workflow) == {"A", "B", "C"}
-
-
-def test_release_requires_every_ci_job_directly_or_through_needs() -> None:
-    jobs = ci_jobs()
-    required = release_required_jobs(text(WORKFLOWS / "release.yml"))
-    direct = [key for key, job in jobs.items() if job_names(key, job) & required]
-    gating: set[str] = set()
-    pending = list(direct)
-    while pending:
-        key = pending.pop()
-        if key not in gating:
-            gating.add(key)
-            needs = jobs[key].get("needs", [])
-            pending.extend([needs] if isinstance(needs, str) else needs)
-
-    assert all(job_names(key, jobs[key]) <= required for key in direct)
-    assert gating == set(jobs)
 
 
 def test_windows_tests_run_in_four_shards_that_the_verify_job_combines() -> None:
@@ -876,23 +823,27 @@ def installer() -> str:
 
 
 def test_gateway_serves_the_maintenance_notice_only_while_the_application_is_unreachable() -> None:
-    routes = yaml.safe_load(text(DEPLOY / "routes.yml"))["http"]
     services = compose_services()
     queries = {}
-    for name in ("backend", "frontend"):
+    for name, router in routers().items():
         (notice,) = [
-            middleware
-            for middleware in routes["routers"][name]["middlewares"]
-            if "errors" in routes["middlewares"][middleware]
+            candidate
+            for candidate in router["middlewares"]
+            if middleware(candidate).get("errors", {}).get("status") == ["502"]
         ]
-        errors = routes["middlewares"][notice]["errors"]
-        assert errors["status"] == ["502"]
+        errors = middleware(notice)["errors"]
         assert errors["statusRewrites"] == {"502": 503}
         assert errors["service"] == "maintenance"
         queries[name] = errors["query"]
 
-    assert queries == {"backend": "/api", "frontend": "/page"}
-    assert routes["services"]["maintenance"]["loadBalancer"]["servers"] == [
+    assert queries == {
+        "api": "/api",
+        "authentication": "/api",
+        "admin": "/api",
+        "backend": "/api",
+        "frontend": "/page",
+    }
+    assert routes()["http"]["services"]["maintenance"]["loadBalancer"]["servers"] == [
         {"url": f"http://maintenance:{maintenance.PORT}"}
     ]
     assert services["gateway"]["depends_on"] == {"maintenance": {"condition": "service_healthy"}}
@@ -906,13 +857,21 @@ def test_the_application_never_answers_the_status_the_gateway_reserves_for_maint
 
     assert "status=502" not in sources
     assert "HTTP_502" not in sources
+    assert "status=413" not in sources
+    assert "HTTP_413" not in sources
+    assert ", 413" not in sources
 
 
 def test_each_release_reads_the_secrets_staged_for_it() -> None:
     compose = text(DEPLOY / "compose.yaml")
     script = installer()
     variables = set(re.findall(r"\$\{([A-Z]+_ENV_FILE):-", compose))
-    written = set(re.findall(r"'([A-Z]+_ENV_FILE)': f'\{secrets\}/[a-z]+\.env'", script))
+    written = set(
+        re.findall(
+            r'"([A-Z]+_ENV_FILE)": f"\{secrets\}/[a-z]+\.env"',
+            text(DEPLOY / "release_environment.py"),
+        )
+    )
 
     assert variables == {
         "RUNTIME_ENV_FILE",
@@ -923,6 +882,10 @@ def test_each_release_reads_the_secrets_staged_for_it() -> None:
     assert written == variables
     assert release_state.SECRETS == runtime_secrets.SECRETS
     assert f'secrets="{runtime_secrets.SECRETS.as_posix()}/${{release##*/}}"' in script
+    assert (
+        'python3 "$release/deploy/release_environment.py" /etc/pyracast/host.json '
+        '"$release/deploy/release.env" "$secrets" "$backend" "$web" "$gateway" "$postgres"\n'
+    ) in script
     assert "/run/pyracast/runtime.env" not in script
     assert "environment_files" not in script
 
@@ -1125,3 +1088,152 @@ def test_gunicorn_keeps_idle_connections_longer_than_the_gateway_reuses_them() -
     )
 
     assert gunicorn["keepalive"] > gateway_idle
+
+
+def per_second(limit: dict[str, Any]) -> float:
+    period = str(limit.get("period", "1s"))
+    unit = {"s": 1, "m": 60}[period[-1]]
+    return float(limit["average"]) / (int(period[:-1]) * unit)
+
+
+def test_every_router_limits_each_client_by_the_address_the_edge_appended() -> None:
+    chains = {name: router["middlewares"] for name, router in routers().items()}
+
+    assert chains == {
+        "api": [
+            "security",
+            "api-refusals",
+            "client-rate",
+            "client-in-flight",
+            "api-body-limit",
+            "maintenance-api",
+            "compression",
+        ],
+        "authentication": [
+            "security",
+            "api-refusals",
+            "authentication-rate",
+            "client-rate",
+            "client-in-flight",
+            "api-body-limit",
+            "maintenance-api",
+            "compression",
+        ],
+        "admin": [
+            "security",
+            "client-rate",
+            "client-in-flight",
+            "admin-body-limit",
+            "maintenance-api",
+            "compression",
+        ],
+        "backend": [
+            "security",
+            "client-rate",
+            "client-in-flight",
+            "page-body-limit",
+            "maintenance-api",
+            "compression",
+        ],
+        "frontend": [
+            "security",
+            "client-rate",
+            "client-in-flight",
+            "page-body-limit",
+            "maintenance-page",
+            "compression",
+        ],
+    }
+    for name in ("client-rate", "authentication-rate", "client-in-flight"):
+        (limit,) = middleware(name).values()
+        assert limit["sourceCriterion"] == {"ipStrategy": {"depth": 1, "ipv6Subnet": 64}}, name
+    assert per_second(middleware("authentication-rate")["rateLimit"]) < per_second(
+        middleware("client-rate")["rateLimit"]
+    )
+    assert middleware("client-in-flight")["inFlightReq"]["amount"] > 0
+    assert routers()["authentication"]["priority"] > routers()["api"]["priority"]
+
+
+def test_a_body_over_the_api_limit_is_refused_with_the_api_error_body() -> None:
+    errors = middleware("api-refusals")["errors"]
+
+    assert errors == {"status": ["413"], "service": "maintenance", "query": "/api/413"}
+    assert not [
+        name
+        for name, router in routers().items()
+        if "api-refusals" in router["middlewares"] and not name.startswith(("api", "auth"))
+    ]
+
+
+def test_the_gateway_owns_the_transport_headers_and_the_applications_the_rest() -> None:
+    headers = middleware("security")["headers"]
+    next_config = text(ROOT / "web" / "next.config.ts")
+    smoke = text(DEPLOY / "smoke.sh")
+
+    assert {key.lower(): value for key, value in headers["customRequestHeaders"].items()} == {
+        "forwarded": "",
+        "x-forwarded-proto": "https",
+        "x-pyracast-client-ip": "",
+    }
+    assert headers["customResponseHeaders"] == {
+        "Server": "",
+        "Cross-Origin-Opener-Policy": "same-origin",
+    }
+    assert headers["stsSeconds"] == settings.SECURE_HSTS_SECONDS
+    assert headers["contentTypeNosniff"] is True
+    assert headers["permissionsPolicy"] == "camera=(), microphone=(), geolocation=()"
+    assert "referrerPolicy" not in headers
+    assert "Permissions-Policy" not in next_config
+    assert "X-Content-Type-Options" not in next_config
+    assert '{ key: "Referrer-Policy", value: "same-origin" }' in next_config
+    for path in ("/", "/app/", "/api/session/", "/admin/login/", "/health/live/"):
+        assert f"exact_headers {path}\n" in smoke, path
+    for header in (
+        f"strict-transport-security: max-age={settings.SECURE_HSTS_SECONDS}",
+        "x-content-type-options: nosniff",
+        "permissions-policy: camera=(), microphone=(), geolocation=()",
+        "cross-origin-opener-policy: same-origin",
+        "referrer-policy: same-origin",
+    ):
+        assert f"'{header}'" in smoke, header
+
+
+def test_the_origin_requires_the_edge_certificate_only_once_the_host_names_its_authority() -> None:
+    client_auth = routes()["tls"]["options"]["default"]["clientAuth"]
+    gateway = compose_services()["gateway"]
+    placeholder = text(DEPLOY / "origin-pull-off.pem")
+    variables = text(TERRAFORM / "variables.tf")
+    host_config = re.search(
+        r"host_config_base64 = base64encode\(jsonencode\(\{(.*?)\}\)\)",
+        text(TERRAFORM / "main.tf"),
+        re.S,
+    )
+    smoke = text(DEPLOY / "smoke.sh")
+
+    assert client_auth == {
+        "caFiles": ["/etc/traefik/origin-pull-ca.pem"],
+        "clientAuthType": '{{ if eq (env "ORIGIN_PULL") "required" }}'
+        "RequireAndVerifyClientCert{{ else }}NoClientCert{{ end }}",
+    }
+    assert gateway["environment"]["ORIGIN_PULL"] == "${ORIGIN_PULL:-off}"
+    assert (
+        "${ORIGIN_PULL_CA:-./origin-pull-off.pem}:/etc/traefik/origin-pull-ca.pem:ro"
+        in gateway["volumes"]
+    )
+    assert placeholder.startswith("-----BEGIN CERTIFICATE-----\n")
+    assert placeholder.count("-----BEGIN") == 1
+    assert host_config
+    assert re.search(r"^\s*origin_pull_ca\s*=\s*var\.origin_pull_ca$", host_config[1], re.M)
+    assert re.search(r'variable "origin_pull_ca" \{.*?default\s*=\s*""', variables, re.S)
+    assert "ORIGIN_PULL=required" in smoke
+    assert smoke.index("ORIGIN_PULL=required") > smoke.index("restore --confirm")
+
+
+def test_the_prerelease_backup_proves_it_runs_under_the_installers_lock() -> None:
+    script = installer()
+
+    assert "exec 9>/run/lock/pyracast-release.lock" in script
+    assert (
+        'python3 "$release/deploy/backup.py" /etc/pyracast/host.json --release-dir "$release" '
+        "--lock-fd 9 --kind prerelease\n"
+    ) in script

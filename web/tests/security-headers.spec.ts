@@ -20,6 +20,12 @@ test("a fresh CSP nonce permits the app and blocks injected scripts", async ({
     const policy = response?.headers()["content-security-policy"] ?? "";
     const nonce = policy.match(/'nonce-([^']+)'/)?.[1];
     expect(nonce).toBeTruthy();
+    expect(policy.split("; ")).toEqual(
+        expect.arrayContaining([
+            "base-uri 'none'",
+            "report-uri /api/csp-reports/",
+        ]),
+    );
     await expect(
         page.getByRole("heading", { name: "Welcome back" }),
     ).toBeVisible();
