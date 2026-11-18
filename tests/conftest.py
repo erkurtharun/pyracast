@@ -95,6 +95,7 @@ MIGRATION = frozenset(
         "test_invitation_link_migration",
         "test_invitation_role_migration",
         "test_ledger_invitation_and_recipient_migrations",
+        "test_reminder_recipient_migration",
         "test_schema_naming_migrations",
         "test_vocabulary_migrations",
         "test_workspace_name_migration",
@@ -105,6 +106,7 @@ MIGRATION = frozenset(
 # trigger definitions.
 INVARIANT_AUDIT = frozenset(
     {
+        "test_account_mail_outbox",
         "test_account_rotation",
         "test_admin_health_queries",
         "test_admin_health_views",
@@ -148,6 +150,7 @@ INVARIANT_AUDIT = frozenset(
         "test_notification_revocations",
         "test_notification_transmission",
         "test_notifications",
+        "test_outbound_mail",
         "test_plant_operations",
         "test_plant_training",
         "test_platform_workspace_authority",
@@ -158,6 +161,7 @@ INVARIANT_AUDIT = frozenset(
         "test_provider_retry",
         "test_provider_snapshot_restore",
         "test_region_editing",
+        "test_reminder_boundary",
         "test_reminder_recipient_shape",
         "test_revalidation_schedule",
         "test_secret_reencryption",

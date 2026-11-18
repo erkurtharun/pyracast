@@ -25,8 +25,10 @@ from django.test import Client, override_settings
 
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.audit import logger as security_logger
+from pyracast.accounts.models import UserLanguagePreference
 from tests.support.auth_lifecycle import AUTH, PASSWORD, mailed_code, member, submit, totp_code
 from tests.support.company_registration import signup
+from tests.support.outbox import deliver_mail
 
 pytestmark = pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 WRONG = "wrong-" + PASSWORD
@@ -673,3 +675,94 @@ def test_provider_signup_without_a_pending_signup_leaves_the_signup_quota(clock:
     for _ in range(5):
         assert submit(client, "auth/provider/signup", {}).status_code == 409
     assert signup(client).status_code == 401
+
+
+def lock_notices() -> list[tuple[str, str]]:
+    from pyracast.notifications.models import OutboundMail
+
+    return list(
+        OutboundMail.objects.filter(kind="account/email/login_locked")
+        .order_by("pk")
+        .values_list("recipient", "status")
+    )
+
+
+def test_a_full_day_of_failed_passwords_mails_the_account_owner_once(clock: Clock) -> None:
+    owner = account("owner")
+    EmailAddress.objects.create(user=owner, email="alias@example.com", verified=True)
+    UserLanguagePreference.objects.create(user=owner, language="tr")
+    client = Client(enforce_csrf_checks=True)
+
+    fail_daily(client, "alias@example.com", 100, clock)
+    for _ in range(3):
+        assert error_codes(login(client, "alias@example.com", WRONG)) == ["too_many_login_attempts"]
+
+    assert mail.outbox == []
+    assert lock_notices() == [("alias@example.com", "pending")]
+    assert deliver_mail() == 1
+    (notice,) = mail.outbox
+    assert notice.to == ["owner@example.com"]
+    assert notice.subject == "Parolayla oturum açma duraklat\u0131ld\u0131"
+    assert lock_notices() == [("alias@example.com", "sent")]
+
+
+def test_the_daily_lock_of_an_unknown_address_writes_the_same_intent_and_mails_nobody(
+    clock: Clock,
+) -> None:
+    client = Client(enforce_csrf_checks=True)
+    fail_daily(client, "absent@example.com", 100, clock)
+    assert error_codes(login(client, "absent@example.com", WRONG)) == ["too_many_login_attempts"]
+
+    assert lock_notices() == [("absent@example.com", "pending")]
+    assert deliver_mail() == 0
+    assert mail.outbox == []
+    assert lock_notices() == [("absent@example.com", "skipped")]
+
+
+def test_a_check_still_in_flight_does_not_announce_a_lock(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = member()
+    fail_daily(Client(enforce_csrf_checks=True), user.email, 99, clock)
+    held, release = hold_correct_password(monkeypatch)
+
+    def beside_the_held_check() -> list[str]:
+        assert held.wait(timeout=10)
+        try:
+            return error_codes(login(Client(enforce_csrf_checks=True), user.email, WRONG))
+        finally:
+            release.set()
+
+    success, refusal = in_parallel(
+        [
+            lambda: login(Client(enforce_csrf_checks=True), user.email, PASSWORD).status_code,
+            beside_the_held_check,
+        ]
+    )
+
+    assert (success, refusal) == (200, ["too_many_login_attempts"])
+    assert lock_notices() == []
+
+
+def test_a_new_lock_after_a_password_reset_is_announced_again(clock: Clock) -> None:
+    user = member()
+    client = Client(enforce_csrf_checks=True)
+    fail_daily(client, user.email, 100, clock)
+    deliver_mail()
+    reset = Client(enforce_csrf_checks=True)
+    assert submit(reset, "auth/password/request", {"email": user.email}).status_code == 401
+    deliver_mail()
+    password = PASSWORD + "new"
+    assert (
+        submit(
+            reset, "auth/password/reset", {"key": mailed_code(), "password": password}
+        ).status_code
+        == 401
+    )
+    clock.advance(3600)
+
+    fail_daily(client, user.email, 99, clock)
+    assert len(lock_notices()) == 1
+    fail_daily(client, user.email, 1, clock)
+
+    assert lock_notices() == [("member@example.com", "sent"), ("member@example.com", "pending")]
