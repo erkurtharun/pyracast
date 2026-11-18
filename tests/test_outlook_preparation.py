@@ -20,6 +20,7 @@ from pyracast.plants.forecasting import forecast_payload
 from pyracast.plants.history import plant_outlook
 from tests.support.domain import NOW
 from tests.support.errors import raises_code
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, publish_snapshot, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -179,7 +180,7 @@ def test_only_contributing_forecast_rows_require_valid_native_bounds(
         latest.normalized_intervals = latest.normalized_intervals[24:]
     publish_snapshot(latest)
     older.normalized_intervals[0]["start"] = "invalid"
-    older.save(update_fields=("normalized_intervals",))
+    stored_again(older)
     scope = (system.member, system.tenant.pk, system.region.pk, plant.pk)
     if not shadowed:
         with raises_code("calculation_out_of_range"):

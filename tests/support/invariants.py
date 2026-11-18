@@ -1,7 +1,7 @@
 import json
 from typing import Any
 
-from django.db import connection, models
+from django.db import connection, models, transaction
 from psycopg import sql
 
 from pyracast.forecasts.models import CollectionJobStatus
@@ -132,13 +132,16 @@ def violations(table: str, rule: str) -> int:
 
 def stored_again[Row: models.Model](row: Row, **changes: Any) -> Row:
     """Archive rows refuse updates, so a test stores another shape of one by deleting it and
-    inserting it again under the same key."""
-    key = row.pk
-    row.delete()
+    inserting it again under the same key in one transaction; the keys of its dependents are
+    deferred, so they still hold at commit."""
     for name, value in changes.items():
         setattr(row, name, value)
-    row.pk = key
-    row.save(force_insert=True)
+    with transaction.atomic(), connection.cursor() as cursor:
+        cursor.execute(
+            sql.SQL("DELETE FROM {} WHERE id = %s").format(sql.Identifier(row._meta.db_table)),
+            [row.pk],
+        )
+        row.save(force_insert=True)
     return row
 
 

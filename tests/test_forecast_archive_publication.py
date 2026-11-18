@@ -17,6 +17,7 @@ from pyracast.plants import forecast_archive
 from pyracast.plants.models import ForecastIssuance, Plant
 from pyracast.plants.operations import revise_plant
 from tests.support.domain import NOW, FakeAdapter, System
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -97,7 +98,7 @@ def test_archive_ineligible_mixed_intervals_do_not_block_regional_publication(
     system, plant = make_plant(monkeypatch)
     source = snapshot_for(system, (NOW + timedelta(days=1)).date(), collected_at=NOW)
     source.normalized_intervals[0]["source_kinds"] = ["forecast", "estimated_actuals"]
-    source.save(update_fields=("normalized_intervals",))
+    stored_again(source)
     assert collect(source.job_id, FakeAdapter(), calculate, NOW)
     source.refresh_from_db()
     assert source.available_at is not None

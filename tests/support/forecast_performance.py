@@ -13,6 +13,7 @@ from pyracast.plants.models import (
     ProductionObservation,
 )
 from tests.support.domain import System
+from tests.support.invariants import stored_again
 
 DAY = date(2026, 11, 8)
 
@@ -20,7 +21,7 @@ DAY = date(2026, 11, 8)
 def publish(source: ForecastSnapshot, *, published_at: datetime | None = None) -> None:
     published_at = source.collected_at if published_at is None else published_at
     source.available_at = published_at
-    source.save()
+    stored_again(source)
     source.job.status = "succeeded"
     source.job.save()
     with transaction.atomic():

@@ -8,6 +8,7 @@ from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.models import ForecastResult, ForecastSnapshot, RequestAttempt
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, make_system
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import publish_snapshot, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -93,7 +94,7 @@ def test_region_current_forecast_excludes_unpublished_or_unsuccessful_sources(
         latest.job.save(update_fields=["status"])
     else:
         setattr(latest, field, NOW + timedelta(seconds=1))
-        latest.save(update_fields=[field])
+        stored_again(latest)
     client = Client()
     client.force_login(system.member)
     path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/forecast/"

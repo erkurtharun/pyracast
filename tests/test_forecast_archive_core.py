@@ -29,6 +29,7 @@ from pyracast.plants.models import (
 )
 from pyracast.trash import RETENTION, purge_expired, trash_region
 from tests.support.domain import NOW
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, ready_run, snapshot_for
 from tests.support.provisional_measurements import acquisition
 
@@ -63,7 +64,7 @@ def test_latest_pre_daylight_acquisition_wins_without_actuals_or_job_target(
     before_sunrise.job.save(update_fields=("target_date",))
     before_sunrise.normalized_intervals = before_sunrise.normalized_intervals[:1]
     before_sunrise.normalized_intervals[0]["power_kw"] = None
-    before_sunrise.save(update_fields=("normalized_intervals",))
+    stored_again(before_sunrise)
     latest = freeze(before_sunrise, plant)
     assert select_forecast_issuance(plant, DAY) == latest
     assert latest.payloads["60"]["complete"] is False
@@ -95,7 +96,7 @@ def test_calibration_and_native_clipping_are_frozen_at_acquisition(
     source = snapshot_for(system, DAY, power_kw=120 / 130, collected_at=NOW)
     source.normalized_intervals[1]["power_kw"] = 80 / 130
     source.normalized_intervals[2]["power_kw"] = None
-    source.save(update_fields=("normalized_intervals",))
+    stored_again(source)
     prepared = prepare_forecast_issuances(source)
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(minutes=1))
     CalibrationActivation.objects.create(plant=plant, configuration=run.configuration)
@@ -116,7 +117,7 @@ def test_calibration_and_native_clipping_are_frozen_at_acquisition(
     assert issuance.payloads["30"]["provenance"]["published_at"] == NOW.isoformat()
     original = deepcopy(issuance.payloads)
     source.normalized_intervals[0]["power_kw"] = 0
-    source.save(update_fields=("normalized_intervals",))
+    stored_again(source)
     with transaction.atomic():
         save_forecast_issuances(
             tuple(replace(item, factor=1.0) for item in prepared), source, NOW, plant=plant
@@ -198,7 +199,7 @@ def test_covered_days_keep_native_boundaries_without_using_job_target(
             "power_kw": 0.4,
         },
     ]
-    source.save(update_fields=("normalized_intervals",))
+    stored_again(source)
     prepared = prepare_forecast_issuances(source)
     assert [item.target_date for item in prepared] == [DAY, DAY + timedelta(days=1)]
     first = prepared[0].native_intervals
@@ -275,7 +276,7 @@ def test_acquisition_issue_and_publication_must_precede_daylight(
     assert prepare_forecast_issuances(issued_before_sunrise) == ()
     source = snapshot_for(system, DAY)
     source.issued_at = source.collected_at
-    source.save(update_fields=("issued_at",))
+    stored_again(source)
     prepared = prepare_forecast_issuances(source)
     for published in (source.collected_at - timedelta(seconds=1), cutoff):
         with transaction.atomic():
@@ -405,7 +406,7 @@ def test_database_rejects_nonfinite_factors_and_invalid_source_lineage(
         with pytest.raises(IntegrityError), transaction.atomic():
             ForecastIssuance.objects.create(**(defaults | {"factor": factor}))
     source.source_kind = "estimated_actuals"
-    source.save(update_fields=("source_kind",))
+    stored_again(source)
     with pytest.raises(IntegrityError, match="lineage"), transaction.atomic():
         ForecastIssuance.objects.create(**defaults)
 

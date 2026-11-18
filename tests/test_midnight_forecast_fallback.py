@@ -15,6 +15,7 @@ from pyracast.plants.operations import revise_plant
 from pyracast.regions.models import Region
 from pyracast.solar import daylight_window
 from tests.support.automatic_forecast_selection import reference_transition
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, publish_snapshot, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -164,10 +165,10 @@ def test_automatic_keeps_intraday_forecast_until_actual_values_arrive(
     publish_snapshot(actual)
     assert read()["source_kind"] == "forecast"
     actual.normalized_intervals[0]["power_kw"] = 0
-    actual.save(update_fields=["normalized_intervals"])
+    stored_again(actual)
     assert read()["source_kind"] == "forecast"
     actual.normalized_intervals[24]["power_kw"] = 0.2
-    actual.save(update_fields=["normalized_intervals"])
+    stored_again(actual)
     assert read()["source_kind"] == "forecast"
     partial = read("estimated_actuals")
     assert partial["source_kind"] == "estimated_actuals"
@@ -180,7 +181,7 @@ def test_automatic_keeps_intraday_forecast_until_actual_values_arrive(
         row["power_kw"] = (
             0 if any(begin < right and stop > left for left, right in daylight.windows) else None
         )
-    actual.save(update_fields=["normalized_intervals"])
+    stored_again(actual)
     arrived = read()
     assert arrived["source_kind"] == "estimated_actuals"
     assert arrived["result"]["complete"] is False
@@ -316,7 +317,7 @@ def test_polar_night_actuals_require_complete_local_day(
     query = {"date": DAY.isoformat(), "data_source": "auto"}
     assert client.get(path, query).json()["source_kind"] == "forecast"
     actual.normalized_intervals[-1]["power_kw"] = 0
-    actual.save(update_fields=["normalized_intervals"])
+    stored_again(actual)
     response = client.get(path, query)
     assert response.status_code == 200, response.content
     assert response.json()["source_kind"] == "estimated_actuals"

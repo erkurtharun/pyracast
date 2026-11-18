@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from io import BytesIO
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from django.core.mail import EmailMessage
@@ -53,7 +54,9 @@ def configured() -> tuple[System, ReminderSchedule]:
     return system, schedule
 
 
-def saved(system: System, when: datetime = NOW) -> ForecastSnapshot:
+def saved(
+    system: System, when: datetime = NOW, *, intervals: list[dict[str, Any]] | None = None
+) -> ForecastSnapshot:
     job = CollectionJob.objects.create(
         binding=system.binding,
         scheduled_slot=when - timedelta(minutes=1),
@@ -73,7 +76,9 @@ def saved(system: System, when: datetime = NOW) -> ForecastSnapshot:
                 "sunlight": "day",
             }
             for offset in (0, 1)
-        ],
+        ]
+        if intervals is None
+        else intervals,
         collected_at=when,
         available_at=when,
         source_kind="forecast",

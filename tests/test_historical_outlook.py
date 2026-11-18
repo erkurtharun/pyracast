@@ -18,6 +18,7 @@ from pyracast.plants.operations import revise_plant
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, System
 from tests.support.errors import raises_code
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, publish_snapshot, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -125,7 +126,7 @@ def test_archive_api_keeps_tenant_boundaries_after_source_changes(
     first = client.get(path, {"date": DAY.isoformat()})
     assert first.status_code == 200
     source.normalized_intervals[0]["power_kw"] = -1
-    source.save()
+    stored_again(source)
     assert client.get(path, {"date": DAY.isoformat()}).json() == first.json()
     other = Tenant.objects.create(name="Other")
     user = User.objects.create_user("other-tenant")
@@ -271,7 +272,7 @@ def test_history_selection_excludes_unavailable_or_unmatched_revisions(
     system, _ = make_plant(monkeypatch)
     original = actuals(system, acquired=NOW - timedelta(hours=2))
     changed = actuals(system)
-    ForecastSnapshot.objects.filter(pk=changed.pk).update(**changes)
+    stored_again(ForecastSnapshot.objects.get(pk=changed.pk), **changes)
     selected = select_actual_snapshot(system.binding, DAY, NOW)
     assert selected is not None
     assert selected.pk == original.pk
@@ -285,7 +286,7 @@ def test_history_selection_keeps_acquisition_and_publication_cutoffs(
     second = actuals(system)
     second.available_at = NOW
     second.issued_at = NOW - timedelta(hours=1)
-    second.save()
+    stored_again(second)
     assert select_actual_snapshot(system.binding, DAY, NOW) == second
     assert select_actual_snapshot(system.binding, DAY, NOW - timedelta(minutes=1)) == first
     second.job.status = "stale"
@@ -419,7 +420,7 @@ def test_corrupt_history_cannot_return_a_fabricated_estimate(
     system, plant = make_plant(monkeypatch)
     snapshot = actuals(system)
     snapshot.normalized_intervals[0]["power_kw"] = -1
-    snapshot.save()
+    stored_again(snapshot)
     with raises_code("calculation_out_of_range"):
         plant_outlook(
             system.member,
@@ -439,8 +440,8 @@ def test_history_selection_preserves_complete_day_when_newer_rolling_window_is_p
     complete = actuals(system, acquired=NOW - timedelta(hours=2))
     partial = actuals(system)
     partial.normalized_intervals = partial.normalized_intervals[6:]
-    partial.save()
+    stored_again(partial)
     assert select_actual_snapshot(system.binding, DAY, NOW) == complete
     complete.normalized_intervals = complete.normalized_intervals[:-6]
-    complete.save()
+    stored_again(complete)
     assert select_actual_snapshot(system.binding, DAY, NOW) == partial

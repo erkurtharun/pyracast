@@ -12,6 +12,7 @@ from pyracast.forecasts.models import ForecastResult, ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, System, make_system
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -152,7 +153,7 @@ def test_region_forecast_excludes_vintages_not_yet_available(
     newer = snapshot_for(system, DAY, collected_at=NOW - timedelta(hours=1))
     if future_field in {"collected_at", "issued_at"}:
         setattr(newer, future_field, NOW + timedelta(seconds=1))
-        newer.save(update_fields=[future_field])
+        stored_again(newer)
     ForecastResult.objects.create(
         snapshot=newer,
         payload={"marker": "future"},

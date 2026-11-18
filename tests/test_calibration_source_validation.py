@@ -18,6 +18,7 @@ from pyracast.plants.operations import ObservationInput, import_observations
 from pyracast.plants.training import run_calibration
 from tests.support.domain import NOW
 from tests.support.historical_reference_import import source_settings
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant
 from tests.support.plant_training import actual_snapshot_for
 
@@ -158,7 +159,7 @@ def test_real_fit_distinguishes_imported_product_from_current_hobby_validation(
             snapshot.job.scheduled_slot = NOW
             snapshot.job.save()
             snapshot.collected_at = snapshot.available_at = NOW
-            snapshot.save()
+            stored_again(snapshot)
         start, end = local_day_bounds(day, system.region.timezone)
         while start < end:
             observations.append(ObservationInput(start, start + timedelta(hours=1), 26))

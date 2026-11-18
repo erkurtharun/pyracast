@@ -20,6 +20,7 @@ from pyracast.regions.models import Region
 from tests.support.domain import NOW
 from tests.support.historical_production_identity import record_identity
 from tests.support.incident_calibration import incident
+from tests.support.invariants import stored_again
 from tests.support.notification_report_data import report_delivery
 from tests.support.notifications import SLOT, saved
 from tests.support.plant_operations import ready_run
@@ -151,7 +152,7 @@ def test_report_hours_integrate_native_daylight_scope_before_aggregation(
         )
     )
     rows.sort(key=lambda row: row["start"])
-    delivery.snapshot.save(update_fields=("normalized_intervals",))
+    stored_again(delivery.snapshot)
     result = saved_report_context(delivery)
     tomorrow = cast(list[dict[str, Any]], result["days"])[1]
     expected = (
@@ -186,7 +187,7 @@ def test_report_uses_eligible_calibration_and_exposes_missing_daylight_hour(
     delivery.snapshot.normalized_intervals = [
         row for row in delivery.snapshot.normalized_intervals if row["start"] != middle["start"]
     ]
-    delivery.snapshot.save(update_fields=("normalized_intervals",))
+    stored_again(delivery.snapshot)
     context = saved_report_context(delivery)
     normal = cast(list[dict[str, Any]], context["days"])[1]["normal"]
     missing = next(row for row in normal["report_intervals"] if row["start"] == middle["start"])
@@ -258,7 +259,7 @@ def test_frozen_report_survives_later_input_changes_and_retry(
     PlantConfiguration.objects.filter(pk=plant.current_configuration_id).update(dc_capacity_mw=260)
     ForecastResult.objects.filter(snapshot=delivery.snapshot).update(daily_payloads={})
     assert delivery.snapshot is not None
-    ForecastSnapshot.objects.filter(pk=delivery.snapshot.pk).update(normalized_intervals=[])
+    stored_again(ForecastSnapshot.objects.get(pk=delivery.snapshot.pk), normalized_intervals=[])
     prepared = delivery.prepared_message
     assert prepare_delivery(delivery, SLOT + timedelta(minutes=3))
     assert delivery.prepared_message == prepared

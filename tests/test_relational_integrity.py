@@ -135,23 +135,21 @@ def test_snapshot_requires_a_complete_increasing_coverage_pair(
 ) -> None:
     system = make_system(approved=True)
     job = CollectionJob.objects.get(binding=system.binding)
-    snapshot = ForecastSnapshot.objects.create(
-        job=job,
-        binding=system.binding,
-        raw_payload={},
-        normalized_intervals=[],
-        collected_at=NOW,
-        source_kind="forecast",
-    )
+    stored: dict[str, Any] = {
+        "job": job,
+        "binding": system.binding,
+        "raw_payload": {},
+        "normalized_intervals": [],
+        "collected_at": NOW,
+        "source_kind": "forecast",
+    }
     with pytest.raises(IntegrityError, match="snapshot_coverage_bounds"), transaction.atomic():
-        ForecastSnapshot.objects.filter(pk=snapshot.pk).update(
-            coverage_start=bounds[0], coverage_end=bounds[1]
-        )
-    ForecastSnapshot.objects.filter(pk=snapshot.pk).update(
-        coverage_start=NOW, coverage_end=NOW + timedelta(minutes=30)
-    )
+        ForecastSnapshot.objects.create(**stored, coverage_start=bounds[0], coverage_end=bounds[1])
     with pytest.raises(IntegrityError, match="snapshot_source_kind"), transaction.atomic():
-        ForecastSnapshot.objects.filter(pk=snapshot.pk).update(source_kind="other")
+        ForecastSnapshot.objects.create(**stored | {"source_kind": "other"})
+    ForecastSnapshot.objects.create(
+        **stored, coverage_start=NOW, coverage_end=NOW + timedelta(minutes=30)
+    )
     with pytest.raises(IntegrityError, match="collection_job_status"), transaction.atomic():
         CollectionJob.objects.filter(pk=job.pk).update(status="lost")
 

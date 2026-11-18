@@ -29,6 +29,7 @@ from pyracast.regions.models import AuditEvent, Region
 from pyracast.trash import RETENTION, purge_expired, trash_region
 from tests.support.capacity_normalization import normalize, scaled_system
 from tests.support.domain import NOW
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import publish_snapshot, snapshot_for
 from tests.support.plant_training import actual_snapshot_for
 
@@ -43,7 +44,7 @@ def test_unknown_or_future_publication_does_not_unlock_a_legacy_forecast(
     system, target = scaled_system(monkeypatch)
     source = publish_snapshot(snapshot_for(system, date(2026, 11, 9)))
     source.available_at = None
-    source.save()
+    stored_again(source)
     result = source.forecastresult
     if publication == "missing":
         result.delete()
@@ -175,7 +176,7 @@ def test_invalid_power_rolls_back_the_entire_normalization(
     actual_snapshot_for(system, date(2026, 11, 6))
     invalid = actual_snapshot_for(system, date(2026, 11, 7))
     invalid.normalized_intervals[0]["power_kw"] = power
-    invalid.save()
+    stored_again(invalid)
     with pytest.raises(ValidationError):
         normalize(system, target)
     assert not ForecastSnapshot.objects.filter(job__binding=target).exists()
@@ -213,7 +214,7 @@ def test_live_native_history_takes_precedence_over_scaled_history(
     native = actual_snapshot_for(replace(system, binding=target), day, power_kw=500)
     assert select_actual_snapshot(target, day, NOW) == native
     native.normalized_intervals.pop()
-    native.save()
+    stored_again(native)
     selected = select_actual_snapshot(target, day, NOW)
     assert selected is not None
     assert selected.pk == ids[0]

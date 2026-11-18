@@ -9,6 +9,7 @@ from pyracast.notifications.preparation import prepare_delivery
 from pyracast.notifications.scheduler import enqueue_due
 from pyracast.plants.models import PlantConfiguration
 from tests.support.domain import NOW
+from tests.support.invariants import stored_again
 from tests.support.notification_preparation import complete_saved
 from tests.support.notification_report_data import report_delivery
 from tests.support.notifications import SLOT, cache_saved_days, configured
@@ -48,7 +49,7 @@ def test_region_delivery_completeness_uses_delivered_daylight_coverage() -> None
         for index, interval in enumerate(snapshot.normalized_intervals)
         if index not in (0, 24)
     ]
-    snapshot.save(update_fields=("normalized_intervals",))
+    stored_again(snapshot)
     cache_saved_days(snapshot, NOW)
     delivery = NotificationDelivery.objects.get(pk=enqueue_due(SLOT)[0])
 

@@ -17,6 +17,7 @@ from pyracast.plants.performance import forecast_performance
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.plants.training import run_calibration
 from tests.support.domain import NOW, System
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, snapshot_for
 from tests.support.plant_training import actual_snapshot_for
 
@@ -42,7 +43,7 @@ def actual_piece(
     source.coverage_start = start + timedelta(hours=first_hour)
     source.coverage_end = start + timedelta(hours=last_hour)
     source.available_at = when
-    source.save()
+    stored_again(source)
     source.job.endpoint, source.job.status = "estimated_actuals", "succeeded"
     source.job.save(update_fields=("endpoint", "status"))
     return source
@@ -156,7 +157,7 @@ def test_full_native_and_composite_representations_share_effective_day_fingerpri
         }
     )
     replacement.coverage_end = end + timedelta(minutes=30)
-    replacement.save(update_fields=("normalized_intervals", "coverage_end"))
+    stored_again(replacement)
     unrelated, _ = selection_fingerprint(plant.current_configuration, rows, NOW)
     assert unrelated == original
     assert prepare_calibration(plant.pk, NOW) is None

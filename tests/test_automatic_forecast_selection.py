@@ -12,6 +12,7 @@ from pyracast.irradiance import local_day_bounds
 from pyracast.plants.history import plant_outlook
 from pyracast.plants.models import ForecastIssuance, PlantConfiguration
 from tests.support.automatic_forecast_selection import DAY, reference_transition
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, publish_snapshot, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -170,7 +171,7 @@ def test_automatic_does_not_replace_latest_when_reference_transition_is_not_safe
         ForecastResult.objects.filter(snapshot=old).delete()
     else:
         old.normalized_intervals[0]["power_kw"] = "invalid"
-        old.save(update_fields=["normalized_intervals"])
+        stored_again(old)
     outlook = plant_outlook(
         system.member,
         system.tenant.pk,

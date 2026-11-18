@@ -30,6 +30,7 @@ from pyracast.plants.preparation import prepare_calibration
 from pyracast.regions.models import Region
 from tests.support.calibration_preparation import add_days
 from tests.support.domain import NOW
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, ready_run
 from tests.support.plant_training import actual_snapshot_for
 
@@ -198,7 +199,7 @@ def test_current_source_transition_refits_once_but_identical_native_reacquisitio
     target = date(2026, 11, 7)
     old_snapshot = ForecastSnapshot.objects.get(job__target_date=target)
     old_snapshot.collected_at = old_snapshot.available_at = NOW - timedelta(minutes=5)
-    old_snapshot.save()
+    stored_again(old_snapshot)
     if old_source == "historical_import":
         old_snapshot.job.reference_import = HistoricalReferenceImport.objects.create(
             binding=system.binding,
@@ -280,7 +281,7 @@ def test_missing_actual_history_does_not_count_as_a_matched_day(
     CalibrationRun.objects.all().delete()
     source = ForecastSnapshot.objects.order_by("pk").first()
     assert source is not None
-    ForecastSnapshot.objects.filter(pk=source.pk).update(source_kind="forecast")
+    stored_again(ForecastSnapshot.objects.get(pk=source.pk), source_kind="forecast")
     run = prepare_calibration(plant.pk)
     assert run is not None
     assert (run.window_start, run.window_end) == (date(2026, 11, 2), date(2026, 11, 7))

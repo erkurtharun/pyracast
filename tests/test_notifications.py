@@ -41,6 +41,7 @@ from pyracast.notifications.scheduler import enqueue_due
 from pyracast.notifications.views import reminder_schedule_payload
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, System, make_system
+from tests.support.invariants import stored_again
 from tests.support.notifications import (
     SLOT,
     attached_sheet,
@@ -408,7 +409,7 @@ def test_full_summary_preserves_units_and_escapes_html() -> None:
         for hour in range(48)
     ]
     snapshot.issued_at = NOW - timedelta(hours=1)
-    snapshot.save()
+    stored_again(snapshot)
     cache_saved_days(snapshot)
     delivery_id = enqueue_due(SLOT)[0]
     assert process_notification(delivery_id, SLOT)

@@ -22,6 +22,7 @@ from pyracast.forecasts.schedule import configure_schedule
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.providers import FixtureProvider, SolcastProvider
 from tests.support.domain import make_system
+from tests.support.invariants import stored_again
 from tests.support.providers import binding_for
 
 MORNING = datetime(2026, 11, 15, 5, 45, tzinfo=UTC)
@@ -132,7 +133,7 @@ def test_archived_daylight_skips_actuals_api_despite_missing_nights() -> None:
         for row in snapshot.normalized_intervals
         if 4 <= datetime.fromisoformat(row["start"]).hour < 15
     ]
-    snapshot.save(update_fields=("normalized_intervals",))
+    stored_again(snapshot)
     assert missing_actuals_window(system.binding, MORNING) is None
     job = actual_job(system.binding.pk)
 
@@ -305,10 +306,10 @@ def test_polar_night_does_not_require_archived_nighttime_values() -> None:
     snapshot = archive_actuals(system.binding.pk)
     for row in snapshot.normalized_intervals:
         row["power_kw"] = 0
-    snapshot.save(update_fields=("normalized_intervals",))
+    stored_again(snapshot)
     assert missing_actuals_window(system.binding, MORNING) is None
     del snapshot.normalized_intervals[-1]
-    snapshot.save(update_fields=("normalized_intervals",))
+    stored_again(snapshot)
     assert missing_actuals_window(system.binding, MORNING) is None
 
 

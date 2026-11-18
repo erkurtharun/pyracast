@@ -22,6 +22,7 @@ from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.regions.models import Region
 from tests.support.delivery_health import NOW, recent_forecast
 from tests.support.domain import FakeAdapter, System, make_system
+from tests.support.invariants import stored_again
 from tests.support.metering import connected
 
 
@@ -171,7 +172,9 @@ def test_long_cooldown_stale_forecasts_and_missed_delivery_are_not_healthy() -> 
     assert report["healthy"] is False
     system.account.request_blocked_until = None
     system.account.save(update_fields=("request_blocked_until",))
-    ForecastSnapshot.objects.filter(pk=snapshot.pk).update(collected_at=NOW - timedelta(hours=27))
+    stored_again(
+        ForecastSnapshot.objects.get(pk=snapshot.pk), collected_at=NOW - timedelta(hours=27)
+    )
     report = delivery_health(NOW, timedelta(minutes=5))
     assert report["regions_without_recent_forecasts"] == 1
     assert report["healthy"] is False

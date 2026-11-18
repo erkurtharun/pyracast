@@ -23,6 +23,7 @@ from pyracast.regions.models import Region
 from pyracast.solar import daylight_window
 from tests.support.domain import NOW
 from tests.support.forecast_performance import DAY, measurements, publish, selected_factor
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -171,10 +172,10 @@ def test_performance_excludes_incomplete_days_and_retrospective_configuration(
         ProductionObservation.objects.order_by("pk").first().delete()  # type: ignore[union-attr]
     elif kind == "source":
         source.normalized_intervals[0]["power_kw"] = None
-        source.save()
+        stored_again(source)
     elif kind == "invalid":
         source.normalized_intervals[0]["power_kw"] = -1
-        source.save()
+        stored_again(source)
         reason = "forecast_not_available"
     else:
         configuration.created_at = NOW
@@ -284,7 +285,7 @@ def test_frozen_power_does_not_reapply_calibration_or_current_model(
     selected_factor(system, configuration, source.collected_at + timedelta(hours=1))
     CalibrationRun.objects.exclude(pk=selected.pk).update(factor=0.5)
     source.normalized_intervals[0]["power_kw"] = 999
-    source.save()
+    stored_again(source)
 
     def changed_model(*args: object, **kwargs: object) -> None:
         raise AssertionError("Archived performance must not calculate current model output.")

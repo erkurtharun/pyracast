@@ -18,6 +18,7 @@ from pyracast.irradiance import local_day_bounds
 from tests.support.archived_actual_composition_api import DAY, acquired_actuals
 from tests.support.domain import NOW, System, make_system
 from tests.support.historical_reference_import import archive, power_file, system_for_import
+from tests.support.invariants import stored_again
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -42,8 +43,10 @@ def test_pinned_actual_composition_replays_original_energy_after_new_correction(
     system = archived_system(monkeypatch)
     pin = paired_pin(system)
     correction = acquired_actuals(system, 7, 18, 0.8)
-    ForecastSnapshot.objects.filter(pk=correction.pk).update(
-        collected_at=NOW - timedelta(minutes=1), available_at=NOW - timedelta(minutes=1)
+    stored_again(
+        ForecastSnapshot.objects.get(pk=correction.pk),
+        collected_at=NOW - timedelta(minutes=1),
+        available_at=NOW - timedelta(minutes=1),
     )
     current = select_archived_actual_source(system.binding, DAY, NOW)
     frozen = replay_archived_actual_source(system.binding, DAY, NOW, pin)
@@ -73,7 +76,7 @@ def test_newer_actual_coverage_never_fills_corrected_missing_values_from_old_sou
     elif correction == "null":
         for row in latest.normalized_intervals:
             row["power_kw"] = None
-    latest.save(update_fields=("collected_at", "available_at", "normalized_intervals"))
+    stored_again(latest)
     source = select_archived_actual_source(system.binding, DAY, NOW)
     assert source is not None
     result = archived_actual_irradiance(system.binding, DAY, source)
@@ -226,8 +229,9 @@ def test_pinned_replay_requires_original_binding_and_knowledge_cutoff(
     elif ineligible == "day":
         day += timedelta(days=1)
     else:
-        ForecastSnapshot.objects.filter(pk=pin["snapshot_ids"][0]).update(
-            **{ineligible: NOW + timedelta(seconds=1)}
+        stored_again(
+            ForecastSnapshot.objects.get(pk=pin["snapshot_ids"][0]),
+            **{ineligible: NOW + timedelta(seconds=1)},
         )
     with pytest.raises(ValueError, match=r"(?i)archived actual|native estimated-actual"):
         replay_archived_actual_source(binding, day, NOW, pin)
