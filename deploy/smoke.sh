@@ -245,15 +245,23 @@ TrustedProxyHeaders(lambda request: HttpResponse())(request)
 assert request.META["HTTP_X_PYRACAST_CLIENT_IP"] == "198.51.100.7", request.META
 assert "HTTP_CF_CONNECTING_IP" not in request.META
 '
-# Through the production routers each client has its own rate and in-flight budget, keyed by the
-# edge's address; a held request is one whose body never arrives.
-"${compose[@]}" exec -T --env "SMOKE_CA=$(cat "$temporary/ca.pem")" --env IN_FLIGHT=32 header-probe python - <<'PY'
+# Each router keeps its own rate and in-flight budget for each client, keyed by the edge's address;
+# a held request is one whose body never arrives.
+"${compose[@]}" exec -T --env "SMOKE_CA=$(cat "$temporary/ca.pem")" \
+  --env RATE_AVERAGE=20 --env RATE_BURST=100 --env SIGN_IN_AVERAGE=0.5 --env SIGN_IN_BURST=20 --env IN_FLIGHT=32 header-probe python - <<'PY'
 import http.client
 import os
 import socket
 import ssl
 import time
 context = ssl.create_default_context(cadata=os.environ['SMOKE_CA'])
+ROUTERS = {
+    'backend': '/health/live/',
+    'api': '/api/session/',
+    'authentication': '/api/auth/browser/v1/config',
+    'admin': '/admin',
+    'frontend': '/robots.txt',
+}
 
 def connect():
     connection = http.client.HTTPSConnection('localhost', 8443, timeout=10)
@@ -275,33 +283,57 @@ def statuses(path, client, count):
     connection.close()
     return seen
 
-flood = statuses('/health/live/', '198.51.100.21', 400)
-assert flood[0] == 200 and 429 in flood and set(flood) == {200, 429}, flood
-assert statuses('/health/live/', '198.51.100.22', 1) == [200]
-sign_in = statuses('/api/auth/browser/v1/config', '198.51.100.23', 40)
-assert sign_in[0] == 200 and 429 in sign_in and set(sign_in) == {200, 429}, sign_in
-assert statuses('/api/session/', '198.51.100.24', 1) == [200]
+def admitted_before_refusal(path, client):
+    connection = connect()
+    admitted = 0
+    started = time.monotonic()
+    while True:
+        connection.request('GET', path, headers={'Host': 'localhost', 'X-Forwarded-For': client})
+        response = connection.getresponse()
+        response.read()
+        if response.status == 429:
+            break
+        assert response.status < 500 and admitted < 1000, (path, response.status, admitted)
+        admitted += 1
+        if response.will_close:
+            connection.close()
+            connection = connect()
+    connection.close()
+    return admitted, time.monotonic() - started
 
-def held(client):
+for router, path in ROUTERS.items():
+    prefix = 'SIGN_IN' if router == 'authentication' else 'RATE'
+    burst, average = int(os.environ[f'{prefix}_BURST']), float(os.environ[f'{prefix}_AVERAGE'])
+    admitted, elapsed = admitted_before_refusal(path, '198.51.100.21')
+    assert burst <= admitted <= burst + average * elapsed + 1, (router, admitted, elapsed)
+assert statuses('/health/live/', '198.51.100.22', 1) == [200]
+
+def held(path, client):
     secure = context.wrap_socket(
         socket.create_connection(('173.245.48.2', 8443), timeout=10), server_hostname='localhost')
-    secure.sendall(f'POST /api/session/ HTTP/1.1\r\nHost: localhost\r\nX-Forwarded-For: {client}\r\n'
+    secure.sendall(f'POST {path} HTTP/1.1\r\nHost: localhost\r\nX-Forwarded-For: {client}\r\n'
                    'Content-Type: application/json\r\nContent-Length: 2\r\n\r\n'.encode())
     return secure
 
-def eventually(client, status):
+def eventually(path, client, refused):
     deadline = time.monotonic() + 10
-    while (seen := statuses('/api/session/', client, 1)) != [status] and time.monotonic() < deadline:
-        time.sleep(0.2)
-    return seen
+    while ((status := statuses(path, client, 1)[0]) == 429) != refused and time.monotonic() < deadline:
+        time.sleep(0.1)
+    return status
 
-holding = [held('198.51.100.25') for _ in range(int(os.environ['IN_FLIGHT']))]
-assert eventually('198.51.100.25', 429) == [429]
+# The authentication router's rate refuses one client before its in-flight budget fills.
+held_paths = [path for router, path in ROUTERS.items() if router != 'authentication']
+holding = []
+for path in held_paths:
+    assert statuses(path, '198.51.100.25', 1) != [429], path
+    holding.append([held(path, '198.51.100.25') for _ in range(int(os.environ['IN_FLIGHT']))])
+    assert eventually(path, '198.51.100.25', refused=True) == 429, path
 assert statuses('/api/session/', '198.51.100.26', 1) == [200]
-holding.pop().close()
-assert eventually('198.51.100.25', 200) == [200]
-for secure in holding:
-    secure.close()
+for path, sockets in zip(held_paths, holding):
+    sockets.pop().close()
+    assert eventually(path, '198.51.100.25', refused=False) != 429, path
+    for secure in sockets:
+        secure.close()
 PY
 [[ $(docker inspect --format '{{.Config.User}}' "$("${compose[@]}" ps -q gateway)") == 10001:10001 ]]
 "${compose[@]}" exec -T api python -c '

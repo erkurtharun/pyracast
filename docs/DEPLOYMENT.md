@@ -64,10 +64,12 @@ header the gateway strips from every request. Review changes to the official
 [IPv4](https://www.cloudflare.com/ips-v4) and [IPv6](https://www.cloudflare.com/ips-v6)
 lists against both `deploy/compose.yaml` and the Terraform ingress rules.
 
-`deploy/routes.yml` limits each client (the address Cloudflare appended) by request
-rate, a tighter rate on `/api/auth/` and concurrent requests, and each router by body
-size; an API body over its limit gets the API error body `request_too_large`. Rate
-and concurrency refusals are plain 429 answers. The gateway owns HSTS, `nosniff`, `Permissions-Policy`
+`deploy/routes.yml` gives each client (the address Cloudflare appended) a request-rate
+and a concurrent-request budget per router, with a tighter rate on `/api/auth/`. Traefik
+builds a separate limiter for every router, including each router's copy on the
+loopback entrypoint, so a client that spends one router's budget keeps its budget on
+the others. Each router also limits the body size; an API body over its limit gets the
+API error body `request_too_large`. Rate and concurrency refusals are plain 429 answers. The gateway owns HSTS, `nosniff`, `Permissions-Policy`
 and `Cross-Origin-Opener-Policy`; the applications own CSP, `Referrer-Policy` and cache
 control, and both CSPs report violations to `/api/csp-reports/`.
 
@@ -749,7 +751,9 @@ owner, provisions again, checks that
 the runtime role can neither create tables nor write the migration ledger and that
 the superuser cannot sign in over TCP, checks frontend/API/static
 routing, forged proxy headers (also from a simulated Cloudflare peer), the exact
-gateway headers and each router's body, rate and in-flight limits, publishes one
+gateway headers, each router's body limit, and that each router refuses one client at
+its own rate budget (and each but the `/api/auth/` router at its own in-flight budget)
+while the next router still grants that client its whole budget, publishes one
 synthetic forecast through the real RabbitMQ worker, and exercises dispatcher and
 idle worker stop. Through the gateway it also checks the anonymous `/api/session/` JSON shape, that a
 wrong-password sign-in gets the normal 400 `email_password_mismatch` refusal and
