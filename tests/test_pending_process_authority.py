@@ -12,6 +12,7 @@ from allauth.account.internal.flows.password_reset_by_code import (
     PasswordResetVerificationProcess,
 )
 from allauth.account.internal.flows.reauthenticate_by_code import (
+    REAUTHENTICATION_CODE_SESSION_KEY,
     ConfirmReauthenticationCodeProcess,
 )
 from allauth.account.models import EmailAddress
@@ -1019,3 +1020,17 @@ def test_a_start_refused_by_its_budget_waits_for_no_lock(start: str) -> None:
     assert still_held
     assert (response.status_code, error_codes(response)) == refusal
     assert mail.outbox == []
+
+
+def test_a_reauthentication_code_admitted_after_its_budget_looked_spent_sends_no_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = account("owner")
+    client = signed_in(user)
+    monkeypatch.setattr(headless, "spent", lambda *args, **kwargs: True)
+
+    response = submit(client, "auth/reauthenticate/code/request", {"email": OWNER})
+
+    assert response.status_code == 429
+    assert mail.outbox == []
+    assert REAUTHENTICATION_CODE_SESSION_KEY not in client.session
