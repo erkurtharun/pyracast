@@ -1,15 +1,47 @@
-from collections.abc import Iterator
+from collections.abc import Collection, Iterator
 from contextlib import contextmanager
 
-from django.db import IntegrityError, connection, models, transaction
+from django.apps.registry import Apps
+from django.db import IntegrityError, connection, migrations, models, transaction
+from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 from django.db.transaction import TransactionManagementError
 
 
+def refuse_values_outside(
+    model: str, lookup: str, allowed: Collection[str], *, scope: models.Q | None = None
+) -> migrations.RunPython:
+    """Fail the migration before a vocabulary CHECK is added while stored rows violate it.
+
+    The migration is atomic, so the failure changes nothing; no row is rewritten or deleted.
+    """
+
+    def refuse(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
+        rows = apps.get_model(model)._default_manager.using(schema_editor.connection.alias)
+        found = sorted(
+            {
+                repr(value)
+                for value in rows.filter(scope or models.Q())
+                .exclude(**{f"{lookup}__in": list(allowed)})
+                .values_list(lookup, flat=True)
+                .distinct()
+            }
+        )
+        if found:
+            table = rows.model._meta.db_table
+            raise ValueError(
+                f"{table}.{lookup} holds values outside its vocabulary: {', '.join(found)}. "
+                "Correct these rows and migrate again; nothing was changed."
+            )
+
+    return migrations.RunPython(refuse, migrations.RunPython.noop)
+
+
 def choices_check(
-    field: str, choices: type[models.TextChoices], *, name: str = ""
+    field: str, choices: type[models.TextChoices], *, name: str = "", blank: bool = False
 ) -> models.CheckConstraint:
+    values = ["", *choices.values] if blank else choices.values
     return models.CheckConstraint(
-        condition=models.Q(**{f"{field}__in": choices.values}),
+        condition=models.Q(**{f"{field}__in": values}),
         name=name or f"%(class)s_{field}_chk",
     )
 

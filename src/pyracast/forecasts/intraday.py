@@ -7,7 +7,12 @@ from typing import Any, Literal, cast
 from django.db.models import Q
 
 from pyracast.connections.models import SiteBinding
-from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.forecasts.models import (
+    CollectionEndpoint,
+    CollectionJobStatus,
+    ForecastSnapshot,
+    SnapshotSourceKind,
+)
 from pyracast.forecasts.sources import covering_snapshots, snapshot_data
 from pyracast.irradiance import local_day_bounds
 from pyracast.irradiance.weather_reference import summarize_weather, unavailable_weather
@@ -135,10 +140,10 @@ def native_actual_snapshots(
         ForecastSnapshot.objects.select_related("job", "binding")
         .filter(
             binding=binding,
-            source_kind="estimated_actuals",
-            job__endpoint="estimated_actuals",
+            source_kind=SnapshotSourceKind.ESTIMATED_ACTUALS,
+            job__endpoint=CollectionEndpoint.ESTIMATED_ACTUALS,
             job__reference_import__isnull=True,
-            job__status="succeeded",
+            job__status=CollectionJobStatus.SUCCEEDED,
             coverage_start__lt=end,
             coverage_end__gt=start,
         )

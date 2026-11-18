@@ -2,6 +2,8 @@ import ast
 import re
 from pathlib import Path
 
+import pytest
+
 SOURCE = Path(__file__).resolve().parents[1] / "src" / "pyracast"
 CODE = re.compile(r"[a-z][a-z0-9_]*")
 VIEW_BASES = {"APIView", "GenericAPIView", "ScopedView", "RequestView"}
@@ -49,13 +51,21 @@ def root_of(node: ast.expr) -> str:
 
 
 def allauth_views(tree: ast.Module) -> set[str]:
-    return {
+    imported = {
         alias.asname or alias.name
         for node in ast.walk(tree)
         if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("allauth.")
         for alias in node.names
         if (node.module or "").endswith("views") or alias.name == "views"
     }
+    imported.update(
+        alias.asname or alias.name.partition(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+        if alias.name.startswith("allauth.") and alias.name.endswith(".views")
+    )
+    return imported
 
 
 def coded_validation_errors(tree: ast.Module) -> list[int]:
@@ -73,7 +83,19 @@ def coded_validation_errors(tree: ast.Module) -> list[int]:
 
 def translates(handler: ast.ExceptHandler) -> bool:
     last = handler.body[-1]
-    return not (isinstance(last, ast.Raise) and last.exc is None)
+    if not isinstance(last, ast.Raise):
+        return True
+    if last.exc is None:
+        return False
+    if isinstance(last.exc, ast.Name) and last.exc.id == handler.name:
+        return any(
+            isinstance(node, ast.Name)
+            and node.id == handler.name
+            and isinstance(node.ctx, ast.Store)
+            for statement in handler.body[:-1]
+            for node in ast.walk(statement)
+        )
+    return True
 
 
 def framework_errors_and_translations(tree: ast.Module) -> list[int]:
@@ -233,3 +255,48 @@ def test_the_scan_recognises_allauth_and_indirect_shapes() -> None:
     assert sorted(handmade_error_bodies(sample)) == [8, 16, 17, 18, 19]
     assert validation_error_factories(sample) == [21]
     assert enclosing_names(sample)[8] == "Login.post"
+
+
+@pytest.mark.parametrize(
+    ("import_line", "base"),
+    [
+        ("import allauth.headless.account.views as views", "views.LoginView"),
+        ("import allauth.headless.account.views", "allauth.headless.account.views.LoginView"),
+    ],
+)
+def test_the_scan_recognises_direct_allauth_view_imports(import_line: str, base: str) -> None:
+    sample = ast.parse(
+        f"{import_line}\n"
+        f"class Login({base}):\n"
+        "    def post(self, request):\n"
+        "        try:\n"
+        "            pass\n"
+        "        except KeyError:\n"
+        "            return Response({'message': 'x'}, status=400)\n"
+    )
+    assert framework_errors_and_translations(sample) == [6]
+
+
+def test_the_scan_keeps_an_explicit_reraise_of_the_caught_error() -> None:
+    sample = ast.parse(
+        "class View(APIView):\n"
+        "    def post(self, request):\n"
+        "        try:\n"
+        "            pass\n"
+        "        except KeyError as error:\n"
+        "            raise error\n"
+    )
+    assert framework_errors_and_translations(sample) == []
+
+
+def test_the_scan_recognises_a_replaced_caught_error() -> None:
+    sample = ast.parse(
+        "class View(APIView):\n"
+        "    def post(self, request):\n"
+        "        try:\n"
+        "            pass\n"
+        "        except KeyError as error:\n"
+        "            error = ValueError('replacement')\n"
+        "            raise error\n"
+    )
+    assert framework_errors_and_translations(sample) == [5]

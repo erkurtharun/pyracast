@@ -4,7 +4,12 @@ import pytest
 from django.test import Client
 
 from pyracast.connections.operations import reserve_request
-from pyracast.forecasts.models import CollectionJob, ForecastSnapshot, RequestAttempt
+from pyracast.forecasts.models import (
+    CollectionJob,
+    ForecastSnapshot,
+    RequestAttempt,
+    RequestPurpose,
+)
 from pyracast.forecasts.schedule import configure_schedule, get_schedule, schedule_payload
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.regions.operations import configure_binding, submit_region, transition_region
@@ -18,9 +23,9 @@ def test_collection_status_reports_the_plants_own_collection_only() -> None:
     moment = NOW.replace(hour=23, minute=30)
     schedule = get_schedule(system.member, system.tenant.pk, system.region.pk, moment)
     for outcome in ("succeeded", "failed", "uncertain"):
-        attempt = reserve_request(system.binding, moment, purpose="forecast")
+        attempt = reserve_request(system.binding, moment, purpose=RequestPurpose.FORECAST)
         RequestAttempt.objects.filter(pk=attempt.pk).update(outcome=outcome)
-    reserve_request(system.binding, moment - timedelta(days=1), purpose="validation")
+    reserve_request(system.binding, moment - timedelta(days=1), purpose=RequestPurpose.VALIDATION)
     other_region = submit_region(
         system.member, system.tenant.pk, name="Other", latitude=41, longitude=29, timezone="UTC"
     )
@@ -32,7 +37,7 @@ def test_collection_status_reports_the_plants_own_collection_only() -> None:
         capacity_kw=1,
         capacity_semantics_verified=True,
     )
-    other_attempt = reserve_request(other_binding, moment, purpose="forecast")
+    other_attempt = reserve_request(other_binding, moment, purpose=RequestPurpose.FORECAST)
     RequestAttempt.objects.filter(pk=other_attempt.pk).update(outcome="failed")
     other_job = CollectionJob.objects.create(
         binding=other_binding,

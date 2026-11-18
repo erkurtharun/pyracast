@@ -18,7 +18,7 @@ class SessionAuthentication(authentication.SessionAuthentication):
 
 # Creating the subclass registers the schema extension; `type()` keeps the untyped hook out of
 # strict typing.
-type(
+SessionAuthenticationScheme = type(
     "SessionAuthenticationScheme",
     (SessionScheme,),
     {"target_class": "pyracast.api.authentication.SessionAuthentication"},

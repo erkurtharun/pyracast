@@ -67,7 +67,7 @@ def capture(
     from pyracast.connections.models import ProviderAccount, SiteBinding
     from pyracast.connections.operations import record_provider_failure, reserve_account_request
     from pyracast.connections.secrets import decrypt_api_key
-    from pyracast.forecasts.models import RequestAttempt
+    from pyracast.forecasts.models import RequestAttempt, RequestPurpose
     from pyracast.provider_retry import retry_after_seconds, retryable_status
     from pyracast.providers import contains_secret
 
@@ -86,7 +86,7 @@ def capture(
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", site_id):
         raise ValueError("A valid resource ID in the saved binding is required.")
     output.mkdir(parents=True, exist_ok=True)
-    purpose = "inspect_" + kind
+    purpose = RequestPurpose(f"inspect_{kind}")
     with transaction.atomic():
         account = ProviderAccount.objects.select_for_update().get(pk=binding.provider_account_id)
         if account.provider != "solcast":

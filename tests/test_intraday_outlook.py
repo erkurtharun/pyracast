@@ -484,7 +484,7 @@ def test_today_actuals_keep_independent_archived_forecast_weather(
             WeatherFixture().fetch(40, 29, start, start + timedelta(days=1))
         )
     elif weather == "failed":
-        forecast.weather_error = "weather_timeout"
+        forecast.weather_error = "weather_request_failed"
     forecast.save(update_fields=("weather_payload", "weather_error"))
     intraday_actuals(system, now)
     monkeypatch.setattr(timezone, "now", lambda: now)
@@ -504,7 +504,7 @@ def test_today_actuals_keep_independent_archived_forecast_weather(
         assert regional["weather_reference"]["intervals"][0]["ghi_wm2"] == 600
     elif weather == "failed":
         assert regional["weather_reference"]["status"] == "unavailable"
-        assert "weather_timeout" in regional["weather_reference"]["quality_flags"]
+        assert "weather_request_failed" in regional["weather_reference"]["quality_flags"]
     else:
         assert "weather_reference" not in regional
 

@@ -312,18 +312,18 @@ test("signed in member explicitly accepts invitation and sees actionable errors"
         if (accepted)
             return route.fulfill({ json: { tenant_id: 1, role: "viewer" } });
         return route.fulfill({
-            status: 400,
+            status: 403,
             json: errorBody(
                 "invitation_email_unverified",
-                "Sign in with the invited email address.",
+                "Verify the invited email address before accepting.",
             ),
         });
     });
     await page.goto("/app/#token=invite-secret&section=members");
     await expect(page).toHaveURL("/app/#section=members");
     await page.getByRole("button", { name: "Accept invitation" }).click();
-    await expect(page.locator(".form-errors")).toContainText(
-        "Sign in with the invited email address.",
+    await expect(page.locator(".form-errors p")).toHaveText(
+        "Verify the invited email address before accepting.",
     );
     accepted = true;
     await page.getByRole("button", { name: "Accept invitation" }).click();
@@ -336,10 +336,14 @@ test("signed in member explicitly accepts invitation and sees actionable errors"
     await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
 });
 
-for (const detail of [
-    "Sign in with the invited email address.",
-    "This invitation has expired.",
-]) {
+for (const [status, code, detail] of [
+    [
+        403,
+        "invitation_email_unverified",
+        "Verify the invited email address before accepting.",
+    ],
+    [400, "invitation_unavailable", "The invitation is invalid or expired."],
+] as const) {
     test(`invitation can be dismissed after: ${detail}`, async ({
         page,
     }, testInfo) => {
@@ -347,13 +351,13 @@ for (const detail of [
         await page.setViewportSize({ width: 320, height: 740 });
         await page.route("**/api/invitations/accept/", (route) =>
             route.fulfill({
-                status: 400,
-                json: errorBody("invalid_request", detail),
+                status,
+                json: errorBody(code, detail),
             }),
         );
         await page.goto("/app/?token=invite-secret");
         await page.getByRole("button", { name: "Accept invitation" }).click();
-        await expect(page.locator(".form-errors")).toContainText(detail);
+        await expect(page.locator(".form-errors p")).toHaveText(detail);
         expect(
             await page.evaluate(
                 () => document.documentElement.scrollWidth <= window.innerWidth,

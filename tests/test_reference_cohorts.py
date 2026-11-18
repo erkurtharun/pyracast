@@ -48,7 +48,7 @@ def prepare_cohorts(
             snapshot.job.endpoint = "historical_import"
             snapshot.job.save()
         elif not current:
-            snapshot.job.endpoint = "legacy_unknown"
+            snapshot.job.endpoint = "forecasts"
             snapshot.job.save()
         start, end = local_day_bounds(day, system.binding.timezone)
         cursor = start

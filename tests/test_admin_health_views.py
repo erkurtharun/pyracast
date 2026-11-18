@@ -4,7 +4,7 @@ import pytest
 from django.utils import timezone
 
 from pyracast.admin_workspace import operations_context, plant_list_context, recent_work_context
-from pyracast.forecasts.models import DispatcherStatus
+from pyracast.forecasts.models import DispatcherPhase
 from pyracast.forecasts.monitoring import record_dispatch_phase
 from pyracast.metering.models import EpiasCollectionJob
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
@@ -22,14 +22,14 @@ def test_historical_health_reasons_are_visible_and_link_to_the_matching_records(
     monkeypatch.setattr(timezone, "now", lambda: NOW)
     system, plant, _ = connected(monkeypatch)
     recent_forecast(system)
-    for phase in DispatcherStatus.Phase.values:
+    for phase in DispatcherPhase.values:
         record_dispatch_phase(phase, NOW)
     EpiasCollectionJob.objects.update(status="succeeded")
     failed = EpiasCollectionJob.objects.first()
     assert failed is not None
     failed.status = "failed"
     failed.scheduled_for = NOW - timedelta(hours=2)
-    failed.last_error = "upstream_error"
+    failed.last_error = "epias_provider_failure"
     failed.save()
     for index in range(22):
         EpiasCollectionJob.objects.create(
@@ -74,7 +74,7 @@ def test_historical_health_reasons_are_visible_and_link_to_the_matching_records(
     assert [row["id"] for row in filtered.context["metering"]] == [failed.pk]
     assert filtered.context["show_metering"] is True
     assert filtered.context["show_deliveries"] is False
-    assert "Upstream error" in filtered.content.decode()
+    assert "Epias provider failure" in filtered.content.decode()
     assert f"/admin/plants/{system.region.pk}/#epias-title" in filtered.content.decode()
     assert failed.pk not in [row["id"] for row in operations_context()["metering"]]
     email_view = client.get("/admin/operations/?issue=partial_forecasts")

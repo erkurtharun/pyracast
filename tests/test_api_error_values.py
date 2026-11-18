@@ -123,8 +123,13 @@ def test_error_bodies_beyond_the_parse_bound_are_left_alone() -> None:
 
     content = json.dumps({"status": 400, "padding": "x" * 1_000_000}).encode()
     response = HttpResponse(content, status=400, content_type="application/json")
+    response["ETag"] = '"original"'
+    response.set_cookie("example", "original")
     result = with_error_contract(RequestFactory().get("/api/example/"), response)
+    assert result is response
     assert result.content == content
+    assert result["ETag"] == '"original"'
+    assert result.cookies["example"].value == "original"
 
 
 def test_rewritten_error_bodies_drop_the_stale_entity_tag() -> None:
@@ -141,3 +146,29 @@ def test_rewritten_error_bodies_drop_the_stale_entity_tag() -> None:
     refused = HttpResponseNotAllowed(["GET"])
     refused["ETag"] = '"before"'
     assert "ETag" not in refuse_in_place(request, refused, ErrorCode.METHOD_NOT_ALLOWED)
+
+
+def test_framework_refusals_preserve_existing_transport_headers() -> None:
+    from django.http import HttpResponseNotAllowed
+    from django.test import RequestFactory
+
+    from pyracast.api.errors import refuse_in_place
+    from pyracast.errors import ErrorCode
+
+    response = HttpResponseNotAllowed(["GET"])
+    response["Retry-After"] = "3"
+    response["WWW-Authenticate"] = "Session"
+    result = refuse_in_place(
+        RequestFactory().get("/api/example/", HTTP_ACCEPT_LANGUAGE="en"),
+        response,
+        ErrorCode.METHOD_NOT_ALLOWED,
+    )
+    assert result is response
+    assert result.status_code == 405
+    assert result["Allow"] == "GET"
+    assert result["Retry-After"] == "3"
+    assert result["WWW-Authenticate"] == "Session"
+    assert json.loads(result.content) == {
+        "code": "method_not_allowed",
+        "message": "This action is not available here.",
+    }

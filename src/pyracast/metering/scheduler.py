@@ -10,7 +10,7 @@ from pyracast.collection_window import nightly_window
 from pyracast.epias import EpiasError
 from pyracast.forecasts.models import CollectionSchedule
 from pyracast.metering.client import get_epias_client
-from pyracast.metering.models import EpiasCollectionJob, EpiasConnection
+from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSourceKind
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import configuration_is_current
 from pyracast.regions.models import Region
@@ -75,7 +75,7 @@ def enqueue_connection(
                 connection_revision=connection.revision,
                 configuration=configuration,
                 target_day=today - timedelta(days=1),
-                source_kind="realtime_generation",
+                source_kind=EpiasSourceKind.REALTIME_GENERATION,
                 scheduled_for__gte=scheduled_for,
                 scheduled_for__lt=retry_until,
                 retry_until=retry_until,
@@ -94,7 +94,7 @@ def enqueue_connection(
             connection_revision=connection.revision,
             configuration=configuration,
             target_day=today - timedelta(days=offset),
-            source_kind="realtime_generation",
+            source_kind=EpiasSourceKind.REALTIME_GENERATION,
             scheduled_for=scheduled_for,
             defaults={
                 "provider_plant": {
@@ -114,7 +114,7 @@ def enqueue_connection(
             EpiasCollectionJob.objects.filter(
                 connection=connection,
                 connection_revision=connection.revision,
-                source_kind="settlement_injection",
+                source_kind=EpiasSourceKind.SETTLEMENT_INJECTION,
             )
             .exclude(scheduled_for=scheduled_for)
             .exists()
@@ -134,7 +134,7 @@ def enqueue_connection(
                 plant=plant,
                 connection_revision=connection.revision,
                 configuration=configuration,
-                source_kind="settlement_injection",
+                source_kind=EpiasSourceKind.SETTLEMENT_INJECTION,
                 target_day=month_start,
                 scheduled_for=scheduled_for,
                 defaults={
@@ -210,7 +210,7 @@ def enqueue_due_epias_jobs(*, now: datetime | None = None) -> list[int]:
                             connection=current,
                             connection_revision=current.revision,
                             configuration=configuration,
-                            source_kind="settlement_injection",
+                            source_kind=EpiasSourceKind.SETTLEMENT_INJECTION,
                             target_day=oldest_month,
                             period_end_day=oldest_month_end,
                             provider_plant__id=current.settlement_plant_id,
@@ -223,7 +223,7 @@ def enqueue_due_epias_jobs(*, now: datetime | None = None) -> list[int]:
                             connection=current,
                             connection_revision=current.revision,
                             configuration=configuration,
-                            source_kind="realtime_generation",
+                            source_kind=EpiasSourceKind.REALTIME_GENERATION,
                             target_day=oldest_day,
                             scheduled_for=initial_slot,
                         ).exists()

@@ -187,7 +187,7 @@ def test_current_policy_terminal_run_does_not_repeat_unchanged_data(
     assert CalibrationRun.objects.count() == 1
 
 
-@pytest.mark.parametrize("old_source", ["historical_import", "unknown_endpoint"])
+@pytest.mark.parametrize("old_source", ["historical_import", "forecasts"])
 def test_current_source_transition_refits_once_but_identical_native_reacquisition_deduplicates(
     monkeypatch: pytest.MonkeyPatch,
     old_source: str,

@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.incident_policy import incidents_unchanged
 from pyracast.plants.measurements import production_identity_current
-from pyracast.plants.models import CalibrationRun, PlantConfiguration
+from pyracast.plants.models import CalibrationRun, CalibrationStatus, PlantConfiguration
 from pyracast.plants.numerics import DERATING_POLICY, POLICY_VERSION
 from pyracast.plants.transfer import calibration_matches_transfer
 
@@ -29,7 +29,11 @@ def production_diagnostic(
             plant_id=configuration.plant_id,
             configuration=configuration,
             binding_id=configuration.binding_id,
-            status__in=("ready", "rejected", "insufficient"),
+            status__in=(
+                CalibrationStatus.READY,
+                CalibrationStatus.REJECTED,
+                CalibrationStatus.INSUFFICIENT,
+            ),
             created_at__lte=known_at,
             cutoff_at__lte=known_at,
             completed_at__lte=known_at,

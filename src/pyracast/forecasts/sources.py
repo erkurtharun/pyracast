@@ -5,7 +5,7 @@ from django.db.models import Q, QuerySet
 
 from pyracast.connections.contracts import ProviderData
 from pyracast.errors import BusyError, ErrorCode
-from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.forecasts.models import CollectionJobStatus, ForecastSnapshot
 from pyracast.irradiance import SourceKind
 from pyracast.weather import WeatherError, restore_weather
 
@@ -29,7 +29,7 @@ def current_forecast_snapshots(
         ForecastSnapshot.objects.select_related("job")
         .filter(
             binding_id=binding_id,
-            job__status="succeeded",
+            job__status=CollectionJobStatus.SUCCEEDED,
             source_kind="forecast",
             coverage_start__lt=end,
             coverage_end__gt=start,

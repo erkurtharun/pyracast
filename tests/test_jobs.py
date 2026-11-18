@@ -24,9 +24,11 @@ from pyracast.forecasts.jobs import (
 )
 from pyracast.forecasts.models import (
     CollectionJob,
+    CollectionJobError,
     ForecastResult,
     ForecastSnapshot,
     RequestAttempt,
+    RequestPurpose,
 )
 from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.regions.models import AuditEvent, Region
@@ -69,7 +71,7 @@ def test_interrupted_lease_can_be_reclaimed_and_old_owner_cannot_publish() -> No
     )
     assert snapshot is not None
     assert not publish(first, snapshot, {}, NOW + LEASE_DURATION + timedelta(seconds=1))
-    retry(first, NOW, "old_worker")
+    retry(first, NOW, CollectionJobError.PROVIDER_FAILURE)
     assert publish(second, snapshot, {"valid": True}, NOW + LEASE_DURATION + timedelta(seconds=1))
     assert ForecastSnapshot.objects.get().raw_payload == {"vintage": 2}
 
@@ -118,7 +120,7 @@ def test_estimated_actuals_snapshot_cannot_be_published_after_restart() -> None:
     assert snapshot.source_kind == "estimated_actuals"
     with pytest.raises(ValidationError):
         publish(lease, snapshot, {}, NOW)
-    retry(lease, NOW, "interrupted")
+    retry(lease, NOW, CollectionJobError.PROVIDER_UNEXPECTED_FAILURE)
     job.refresh_from_db()
     assert not collect(job.pk, FakeAdapter(), calculate, job.available_at)
     job.refresh_from_db()
@@ -187,7 +189,7 @@ def test_quota_retry_after_midnight_waits_for_the_following_utc_day(
     before_midnight = NOW.replace(hour=23, minute=59, second=59)
     after_midnight = before_midnight + timedelta(seconds=2)
     ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=1)
-    reserve_request(system.binding, after_midnight, purpose="already_used")
+    reserve_request(system.binding, after_midnight, purpose=RequestPurpose.VALIDATION)
     clock = [0.0]
     original_claim = jobs.claim
 
@@ -292,10 +294,10 @@ def test_missing_running_lease_is_recoverable_and_naive_now_rejected() -> None:
     assert lease is not None
     with pytest.raises(ValidationError):
         claim(job.pk, NOW.replace(tzinfo=None))
-    retry(lease, NOW, "retry")
-    retry(lease, NOW, "duplicate")
+    retry(lease, NOW, CollectionJobError.PROVIDER_FAILURE)
+    retry(lease, NOW, CollectionJobError.CALCULATION_FAILURE)
     job.refresh_from_db()
-    assert job.last_error == "retry"
+    assert job.last_error == "provider_failure"
     assert isinstance(lease, Lease)
     assert lease.binding.pk == system.binding.pk
 
@@ -337,7 +339,7 @@ def test_concurrent_quota_reservations_share_one_account_budget() -> None:
         close_old_connections()
         try:
             barrier.wait(timeout=10)
-            reserve_request(system.binding, NOW, purpose="forecast")
+            reserve_request(system.binding, NOW, purpose=RequestPurpose.FORECAST)
             return True
         except QuotaExceededError:
             return False

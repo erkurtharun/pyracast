@@ -2,6 +2,22 @@ from django.conf import settings
 from django.db import models
 from django.db.models import F, Q
 
+from pyracast.db import choices_check
+
+
+class EpiasSourceKind(models.TextChoices):
+    REALTIME_GENERATION = "realtime_generation", "Real-time generation"
+    SETTLEMENT_INJECTION = "settlement_injection", "Settlement injection"
+
+
+class EpiasJobStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    RUNNING = "running", "Running"
+    SUCCEEDED = "succeeded", "Succeeded"
+    FAILED = "failed", "Failed"
+    SUPERSEDED = "superseded", "Superseded"
+    AWAITING_PUBLICATION = "awaiting_publication", "Awaiting publication"
+
 
 class EpiasConnection(models.Model):
     plant = models.OneToOneField("plants.Plant", on_delete=models.PROTECT)
@@ -23,6 +39,14 @@ class EpiasConnection(models.Model):
         )
 
 
+class EpiasJobError(models.TextChoices):
+    RETRY_WINDOW_EXPIRED = "retry_window_expired", "Retry window expired"
+    ATTEMPTS_EXHAUSTED = "attempts_exhausted", "Attempts exhausted"
+    PROVIDER_FAILURE = "epias_provider_failure", "Epias provider failure"
+    UNPUBLISHED_DATA = "unpublished_data", "Unpublished data"
+    PARTIAL_DATA = "partial_data", "Partial data"
+
+
 class EpiasCollectionJob(models.Model):
     connection = models.ForeignKey(EpiasConnection, on_delete=models.PROTECT)
     plant = models.ForeignKey("plants.Plant", on_delete=models.PROTECT)
@@ -31,15 +55,17 @@ class EpiasCollectionJob(models.Model):
     provider_plant = models.JSONField()
     target_day = models.DateField()
     period_end_day = models.DateField(null=True)
-    source_kind = models.CharField(max_length=30, default="realtime_generation")
+    source_kind = models.CharField(
+        max_length=30, choices=EpiasSourceKind, default=EpiasSourceKind.REALTIME_GENERATION
+    )
     scheduled_for = models.DateTimeField()
-    status = models.CharField(max_length=20, default="pending")
+    status = models.CharField(max_length=20, choices=EpiasJobStatus, default=EpiasJobStatus.PENDING)
     lease_token = models.UUIDField(null=True)
     lease_expires_at = models.DateTimeField(null=True)
     attempts = models.PositiveSmallIntegerField(default=0)
     next_attempt_at = models.DateTimeField()
     retry_until = models.DateTimeField(null=True)
-    last_error = models.CharField(max_length=40, default="")
+    last_error = models.CharField(max_length=40, choices=EpiasJobError, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -65,23 +91,9 @@ class EpiasCollectionJob(models.Model):
             models.CheckConstraint(
                 condition=Q(connection_revision__gte=1), name="epias_job_revision_positive"
             ),
-            models.CheckConstraint(
-                condition=Q(source_kind__in=("realtime_generation", "settlement_injection")),
-                name="epias_job_source_valid",
-            ),
-            models.CheckConstraint(
-                condition=Q(
-                    status__in=(
-                        "pending",
-                        "running",
-                        "succeeded",
-                        "failed",
-                        "superseded",
-                        "awaiting_publication",
-                    )
-                ),
-                name="epias_job_status_valid",
-            ),
+            choices_check("source_kind", EpiasSourceKind, name="epias_job_source_valid"),
+            choices_check("status", EpiasJobStatus, name="epias_job_status_valid"),
+            choices_check("last_error", EpiasJobError, blank=True),
         )
         indexes = (models.Index(fields=("status", "next_attempt_at")),)
 
@@ -92,7 +104,9 @@ class EpiasSnapshot(models.Model):
     connection = models.ForeignKey(EpiasConnection, on_delete=models.PROTECT)
     configuration = models.ForeignKey("plants.PlantConfiguration", on_delete=models.PROTECT)
     target_day = models.DateField()
-    source_kind = models.CharField(max_length=30, default="realtime_generation")
+    source_kind = models.CharField(
+        max_length=30, choices=EpiasSourceKind, default=EpiasSourceKind.REALTIME_GENERATION
+    )
     provider_plant = models.JSONField(default=dict)
     endpoint = models.URLField(default="")
     normalization_policy = models.CharField(max_length=40, default="hour-start-istanbul-v1")
@@ -111,9 +125,6 @@ class EpiasSnapshot(models.Model):
             models.CheckConstraint(
                 condition=Q(attempt__gte=1), name="epias_acquisition_attempt_positive"
             ),
-            models.CheckConstraint(
-                condition=Q(source_kind__in=("realtime_generation", "settlement_injection")),
-                name="epias_acquisition_source_valid",
-            ),
+            choices_check("source_kind", EpiasSourceKind, name="epias_acquisition_source_valid"),
         )
         indexes = (models.Index(fields=("connection", "target_day", "available_at")),)

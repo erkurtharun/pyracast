@@ -7,7 +7,7 @@ from django.template.loader import render_to_string
 from django.utils.formats import date_format, number_format
 from django.utils.translation import gettext as _
 
-from pyracast.notifications.models import NotificationDelivery
+from pyracast.notifications.models import NotificationDelivery, PreparedMessageFormat
 from pyracast.notifications.presentation import present_report, source_label
 from pyracast.notifications.report_data import saved_report_context
 from pyracast.notifications.sources import saved_report_results
@@ -89,7 +89,7 @@ def render_forecast(
         "url": report.url,
     }
     return {
-        "format": "xlsx",
+        "format": PreparedMessageFormat.XLSX,
         "subject": subject,
         "body": render_to_string("notifications/forecast.txt", template_context).strip(),
         "html": render_to_string("notifications/forecast.html", template_context),

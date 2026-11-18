@@ -14,7 +14,15 @@ from pyracast.connections.identity import canonical_account_identity
 from pyracast.connections.models import BindingHealth, Provider, ProviderAccount, SiteBinding
 from pyracast.connections.secrets import encrypt_secret
 from pyracast.forecasts.budget import remaining_forecast_requests
-from pyracast.forecasts.models import CollectionJob, RequestAttempt
+from pyracast.forecasts.models import (
+    CollectionEndpoint,
+    CollectionJob,
+    CollectionJobError,
+    CollectionJobStatus,
+    RequestAttempt,
+    RequestOutcome,
+    RequestPurpose,
+)
 from pyracast.provider_retry import next_retry_at, rate_limit_retry_after
 from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionStatus
 
@@ -114,13 +122,15 @@ def reserve_account_request(
     account: ProviderAccount,
     now: datetime,
     *,
-    purpose: str,
+    purpose: RequestPurpose,
     binding: SiteBinding | None = None,
     job: CollectionJob | None = None,
 ) -> RequestAttempt:
     started = time.monotonic()
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
+    if purpose not in RequestPurpose.values:
+        raise ValidationError("Unknown request purpose.")
     if binding is not None and binding.provider_account_id != account.pk:
         raise ValidationError("The binding must belong to the provider account.")
     if job is not None and (binding is None or job.binding_id != binding.pk):
@@ -140,7 +150,7 @@ def reserve_account_request(
             raise QuotaExceededError
         if (
             job is not None
-            and purpose == "estimated_actuals"
+            and purpose == RequestPurpose.ESTIMATED_ACTUALS
             and used + 1 + remaining_forecast_requests(account, now) > account.daily_quota
         ):
             raise ForecastBudgetReservedError
@@ -155,7 +165,11 @@ def reserve_account_request(
 
 
 def reserve_request(
-    binding: SiteBinding, now: datetime, *, purpose: str, job: CollectionJob | None = None
+    binding: SiteBinding,
+    now: datetime,
+    *,
+    purpose: RequestPurpose,
+    job: CollectionJob | None = None,
 ) -> RequestAttempt:
     return reserve_account_request(
         binding.provider_account, now, purpose=purpose, binding=binding, job=job
@@ -189,11 +203,11 @@ def validate_binding(
         not binding.settings_verification_reference or binding.installation_date is None
     ):
         raise ValidationError("Confirmed site settings and installation date are required.")
-    attempt = reserve_request(binding, now, purpose="validation")
+    attempt = reserve_request(binding, now, purpose=RequestPurpose.VALIDATION)
     try:
         adapter.validate(binding)
     except ProviderError as exc:
-        RequestAttempt.objects.filter(pk=attempt.pk).update(outcome="failed")
+        RequestAttempt.objects.filter(pk=attempt.pk).update(outcome=RequestOutcome.FAILED)
         SiteBinding.objects.filter(pk=binding.pk).update(health=BindingHealth.ERROR)
         record_provider_failure(
             binding.provider_account, exc, now + timedelta(seconds=time.monotonic() - started)
@@ -223,7 +237,7 @@ def validate_binding(
                 CollectionJob.objects.select_for_update()
                 .filter(
                     binding=binding,
-                    endpoint="forecasts",
+                    endpoint=CollectionEndpoint.FORECASTS,
                     reference_import__isnull=True,
                     scheduled_slot__lte=recovered_at,
                 )
@@ -232,10 +246,10 @@ def validate_binding(
             )
             if (
                 latest is not None
-                and latest.status == "failed"
-                and latest.last_error == "provider_authentication_failed"
+                and latest.status == CollectionJobStatus.FAILED
+                and latest.last_error == CollectionJobError.PROVIDER_AUTHENTICATION_FAILED
             ):
-                latest.status = "pending"
+                latest.status = CollectionJobStatus.PENDING
                 latest.available_at = recovered_at
                 latest.attempts = 0
                 latest.last_error = ""
@@ -251,7 +265,7 @@ def validate_binding(
                         "lease_expires_at",
                     )
                 )
-        attempt.outcome = "succeeded"
+        attempt.outcome = RequestOutcome.SUCCEEDED
         attempt.save(update_fields=("outcome",))
         AuditEvent.objects.create(
             actor=actor,
