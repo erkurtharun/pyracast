@@ -16,6 +16,7 @@ from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.jobs import claim, collect, persist_snapshot, retry
 from pyracast.forecasts.models import (
     CollectionJob,
+    CollectionJobError,
     CollectionSchedule,
     ForecastResult,
     ForecastSnapshot,
@@ -130,7 +131,7 @@ def test_history_restart_reuses_saved_snapshot_without_request() -> None:
     data = HistoricalFixture().fetch_history(lease.binding, lease.target_date, 7)
     snapshot = persist_snapshot(lease, data, NIGHT)
     assert snapshot is not None
-    retry(lease, NIGHT, "interrupted")
+    retry(lease, NIGHT, CollectionJobError.PROVIDER_UNEXPECTED_FAILURE)
     history.refresh_from_db()
     assert collect(history.pk, FakeAdapter(), no_calculation, history.available_at)
     assert not RequestAttempt.objects.filter(job=history).exists()
@@ -313,7 +314,7 @@ def test_schedule_edit_keeps_authorized_retry_and_only_creates_future_slots(
     job = CollectionJob.objects.get(endpoint="forecasts", scheduled_slot=due)
     lease = claim(job.pk, due)
     assert lease is not None
-    retry(lease, due, "provider_failure")
+    retry(lease, due, CollectionJobError.PROVIDER_FAILURE)
     changed = due + timedelta(minutes=1)
     times = ["08:00", "09:00", "11:00"] + (["10:00"] if keep_due_time else [])
     configure_schedule(

@@ -15,7 +15,14 @@ from django.utils.translation import gettext as _
 from pyracast.accounts.authorization import require_platform_admin
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.jobs import binding_is_current
-from pyracast.forecasts.models import CollectionJob, ForecastSnapshot, HistoricalReferenceImport
+from pyracast.forecasts.models import (
+    CollectionEndpoint,
+    CollectionJob,
+    CollectionJobStatus,
+    ForecastSnapshot,
+    HistoricalReferenceImport,
+    SnapshotSourceKind,
+)
 from pyracast.irradiance.pairs import PowerFile, load_power
 from pyracast.regions.models import AuditAction, AuditEvent, Region
 
@@ -213,10 +220,10 @@ def _archive_historical_reference(
         job = CollectionJob.objects.create(
             binding=binding,
             reference_import=record,
-            endpoint="historical_import",
+            endpoint=CollectionEndpoint.HISTORICAL_IMPORT,
             scheduled_slot=moment,
             target_date=day,
-            status="succeeded",
+            status=CollectionJobStatus.SUCCEEDED,
             available_at=moment,
         )
         normalized: list[dict[str, Any]] = [
@@ -242,7 +249,7 @@ def _archive_historical_reference(
             collected_at=moment,
             available_at=moment,
             issued_at=None,
-            source_kind="estimated_actuals",
+            source_kind=SnapshotSourceKind.ESTIMATED_ACTUALS,
             coverage_start=power.intervals[indexes[0]].start,
             coverage_end=power.intervals[indexes[-1]].end,
         )

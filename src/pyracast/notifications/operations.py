@@ -9,7 +9,7 @@ from django.utils import translation
 from django.utils.translation import gettext
 
 from pyracast.accounts.authorization import tenant_membership
-from pyracast.accounts.models import WorkspaceRole
+from pyracast.accounts.models import Language, WorkspaceRole
 from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.models import (
     NotificationSettings,
@@ -17,7 +17,7 @@ from pyracast.notifications.models import (
 )
 from pyracast.notifications.recipients import effective_recipients as effective_recipients
 from pyracast.notifications.recipients import recipient_memberships
-from pyracast.regions.models import Region
+from pyracast.regions.models import Region, RegionStatus
 
 RECIPIENT_MAX_LENGTH = 254
 
@@ -36,7 +36,7 @@ def invalid_reminder_recipient_count() -> int:
     for schedule in ReminderSchedule.objects.filter(
         enabled=True,
         region__deleted_at__isnull=True,
-        region__status="approved",
+        region__status=RegionStatus.APPROVED,
         region__approved_binding__provider_account__enabled=True,
     ).select_related("region"):
         try:
@@ -97,7 +97,7 @@ def configure_reminders(
 ) -> ReminderSchedule:
     if now.tzinfo is None:
         raise ValidationError("An aware timestamp is required.")
-    if language not in {"en", "tr"}:
+    if language not in Language.values:
         raise ValidationError(gettext("A supported reminder language is required."))
     with transaction.atomic():
         tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)

@@ -7,13 +7,13 @@ from rest_framework.response import Response
 
 from pyracast.api.serializers import FiniteFloat, InputSerializer
 from pyracast.incidents import operations
-from pyracast.incidents.models import PlantIncident
+from pyracast.incidents.models import IncidentKind, PlantIncident
 from pyracast.plants.api import ScopedView
 from pyracast.plants.serializers import AwareDateTime
 
 
 class IncidentInput(InputSerializer):
-    kind = serializers.ChoiceField(choices=("inverter", "panels", "grid", "other", "multiple"))
+    kind = serializers.ChoiceField(choices=IncidentKind.choices)
     title = serializers.CharField(max_length=200)
     notes = serializers.CharField(max_length=2000, allow_blank=True, default="")
     starts_at = AwareDateTime()

@@ -17,6 +17,7 @@ from pyracast.forecasts.models import (
     CollectionSchedule,
     ForecastSnapshot,
     RequestAttempt,
+    RequestPurpose,
 )
 from pyracast.forecasts.schedule import configure_schedule
 from pyracast.forecasts.scheduler import enqueue_due
@@ -297,7 +298,7 @@ def test_history_retries_after_utc_budget_reset_inside_local_night_window() -> N
         provider_account=system.account,
         utc_day=before_reset.date(),
         created_at=before_reset,
-        purpose="operator",
+        purpose="validation",
         outcome="uncertain",
     )
     enqueue_due(before_reset)
@@ -373,7 +374,11 @@ def test_history_rechecks_morning_deadline_before_request(
         original_reserve = operations.reserve_request
 
         def reserve(
-            binding: SiteBinding, now: datetime, *, purpose: str, job: CollectionJob | None = None
+            binding: SiteBinding,
+            now: datetime,
+            *,
+            purpose: RequestPurpose,
+            job: CollectionJob | None = None,
         ) -> RequestAttempt:
             attempt = original_reserve(binding, now, purpose=purpose, job=job)
             elapsed[0] = 2.0
