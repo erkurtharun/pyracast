@@ -9,6 +9,7 @@ from pyracast.irradiance import local_day_bounds
 from tests.support.delivery_health import recent_forecast
 from tests.support.domain import NOW, make_system
 from tests.support.epias_api import archive_source, connected_source
+from tests.support.invariants import rewritten_archive_rows
 from tests.support.plant_operations import saved_actuals
 from tests.support.trash_operations import sibling
 from tests.support.weather_collection import WeatherFixture
@@ -89,3 +90,19 @@ def test_saved_actuals_are_available_to_native_actual_consumers() -> None:
     source = saved_actuals(system, day)
 
     assert native_actual_snapshots(system.binding, start, end, NOW) == [source]
+
+
+def test_the_archive_audit_lets_only_a_production_revision_leave_the_current_set() -> None:
+    observation: dict[str, object] = {"id": 5, "is_current": True}
+    epias: dict[str, object] = {"id": 5, "readings": []}
+    before = {
+        "plants_productionobservation": {5: observation},
+        "metering_epiassnapshot": {5: epias},
+    }
+    superseded = {**observation, "is_current": False}
+
+    after = {**before, "plants_productionobservation": {5: superseded}}
+    rewritten = {**after, "metering_epiassnapshot": {5: {**epias, "readings": [1]}}}
+
+    assert rewritten_archive_rows(before, after) == {}
+    assert rewritten_archive_rows(before, rewritten) == {"metering_epiassnapshot": [5]}
