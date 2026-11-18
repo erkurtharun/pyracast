@@ -189,7 +189,7 @@ def test_command_line_records_and_prunes_with_docker(
             raise subprocess.CalledProcessError(1, command)
         return subprocess.CompletedProcess(command, 0)
 
-    monkeypatch.setattr(release_state.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
 
     assert release_state.main(["record", str(serving), str(previous)]) == 0
     assert release_state.main(["prune"]) == 1

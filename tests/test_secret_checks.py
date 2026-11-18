@@ -11,7 +11,8 @@ from django.test import override_settings
 from pyracast.accounts.management.commands import reencrypt_secrets
 from pyracast.accounts.mfa import MFAAdapter
 from pyracast.connections.models import ProviderAccount
-from pyracast.connections.secrets import encrypt_secret
+from pyracast.connections.secrets import KEY_CONTEXT, PREFIX, encrypt_secret
+from pyracast.encryption import secret_cipher
 from tests.support.domain import System, make_system
 
 pytestmark = pytest.mark.django_db
@@ -167,4 +168,22 @@ def test_verification_failure_rolls_back_the_reencryption(
 
     assert error.value.returncode == 2
     assert f"connections_provideraccount {account.pk}" in str(error.value)
+    assert rows() == before
+
+
+def test_reencryption_refuses_a_stored_key_it_could_no_longer_write() -> None:
+    system = make_system()
+    with override_settings(SECRET_KEY=OLD_KEY, SECRET_KEY_FALLBACKS=[]):
+        system.account.encrypted_api_key = PREFIX + secret_cipher(KEY_CONTEXT).encrypt(
+            b"key with spaces"
+        ).decode("ascii")
+        system.account.save(update_fields=["encrypted_api_key"])
+    before = rows()
+
+    with override_settings(**ROTATING), pytest.raises(CommandError) as error:
+        call_command("reencrypt_secrets", stdout=StringIO())
+
+    assert error.value.returncode == 1
+    assert f"connections_provideraccount {system.account.pk}" in str(error.value)
+    assert "key with spaces" not in str(error.value)
     assert rows() == before

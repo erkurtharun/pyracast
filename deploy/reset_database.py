@@ -31,19 +31,18 @@ if __package__ in (None, ""):
 from deploy.backup import compose_command, upload_backup
 from deploy.operations_log import access_token
 
-# The installer's drain order (contract-tested): the producer, the consumers, then ingress.
+# The installer's drain order (contract-tested): the producer, the consumers, then the servers
+# behind the gateway, which keeps answering with the maintenance notice.
 STOP_ORDER = (
     ("660", ("dispatcher",)),
     ("660", ("worker", "notifications")),
-    ("100", ("gateway", "api", "web")),
+    ("100", ("api", "web")),
 )
 APPLICATION_SERVICES = frozenset(service for _, group in STOP_ORDER for service in group)
 SUPPORT_SERVICES = ("postgres", "rabbitmq")
 OBJECT_PATTERN = re.compile(r"postgres/[A-Za-z0-9/_.-]+\.dump")
 PRERESET = "-prereset-"
 BUCKET_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]")
-# Roles and their memberships belong to the cluster and survive DROP DATABASE.
-ROLE_STATEMENTS = ("CREATE ROLE ", "GRANT pyracast_owner TO ")
 COUNT_SQL = (
     "SELECT c.relname || ' ' || (xpath('/row/n/text()', query_to_xml("
     "format('SELECT count(*) AS n FROM public.%I', c.relname), false, true, '')))[1]::text "
@@ -744,11 +743,6 @@ def purge_queues(host: Host) -> None:
     step(f"Purged {len(queues)} queues: {', '.join(queues)}")
 
 
-def database_bootstrap(statements: str) -> str:
-    lines = statements.splitlines()
-    return "\n".join(line for line in lines if not line.startswith(ROLE_STATEMENTS)) + "\n"
-
-
 def recreate_database(host: Host) -> None:
     step("Dropping and recreating database pyracast")
     psql(
@@ -759,9 +753,9 @@ def recreate_database(host: Host) -> None:
         "-c",
         "CREATE DATABASE pyracast",
     )
-    step("Applying the database part of deploy/bootstrap.sql")
+    step("Applying deploy/bootstrap.sql")
     bootstrap = (host.release / "deploy/bootstrap.sql").read_text()
-    psql(host, "pyracast", script=database_bootstrap(bootstrap))
+    psql(host, "pyracast", "--single-transaction", script=bootstrap)
 
 
 def check_roles(host: Host) -> None:

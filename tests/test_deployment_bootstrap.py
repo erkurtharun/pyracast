@@ -213,7 +213,7 @@ def test_converge_applies_the_definition_in_one_transaction_without_plaintext(
 ) -> None:
     environment(tmp_path / "secrets")
     psql = Psql("pyracast_owner\npyracast_app\n")
-    monkeypatch.setattr(bootstrap_database.subprocess, "run", psql)
+    monkeypatch.setattr(subprocess, "run", psql)
 
     bootstrap_database.converge_database(release(tmp_path / "release"), tmp_path / "secrets")
 
@@ -237,7 +237,7 @@ def test_converge_changes_no_password_that_already_verifies(
         for role, password in (("pyracast_owner", "owner-secret"), ("pyracast_app", "app-secret"))
     )
     psql = Psql(stored)
-    monkeypatch.setattr(bootstrap_database.subprocess, "run", psql)
+    monkeypatch.setattr(subprocess, "run", psql)
 
     bootstrap_database.converge_database(release(tmp_path / "release"), tmp_path / "secrets")
 
@@ -250,7 +250,7 @@ def test_converge_refuses_role_names_outside_the_definition(
 ) -> None:
     environment(tmp_path / "secrets", app, owner)
     psql = Psql("")
-    monkeypatch.setattr(bootstrap_database.subprocess, "run", psql)
+    monkeypatch.setattr(subprocess, "run", psql)
 
     with pytest.raises(ValueError, match="role names"):
         bootstrap_database.converge_database(release(tmp_path / "release"), tmp_path / "secrets")

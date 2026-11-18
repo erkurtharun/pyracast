@@ -146,7 +146,8 @@ def exception_handler(exc: Exception, context: dict[str, Any]) -> Response | Non
     if isinstance(exc, QuotaExceededError):
         return Response({"code": "quota_exhausted"}, status=429)
     if isinstance(exc, ProviderError):
-        return Response({"code": "provider_unavailable"}, status=502)
+        # 502 belongs to the gateway: it means the application is unreachable (maintenance).
+        return Response({"code": "provider_unavailable"}, status=503)
     if isinstance(exc, SuspiciousOperation | BadRequest):
         # Django answers these through handler400 and logs them on django.security.
         return None

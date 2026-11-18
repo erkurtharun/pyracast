@@ -59,9 +59,9 @@ else
   case "$MODE" in
     tls) exit 60 ;;
     response) printf 'unavailable\n' ;;
+    resume-unready) exit 22 ;;
     *) printf 'ok\n' ;;
   esac
-  if [[ $MODE == resume-unready ]]; then exit 22; fi
 fi
 SH
 cat >/mock-bin/systemctl <<'SH'
@@ -274,9 +274,10 @@ for MODE in preflight deploy-check plan secrets units-invalid metadata check-sec
     test "$(readlink /opt/pyracast/current)" == /opt/pyracast/releases/old
     # SIGKILL bypasses EXIT cleanup, so safety must already be durable before migration.
     test -f /migration.json
-    test -f /run/pyracast/migration.env
+    test -f "/run/pyracast/releases/${new_release##*/}/migration.env"
   else
     test ! -e /migration.json
+    test ! -e "/run/pyracast/releases/${new_release##*/}/migration.env"
     test ! -e /run/pyracast/migration.env
     case "$MODE" in
       live-artifact)

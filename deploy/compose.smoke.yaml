@@ -63,6 +63,8 @@ services:
     logging: *local-logs
   web:
     logging: *local-logs
+  maintenance:
+    logging: *local-logs
   worker:
     logging: *local-logs
   notifications:

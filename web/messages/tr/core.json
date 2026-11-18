@@ -252,7 +252,8 @@
             "session_ended": "Oturumunuz sona erdi. Sayfayı yenileyip yeniden giriş yapın.",
             "permission_denied": "Bu işlem için yetkiniz yok.",
             "bad_request": "İstek geçersiz. Sayfayı yenileyip yeniden deneyin.",
-            "invalid_proxy_headers": "Bağlantı doğrulanamadı. Lütfen daha sonra yeniden deneyin."
+            "invalid_proxy_headers": "Bağlantı doğrulanamadı. Lütfen daha sonra yeniden deneyin.",
+            "maintenance": "Pyracast güncelleniyor. Bir dakika sonra yeniden deneyin; verileriniz güvende."
         }
     },
     "ProductionCsv": {
