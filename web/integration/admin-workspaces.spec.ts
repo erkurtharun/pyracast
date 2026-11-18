@@ -52,17 +52,32 @@ test("a platform administrator creates a workspace, adds a plant and manages mem
         page.getByText("Paste a pair such as 41.0082, 28.9784 into Latitude"),
     ).toBeVisible();
     const latitude = page.getByLabel(/^Latitude/);
-    await latitude.evaluate((element) => {
-        const data = new DataTransfer();
-        data.setData("text/plain", "41.0082, 28.9784");
-        element.dispatchEvent(
-            new ClipboardEvent("paste", {
+    const pasteCoordinates = (text: string) =>
+        latitude.evaluate((element, text) => {
+            const data = new DataTransfer();
+            data.setData("text/plain", text);
+            const event = new ClipboardEvent("paste", {
                 clipboardData: data,
                 bubbles: true,
                 cancelable: true,
-            }),
+            });
+            element.dispatchEvent(event);
+            return event.defaultPrevented;
+        }, text);
+    for (const [text, expectedLatitude, expectedLongitude] of [
+        [" -41.5 ; 28.9 ", "-41.5", "28.9"],
+        ["41.5\t-28.9", "41.5", "-28.9"],
+        ["41.0082, 28.9784", "41.0082", "28.9784"],
+    ] as const) {
+        expect(await pasteCoordinates(text)).toBe(true);
+        await expect(latitude).toHaveValue(expectedLatitude);
+        await expect(page.getByLabel(/^Longitude/)).toHaveValue(
+            expectedLongitude,
         );
-    });
+    }
+    for (const text of ["41,,29", "41 29 30", "41. 29", "NaN,29"]) {
+        expect(await pasteCoordinates(text)).toBe(false);
+    }
     await expect(latitude).toHaveValue("41.0082");
     await expect(page.getByLabel(/^Longitude/)).toHaveValue("28.9784");
     await page.getByLabel(/^DC capacity/).fill("12");

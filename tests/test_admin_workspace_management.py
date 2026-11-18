@@ -641,3 +641,16 @@ def test_hidden_workspace_form_errors_explain_how_to_reload() -> None:
     assert 'href="#id_expected_name"' not in html
     assert Tenant.objects.get(pk=tenant.pk).name == "Solar workspace"
     assert not LogEntry.objects.exists()
+
+
+def test_workspace_tables_leave_keyboard_focus_to_their_interactive_controls() -> None:
+    tenant, owner, _ = workspace()
+    region = site(owner, tenant)
+    client, operator = verified_admin()
+    invite_workspace_member(operator, tenant.pk, "guest@example.com", platform=True)
+    html = client.get(f"/admin/workspaces/{tenant.pk}/").content.decode()
+    for section in ("plants", "members", "invitations"):
+        assert f'<div class="table-wrap" role="region" aria-labelledby="{section}-title">' in html
+    assert f'href="/admin/plants/{region.pk}/"' in html
+    assert ">Resend<" in html
+    assert ">Revoke<" in html
