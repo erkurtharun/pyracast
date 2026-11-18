@@ -2500,4 +2500,4 @@ msgstr[0] "%(counter)s üye"
 msgstr[1] "%(counter)s üye"
 
 msgid "You cannot remove your own membership from this console."
-msgstr "Bu konsoldan kendi ?yeli?inizi kald?ramazs?n?z."
+msgstr "Bu konsoldan kendi üyeliğinizi kaldıramazsınız."
