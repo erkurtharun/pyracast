@@ -22,12 +22,14 @@ from pyracast.accounts import inputs
 from pyracast.accounts.adapters import violated_constraint
 
 COMPLETION_FAILURES = (ObjectDoesNotExist, ObjectNotUpdated, IntegrityError, OperationalError)
+# The second name is the one Django generated for allauth's unique (user, email).
+STALE_CONSTRAINTS = {"unique_verified_email", "account_emailaddress_user_id_email_987c8728_uniq"}
 
 
 def failed_completion(error: Exception) -> bool:
     if isinstance(error, IntegrityError):
-        return violated_constraint(error) == "unique_verified_email"
-    # At READ COMMITTED a deadlock is the only operational error that a competing writer causes.
+        return violated_constraint(error) in STALE_CONSTRAINTS
+    # Only a deadlock answers 409; a lock timeout reaches handler500, which answers 503 busy.
     if isinstance(error, OperationalError):
         return isinstance(error.__cause__, DeadlockDetected)
     return True
@@ -58,19 +60,37 @@ def discard_settled_verification(request: HttpRequest) -> None:
         process.abort()
 
 
-def claim(process: EmailVerificationProcess) -> None:
-    address = process.email_address
-    if not address.pk:
-        if settled(process):
-            raise EmailAddress.DoesNotExist
-        return
+def claim(address: EmailAddress) -> None:
     # A conditional write of the row completion saves next: it matches only while the row is still
-    # this account's unverified address and keeps it unchanged by others until completion commits.
+    # unverified and holds the cached owner and email, the fields completion writes back from the
+    # cached object, and keeps the row unchanged by others until completion commits.
     claimed = EmailAddress.objects.filter(
-        pk=address.pk, user_id=address.user_id, verified=False
+        pk=address.pk, user_id=address.user_id, email=address.email, verified=False
     ).update(verified=False)
     if not claimed:
         raise EmailAddress.DoesNotExist
+
+
+def claim_verification(process: EmailVerificationProcess) -> None:
+    address = process.email_address
+    if address.pk:
+        claim(address)
+    elif settled(process):
+        raise EmailAddress.DoesNotExist
+
+
+def claim_reset_address(process: PasswordResetVerificationProcess) -> None:
+    user = cast(User, process.user)
+    try:
+        address = EmailAddress.objects.get_for_user(user, process.state["email"])
+    except EmailAddress.DoesNotExist:
+        addresses = []
+    else:
+        if not address.verified:
+            claim(address)
+        addresses = [address]
+    # allauth's indirect verification reads the address from this cache and saves the claimed row.
+    EmailAddress.objects.fill_cache_for_user(user, addresses)
 
 
 class LoginView(views.LoginView):
@@ -96,13 +116,15 @@ class ResetPasswordView(views.ResetPasswordView):
         return super().handle(request, *args, **kwargs)
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        process = cast(PasswordResetVerificationProcess, self.process)
         try:
             with transaction.atomic():
+                claim_reset_address(process)
                 return super().post(request, *args, **kwargs)
         except COMPLETION_FAILURES as error:
             if not failed_completion(error):
                 raise
-            cast(PasswordResetVerificationProcess, self.process).abort()
+            process.abort()
             return ConflictResponse(request)
 
 
@@ -115,7 +137,7 @@ class VerifyEmailView(views.VerifyEmailView):
         process = cast(EmailVerificationProcess, self.process)
         try:
             with transaction.atomic():
-                claim(process)
+                claim_verification(process)
                 email_address = process.finish()
         except COMPLETION_FAILURES as error:
             if not failed_completion(error):
