@@ -281,3 +281,40 @@ def test_invitation_mail_names_the_offered_role_in_the_requested_language(
     assert "çal\u0131şma alan\u0131n\u0131n yöneticisi yapar" in str(mail.outbox[-1].body)
     invite_workspace_member(platform, tenant.pk, "izleyici@example.com", platform=True)
     assert "salt okunur erişim" in str(mail.outbox[-1].body)
+
+
+def test_accepting_an_administrator_invitation_records_the_administrator_grant(
+    unadministered: tuple[Tenant, User],
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(logger, "handlers", [caplog.handler])
+    caplog.set_level(logging.INFO, logger="pyracast.security")
+    tenant, platform = unadministered
+    invitation = invite_workspace_member(
+        platform, tenant.pk, "owner@example.com", role=WorkspaceRole.ADMIN, platform=True
+    )
+    token = invitation_token()
+    owner = verified_account("owner", "owner@example.com")
+    caplog.clear()
+    accept_workspace_invitation(owner, token)
+    assert [
+        json.loads(record.message)
+        for record in caplog.records
+        if record.name == "pyracast.security"
+    ] == [
+        {
+            "event": "workspace_admin_reassigned",
+            "user_id": platform.pk,
+            "client_ip": None,
+            "tenant_id": tenant.pk,
+            "target_id": owner.pk,
+        },
+        {
+            "event": "invitation_accepted",
+            "user_id": owner.pk,
+            "client_ip": None,
+            "tenant_id": tenant.pk,
+            "target_id": invitation.pk,
+        },
+    ]

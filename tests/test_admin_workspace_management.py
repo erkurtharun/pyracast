@@ -596,3 +596,32 @@ def test_workspace_console_pages_render_in_turkish_without_mail_or_provider_call
         (f"/admin/plants/{region.pk}/", "<dt>İnceleme</dt>"),
     ):
         assert header in client.get(path, HTTP_ACCEPT_LANGUAGE="tr").content.decode(), path
+
+
+def test_the_console_keeps_the_signed_in_membership_and_explains_self_removal() -> None:
+    tenant, _, _ = workspace()
+    client, operator = verified_admin()
+    Membership.objects.create(tenant=tenant, user=operator)
+    url = f"/admin/workspaces/{tenant.pk}/members/{operator.pk}/removal/"
+    for response in (client.get(url), client.post(url)):
+        html = response.content.decode()
+        assert "You cannot remove your own membership from this console." in html
+        assert ">Remove member</button>" not in html
+        assert "The workspace administrator cannot be removed." not in html
+        assert f'href="/admin/workspaces/{tenant.pk}/"' in html
+    assert Membership.objects.get(tenant=tenant, user=operator).role == WorkspaceRole.VIEWER
+    assert not WorkspaceMemberRemoval.objects.exists()
+
+
+def test_hidden_workspace_form_errors_explain_how_to_reload() -> None:
+    tenant, _, _ = workspace()
+    client, _ = verified_admin()
+    url = f"/admin/workspaces/{tenant.pk}/name/"
+    response = client.post(url, {"name": "New name"})
+    assert response.status_code == 400
+    html = response.content.decode()
+    assert "data-error-summary" in html
+    assert f'<li>This field is required. <a href="{url}">Reload this page</a></li>' in html
+    assert 'href="#id_expected_name"' not in html
+    assert Tenant.objects.get(pk=tenant.pk).name == "Solar workspace"
+    assert not LogEntry.objects.exists()
