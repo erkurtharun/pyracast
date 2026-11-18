@@ -60,7 +60,7 @@ def _problem(
 ) -> str | None:
     try:
         status, body = get(origin + path)
-    except OSError as error:
+    except (OSError, http.client.HTTPException) as error:
         return f"{path} could not be fetched: {error}"
     if status != 200:
         return f"{path} answered {status}"

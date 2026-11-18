@@ -330,7 +330,8 @@ passed or, for Sonar alone, was skipped. The workflow independently requires tha
 commit's CI run; a failed test, stale commit, fork or pull-request run cannot deploy.
 
 Use `terraform -chdir=infra/terraform output -json github_environment_variables`
-to obtain the nonsecret values. Add them as **production environment variables**.
+to obtain the nonsecret values. Add the `GCP_*` values as **production environment
+variables**, configuring the optional variables only after the prerequisites below.
 `GCP_MIGRATION_SECRET` is the short secret ID (for example `pyracast-migration`)
 passed to `gcloud --secret`, without a `projects/.../secrets/` prefix. Set
 `migration_secret_version` in Terraform to the enabled version of that secret before

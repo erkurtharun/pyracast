@@ -1,3 +1,4 @@
+import http.client
 import json
 import time
 from collections.abc import Callable
@@ -104,6 +105,38 @@ def test_an_unreachable_origin_is_a_problem() -> None:
         "/api/session/ could not be fetched: connection refused",
         "/app/ could not be fetched: connection refused",
     ]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        http.client.IncompleteRead(b"partial"),
+        http.client.BadStatusLine("invalid"),
+        http.client.LineTooLong("header"),
+    ],
+)
+@pytest.mark.parametrize("recovers", [False, True])
+def test_protocol_errors_use_the_public_probe_retry_budget(
+    error: http.client.HTTPException, recovers: bool
+) -> None:
+    calls: list[str] = []
+    sleeps: list[float] = []
+    answers = healthy()
+
+    def fetch(url: str) -> tuple[int, bytes]:
+        calls.append(url)
+        if url.endswith("/api/session/") and (not recovers or calls.count(url) == 1):
+            raise error
+        return answers[url][0]
+
+    problems = probe_origin.probe("https://pyracast.example", fetch, sleeps.append)
+
+    attempts = 2 if recovers else probe_origin.ATTEMPTS
+    assert calls == ["https://pyracast.example/api/session/"] * attempts + [
+        "https://pyracast.example/app/"
+    ]
+    assert sleeps == [probe_origin.RETRY_SECONDS] * (attempts - 1)
+    assert problems == ([] if recovers else [f"/api/session/ could not be fetched: {error}"])
 
 
 def test_main_passes_a_healthy_origin(

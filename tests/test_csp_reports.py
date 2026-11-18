@@ -155,6 +155,28 @@ def test_a_batch_logs_at_most_its_bounded_number_of_violations(logged: Logged) -
     assert len(logged()) == csp_reports.MAX_REPORTS
 
 
+def test_report_fields_have_individual_log_limits(logged: Logged) -> None:
+    report = {
+        "csp-report": {
+            "effective-directive": "d" * 1000,
+            "blocked-uri": "https://" + "a" * 1000 + ".example/script.js?secret=value",
+            "document-uri": "https://pyracast.example/app/?secret=value",
+            "disposition": "r" * 1000,
+        }
+    }
+
+    assert post(report) == 204
+    assert logged() == [
+        {
+            "event": "csp_violation",
+            "directive": "d" * 64,
+            "blocked": "https://" + "a" * 120,
+            "document": "/app/",
+            "disposition": "r" * 32,
+        }
+    ]
+
+
 def test_only_posted_reports_are_accepted() -> None:
     assert Client().get(URL).status_code == 405
 

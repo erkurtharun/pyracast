@@ -84,10 +84,10 @@ def csp_report(request: HttpRequest) -> HttpResponse:
                 json.dumps(
                     {
                         "event": "csp_violation",
-                        "directive": str(violation["directive"] or ""),
-                        "blocked": _origin(violation["blocked"]),
+                        "directive": str(violation["directive"] or "")[:64],
+                        "blocked": _origin(violation["blocked"])[:128],
                         "document": _first_segment(violation["document"]),
-                        "disposition": str(violation["disposition"] or ""),
+                        "disposition": str(violation["disposition"] or "")[:32],
                     }
                 ),
             )

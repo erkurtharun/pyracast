@@ -152,6 +152,7 @@ def test_the_installer_runs_in_a_transient_unit_that_the_job_only_follows() -> N
     assert "if sudo systemctl is-active --quiet '$unit'; then" in transfer
     assert 'unit="${stage#/run/}.service"' in transfer
     assert transfer.index("trap cleanup EXIT") < transfer.index("git archive")
+    assert transfer.endswith('trap - EXIT\ncleanup\nexit "$status"\n')
 
 
 def test_the_migration_secret_version_is_pinned_when_configured_and_numeric() -> None:

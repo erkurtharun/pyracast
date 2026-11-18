@@ -321,6 +321,8 @@ jobs:
             status=0
             "${ssh[@]}" --command="sudo python3 '$stage/bundle/deploy/release_unit.py' follow '$stage'" || status=$?
           done
+          trap - EXIT
+          cleanup
           exit "$status"
       - name: Protect the verified deployed digests from registry cleanup
         run: python3 deploy/pin_release_images.py published
