@@ -337,7 +337,11 @@ def test_release_drains_every_application_service_within_its_stop_grace_period()
     drain = stop_groups(script, cleanup=False)
     services = compose_services()
 
-    assert stop_groups(script, cleanup=True) == drain
+    cleanup = stop_groups(script, cleanup=True)
+    # For a previous helper that refuses to run beside it, the failure path stops the notice too.
+    beside_helper = (drain[-1][0], ("gateway", "maintenance", *drain[-1][1]))
+    assert [group for group in cleanup if group != beside_helper] == drain
+    assert beside_helper in cleanup
     assert sorted(name for _, group in drain for name in group) == sorted(
         long_running_services() - SUPPORT_SERVICES - EDGE_SERVICES
     )

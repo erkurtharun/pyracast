@@ -68,6 +68,11 @@ resume_previous() {
   "${old[@]}" up -d --wait --wait-timeout 180 && ready \
     && rm -f /var/lib/pyracast/release-blocked && sync -f /var/lib/pyracast
 }
+# The printed recovery commands run the helper of the release in /opt/pyracast/current; one that
+# counts the gateway as an application service (main before the notice) refuses restore beside it.
+helper_keeps_notice() {
+  python3 -I -c 'import sys; sys.path.insert(0, sys.argv[1]); from deploy.reset_database import APPLICATION_SERVICES; sys.exit("gateway" in APPLICATION_SERVICES)' /opt/pyracast/current 2>/dev/null
+}
 cleanup() {
   result=$?
   trap - EXIT
@@ -85,11 +90,17 @@ cleanup() {
       stopped=1
       noticed=1
       switched=1
+      notice=0
+      if [[ -z $previous ]] || helper_keeps_notice; then notice=1; fi
       begin_maintenance || blocked=0
       "${compose[@]}" stop -t 660 dispatcher || stopped=0
       "${compose[@]}" stop -t 660 worker notifications || stopped=0
-      "${compose[@]}" up -d --no-deps --wait --wait-timeout 180 maintenance gateway || noticed=0
-      "${compose[@]}" stop -t 100 api web || stopped=0
+      if (( notice == 1 )); then
+        "${compose[@]}" up -d --no-deps --wait --wait-timeout 180 maintenance gateway || noticed=0
+        "${compose[@]}" stop -t 100 api web || stopped=0
+      else
+        "${compose[@]}" stop -t 100 gateway maintenance api web || stopped=0
+      fi
       # abort and restore start the previous release with the runtime secret host.json names.
       if [[ -n $previous ]]; then switch_runtime || switched=0; fi
       if (( stopped == 1 )); then
@@ -97,7 +108,9 @@ cleanup() {
       else
         echo "Release failed during maintenance. A stop command failed; the application may still run. Check with: ${compose[*]} ps" >&2
       fi
-      if (( noticed == 1 )); then
+      if (( notice == 0 )); then
+        echo 'The gateway is stopped too: the recovery helper of the release in /opt/pyracast/current refuses to run beside it, so the site is unreachable until recovery.' >&2
+      elif (( noticed == 1 )); then
         echo 'The gateway shows the maintenance notice.' >&2
       else
         echo "The maintenance notice did not start. Check with: ${compose[*]} ps gateway maintenance" >&2
@@ -108,7 +121,9 @@ cleanup() {
       if (( switched == 0 )); then
         echo "The runtime database password was not set to the runtime secret that recovery uses. Before recovery run: ${old[*]} up -d --wait postgres && python3 $release/deploy/bootstrap_database.py switch-runtime $release $secrets $secrets/runtime-verifier" >&2
       fi
-      if [[ -n $prerelease_object ]]; then
+      if [[ -z $previous ]]; then
+        echo 'No release served before this one: fix the cause and run the release again.' >&2
+      elif [[ -n $prerelease_object ]]; then
         echo "Pre-release record: $release/prerelease-backup.json" >&2
         echo "Before migrate, recover with: $recovery abort. In or after migrate, with: $recovery restore --confirm $prerelease_object" >&2
       elif (( record_unreadable == 1 )); then
