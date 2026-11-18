@@ -106,3 +106,28 @@ def test_the_archive_audit_lets_only_a_production_revision_leave_the_current_set
 
     assert rewritten_archive_rows(before, after) == {}
     assert rewritten_archive_rows(before, rewritten) == {"metering_epiassnapshot": [5]}
+
+
+def test_the_archive_audit_lets_only_an_unpublished_snapshot_take_weather_and_publication() -> None:
+    staged: dict[str, object] = {
+        "raw_payload": {},
+        "available_at": None,
+        "weather_payload": None,
+        "weather_error": "",
+    }
+    taken = {"available_at": NOW.isoformat(), "weather_payload": {}, "weather_error": ""}
+    published = staged | taken
+
+    def audit(before: dict[str, object], after: dict[str, object]) -> dict[str, list[int]]:
+        return rewritten_archive_rows(
+            {"plants_productionobservation": {}, "forecasts_forecastsnapshot": {1: before}},
+            {"plants_productionobservation": {}, "forecasts_forecastsnapshot": {1: after}},
+        )
+
+    assert audit(staged, published) == {}
+    assert audit(staged, published | {"raw_payload": {"changed": True}}) == {
+        "forecasts_forecastsnapshot": [1]
+    }
+    assert audit(published, published | {"weather_error": "weather_request_failed"}) == {
+        "forecasts_forecastsnapshot": [1]
+    }

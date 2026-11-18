@@ -12,12 +12,16 @@ from django.db import IntegrityError, transaction
 from django.db.models import F
 
 from pyracast.accounts.models import Membership
+from pyracast.calculation import calculate
+from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import SiteBinding
+from pyracast.forecasts.jobs import collect
 from pyracast.forecasts.models import (
     CollectionJob,
     ForecastSnapshot,
     HistoricalReferenceImport,
     ReferenceCapacityNormalization,
+    SnapshotWeatherError,
 )
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.jobs import run_epias_job
@@ -26,7 +30,7 @@ from pyracast.plants.models import Plant, PlantConfiguration, ProductionObservat
 from pyracast.plants.operations import ObservationInput, import_observations
 from pyracast.regions.models import Region
 from tests.support.capacity_normalization import normalize, scaled_system
-from tests.support.domain import NOW, System, make_system
+from tests.support.domain import NOW, FakeAdapter, System, make_system
 from tests.support.historical_reference_import import archive, power_file, system_for_import
 from tests.support.invariants import (
     OBSERVATION_LINEAGE_RULE,
@@ -41,6 +45,7 @@ from tests.support.plant_training import actual_snapshot_for
 from tests.support.production_changes import edit, provider, write
 from tests.support.provisional_measurements import DAY, acquisition
 from tests.support.trash_operations import sibling
+from tests.support.weather_collection import WeatherFixture
 
 pytestmark = pytest.mark.django_db(transaction=True)
 
@@ -204,6 +209,72 @@ def test_a_production_revision_supersedes_the_same_plant_and_interval(
     assert revision.supersedes_id == previous.pk
 
 
+def _forecast_snapshot(**values: Any) -> ForecastSnapshot:
+    system = make_system()
+    job = CollectionJob.objects.create(
+        binding=system.binding, scheduled_slot=NOW, target_date=NOW.date(), available_at=NOW
+    )
+    return ForecastSnapshot.objects.create(
+        **{
+            "job": job,
+            "binding": system.binding,
+            "raw_payload": {"provider": True},
+            "normalized_intervals": [],
+            "collected_at": NOW,
+            "source_kind": "forecast",
+        }
+        | values
+    )
+
+
+ACQUISITION_CHANGES = [
+    {"raw_payload": {}},
+    {"normalized_intervals": [{"power_kw": 1}]},
+    {"collected_at": NOW - timedelta(hours=1)},
+    {"issued_at": NOW},
+    {"source_kind": "estimated_actuals"},
+    {"coverage_start": NOW, "coverage_end": NOW + timedelta(hours=1)},
+]
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        *ACQUISITION_CHANGES,
+        {"available_at": NOW + timedelta(hours=1)},
+        {"available_at": None},
+        {"weather_payload": {}},
+        {"weather_error": SnapshotWeatherError.ACQUISITION_FAILED},
+    ],
+)
+def test_a_published_forecast_snapshot_is_never_rewritten(values: dict[str, Any]) -> None:
+    rows = ForecastSnapshot.objects.filter(pk=_forecast_snapshot(available_at=NOW).pk)
+
+    with pytest.raises(IntegrityError, match=IMMUTABLE), transaction.atomic():
+        rows.update(**values)
+
+    rows.delete()
+    assert not ForecastSnapshot.objects.exists()
+
+
+@pytest.mark.parametrize("values", ACQUISITION_CHANGES)
+def test_an_unpublished_forecast_snapshot_takes_only_its_weather_and_publication(
+    values: dict[str, Any],
+) -> None:
+    rows = ForecastSnapshot.objects.filter(pk=_forecast_snapshot().pk)
+
+    with pytest.raises(IntegrityError, match=IMMUTABLE), transaction.atomic():
+        rows.update(**values)
+
+    rows.update(weather_error=SnapshotWeatherError.ACQUISITION_INTERRUPTED)
+    rows.update(weather_payload={"provider": "open_meteo"}, weather_error="")
+    rows.update(available_at=NOW)
+    assert rows.values_list("weather_payload", "available_at").get() == (
+        {"provider": "open_meteo"},
+        NOW,
+    )
+
+
 def test_a_capacity_normalization_stores_the_factor_of_its_capacities(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -285,6 +356,14 @@ def _reference_import_correction(
     return lambda: archive(system, path)
 
 
+def _capacity_normalization(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> Callable[[], object]:
+    system, target = scaled_system(monkeypatch)
+    actual_snapshot_for(system, date(2026, 11, 7))
+    return lambda: normalize(system, target)
+
+
 def _epias_acquisition(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Callable[[], object]:
     connected(monkeypatch)
     EpiasCollectionJob.objects.update(next_attempt_at=NOW, retry_until=None)
@@ -339,6 +418,7 @@ def _production_revert(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Calla
     ("writer", "table", "superseded"),
     [
         (_reference_import_correction, "forecasts_historicalreferenceimport", 0),
+        (_capacity_normalization, "forecasts_forecastsnapshot", 0),
         (_epias_acquisition, "metering_epiassnapshot", 0),
         (_observation_import, "plants_productionobservation", 0),
         (_production_correction, "plants_productionobservation", 1),
@@ -363,6 +443,31 @@ def test_archive_writers_append_and_never_rewrite_stored_rows(
     assert len(after[table]) > len(before[table])
     assert len(superseded_revisions(before, after)) == superseded
     assert violations("plants_productionobservation", OBSERVATION_LINEAGE_RULE) == 0
+
+
+def test_a_collection_publishes_its_staged_snapshot_without_rewriting_the_acquisition() -> None:
+    make_system(approved=True)
+    job = CollectionJob.objects.get()
+    weather = WeatherFixture()
+
+    def fail(binding: SiteBinding, day: object, data: ProviderData) -> dict[str, object]:
+        raise ValueError("retry calculation")
+
+    assert not collect(job.pk, FakeAdapter(), fail, NOW, weather_provider=weather)
+    staged = archived_rows()
+    (acquired,) = staged["forecasts_forecastsnapshot"].values()
+    assert acquired["available_at"] is None
+    assert acquired["weather_payload"] is not None
+
+    assert collect(
+        job.pk, FakeAdapter(), calculate, NOW + timedelta(minutes=2), weather_provider=weather
+    )
+
+    published = archived_rows()
+    assert rewritten_archive_rows(staged, published) == {}
+    (stored,) = published["forecasts_forecastsnapshot"].values()
+    assert stored["available_at"] is not None
+    assert stored | {"available_at": None} == acquired
 
 
 def test_two_source_revisions_of_one_slot_normalize_onto_one_target(

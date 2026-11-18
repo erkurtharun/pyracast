@@ -108,10 +108,15 @@ STORED_RULES: tuple[tuple[str, str], ...] = (
     ("plants_plant", PLANT_AUTOMATION_RULE),
     ("plants_productionobservation", OBSERVATION_LINEAGE_RULE),
 )
+OBSERVATIONS = "plants_productionobservation"
+FORECAST_SNAPSHOTS = "forecasts_forecastsnapshot"
+# An unpublished forecast snapshot still takes its weather and its publication.
+STAGED = ("available_at", "weather_payload", "weather_error")
 ARCHIVES = (
+    FORECAST_SNAPSHOTS,
     "forecasts_historicalreferenceimport",
     "metering_epiassnapshot",
-    "plants_productionobservation",
+    OBSERVATIONS,
 )
 
 
@@ -168,9 +173,6 @@ def archived_rows() -> dict[str, dict[int, dict[str, Any]]]:
     return rows
 
 
-OBSERVATIONS = "plants_productionobservation"
-
-
 def superseded_revisions(
     before: dict[str, dict[int, dict[str, Any]]], after: dict[str, dict[int, dict[str, Any]]]
 ) -> set[int]:
@@ -185,7 +187,8 @@ def rewritten_archive_rows(
     before: dict[str, dict[int, dict[str, Any]]], after: dict[str, dict[int, dict[str, Any]]]
 ) -> dict[str, list[int]]:
     """Archive rows stored before a writer ran that it changed or removed; a production
-    revision may only leave the current set."""
+    revision may only leave the current set, an unpublished forecast snapshot may only take its
+    weather and publication."""
     superseded = superseded_revisions(before, after)
     changed: dict[str, list[int]] = {}
     for table, rows in before.items():
@@ -193,6 +196,8 @@ def rewritten_archive_rows(
             stored = after[table].get(key)
             if stored is not None and table == OBSERVATIONS and key in superseded:
                 stored = {**stored, "is_current": True}
+            if stored is not None and table == FORECAST_SNAPSHOTS and row["available_at"] is None:
+                stored = {**stored, **{name: row[name] for name in STAGED}}
             if stored != row:
                 changed.setdefault(table, []).append(key)
     return changed
