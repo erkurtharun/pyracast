@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-FORM_ERRORS = re.compile(r"\b\w*form\.errors\b")
+FORM_ERRORS = re.compile(r"(?<![\w.])(?!field\.)\w+\.errors\b")
 CONDITION = re.compile(r"\{%\s*(?:el)?if\b.*?%\}", re.S)
 
 
@@ -38,3 +38,12 @@ def test_the_error_dictionary_ratchet_allows_it_only_in_conditions() -> None:
         "action_form.errors",
         "review_form.errors",
     ]
+
+
+def test_the_error_dictionary_ratchet_recognizes_any_form_name() -> None:
+    template = (
+        "{% if login.errors %}{{ login.errors }}"
+        "{{ login.errors.as_text }}{% for key in login.errors %}{% endfor %}{% endif %}"
+    )
+
+    assert printed_error_dictionaries(template) == ["login.errors"] * 3
