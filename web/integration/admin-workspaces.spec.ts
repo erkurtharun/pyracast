@@ -1,0 +1,108 @@
+import { expect, test } from "@playwright/test";
+import {
+    checkPage,
+    recordCspViolations,
+    signInToConsole,
+} from "./support/console";
+
+test("a platform administrator creates a workspace, adds a plant and manages members", async ({
+    page,
+}, testInfo) => {
+    test.setTimeout(90_000);
+    const violations = await recordCspViolations(page);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await signInToConsole(
+        page,
+        process.env.BROWSER_CONSOLE_EMAIL!,
+        process.env.BROWSER_ADMIN_PASSWORD!,
+        process.env.BROWSER_CONSOLE_TOTP_SEED!,
+    );
+
+    await page.goto("/admin/workspaces/");
+    await checkPage(page, testInfo, "console-workspaces-desktop");
+    await page.getByRole("link", { name: "New workspace" }).first().click();
+    await expect(
+        page.getByRole("heading", { name: "New workspace", exact: true }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Create workspace" }).click();
+    await expect(page.getByLabel(/^Workspace name/)).toBeFocused();
+    await page.getByLabel(/^Workspace name/).fill("Browser console customer");
+    await page
+        .getByLabel(/^Administrator email/)
+        .fill("browser-owner@example.test");
+    await page.getByRole("button", { name: "Create workspace" }).click();
+    await expect(
+        page.getByRole("heading", {
+            level: 1,
+            name: "Browser console customer",
+        }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("status").filter({
+            hasText: "Invitation sent to browser-owner@example.test.",
+        }),
+    ).toBeVisible();
+    await checkPage(page, testInfo, "console-workspace-desktop");
+    await page.setViewportSize({ width: 320, height: 800 });
+    await checkPage(page, testInfo, "console-workspace-mobile");
+
+    await page.getByRole("link", { name: "Add plant" }).first().click();
+    await page.getByLabel(/^Plant name/).fill("Browser console plant");
+    const latitude = page.getByLabel(/^Latitude/);
+    await latitude.evaluate((element) => {
+        const data = new DataTransfer();
+        data.setData("text/plain", "41.0082, 28.9784");
+        element.dispatchEvent(
+            new ClipboardEvent("paste", {
+                clipboardData: data,
+                bubbles: true,
+                cancelable: true,
+            }),
+        );
+    });
+    await expect(latitude).toHaveValue("41.0082");
+    await expect(page.getByLabel(/^Longitude/)).toHaveValue("28.9784");
+    await page.getByLabel(/^DC capacity/).fill("12");
+    const tilt = page.getByLabel(/^Tilt/);
+    await expect(tilt).toBeHidden();
+    await page.getByLabel(/^Mounting type/).selectOption("fixed");
+    await expect(tilt).toBeVisible();
+    await tilt.fill("25");
+    await page.getByLabel(/^Azimuth/).fill("180");
+    await checkPage(page, testInfo, "console-plant-form-mobile");
+    await page.getByRole("button", { name: "Add plant" }).click();
+    await expect(page).toHaveURL(/\/admin\/plants\/\d+\/$/);
+    await expect(
+        page
+            .getByRole("status")
+            .filter({ hasText: "Plant Browser console plant created." }),
+    ).toBeVisible();
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.getByRole("link", { name: "Edit details" }).click();
+    await expect(
+        page.getByRole("heading", { name: "Edit plant details", exact: true }),
+    ).toBeVisible();
+    await checkPage(page, testInfo, "console-plant-details-desktop");
+
+    await page.goto(`/admin/workspaces/${process.env.BROWSER_OTHER_TENANT!}/`);
+    await page.getByRole("link", { name: "Invite member" }).click();
+    await page.getByLabel(/^Email address/).fill("browser-viewer@example.test");
+    await page.getByRole("button", { name: "Send invitation" }).click();
+    await expect(
+        page.getByRole("status").filter({
+            hasText: "Invitation sent to browser-viewer@example.test.",
+        }),
+    ).toBeVisible();
+    const member = process.env.BROWSER_REMOVABLE_MEMBER!;
+    await page.getByRole("link", { name: `Remove ${member}` }).click();
+    await page.setViewportSize({ width: 320, height: 800 });
+    await checkPage(page, testInfo, "console-member-removal-mobile");
+    await page.getByRole("button", { name: "Remove member" }).click();
+    await expect(
+        page
+            .getByRole("status")
+            .filter({ hasText: `${member} was removed from the workspace.` }),
+    ).toBeVisible();
+    await checkPage(page, testInfo, "console-members-mobile");
+    expect(violations).toEqual([]);
+});

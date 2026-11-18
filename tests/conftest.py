@@ -70,7 +70,7 @@ SUBPROCESS = frozenset(
     }
 )
 MIGRATION = frozenset(
-    {"test_invariant_migrations", "test_vocabulary_migrations", "test_workspace_name_migration"}
+    {"test_invariant_migrations", "test_invitation_role_migration", "test_vocabulary_migrations", "test_workspace_name_migration"}
 )
 # Modules that drive every writer of the tables with stored invariants. After each passing test
 # of these modules the rows are checked with raw queries written independently of the CHECK and
