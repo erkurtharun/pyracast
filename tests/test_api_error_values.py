@@ -148,6 +148,23 @@ def test_rewritten_error_bodies_drop_the_stale_entity_tag() -> None:
     assert "ETag" not in refuse_in_place(request, refused, ErrorCode.METHOD_NOT_ALLOWED)
 
 
+@pytest.mark.parametrize("header", ["Content-Encoding", "Content-MD5"])
+def test_rewritten_error_bodies_drop_stale_representation_headers(header: str) -> None:
+    from django.http import HttpResponse, HttpResponseNotAllowed
+    from django.test import RequestFactory
+
+    from pyracast.api.errors import refuse_in_place, with_error_contract
+    from pyracast.errors import ErrorCode
+
+    request = RequestFactory().get("/api/example/")
+    rewritten = HttpResponse('{"status": 400}', status=400, content_type="application/json")
+    rewritten[header] = "before"
+    assert header not in with_error_contract(request, rewritten)
+    refused = HttpResponseNotAllowed(["GET"])
+    refused[header] = "before"
+    assert header not in refuse_in_place(request, refused, ErrorCode.METHOD_NOT_ALLOWED)
+
+
 def test_framework_refusals_preserve_existing_transport_headers() -> None:
     from django.http import HttpResponseNotAllowed
     from django.test import RequestFactory

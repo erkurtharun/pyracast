@@ -216,9 +216,7 @@ def test_tenant_api_treats_a_platform_administrator_without_membership_as_an_out
     for method, path, body in requests:
         response = getattr(client, method)(path, body, content_type="application/json")
         assert response.status_code == 403, path
-        assert response.json()["code"] == (
-            "membership_required" if method == "get" else "workspace_admin_required"
-        ), path
+        assert response.json()["code"] == "membership_required", path
     assert not Membership.objects.filter(user=platform).exists()
     assert Membership.objects.filter(user=viewer).exists()
     assert WorkspaceInvitation.objects.count() == 1

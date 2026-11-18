@@ -110,8 +110,8 @@ def test_site_list_prepares_plants_without_per_row_queries(django_assert_num_que
         submit_site(system.member, system.tenant.pk, **site_values(latitude=41 + index))
     from pyracast.plants.site_api import SiteOutput
 
-    with django_assert_num_queries(3):
-        rows = SiteOutput(site_queryset(system.member, system.tenant.pk), many=True).data
+    with django_assert_num_queries(2):
+        rows = SiteOutput(site_queryset(system.tenant.pk), many=True).data
     assert len(rows) == 5
 
 

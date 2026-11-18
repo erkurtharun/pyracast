@@ -4,7 +4,8 @@ worker_class = "gthread"
 threads = 2
 timeout = 90
 graceful_timeout = 90
-keepalive = 5
+# Seconds; above Traefik's 90 s reuse of idle backend connections, so the gateway closes them first.
+keepalive = 120
 control_socket_disable = True
 worker_tmp_dir = "/tmp"  # noqa: S108 -- Private container tmpfs, no shared host directory.
 accesslog = "-"

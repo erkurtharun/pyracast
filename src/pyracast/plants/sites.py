@@ -2,19 +2,13 @@ from django.contrib.auth.models import User
 from django.db import transaction
 from django.db.models import Prefetch, QuerySet
 
-from pyracast.accounts.authorization import tenant_membership
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import create_plant
 from pyracast.regions.models import Region
 from pyracast.regions.operations import submit_region
 
 
-def site_queryset(actor: User, tenant_id: int) -> QuerySet[Region]:
-    tenant_membership(actor, tenant_id)
-    return tenant_sites(tenant_id)
-
-
-def tenant_sites(tenant_id: int) -> QuerySet[Region]:
+def site_queryset(tenant_id: int) -> QuerySet[Region]:
     return (
         Region.objects.filter(tenant_id=tenant_id, deleted_at__isnull=True)
         .prefetch_related(
@@ -69,4 +63,4 @@ def submit_site(
             surface_azimuth=surface_azimuth,
             platform=platform,
         )
-        return tenant_sites(tenant_id).get(pk=region.pk)
+        return site_queryset(tenant_id).get(pk=region.pk)

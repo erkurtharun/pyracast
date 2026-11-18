@@ -203,15 +203,22 @@ CACHES = {
         "BACKEND": "pyracast.accounts.cache.AuthenticationCache",
         "LOCATION": "pyracast_authentication_cache",
         "KEY_PREFIX": "pyracast-auth",
-    }
+    },
+    # Throttle counters live in each API process and are lost on restart.
+    "throttle": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
 }
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": ["pyracast.api.authentication.SessionAuthentication"],
-    "DEFAULT_PERMISSION_CLASSES": [
-        "rest_framework.permissions.IsAuthenticated",
-        "pyracast.api.permissions.WorkspaceWritePermission",
-    ],
-    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_PERMISSION_CLASSES": ["pyracast.api.permissions.RoutePolicy"],
+    "DEFAULT_THROTTLE_CLASSES": ["pyracast.api.throttling.RouteThrottle"],
+    # Per signed-in user and scope; generous until the logged refusals show the real need.
+    "DEFAULT_THROTTLE_RATES": {
+        "forecast": "60/min",
+        "calibration": "20/hour",
+        "production_import": "120/hour",
+        "submission": "30/hour",
+    },
+    "DEFAULT_SCHEMA_CLASS": "pyracast.api.schema.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 50,
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],

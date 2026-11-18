@@ -16,6 +16,10 @@ ALTER ROLE pyracast_owner LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATIO
 ALTER ROLE pyracast_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
 GRANT pyracast_owner TO CURRENT_USER WITH SET TRUE;
 CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements WITH SCHEMA public;
+REVOKE SELECT ON public.pg_stat_statements, public.pg_stat_statements_info FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.pg_stat_statements(boolean), public.pg_stat_statements_info()
+    FROM PUBLIC;
 ALTER SCHEMA public OWNER TO pyracast_owner;
 SET LOCAL ROLE pyracast_owner;
 REVOKE ALL ON SCHEMA public FROM PUBLIC;

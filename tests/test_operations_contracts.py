@@ -1101,3 +1101,27 @@ def test_smoke_proves_the_maintenance_notice_and_the_restricted_roles() -> None:
     assert "INSERT INTO django_migrations" in smoke
     assert "== '42501'" in smoke
     assert "no pg_hba.conf entry" in smoke
+
+
+def test_postgresql_collects_statement_statistics_from_its_first_start() -> None:
+    command = compose_services()["postgres"]["command"]
+    smoke = text(DEPLOY / "smoke.sh")
+    converged = smoke.index('"${bootstrap[@]}" converge "$temporary" "$temporary"\n')
+
+    assert "shared_preload_libraries=pg_stat_statements" in command
+    assert "CREATE EXTENSION IF NOT EXISTS pg_stat_statements WITH SCHEMA public;" in text(
+        DEPLOY / "bootstrap.sql"
+    )
+    assert smoke.index("FROM pg_stat_statements") > converged
+
+
+def test_gunicorn_keeps_idle_connections_longer_than_the_gateway_reuses_them() -> None:
+    gunicorn = runpy.run_path(str(DEPLOY / "gunicorn_conf.py"))
+    # Traefik closes idle backend connections after 90 s unless the gateway sets its own value.
+    gateway_idle = seconds(
+        gateway_environment().get(
+            "TRAEFIK_SERVERSTRANSPORT_FORWARDINGTIMEOUTS_IDLECONNTIMEOUT", "90s"
+        )
+    )
+
+    assert gunicorn["keepalive"] > gateway_idle

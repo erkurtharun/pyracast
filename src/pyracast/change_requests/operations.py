@@ -230,8 +230,8 @@ def submit_incident(
     return request
 
 
-def visible_requests(actor: User, tenant_id: int) -> QuerySet[ChangeRequest]:
-    membership = tenant_membership(actor, tenant_id)
+def visible_requests(actor: User, membership: Membership) -> QuerySet[ChangeRequest]:
+    tenant_id = membership.tenant_id
     return ChangeRequest.objects.filter(
         Q(plant__region__tenant__membership__role=WorkspaceRole.ADMIN)
         | Q(proposed_by_id=actor.pk, proposer_membership_id=membership.pk),
@@ -243,7 +243,7 @@ def visible_requests(actor: User, tenant_id: int) -> QuerySet[ChangeRequest]:
 
 
 def _request(actor: User, tenant_id: int, request_id: int, *, lock: bool = False) -> ChangeRequest:
-    rows = visible_requests(actor, tenant_id).select_related(
+    rows = visible_requests(actor, tenant_membership(actor, tenant_id)).select_related(
         "plant__region", "configuration__binding", "proposed_by", "reviewed_by"
     )
     if lock:

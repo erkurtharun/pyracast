@@ -70,16 +70,21 @@ def allauth_views(tree: ast.Module) -> set[str]:
     return imported
 
 
+def validation_message(node: ast.Call) -> ast.expr | None:
+    if node.args:
+        return node.args[0]
+    return next((keyword.value for keyword in node.keywords if keyword.arg == "message"), None)
+
+
 def coded_validation_errors(tree: ast.Module) -> list[int]:
     return [
         node.lineno
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and name_of(node.func) == "ValidationError"
-        and node.args
-        and isinstance(node.args[0], ast.Constant)
-        and isinstance(node.args[0].value, str)
-        and CODE.fullmatch(node.args[0].value)
+        and isinstance(message := validation_message(node), ast.Constant)
+        and isinstance(message.value, str)
+        and CODE.fullmatch(message.value)
     ]
 
 
@@ -134,6 +139,9 @@ def response_body(node: ast.Call) -> ast.expr | None:
 
 def refusing_status(node: ast.Call) -> bool:
     status = next((keyword.value for keyword in node.keywords if keyword.arg == "status"), None)
+    if isinstance(status, ast.Attribute):
+        constant = re.fullmatch(r"HTTP_(\d{3})_\w+", status.attr)
+        return constant is not None and int(constant[1]) >= 400
     return (
         isinstance(status, ast.Constant) and isinstance(status.value, int) and status.value >= 400
     )
@@ -302,3 +310,15 @@ def test_the_scan_recognises_a_replaced_caught_error() -> None:
         "            raise error\n"
     )
     assert framework_errors_and_translations(sample) == [5]
+
+
+def test_the_scan_recognises_status_constants_and_keyword_codes() -> None:
+    sample = ast.parse(
+        "def answer(request, body):\n"
+        "    Response(body, status=status.HTTP_400_BAD_REQUEST)\n"
+        "    Response(body, status=status.HTTP_200_OK)\n"
+        "    raise ValidationError(message='unsupported_language')\n"
+        "    raise ValidationError(message='Choose a supported language.')\n"
+    )
+    assert handmade_error_bodies(sample) == [2]
+    assert coded_validation_errors(sample) == [4]

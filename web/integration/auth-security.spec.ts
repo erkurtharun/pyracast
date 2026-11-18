@@ -72,6 +72,12 @@ test("verified email and a recovery code protect a real browser session", async 
     const setupKey = page.locator(".mfa-secret-code");
     await expect(setupKey).toBeVisible();
     const setupSecret = await setupKey.innerText();
+    await expect
+        .poll(() => Date.now() % 30_000, {
+            timeout: 31_000,
+            intervals: [100, 250, 500],
+        })
+        .toBeLessThan(25_000);
     const enrollmentStep = Math.floor(Date.now() / 30_000);
     const code = totp(setupSecret);
     await page.getByLabel("Authenticator code", { exact: true }).fill(code);

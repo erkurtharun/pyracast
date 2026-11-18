@@ -147,6 +147,30 @@ def test_provisioning_converges_and_a_second_run_changes_nothing(scratch_databas
         )
 
 
+def test_provisioning_creates_the_statement_statistics_extension(scratch_database: str) -> None:
+    provision(scratch_database)
+    provision(scratch_database)
+    with psycopg.connect(**server_parameters(scratch_database)) as connection:
+        assert connection.execute(
+            "SELECT extnamespace::regnamespace::text FROM pg_extension "
+            "WHERE extname = 'pg_stat_statements'"
+        ).fetchall() == [("public",)]
+
+
+def test_statement_statistics_are_reserved_for_the_database_operator(scratch_database: str) -> None:
+    provision(scratch_database)
+    provision(scratch_database)
+    with psycopg.connect(**server_parameters(scratch_database)) as connection:
+        for role in ("pyracast_app", "pyracast_owner"):
+            assert connection.execute(
+                "SELECT has_table_privilege(%s, 'public.pg_stat_statements', 'SELECT'), "
+                "has_table_privilege(%s, 'public.pg_stat_statements_info', 'SELECT'), "
+                "has_function_privilege(%s, 'public.pg_stat_statements(boolean)', 'EXECUTE'), "
+                "has_function_privilege(%s, 'public.pg_stat_statements_info()', 'EXECUTE')",
+                (role, role, role, role),
+            ).fetchone() == (False, False, False, False)
+
+
 def test_role_check_refuses_runtime_writes_to_the_ledger_until_provisioning_converges(
     scratch_database: str,
 ) -> None:

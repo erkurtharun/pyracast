@@ -1,4 +1,6 @@
+import json
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -19,6 +21,7 @@ from tests.support.plant_operations import make_plant, publish_snapshot, snapsho
 from tests.support.weather_collection import WeatherFixture
 
 pytestmark = pytest.mark.django_db(transaction=True)
+OPENAPI = Path(__file__).resolve().parents[1] / "web" / "openapi.json"
 DAY = date(2026, 11, 10)
 
 
@@ -187,3 +190,110 @@ def test_region_reads_explicit_estimated_actuals_for_today(
     weather = body["result"]["weather_reference"]
     assert weather["energy_kwh_m2"] == pytest.approx(14.4)
     assert weather["intervals"][0]["ghi_wm2"] == 600
+
+
+ENVELOPE = {
+    "date",
+    "timezone",
+    "source_kind",
+    "freshness",
+    "unavailable_reason",
+    "result",
+}
+REGION_ENVELOPE = ENVELOPE | {"collected_at", "issued_at", "binding_id"}
+PLANT_ENVELOPE = ENVELOPE | {
+    "plant_id",
+    "as_of",
+    "configuration_id",
+    "calibration_id",
+    "regional_irradiance",
+    "outage_scenario",
+    "production_diagnostic",
+}
+
+
+def test_each_forecast_read_sends_exactly_its_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
+    system, plant = make_plant(monkeypatch)
+    snapshot = publish_snapshot(snapshot_for(system, DAY, collected_at=NOW))
+    client = client_for(system.member)
+    today = {"date": DAY.isoformat()}
+    region = client.get(region_path(system), today).json()
+    issued = client.get(plant_path(system, plant), today).json()
+    monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=2))
+    client = client_for(system.member)
+    actuals = {**today, "data_source": "estimated_actuals"}
+    archived = client.get(plant_path(system, plant), today).json()
+    plant_actuals = client.get(plant_path(system, plant), actuals).json()
+    region_actuals = client.get(region_path(system), actuals).json()
+
+    assert set(region) == set(region_actuals) == REGION_ENVELOPE
+    assert region["binding_id"] == system.binding.pk
+    declared = PLANT_ENVELOPE | {"issuance_id", "snapshot_id"}
+    assert set(issued) == set(archived) == declared
+    assert PLANT_ENVELOPE <= set(plant_actuals) <= declared
+    assert archived["snapshot_id"] == snapshot.pk
+
+
+def documented(name: str) -> tuple[set[str], set[str]]:
+    component = json.loads(OPENAPI.read_text(encoding="utf-8"))["components"]["schemas"][name]
+    return set(component.get("required", ())), set(component["properties"])
+
+
+def test_the_performance_read_sends_exactly_its_documented_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    publish_snapshot(snapshot_for(system, DAY, collected_at=NOW))
+    monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=2))
+    client = client_for(system.member)
+    period = {"start_date": DAY.isoformat(), "end_date": DAY.isoformat()}
+    required, declared = documented("PerformanceOutput")
+    day_required, day_declared = documented("PerformanceDay")
+    for comparison in ("archived_forecast", "historical_model"):
+        response = client.get(
+            plant_path(system, plant, "performance"), {**period, "comparison": comparison}
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert set(body) == required == declared
+        assert body["timezone"] == system.binding.timezone
+        assert body["plant_id"] == plant.pk
+        assert [day["date"] for day in body["days"]] == [DAY.isoformat()]
+        assert day_required <= set(body["days"][0]) <= day_declared
+
+
+def test_forecast_envelopes_share_one_documented_vocabulary() -> None:
+    schema = json.loads(OPENAPI.read_text(encoding="utf-8"))
+    components = schema["components"]["schemas"]
+    region, plant = components["ForecastOutput"], components["PlantForecastOutput"]
+    performance = components["PerformanceOutput"]
+    assert set(region["properties"]) == REGION_ENVELOPE
+    assert set(plant["properties"]) == PLANT_ENVELOPE | {"issuance_id", "snapshot_id"}
+    for field in ENVELOPE:
+        assert region["properties"][field] == plant["properties"][field]
+    assert set(performance["properties"]) & set(plant["properties"]) == {
+        "timezone",
+        "plant_id",
+        "configuration_id",
+    }
+    for field in ("timezone", "plant_id", "configuration_id"):
+        assert performance["properties"][field] == plant["properties"][field]
+    assert components[region["properties"]["freshness"]["$ref"].rsplit("/", 1)[1]]["enum"] == [
+        "fresh",
+        "stale",
+        "missing",
+    ]
+    for name in ("ForecastOutput", "PlantForecastOutput", "PerformanceOutput"):
+        operations = [
+            operation
+            for methods in schema["paths"].values()
+            for operation in methods.values()
+            if operation["responses"]
+            .get("200", {})
+            .get("content", {})
+            .get("application/json", {})
+            .get("schema")
+            == {"$ref": f"#/components/schemas/{name}"}
+        ]
+        assert len(operations) == 1
+        assert {"400", "403", "404", "429"} <= set(operations[0]["responses"])

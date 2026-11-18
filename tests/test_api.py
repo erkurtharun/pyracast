@@ -132,8 +132,7 @@ def test_fixture_workflow_and_freshness(customer: tuple[Client, User, Tenant]) -
     region.timezone = "America/New_York"
     region.save(update_fields=["timezone"])
     assert client.get(path).json()["timezone"] == "Europe/Istanbul"
-    assert client.get(path).json()["scheduled_slot"] is not None
-    assert isinstance(client.get(path).json()["late"], bool)
+    assert client.get(path).json()["binding_id"] == binding.pk
     assert client.get(path.replace(str(job.target_date), "1900-01-01")).status_code == 400
     assert client.get(path.replace(str(job.target_date), "invalid")).status_code == 400
     assert admin_client.get("/admin/").status_code == 200

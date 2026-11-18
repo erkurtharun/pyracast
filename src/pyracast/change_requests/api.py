@@ -3,11 +3,9 @@ from typing import Any, cast
 from django.contrib.auth.models import User
 from drf_spectacular.utils import extend_schema
 from rest_framework.generics import GenericAPIView
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from pyracast.api.permissions import WorkspaceMemberWritePermission
 from pyracast.change_requests import operations
 from pyracast.change_requests.models import ChangeRequest
 from pyracast.change_requests.queries import inbox, request_detail, request_summaries
@@ -35,8 +33,6 @@ class RequestView(GenericAPIView[ChangeRequest]):
 
 
 class ProductionRequestsView(RequestView):
-    permission_classes = (IsAuthenticated, WorkspaceMemberWritePermission)
-
     @extend_schema(request=ProductionRequestInput, responses={201: ChangeRequestOutput})
     def post(self, request: Request, tenant_id: int, region_id: int, plant_id: int) -> Response:
         data = ProductionRequestInput(data=request.data)
@@ -50,8 +46,6 @@ class ProductionRequestsView(RequestView):
 
 
 class IncidentRequestsView(RequestView):
-    permission_classes = (IsAuthenticated, WorkspaceMemberWritePermission)
-
     @extend_schema(request=IncidentRequestInput, responses={201: ChangeRequestOutput})
     def post(self, request: Request, tenant_id: int, region_id: int, plant_id: int) -> Response:
         data = IncidentRequestInput(data=request.data)
@@ -110,8 +104,6 @@ class RejectView(RequestView):
 
 
 class WithdrawView(RequestView):
-    permission_classes = (IsAuthenticated, WorkspaceMemberWritePermission)
-
     @extend_schema(request=EmptyInput, responses=ChangeRequestOutput)
     def post(self, request: Request, tenant_id: int, request_id: int) -> Response:
         data = EmptyInput(data=request.data)
@@ -121,8 +113,6 @@ class WithdrawView(RequestView):
 
 
 class SeenView(RequestView):
-    permission_classes = (IsAuthenticated, WorkspaceMemberWritePermission)
-
     @extend_schema(request=EmptyInput, responses=ChangeRequestOutput)
     def post(self, request: Request, tenant_id: int, request_id: int) -> Response:
         data = EmptyInput(data=request.data)

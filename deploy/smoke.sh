@@ -122,6 +122,7 @@ for attempt in {1..10}; do
   (( attempt < 10 )) && sleep 1
 done
 "${superuser[@]}" -Atc "SELECT 'smoke-logged-probe'"
+"${superuser[@]}" -Atc 'SELECT count(*) FROM pg_stat_statements' >/dev/null
 mkdir "$temporary/rotated"
 printf 'PGUSER=pyracast_app\nPGPASSWORD=smoke-rotated\n' > "$temporary/rotated/runtime.env"
 printf 'PGUSER=pyracast_owner\nPGPASSWORD=smoke-owner-rotated\n' > "$temporary/rotated/migration.env"

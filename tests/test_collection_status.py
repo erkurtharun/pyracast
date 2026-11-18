@@ -22,7 +22,7 @@ pytestmark = pytest.mark.django_db(transaction=True)
 def test_collection_status_reports_the_plants_own_collection_only() -> None:
     system = make_system(approved=True)
     moment = NOW.replace(hour=23, minute=30)
-    schedule = get_schedule(system.member, system.tenant.pk, system.region.pk, moment)
+    schedule = get_schedule(system.tenant.pk, system.region.pk, moment)
     for outcome in ("succeeded", "failed", "uncertain"):
         attempt = reserve_request(system.binding, moment, purpose=RequestPurpose.FORECAST)
         RequestAttempt.objects.filter(pk=attempt.pk).update(outcome=outcome)
@@ -146,7 +146,7 @@ def test_last_success_reports_native_collection_independently_of_operator_import
         collected_at=NOW + timedelta(hours=1),
         source_kind="estimated_actuals" if endpoint != "scaled_forecasts" else "forecast",
     )
-    schedule = get_schedule(system.member, system.tenant.pk, system.region.pk, NOW)
+    schedule = get_schedule(system.tenant.pk, system.region.pk, NOW)
 
     assert schedule_payload(schedule, NOW)["last_success_at"] == (NOW if native else None)
     assert ForecastSnapshot.objects.filter(binding=system.binding).count() == (2 if native else 1)
@@ -170,7 +170,7 @@ def test_next_collection_is_the_earliest_queued_job_forecast_slot_or_nightly_win
     CollectionJob.objects.filter(status="pending").update(status="succeeded")
 
     def next_collection(now: datetime) -> object:
-        schedule = get_schedule(system.member, system.tenant.pk, system.region.pk, now)
+        schedule = get_schedule(system.tenant.pk, system.region.pk, now)
         return schedule_payload(schedule, now)["next_collection_at"]
 
     later = morning + timedelta(hours=1)

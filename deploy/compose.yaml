@@ -230,7 +230,7 @@ services:
     environment:
       POSTGRES_DB: pyracast
       POSTGRES_INITDB_ARGS: --data-checksums
-    command: [postgres, -c, shared_buffers=128MB, -c, max_connections=40, -c, hba_file=/etc/postgresql/pg_hba.conf]
+    command: [postgres, -c, shared_buffers=128MB, -c, max_connections=40, -c, hba_file=/etc/postgresql/pg_hba.conf, -c, shared_preload_libraries=pg_stat_statements]
     volumes:
       - ${DATA_ROOT:-/var/lib/pyracast}/postgres:/var/lib/postgresql
     tmpfs: ["/tmp:uid=70,gid=70,mode=0700,size=32m", "/var/run/postgresql:uid=70,gid=70,mode=0770,size=16m"]

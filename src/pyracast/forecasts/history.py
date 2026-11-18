@@ -40,6 +40,29 @@ from pyracast.regions.models import Region
 HISTORY_SELECTION_POLICY = "native-then-authorized-scale-complete-actuals-v4"
 
 
+def regional_envelope(
+    target_date: date,
+    zone: str,
+    source_kind: str,
+    snapshot: ForecastSnapshot | None,
+    result: dict[str, object] | None,
+    *,
+    fresh: bool,
+    unavailable_reason: str,
+) -> dict[str, object]:
+    return {
+        "date": target_date,
+        "timezone": zone,
+        "source_kind": source_kind,
+        "freshness": "missing" if snapshot is None else "fresh" if fresh else "stale",
+        "unavailable_reason": unavailable_reason if snapshot is None else None,
+        "result": result,
+        "collected_at": snapshot.collected_at if snapshot else None,
+        "issued_at": snapshot.issued_at if snapshot else None,
+        "binding_id": snapshot.binding_id if snapshot else None,
+    }
+
+
 def select_actual_snapshot(
     binding: SiteBinding, target_date: date, as_of: datetime
 ) -> ForecastSnapshot | None:
@@ -132,25 +155,15 @@ def regional_history(
         fallback = _regional_saved_forecast(region, target_date, as_of)
         if fallback["result"] is not None:
             return fallback
-    return {
-        "region_id": region.pk,
-        "date": target_date,
-        "timezone": binding.timezone if binding else region.timezone,
-        "status": region.status,
-        "source_kind": "estimated_actuals",
-        "freshness": "missing"
-        if snapshot is None
-        else "fresh"
-        if binding is not None and binding_is_current(binding)
-        else "stale",
-        "unavailable_reason": "estimated_actuals_unavailable" if snapshot is None else None,
-        "result": result,
-        "collected_at": snapshot.collected_at if snapshot else None,
-        "issued_at": snapshot.issued_at if snapshot else None,
-        "binding_revision": snapshot.job.binding_id if snapshot else None,
-        "scheduled_slot": snapshot.job.scheduled_slot if snapshot else None,
-        "late": snapshot.collected_at > snapshot.job.scheduled_slot if snapshot else None,
-    }
+    return regional_envelope(
+        target_date,
+        binding.timezone if binding else region.timezone,
+        "estimated_actuals",
+        snapshot,
+        result,
+        fresh=binding is not None and binding_is_current(binding),
+        unavailable_reason="estimated_actuals_unavailable",
+    )
 
 
 def regional_outlook(
@@ -191,26 +204,17 @@ def regional_outlook(
         .order_by("-snapshot__collected_at", "-published_at", "-pk")
         .first()
     )
-    fresh = (
-        saved is not None
+    return regional_envelope(
+        target_date,
+        saved.snapshot.job.binding.timezone if saved else region.timezone,
+        "forecast",
+        saved.snapshot if saved else None,
+        saved.payload if saved else None,
+        fresh=saved is not None
         and binding_is_current(saved.snapshot.job.binding)
-        and saved.snapshot.collected_at >= now - timedelta(hours=24)
+        and saved.snapshot.collected_at >= now - timedelta(hours=24),
+        unavailable_reason="forecast_unavailable",
     )
-    return {
-        "region_id": region.pk,
-        "date": target_date,
-        "timezone": saved.snapshot.job.binding.timezone if saved else region.timezone,
-        "status": region.status,
-        "source_kind": "forecast",
-        "unavailable_reason": "forecast_unavailable" if saved is None else None,
-        "freshness": "missing" if saved is None else "fresh" if fresh else "stale",
-        "result": saved.payload if saved else None,
-        "collected_at": saved.snapshot.collected_at if saved else None,
-        "issued_at": saved.snapshot.issued_at if saved else None,
-        "binding_revision": saved.snapshot.job.binding_id if saved else None,
-        "scheduled_slot": saved.snapshot.job.scheduled_slot if saved else None,
-        "late": saved.snapshot.collected_at > saved.snapshot.job.scheduled_slot if saved else None,
-    }
 
 
 def _regional_current_forecast(
@@ -334,27 +338,16 @@ def _regional_composed_forecast(
             ]
         except (ValueError, ArithmeticError) as exc:
             raise DomainError(ErrorCode.CALCULATION_OUT_OF_RANGE) from exc
-    fresh = (
-        binding is not None
+    return regional_envelope(
+        target_date,
+        binding.timezone if binding else region.timezone,
+        source_kind,
+        snapshot,
+        result,
+        fresh=binding is not None
         and binding_is_current(binding)
-        and all(source.collected_at >= now - timedelta(hours=24) for source in used_snapshots)
+        and all(source.collected_at >= now - timedelta(hours=24) for source in used_snapshots),
+        unavailable_reason="estimated_actuals_unavailable"
+        if actuals_only
+        else "forecast_unavailable",
     )
-    return {
-        "region_id": region.pk,
-        "date": target_date,
-        "timezone": binding.timezone if binding else region.timezone,
-        "status": region.status,
-        "source_kind": source_kind,
-        "unavailable_reason": (
-            "estimated_actuals_unavailable" if actuals_only else "forecast_unavailable"
-        )
-        if snapshot is None
-        else None,
-        "freshness": "missing" if snapshot is None else "fresh" if fresh else "stale",
-        "result": result,
-        "collected_at": snapshot.collected_at if snapshot else None,
-        "issued_at": snapshot.issued_at if snapshot else None,
-        "binding_revision": snapshot.job.binding_id if snapshot else None,
-        "scheduled_slot": snapshot.job.scheduled_slot if snapshot else None,
-        "late": snapshot.collected_at > snapshot.job.scheduled_slot if snapshot else None,
-    }

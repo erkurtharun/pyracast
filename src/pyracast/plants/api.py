@@ -8,7 +8,6 @@ from rest_framework.generics import GenericAPIView
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from pyracast.accounts.authorization import tenant_membership
 from pyracast.plants import operations
 from pyracast.plants.automation import automation_status, set_calibration_automation
 from pyracast.plants.history import plant_outlook
@@ -50,10 +49,11 @@ from pyracast.regions.models import Region
 
 class ScopedView[ModelT: Model](GenericAPIView[ModelT]):
     def plant_queryset(self) -> QuerySet[Plant]:
-        tenant_id = self.kwargs["tenant_id"]
-        tenant_membership(cast(User, self.request.user), tenant_id)
         region = get_object_or_404(
-            Region, pk=self.kwargs["region_id"], tenant_id=tenant_id, deleted_at__isnull=True
+            Region,
+            pk=self.kwargs["region_id"],
+            tenant_id=self.kwargs["tenant_id"],
+            deleted_at__isnull=True,
         )
         return (
             Plant.objects.filter(region=region)
@@ -160,7 +160,7 @@ class PerformanceView(ScopedView[Plant]):
         plant = self.plant()
         data = PerformanceQuery(data=request.query_params)
         data.is_valid(raise_exception=True)
-        return Response(forecast_performance(plant, **data.validated_data))
+        return Response(PerformanceOutput(forecast_performance(plant, **data.validated_data)).data)
 
 
 class CalibrationsView(ScopedView[CalibrationRun]):
@@ -245,4 +245,4 @@ class ForecastView(ScopedView[Plant]):
             as_of=values.get("as_of"),
             source=values["data_source"],
         )
-        return Response(result)
+        return Response(PlantForecastOutput(result).data)

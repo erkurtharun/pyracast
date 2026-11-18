@@ -334,7 +334,9 @@ def _write_body(response: HttpResponse, body: Mapping[str, object]) -> None:
     response["Content-Type"] = "application/json"
     if response.has_header("Content-Length"):
         response["Content-Length"] = str(len(response.content))
-    del response["ETag"]
+    # The new bytes invalidate every header that describes the old representation.
+    for header in ("ETag", "Content-Encoding", "Content-MD5"):
+        del response[header]
 
 
 def refuse_in_place(request: HttpRequest, response: HttpResponse, code: ErrorCode) -> HttpResponse:

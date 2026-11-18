@@ -131,17 +131,23 @@ class ForecastQuery(InputSerializer):
     )
 
 
-class ForecastOutput(serializers.Serializer[dict[str, Any]]):
-    region_id = serializers.IntegerField()
+class ForecastEnvelope(serializers.Serializer[dict[str, Any]]):
     date = serializers.DateField()
     timezone = serializers.CharField()
-    status = serializers.CharField()
-    freshness = serializers.CharField()
     source_kind = serializers.ChoiceField(choices=("forecast", "estimated_actuals", "mixed"))
-    unavailable_reason = serializers.CharField(allow_null=True)
+    freshness = serializers.ChoiceField(choices=("fresh", "stale", "missing"))
+    unavailable_reason = serializers.ChoiceField(
+        choices=(
+            "configuration_unavailable",
+            "forecast_unavailable",
+            "estimated_actuals_unavailable",
+        ),
+        allow_null=True,
+    )
     result = serializers.JSONField(allow_null=True)
+
+
+class ForecastOutput(ForecastEnvelope):
     collected_at = serializers.DateTimeField(allow_null=True)
     issued_at = serializers.DateTimeField(allow_null=True)
-    binding_revision = serializers.IntegerField(allow_null=True)
-    scheduled_slot = serializers.DateTimeField(allow_null=True)
-    late = serializers.BooleanField(allow_null=True)
+    binding_id = serializers.IntegerField(allow_null=True)
