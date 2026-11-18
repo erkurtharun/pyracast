@@ -3131,10 +3131,22 @@
                 "type": "string",
                 "description": "* `activated` - activated\n* `skipped` - skipped"
             },
+            "BaselineSourceKindEnum": {
+                "enum": [
+                    "manual",
+                    "realtime_generation",
+                    "settlement_injection"
+                ],
+                "type": "string",
+                "description": "* `manual` - Manual\n* `realtime_generation` - Real-time generation\n* `settlement_injection` - Settlement injection"
+            },
             "BindingHealthEnum": {
                 "enum": ["unknown", "healthy", "error"],
                 "type": "string",
                 "description": "* `unknown` - Unknown\n* `healthy` - Healthy\n* `error` - Error"
+            },
+            "BlankEnum": {
+                "enum": [""]
             },
             "CalibrationAutomationOutput": {
                 "type": "object",
@@ -3170,6 +3182,15 @@
                     "last_attempt",
                     "next_check_at"
                 ]
+            },
+            "CalibrationErrorEnum": {
+                "enum": [
+                    "attempt_limit",
+                    "invalid_cutoff",
+                    "invalid_calibration_data"
+                ],
+                "type": "string",
+                "description": "* `attempt_limit` - Attempt limit reached\n* `invalid_cutoff` - Invalid cutoff\n* `invalid_calibration_data` - Invalid calibration data"
             },
             "CalibrationInput": {
                 "type": "object",
@@ -3289,7 +3310,7 @@
                     "superseded"
                 ],
                 "type": "string",
-                "description": "* `pending` - pending\n* `running` - running\n* `ready` - ready\n* `insufficient` - insufficient\n* `rejected` - rejected\n* `failed` - failed\n* `superseded` - superseded"
+                "description": "* `pending` - Pending\n* `running` - Running\n* `ready` - Ready\n* `insufficient` - Insufficient\n* `rejected` - Rejected\n* `failed` - Failed\n* `superseded` - Superseded"
             },
             "CalibrationSummaryOutput": {
                 "type": "object",
@@ -3586,6 +3607,36 @@
                     "unread"
                 ]
             },
+            "CollectionEndpointEnum": {
+                "enum": [
+                    "forecasts",
+                    "estimated_actuals",
+                    "historical_import",
+                    "scaled_forecasts",
+                    "scaled_estimated_actuals"
+                ],
+                "type": "string",
+                "description": "* `forecasts` - Forecasts\n* `estimated_actuals` - Estimated actuals\n* `historical_import` - Historical import\n* `scaled_forecasts` - Scaled forecasts\n* `scaled_estimated_actuals` - Scaled estimated actuals"
+            },
+            "CollectionJobErrorEnum": {
+                "enum": [
+                    "history_window_closed",
+                    "attempts_exhausted",
+                    "forecast_superseded",
+                    "history_incomplete",
+                    "history_already_archived",
+                    "provider_authentication_failed",
+                    "provider_throttled",
+                    "history_budget_reserved",
+                    "quota_exhausted",
+                    "provider_failure",
+                    "provider_unexpected_failure",
+                    "invalid_source_kind",
+                    "calculation_failure"
+                ],
+                "type": "string",
+                "description": "* `history_window_closed` - History window closed\n* `attempts_exhausted` - Attempts exhausted\n* `forecast_superseded` - Forecast superseded\n* `history_incomplete` - History incomplete\n* `history_already_archived` - History already archived\n* `provider_authentication_failed` - Provider authentication failed\n* `provider_throttled` - Provider throttled\n* `history_budget_reserved` - History budget reserved\n* `quota_exhausted` - Quota exhausted\n* `provider_failure` - Provider failure\n* `provider_unexpected_failure` - Provider unexpected failure\n* `invalid_source_kind` - Invalid source kind\n* `calculation_failure` - Calculation failure"
+            },
             "CollectionJobOutput": {
                 "type": "object",
                 "properties": {
@@ -3593,10 +3644,10 @@
                         "type": "integer"
                     },
                     "endpoint": {
-                        "type": "string"
+                        "$ref": "#/components/schemas/CollectionEndpointEnum"
                     },
                     "status": {
-                        "type": "string"
+                        "$ref": "#/components/schemas/CollectionJobStatusEnum"
                     },
                     "scheduled_slot": {
                         "type": "string",
@@ -3615,7 +3666,14 @@
                         "type": "integer"
                     },
                     "last_error": {
-                        "type": "string"
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/CollectionJobErrorEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/BlankEnum"
+                            }
+                        ]
                     }
                 },
                 "required": [
@@ -3628,6 +3686,18 @@
                     "scheduled_slot",
                     "status"
                 ]
+            },
+            "CollectionJobStatusEnum": {
+                "enum": [
+                    "pending",
+                    "running",
+                    "retry",
+                    "succeeded",
+                    "failed",
+                    "stale"
+                ],
+                "type": "string",
+                "description": "* `pending` - Pending\n* `running` - Running\n* `retry` - Retry\n* `succeeded` - Succeeded\n* `failed` - Failed\n* `stale` - Stale"
             },
             "CollectionScheduleInput": {
                 "type": "object",
@@ -3829,6 +3899,17 @@
                 },
                 "required": ["ends_at", "starts_at"]
             },
+            "DispatcherPhaseEnum": {
+                "enum": [
+                    "collection",
+                    "notifications",
+                    "calibration",
+                    "retention",
+                    "metering"
+                ],
+                "type": "string",
+                "description": "* `collection` - Collection\n* `notifications` - Notifications\n* `calibration` - Calibration\n* `retention` - Retention\n* `metering` - Metering"
+            },
             "EpiasConnectionOutput": {
                 "type": "object",
                 "properties": {
@@ -3865,7 +3946,14 @@
                         "nullable": true
                     },
                     "last_error": {
-                        "type": "string"
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/EpiasJobErrorEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/BlankEnum"
+                            }
+                        ]
                     },
                     "pending_jobs": {
                         "type": "integer"
@@ -3887,6 +3975,34 @@
                     "provider_plant_id",
                     "settlement_plant_id"
                 ]
+            },
+            "EpiasJobErrorEnum": {
+                "enum": [
+                    "retry_window_expired",
+                    "attempts_exhausted",
+                    "epias_provider_failure",
+                    "unpublished_data",
+                    "partial_data"
+                ],
+                "type": "string",
+                "description": "* `retry_window_expired` - Retry window expired\n* `attempts_exhausted` - Attempts exhausted\n* `epias_provider_failure` - Epias provider failure\n* `unpublished_data` - Unpublished data\n* `partial_data` - Partial data"
+            },
+            "EpiasJobStatusEnum": {
+                "enum": [
+                    "pending",
+                    "running",
+                    "succeeded",
+                    "failed",
+                    "superseded",
+                    "awaiting_publication"
+                ],
+                "type": "string",
+                "description": "* `pending` - Pending\n* `running` - Running\n* `succeeded` - Succeeded\n* `failed` - Failed\n* `superseded` - Superseded\n* `awaiting_publication` - Awaiting publication"
+            },
+            "EpiasSourceKindEnum": {
+                "enum": ["realtime_generation", "settlement_injection"],
+                "type": "string",
+                "description": "* `realtime_generation` - Real-time generation\n* `settlement_injection` - Settlement injection"
             },
             "Error": {
                 "type": "object",
@@ -4215,7 +4331,7 @@
             "IncidentKindEnum": {
                 "enum": ["inverter", "panels", "grid", "other", "multiple"],
                 "type": "string",
-                "description": "* `inverter` - inverter\n* `panels` - panels\n* `grid` - grid\n* `other` - other\n* `multiple` - multiple"
+                "description": "* `inverter` - Inverter\n* `panels` - Panels\n* `grid` - Grid\n* `other` - Other\n* `multiple` - Multiple"
             },
             "IncidentOutput": {
                 "type": "object",
@@ -4229,7 +4345,11 @@
                         "readOnly": true
                     },
                     "kind": {
-                        "type": "string",
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/IncidentKindEnum"
+                            }
+                        ],
                         "readOnly": true
                     },
                     "title": {
@@ -4582,6 +4702,45 @@
                 "type": "string",
                 "description": "* `unknown` - Unknown\n* `fixed` - Fixed\n* `tracking` - Tracking"
             },
+            "NotificationDeliveryErrorEnum": {
+                "enum": [
+                    "missed_schedule",
+                    "delivery_deadline_exceeded",
+                    "cancelled_by_settings_change",
+                    "schedule_or_authority_changed",
+                    "no_recipients",
+                    "invalid_recipient",
+                    "recipient_limit_exceeded",
+                    "definition_trashed",
+                    "interrupted_send",
+                    "interrupted_connection",
+                    "mail_not_sent",
+                    "mail_configuration_invalid",
+                    "mail_credentials_rejected",
+                    "mail_authorization_revoked",
+                    "mail_rate_limited",
+                    "mail_rejected",
+                    "mail_sender_forbidden",
+                    "mail_preparation_failed",
+                    "mail_outcome_uncertain"
+                ],
+                "type": "string",
+                "description": "* `missed_schedule` - Missed schedule\n* `delivery_deadline_exceeded` - Delivery deadline exceeded\n* `cancelled_by_settings_change` - Cancelled by settings change\n* `schedule_or_authority_changed` - Schedule or authority changed\n* `no_recipients` - No recipients\n* `invalid_recipient` - Invalid recipient\n* `recipient_limit_exceeded` - Recipient limit exceeded\n* `definition_trashed` - Definition trashed\n* `interrupted_send` - Interrupted during sending\n* `interrupted_connection` - Interrupted before sending\n* `mail_not_sent` - Mail not sent\n* `mail_configuration_invalid` - Mail configuration invalid\n* `mail_credentials_rejected` - Mail credentials rejected\n* `mail_authorization_revoked` - Mail authorization revoked\n* `mail_rate_limited` - Mail rate limited\n* `mail_rejected` - Mail rejected\n* `mail_sender_forbidden` - Mail sender forbidden\n* `mail_preparation_failed` - Mail preparation failed\n* `mail_outcome_uncertain` - Mail outcome uncertain"
+            },
+            "NotificationDeliveryStatusEnum": {
+                "enum": [
+                    "pending",
+                    "retry",
+                    "sending",
+                    "sent",
+                    "failed",
+                    "uncertain",
+                    "skipped",
+                    "cancelled"
+                ],
+                "type": "string",
+                "description": "* `pending` - Pending\n* `retry` - Retry\n* `sending` - Sending\n* `sent` - Sent\n* `failed` - Failed\n* `uncertain` - Uncertain\n* `skipped` - Skipped\n* `cancelled` - Cancelled"
+            },
             "NullEnum": {
                 "enum": [null]
             },
@@ -4653,7 +4812,7 @@
                     "quality": {
                         "allOf": [
                             {
-                                "$ref": "#/components/schemas/ProductionQualityEnum"
+                                "$ref": "#/components/schemas/ObservationQualityEnum"
                             }
                         ],
                         "readOnly": true
@@ -4693,6 +4852,11 @@
                     "supersedes_id"
                 ]
             },
+            "ObservationQualityEnum": {
+                "enum": ["valid", "outage", "curtailed", "invalid"],
+                "type": "string",
+                "description": "* `valid` - Valid\n* `outage` - Outage\n* `curtailed` - Curtailed\n* `invalid` - Invalid"
+            },
             "ObservationRow": {
                 "type": "object",
                 "properties": {
@@ -4712,7 +4876,7 @@
                     "quality": {
                         "allOf": [
                             {
-                                "$ref": "#/components/schemas/ProductionQualityEnum"
+                                "$ref": "#/components/schemas/ObservationQualityEnum"
                             }
                         ],
                         "default": "valid"
@@ -5257,6 +5421,28 @@
                     "uncertainty"
                 ]
             },
+            "PlantEventActionEnum": {
+                "enum": [
+                    "submission_saved",
+                    "configuration_created",
+                    "plant_renamed",
+                    "observations_imported",
+                    "production_changed",
+                    "epias_connected",
+                    "epias_disconnected",
+                    "calibration_requested",
+                    "calibration_scheduled",
+                    "calibration_completed",
+                    "calibration_activated",
+                    "calibration_automatically_activated",
+                    "calibration_reset",
+                    "calibration_automation_enabled",
+                    "calibration_automation_disabled",
+                    "calibration_automatic_skipped"
+                ],
+                "type": "string",
+                "description": "* `submission_saved` - Submission saved\n* `configuration_created` - Configuration created\n* `plant_renamed` - Plant renamed\n* `observations_imported` - Observations imported\n* `production_changed` - Production changed\n* `epias_connected` - EPIAS connected\n* `epias_disconnected` - EPIAS disconnected\n* `calibration_requested` - Calibration requested\n* `calibration_scheduled` - Calibration scheduled\n* `calibration_completed` - Calibration completed\n* `calibration_activated` - Calibration activated\n* `calibration_automatically_activated` - Calibration automatically activated\n* `calibration_reset` - Calibration reset\n* `calibration_automation_enabled` - Automatic calibration enabled\n* `calibration_automation_disabled` - Automatic calibration disabled\n* `calibration_automatic_skipped` - Automatic calibration skipped"
+            },
             "PlantForecastOutput": {
                 "type": "object",
                 "properties": {
@@ -5506,6 +5692,21 @@
                 "type": "string",
                 "description": "* `ac` - AC\n* `dc` - DC"
             },
+            "PreparedMessageFormatEnum": {
+                "enum": ["xlsx", "plain"],
+                "type": "string",
+                "description": "* `xlsx` - Workbook\n* `plain` - Plain text"
+            },
+            "PreparedMessageKindEnum": {
+                "enum": [
+                    "current",
+                    "saved_complete",
+                    "saved_partial",
+                    "unavailable"
+                ],
+                "type": "string",
+                "description": "* `current` - Current forecast\n* `saved_complete` - Saved complete forecast\n* `saved_partial` - Saved partial forecast\n* `unavailable` - Unavailable"
+            },
             "ProductionChangeActionEnum": {
                 "enum": ["set", "revert"],
                 "type": "string",
@@ -5538,7 +5739,7 @@
                     "quality": {
                         "allOf": [
                             {
-                                "$ref": "#/components/schemas/ProductionQualityEnum"
+                                "$ref": "#/components/schemas/ObservationQualityEnum"
                             }
                         ],
                         "default": "valid"
@@ -5840,7 +6041,14 @@
                         "nullable": true
                     },
                     "baseline_source_kind": {
-                        "type": "string"
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/BaselineSourceKindEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/BlankEnum"
+                            }
+                        ]
                     },
                     "current": {
                         "allOf": [
@@ -5884,7 +6092,7 @@
                         "nullable": true
                     },
                     "quality": {
-                        "type": "string"
+                        "$ref": "#/components/schemas/ObservationQualityEnum"
                     },
                     "source": {
                         "type": "string"
@@ -6033,11 +6241,6 @@
                     "source_kind",
                     "starts_at"
                 ]
-            },
-            "ProductionQualityEnum": {
-                "enum": ["valid", "outage", "curtailed", "invalid"],
-                "type": "string",
-                "description": "* `valid` - Valid\n* `outage` - Outage\n* `curtailed` - Curtailed\n* `invalid` - Invalid"
             },
             "ProductionRequestInput": {
                 "type": "object",
@@ -6232,14 +6435,28 @@
                         "format": "date-time"
                     },
                     "status": {
-                        "type": "string"
+                        "$ref": "#/components/schemas/NotificationDeliveryStatusEnum"
                     },
                     "last_error": {
-                        "type": "string"
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/NotificationDeliveryErrorEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/BlankEnum"
+                            }
+                        ]
                     },
                     "forecast_status": {
-                        "type": "string",
-                        "nullable": true
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/PreparedMessageKindEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
                     },
                     "forecast_complete": {
                         "type": "boolean",
@@ -6412,6 +6629,22 @@
                     }
                 },
                 "required": ["daily_reminder_limit", "queries_per_email"]
+            },
+            "RequestOutcomeEnum": {
+                "enum": ["uncertain", "succeeded", "failed"],
+                "type": "string",
+                "description": "* `uncertain` - Uncertain\n* `succeeded` - Succeeded\n* `failed` - Failed"
+            },
+            "RequestPurposeEnum": {
+                "enum": [
+                    "forecast",
+                    "estimated_actuals",
+                    "validation",
+                    "inspect_settings",
+                    "inspect_forecast"
+                ],
+                "type": "string",
+                "description": "* `forecast` - Forecast\n* `estimated_actuals` - Estimated actuals\n* `validation` - Validation\n* `inspect_settings` - Site settings check\n* `inspect_forecast` - Forecast check"
             },
             "ResolutionMinutesEnum": {
                 "enum": [30, 60],
@@ -6651,6 +6884,30 @@
                 "enum": ["daylight", "full_day"],
                 "type": "string",
                 "description": "* `daylight` - daylight\n* `full_day` - full_day"
+            },
+            "SnapshotSourceKindEnum": {
+                "enum": ["forecast", "estimated_actuals"],
+                "type": "string",
+                "description": "* `forecast` - Forecast\n* `estimated_actuals` - Estimated actuals"
+            },
+            "SnapshotWeatherErrorEnum": {
+                "enum": [
+                    "invalid_weather_number",
+                    "invalid_weather_coordinates",
+                    "invalid_weather_schema",
+                    "invalid_weather_timezone",
+                    "invalid_weather_units",
+                    "empty_weather_response",
+                    "invalid_weather_interval",
+                    "invalid_weather_window",
+                    "unsafe_weather_response",
+                    "invalid_weather_collection_time",
+                    "weather_request_failed",
+                    "weather_acquisition_failed",
+                    "weather_acquisition_interrupted"
+                ],
+                "type": "string",
+                "description": "* `invalid_weather_number` - Invalid weather number\n* `invalid_weather_coordinates` - Invalid weather coordinates\n* `invalid_weather_schema` - Invalid weather schema\n* `invalid_weather_timezone` - Invalid weather timezone\n* `invalid_weather_units` - Invalid weather units\n* `empty_weather_response` - Empty weather response\n* `invalid_weather_interval` - Invalid weather interval\n* `invalid_weather_window` - Invalid weather window\n* `unsafe_weather_response` - Unsafe weather response\n* `invalid_weather_collection_time` - Invalid weather collection time\n* `weather_request_failed` - Weather request failed\n* `weather_acquisition_failed` - Weather acquisition failed\n* `weather_acquisition_interrupted` - Weather acquisition interrupted"
             },
             "TenantOutput": {
                 "type": "object",

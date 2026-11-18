@@ -10,7 +10,7 @@ from pyracast.forecasts.intraday import (
     apply_intraday_source,
     prepare_intraday_source,
 )
-from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.forecasts.models import CollectionJobStatus, ForecastSnapshot
 from pyracast.forecasts.projections import saved_day_payload
 from pyracast.forecasts.sources import snapshot_data
 from pyracast.irradiance import local_day_bounds
@@ -31,7 +31,9 @@ def eligible_saved_forecasts(
     cutoff = min(available_at, delivery.preparation_deadline)
     return (
         ForecastSnapshot.objects.filter(
-            binding=delivery.binding, job__status="succeeded", source_kind="forecast"
+            binding=delivery.binding,
+            job__status=CollectionJobStatus.SUCCEEDED,
+            source_kind="forecast",
         )
         .filter(_available_by(cutoff))
         .filter(

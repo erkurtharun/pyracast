@@ -38,7 +38,7 @@ def test_confirmed_admin_recovery_is_audited_and_keeps_quota_and_authentication_
         provider_account=system.account,
         utc_day=now.date(),
         created_at=now,
-        purpose="forecasts",
+        purpose="forecast",
         outcome="uncertain",
     )
     client, admin = verified_admin()

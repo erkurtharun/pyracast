@@ -13,7 +13,13 @@ from pyracast.accounts.authorization import require_platform_admin, tenant_membe
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.calibration_data import current_source_validation
-from pyracast.plants.models import CalibrationRun, Plant, PlantEvent
+from pyracast.plants.models import (
+    CalibrationRun,
+    CalibrationStatus,
+    Plant,
+    PlantEvent,
+    PlantEventAction,
+)
 from pyracast.plants.operations import _activate, _validate_activation, configuration_is_current
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.regions.models import Region
@@ -52,7 +58,10 @@ def automation_status(plant: Plant) -> dict[str, Any]:
         PlantEvent.objects.filter(
             plant=plant,
             details__configuration_id=plant.current_configuration_id,
-            action__in=("calibration_automatic_skipped", "calibration_automatically_activated"),
+            action__in=(
+                PlantEventAction.CALIBRATION_AUTOMATIC_SKIPPED,
+                PlantEventAction.CALIBRATION_AUTOMATICALLY_ACTIVATED,
+            ),
         )
         .order_by("-created_at", "-pk")
         .first()
@@ -95,7 +104,9 @@ def update_automation(plant: Plant, actor: User, *, enabled: bool, now: datetime
     PlantEvent.objects.create(
         plant=plant,
         actor=actor,
-        action="calibration_automation_enabled" if enabled else "calibration_automation_disabled",
+        action=PlantEventAction.CALIBRATION_AUTOMATION_ENABLED
+        if enabled
+        else PlantEventAction.CALIBRATION_AUTOMATION_DISABLED,
         details={"configuration_id": plant.current_configuration_id},
     )
 
@@ -147,9 +158,9 @@ def set_calibration_automation(
             )
             if (
                 latest is not None
-                and latest.status == "ready"
+                and latest.status == CalibrationStatus.READY
                 and not CalibrationRun.objects.filter(
-                    plant=plant, status__in=("pending", "running")
+                    plant=plant, status__in=(CalibrationStatus.PENDING, CalibrationStatus.RUNNING)
                 ).exists()
             ):
                 promote_automatic_calibration(plant, latest, timezone.now())
@@ -161,7 +172,7 @@ def _skip(plant: Plant, run_id: int | None, reason: str) -> None:
     PlantEvent.objects.create(
         plant=plant,
         actor=None,
-        action="calibration_automatic_skipped",
+        action=PlantEventAction.CALIBRATION_AUTOMATIC_SKIPPED,
         details={
             "calibration_id": run_id,
             "configuration_id": plant.current_configuration_id,
@@ -251,7 +262,7 @@ def promote_automatic_calibration(plant: Plant, run: CalibrationRun, now: dateti
         reason = "authorization_revoked"
     elif not configuration_is_current(run.configuration):
         reason = "configuration_changed"
-    elif run.status != "ready":
+    elif run.status != CalibrationStatus.READY:
         reason = f"candidate_{run.status}"
     else:
         try:

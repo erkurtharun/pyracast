@@ -4,6 +4,8 @@ from django.db import models
 from django.db.models import F, Q
 
 from pyracast.db import choices_check
+from pyracast.incidents.models import IncidentKind
+from pyracast.plants.models import ObservationQuality
 
 
 class ChangeRequestKind(models.TextChoices):
@@ -28,6 +30,12 @@ class IncidentChangeAction(models.TextChoices):
     UPDATE = "update", "Update"
     RESOLVE = "resolve", "Resolve"
     CANCEL = "cancel", "Cancel"
+
+
+class BaselineSourceKind(models.TextChoices):
+    MANUAL = "manual", "Manual"
+    REALTIME_GENERATION = "realtime_generation", "Real-time generation"
+    SETTLEMENT_INJECTION = "settlement_injection", "Settlement injection"
 
 
 DECIDED = (ChangeRequestStatus.APPROVED, ChangeRequestStatus.REJECTED)
@@ -98,13 +106,13 @@ class ProductionChangeItem(models.Model):
     ends_at = models.DateTimeField()
     action = models.CharField(max_length=10, choices=ProductionChangeAction)
     energy_mwh = models.FloatField()
-    quality = models.CharField(max_length=20)
+    quality = models.CharField(max_length=20, choices=ObservationQuality)
     source = models.CharField(max_length=200)
     expected_head = models.ForeignKey(
         "plants.ProductionObservation", on_delete=models.PROTECT, null=True, related_name="+"
     )
     baseline_energy_mwh = models.FloatField(null=True)
-    baseline_source_kind = models.CharField(max_length=40, blank=True)
+    baseline_source_kind = models.CharField(max_length=40, choices=BaselineSourceKind, blank=True)
     applied_observation = models.ForeignKey(
         "plants.ProductionObservation", on_delete=models.PROTECT, null=True, related_name="+"
     )
@@ -126,10 +134,8 @@ class ProductionChangeItem(models.Model):
             models.CheckConstraint(
                 condition=Q(ends_at__gt=F("starts_at")), name="proposal_production_interval_valid"
             ),
-            models.CheckConstraint(
-                condition=Q(quality__in=("valid", "outage", "curtailed", "invalid")),
-                name="proposal_production_quality_valid",
-            ),
+            choices_check("quality", ObservationQuality, name="proposal_production_quality_valid"),
+            choices_check("baseline_source_kind", BaselineSourceKind, blank=True),
             models.UniqueConstraint(
                 fields=("request", "starts_at", "ends_at"),
                 name="proposal_production_interval_unique",
@@ -144,7 +150,7 @@ class IncidentChange(models.Model):
     action = models.CharField(max_length=10, choices=IncidentChangeAction)
     incident = models.ForeignKey("incidents.PlantIncident", on_delete=models.PROTECT, null=True)
     expected_revision = models.PositiveIntegerField(null=True)
-    kind = models.CharField(max_length=20, blank=True)
+    kind = models.CharField(max_length=20, choices=IncidentKind, blank=True)
     title = models.CharField(max_length=200, blank=True)
     notes = models.CharField(max_length=2000, blank=True)
     starts_at = models.DateTimeField(null=True)
@@ -181,7 +187,7 @@ class IncidentChange(models.Model):
                 | Q(
                     action__in=INCIDENT_EDITS,
                     starts_at__isnull=False,
-                    kind__in=("inverter", "panels", "grid", "other", "multiple"),
+                    kind__in=IncidentKind.values,
                 )
                 & ~Q(title=""),
                 name="proposal_incident_values_valid",
@@ -191,6 +197,7 @@ class IncidentChange(models.Model):
                 name="proposal_incident_end_required",
             ),
             choices_check("action", IncidentChangeAction),
+            choices_check("kind", IncidentKind, blank=True),
             *(
                 models.CheckConstraint(
                     condition=Q(**{f"{field}__isnull": True})

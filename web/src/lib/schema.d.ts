@@ -729,12 +729,22 @@ export interface components {
          */
         AutomaticCalibrationAttemptOutputStatusEnum: "activated" | "skipped";
         /**
+         * @description * `manual` - Manual
+         *     * `realtime_generation` - Real-time generation
+         *     * `settlement_injection` - Settlement injection
+         * @enum {string}
+         */
+        BaselineSourceKindEnum:
+            "manual" | "realtime_generation" | "settlement_injection";
+        /**
          * @description * `unknown` - Unknown
          *     * `healthy` - Healthy
          *     * `error` - Error
          * @enum {string}
          */
         BindingHealthEnum: "unknown" | "healthy" | "error";
+        /** @enum {unknown} */
+        BlankEnum: "";
         CalibrationAutomationOutput: {
             enabled: boolean;
             authorized: boolean;
@@ -745,6 +755,14 @@ export interface components {
                 | components["schemas"]["AutomaticCalibrationAttemptOutput"]
                 | null;
         };
+        /**
+         * @description * `attempt_limit` - Attempt limit reached
+         *     * `invalid_cutoff` - Invalid cutoff
+         *     * `invalid_calibration_data` - Invalid calibration data
+         * @enum {string}
+         */
+        CalibrationErrorEnum:
+            "attempt_limit" | "invalid_cutoff" | "invalid_calibration_data";
         CalibrationInput: {
             configuration_id: number;
             /** Format: date */
@@ -776,13 +794,13 @@ export interface components {
             readonly dataset_sha256: string;
         };
         /**
-         * @description * `pending` - pending
-         *     * `running` - running
-         *     * `ready` - ready
-         *     * `insufficient` - insufficient
-         *     * `rejected` - rejected
-         *     * `failed` - failed
-         *     * `superseded` - superseded
+         * @description * `pending` - Pending
+         *     * `running` - Running
+         *     * `ready` - Ready
+         *     * `insufficient` - Insufficient
+         *     * `rejected` - Rejected
+         *     * `failed` - Failed
+         *     * `superseded` - Superseded
          * @enum {string}
          */
         CalibrationStatusEnum:
@@ -877,10 +895,54 @@ export interface components {
             can_withdraw: boolean;
             unread: boolean;
         };
+        /**
+         * @description * `forecasts` - Forecasts
+         *     * `estimated_actuals` - Estimated actuals
+         *     * `historical_import` - Historical import
+         *     * `scaled_forecasts` - Scaled forecasts
+         *     * `scaled_estimated_actuals` - Scaled estimated actuals
+         * @enum {string}
+         */
+        CollectionEndpointEnum:
+            | "forecasts"
+            | "estimated_actuals"
+            | "historical_import"
+            | "scaled_forecasts"
+            | "scaled_estimated_actuals";
+        /**
+         * @description * `history_window_closed` - History window closed
+         *     * `attempts_exhausted` - Attempts exhausted
+         *     * `forecast_superseded` - Forecast superseded
+         *     * `history_incomplete` - History incomplete
+         *     * `history_already_archived` - History already archived
+         *     * `provider_authentication_failed` - Provider authentication failed
+         *     * `provider_throttled` - Provider throttled
+         *     * `history_budget_reserved` - History budget reserved
+         *     * `quota_exhausted` - Quota exhausted
+         *     * `provider_failure` - Provider failure
+         *     * `provider_unexpected_failure` - Provider unexpected failure
+         *     * `invalid_source_kind` - Invalid source kind
+         *     * `calculation_failure` - Calculation failure
+         * @enum {string}
+         */
+        CollectionJobErrorEnum:
+            | "history_window_closed"
+            | "attempts_exhausted"
+            | "forecast_superseded"
+            | "history_incomplete"
+            | "history_already_archived"
+            | "provider_authentication_failed"
+            | "provider_throttled"
+            | "history_budget_reserved"
+            | "quota_exhausted"
+            | "provider_failure"
+            | "provider_unexpected_failure"
+            | "invalid_source_kind"
+            | "calculation_failure";
         CollectionJobOutput: {
             id: number;
-            endpoint: string;
-            status: string;
+            endpoint: components["schemas"]["CollectionEndpointEnum"];
+            status: components["schemas"]["CollectionJobStatusEnum"];
             /** Format: date-time */
             scheduled_slot: string;
             /** Format: date-time */
@@ -888,8 +950,21 @@ export interface components {
             /** Format: date-time */
             retry_until: string | null;
             attempts: number;
-            last_error: string;
+            last_error:
+                | components["schemas"]["CollectionJobErrorEnum"]
+                | components["schemas"]["BlankEnum"];
         };
+        /**
+         * @description * `pending` - Pending
+         *     * `running` - Running
+         *     * `retry` - Retry
+         *     * `succeeded` - Succeeded
+         *     * `failed` - Failed
+         *     * `stale` - Stale
+         * @enum {string}
+         */
+        CollectionJobStatusEnum:
+            "pending" | "running" | "retry" | "succeeded" | "failed" | "stale";
         CollectionScheduleInput: {
             enabled: boolean;
             times: string[];
@@ -953,6 +1028,20 @@ export interface components {
             /** Format: date-time */
             ends_at: string;
         };
+        /**
+         * @description * `collection` - Collection
+         *     * `notifications` - Notifications
+         *     * `calibration` - Calibration
+         *     * `retention` - Retention
+         *     * `metering` - Metering
+         * @enum {string}
+         */
+        DispatcherPhaseEnum:
+            | "collection"
+            | "notifications"
+            | "calibration"
+            | "retention"
+            | "metering";
         EpiasConnectionOutput: {
             connected: boolean;
             provider_plant_id: number | null;
@@ -965,10 +1054,48 @@ export interface components {
             name: string;
             /** Format: date-time */
             last_success_at: string | null;
-            last_error: string;
+            last_error:
+                | components["schemas"]["EpiasJobErrorEnum"]
+                | components["schemas"]["BlankEnum"];
             pending_jobs: number;
             archived_days: number;
         };
+        /**
+         * @description * `retry_window_expired` - Retry window expired
+         *     * `attempts_exhausted` - Attempts exhausted
+         *     * `epias_provider_failure` - Epias provider failure
+         *     * `unpublished_data` - Unpublished data
+         *     * `partial_data` - Partial data
+         * @enum {string}
+         */
+        EpiasJobErrorEnum:
+            | "retry_window_expired"
+            | "attempts_exhausted"
+            | "epias_provider_failure"
+            | "unpublished_data"
+            | "partial_data";
+        /**
+         * @description * `pending` - Pending
+         *     * `running` - Running
+         *     * `succeeded` - Succeeded
+         *     * `failed` - Failed
+         *     * `superseded` - Superseded
+         *     * `awaiting_publication` - Awaiting publication
+         * @enum {string}
+         */
+        EpiasJobStatusEnum:
+            | "pending"
+            | "running"
+            | "succeeded"
+            | "failed"
+            | "superseded"
+            | "awaiting_publication";
+        /**
+         * @description * `realtime_generation` - Real-time generation
+         *     * `settlement_injection` - Settlement injection
+         * @enum {string}
+         */
+        EpiasSourceKindEnum: "realtime_generation" | "settlement_injection";
         /** @description Body of every failed /api/ response. */
         Error: {
             code: components["schemas"]["ErrorCode"];
@@ -1192,18 +1319,18 @@ export interface components {
             available_export_mw?: number | null;
         };
         /**
-         * @description * `inverter` - inverter
-         *     * `panels` - panels
-         *     * `grid` - grid
-         *     * `other` - other
-         *     * `multiple` - multiple
+         * @description * `inverter` - Inverter
+         *     * `panels` - Panels
+         *     * `grid` - Grid
+         *     * `other` - Other
+         *     * `multiple` - Multiple
          * @enum {string}
          */
         IncidentKindEnum: "inverter" | "panels" | "grid" | "other" | "multiple";
         IncidentOutput: {
             readonly id: number;
             readonly revision: number;
-            readonly kind: string;
+            readonly kind: components["schemas"]["IncidentKindEnum"];
             readonly title: string;
             readonly notes: string;
             /** Format: date-time */
@@ -1340,6 +1467,68 @@ export interface components {
          * @enum {string}
          */
         MountingTypeEnum: "unknown" | "fixed" | "tracking";
+        /**
+         * @description * `missed_schedule` - Missed schedule
+         *     * `delivery_deadline_exceeded` - Delivery deadline exceeded
+         *     * `cancelled_by_settings_change` - Cancelled by settings change
+         *     * `schedule_or_authority_changed` - Schedule or authority changed
+         *     * `no_recipients` - No recipients
+         *     * `invalid_recipient` - Invalid recipient
+         *     * `recipient_limit_exceeded` - Recipient limit exceeded
+         *     * `definition_trashed` - Definition trashed
+         *     * `interrupted_send` - Interrupted during sending
+         *     * `interrupted_connection` - Interrupted before sending
+         *     * `mail_not_sent` - Mail not sent
+         *     * `mail_configuration_invalid` - Mail configuration invalid
+         *     * `mail_credentials_rejected` - Mail credentials rejected
+         *     * `mail_authorization_revoked` - Mail authorization revoked
+         *     * `mail_rate_limited` - Mail rate limited
+         *     * `mail_rejected` - Mail rejected
+         *     * `mail_sender_forbidden` - Mail sender forbidden
+         *     * `mail_preparation_failed` - Mail preparation failed
+         *     * `mail_outcome_uncertain` - Mail outcome uncertain
+         * @enum {string}
+         */
+        NotificationDeliveryErrorEnum:
+            | "missed_schedule"
+            | "delivery_deadline_exceeded"
+            | "cancelled_by_settings_change"
+            | "schedule_or_authority_changed"
+            | "no_recipients"
+            | "invalid_recipient"
+            | "recipient_limit_exceeded"
+            | "definition_trashed"
+            | "interrupted_send"
+            | "interrupted_connection"
+            | "mail_not_sent"
+            | "mail_configuration_invalid"
+            | "mail_credentials_rejected"
+            | "mail_authorization_revoked"
+            | "mail_rate_limited"
+            | "mail_rejected"
+            | "mail_sender_forbidden"
+            | "mail_preparation_failed"
+            | "mail_outcome_uncertain";
+        /**
+         * @description * `pending` - Pending
+         *     * `retry` - Retry
+         *     * `sending` - Sending
+         *     * `sent` - Sent
+         *     * `failed` - Failed
+         *     * `uncertain` - Uncertain
+         *     * `skipped` - Skipped
+         *     * `cancelled` - Cancelled
+         * @enum {string}
+         */
+        NotificationDeliveryStatusEnum:
+            | "pending"
+            | "retry"
+            | "sending"
+            | "sent"
+            | "failed"
+            | "uncertain"
+            | "skipped"
+            | "cancelled";
         /** @enum {unknown} */
         NullEnum: null;
         ObservationImport: {
@@ -1362,7 +1551,7 @@ export interface components {
             readonly ends_at: string;
             /** Format: double */
             readonly energy_mwh: number;
-            readonly quality: components["schemas"]["ProductionQualityEnum"];
+            readonly quality: components["schemas"]["ObservationQualityEnum"];
             readonly source: string;
             recorded_by_id: number;
             /** Format: date-time */
@@ -1370,6 +1559,14 @@ export interface components {
             supersedes_id: number | null;
             readonly is_reverted: boolean;
         };
+        /**
+         * @description * `valid` - Valid
+         *     * `outage` - Outage
+         *     * `curtailed` - Curtailed
+         *     * `invalid` - Invalid
+         * @enum {string}
+         */
+        ObservationQualityEnum: "valid" | "outage" | "curtailed" | "invalid";
         ObservationRow: {
             /** Format: date-time */
             starts_at: string;
@@ -1378,7 +1575,7 @@ export interface components {
             /** Format: double */
             energy: number;
             /** @default valid */
-            quality: components["schemas"]["ProductionQualityEnum"];
+            quality: components["schemas"]["ObservationQualityEnum"];
             source: string;
         };
         PaginatedCalibrationSummaryOutputList: {
@@ -1591,6 +1788,42 @@ export interface components {
             days: components["schemas"]["PerformanceDay"][];
             uncertainty: string;
         };
+        /**
+         * @description * `submission_saved` - Submission saved
+         *     * `configuration_created` - Configuration created
+         *     * `plant_renamed` - Plant renamed
+         *     * `observations_imported` - Observations imported
+         *     * `production_changed` - Production changed
+         *     * `epias_connected` - EPIAS connected
+         *     * `epias_disconnected` - EPIAS disconnected
+         *     * `calibration_requested` - Calibration requested
+         *     * `calibration_scheduled` - Calibration scheduled
+         *     * `calibration_completed` - Calibration completed
+         *     * `calibration_activated` - Calibration activated
+         *     * `calibration_automatically_activated` - Calibration automatically activated
+         *     * `calibration_reset` - Calibration reset
+         *     * `calibration_automation_enabled` - Automatic calibration enabled
+         *     * `calibration_automation_disabled` - Automatic calibration disabled
+         *     * `calibration_automatic_skipped` - Automatic calibration skipped
+         * @enum {string}
+         */
+        PlantEventActionEnum:
+            | "submission_saved"
+            | "configuration_created"
+            | "plant_renamed"
+            | "observations_imported"
+            | "production_changed"
+            | "epias_connected"
+            | "epias_disconnected"
+            | "calibration_requested"
+            | "calibration_scheduled"
+            | "calibration_completed"
+            | "calibration_activated"
+            | "calibration_automatically_activated"
+            | "calibration_reset"
+            | "calibration_automation_enabled"
+            | "calibration_automation_disabled"
+            | "calibration_automatic_skipped";
         PlantForecastOutput: {
             plant_id: number;
             /** Format: date */
@@ -1665,6 +1898,21 @@ export interface components {
          */
         PowerBasisEnum: "ac" | "dc";
         /**
+         * @description * `xlsx` - Workbook
+         *     * `plain` - Plain text
+         * @enum {string}
+         */
+        PreparedMessageFormatEnum: "xlsx" | "plain";
+        /**
+         * @description * `current` - Current forecast
+         *     * `saved_complete` - Saved complete forecast
+         *     * `saved_partial` - Saved partial forecast
+         *     * `unavailable` - Unavailable
+         * @enum {string}
+         */
+        PreparedMessageKindEnum:
+            "current" | "saved_complete" | "saved_partial" | "unavailable";
+        /**
          * @description * `set` - Set
          *     * `revert` - Revert
          * @enum {string}
@@ -1680,7 +1928,7 @@ export interface components {
             /** Format: double */
             energy?: number;
             /** @default valid */
-            quality: components["schemas"]["ProductionQualityEnum"];
+            quality: components["schemas"]["ObservationQualityEnum"];
             /** @default operator */
             source: string;
         };
@@ -1757,7 +2005,9 @@ export interface components {
             expected_revision_id: number | null;
             /** Format: double */
             baseline_energy_mwh: number | null;
-            baseline_source_kind: string;
+            baseline_source_kind:
+                | components["schemas"]["BaselineSourceKindEnum"]
+                | components["schemas"]["BlankEnum"];
             current: components["schemas"]["ProductionValueOutput"] | null;
             automatic: components["schemas"]["ProductionValueOutput"] | null;
             provider_intervals: components["schemas"]["ProviderIntervalOutput"][];
@@ -1765,7 +2015,7 @@ export interface components {
             proposed: components["schemas"]["ProductionValueOutput"] | null;
             /** Format: double */
             energy_mwh: number | null;
-            quality: string;
+            quality: components["schemas"]["ObservationQualityEnum"];
             source: string;
             applied_observation_id: number | null;
         };
@@ -1808,14 +2058,6 @@ export interface components {
             content_sha256: string;
             provisional: boolean;
         };
-        /**
-         * @description * `valid` - Valid
-         *     * `outage` - Outage
-         *     * `curtailed` - Curtailed
-         *     * `invalid` - Invalid
-         * @enum {string}
-         */
-        ProductionQualityEnum: "valid" | "outage" | "curtailed" | "invalid";
         ProductionRequestInput: {
             configuration_id: number;
             unit: components["schemas"]["UnitEnum"];
@@ -1877,9 +2119,16 @@ export interface components {
             recipients: string[];
             /** Format: date-time */
             scheduled_for: string;
-            status: string;
-            last_error: string;
-            forecast_status: string | null;
+            status: components["schemas"]["NotificationDeliveryStatusEnum"];
+            last_error:
+                | components["schemas"]["NotificationDeliveryErrorEnum"]
+                | components["schemas"]["BlankEnum"];
+            forecast_status:
+                | (
+                      | components["schemas"]["PreparedMessageKindEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
             forecast_complete: boolean | null;
             /** Format: date-time */
             collected_at: string | null;
@@ -1918,6 +2167,27 @@ export interface components {
             daily_reminder_limit: number;
             queries_per_email: number;
         };
+        /**
+         * @description * `uncertain` - Uncertain
+         *     * `succeeded` - Succeeded
+         *     * `failed` - Failed
+         * @enum {string}
+         */
+        RequestOutcomeEnum: "uncertain" | "succeeded" | "failed";
+        /**
+         * @description * `forecast` - Forecast
+         *     * `estimated_actuals` - Estimated actuals
+         *     * `validation` - Validation
+         *     * `inspect_settings` - Site settings check
+         *     * `inspect_forecast` - Forecast check
+         * @enum {string}
+         */
+        RequestPurposeEnum:
+            | "forecast"
+            | "estimated_actuals"
+            | "validation"
+            | "inspect_settings"
+            | "inspect_forecast";
         /**
          * @description * `30` - 30
          *     * `60` - 60
@@ -1986,6 +2256,42 @@ export interface components {
          * @enum {string}
          */
         SlotScopeEnum: "daylight" | "full_day";
+        /**
+         * @description * `forecast` - Forecast
+         *     * `estimated_actuals` - Estimated actuals
+         * @enum {string}
+         */
+        SnapshotSourceKindEnum: "forecast" | "estimated_actuals";
+        /**
+         * @description * `invalid_weather_number` - Invalid weather number
+         *     * `invalid_weather_coordinates` - Invalid weather coordinates
+         *     * `invalid_weather_schema` - Invalid weather schema
+         *     * `invalid_weather_timezone` - Invalid weather timezone
+         *     * `invalid_weather_units` - Invalid weather units
+         *     * `empty_weather_response` - Empty weather response
+         *     * `invalid_weather_interval` - Invalid weather interval
+         *     * `invalid_weather_window` - Invalid weather window
+         *     * `unsafe_weather_response` - Unsafe weather response
+         *     * `invalid_weather_collection_time` - Invalid weather collection time
+         *     * `weather_request_failed` - Weather request failed
+         *     * `weather_acquisition_failed` - Weather acquisition failed
+         *     * `weather_acquisition_interrupted` - Weather acquisition interrupted
+         * @enum {string}
+         */
+        SnapshotWeatherErrorEnum:
+            | "invalid_weather_number"
+            | "invalid_weather_coordinates"
+            | "invalid_weather_schema"
+            | "invalid_weather_timezone"
+            | "invalid_weather_units"
+            | "empty_weather_response"
+            | "invalid_weather_interval"
+            | "invalid_weather_window"
+            | "unsafe_weather_response"
+            | "invalid_weather_collection_time"
+            | "weather_request_failed"
+            | "weather_acquisition_failed"
+            | "weather_acquisition_interrupted";
         TenantOutput: {
             readonly id: number;
             readonly name: string;

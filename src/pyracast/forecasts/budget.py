@@ -4,7 +4,13 @@ from zoneinfo import ZoneInfo
 from django.conf import settings
 
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.forecasts.models import CollectionJob, CollectionSchedule, RequestAttempt
+from pyracast.forecasts.models import (
+    CollectionEndpoint,
+    CollectionJob,
+    CollectionJobStatus,
+    CollectionSchedule,
+    RequestAttempt,
+)
 from pyracast.notifications.schedule import local_slot
 
 
@@ -30,7 +36,9 @@ def remaining_forecast_requests(account: ProviderAccount, now: datetime) -> int:
         schedule = CollectionSchedule.objects.filter(region_id=binding.region_id).first()
         if schedule is not None and not schedule.enabled:
             continue
-        jobs = list(CollectionJob.objects.filter(binding=binding, endpoint="forecasts"))
+        jobs = list(
+            CollectionJob.objects.filter(binding=binding, endpoint=CollectionEndpoint.FORECASTS)
+        )
         if not jobs:
             continue
         effective = schedule.effective_from if schedule else min(job.scheduled_slot for job in jobs)
@@ -39,11 +47,22 @@ def remaining_forecast_requests(account: ProviderAccount, now: datetime) -> int:
         paid_or_terminal = {
             job.scheduled_slot
             for job in jobs
-            if job.pk in attempted or job.status in {"succeeded", "failed", "stale"}
+            if job.pk in attempted
+            or job.status
+            in {
+                CollectionJobStatus.SUCCEEDED,
+                CollectionJobStatus.FAILED,
+                CollectionJobStatus.STALE,
+            }
         }
         for job in jobs:
             if (
-                job.status in {"pending", "retry", "running"}
+                job.status
+                in {
+                    CollectionJobStatus.PENDING,
+                    CollectionJobStatus.RETRY,
+                    CollectionJobStatus.RUNNING,
+                }
                 and job.pk not in attempted
                 and job.available_at < day_end
             ):

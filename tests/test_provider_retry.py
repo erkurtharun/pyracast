@@ -10,7 +10,7 @@ from pyracast.connections.operations import (
     reserve_account_request,
 )
 from pyracast.forecasts.jobs import collect
-from pyracast.forecasts.models import CollectionJob, RequestAttempt
+from pyracast.forecasts.models import CollectionJob, RequestAttempt, RequestPurpose
 from pyracast.provider_retry import next_retry_at, retry_after_seconds
 from tests.support.domain import NOW, FakeAdapter, make_system
 from tests.support.jobs import calculate
@@ -63,7 +63,9 @@ def test_long_throttling_hint_blocks_every_new_account_request() -> None:
     job.refresh_from_db()
     assert job.available_at >= NOW + timedelta(days=2)
     with pytest.raises(RequestDeferredError) as caught:
-        reserve_account_request(system.account, NOW + timedelta(days=1), purpose="validation")
+        reserve_account_request(
+            system.account, NOW + timedelta(days=1), purpose=RequestPurpose.VALIDATION
+        )
     assert caught.value.available_at is not None
     assert caught.value.available_at >= NOW + timedelta(days=2)
     assert RequestAttempt.objects.filter(purpose="forecast").count() == 1
@@ -81,4 +83,6 @@ def test_pathological_throttling_hint_remains_a_durable_safe_deferral() -> None:
         days=1
     )
     with pytest.raises(RequestDeferredError):
-        reserve_account_request(system.account, NOW + timedelta(days=365), purpose="validation")
+        reserve_account_request(
+            system.account, NOW + timedelta(days=365), purpose=RequestPurpose.VALIDATION
+        )

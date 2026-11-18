@@ -246,14 +246,14 @@ def test_paired_actuals_cannot_spend_reserved_future_forecast_quota() -> None:
         provider_account=system.account,
         utc_day=MORNING.date(),
         created_at=MORNING,
-        purpose="operator",
+        purpose="validation",
         outcome="succeeded",
     )
     RequestAttempt.objects.create(
         provider_account=system.account,
         utc_day=MORNING.date(),
         created_at=MORNING,
-        purpose="operator",
+        purpose="validation",
         outcome="succeeded",
     )
     job = actual_job(system.binding.pk)

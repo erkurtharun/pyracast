@@ -6,9 +6,14 @@ from django.core.exceptions import ValidationError
 from django.db import close_old_connections, transaction
 
 from pyracast.accounts.models import Tenant
-from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.forecasts.models import CollectionJobStatus, ForecastSnapshot
 from pyracast.notifications.eligibility import binding_can_notify
-from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
+from pyracast.notifications.models import (
+    NotificationDelivery,
+    NotificationDeliveryError,
+    NotificationDeliveryStatus,
+    ReminderSchedule,
+)
 from pyracast.notifications.operations import (
     effective_recipients,
     recipient_limit,
@@ -60,11 +65,11 @@ def slot_recipients(schedule: ReminderSchedule, limit: int) -> tuple[list[str], 
         for address in recipients:
             validate_recipient(address)
     except ValidationError, TypeError:
-        return [], "invalid_recipient"
+        return [], NotificationDeliveryError.INVALID_RECIPIENT
     if not recipients:
-        return [], "no_recipients"
+        return [], NotificationDeliveryError.NO_RECIPIENTS
     if len(recipients) > limit:
-        return [], "recipient_limit_exceeded"
+        return [], NotificationDeliveryError.RECIPIENT_LIMIT_EXCEEDED
     return recipients, ""
 
 
@@ -116,7 +121,7 @@ def _enqueue_schedule(schedule: ReminderSchedule, now: datetime) -> list[int]:
                         binding=binding,
                         preparation_deadline=slot + PREPARATION_GRACE,
                         available_at=now,
-                        status="skipped",
+                        status=NotificationDeliveryStatus.SKIPPED,
                         last_error=reason,
                     )
                     ids.append(paused.pk)
@@ -124,7 +129,7 @@ def _enqueue_schedule(schedule: ReminderSchedule, now: datetime) -> list[int]:
                 snapshot = (
                     ForecastSnapshot.objects.filter(
                         job__binding=binding,
-                        job__status="succeeded",
+                        job__status=CollectionJobStatus.SUCCEEDED,
                         source_kind="forecast",
                         collected_at__lte=slot,
                         forecastresult__published_at__lte=slot,
@@ -142,8 +147,12 @@ def _enqueue_schedule(schedule: ReminderSchedule, now: datetime) -> list[int]:
                     binding=binding,
                     preparation_deadline=slot + PREPARATION_GRACE,
                     available_at=now,
-                    status="skipped" if now - slot > MAX_LATENESS else "pending",
-                    last_error="missed_schedule" if now - slot > MAX_LATENESS else "",
+                    status=NotificationDeliveryStatus.SKIPPED
+                    if now - slot > MAX_LATENESS
+                    else NotificationDeliveryStatus.PENDING,
+                    last_error=NotificationDeliveryError.MISSED_SCHEDULE
+                    if now - slot > MAX_LATENESS
+                    else "",
                 )
                 ids.append(delivery.pk)
     return ids

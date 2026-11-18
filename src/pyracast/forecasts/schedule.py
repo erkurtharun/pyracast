@@ -18,7 +18,13 @@ from pyracast.collection_window import (
     next_nightly_start,
 )
 from pyracast.forecasts.jobs import binding_is_current
-from pyracast.forecasts.models import CollectionJob, CollectionSchedule, ForecastSnapshot
+from pyracast.forecasts.models import (
+    CollectionEndpoint,
+    CollectionJob,
+    CollectionJobStatus,
+    CollectionSchedule,
+    ForecastSnapshot,
+)
 from pyracast.forecasts.timing import effective_forecast_schedule, next_forecast_slot
 from pyracast.regions.models import AuditAction, AuditEvent, Region
 
@@ -79,7 +85,8 @@ def configure_schedule(
             defaults={"enabled": enabled, "times": times, "effective_from": now},
         )
         unclaimed = CollectionJob.objects.filter(
-            binding__region=region, status__in=("pending", "retry")
+            binding__region=region,
+            status__in=(CollectionJobStatus.PENDING, CollectionJobStatus.RETRY),
         )
         if enabled:
             zone = ZoneInfo(region.timezone)
@@ -88,11 +95,14 @@ def configure_schedule(
                 for pk, endpoint, slot, target in unclaimed.values_list(
                     "pk", "endpoint", "scheduled_slot", "target_date"
                 )
-                if (endpoint != "forecasts" and target != slot.astimezone(zone).date())
+                if (
+                    endpoint != CollectionEndpoint.FORECASTS
+                    and target != slot.astimezone(zone).date()
+                )
                 or slot.astimezone(zone).strftime("%H:%M") in times
             ]
             unclaimed = unclaimed.exclude(pk__in=retained)
-        unclaimed.update(status="stale", lease_token=None, lease_expires_at=None)
+        unclaimed.update(status=CollectionJobStatus.STALE, lease_token=None, lease_expires_at=None)
         AuditEvent.objects.create(
             actor=actor,
             region=region,
@@ -112,7 +122,7 @@ def _next_collection_at(schedule: CollectionSchedule, now: datetime) -> datetime
         return None
     jobs = CollectionJob.objects.filter(binding=binding)
     timing = effective_forecast_schedule(
-        first_slot=jobs.filter(endpoint="forecasts", reference_import__isnull=True)
+        first_slot=jobs.filter(endpoint=CollectionEndpoint.FORECASTS, reference_import__isnull=True)
         .order_by("scheduled_slot")
         .values_list("scheduled_slot", flat=True)
         .first(),
@@ -121,7 +131,9 @@ def _next_collection_at(schedule: CollectionSchedule, now: datetime) -> datetime
     )
     if timing is None:
         return None
-    queued = jobs.filter(status__in=("pending", "retry")).aggregate(next=Min("available_at"))
+    queued = jobs.filter(
+        status__in=(CollectionJobStatus.PENDING, CollectionJobStatus.RETRY)
+    ).aggregate(next=Min("available_at"))
     zone = schedule.region.timezone
     planned = next_forecast_slot(now, zone, timing.times, timing.effective_from)
     moments = (queued["next"], planned, next_nightly_start(now, zone))
@@ -139,9 +151,9 @@ def schedule_payload(schedule: CollectionSchedule, now: datetime) -> dict[str, o
         "effective_from": schedule.effective_from,
         "last_success_at": ForecastSnapshot.objects.filter(
             binding=binding,
-            job__endpoint__in=("forecasts", "estimated_actuals"),
+            job__endpoint__in=(CollectionEndpoint.FORECASTS, CollectionEndpoint.ESTIMATED_ACTUALS),
             job__reference_import__isnull=True,
-            job__status="succeeded",
+            job__status=CollectionJobStatus.SUCCEEDED,
         ).aggregate(last=Max("collected_at"))["last"]
         if binding
         else None,
