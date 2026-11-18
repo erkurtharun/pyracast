@@ -190,11 +190,21 @@ def test_timeouts_are_redacted() -> None:
         SolcastProvider(httpx.MockTransport(handle)).fetch(binding_for(), TARGET)
 
 
-@pytest.mark.parametrize("body", [b"not json", b"<html>challenge</html>", b"\x80"])
-def test_an_unreadable_success_body_is_a_retryable_unreadable_answer(body: bytes) -> None:
+@pytest.mark.parametrize(
+    ("headers", "body"),
+    [
+        ({}, b"not json"),
+        ({}, b"<html>challenge</html>"),
+        ({}, b"\x80"),
+        ({"Content-Encoding": "gzip"}, b"not gzip"),
+    ],
+)
+def test_an_unreadable_success_body_is_a_retryable_unreadable_answer(
+    headers: dict[str, str], body: bytes
+) -> None:
 
     def handle(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, content=body)
+        return httpx.Response(200, headers=headers, stream=httpx.ByteStream(body))
 
     with pytest.raises(ProviderError, match=r"^invalid_provider_schema$") as caught:
         SolcastProvider(httpx.MockTransport(handle)).fetch(binding_for(), TARGET)
