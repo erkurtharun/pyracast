@@ -609,6 +609,22 @@ refused_handshake "${stranger[@]}"
 [[ $("${secure_curl[@]}" "${edge[@]}" https://localhost:18443/health/ready/) == ok ]]
 # Host-local probes keep working without the edge's certificate on the loopback entrypoint.
 [[ $("${secure_curl[@]}" https://localhost:18444/health/ready/) == ok ]]
+probe_origin_pull=(uv run --no-project --python 3.15.2 python
+  "$root/deploy/probe_origin_pull.py" localhost --port 18443 --cafile "$temporary/ca.pem")
+"${probe_origin_pull[@]}" --attempts 1
+# An authority Traefik cannot load leaves the public routers unbuilt; only the loopback one serves.
+printf -- '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n' > "$temporary/edge-invalid.pem"
+chmod 644 "$temporary/edge-invalid.pem"
+invalid_authority="$temporary/edge-invalid.pem"
+if command -v cygpath >/dev/null; then invalid_authority=$(cygpath -m "$invalid_authority"); fi
+ORIGIN_PULL=required ORIGIN_PULL_CA="$invalid_authority" \
+  "${compose[@]}" up -d --no-deps --wait --wait-timeout 120 gateway
+[[ $("${secure_curl[@]}" --retry 10 --retry-delay 1 --retry-all-errors \
+  https://localhost:18444/health/ready/) == ok ]]
+refused=0
+observed=$("${probe_origin_pull[@]}" --attempts 3 --interval 1 2>&1) || refused=$?
+[[ $refused == 1 && $observed == *'closed the connection during the handshake'* ]]
+refused_handshake "${edge[@]}"
 "${compose[@]}" up -d --no-deps --wait --wait-timeout 120 gateway
 ready
-echo 'Production containers, TLS routing, exact gateway headers, body, rate and in-flight limits, static assets, Turkish catalogs, session and sign-in API, workspace app shell, database roles and access rules, fixture queue publication, graceful idle shutdown, the maintenance notice, database reset and restore, and Authenticated Origin Pulls passed.'
+echo 'Production containers, TLS routing, exact gateway headers, body, rate and in-flight limits, static assets, Turkish catalogs, session and sign-in API, workspace app shell, database roles and access rules, fixture queue publication, graceful idle shutdown, the maintenance notice, database reset and restore, and Authenticated Origin Pulls with an accepted and a rejected authority passed.'

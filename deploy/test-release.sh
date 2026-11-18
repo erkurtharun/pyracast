@@ -7,7 +7,7 @@ if [[ ! -f /.dockerenv || $EUID != 0 || $$ != 1 || ! -f /source/install-release.
 fi
 trap 'cat /result /calls >&2' ERR
 mkdir -p /mock-bin /fixture/deploy /etc/pyracast /etc/systemd/system /var/lib/pyracast /opt/pyracast/releases /run/lock /units
-cat >/etc/pyracast/host.json <<'JSON'
+cat >/host.json <<'JSON'
 {"domain":"example.com","acme_email":"ops@example.com","backup_bucket":"pyracast-backups","runtime_secret_version":"1"}
 JSON
 printf 'name: fixture\n' >/fixture/deploy/compose.yaml
@@ -16,7 +16,8 @@ touch /fixture/deploy/runtime_secrets.py /fixture/deploy/bootstrap_database.py
 # python3 mock still answers every backup.py call.
 cp /source/__init__.py /source/backup.py /source/host.py /source/operations_log.py \
   /source/reset_database.py /source/install-units.sh /source/release_record.py \
-  /source/release_state.py /source/release_environment.py /fixture/deploy/
+  /source/release_state.py /source/release_environment.py /source/probe_origin_pull.py \
+  /fixture/deploy/
 cp -R /source/systemd /fixture/deploy/
 units=(pyracast-backup.service pyracast-backup.timer pyracast-watchdog.service pyracast-watchdog.timer)
 # State model: host.json names the runtime secret "new-runtime"; the serving release staged the
@@ -55,6 +56,13 @@ elif [[ ${1:-} == */bootstrap_database.py || ${1:-} == */backup.py ]]; then
     object=postgres/fixture-prerelease-$RUN.dump
     if [[ $MODE == *record-invalid ]]; then object='postgres/x.dump; touch /record-injected'; fi
     printf '{"object": "%s"}\n' "$object" >"$release_dir/prerelease-backup.json"
+  fi
+elif [[ ${1:-} == */probe_origin_pull.py ]]; then
+  printf 'python3 %s\n' "$*" >>/calls
+  test -f /var/lib/pyracast/release-blocked || exit 90
+  if [[ $MODE == origin-pull-open ]]; then
+    echo 'The public entrypoint 127.0.0.1:443 (example.com) does not enforce origin pulls: it closed the connection during the handshake.' >&2
+    exit 1
   fi
 else
   exec /usr/local/bin/python3 "$@"
@@ -319,8 +327,19 @@ assert marker, 'The marker holds no identity'
 assert session == {'marker': marker, 'object': sys.argv[3], 'release': 'old', 'replaced': True}, session
 PY
 }
-for MODE in preflight deploy-check plan secrets units-invalid metadata check-secrets image live-artifact redeploy-preflight drain backup support-postgres support-rabbit resume-failed resume-unready stop-failed switch maintenance-backup migration legacy-migration health tls response success prune first-success redeploy final-start first-backup killed-backup killed lock-wait lock-timeout maintenance-success maintenance-migration maintenance-replaced maintenance-prepared maintenance-record-invalid record-invalid retry-migration retry-backup cancelled; do
+for MODE in preflight deploy-check plan secrets units-invalid metadata check-secrets image live-artifact redeploy-preflight drain backup support-postgres support-rabbit resume-failed resume-unready stop-failed switch maintenance-backup migration legacy-migration health tls response success prune first-success redeploy final-start first-backup killed-backup killed lock-wait lock-timeout maintenance-success maintenance-migration maintenance-replaced maintenance-prepared maintenance-record-invalid record-invalid retry-migration retry-backup cancelled origin-pull origin-pull-open; do
   export MODE RUN=1
+  cp /host.json /etc/pyracast/host.json
+  if [[ $MODE == origin-pull* ]]; then
+    /usr/local/bin/python3 - /etc/pyracast/host.json /source/origin-pull-off.pem <<'PY'
+import json
+import sys
+from pathlib import Path
+host = Path(sys.argv[1])
+authority = Path(sys.argv[2]).read_text()
+host.write_text(json.dumps({**json.loads(host.read_text()), 'origin_pull_ca': authority}))
+PY
+  fi
   rm -rf /opt/pyracast/current /opt/pyracast/current.next /opt/pyracast/releases/* /run/pyracast /var/lib/pyracast/reset
   rm -f /var/lib/pyracast/release-blocked /var/lib/pyracast/release-state.json /migration-entered /backup-entered /backup-complete /support-changed /database-initialized
   rm -f /role /app-running /resumed-with /switched-while-running /first-session.json
@@ -476,14 +495,21 @@ for MODE in preflight deploy-check plan secrets units-invalid metadata check-sec
         absent 'switch-runtime'
         units_untouched
         ;;
-      drain|backup|record-invalid|support-postgres|support-rabbit)
+      drain|backup|record-invalid|support-postgres|support-rabbit|origin-pull-open)
         case "$MODE" in
           drain) test "$result" == 47 ;;
           backup) test "$result" == 45 ;;
           support-postgres) test "$result" == 46 ;;
           support-rabbit) test "$result" == 42 ;;
-          record-invalid) test "$result" == 1 ;;
+          record-invalid|origin-pull-open) test "$result" == 1 ;;
         esac
+        if [[ $MODE == origin-pull-open ]]; then
+          probed=$(grep -n "^python3 $new_release/deploy/probe_origin_pull.py example.com$" /calls | cut -d: -f1)
+          edge=$(grep -n "$new_release/deploy/compose.yaml up -d --no-deps --wait --wait-timeout 180 maintenance gateway$" /calls | head -n 1 | cut -d: -f1)
+          test "$probed" -gt "$edge"
+          test "$probed" -lt "$(grep -n 'switch-runtime' /calls | cut -d: -f1)"
+          absent '--kind prerelease'
+        fi
         test ! -e /var/lib/pyracast/release-blocked
         test "$(readlink /opt/pyracast/current)" == /opt/pyracast/releases/old
         # The previous release runs as a service start would run it: host.json's secret, which the
@@ -613,8 +639,19 @@ for MODE in preflight deploy-check plan secrets units-invalid metadata check-sec
         grep -Fq "Finish with: bash $new_release/deploy/install-units.sh install $new_release && systemctl start pyracast.service" /result
         units_installed
         ;;
-      success|prune|first-success|redeploy|lock-wait|maintenance-success|cancelled)
+      success|prune|first-success|redeploy|lock-wait|maintenance-success|cancelled|origin-pull)
         test "$result" == 0
+        if [[ $MODE == origin-pull ]]; then
+          grep -Fxq 'ORIGIN_PULL=required' "$new_release/deploy/release.env"
+          cmp /source/origin-pull-off.pem "$new_release/deploy/origin-pull-ca.pem"
+          mapfile -t probes < <(grep -n "^python3 $new_release/deploy/probe_origin_pull.py example.com$" /calls | cut -d: -f1)
+          test "${#probes[@]}" == 2
+          test "${probes[0]}" -gt "$(grep -n ' up -d --no-deps --wait --wait-timeout 180 maintenance gateway$' /calls | cut -d: -f1)"
+          test "${probes[0]}" -lt "$(grep -n ' stop -t 100 api web$' /calls | cut -d: -f1)"
+          test "${probes[1]}" -gt "$(grep -n '^curl ' /calls | tail -n 1 | cut -d: -f1)"
+        else
+          absent 'probe_origin_pull.py'
+        fi
         if [[ $MODE == cancelled ]]; then
           if grep -Fq "Release $revision is healthy." /follow-cancelled; then exit 1; fi
           grep -Fxq "Release $revision is healthy." /result

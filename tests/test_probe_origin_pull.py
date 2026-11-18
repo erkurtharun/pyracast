@@ -72,8 +72,15 @@ def entrypoint(certificate: Path, behaviour: str) -> Iterator[int]:
                 if behaviour == CLOSES:
                     connection.recv(65536)
                     continue
-                with context.wrap_socket(connection, server_side=True) as secure:
-                    secure.recv(1)
+                with context.wrap_socket(
+                    connection, server_side=True, do_handshake_on_connect=False
+                ) as secure:
+                    with contextlib.suppress(ssl.SSLError):
+                        secure.do_handshake()
+                    # Closing with unread client bytes resets the connection, and Windows then
+                    # discards the alert the client has not read yet.
+                    while socket.socket.recv(secure, 4096):
+                        pass
 
     thread = threading.Thread(target=serve)
     thread.start()

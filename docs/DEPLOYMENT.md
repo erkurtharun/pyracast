@@ -76,13 +76,20 @@ client certificate. To enable them: create a CA and a client certificate it sign
 upload the certificate to Cloudflare as a zone-level Authenticated Origin Pulls
 certificate and turn the feature on (the edge then presents it; nothing changes yet),
 then set `origin_pull_ca` in `terraform.tfvars` to the CA's PEM, apply, run the startup
-script to refresh `/etc/pyracast/host.json` and release. Check that the site still
-answers through Cloudflare and that, on the VM,
-`curl --resolve DOMAIN:443:127.0.0.1 https://DOMAIN/health/live/` fails the handshake.
-Host-local probes (release readiness, watchdog, reset tool) use the loopback-only
-port 8443, which never asks for the edge's certificate. To go back, set
-`origin_pull_ca = ""`, apply, refresh `host.json` and release; the edge certificate
-can stay.
+script to refresh `/etc/pyracast/host.json` and release. Before maintenance the installer
+refuses a value with no certificate or with any PEM block that does not load as an
+X.509 certificate. Host-local probes (release readiness, watchdog, reset tool) use the
+loopback-only port 8443, which never asks for the edge's certificate, so a release that
+requires origin pulls is ready only when `deploy/probe_origin_pull.py` also sees port
+443 refuse a TLS 1.3 handshake without a client certificate (alert
+`certificate_required`). Traefik closes that handshake instead when it rejects the TLS
+option and completes it when its routers are missing. The probe first runs right after
+the new gateway starts, so either outcome fails the release as a failure before
+`migrate` does: the previous release serves again. Check that the site
+still answers through Cloudflare and that, on the VM,
+`python3 /opt/pyracast/current/deploy/probe_origin_pull.py DOMAIN` reports that refusal.
+To go back, set `origin_pull_ca = ""`, apply, refresh `host.json` and release; the
+edge certificate can stay.
 
 `deploy/gateway/` builds upstream Traefik as a pinned Go tool, verifying module
 checksums. Review dependency updates with the container build and HTTPS smoke
@@ -753,15 +760,19 @@ answers 503 with `Retry-After` (the maintenance page for a navigation, the
 `reset`, a refused `abort`, a pre-release dump of the empty database, `migrate` from zero under the
 restricted owner and a start; then the stop a failed release leaves and `restore`,
 after which ownership, privileges, stored rows and a stored password are back and
-the site is ready; last it requires the edge certificate. `deploy/test-release.sh` runs the installer against a model of which
+the site is ready; last it requires the edge certificate, and the origin-pull probe
+passes with the edge's authority and fails with one Traefik cannot load while the
+loopback port still answers. `deploy/test-release.sh` runs the installer against a model of which
 secret each release starts with and which one the runtime role's password matches. It
 proves that a failure before `migrate` starts the previous release with the secret
 `host.json` names, that no password change happens while API or web run or after a
 failed stop, that the printed password command works after `/run` is emptied, that a
 reset session keeps its marker and is recovered with its own archive, that a second
 release in the same maintenance and a kill during `migrate` keep the first recovery
-point, that pruning keeps the previous release, and that a release whose job is
-cancelled during `migrate` still completes and can be followed again.
+point, that pruning keeps the previous release, that a release whose job is
+cancelled during `migrate` still completes and can be followed again, and that a
+release whose public port does not enforce required origin pulls resumes the previous
+release.
 `tests/test_deployment_previous_helper.py` runs each recovery the installer prints
 through the current helper and the one on `main` before the maintenance notice,
 against a model of the database, and counts it only when the previous release serves

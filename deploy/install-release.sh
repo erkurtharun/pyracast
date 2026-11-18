@@ -43,6 +43,13 @@ begin_maintenance() {
   touch /var/lib/pyracast/release-blocked && sync -f /var/lib/pyracast/release-blocked \
     && sync -f /var/lib/pyracast
 }
+# With origin pulls required, the public entrypoint of the release in $1 must refuse a handshake
+# without the edge's certificate: Traefik closes it instead when it rejects the TLS option.
+edge_enforced() {
+  if grep -qsx 'ORIGIN_PULL=required' "$1/deploy/release.env"; then
+    python3 "$release/deploy/probe_origin_pull.py" "$site_address"
+  fi
+}
 # Probes the release in $1 through its gateway; one with the loopback entrypoint is probed there,
 # where the edge's client certificate is never required.
 ready() {
@@ -54,7 +61,7 @@ ready() {
   response=$(curl --fail --silent --show-error --noproxy '*' \
     --connect-timeout 5 --max-time 10 --retry 18 --retry-delay 5 --retry-max-time 180 \
     --retry-all-errors --resolve "$site_address:$port:127.0.0.1" "$url") || return $?
-  [[ $response == ok ]]
+  [[ $response == ok ]] && edge_enforced "$1"
 }
 # Sets the runtime role's password to the release's staged runtime secret, the version host.json
 # names. Only while no API or web container runs: their next connections would use another one.
@@ -210,6 +217,7 @@ if [[ -L /opt/pyracast/current ]]; then
   "${old[@]}" stop -t 660 worker notifications
   # The previous gateway may depend on api and web; this one answers with the notice once they stop.
   "${compose[@]}" up -d --no-deps --wait --wait-timeout 180 maintenance gateway
+  edge_enforced "$release"
   "${compose[@]}" stop -t 100 api web
 fi
 switch_runtime
