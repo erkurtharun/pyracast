@@ -51,13 +51,21 @@ def root_of(node: ast.expr) -> str:
 
 
 def allauth_views(tree: ast.Module) -> set[str]:
-    return {
+    imported = {
         alias.asname or alias.name
         for node in ast.walk(tree)
         if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("allauth.")
         for alias in node.names
         if (node.module or "").endswith("views") or alias.name == "views"
     }
+    imported.update(
+        alias.asname or alias.name.partition(".")[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+        if alias.name.startswith("allauth.") and alias.name.endswith(".views")
+    )
+    return imported
 
 
 def coded_validation_errors(tree: ast.Module) -> list[int]:
@@ -75,7 +83,19 @@ def coded_validation_errors(tree: ast.Module) -> list[int]:
 
 def translates(handler: ast.ExceptHandler) -> bool:
     last = handler.body[-1]
-    return not (isinstance(last, ast.Raise) and last.exc is None)
+    if not isinstance(last, ast.Raise):
+        return True
+    if last.exc is None:
+        return False
+    if isinstance(last.exc, ast.Name) and last.exc.id == handler.name:
+        return any(
+            isinstance(node, ast.Name)
+            and node.id == handler.name
+            and isinstance(node.ctx, ast.Store)
+            for statement in handler.body[:-1]
+            for node in ast.walk(statement)
+        )
+    return True
 
 
 def framework_errors_and_translations(tree: ast.Module) -> list[int]:
