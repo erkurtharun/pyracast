@@ -38,6 +38,17 @@ PROVIDER_ACCOUNT_RULE = (
     " OR authentication_failed_revision BETWEEN 1 AND credential_revision)"
 )
 SITE_BINDING_RULE = "(validated_at IS NULL) = (validated_credential_revision IS NULL)"
+CALIBRATION_RUN_RULE = (
+    f"(status IN ('{CalibrationStatus.PENDING}', '{CalibrationStatus.RUNNING}')"
+    " OR completed_at IS NOT NULL)"
+    " AND assessment IN ('', 'insufficient', 'provisional', 'evaluated')"
+)
+PLANT_AUTOMATION_RULE = (
+    "(automatic_calibration_enabled AND automatic_calibration_enabled_by_id IS NOT NULL"
+    " AND next_calibration_check_at IS NOT NULL)"
+    " OR (NOT automatic_calibration_enabled AND automatic_calibration_enabled_by_id IS NULL"
+    " AND next_calibration_check_at IS NULL)"
+)
 OBSERVATION_LINEAGE_RULE = (
     "supersedes_id IS NULL OR EXISTS (SELECT 1 FROM plants_productionobservation AS previous"
     " WHERE previous.id = plants_productionobservation.supersedes_id"

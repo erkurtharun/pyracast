@@ -124,6 +124,7 @@ def _calibration_run(monkeypatch: pytest.MonkeyPatch) -> CalibrationRun:
         window_end=NOW.date() - timedelta(days=1),
         cutoff_at=NOW,
         status="failed",
+        completed_at=NOW,
         last_error="attempt_limit",
     )
 

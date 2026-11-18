@@ -19,7 +19,9 @@ from pyracast.plants.models import CalibrationRun, Plant, ProductionObservation
 from tests.support.capacity_normalization import normalize, scaled_system
 from tests.support.domain import NOW, System, make_system
 from tests.support.invariants import (
+    CALIBRATION_RUN_RULE,
     OBSERVATION_LINEAGE_RULE,
+    PLANT_AUTOMATION_RULE,
     PROVIDER_ACCOUNT_RULE,
     SITE_BINDING_RULE,
     lease_violations,
@@ -53,9 +55,15 @@ NEW_CHECKS = {
     },
     "forecasts_referencecapacitynormalization": {"referencecapacitynormalization_factor_chk"},
     "metering_epiascollectionjob": {"epiascollectionjob_lease_chk"},
-    "plants_calibrationrun": {"calibrationrun_lease_chk"},
+    "plants_calibrationrun": {
+        "calibrationrun_lease_chk",
+        "calibrationrun_completed_at_chk",
+        "calibrationrun_assessment_chk",
+    },
+    "plants_plant": {"plant_automation_chk"},
     "notifications_notificationdelivery": {"notificationdelivery_lease_chk"},
 }
+PLANT_TABLES = ("plants_calibrationrun", "plants_plant")
 NEW_TRIGGERS = {
     "historicalreferenceimport_immutable",
     "epiassnapshot_immutable",
@@ -127,6 +135,14 @@ def test_invariant_migrations_repair_the_named_rows_and_reverse(
     original = _observation(system, plant, NOW - timedelta(days=2))
     ProductionObservation.objects.filter(pk=original.pk).update(is_current=False)
     correction = _observation(system, plant, NOW - timedelta(days=2), supersedes=original)
+    finished = _finished_run(system, plant)
+    automated = Plant.objects.filter(pk=plant.pk)
+    automated.update(
+        automatic_calibration_enabled=True,
+        automatic_calibration_enabled_by=system.member,
+        next_calibration_check_at=NOW,
+    )
+    stored_plant = automated.values().get()
     migrate(*PREVIOUS.values())
     assert _installed() == (set(), set())
     token = uuid.uuid4()
@@ -169,9 +185,104 @@ def test_invariant_migrations_repair_the_named_rows_and_reverse(
     assert violations("connections_sitebinding", SITE_BINDING_RULE) == 0
     assert ProductionObservation.objects.get(pk=correction.pk).supersedes_id == original.pk
     assert violations("plants_productionobservation", OBSERVATION_LINEAGE_RULE) == 0
+    finished.refresh_from_db()
+    assert (finished.status, finished.completed_at, finished.assessment) == (
+        "insufficient",
+        NOW,
+        "insufficient",
+    )
+    assert automated.values().get() == stored_plant
+    assert violations("plants_calibrationrun", CALIBRATION_RUN_RULE) == 0
+    assert violations("plants_plant", PLANT_AUTOMATION_RULE) == 0
 
     migrate(*PREVIOUS.values())
     assert _installed() == (set(), set())
+
+
+def _finished_run(system: System, plant: Plant, **values: object) -> CalibrationRun:
+    return CalibrationRun.objects.create(
+        **{
+            "plant": plant,
+            "configuration_id": plant.current_configuration_id,
+            "binding": system.binding,
+            "requested_by": system.member,
+            "window_start": NOW.date() - timedelta(days=7),
+            "window_end": NOW.date() - timedelta(days=1),
+            "cutoff_at": NOW,
+            "status": "insufficient",
+            "assessment": "insufficient",
+            "completed_at": NOW,
+        }
+        | values
+    )
+
+
+def _terminal_run_without_completion(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    system, plant = make_plant(monkeypatch)
+    run = _finished_run(system, plant)
+    migrate(PREVIOUS["plants"])
+    CalibrationRun.objects.filter(pk=run.pk).update(completed_at=None)
+    return run
+
+
+def _assessment_outside(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    system, plant = make_plant(monkeypatch)
+    run = _finished_run(system, plant)
+    migrate(PREVIOUS["plants"])
+    CalibrationRun.objects.filter(pk=run.pk).update(assessment="excellent")
+    return run
+
+
+def _automation_without_user(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    _, plant = make_plant(monkeypatch)
+    migrate(PREVIOUS["plants"])
+    Plant.objects.filter(pk=plant.pk).update(
+        automatic_calibration_enabled=True, next_calibration_check_at=NOW
+    )
+    return plant
+
+
+@pytest.mark.usefixtures("leaf")
+@pytest.mark.parametrize(
+    ("stored", "refusal", "correction"),
+    [
+        (
+            _terminal_run_without_completion,
+            r"plants_calibrationrun holds 1 row.*completion time",
+            {"completed_at": NOW},
+        ),
+        (
+            _assessment_outside,
+            r"plants_calibrationrun\.assessment holds values outside.*'excellent'",
+            {"assessment": "evaluated"},
+        ),
+        (
+            _automation_without_user,
+            r"plants_plant holds 1 row.*automation",
+            {"automatic_calibration_enabled": False, "next_calibration_check_at": None},
+        ),
+    ],
+)
+def test_calibration_migration_refuses_run_and_automation_states_no_writer_produces(
+    stored: Callable[[pytest.MonkeyPatch], models.Model],
+    refusal: str,
+    correction: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    row = stored(monkeypatch)
+    rows = type(row)._default_manager.filter(pk=row.pk)
+    kept = rows.values().get()
+
+    with pytest.raises(ValueError, match=refusal):
+        forward()
+
+    assert not any(checks(table) & NEW_CHECKS[table] for table in PLANT_TABLES)
+    assert rows.values().get() == kept
+    rows.update(**correction)
+    forward()
+    assert all(NEW_CHECKS[table] <= checks(table) for table in PLANT_TABLES)
+    assert violations("plants_calibrationrun", CALIBRATION_RUN_RULE) == 0
+    assert violations("plants_plant", PLANT_AUTOMATION_RULE) == 0
 
 
 def _observation(

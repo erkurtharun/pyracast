@@ -15,6 +15,8 @@ from pyracast.connections.contracts import ProviderData
 from pyracast.forecasts.models import SnapshotWeatherError
 from pyracast.mail.errors import MailFailure
 from pyracast.notifications.models import PAUSED_DELIVERY_ERRORS, NotificationDeliveryError
+from pyracast.plants.models import CalibrationAssessment
+from pyracast.plants.numerics import FitAssessment
 from pyracast.weather import WeatherFailure
 from tests.support.vocabularies import (
     COVERED_APPS,
@@ -170,6 +172,10 @@ def test_every_mail_failure_can_be_stored_on_a_reminder_delivery() -> None:
 
 def test_every_weather_failure_can_be_stored_on_a_snapshot() -> None:
     assert set(WeatherFailure) <= set(SnapshotWeatherError)
+
+
+def test_every_fitted_assessment_can_be_stored_on_a_calibration_run() -> None:
+    assert set(get_args(FitAssessment)) == set(CalibrationAssessment)
 
 
 def test_provider_data_carries_only_snapshot_weather_errors() -> None:
