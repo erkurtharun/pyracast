@@ -456,3 +456,87 @@ def test_instance_metadata_is_read_once_per_process_with_a_short_timeout(
             },
         }
     ] * 2
+
+
+def forbidden(*_args: object, **_kwargs: object) -> None:
+    raise AssertionError("This step must not run.")
+
+
+@pytest.mark.parametrize("name", ["other/x.dump", "postgres/x.sql", "postgres/a b.dump"])
+def test_a_rehearsal_restores_only_a_postgresql_archive_of_the_bucket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    monkeypatch.setattr(backup, "download_backup", forbidden)
+    with pytest.raises(ValueError, match="Select a PostgreSQL archive object"):
+        backup.rehearse_restore(tmp_path, "private-backups", name, tmp_path)
+
+
+def test_a_restore_database_that_never_accepts_connections_is_removed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = tmp_path / "database.dump"
+    archive.write_bytes(b"PGDMP")
+    commands: list[list[str]] = []
+
+    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 2 if "pg_isready" in command else 0)
+
+    def configuration(_command: list[str], **_kwargs: object) -> str:
+        return json.dumps({"services": {"postgres": {"image": "postgres@sha256:fixture"}}})
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "check_output", configuration)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    with pytest.raises(RuntimeError, match="Restore database did not become ready"):
+        backup.restore_archive(tmp_path, archive, "postgres/fixture.dump")
+    assert sum("pg_isready" in command for command in commands) == 60
+    assert not any("pg_restore" in command for command in commands)
+    assert [command[:3] for command in commands[-2:]] == [
+        ["docker", "rm", "--force"],
+        ["docker", "volume", "rm"],
+    ]
+
+
+def host_configuration(tmp_path: Path, bucket: str) -> Path:
+    config = tmp_path / "host.json"
+    config.write_text(json.dumps({"backup_bucket": bucket}))
+    return config
+
+
+@pytest.mark.parametrize("bucket", ["", "Private", "-backups", "a"])
+def test_backup_refuses_a_bucket_name_cloud_storage_would_not_accept(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bucket: str
+) -> None:
+    monkeypatch.setattr(backup, "create_backup", forbidden)
+    with pytest.raises(ValueError, match="Invalid backup bucket"):
+        backup.main([str(host_configuration(tmp_path, bucket))])
+
+
+def test_a_rehearsal_restores_the_named_archive_and_takes_no_backup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rehearsed: list[tuple[Path, str, str]] = []
+
+    def rehearse(release: Path, bucket: str, name: str, _directory: Path) -> None:
+        rehearsed.append((release, bucket, name))
+
+    monkeypatch.setattr(backup, "rehearse_restore", rehearse)
+    monkeypatch.setattr(backup, "create_backup", forbidden)
+    config = host_configuration(tmp_path, "private-backups")
+    arguments = [str(config), "--release-dir", str(tmp_path), "--rehearse", "postgres/x.dump"]
+
+    assert backup.main(arguments) == 0
+    assert rehearsed == [(tmp_path, "private-backups", "postgres/x.dump")]
+
+
+def test_a_refused_command_line_is_not_reported_as_a_failed_backup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reports: list[str] = []
+    monkeypatch.setattr(backup.signal, "signal", lambda *_args: None)
+    monkeypatch.setattr(backup, "report", lambda event, *_args, **_kwargs: reports.append(event))
+    with pytest.raises(SystemExit) as stopped:
+        backup.run(["--kind", "weekly", str(tmp_path / "host.json")])
+    assert stopped.value.code == 2
+    assert reports == []

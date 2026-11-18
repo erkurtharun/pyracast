@@ -178,3 +178,37 @@ def test_main_warns_that_an_unset_origin_was_not_probed(
 def test_main_refuses_an_invalid_origin(capsys: pytest.CaptureFixture[str]) -> None:
     assert probe_origin.main(["http://pyracast.example"]) == 2
     assert "PYRACAST_PUBLIC_ORIGIN" in capsys.readouterr().err
+
+
+def test_a_probe_request_reads_one_uncached_answer_and_closes_its_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, ...]] = []
+
+    class Response:
+        status = 503
+
+        def read(self) -> bytes:
+            return b"maintenance"
+
+    class Connection:
+        def __init__(self, netloc: str, *, timeout: float) -> None:
+            calls.append(("open", netloc, str(timeout)))
+
+        def request(self, method: str, path: str, *, headers: dict[str, str]) -> None:
+            calls.append((method, path, headers["Cache-Control"], headers["User-Agent"]))
+
+        def getresponse(self) -> Response:
+            return Response()
+
+        def close(self) -> None:
+            calls.append(("close",))
+
+    monkeypatch.setattr(http.client, "HTTPSConnection", Connection)
+
+    assert probe_origin.fetch("https://pyracast.example/api/session/") == (503, b"maintenance")
+    assert calls == [
+        ("open", "pyracast.example", "15"),
+        ("GET", "/api/session/", "no-cache", "pyracast-release-probe"),
+        ("close",),
+    ]

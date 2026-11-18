@@ -1,5 +1,6 @@
 import ast
 import re
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -99,6 +100,35 @@ def test_selection_markers_cover_every_module_that_needs_them(marker: str, patte
     assert marked == _modules_matching(pattern) - {"test_suite_conventions"}
 
 
+TOOLING_PATTERN = (
+    r"(?m)^\s*(?:from|import) (?:deploy|scripts)\b"
+    r'|/ "(?:deploy|\.agents|\.github)\b'
+    r'|"\.(?:github|agents)/'
+    r"|tests\.support\.workflows"
+)
+
+
+def test_tooling_marks_every_module_that_exercises_repository_tooling() -> None:
+    from tests.conftest import TOOLING
+
+    assert _modules_matching(TOOLING_PATTERN) | {"test_suite_conventions"} == TOOLING
+
+
+def test_browser_scenarios_are_marked_and_left_out_of_the_default_run() -> None:
+    from tests.conftest import MODULE_MARKERS
+
+    scenarios = {path.stem for path in (TESTS / "e2e").glob("test_*.py")}
+    pytest_options = tomllib.loads((TESTS.parent / "pyproject.toml").read_text(encoding="utf-8"))
+    addopts = pytest_options["tool"]["pytest"]["addopts"]
+
+    assert scenarios
+    assert {module for module, markers in MODULE_MARKERS.items() if "browser" in markers} == (
+        scenarios
+    )
+    assert not scenarios & {path.stem for path in TESTS.glob("test_*.py")}
+    assert addopts[addopts.index("-m") + 1] == "not browser"
+
+
 def test_the_invariant_audit_names_existing_database_modules() -> None:
     from tests.conftest import INVARIANT_AUDIT
 
@@ -109,6 +139,36 @@ def test_the_invariant_audit_names_existing_database_modules() -> None:
 def test_selection_markers_are_applied_by_module(request: pytest.FixtureRequest) -> None:
     assert request.node.get_closest_marker("tooling") is not None
     assert request.node.get_closest_marker("migration") is None
+
+
+def test_the_coverage_floor_and_every_scanner_read_the_deployment_code() -> None:
+    root = TESTS.parent
+    coverage = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["tool"]
+    sonar = dict(
+        line.split("=", 1)
+        for line in (root / "sonar-project.properties").read_text(encoding="utf-8").splitlines()
+        if "=" in line
+    )
+    qodana = yaml.safe_load((root / "qodana.yaml").read_text(encoding="utf-8"))
+    (skipped,) = [item["paths"] for item in qodana["exclude"] if item["name"] == "All"]
+
+    assert coverage["coverage"]["run"]["source"] == ["src/pyracast", "deploy"]
+    assert coverage["coverage"]["report"]["fail_under"] == 100
+    assert {"src", "scripts", "deploy", ".github"} <= set(sonar["sonar.sources"].split(","))
+    assert not [
+        pattern
+        for pattern in sonar["sonar.coverage.exclusions"].split(",")
+        if pattern.startswith(("src", "deploy"))
+    ]
+    assert {"deploy", "scripts", ".agents/hooks.py"} <= set(coverage["mypy"]["files"])
+    assert skipped == ["web"]
+
+
+@pytest.mark.parametrize("name", ["qodana.yaml", "qodana-js.yaml"])
+def test_each_language_scan_fails_on_a_critical_or_high_finding(name: str) -> None:
+    configuration = yaml.safe_load((TESTS.parent / name).read_text(encoding="utf-8"))
+
+    assert configuration["failureConditions"]["severityThresholds"] == {"critical": 0, "high": 0}
 
 
 @pytest.mark.parametrize("name", ["qodana.yaml", "qodana-js.yaml"])

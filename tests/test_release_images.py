@@ -146,3 +146,38 @@ def test_production_retention_pins_require_the_selected_digest(
         "--project=pyracast",
         "--quiet",
     ]
+
+
+@pytest.mark.parametrize("release", ["current", "published"])
+def test_main_pins_the_live_or_the_published_release_from_the_workflow_environment(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], release: str
+) -> None:
+    pinned: list[tuple[dict[str, str], str]] = []
+    reads: list[tuple[str, ...]] = []
+
+    def current(*arguments: str) -> dict[str, str]:
+        reads.append(arguments)
+        return IMAGES
+
+    environment = {
+        "GCP_PROJECT_ID": "pyracast",
+        "GCP_ARTIFACT_REPOSITORY": REPOSITORY,
+        "GCP_ZONE": "us-central1-a",
+        "GCP_INSTANCE": "pyracast-vm",
+        **(IMAGES if release == "published" else {}),
+    }
+    for key, value in environment.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(pin_release_images, "current_images", current)
+    monkeypatch.setattr(
+        pin_release_images, "pin_images", lambda images, project: pinned.append((images, project))
+    )
+    monkeypatch.setattr(sys, "argv", ["pin_release_images.py", release])
+
+    pin_release_images.main()
+
+    assert pinned == [(IMAGES, "pyracast")]
+    assert reads == (
+        [("pyracast", "us-central1-a", "pyracast-vm", REPOSITORY)] if release == "current" else []
+    )
+    assert capsys.readouterr().out == "Verified 4 production image retention tags.\n"

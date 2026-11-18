@@ -212,7 +212,17 @@ def test_scram_verifier_matches_the_one_postgresql_computes() -> None:
     assert bootstrap_database.scram_matches(replaced, "computed-by-client")
 
 
-@pytest.mark.parametrize("stored", [None, "", "md5abc", "SCRAM-SHA-256$x", "SCRAM-SHA-256$1:%$a:b"])
+@pytest.mark.parametrize(
+    "stored",
+    [
+        None,
+        "",
+        "md5abc",
+        "SCRAM-SHA-256$x",
+        "SCRAM-SHA-256$1:%$a:b",
+        "SCRAM-SHA-256$4096:A$AAAA:AAAA",
+    ],
+)
 def test_an_unreadable_verifier_never_matches(stored: str | None) -> None:
     assert not bootstrap_database.scram_matches(stored, "password")
 
@@ -578,3 +588,18 @@ def test_command_line_runs_each_step(
     bootstrap_database.main()
 
     assert calls == [(function, "release", "secrets")]
+
+
+def test_converge_names_each_role_whose_password_it_changed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        bootstrap_database,
+        "converge_database",
+        lambda _release, _secrets: ["pyracast_owner", "pyracast_app"],
+    )
+    monkeypatch.setattr(sys, "argv", ["bootstrap_database.py", "converge", "release", "secrets"])
+
+    bootstrap_database.main()
+
+    assert capsys.readouterr().out == "pyracast_owner\npyracast_app\n"

@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 
 import pytest
 from cryptography import x509
@@ -536,3 +536,36 @@ def test_capacity_warning_covers_boot_disk_data_disk_and_memory(
         },
     )
     assert watched.events == ([expected] if warns else [])
+
+
+class Listing:
+    def __init__(self, listed: str, containers: list[dict[str, object]]) -> None:
+        self.listed = listed
+        self.containers = containers
+        self.commands: list[list[str]] = []
+
+    def command(self, command: list[str], **_options: object) -> subprocess.CompletedProcess[str]:
+        self.commands.append(command)
+        output = (
+            json.dumps(self.containers) if command[:2] == ["docker", "inspect"] else self.listed
+        )
+        return subprocess.CompletedProcess(command, 0, output, "")
+
+
+def test_a_project_without_containers_reports_every_service_missing() -> None:
+    listing = Listing("", [])
+
+    assert watchdog.inspect_services(cast(watchdog.Run, listing), ["compose"]) == dict.fromkeys(
+        watchdog.SERVICES, "missing"
+    )
+    assert listing.commands == [["compose", "ps", "--all", "--quiet"]]
+
+
+def test_containers_of_services_the_watchdog_does_not_supervise_are_ignored() -> None:
+    listing = Listing("one\ntwo\n", [container("api", "healthy"), container("migrate", "exited")])
+
+    assert watchdog.inspect_services(cast(watchdog.Run, listing), ["compose"]) == {
+        **dict.fromkeys(watchdog.SERVICES, "missing"),
+        "api": "healthy",
+    }
+    assert listing.commands[-1] == ["docker", "inspect", "one", "two"]

@@ -1,5 +1,6 @@
 import re
 from pathlib import Path
+from typing import Any
 
 from deploy import release_authorization, release_unit
 from tests.support.workflows import (
@@ -111,6 +112,46 @@ def test_ci_scans_all_five_images_before_merge() -> None:
     ) in scan["run"]
     assert deployment["steps"].index(scan) < step_index(deployment, "deploy/smoke.sh")
     assert not (ROOT / "deploy" / "scan-support.sh").exists()
+
+
+SCAN = "Scan every image; block every high or critical vulnerability"
+
+
+def triggers(name: str) -> dict[str, Any]:
+    document = workflow(name)
+    found: dict[str, Any] = document.get("on", document.get(True))
+    return found
+
+
+def image_builds(job: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        candidate["with"]
+        for candidate in job["steps"]
+        if str(candidate.get("uses", "")).startswith("docker/build-push-action@")
+    ]
+
+
+def test_the_release_images_are_rescanned_daily_without_cloud_credentials() -> None:
+    document = workflow("image-rescan.yml")
+    (job,) = document["jobs"].values()
+    built = [(build["context"], build.get("file"), build["tags"]) for build in image_builds(job)]
+    released = [
+        (build["context"], build.get("file"), build["tags"])
+        for build in image_builds(ci_jobs()["deployment"])
+    ]
+
+    assert re.fullmatch(r"\d+ \d+ \* \* \*", triggers("image-rescan.yml")["schedule"][0]["cron"])
+    assert "workflow_dispatch" in triggers("image-rescan.yml")
+    assert document["permissions"] == {"contents": "read"}
+    assert "permissions" not in job
+    assert "environment" not in job
+    assert built == released
+    assert all(build["load"] is True for build in image_builds(job))
+    assert step(job, SCAN)["run"] == step(ci_jobs()["deployment"], SCAN)["run"].replace(
+        'echo "POSTGRES_IMAGE=$POSTGRES_IMAGE" >> "$GITHUB_ENV"\n', ""
+    )
+    assert triggers("release.yml")["workflow_run"]["workflows"] == ["CI"]
+    assert document["name"] != "CI"
 
 
 def test_the_serialized_deploy_cancels_a_release_main_moved_past_just_before_the_transfer() -> None:
