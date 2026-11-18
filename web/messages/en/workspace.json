@@ -113,10 +113,6 @@
         "currentLocation": "Current location: {latitude}°, {longitude}° · {timezone}",
         "location": "{latitude}°, {longitude}° · {timezone}",
         "approvalHelp": "A location change requires administrator approval and a new connection verification.",
-        "requestFailed": "Unable to submit the request.",
-        "locationChanged": "The plant location has changed. Return to the plant list and reopen it.",
-        "requestPending": "A different location request is already pending. Reopen the editor to see it.",
-        "locationUnchanged": "Enter a location different from the current location.",
         "ianaTimezone": "IANA timezone"
     },
     "RegionWorkspace": {

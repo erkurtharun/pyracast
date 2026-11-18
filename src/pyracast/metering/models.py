@@ -39,6 +39,14 @@ class EpiasConnection(models.Model):
         )
 
 
+class EpiasJobError(models.TextChoices):
+    RETRY_WINDOW_EXPIRED = "retry_window_expired", "Retry window expired"
+    ATTEMPTS_EXHAUSTED = "attempts_exhausted", "Attempts exhausted"
+    PROVIDER_FAILURE = "epias_provider_failure", "Epias provider failure"
+    UNPUBLISHED_DATA = "unpublished_data", "Unpublished data"
+    PARTIAL_DATA = "partial_data", "Partial data"
+
+
 class EpiasCollectionJob(models.Model):
     connection = models.ForeignKey(EpiasConnection, on_delete=models.PROTECT)
     plant = models.ForeignKey("plants.Plant", on_delete=models.PROTECT)
@@ -57,7 +65,7 @@ class EpiasCollectionJob(models.Model):
     attempts = models.PositiveSmallIntegerField(default=0)
     next_attempt_at = models.DateTimeField()
     retry_until = models.DateTimeField(null=True)
-    last_error = models.CharField(max_length=40, default="")
+    last_error = models.CharField(max_length=40, choices=EpiasJobError, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -85,6 +93,7 @@ class EpiasCollectionJob(models.Model):
             ),
             choices_check("source_kind", EpiasSourceKind, name="epias_job_source_valid"),
             choices_check("status", EpiasJobStatus, name="epias_job_status_valid"),
+            choices_check("last_error", EpiasJobError, blank=True),
             lease_check((EpiasJobStatus.RUNNING,)),
         )
         indexes = (models.Index(fields=("status", "next_attempt_at")),)

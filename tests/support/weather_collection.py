@@ -2,7 +2,13 @@ from datetime import UTC, datetime, timedelta
 
 from django.db import connection
 
-from pyracast.weather import OpenMeteoProvider, WeatherData, WeatherError, normalize_weather
+from pyracast.weather import (
+    OpenMeteoProvider,
+    WeatherData,
+    WeatherError,
+    WeatherFailure,
+    normalize_weather,
+)
 from tests.support.domain import NOW
 
 
@@ -18,7 +24,7 @@ class WeatherFixture(OpenMeteoProvider):
         assert not connection.in_atomic_block
         self.calls += 1
         if self.fail:
-            raise WeatherError("weather_request_failed")
+            raise WeatherError(WeatherFailure.REQUEST_FAILED)
         first = start.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
         stamps = [first - timedelta(hours=1)]
         while stamps[-1] < end:

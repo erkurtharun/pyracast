@@ -33,6 +33,7 @@ from pyracast.forecasts.acquisition import missing_actuals_window
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJob,
+    CollectionJobError,
     CollectionJobStatus,
     CollectionSchedule,
     ForecastResult,
@@ -41,6 +42,7 @@ from pyracast.forecasts.models import (
     RequestOutcome,
     RequestPurpose,
     SnapshotSourceKind,
+    SnapshotWeatherError,
 )
 from pyracast.forecasts.projections import prepare_daily_payloads
 from pyracast.forecasts.sources import snapshot_data
@@ -107,7 +109,7 @@ def claim(job_id: int, now: datetime) -> Lease | None:
         now += timedelta(seconds=time.monotonic() - started)
         cleared_cooldown = (
             job.status == CollectionJobStatus.RETRY
-            and job.last_error == "provider_throttled"
+            and job.last_error == CollectionJobError.PROVIDER_THROTTLED
             and CollectionJob.objects.filter(
                 pk=job.pk, binding__provider_account__request_blocked_until__isnull=True
             ).exists()
@@ -120,7 +122,7 @@ def claim(job_id: int, now: datetime) -> Lease | None:
             return None
         if job.retry_until is not None and now >= job.retry_until:
             job.status = CollectionJobStatus.FAILED
-            job.last_error = "history_window_closed"
+            job.last_error = CollectionJobError.HISTORY_WINDOW_CLOSED
             job.lease_token = None
             job.lease_expires_at = None
             job.save(update_fields=("status", "last_error", "lease_token", "lease_expires_at"))
@@ -145,7 +147,7 @@ def claim(job_id: int, now: datetime) -> Lease | None:
             return None
         if job.retry_until is None and job.attempts >= 3:
             job.status = CollectionJobStatus.FAILED
-            job.last_error = "attempts_exhausted"
+            job.last_error = CollectionJobError.ATTEMPTS_EXHAUSTED
             job.lease_token = None
             job.lease_expires_at = None
             job.save(update_fields=("status", "last_error", "lease_token", "lease_expires_at"))
@@ -180,7 +182,7 @@ def claim(job_id: int, now: datetime) -> Lease | None:
             and latest_slot > job.scheduled_slot
         ):
             job.status = CollectionJobStatus.STALE
-            job.last_error = "forecast_superseded"
+            job.last_error = CollectionJobError.FORECAST_SUPERSEDED
             job.lease_token = None
             job.lease_expires_at = None
             job.save(update_fields=("status", "last_error", "lease_token", "lease_expires_at"))
@@ -244,7 +246,7 @@ def claim(job_id: int, now: datetime) -> Lease | None:
 def retry(
     lease: Lease,
     now: datetime,
-    code: str,
+    code: CollectionJobError,
     *,
     quota: bool = False,
     retryable: bool = True,
@@ -271,7 +273,7 @@ def retry(
                 if intraday and not quota
                 else int(NIGHT_RETRY_DELAY.total_seconds()),
             )
-            if quota and code != "history_budget_reserved":
+            if quota and code != CollectionJobError.HISTORY_BUDGET_RESERVED:
                 tomorrow = now.astimezone(UTC).date() + timedelta(days=1)
                 reset = datetime.combine(tomorrow, datetime.min.time(), tzinfo=UTC)
                 job.available_at = max(job.available_at, reset)
@@ -394,7 +396,7 @@ def publish(
                 and job.retry_until is not None
                 and missing_actuals_window(binding, now, acquired=snapshot) is not None
             ):
-                job.last_error = "history_incomplete"
+                job.last_error = CollectionJobError.HISTORY_INCOMPLETE
                 available = now + NIGHT_RETRY_DELAY
                 schedule = CollectionSchedule.objects.filter(region_id=binding.region_id).first()
                 if available < job.retry_until:
@@ -478,7 +480,7 @@ def _attach_weather(lease: Lease, data: ProviderData, provider: OpenMeteoProvide
         return replace(data, weather=None, weather_error=exc.code)
     except Exception as exc:
         logger.warning("Weather acquisition failed error_type=%s", type(exc).__name__)
-        return replace(data, weather=None, weather_error="weather_acquisition_failed")
+        return replace(data, weather=None, weather_error=SnapshotWeatherError.ACQUISITION_FAILED)
     return replace(data, weather=weather, weather_error="")
 
 
@@ -528,7 +530,7 @@ def collect(
                 pk=job_id, lease_token=lease.token, status=CollectionJobStatus.RUNNING
             ).update(
                 status=CollectionJobStatus.SUCCEEDED,
-                last_error="history_already_archived",
+                last_error=CollectionJobError.HISTORY_ALREADY_ARCHIVED,
                 lease_token=None,
                 lease_expires_at=None,
             )
@@ -548,9 +550,9 @@ def collect(
             retry(
                 lease,
                 finished_at,
-                "provider_authentication_failed"
+                CollectionJobError.PROVIDER_AUTHENTICATION_FAILED
                 if exc.available_at is None
-                else "provider_throttled",
+                else CollectionJobError.PROVIDER_THROTTLED,
                 retryable=exc.available_at is not None,
                 retry_after_seconds=math.ceil((exc.available_at - finished_at).total_seconds())
                 if exc.available_at is not None
@@ -562,18 +564,18 @@ def collect(
             retry(
                 lease,
                 now + timedelta(seconds=time.monotonic() - started),
-                "history_window_closed"
+                CollectionJobError.HISTORY_WINDOW_CLOSED
                 if isinstance(exc, HistoryWindowClosedError)
-                else "history_budget_reserved"
+                else CollectionJobError.HISTORY_BUDGET_RESERVED
                 if isinstance(exc, ForecastBudgetReservedError)
-                else "quota_exhausted",
+                else CollectionJobError.QUOTA_EXHAUSTED,
                 quota=True,
             )
             return False
         request_at = now + timedelta(seconds=time.monotonic() - started)
         if job.retry_until is not None and request_at >= job.retry_until:
             RequestAttempt.objects.filter(pk=attempt.pk).update(outcome=RequestOutcome.FAILED)
-            retry(lease, request_at, "history_window_closed", quota=True)
+            retry(lease, request_at, CollectionJobError.HISTORY_WINDOW_CLOSED, quota=True)
             return False
         try:
             data = (
@@ -592,11 +594,11 @@ def collect(
             retry(
                 lease,
                 now + timedelta(seconds=time.monotonic() - started),
-                "provider_authentication_failed"
+                CollectionJobError.PROVIDER_AUTHENTICATION_FAILED
                 if exc.status_code == 401
-                else "provider_throttled"
+                else CollectionJobError.PROVIDER_THROTTLED
                 if exc.status_code == 429
-                else "provider_failure",
+                else CollectionJobError.PROVIDER_FAILURE,
                 retryable=exc.retryable,
                 retry_after_seconds=rate_limit_retry_after(exc.retry_after_seconds)
                 if exc.status_code == 429
@@ -613,13 +615,15 @@ def collect(
             retry(
                 lease,
                 now + timedelta(seconds=time.monotonic() - started),
-                "provider_unexpected_failure",
+                CollectionJobError.PROVIDER_UNEXPECTED_FAILURE,
             )
             return False
         RequestAttempt.objects.filter(pk=attempt.pk).update(outcome=RequestOutcome.SUCCEEDED)
         logger.info("Provider request succeeded correlation_id=%s", attempt.correlation_id)
         if weather_provider is not None:
-            data = replace(data, weather=None, weather_error="weather_acquisition_interrupted")
+            data = replace(
+                data, weather=None, weather_error=SnapshotWeatherError.ACQUISITION_INTERRUPTED
+            )
         snapshot = persist_snapshot(
             lease, data, now + timedelta(seconds=time.monotonic() - started)
         )
@@ -638,7 +642,11 @@ def collect(
         else SnapshotSourceKind.FORECAST
     )
     if snapshot.source_kind != expected_kind:
-        retry(lease, now + timedelta(seconds=time.monotonic() - started), "invalid_source_kind")
+        retry(
+            lease,
+            now + timedelta(seconds=time.monotonic() - started),
+            CollectionJobError.INVALID_SOURCE_KIND,
+        )
         return False
     if lease.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS:
         return publish(lease, snapshot, {}, now + timedelta(seconds=time.monotonic() - started))
@@ -650,7 +658,11 @@ def collect(
         logger.warning(
             "Forecast calculation failed job_id=%s error_type=%s", lease.job_id, type(exc).__name__
         )
-        retry(lease, now + timedelta(seconds=time.monotonic() - started), "calculation_failure")
+        retry(
+            lease,
+            now + timedelta(seconds=time.monotonic() - started),
+            CollectionJobError.CALCULATION_FAILURE,
+        )
         return False
     daily_payloads = prepare_daily_payloads(
         lease.binding, lease.target_date, data, calculator, payload
@@ -671,7 +683,7 @@ def pending_job_ids(now: datetime, limit: int = 100) -> list[int]:
             Q(available_at__lte=now)
             | Q(
                 status=CollectionJobStatus.RETRY,
-                last_error="provider_throttled",
+                last_error=CollectionJobError.PROVIDER_THROTTLED,
                 binding__provider_account__request_blocked_until__isnull=True,
             ),
             binding__region__deleted_at__isnull=True,

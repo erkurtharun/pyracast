@@ -2,12 +2,9 @@
 
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
-import { ApiError, request, type Session } from "@/lib/api";
-import {
-    authRequest,
-    AuthResponseError,
-    type AuthResult,
-} from "@/lib/auth-api";
+import { request, type Session } from "@/lib/api";
+import { ApiError } from "@/lib/api/errors";
+import { authRequest, type AuthResult } from "@/lib/auth-api";
 
 export type ReauthMode = "mfa" | "password" | "email";
 
@@ -29,7 +26,7 @@ export async function refreshExpiredSession(
     expiredMessage: string,
 ): Promise<never> {
     onSession(await request<Session>("/api/session/"));
-    throw new AuthResponseError(expiredMessage, 401);
+    throw new ApiError(expiredMessage, { status: 401 });
 }
 
 export function ReauthenticationForm({

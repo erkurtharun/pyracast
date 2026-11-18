@@ -2,7 +2,8 @@
 
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { ApiError, request, type Session } from "@/lib/api";
+import { request, type Session } from "@/lib/api";
+import { ApiError } from "@/lib/api/errors";
 import { authRequest } from "@/lib/auth-api";
 import {
     getReauthMode,

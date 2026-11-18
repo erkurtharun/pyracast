@@ -11,8 +11,10 @@ from drf_spectacular.plumbing import deep_import_string
 
 from pyracast.accounts.language import Language
 from pyracast.accounts.models import UserLanguagePreference
+from pyracast.forecasts.models import SnapshotWeatherError
 from pyracast.mail.errors import MailFailure
 from pyracast.notifications.models import PAUSED_DELIVERY_ERRORS, NotificationDeliveryError
+from pyracast.weather import WeatherFailure
 from tests.support.vocabularies import (
     COVERED_APPS,
     FAILURE_CODES,
@@ -163,6 +165,10 @@ def test_operation_rejects_values_outside_the_vocabulary(
 def test_every_mail_failure_can_be_stored_on_a_reminder_delivery() -> None:
     assert set(MailFailure) <= set(NotificationDeliveryError)
     assert set(PAUSED_DELIVERY_ERRORS) <= set(NotificationDeliveryError)
+
+
+def test_every_weather_failure_can_be_stored_on_a_snapshot() -> None:
+    assert set(WeatherFailure) <= set(SnapshotWeatherError)
 
 
 def test_supported_languages_have_one_value_set() -> None:

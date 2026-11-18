@@ -14,6 +14,7 @@ from django.utils.translation import gettext
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import WorkspaceRole
 from pyracast.connections.models import SiteBinding
+from pyracast.errors import DomainError, ErrorCode
 from pyracast.forecasts.actuals import ACTUAL_COMPOSITION_POLICY
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.jobs import binding_is_current
@@ -79,7 +80,7 @@ def _binding(region: Region) -> SiteBinding:
 
 def _configuration(plant: Plant) -> PlantConfiguration:
     if plant.current_configuration_id is None:
-        raise ValidationError("configuration_unavailable")
+        raise DomainError(ErrorCode.CONFIGURATION_UNAVAILABLE)
     configuration = PlantConfiguration.objects.select_related("binding__provider_account").get(
         pk=plant.current_configuration_id, plant=plant
     )
@@ -215,7 +216,7 @@ def create_plant(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
         if Plant.objects.filter(region=region).exists():
-            raise ValidationError("location_already_has_plant")
+            raise DomainError(ErrorCode.LOCATION_ALREADY_HAS_PLANT)
         plant = Plant.objects.create(region=region, name=name.strip())
         _save_plant_parameters(
             actor,
@@ -337,7 +338,7 @@ def activate_submitted_plants(actor: User, region: Region, binding: SiteBinding)
         else:
             submission = PlantSubmission.objects.filter(plant=plant).first()
             if submission is None:
-                raise ValidationError("plant_submission_required")
+                raise DomainError(ErrorCode.PLANT_SUBMISSION_REQUIRED)
             parameters = submission
         _save_configuration(
             actor,
@@ -429,7 +430,7 @@ def import_observations(
             if day not in references:
                 references[day] = reference_intervals(configuration, day, now)
             if not interval_is_covered(references[day], start, end):
-                raise ValidationError("estimated_actuals_unavailable")
+                raise DomainError(ErrorCode.ESTIMATED_ACTUALS_UNAVAILABLE)
             saved = ProductionObservation.objects.create(
                 plant=plant,
                 configuration=configuration,

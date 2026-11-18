@@ -2,6 +2,7 @@ import { expect, test, type Page } from "./support/test";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
 import { mockApi, paged, region, user, tenantRow } from "./support/workspace";
+import { errorBody } from "./support/errors";
 
 type Saved = { id: number; energy: number; quality: string; source: string };
 async function productionApi(page: Page, viewer = false) {
@@ -149,9 +150,10 @@ async function productionApi(page: Page, viewer = false) {
             });
             await route.fulfill({
                 status: 409,
-                json: {
-                    detail: "Production changed. Reload the current values before saving.",
-                },
+                json: errorBody(
+                    "production_revision_changed",
+                    "Production changed. Reload the current values before saving.",
+                ),
             });
             return;
         }
@@ -607,7 +609,10 @@ test("a failed import refresh preserves the draft and releases an invalidated pe
         if (failRefresh)
             return route.fulfill({
                 status: 503,
-                json: { detail: "Import refresh temporarily unavailable." },
+                json: errorBody(
+                    "busy",
+                    "Import refresh temporarily unavailable.",
+                ),
             });
         if (!holdReload) return route.fallback();
         holdReload = false;
@@ -698,7 +703,7 @@ test("production polling pauses during editing and hidden documents and retains 
         return fail
             ? route.fulfill({
                   status: 503,
-                  json: { detail: "Temporary production read failure." },
+                  json: errorBody("busy", "Temporary production read failure."),
               })
             : route.fallback();
     });
@@ -1057,7 +1062,7 @@ test("changing dates hides the old production export and ignores late responses"
         await gate;
         await route.fulfill({
             status: 503,
-            json: { detail: "Late old date failure." },
+            json: errorBody("busy", "Late old date failure."),
         });
     });
     await openProduction(page);
@@ -1083,7 +1088,7 @@ test("failed production requests stop loading without exposing stale values", as
     await page.route("**/production/?*", (route) =>
         route.fulfill({
             status: 503,
-            json: { detail: "Production is temporarily unavailable." },
+            json: errorBody("busy", "Production is temporarily unavailable."),
         }),
     );
     await openProduction(page);

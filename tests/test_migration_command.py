@@ -43,14 +43,36 @@ def test_standard_migrate_command_remains_idempotent() -> None:
 
 
 def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
-    disk = MigrationLoader(None).disk_migrations
+    loader = MigrationLoader(None)
+    disk = loader.disk_migrations
     project = {
         config.label for config in apps.get_app_configs() if config.name.startswith("pyracast.")
     }
     baseline = {app: {"0001_initial"} for app in project}
     # Regions and connections reference each other; Django breaks that cycle in a second file.
     baseline["connections"].add("0002_initial")
-    assert {app: {name for label, name in disk if label == app} for app in project} == baseline
+    assert {
+        app: {
+            name for (label, name), migration in disk.items() if label == app and migration.initial
+        }
+        for app in project
+    } == baseline
+    forward = {
+        "change_requests": "0002_change_vocabulary_checks",
+        "forecasts": "0002_collection_endpoint_and_request_purpose_checks",
+        "incidents": "0002_incident_kind_choices",
+        "metering": "0002_epias_vocabulary_choices",
+        "notifications": "0002_delivery_vocabulary_checks",
+        "plants": "0002_plant_event_action_and_calibration_error_checks",
+    }
+    expected = {
+        app: names | ({forward[app]} if app in forward else set())
+        for app, names in baseline.items()
+    }
+    assert {app: {name for label, name in disk if label == app} for app in project} == expected
+    for app, name in forward.items():
+        assert (app, "0001_initial") in disk[app, name].dependencies
+        assert loader.graph.leaf_nodes(app) == [(app, name)]
 
 
 @contextmanager

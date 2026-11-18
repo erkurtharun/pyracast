@@ -13,6 +13,7 @@ from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import (
     CollectionEndpoint,
     CollectionJob,
+    CollectionJobError,
     CollectionJobStatus,
     CollectionSchedule,
 )
@@ -114,7 +115,7 @@ def _enqueue_region(region_id: int, now: datetime, cutoff: time) -> list[int]:
             status__in=(CollectionJobStatus.PENDING, CollectionJobStatus.RETRY),
         ).update(
             status=CollectionJobStatus.STALE,
-            last_error="forecast_superseded",
+            last_error=CollectionJobError.FORECAST_SUPERSEDED,
             lease_token=None,
             lease_expires_at=None,
         )

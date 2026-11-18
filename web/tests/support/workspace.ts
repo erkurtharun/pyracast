@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { errorBody } from "./errors";
 
 import type { components } from "../../src/lib/schema";
 
@@ -112,9 +113,10 @@ export async function mockApi(
             if (failed) {
                 await route.fulfill({
                     status: 503,
-                    json: {
-                        detail: "Forecast service is temporarily unavailable.",
-                    },
+                    json: errorBody(
+                        "busy",
+                        "Forecast service is temporarily unavailable.",
+                    ),
                 });
                 return;
             }

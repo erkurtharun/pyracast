@@ -8,7 +8,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q, QuerySet
 from django.utils import timezone
-from django.utils.translation import gettext
+from django.utils.translation import gettext_lazy as _
 
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import Membership, WorkspaceRole
@@ -33,9 +33,9 @@ from pyracast.change_requests.preparation import (
     production_context,
     validate_request,
 )
+from pyracast.errors import ConflictError, DomainError, ErrorCode
 from pyracast.incidents.models import IncidentRevision
 from pyracast.incidents.operations import (
-    RevisionConflict,
     finish_incident,
     lock_incident_plant,
     save_incident,
@@ -43,17 +43,10 @@ from pyracast.incidents.operations import (
 from pyracast.plants.models import Plant
 from pyracast.plants.production_changes import (
     ProductionChange,
-    ProductionRevisionConflictError,
     change_production,
     lock_production_configuration,
     prepare_production_changes,
 )
-
-
-class RequestConflictError(Exception):
-    def __init__(self, code: str, detail: str) -> None:
-        self.code, self.detail = code, detail
-        super().__init__(detail)
 
 
 def _reason(reason: str, *, required: bool = False) -> str:
@@ -62,7 +55,11 @@ def _reason(reason: str, *, required: bool = False) -> str:
         or len(reason.strip()) > 500
         or (required and not reason.strip())
     ):
-        raise ValidationError(gettext("A reason of 1 to 500 characters is required."))
+        raise DomainError(
+            ErrorCode.INVALID_REQUEST,
+            _("A reason of 1 to 500 characters is required."),
+            field="reason",
+        )
     return reason.strip()
 
 
@@ -71,9 +68,7 @@ def _replay(membership: Membership, key: UUID, payload_hash: str) -> ChangeReque
         proposer_membership_id=membership.pk, idempotency_key=key
     ).first()
     if previous is not None and previous.payload_sha256 != payload_hash:
-        raise RequestConflictError(
-            "idempotency_key_reused", gettext("Use a new request key for changed input.")
-        )
+        raise ConflictError(ErrorCode.IDEMPOTENCY_KEY_REUSED)
     return previous
 
 
@@ -92,10 +87,7 @@ def _create(
         ).count()
         >= 20
     ):
-        raise RequestConflictError(
-            "pending_request_limit",
-            gettext("Resolve or withdraw pending requests before submitting more."),
-        )
+        raise ConflictError(ErrorCode.PENDING_REQUEST_LIMIT)
     return ChangeRequest.objects.create(
         plant=plant,
         configuration_id=configuration_id,
@@ -124,7 +116,11 @@ def submit_production(
     membership = tenant_membership(actor, tenant_id, role=WorkspaceRole.VIEWER, lock=True)
     reason = _reason(reason, required=True)
     if not 1 <= len(changes) <= 100:
-        raise ValidationError(gettext("Submit 1 to 100 production intervals."))
+        raise DomainError(
+            ErrorCode.INVALID_REQUEST,
+            _("Submit 1 to 100 production intervals."),
+            field="changes",
+        )
     payload_hash = digest(
         {
             "plant": plant_id,
@@ -139,10 +135,7 @@ def submit_production(
     if previous is not None:
         return previous
     configuration = lock_production_configuration(tenant_id, region_id, plant_id, configuration_id)
-    try:
-        prepared = prepare_production_changes(configuration, unit, changes)
-    except ProductionRevisionConflictError as error:
-        raise RequestConflictError("production_revision_conflict", str(error)) from None
+    prepared = prepare_production_changes(configuration, unit, changes)
     request = _create(
         membership,
         configuration.plant,
@@ -262,18 +255,15 @@ def _terminal(request: ChangeRequest, status: str) -> bool:
     if request.status == status:
         return True
     if request.status != ChangeRequestStatus.PENDING:
-        raise RequestConflictError(
-            "request_already_closed", gettext("The request already has a different outcome.")
-        )
+        raise ConflictError(ErrorCode.REQUEST_ALREADY_CLOSED)
     return False
 
 
 def _validate(actor: User, request: ChangeRequest, plant: Plant, *, lock: bool = True) -> None:
     try:
         validate_request(actor, request, plant, lock=lock)
-    except (ValidationError, RevisionConflict, ProductionRevisionConflictError) as error:
-        detail = " ".join(error.messages) if isinstance(error, ValidationError) else str(error)
-        raise RequestConflictError("request_conflict", detail) from error
+    except ValidationError as error:
+        raise ConflictError(ErrorCode.REQUEST_CONFLICT, " ".join(error.messages)) from error
 
 
 @transaction.atomic
@@ -289,10 +279,7 @@ def approve_request(
     _validate(actor, request, plant)
     context = decision_context(request, plant)
     if review_fingerprint != "v1:" + digest(context["context"]):
-        raise RequestConflictError(
-            "review_context_changed",
-            gettext("The review context changed. Refresh and review again."),
-        )
+        raise ConflictError(ErrorCode.REVIEW_CONTEXT_CHANGED)
     request.reviewed_context = context
     request.save(update_fields=("reviewed_context",))
     scope = actor, tenant_id, plant.region_id, plant.pk

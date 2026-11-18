@@ -223,37 +223,7 @@
     "Errors": {
         "request": "Request failed ({status}). Please try again.",
         "invalidResponse": "The server returned an invalid response. Please try again.",
-        "duplicateLocation": "This location is already in your company’s portfolio. Open the existing plant.",
-        "activePlant": "This location already has an active plant.",
-        "reference": "Reference: {reference}",
-        "codes": {
-            "configuration_unavailable": "Plant configuration is unavailable. Complete setup and wait for administrator approval.",
-            "location_already_has_plant": "This location already has an active plant. Open the existing plant.",
-            "plant_submission_required": "Complete the plant's technical details before requesting approval.",
-            "estimated_actuals_unavailable": "Matching historical estimates are unavailable. Choose a day with collected data.",
-            "region_revision_changed": "The plant location changed. Reopen the plant and try again.",
-            "location_change_already_pending": "Another location request is pending. Reopen the editor to see it.",
-            "location_unchanged": "Enter a location different from the current location.",
-            "location_change_already_reviewed": "This location request has already been reviewed. Refresh the page.",
-            "location_already_exists": "This location is already in your company's portfolio. Open the existing plant.",
-            "calculation_out_of_range": "This forecast could not be calculated. Choose another day or contact your administrator.",
-            "trash_retention_expired": "The 30-day restore period has ended.",
-            "date_out_of_range": "Choose a date within the available forecast range.",
-            "completed_day_required": "Choose a completed local day for historical estimates.",
-            "not_found": "This item is unavailable. Return to the plant list and try again.",
-            "provider_authentication_failed": "The data connection needs administrator attention. Saved data remains available.",
-            "provider_throttled": "The data provider is limiting requests. Please try again later.",
-            "quota_exhausted": "The daily data request budget is exhausted. Try again after it resets.",
-            "provider_unavailable": "The data provider is unavailable. Please try again later.",
-            "workspace_busy": "Another update is in progress. Try again shortly.",
-            "server_error": "The server could not complete this request.",
-            "request_timeout": "The request took too long. Please try again.",
-            "database_conflict": "Another update conflicted with this one. Try again shortly.",
-            "session_ended": "Your session ended. Refresh the page and sign in again.",
-            "permission_denied": "You do not have permission for this action.",
-            "bad_request": "The request was not valid. Refresh the page and try again.",
-            "invalid_proxy_headers": "The connection could not be verified. Please try again later."
-        }
+        "reference": "Reference: {reference}"
     },
     "ProductionCsv": {
         "size": "Choose a CSV no larger than 2 MiB.",

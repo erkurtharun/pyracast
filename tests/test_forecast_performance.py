@@ -196,7 +196,7 @@ def test_performance_scope_and_date_validation(monkeypatch: pytest.MonkeyPatch) 
     path = (
         f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/plants/{plant.pk}/performance/"
     )
-    assert client.get(path).status_code == 403
+    assert client.get(path).status_code == 401
     other = User.objects.create_user("other")
     Membership.objects.create(user=other, tenant=Tenant.objects.create(name="Other"))
     client.force_login(other)

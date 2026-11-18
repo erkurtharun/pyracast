@@ -310,7 +310,7 @@ def test_trusted_proxy_rejects_ambiguous_identity(
     request = RequestFactory().get(
         "/", REMOTE_ADDR="10.0.0.1", HTTP_X_FORWARDED_PROTO=proto, HTTP_X_REAL_IP=client_ip
     )
-    with pytest.raises(PermissionDenied, match="Invalid trusted proxy"):
+    with pytest.raises(PermissionDenied, match="could not be verified"):
         TrustedProxyHeaders(proxy_response)(request)
 
 
@@ -375,7 +375,7 @@ def test_proxy_chain_rejects_missing_or_invalid_client(settings: LazySettings, c
         HTTP_X_REAL_IP="173.245.48.1",
         HTTP_X_FORWARDED_FOR=chain,
     )
-    with pytest.raises(PermissionDenied, match="Invalid trusted proxy"):
+    with pytest.raises(PermissionDenied, match="could not be verified"):
         TrustedProxyHeaders(proxy_response)(request)
 
 

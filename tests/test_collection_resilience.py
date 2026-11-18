@@ -20,6 +20,7 @@ from pyracast.forecasts.models import (
     ForecastResult,
     ForecastSnapshot,
     RequestAttempt,
+    RequestPurpose,
 )
 from pyracast.forecasts.schedule import configure_schedule
 from pyracast.forecasts.scheduler import enqueue_due
@@ -140,7 +141,9 @@ def test_rate_limit_cooldown_is_shared_by_account_and_does_not_consume_waiting_q
     assert system.account.request_blocked_until is not None
     assert system.account.request_blocked_until >= NOW + timedelta(seconds=900)
     with pytest.raises(RequestDeferredError) as caught:
-        reserve_account_request(system.account, NOW + timedelta(seconds=899), purpose="validation")
+        reserve_account_request(
+            system.account, NOW + timedelta(seconds=899), purpose=RequestPurpose.VALIDATION
+        )
     assert caught.value.available_at == system.account.request_blocked_until
     CollectionJob.objects.filter(pk=job.pk).update(available_at=NOW)
     assert not collect(job.pk, FakeAdapter(), calculate, NOW)
@@ -165,11 +168,11 @@ def test_authentication_block_preserves_account_and_clears_by_credential_revisio
     system.account.refresh_from_db()
     assert system.account.enabled
     with pytest.raises(RequestDeferredError) as caught:
-        reserve_account_request(system.account, NOW, purpose="validation")
+        reserve_account_request(system.account, NOW, purpose=RequestPurpose.VALIDATION)
     assert caught.value.available_at is None
     rotate_secret(system.admin, system.account.pk, "test-only-replacement")
     system.account.refresh_from_db()
-    assert reserve_account_request(system.account, NOW, purpose="validation")
+    assert reserve_account_request(system.account, NOW, purpose=RequestPurpose.VALIDATION)
     assert system.account.authentication_failed_revision != system.account.credential_revision
     assert not RequestAttempt.objects.filter(purpose="forecast").exists()
 
@@ -192,9 +195,9 @@ def test_obsolete_responses_cannot_block_rotated_credentials_or_shorten_cooldown
     assert system.account.request_blocked_until == first_until
     assert system.account.authentication_failed_revision is None
     with pytest.raises(RequestDeferredError):
-        reserve_account_request(system.account, NOW, purpose="validation")
+        reserve_account_request(system.account, NOW, purpose=RequestPurpose.VALIDATION)
     assert first_until is not None
-    assert reserve_account_request(system.account, first_until, purpose="validation")
+    assert reserve_account_request(system.account, first_until, purpose=RequestPurpose.VALIDATION)
 
 
 @pytest.mark.django_db(transaction=True)
@@ -207,7 +210,7 @@ def test_validation_authentication_error_blocks_other_requests() -> None:
     with pytest.raises(ProviderError):
         validate_binding(system.admin, system.binding.pk, FakeAdapter(fail), NOW)
     with pytest.raises(RequestDeferredError):
-        reserve_account_request(system.account, NOW, purpose="inspect_settings")
+        reserve_account_request(system.account, NOW, purpose=RequestPurpose.INSPECT_SETTINGS)
 
 
 @pytest.mark.parametrize("nightly", [False, True])
@@ -319,7 +322,7 @@ def test_unexpected_auxiliary_weather_failure_does_not_block_primary_publication
 def test_resource_forbidden_does_not_disable_other_account_resources() -> None:
     system = make_system()
     record_provider_failure(system.account, ProviderError("private", status_code=403), NOW)
-    assert reserve_account_request(system.account, NOW, purpose="validation")
+    assert reserve_account_request(system.account, NOW, purpose=RequestPurpose.VALIDATION)
 
 
 @pytest.mark.django_db(transaction=True)

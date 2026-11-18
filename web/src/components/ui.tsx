@@ -10,7 +10,8 @@ import {
     useState,
     type ReactNode,
 } from "react";
-import { ApiError, request, type Page } from "@/lib/api";
+import { request, type Page } from "@/lib/api";
+import { ApiError } from "@/lib/api/errors";
 const FormErrors = createContext<Record<string, string>>({});
 export function useCollection<T>(url: string, refresh = 0, pollMs = 0) {
     const t = useTranslations("Common");
@@ -254,7 +255,8 @@ export function ActionForm({
                     ref={errorRef}
                 >
                     <strong>{t("saveFailed")}</strong>
-                    {Object.keys(state.fields).length ? (
+                    <p>{state.message}</p>
+                    {Object.keys(state.fields).length > 0 && (
                         <ul>
                             {Object.entries(state.fields).map(
                                 ([name, message]) => (
@@ -279,8 +281,6 @@ export function ActionForm({
                                 ),
                             )}
                         </ul>
-                    ) : (
-                        <p>{state.message}</p>
                     )}
                 </div>
             )}

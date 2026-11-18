@@ -2,7 +2,6 @@ from datetime import date, datetime, timedelta
 from typing import Any, cast
 
 import pytest
-from django.core.exceptions import ValidationError
 from django.test import Client
 from django.utils import timezone
 
@@ -25,6 +24,7 @@ from pyracast.regions.models import Region
 from pyracast.solar import daylight_window
 from pyracast.weather import serialize_weather
 from tests.support.domain import System
+from tests.support.errors import raises_code
 from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
 from tests.support.weather_collection import WeatherFixture
 
@@ -484,7 +484,7 @@ def test_today_actuals_keep_independent_archived_forecast_weather(
             WeatherFixture().fetch(40, 29, start, start + timedelta(days=1))
         )
     elif weather == "failed":
-        forecast.weather_error = "weather_timeout"
+        forecast.weather_error = "weather_request_failed"
     forecast.save(update_fields=("weather_payload", "weather_error"))
     intraday_actuals(system, now)
     monkeypatch.setattr(timezone, "now", lambda: now)
@@ -504,7 +504,7 @@ def test_today_actuals_keep_independent_archived_forecast_weather(
         assert regional["weather_reference"]["intervals"][0]["ghi_wm2"] == 600
     elif weather == "failed":
         assert regional["weather_reference"]["status"] == "unavailable"
-        assert "weather_timeout" in regional["weather_reference"]["quality_flags"]
+        assert "weather_request_failed" in regional["weather_reference"]["quality_flags"]
     else:
         assert "weather_reference" not in regional
 
@@ -683,7 +683,7 @@ def test_intraday_rejects_damaged_original_native_bounds(
         row["original_end"] = row["start"]
     actual.save(update_fields=("normalized_intervals",))
     monkeypatch.setattr(timezone, "now", lambda: now)
-    with pytest.raises(ValidationError, match="calculation_out_of_range"):
+    with raises_code("calculation_out_of_range"):
         plant_outlook(
             system.member,
             system.tenant.pk,
@@ -694,7 +694,7 @@ def test_intraday_rejects_damaged_original_native_bounds(
             source="auto",
         )
     system.region.refresh_from_db()
-    with pytest.raises(ValidationError, match="calculation_out_of_range"):
+    with raises_code("calculation_out_of_range"):
         regional_outlook(system.region, DAY, "auto", now)
 
 

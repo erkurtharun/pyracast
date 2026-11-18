@@ -14,7 +14,7 @@ from pyracast.connections.operations import (
     reserve_account_request,
     reserve_request,
 )
-from pyracast.forecasts.models import CollectionJob, RequestAttempt
+from pyracast.forecasts.models import CollectionJob, RequestAttempt, RequestPurpose
 from pyracast.regions.operations import configure_binding
 from tests.support.domain import NOW, make_system
 
@@ -30,15 +30,15 @@ def test_quota_uses_utc_day_after_account_lock_wait(
     started = datetime(2026, 11, 9, 23, 59, 59, tzinfo=UTC)
     reserved = started + timedelta(seconds=2)
     if next_day_full:
-        reserve_request(system.binding, reserved, purpose="validation")
+        reserve_request(system.binding, reserved, purpose=RequestPurpose.VALIDATION)
     ticks = iter([0.0, 2.0])
     monkeypatch.setattr(operations, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
 
     if next_day_full:
         with pytest.raises(QuotaExceededError):
-            reserve_request(system.binding, started, purpose="forecast")
+            reserve_request(system.binding, started, purpose=RequestPurpose.FORECAST)
     else:
-        attempt = reserve_request(system.binding, started, purpose="forecast")
+        attempt = reserve_request(system.binding, started, purpose=RequestPurpose.FORECAST)
         assert attempt.utc_day == reserved.date()
         assert attempt.created_at == reserved
     assert RequestAttempt.objects.count() == 1
@@ -47,13 +47,13 @@ def test_quota_uses_utc_day_after_account_lock_wait(
 def test_prebinding_requests_share_the_account_ledger() -> None:
     system = make_system()
     ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=1)
-    attempt = reserve_account_request(system.account, NOW, purpose="inspect_settings")
+    attempt = reserve_account_request(system.account, NOW, purpose=RequestPurpose.INSPECT_SETTINGS)
     assert attempt.binding_id is None
     assert attempt.job_id is None
     assert attempt.outcome == "uncertain"
     assert attempt.provider_account_id == system.account.pk
     with pytest.raises(QuotaExceededError):
-        reserve_request(system.binding, NOW, purpose="validation")
+        reserve_request(system.binding, NOW, purpose=RequestPurpose.VALIDATION)
     assert RequestAttempt.objects.count() == 1
 
 
@@ -67,9 +67,11 @@ def test_prebinding_and_forecast_reservations_serialize_one_budget() -> None:
         try:
             barrier.wait(timeout=10)
             if before_binding:
-                reserve_account_request(system.account, NOW, purpose="inspect_settings")
+                reserve_account_request(
+                    system.account, NOW, purpose=RequestPurpose.INSPECT_SETTINGS
+                )
             else:
-                reserve_request(system.binding, NOW, purpose="forecast")
+                reserve_request(system.binding, NOW, purpose=RequestPurpose.FORECAST)
             return True
         except QuotaExceededError:
             return False
@@ -90,7 +92,7 @@ def test_prebinding_reservations_recheck_account_authorization(state: str) -> No
     else:
         ProviderAccount.objects.filter(pk=system.account.pk).update(authorized_at=None)
     with pytest.raises(QuotaExceededError):
-        reserve_account_request(system.account, NOW, purpose="inspect_settings")
+        reserve_account_request(system.account, NOW, purpose=RequestPurpose.INSPECT_SETTINGS)
     assert not RequestAttempt.objects.exists()
 
 
@@ -100,7 +102,9 @@ def test_reservations_reject_mismatched_account_binding_and_job() -> None:
         provider="fixture", external_account_id="another"
     )
     with pytest.raises(ValidationError, match="provider account"):
-        reserve_account_request(other_account, NOW, purpose="forecast", binding=system.binding)
+        reserve_account_request(
+            other_account, NOW, purpose=RequestPurpose.FORECAST, binding=system.binding
+        )
     job = CollectionJob.objects.create(
         binding=system.binding,
         scheduled_slot=NOW,
@@ -108,7 +112,7 @@ def test_reservations_reject_mismatched_account_binding_and_job() -> None:
         available_at=NOW,
     )
     with pytest.raises(ValidationError, match="job must belong"):
-        reserve_account_request(system.account, NOW, purpose="forecast", job=job)
+        reserve_account_request(system.account, NOW, purpose=RequestPurpose.FORECAST, job=job)
     replacement = configure_binding(
         system.admin,
         system.region.pk,
@@ -119,6 +123,6 @@ def test_reservations_reject_mismatched_account_binding_and_job() -> None:
     )
     with pytest.raises(ValidationError, match="job must belong"):
         reserve_account_request(
-            system.account, NOW, purpose="forecast", binding=replacement, job=job
+            system.account, NOW, purpose=RequestPurpose.FORECAST, binding=replacement, job=job
         )
     assert not RequestAttempt.objects.exists()

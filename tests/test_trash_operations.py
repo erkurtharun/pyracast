@@ -43,6 +43,7 @@ from pyracast.trash import (
     trash_region,
 )
 from tests.support.domain import NOW, System
+from tests.support.errors import raises_code
 from tests.support.historical_reference_import import power_file, source_settings, system_for_import
 from tests.support.plant_operations import make_plant, request_run, snapshot_for
 from tests.support.trash_operations import sibling
@@ -260,7 +261,7 @@ def test_restore_deadline_is_strict_and_purge_boundary_is_inclusive(
     trash_region(*args)
     assert purge_expired(NOW + RETENTION - timedelta(microseconds=1)) == {"regions": 0, "plants": 0}
     monkeypatch.setattr(timezone, "now", lambda: NOW + RETENTION)
-    with pytest.raises(ValidationError, match="trash_retention_expired"):
+    with raises_code("trash_retention_expired"):
         restore_region(*args)
     assert purge_expired() == {"regions": 1, "plants": 1}
     assert not Plant.objects.filter(pk=plant.pk).exists()

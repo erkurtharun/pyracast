@@ -55,6 +55,42 @@ class SnapshotSourceKind(models.TextChoices):
     ESTIMATED_ACTUALS = "estimated_actuals", "Estimated actuals"
 
 
+class CollectionJobError(models.TextChoices):
+    HISTORY_WINDOW_CLOSED = "history_window_closed", "History window closed"
+    ATTEMPTS_EXHAUSTED = "attempts_exhausted", "Attempts exhausted"
+    FORECAST_SUPERSEDED = "forecast_superseded", "Forecast superseded"
+    HISTORY_INCOMPLETE = "history_incomplete", "History incomplete"
+    HISTORY_ALREADY_ARCHIVED = "history_already_archived", "History already archived"
+    PROVIDER_AUTHENTICATION_FAILED = (
+        "provider_authentication_failed",
+        "Provider authentication failed",
+    )
+    PROVIDER_THROTTLED = "provider_throttled", "Provider throttled"
+    HISTORY_BUDGET_RESERVED = "history_budget_reserved", "History budget reserved"
+    QUOTA_EXHAUSTED = "quota_exhausted", "Quota exhausted"
+    PROVIDER_FAILURE = "provider_failure", "Provider failure"
+    PROVIDER_UNEXPECTED_FAILURE = "provider_unexpected_failure", "Provider unexpected failure"
+    INVALID_SOURCE_KIND = "invalid_source_kind", "Invalid source kind"
+    CALCULATION_FAILURE = "calculation_failure", "Calculation failure"
+
+
+class SnapshotWeatherError(models.TextChoices):
+    # Every WeatherFailure code is a member: weather collection stores WeatherError.code here.
+    INVALID_NUMBER = "invalid_weather_number", "Invalid weather number"
+    INVALID_COORDINATES = "invalid_weather_coordinates", "Invalid weather coordinates"
+    INVALID_SCHEMA = "invalid_weather_schema", "Invalid weather schema"
+    INVALID_TIMEZONE = "invalid_weather_timezone", "Invalid weather timezone"
+    INVALID_UNITS = "invalid_weather_units", "Invalid weather units"
+    EMPTY_RESPONSE = "empty_weather_response", "Empty weather response"
+    INVALID_INTERVAL = "invalid_weather_interval", "Invalid weather interval"
+    INVALID_WINDOW = "invalid_weather_window", "Invalid weather window"
+    UNSAFE_RESPONSE = "unsafe_weather_response", "Unsafe weather response"
+    INVALID_COLLECTION_TIME = "invalid_weather_collection_time", "Invalid weather collection time"
+    REQUEST_FAILED = "weather_request_failed", "Weather request failed"
+    ACQUISITION_FAILED = "weather_acquisition_failed", "Weather acquisition failed"
+    ACQUISITION_INTERRUPTED = "weather_acquisition_interrupted", "Weather acquisition interrupted"
+
+
 class DispatcherStatus(models.Model):
     phase = models.CharField(max_length=20, primary_key=True, choices=DispatcherPhase)
     attempted_at = models.DateTimeField()
@@ -112,7 +148,7 @@ class CollectionJob(models.Model):
     lease_token = models.UUIDField(null=True)
     lease_expires_at = models.DateTimeField(null=True)
     attempts = models.PositiveIntegerField(default=0)
-    last_error = models.CharField(max_length=40, default="")
+    last_error = models.CharField(max_length=40, choices=CollectionJobError, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -135,6 +171,7 @@ class CollectionJob(models.Model):
             ),
             choices_check("endpoint", CollectionEndpoint),
             choices_check("status", CollectionJobStatus, name="collection_job_status"),
+            choices_check("last_error", CollectionJobError, blank=True),
             lease_check((CollectionJobStatus.RUNNING,)),
             models.CheckConstraint(
                 condition=models.Q(
@@ -207,7 +244,9 @@ class ForecastSnapshot(models.Model):
     coverage_end = models.DateTimeField(null=True, db_index=True)
     available_at = models.DateTimeField(null=True)
     weather_payload = models.JSONField(null=True)
-    weather_error = models.CharField(max_length=64, default="")
+    weather_error = models.CharField(
+        max_length=64, choices=SnapshotWeatherError, blank=True, default=""
+    )
 
     class Meta:
         indexes = (
@@ -230,6 +269,7 @@ class ForecastSnapshot(models.Model):
                 name="snapshot_coverage_bounds",
             ),
             choices_check("source_kind", SnapshotSourceKind, name="snapshot_source_kind"),
+            choices_check("weather_error", SnapshotWeatherError, blank=True),
         )
 
 
