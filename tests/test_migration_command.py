@@ -58,6 +58,7 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
         for app in project
     } == baseline
     forward = {
+        "accounts": "0002_workspace_names_need_not_be_unique",
         "change_requests": "0002_change_vocabulary_checks",
         "forecasts": "0002_collection_endpoint_and_request_purpose_checks",
         "incidents": "0002_incident_kind_choices",

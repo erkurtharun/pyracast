@@ -244,6 +244,40 @@ def test_a_refusal_is_attributed_to_its_route_pattern_and_never_to_its_path(
     assert "9257" not in caplog.text
 
 
+@pytest.mark.parametrize(
+    ("refusal", "event", "code"),
+    [
+        ("permission", "authorization_denied", "permission_denied"),
+        ("csrf", "csrf_refused", "csrf_failed"),
+    ],
+)
+def test_a_refusal_without_a_matching_route_uses_a_fixed_route_label(
+    refusal: str, event: str, code: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    request = RequestFactory().post("/api/unrouted/7341/private-value/")
+    request.user = User(pk=990_002, username="unrouted-refusal")
+
+    response = (
+        error_pages.permission_denied(request, PermissionDenied())
+        if refusal == "permission"
+        else error_pages.csrf_failure(request)
+    )
+
+    assert response.status_code == 403
+    assert json.loads(response.content)["code"] == code
+    assert security_lines(caplog) == [
+        {
+            "event": event,
+            "user_id": request.user.pk,
+            "client_ip": "127.0.0.1",
+            "reason": code,
+            "view": "-",
+        }
+    ]
+    assert "7341" not in caplog.text
+    assert "private-value" not in caplog.text
+
+
 @pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
 def test_a_signed_in_refusal_from_an_authentication_view_is_recorded(
     caplog: pytest.LogCaptureFixture,
