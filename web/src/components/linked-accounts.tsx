@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import type { Session } from "@/lib/api";
 import { authRequest } from "@/lib/auth-api";
 import {
     SocialProviderButtons,
@@ -23,18 +22,14 @@ type ProviderAccount = {
 type Pending =
     { kind: "connect" } | { kind: "disconnect"; account: ProviderAccount };
 export function LinkedAccounts({
-    token,
     email,
     hasPassword,
-    onSession,
 }: {
-    token: string;
     email: string;
     hasPassword: boolean;
-    onSession: (session: Session) => void;
 }) {
     const t = useTranslations("SocialAuth");
-    const providers = useSocialProviders(token);
+    const providers = useSocialProviders();
     const security = useTranslations("Security");
     const [accounts, setAccounts] = useState<ProviderAccount[]>();
     const [version, setVersion] = useState(0);
@@ -68,15 +63,12 @@ export function LinkedAccounts({
     }, []);
     useEffect(() => {
         let active = true;
-        authRequest<ProviderAccount[]>("account/providers", "GET", token)
+        authRequest<ProviderAccount[]>("account/providers", "GET")
             .then(async (result) => {
                 if (!active) return;
                 if (result.status === 401) {
                     if (!result.meta?.is_authenticated)
-                        await refreshExpiredSession(
-                            onSession,
-                            security("sessionExpired"),
-                        );
+                        await refreshExpiredSession(security("sessionExpired"));
                     throw new Error(security("confirmIdentityFirst"));
                 }
                 if (!Array.isArray(result.data))
@@ -92,24 +84,19 @@ export function LinkedAccounts({
         return () => {
             active = false;
         };
-    }, [token, version, onSession, security, t]);
+    }, [version, security, t]);
     async function disconnect(account: ProviderAccount, replay = false) {
         setBusy(true);
         setError(undefined);
         setNotice(false);
         try {
-            const result = await authRequest(
-                "account/providers",
-                "DELETE",
-                token,
-                { provider: account.provider.id, account: account.uid },
-            );
+            const result = await authRequest("account/providers", "DELETE", {
+                provider: account.provider.id,
+                account: account.uid,
+            });
             if (result.status === 401) {
                 if (!result.meta?.is_authenticated)
-                    await refreshExpiredSession(
-                        onSession,
-                        security("sessionExpired"),
-                    );
+                    await refreshExpiredSession(security("sessionExpired"));
                 if (replay) throw new Error(security("reauthStillRequired"));
                 setReauth({
                     mode: getReauthMode(result, hasPassword),
@@ -191,8 +178,6 @@ export function LinkedAccounts({
                     key={reauth.mode}
                     mode={reauth.mode}
                     email={email}
-                    token={token}
-                    onSession={onSession}
                     autoFocus
                     onCancel={() => setReauth(undefined)}
                     onVerified={async () => {
@@ -205,7 +190,6 @@ export function LinkedAccounts({
             )}
             {canConnect ? (
                 <SocialProviderButtons
-                    token={token}
                     process="connect"
                     enabledProviders={providers}
                 />

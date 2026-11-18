@@ -14,6 +14,9 @@ ALLAUTH_PROTOCOL = {
     "accounts/adapters.py:AccountAdapter.validation_error",
     "accounts/adapters.py:AccountAdapter.pre_authenticate",
     "accounts/adapters.py:AccountAdapter.confirm_email",
+    # A completion that failed answers allauth's own 409 for a client with nothing pending.
+    "accounts/headless.py:ResetPasswordView.post",
+    "accounts/headless.py:VerifyEmailView.post",
     "accounts/inputs.py:ChangePasswordInput.clean_current_password",
     "accounts/inputs.py:ResendEmailVerificationInput.clean",
     "accounts/inputs.py:SecondFactorCode.matching_code",

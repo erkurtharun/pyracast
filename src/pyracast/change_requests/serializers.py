@@ -129,10 +129,15 @@ class ChangeRequestSummaryOutput(serializers.Serializer[dict[str, Any]]):
     can_review = serializers.BooleanField()
     can_withdraw = serializers.BooleanField()
     unread = serializers.BooleanField()
+    timezone = serializers.CharField()
+    item_count = serializers.IntegerField()
+    period_start = serializers.DateTimeField()
+    period_end = serializers.DateTimeField(allow_null=True)
+    incident_action = serializers.ChoiceField(choices=IncidentChangeAction.choices, allow_null=True)
+    incident_title = serializers.CharField(allow_null=True)
 
 
 class ChangeRequestOutput(ChangeRequestSummaryOutput):
-    timezone = serializers.CharField()
     conflict = ConflictOutput(allow_null=True)
     review_fingerprint = serializers.CharField(allow_null=True)
     production_items = ProductionItemOutput(many=True)

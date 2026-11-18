@@ -1,7 +1,8 @@
 "use client";
 import { useTranslations, useLocale } from "next-intl";
 import { useState } from "react";
-import { request } from "@/lib/api";
+import type { RegionScope } from "@/lib/api";
+import { api } from "@/lib/api/client";
 import type { components } from "@/lib/schema";
 import { Empty, Notice, useCollection } from "./ui";
 
@@ -9,13 +10,11 @@ type DeletedRegion = components["schemas"]["TrashedRegionOutput"];
 
 export function MoveToRecycleBin({
     name,
-    url,
-    token,
+    scope,
     onDeleted,
 }: {
     name: string;
-    url: string;
-    token: string;
+    scope: RegionScope;
     onDeleted: () => void;
 }) {
     const t = useTranslations("RecycleBin");
@@ -55,7 +54,10 @@ export function MoveToRecycleBin({
                         setWorking(true);
                         setError("");
                         try {
-                            await request(url, "DELETE", undefined, token);
+                            await api.delete(
+                                "/api/tenants/{tenant_id}/regions/{region_id}/",
+                                { path: scope },
+                            );
                             onDeleted();
                         } catch (failure) {
                             setError((failure as Error).message);
@@ -70,13 +72,7 @@ export function MoveToRecycleBin({
     );
 }
 
-export function RecycleBin({
-    tenant,
-    token,
-}: {
-    tenant: number;
-    token: string;
-}) {
+export function RecycleBin({ tenant }: { tenant: number }) {
     const t = useTranslations("RecycleBin");
     const locale = useLocale();
 
@@ -85,9 +81,9 @@ export function RecycleBin({
     const [error, setError] = useState("");
     const [message, setMessage] = useState("");
     const [restored, setRestored] = useState<number[]>([]);
-    const base = `/api/tenants/${tenant}/`;
-    const regions = useCollection<DeletedRegion>(
-        `${base}trash/regions/`,
+    const regions = useCollection(
+        "/api/tenants/{tenant_id}/trash/regions/",
+        { path: { tenant_id: tenant } },
         version,
     );
     const rows =
@@ -106,11 +102,11 @@ export function RecycleBin({
         setError("");
         setMessage("");
         try {
-            await request(
-                `${base}regions/${row.id}/restore/`,
-                "POST",
-                {},
-                token,
+            await api.post(
+                "/api/tenants/{tenant_id}/regions/{region_id}/restore/",
+                {
+                    path: { tenant_id: tenant, region_id: row.id },
+                },
             );
             setRestored((current) => [...current, row.id]);
             setVersion((current) => current + 1);

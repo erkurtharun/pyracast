@@ -860,6 +860,18 @@ export interface components {
             can_withdraw: boolean;
             unread: boolean;
             timezone: string;
+            item_count: number;
+            /** Format: date-time */
+            period_start: string;
+            /** Format: date-time */
+            period_end: string | null;
+            incident_action:
+                | (
+                      | components["schemas"]["IncidentChangeActionEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+            incident_title: string | null;
             conflict: components["schemas"]["ConflictOutput"] | null;
             review_fingerprint: string | null;
             production_items: components["schemas"]["ProductionItemOutput"][];
@@ -894,6 +906,19 @@ export interface components {
             can_review: boolean;
             can_withdraw: boolean;
             unread: boolean;
+            timezone: string;
+            item_count: number;
+            /** Format: date-time */
+            period_start: string;
+            /** Format: date-time */
+            period_end: string | null;
+            incident_action:
+                | (
+                      | components["schemas"]["IncidentChangeActionEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
+            incident_title: string | null;
         };
         /**
          * @description * `forecasts` - Forecasts
@@ -1139,6 +1164,7 @@ export interface components {
          *     * `database_conflict` - Database Conflict
          *     * `request_timeout` - Request Timeout
          *     * `provider_authentication_failed` - Provider Authentication Failed
+         *     * `maintenance` - Maintenance
          *     * `forecast_sources_changed` - Forecast Sources Changed
          *     * `configuration_unavailable` - Configuration Unavailable
          *     * `location_already_has_plant` - Location Already Has Plant
@@ -1204,6 +1230,7 @@ export interface components {
             | "database_conflict"
             | "request_timeout"
             | "provider_authentication_failed"
+            | "maintenance"
             | "forecast_sources_changed"
             | "configuration_unavailable"
             | "location_already_has_plant"
@@ -2204,6 +2231,8 @@ export interface components {
             user: components["schemas"]["SessionUserOutput"] | null;
             csrf_token: string;
             language: components["schemas"]["LanguageEnum"];
+            /** Format: date-time */
+            expires_at: string | null;
         };
         SessionUserOutput: {
             id: number;

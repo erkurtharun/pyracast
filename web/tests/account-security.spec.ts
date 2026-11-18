@@ -93,3 +93,72 @@ test("administrator recovery codes request a fresh authenticator confirmation", 
         page.getByRole("button", { name: "Confirm authenticator" }),
     ).toBeVisible();
 });
+
+test("an email change that needs a fresh sign-in confirms the password and sends the code", async ({
+    page,
+}) => {
+    await mockApi(page);
+    const submitted: unknown[] = [];
+    const confirmations: unknown[] = [];
+    await page.route("**/api/auth/browser/v1/account/email", (route) => {
+        submitted.push(route.request().postDataJSON());
+        if (submitted.length === 2)
+            expect(confirmations).toEqual([{ password: "current-password" }]);
+        return route.fulfill(
+            submitted.length === 1
+                ? {
+                      status: 401,
+                      json: {
+                          status: 401,
+                          meta: { is_authenticated: true },
+                          data: {
+                              flows: [
+                                  { id: "reauthenticate", is_pending: true },
+                              ],
+                          },
+                      },
+                  }
+                : { json: { status: 200, data: [] } },
+        );
+    });
+    await page.route("**/api/auth/browser/v1/auth/reauthenticate", (route) => {
+        confirmations.push(route.request().postDataJSON());
+        expect(route.request().postDataJSON()).toEqual({
+            password: "current-password",
+        });
+        return route.fulfill({
+            json: { status: 200, meta: { is_authenticated: true } },
+        });
+    });
+    await page.goto("/app/");
+    await page.getByRole("button", { name: "Account" }).click();
+    await page.getByText("Change email", { exact: true }).click();
+    await page.getByLabel("New email address").fill("new@example.test");
+    await page.getByRole("button", { name: "Send verification code" }).click();
+    const changeEmail = page.locator(".account-disclosure").filter({
+        has: page.getByText("Change email", { exact: true }),
+    });
+    await changeEmail
+        .getByLabel("Current password", { exact: true })
+        .fill("current-password");
+    await changeEmail.getByRole("button", { name: "Confirm password" }).click();
+    await expect
+        .poll(() => submitted)
+        .toEqual([
+            { email: "new@example.test" },
+            { email: "new@example.test" },
+        ]);
+    await expect(page.getByLabel("Email verification code")).toBeVisible();
+    expect(confirmations).toEqual([{ password: "current-password" }]);
+    await expect(changeEmail.getByLabel("New email address")).toHaveValue(
+        "new@example.test",
+    );
+    await expect(
+        changeEmail.getByText(
+            "Enter the code sent to your email in this browser.",
+        ),
+    ).toBeVisible();
+    await expect(
+        page.getByText("Please confirm your identity and try again."),
+    ).toHaveCount(0);
+});

@@ -69,12 +69,16 @@ async function openForecast(
                       }
                     : {}),
             }));
-            if (missing)
+            if (missing) {
+                const [template] = rows;
+                if (!template)
+                    throw new Error("The forecast fixture has no interval.");
                 rows.push({
-                    ...rows[0],
+                    ...template,
                     start: "2026-11-14T11:00:00Z",
                     end: "2026-11-14T12:00:00Z",
                 });
+            }
             const result = {
                 start: "2026-11-13T21:00:00Z",
                 end: "2026-11-14T21:00:00Z",
@@ -213,11 +217,13 @@ for (const electrical of [true, false]) {
             await readFile(await (await download).path(), "utf8"),
             { header: true, skipEmptyLines: true },
         );
-        expect(records.data[0].source_kinds).toContain("estimated_actuals");
-        expect(records.data[1].source_kinds).toContain("forecast");
+        expect(records.data[0]?.source_kinds).toContain("estimated_actuals");
+        expect(records.data[1]?.source_kinds).toContain("forecast");
         if (electrical) {
-            expect(records.data[2].source_kinds).toContain("estimated_actuals");
-            expect(records.data[2].source_kinds).toContain("forecast");
+            expect(records.data[2]?.source_kinds).toContain(
+                "estimated_actuals",
+            );
+            expect(records.data[2]?.source_kinds).toContain("forecast");
         }
         await page.getByText("Source & quality", { exact: true }).click();
         await expect(
@@ -388,7 +394,7 @@ for (const scenario of ["outage"] as const) {
             affected_energy_mwh: "1",
             normal_quality_flags: '["normal_test_flag"]',
         });
-        expect(records.data[1].affected_quality_flags).toBe(
+        expect(records.data[1]?.affected_quality_flags).toBe(
             '["affected_test_flag"]',
         );
     });

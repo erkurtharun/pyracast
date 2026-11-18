@@ -1,9 +1,12 @@
+import http.client
 import json
 import re
+import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import timedelta
+from email.message import Message
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +19,7 @@ from django.utils import timezone
 from psycopg.errors import DeadlockDetected, LockNotAvailable, QueryCanceled
 from rest_framework.exceptions import APIException, Throttled
 
+from pyracast import maintenance
 from pyracast.accounts import session_lock
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.api.session import SessionView
@@ -133,6 +137,38 @@ def busy_session(monkeypatch: pytest.MonkeyPatch, accept: str) -> Any:
     client = Client()
     client.cookies["sessionid"] = "a" * 32
     return client.get("/api/session/", headers=language(accept))
+
+
+@dataclass(frozen=True)
+class NoticeResponse:
+    status_code: int
+    headers: Message
+    content: bytes
+
+    def __getitem__(self, name: str) -> str:
+        value = self.headers[name]
+        if value is None:
+            raise KeyError(name)
+        return value
+
+    def __contains__(self, name: object) -> bool:
+        return isinstance(name, str) and name in self.headers
+
+
+def maintenance_notice(monkeypatch: pytest.MonkeyPatch, accept: str) -> Any:
+    server = maintenance.server("127.0.0.1", 0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    connection = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
+    try:
+        connection.request("GET", "/api", headers={"Accept": "*/*", **language(accept)})
+        answer = connection.getresponse()
+        return NoticeResponse(answer.status, answer.headers, answer.read())
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 def anonymous_tenants(monkeypatch: pytest.MonkeyPatch, accept: str) -> Any:
@@ -331,7 +367,7 @@ CASES: dict[str, Case] = {
         request_id=True,
     ),
     "provider_unavailable": Case(
-        502,
+        503,
         "The forecast provider is unavailable. Try again later.",
         "Tahmin sağlay\u0131c\u0131s\u0131na ulaş\u0131lam\u0131yor. Daha sonra tekrar deneyin.",
         raising(lambda: ProviderError("timeout")),
@@ -363,6 +399,13 @@ CASES: dict[str, Case] = {
         "Tahmin sağlay\u0131c\u0131s\u0131 kay\u0131tl\u0131 kimlik bilgilerini reddetti. "
         "Yöneticinize başvurun.",
         raising(lambda: RequestDeferredError(None)),
+    ),
+    "maintenance": Case(
+        503,
+        "Pyracast is being updated. Try again in a minute; your data is safe.",
+        "Pyracast güncelleniyor. Bir dakika sonra yeniden deneyin; verileriniz güvende.",
+        maintenance_notice,
+        retry_after=60,
     ),
     "forecast_sources_changed": Case(
         503,
@@ -857,7 +900,8 @@ def test_malformed_or_non_object_json_is_a_localized_refusal(
 def test_replaced_framework_refusals_keep_the_response_metadata(
     method: str, path: str, content: bytes, status: int
 ) -> None:
-    from pyracast.accounts.language import LANGUAGE_COOKIE, save_user_language
+    from pyracast.accounts.language import save_user_language
+    from pyracast.languages import LANGUAGE_COOKIE
 
     user = User.objects.create_user(username="person", email="person@example.com")
     save_user_language(user, "tr")

@@ -10,14 +10,28 @@ import {
     useState,
     type ReactNode,
 } from "react";
-import { request, type Page } from "@/lib/api";
+import {
+    buildUrl,
+    type Answer,
+    type ListPath,
+    type PathFor,
+    type RequestOptions,
+} from "@/lib/api/client";
 import { ApiError } from "@/lib/api/errors";
+import { send } from "@/lib/api/lane";
 const FormErrors = createContext<Record<string, string>>({});
-export function useCollection<T>(url: string, refresh = 0, pollMs = 0) {
+export function useCollection<P extends ListPath>(
+    path: P,
+    options: RequestOptions<P, "get">,
+    refresh = 0,
+    pollMs = 0,
+) {
+    type Page = Answer<P, "get">;
     const t = useTranslations("Common");
+    const url = buildUrl(path, options);
     const [state, setState] = useState<{
         url: string;
-        data?: Page<T>;
+        data?: Page;
         error?: string;
         loading: boolean;
     }>({ url, loading: true });
@@ -25,17 +39,20 @@ export function useCollection<T>(url: string, refresh = 0, pollMs = 0) {
         let current = true;
         let sequence = 0;
         async function load(requestSequence: number) {
-            const first = await request<Page<T>>(url);
+            const first = await send<Page>({ method: "GET", url });
             const rows = [...first.results];
             let next = first.next;
             const visited = new Set<string>();
             while (next && current && requestSequence === sequence) {
                 const target = new URL(next, window.location.origin);
-                const path = target.pathname + target.search;
-                if (visited.has(path) || !target.pathname.startsWith("/api/"))
+                const pagePath = target.pathname + target.search;
+                if (
+                    visited.has(pagePath) ||
+                    !target.pathname.startsWith("/api/")
+                )
                     throw new Error(t("invalidPage"));
-                visited.add(path);
-                const page = await request<Page<T>>(path);
+                visited.add(pagePath);
+                const page = await send<Page>({ method: "GET", url: pagePath });
                 rows.push(...page.results);
                 next = page.next;
             }
@@ -49,10 +66,15 @@ export function useCollection<T>(url: string, refresh = 0, pollMs = 0) {
         const start = () => {
             const requestSequence = ++sequence;
             load(requestSequence).catch((error: Error) => {
+                const denied =
+                    error instanceof ApiError && error.status === 403;
                 if (current && requestSequence === sequence)
                     setState((previous) => ({
                         url,
-                        data: previous.url === url ? previous.data : undefined,
+                        data:
+                            previous.url === url && !denied
+                                ? previous.data
+                                : undefined,
                         error: error.message,
                         loading: false,
                     }));
@@ -69,10 +91,16 @@ export function useCollection<T>(url: string, refresh = 0, pollMs = 0) {
         ? state
         : { url, data: undefined, error: undefined, loading: true };
 }
-export function useResource<T>(url: string, refresh = 0, pollMs = 0) {
+export function useResource<P extends PathFor<"get">>(
+    path: P,
+    options: RequestOptions<P, "get">,
+    refresh = 0,
+    pollMs = 0,
+) {
     const locale = useLocale();
+    const url = buildUrl(path, options);
     const [state, setState] = useState<{
-        data?: T;
+        data?: Answer<P, "get">;
         error?: string;
         loading: boolean;
     }>({ loading: true });
@@ -81,7 +109,7 @@ export function useResource<T>(url: string, refresh = 0, pollMs = 0) {
         let sequence = 0;
         const load = () => {
             const requestSequence = ++sequence;
-            request<T>(url)
+            send<Answer<P, "get">>({ method: "GET", url })
                 .then((data) => {
                     if (current && requestSequence === sequence)
                         setState({ data, loading: false });

@@ -2,11 +2,20 @@ import Papa from "papaparse";
 import { createTranslator } from "next-intl";
 import { isLanguage } from "@/i18n/language";
 import { messages } from "@/i18n/messages";
+export const QUALITIES = ["valid", "outage", "curtailed", "invalid"] as const;
+export type Quality = (typeof QUALITIES)[number];
+export function qualityOf(value: string | null | undefined): Quality {
+    if (value === null || value === undefined) return "valid";
+    const selected = QUALITIES.find((quality) => quality === value);
+    if (selected === undefined)
+        throw new Error("Unrecognized production quality.");
+    return selected;
+}
 export type Observation = {
     starts_at: string;
     ends_at: string;
     energy: number;
-    quality: string;
+    quality: Quality;
     source: string;
 };
 export function parseProduction(text: string, language = "en"): Observation[] {
@@ -30,12 +39,18 @@ export function parseProduction(text: string, language = "en"): Observation[] {
         "starts_at,ends_at,energy,quality,source"
     )
         throw new Error(t("header"));
-    if (parsed.errors.length)
-        throw new Error(t("parse", { reason: parsed.errors[0].message }));
+    const [error] = parsed.errors;
+    if (error) throw new Error(t("parse", { reason: error.message }));
     if (parsed.data.length < 1 || parsed.data.length > 2000)
         throw new Error(t("count"));
     const rows = parsed.data.map((row, index) => {
-        const { starts_at, ends_at, energy: rawEnergy, quality, source } = row;
+        const {
+            starts_at = "",
+            ends_at = "",
+            energy: rawEnergy,
+            quality,
+            source,
+        } = row;
         const start = Date.parse(starts_at),
             end = Date.parse(ends_at),
             energy = Number(rawEnergy);
@@ -51,24 +66,22 @@ export function parseProduction(text: string, language = "en"): Observation[] {
         if (end > Date.now()) throw new Error(t("future", { row: index + 2 }));
         if (!rawEnergy || !Number.isFinite(energy) || energy < 0)
             throw new Error(t("energy", { row: index + 2 }));
-        if (
-            !["valid", "outage", "curtailed", "invalid"].includes(quality) ||
-            !source ||
-            source.length > 200
-        )
+        const known = QUALITIES.find((value) => value === quality);
+        if (!known || !source || source.length > 200)
             throw new Error(t("quality", { row: index + 2 }));
-        return { starts_at, ends_at, energy, quality, source };
+        return { starts_at, ends_at, energy, quality: known, source };
     });
     const sorted = [...rows].sort(
         (a, b) => Date.parse(a.starts_at) - Date.parse(b.starts_at),
     );
     if (
-        sorted.some(
-            (row, index) =>
-                index > 0 &&
-                Date.parse(row.starts_at) <
-                    Date.parse(sorted[index - 1].ends_at),
-        )
+        sorted.some((row, index) => {
+            const previous = sorted[index - 1];
+            return (
+                previous !== undefined &&
+                Date.parse(row.starts_at) < Date.parse(previous.ends_at)
+            );
+        })
     )
         throw new Error(t("overlap"));
     return rows;

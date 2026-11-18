@@ -35,6 +35,11 @@ CODE_TIMEOUTS = {
     "account/email/login_code": "ACCOUNT_LOGIN_BY_CODE_TIMEOUT",
 }
 
+
+def violated_constraint(error: IntegrityError) -> str | None:
+    return getattr(getattr(error.__cause__, "diag", None), "constraint_name", None)
+
+
 LOGIN_LIMITED_MESSAGE = gettext_lazy(
     "Too many sign-in attempts, or a verification code was sent recently. "
     "Try again in a few minutes."
@@ -128,6 +133,11 @@ class AccountAdapter(DefaultAccountAdapter):
             return normalize_client_ip(super().get_client_ip(request))
         except ValueError:
             raise PermissionDenied("Unable to determine client IP address") from None
+
+    def set_password(self, user: AbstractBaseUser, password: str) -> None:
+        user.set_password(password)
+        # A full save would insert an account deleted meanwhile again; this one raises NotUpdated.
+        user.save(update_fields=["password"])
 
     @transaction.atomic
     def confirm_email(self, request: HttpRequest, email_address: EmailAddress) -> bool:

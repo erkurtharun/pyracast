@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+# Each release reads its own copy, so writing a new release's secrets never changes a running one.
+SECRETS = Path("/run/pyracast/releases")
+
 
 def environment_values(payload: object) -> dict[str, str]:
     if not isinstance(payload, dict) or not payload:
@@ -88,12 +91,16 @@ def prepare_migration(payload: object, directory: Path) -> None:
     write_environment(directory / "migration.env", values)
 
 
-def main() -> None:
+def staged_directory(script: Path) -> Path:
+    return SECRETS / script.resolve().parents[1].name
+
+
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("host_config", type=Path)
     parser.add_argument("--migration", type=Path)
-    arguments = parser.parse_args()
-    directory = Path("/run/pyracast")
+    arguments = parser.parse_args(argv)
+    directory = staged_directory(Path(__file__))
     if arguments.migration is not None:
         prepare_migration(json.loads(arguments.migration.read_text()), directory)
     else:

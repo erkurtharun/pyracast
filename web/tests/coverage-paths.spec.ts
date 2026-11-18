@@ -1,9 +1,14 @@
 import { expect, test } from "@playwright/test";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { authoredSource, sourcePath } from "../testing/coverage-options";
+import { CoverageReport } from "monocart-coverage-reports";
+import {
+    authoredSource,
+    coverageOptions,
+    sourcePath,
+} from "../testing/coverage-options";
 
 test("coverage identifies only authored sources from known path forms", () => {
     const source = path.resolve("src", "lib", "api.ts");
@@ -47,6 +52,72 @@ test("absolute checkout roots containing src normalize from the actual root", ()
         );
     } finally {
         process.chdir(original);
+        rmSync(temporary, { recursive: true, force: true });
+    }
+});
+
+test("LCOV records authored execution once when a generated chunk has no source map", async () => {
+    const temporary = mkdtempSync(path.join(os.tmpdir(), "pyracast-lcov-"));
+    const source = "const observed = 1;\n";
+    const generated = "globalThis.chunkLoaded = true;\n";
+    try {
+        const report = new CoverageReport({
+            ...coverageOptions,
+            outputDir: temporary,
+            reports: ["lcovonly"],
+            all: undefined,
+        });
+        await report.add([
+            {
+                url: "http://127.0.0.1/_next/static/authored.js",
+                source,
+                sourceMap: {
+                    version: 3,
+                    sources: ["src/lib/coverage-fixture.ts"],
+                    sourcesContent: [source],
+                    names: [],
+                    mappings: "AAAA",
+                },
+                functions: [
+                    {
+                        functionName: "",
+                        isBlockCoverage: true,
+                        ranges: [
+                            {
+                                startOffset: 0,
+                                endOffset: source.length,
+                                count: 1,
+                            },
+                        ],
+                    },
+                ],
+            },
+            {
+                url: "http://127.0.0.1/_next/static/generated.js",
+                source: generated,
+                functions: [
+                    {
+                        functionName: "",
+                        isBlockCoverage: true,
+                        ranges: [
+                            {
+                                startOffset: 0,
+                                endOffset: generated.length,
+                                count: 1,
+                            },
+                        ],
+                    },
+                ],
+            },
+        ]);
+        await report.generate();
+        const lcov = readFileSync(path.join(temporary, "lcov.info"), "utf8");
+        const files = (lcov.match(/^SF:.+$/gm) ?? []).map((entry) =>
+            sourcePath(entry.slice(3)),
+        );
+        expect(files).toEqual(["web/src/lib/coverage-fixture.ts"]);
+        expect(lcov).toContain("DA:1,1");
+    } finally {
         rmSync(temporary, { recursive: true, force: true });
     }
 });

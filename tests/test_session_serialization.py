@@ -1,3 +1,4 @@
+import json
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -360,6 +361,37 @@ def test_contention_has_a_bounded_wait_and_retry_response(monkeypatch: pytest.Mo
         assert response.status_code == 429
         assert response.headers["Retry-After"] == "1"
         assert pool.submit(request).result(timeout=5).status_code == 200
+
+
+def test_a_busy_session_refuses_a_write_before_its_view_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(session_lock, "_LOCK_TIMEOUT", "100ms")
+    key = "g" * 32
+    ran: list[str] = []
+
+    def view(incoming: Any) -> HttpResponse:
+        ran.append(incoming.method)
+        return HttpResponse("created", status=201)
+
+    def request() -> HttpResponse:
+        try:
+            incoming = RequestFactory().post(
+                "/api/tenants/1/sites/", {}, content_type="application/json"
+            )
+            incoming.COOKIES[settings.SESSION_COOKIE_NAME] = key
+            return SessionRequestSerialization(view)(incoming)
+        finally:
+            connections.close_all()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with serialize_session(key):
+            response = pool.submit(request).result(timeout=5)
+        assert response.status_code == 429
+        assert json.loads(response.content)["code"] == "session_busy"
+        assert ran == []
+        assert pool.submit(request).result(timeout=5).status_code == 201
+        assert ran == ["POST"]
 
 
 @pytest.mark.parametrize("key", ["", "a" * 31, "!" * 32, "?" * 32, "A" * 32])

@@ -3467,6 +3467,33 @@
                     "timezone": {
                         "type": "string"
                     },
+                    "item_count": {
+                        "type": "integer"
+                    },
+                    "period_start": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "period_end": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "incident_action": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/IncidentChangeActionEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "incident_title": {
+                        "type": "string",
+                        "nullable": true
+                    },
                     "conflict": {
                         "allOf": [
                             {
@@ -3504,7 +3531,12 @@
                     "former_member",
                     "id",
                     "incident",
+                    "incident_action",
+                    "incident_title",
+                    "item_count",
                     "kind",
+                    "period_end",
+                    "period_start",
                     "plant_id",
                     "plant_name",
                     "production_items",
@@ -3585,6 +3617,36 @@
                     },
                     "unread": {
                         "type": "boolean"
+                    },
+                    "timezone": {
+                        "type": "string"
+                    },
+                    "item_count": {
+                        "type": "integer"
+                    },
+                    "period_start": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "period_end": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "incident_action": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/IncidentChangeActionEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "incident_title": {
+                        "type": "string",
+                        "nullable": true
                     }
                 },
                 "required": [
@@ -3595,7 +3657,12 @@
                     "decision_reason",
                     "former_member",
                     "id",
+                    "incident_action",
+                    "incident_title",
+                    "item_count",
                     "kind",
+                    "period_end",
+                    "period_start",
                     "plant_id",
                     "plant_name",
                     "proposed_by",
@@ -3604,6 +3671,7 @@
                     "reviewed_by",
                     "status",
                     "submitted_at",
+                    "timezone",
                     "unread"
                 ]
             },
@@ -4064,6 +4132,7 @@
                     "database_conflict",
                     "request_timeout",
                     "provider_authentication_failed",
+                    "maintenance",
                     "forecast_sources_changed",
                     "configuration_unavailable",
                     "location_already_has_plant",
@@ -4100,7 +4169,7 @@
                     "workspace_admin_changed"
                 ],
                 "type": "string",
-                "description": "* `invalid_request` - Invalid Request\n* `bad_request` - Bad Request\n* `session_ended` - Session Ended\n* `not_authenticated` - Not Authenticated\n* `csrf_failed` - Csrf Failed\n* `permission_denied` - Permission Denied\n* `invalid_proxy_headers` - Invalid Proxy Headers\n* `membership_required` - Membership Required\n* `workspace_admin_required` - Workspace Admin Required\n* `admin_edits_directly` - Admin Edits Directly\n* `platform_admin_required` - Platform Admin Required\n* `invitation_email_unverified` - Invitation Email Unverified\n* `not_found` - Not Found\n* `method_not_allowed` - Method Not Allowed\n* `not_acceptable` - Not Acceptable\n* `unsupported_media_type` - Unsupported Media Type\n* `conflict` - Conflict\n* `throttled` - Throttled\n* `session_busy` - Session Busy\n* `invitation_rate_limited` - Invitation Rate Limited\n* `provider_throttled` - Provider Throttled\n* `quota_exhausted` - Quota Exhausted\n* `server_error` - Server Error\n* `provider_unavailable` - Provider Unavailable\n* `busy` - Busy\n* `database_conflict` - Database Conflict\n* `request_timeout` - Request Timeout\n* `provider_authentication_failed` - Provider Authentication Failed\n* `forecast_sources_changed` - Forecast Sources Changed\n* `configuration_unavailable` - Configuration Unavailable\n* `location_already_has_plant` - Location Already Has Plant\n* `plant_submission_required` - Plant Submission Required\n* `estimated_actuals_unavailable` - Estimated Actuals Unavailable\n* `location_unchanged` - Location Unchanged\n* `location_already_exists` - Location Already Exists\n* `calculation_out_of_range` - Calculation Out Of Range\n* `trash_retention_expired` - Trash Retention Expired\n* `date_out_of_range` - Date Out Of Range\n* `completed_day_required` - Completed Day Required\n* `invalid_epias_plant` - Invalid Epias Plant\n* `epias_plant_identity_mismatch` - Epias Plant Identity Mismatch\n* `incident_closed` - Incident Closed\n* `incident_overlap` - Incident Overlap\n* `incident_starts_in_future` - Incident Starts In Future\n* `incident_ends_before_start` - Incident Ends Before Start\n* `incident_ends_in_future` - Incident Ends In Future\n* `incident_capacity_exceeded` - Incident Capacity Exceeded\n* `invitation_unavailable` - Invitation Unavailable\n* `invitation_member_exists` - Invitation Member Exists\n* `workspace_admin_not_removable` - Workspace Admin Not Removable\n* `member_unavailable` - Member Unavailable\n* `region_revision_changed` - Region Revision Changed\n* `location_change_already_pending` - Location Change Already Pending\n* `location_change_already_reviewed` - Location Change Already Reviewed\n* `incident_revision_changed` - Incident Revision Changed\n* `idempotency_key_reused` - Idempotency Key Reused\n* `pending_request_limit` - Pending Request Limit\n* `production_revision_changed` - Production Revision Changed\n* `request_already_closed` - Request Already Closed\n* `request_conflict` - Request Conflict\n* `review_context_changed` - Review Context Changed\n* `workspace_admin_changed` - Workspace Admin Changed"
+                "description": "* `invalid_request` - Invalid Request\n* `bad_request` - Bad Request\n* `session_ended` - Session Ended\n* `not_authenticated` - Not Authenticated\n* `csrf_failed` - Csrf Failed\n* `permission_denied` - Permission Denied\n* `invalid_proxy_headers` - Invalid Proxy Headers\n* `membership_required` - Membership Required\n* `workspace_admin_required` - Workspace Admin Required\n* `admin_edits_directly` - Admin Edits Directly\n* `platform_admin_required` - Platform Admin Required\n* `invitation_email_unverified` - Invitation Email Unverified\n* `not_found` - Not Found\n* `method_not_allowed` - Method Not Allowed\n* `not_acceptable` - Not Acceptable\n* `unsupported_media_type` - Unsupported Media Type\n* `conflict` - Conflict\n* `throttled` - Throttled\n* `session_busy` - Session Busy\n* `invitation_rate_limited` - Invitation Rate Limited\n* `provider_throttled` - Provider Throttled\n* `quota_exhausted` - Quota Exhausted\n* `server_error` - Server Error\n* `provider_unavailable` - Provider Unavailable\n* `busy` - Busy\n* `database_conflict` - Database Conflict\n* `request_timeout` - Request Timeout\n* `provider_authentication_failed` - Provider Authentication Failed\n* `maintenance` - Maintenance\n* `forecast_sources_changed` - Forecast Sources Changed\n* `configuration_unavailable` - Configuration Unavailable\n* `location_already_has_plant` - Location Already Has Plant\n* `plant_submission_required` - Plant Submission Required\n* `estimated_actuals_unavailable` - Estimated Actuals Unavailable\n* `location_unchanged` - Location Unchanged\n* `location_already_exists` - Location Already Exists\n* `calculation_out_of_range` - Calculation Out Of Range\n* `trash_retention_expired` - Trash Retention Expired\n* `date_out_of_range` - Date Out Of Range\n* `completed_day_required` - Completed Day Required\n* `invalid_epias_plant` - Invalid Epias Plant\n* `epias_plant_identity_mismatch` - Epias Plant Identity Mismatch\n* `incident_closed` - Incident Closed\n* `incident_overlap` - Incident Overlap\n* `incident_starts_in_future` - Incident Starts In Future\n* `incident_ends_before_start` - Incident Ends Before Start\n* `incident_ends_in_future` - Incident Ends In Future\n* `incident_capacity_exceeded` - Incident Capacity Exceeded\n* `invitation_unavailable` - Invitation Unavailable\n* `invitation_member_exists` - Invitation Member Exists\n* `workspace_admin_not_removable` - Workspace Admin Not Removable\n* `member_unavailable` - Member Unavailable\n* `region_revision_changed` - Region Revision Changed\n* `location_change_already_pending` - Location Change Already Pending\n* `location_change_already_reviewed` - Location Change Already Reviewed\n* `incident_revision_changed` - Incident Revision Changed\n* `idempotency_key_reused` - Idempotency Key Reused\n* `pending_request_limit` - Pending Request Limit\n* `production_revision_changed` - Production Revision Changed\n* `request_already_closed` - Request Already Closed\n* `request_conflict` - Request Conflict\n* `review_context_changed` - Review Context Changed\n* `workspace_admin_changed` - Workspace Admin Changed"
             },
             "ForecastOutput": {
                 "type": "object",
@@ -6691,9 +6760,14 @@
                     },
                     "language": {
                         "$ref": "#/components/schemas/LanguageEnum"
+                    },
+                    "expires_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
                     }
                 },
-                "required": ["csrf_token", "language", "user"]
+                "required": ["csrf_token", "expires_at", "language", "user"]
             },
             "SessionUserOutput": {
                 "type": "object",

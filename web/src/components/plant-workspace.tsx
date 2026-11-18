@@ -6,7 +6,8 @@ import { Reminders } from "./reminders";
 import { CollectionSchedule } from "./collection-schedule";
 import { RegionSettings } from "./region-settings";
 import { CsvDownload } from "./csv-download";
-import { request, type Plant, type Forecast, type Region } from "@/lib/api";
+import type { Forecast, Plant, PlantScope, Region } from "@/lib/api";
+import { api } from "@/lib/api/client";
 import { Calibrations } from "./calibrations";
 import { ActionForm, Notice, Tag, useResource } from "./ui";
 import { ProductionHistory } from "./production-history";
@@ -22,20 +23,16 @@ import {
 import { DataSourceControl, localDay, type DataSource } from "./data-source";
 export function PlantWorkspace({
     plant,
-    base,
+    scope,
     timezone,
-    token,
     region,
-    regionBase,
     onBack,
     onDeleted,
 }: {
     plant: Plant;
-    base: string;
+    scope: PlantScope;
     timezone: string;
-    token: string;
     region: Region;
-    regionBase: string;
     onBack: () => void;
     onDeleted: () => void;
 }) {
@@ -80,7 +77,7 @@ export function PlantWorkspace({
             </button>
             {!canManage && (tab === "production" || tab === "outages") && (
                 <OwnPendingRequests
-                    tenantBase={`${base.split("/regions/")[0]}/`}
+                    tenantId={scope.tenant_id}
                     plantId={plant.id}
                     revision={productionRevision + outageRevision}
                 />
@@ -104,13 +101,15 @@ export function PlantWorkspace({
                 </Notice>
             )}
             <nav className="tabs" aria-label={t("plantSections")}>
-                {[
-                    ["forecast", t("forecast")],
-                    ["production", t("production")],
-                    ["calibration", t("calibration")],
-                    ["outages", t("outages")],
-                    ["settings", t("settings")],
-                ].map(([key, label]) => (
+                {(
+                    [
+                        ["forecast", t("forecast")],
+                        ["production", t("production")],
+                        ["calibration", t("calibration")],
+                        ["outages", t("outages")],
+                        ["settings", t("settings")],
+                    ] as const
+                ).map(([key, label]) => (
                     <button
                         key={key}
                         className={tab === key ? "active" : ""}
@@ -130,10 +129,12 @@ export function PlantWorkspace({
             {tab === "forecast" ? (
                 <>
                     <nav className="subnav" aria-label={t("forecastViews")}>
-                        {[
-                            ["generation", t("generation")],
-                            ["irradiance", t("irradiance")],
-                        ].map(([key, label]) => (
+                        {(
+                            [
+                                ["generation", t("generation")],
+                                ["irradiance", t("irradiance")],
+                            ] as const
+                        ).map(([key, label]) => (
                             <button
                                 key={key}
                                 className={forecastView === key ? "active" : ""}
@@ -215,20 +216,18 @@ export function PlantWorkspace({
                     ) : (
                         <PlantForecast
                             key={`${forecastView}-${date}-${resolution}-${source}-${configuration?.id}-${outageRevision}`}
+                            scope={scope}
                             electrical={forecastView === "generation"}
-                            url={
-                                forecastView === "generation"
-                                    ? `${base}forecast/?date=${date}&resolution_minutes=${resolution}&data_source=${source}`
-                                    : `${regionBase}forecast/?date=${date}&data_source=${source}`
-                            }
+                            date={date}
+                            resolution={resolution === "30" ? 30 : 60}
+                            source={source}
                         />
                     )}
                 </>
             ) : tab === "outages" ? (
                 <Outages
-                    currentConfigurationId={configuration?.id}
-                    base={base}
-                    token={token}
+                    configuration={configuration}
+                    scope={scope}
                     timezone={timezone}
                     onChanged={() => setOutageRevision((value) => value + 1)}
                 />
@@ -255,12 +254,14 @@ export function PlantWorkspace({
                         />
                     </details>
                     <nav className="subnav" aria-label={t("plantSettings")}>
-                        {[
-                            ["configuration", t("technicalDetails")],
-                            ["location", t("location")],
-                            ["collection", t("dataCollection")],
-                            ["reminders", t("emailReminders")],
-                        ].map(([key, label]) => (
+                        {(
+                            [
+                                ["configuration", t("technicalDetails")],
+                                ["location", t("location")],
+                                ["collection", t("dataCollection")],
+                                ["reminders", t("emailReminders")],
+                            ] as const
+                        ).map(([key, label]) => (
                             <button
                                 key={key}
                                 className={settingsView === key ? "active" : ""}
@@ -281,11 +282,14 @@ export function PlantWorkspace({
                                     submit={t("saveConfiguration")}
                                     onSubmit={async (data) => {
                                         setSavedPlant(
-                                            await request<Plant>(
-                                                base,
-                                                "PUT",
-                                                configurationInput(data),
-                                                token,
+                                            await api.put(
+                                                "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/",
+                                                {
+                                                    path: scope,
+                                                    body: configurationInput(
+                                                        data,
+                                                    ),
+                                                },
                                             ),
                                         );
                                     }}
@@ -305,23 +309,11 @@ export function PlantWorkspace({
                             )}
                         </section>
                     ) : settingsView === "location" ? (
-                        <RegionSettings
-                            region={region}
-                            base={regionBase}
-                            token={token}
-                        />
+                        <RegionSettings region={region} scope={scope} />
                     ) : settingsView === "collection" ? (
-                        <CollectionSchedule
-                            base={regionBase}
-                            region={region}
-                            token={token}
-                        />
+                        <CollectionSchedule scope={scope} region={region} />
                     ) : (
-                        <Reminders
-                            base={regionBase}
-                            region={region}
-                            token={token}
-                        />
+                        <Reminders scope={scope} region={region} />
                     )}
                     {canManage && (
                         <section className="panel">
@@ -329,8 +321,7 @@ export function PlantWorkspace({
                             <p>{t("deletionHelp")}</p>
                             <MoveToRecycleBin
                                 name={currentPlant.name}
-                                url={regionBase}
-                                token={token}
+                                scope={scope}
                                 onDeleted={onDeleted}
                             />
                         </section>
@@ -339,10 +330,12 @@ export function PlantWorkspace({
             ) : tab === "production" ? (
                 <>
                     <nav className="subnav" aria-label={t("productionViews")}>
-                        {[
-                            ["production", t("actuals")],
-                            ["comparison", t("comparison")],
-                        ].map(([key, label]) => (
+                        {(
+                            [
+                                ["production", t("actuals")],
+                                ["comparison", t("comparison")],
+                            ] as const
+                        ).map(([key, label]) => (
                             <button
                                 key={key}
                                 className={
@@ -360,16 +353,15 @@ export function PlantWorkspace({
                     {productionView === "comparison" ? (
                         <ForecastPerformance
                             key={configuration?.id}
-                            base={base}
+                            scope={scope}
                             timezone={timezone}
                         />
                     ) : (
                         <ProductionHistory
                             key={`history-${configuration?.id}`}
-                            base={base}
+                            scope={scope}
                             configuration={configuration?.id}
                             timezone={timezone}
-                            token={token}
                             onSaved={() =>
                                 setProductionRevision((current) => current + 1)
                             }
@@ -381,8 +373,7 @@ export function PlantWorkspace({
             ) : (
                 <Calibrations
                     key={`calibration-${configuration.id}`}
-                    base={base}
-                    token={token}
+                    scope={scope}
                     currentConfigurationId={configuration.id}
                     productionRevision={productionRevision}
                 />
@@ -426,15 +417,66 @@ function latestPlant(server: Plant, saved?: Plant): Plant {
         return server;
     return saved;
 }
+type ForecastQuery = {
+    scope: PlantScope;
+    date: string;
+    resolution: 30 | 60;
+    source: DataSource;
+};
 function PlantForecast({
-    url,
+    electrical,
+    ...query
+}: ForecastQuery & { electrical: boolean }) {
+    return electrical ? (
+        <GenerationForecast {...query} />
+    ) : (
+        <IrradianceForecast {...query} />
+    );
+}
+function GenerationForecast({
+    scope,
+    date,
+    resolution,
+    source,
+}: ForecastQuery) {
+    const resource = useResource(
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/forecast/",
+        {
+            path: scope,
+            query: {
+                date,
+                resolution_minutes: resolution,
+                data_source: source,
+            },
+        },
+        0,
+        30_000,
+    );
+    return <ForecastResource resource={resource} electrical />;
+}
+function IrradianceForecast({ scope, date, source }: ForecastQuery) {
+    const resource = useResource(
+        "/api/tenants/{tenant_id}/regions/{region_id}/forecast/",
+        {
+            path: scope,
+            query: {
+                date,
+                data_source: source === "archived_forecast" ? "auto" : source,
+            },
+        },
+        0,
+        30_000,
+    );
+    return <ForecastResource resource={resource} electrical={false} />;
+}
+function ForecastResource({
+    resource,
     electrical,
 }: {
-    url: string;
+    resource: { data?: Forecast; error?: string; loading: boolean };
     electrical: boolean;
 }) {
     const t = useTranslations("PlantWorkspace");
-    const resource = useResource<Forecast>(url, 0, 30_000);
     return (
         <section className="panel">
             {resource.loading ? (

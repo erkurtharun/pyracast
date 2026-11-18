@@ -422,7 +422,7 @@ for (const [kind, label] of [
     ["saved_complete", "Saved forecast"],
     ["saved_partial", "Partial forecast"],
     ["unavailable", "No forecast available"],
-]) {
+] as const) {
     test(`delivered ${kind} is distinguished from mail acceptance`, async ({
         page,
     }) => {
@@ -469,7 +469,7 @@ for (const [code, detail] of [
         "mail_preparation_failed",
         "Transmission permission could not be confirmed. Retries are bounded by the sending window.",
     ],
-]) {
+] as const) {
     test(`${code} explains the retry reason without exposing internal codes`, async ({
         page,
     }) => {

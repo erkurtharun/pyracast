@@ -3,40 +3,47 @@ import { useLocale, useTranslations } from "next-intl";
 import { ScrollRegion } from "./scroll-region";
 
 import { useState, type FormEvent } from "react";
-import type { components } from "@/lib/schema";
 import { localDay } from "./data-source";
+import type { PlantScope } from "@/lib/api";
+import type { RequestOptions } from "@/lib/api/client";
 import { Notice, Stat, useResource } from "./ui";
 import { CsvDownload } from "./csv-download";
 
-type Performance = components["schemas"]["PerformanceOutput"];
+type PerformanceQuery = RequestOptions<
+    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/performance/",
+    "get"
+>["query"];
+type Comparison = NonNullable<PerformanceQuery>["comparison"];
 
 export function ForecastPerformance({
-    base,
+    scope,
     timezone,
 }: {
-    base: string;
+    scope: PlantScope;
     timezone: string;
 }) {
     const t = useTranslations("ForecastPerformance");
 
     const [start, setStart] = useState(() => localDay(timezone, -30));
     const [end, setEnd] = useState(() => localDay(timezone, -1));
-    const [comparison, setComparison] = useState("historical_model");
+    const [comparison, setComparison] =
+        useState<Comparison>("historical_model");
     const [issuanceCutoff, setIssuanceCutoff] = useState("");
-    const [url, setUrl] = useState(
-        `${base}performance/?daylight_only=true&comparison=historical_model`,
-    );
+    const [query, setQuery] = useState<PerformanceQuery>({
+        daylight_only: true,
+        comparison: "historical_model",
+    });
     function load(event: FormEvent) {
         event.preventDefault();
-        const params = new URLSearchParams({
+        setQuery({
             start_date: start,
             end_date: end,
-            daylight_only: "true",
+            daylight_only: true,
             comparison,
+            ...(comparison === "archived_forecast" && issuanceCutoff
+                ? { issuance_cutoff: issuanceCutoff }
+                : {}),
         });
-        if (comparison === "archived_forecast" && issuanceCutoff)
-            params.set("issuance_cutoff", issuanceCutoff);
-        setUrl(`${base}performance/?${params}`);
     }
     return (
         <section className="panel">
@@ -59,7 +66,13 @@ export function ForecastPerformance({
                     {t("comparison")}
                     <select
                         value={comparison}
-                        onChange={(event) => setComparison(event.target.value)}
+                        onChange={(event) =>
+                            setComparison(
+                                event.target.value === "archived_forecast"
+                                    ? "archived_forecast"
+                                    : "historical_model",
+                            )
+                        }
                     >
                         <option value="historical_model">
                             {t("historical_model")}
@@ -105,16 +118,23 @@ export function ForecastPerformance({
                     {t("load_performance")}
                 </button>
             </form>
-            <PerformanceResults key={url} url={url} timezone={timezone} />
+            <PerformanceResults
+                key={JSON.stringify(query)}
+                scope={scope}
+                query={query}
+                timezone={timezone}
+            />
         </section>
     );
 }
 
 function PerformanceResults({
-    url,
+    scope,
+    query,
     timezone,
 }: {
-    url: string;
+    scope: PlantScope;
+    query: PerformanceQuery;
     timezone: string;
 }) {
     const t = useTranslations("ForecastPerformance");
@@ -140,7 +160,13 @@ function PerformanceResults({
         invalid_forecast_data: t("saved_reference_data_is_invalid"),
     };
 
-    const resource = useResource<Performance>(url);
+    const resource = useResource(
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/performance/",
+        {
+            path: scope,
+            query,
+        },
+    );
     const matched =
         resource.data?.days.filter((day) => day.status === "matched") ?? [];
     const historical = resource.data?.comparison === "historical_model";

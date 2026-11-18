@@ -60,6 +60,7 @@ export const coverageOptions: CoverageReportOptions = {
     v8Ignore: false,
     entryFilter: (entry) => entry.url.includes("/_next/static/"),
     sourceFilter: authoredSource,
+    outputFilter: (entry) => authoredSource(entry.sourcePath),
     sourcePath,
     all: {
         dir: "src",

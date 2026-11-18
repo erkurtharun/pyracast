@@ -825,6 +825,10 @@ msgid "Production changed. Reload the latest values before saving."
 msgstr ""
 "Üretim verileri değişti. Kaydetmeden önce güncel değerleri yeniden yükleyin."
 
+msgid "Pyracast is being updated. Try again in a minute; your data is safe."
+msgstr ""
+"Pyracast güncelleniyor. Bir dakika sonra yeniden deneyin; verileriniz güvende."
+
 msgid "A production batch must stay within 31 local days."
 msgstr "Bir üretim grubu en fazla 31 yerel günü kapsayabilir."
 
