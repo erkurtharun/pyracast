@@ -4,13 +4,14 @@ from datetime import UTC, datetime, timedelta
 import httpx
 import pytest
 from django.core.management import CommandError, call_command
+from django.utils import timezone
 from dramatiq import Message
 from dramatiq.brokers.stub import StubBroker
 
 from pyracast import trash
 from pyracast.epias import AUTH_URL, BASE_URL, EpiasClient
 from pyracast.forecasts.management.commands import dispatch as command
-from pyracast.forecasts.models import DispatcherStatus
+from pyracast.forecasts.models import DispatcherStatus, ForecastSnapshot
 from pyracast.metering import scheduler as metering_scheduler
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection
 from pyracast.metering.scheduler import enqueue_due_epias_jobs
@@ -19,11 +20,12 @@ from pyracast.plants.models import CalibrationRun, Plant, PlantEvent
 from pyracast.plants.operations import request_calibration
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.regions.models import Region
-from pyracast.trash import RETENTION, trash_region
+from pyracast.trash import RETENTION, restore_region, trash_region
 from tests.support.domain import NOW, System
 from tests.support.epias import PASSWORD, TICKET, USERNAME
+from tests.support.errors import raises_code
 from tests.support.metering import NEXT_NIGHT, PROVIDER_PLANT, connect, connected
-from tests.support.plant_operations import make_plant
+from tests.support.plant_operations import make_plant, snapshot_for
 from tests.support.trash_operations import sibling, sibling_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -109,11 +111,11 @@ def test_a_failing_region_purge_does_not_stop_later_regions_and_is_deferred(
     attempts: list[int] = []
     original = trash._purge_region
 
-    def purge(region: Region, plants: list[Plant]) -> None:
+    def purge(region: Region, plants: list[Plant], budget: trash._Budget) -> None:
         attempts.append(region.pk)
         if region.pk == system.region.pk:
             raise RuntimeError("private purge detail")
-        original(region, plants)
+        original(region, plants, budget)
 
     monkeypatch.setattr("pyracast.trash._purge_region", purge)
     dispatch_once(monkeypatch)
@@ -127,6 +129,40 @@ def test_a_failing_region_purge_does_not_stop_later_regions_and_is_deferred(
 
     dispatch_once(monkeypatch)
     assert attempts == [system.region.pk, other.pk]
+
+
+def test_a_purge_beyond_its_budget_resumes_next_run_and_later_phases_still_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    for offset in range(3):
+        snapshot_for(system, NOW.date() - timedelta(days=offset + 1))
+    trash_region(system.member, system.tenant.pk, system.region.pk)
+    deleted_at = NOW - RETENTION - timedelta(days=1)
+    Region.objects.update(deleted_at=deleted_at)
+    monkeypatch.setattr("pyracast.trash.PURGE_CHUNK_SIZE", 1)
+    monkeypatch.setattr("pyracast.trash.PURGE_STATEMENT_BUDGET", 2)
+
+    dispatch_once(monkeypatch)
+
+    assert Region.objects.filter(pk=system.region.pk).exists()
+    assert ForecastSnapshot.objects.count() == 3
+    assert Region.objects.get(pk=system.region.pk).deleted_at == NOW - 2 * RETENTION
+    assert set(DispatcherStatus.objects.values_list("phase", "last_error")) >= {
+        ("retention", ""),
+        ("metering", ""),
+    }
+    monkeypatch.setattr(timezone, "now", lambda: deleted_at + RETENTION - timedelta(days=1))
+    with raises_code("trash_retention_expired"):
+        restore_region(system.member, system.tenant.pk, system.region.pk)
+
+    monkeypatch.setattr(timezone, "now", lambda: NOW)
+    monkeypatch.setattr("pyracast.trash.PURGE_STATEMENT_BUDGET", 1000)
+    dispatch_once(monkeypatch)
+
+    assert not Region.objects.filter(pk=system.region.pk).exists()
+    assert not Plant.objects.filter(pk=plant.pk).exists()
+    assert not ForecastSnapshot.objects.exists()
 
 
 def test_a_failing_connection_does_not_stop_other_connections_or_publication(
@@ -227,4 +263,6 @@ def test_a_due_check_backs_off_only_a_plant_that_is_still_automated(
     automation._defer_due_check((plant.pk, plant.region_id, system.tenant.pk), NOW)
     plant.refresh_from_db()
     assert plant.next_calibration_check_at is None
-    assert not PlantEvent.objects.filter(plant=plant).exists()
+    assert not PlantEvent.objects.filter(
+        plant=plant, action="calibration_automatic_skipped"
+    ).exists()

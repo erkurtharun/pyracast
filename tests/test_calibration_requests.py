@@ -1,24 +1,40 @@
-import time
 from collections.abc import Callable, Iterator
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
-from threading import Barrier
+from datetime import date, datetime, timedelta
+from pathlib import Path
 
 import psycopg
 import pytest
-from django.db import close_old_connections, connection
+from django.db import connection
 from dramatiq.brokers.stub import StubBroker
 
+from pyracast.connections.contracts import ProviderData
+from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.connections.secrets import encrypt_secret
+from pyracast.forecasts.jobs import claim, persist_snapshot, publish
+from pyracast.forecasts.models import CollectionJob, HistoricalReferenceImport
 from pyracast.incidents.models import PlantIncident
-from pyracast.plants import preparation, training
+from pyracast.intervals import NormalizedInterval
+from pyracast.irradiance import local_day_bounds
+from pyracast.plants import automation, preparation, training
 from pyracast.plants.automation import set_calibration_automation
-from pyracast.plants.models import CalibrationRun, Plant, PlantEvent, ProductionObservation
+from pyracast.plants.models import (
+    CalibrationActivation,
+    CalibrationRun,
+    Plant,
+    PlantEvent,
+    ProductionObservation,
+)
+from pyracast.plants.operations import ObservationInput, import_observations
 from pyracast.plants.runtime import dispatch_calibrations, make_calibration_actor
 from tests.support.calibration_preparation import add_days
+from tests.support.concurrency import behind_open_transaction
 from tests.support.domain import NOW, System
+from tests.support.historical_reference_import import archive, power_file
 from tests.support.incident_calibration import incident
 from tests.support.migrations import forward, leaf_nodes, migrate
-from tests.support.plant_operations import make_plant
+from tests.support.plant_operations import half_hours, make_plant
+from tests.support.plant_training import actual_snapshot_for
+from tests.support.production_changes import edit, write
 from tests.support.trash_operations import sibling_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -32,27 +48,80 @@ def raise_private(*args: object, **kwargs: object) -> None:
     raise RuntimeError("private preparation detail")
 
 
-def write_observations(system: System, plant: Plant) -> None:
+def write_observations(system: System, plant: Plant, _: Path) -> None:
     add_days(system, plant, 1, 1)
 
 
-def enable_automation(system: System, plant: Plant) -> None:
+def enable_automation(system: System, plant: Plant, _: Path) -> None:
     set_calibration_automation(
         system.member, system.tenant.pk, system.region.pk, plant.pk, enabled=True
     )
 
 
-def declare_outage(system: System, plant: Plant) -> None:
+def declare_outage(system: System, plant: Plant, _: Path) -> None:
     incident(system, plant, NOW - timedelta(days=2), NOW - timedelta(days=1))
 
 
-WRITERS: dict[str, tuple[Callable[[System, Plant], None], Callable[[Plant], bool]]] = {
+def change_production(system: System, plant: Plant, _: Path) -> None:
+    start, _end = local_day_bounds(NOW.date() - timedelta(days=2), system.binding.timezone)
+    write(system, plant, [edit(start, 2)])
+
+
+def publish_estimated_actuals(system: System, plant: Plant, _: Path) -> None:
+    moment = NOW - timedelta(seconds=1)
+    day = NOW.date() - timedelta(days=1)
+    start, _end = local_day_bounds(day, system.binding.timezone)
+    job = CollectionJob.objects.create(
+        binding=system.binding,
+        target_date=day,
+        endpoint="estimated_actuals",
+        scheduled_for=moment,
+        available_at=moment,
+    )
+    lease = claim(job.pk, moment)
+    assert lease is not None
+    data = ProviderData(
+        {"fixture": "estimated_actuals"},
+        NormalizedInterval.from_rows(half_hours(start, start + timedelta(days=1), 0.4)),
+        collected_at=moment,
+        source_kind="estimated_actuals",
+    )
+    snapshot = persist_snapshot(lease, data, moment)
+    assert snapshot is not None
+    assert publish(lease, snapshot, {}, moment)
+
+
+def import_history(system: System, plant: Plant, directory: Path) -> None:
+    ProviderAccount.objects.filter(pk=system.account.pk).update(
+        provider="solcast", encrypted_api_key=encrypt_secret("test-only-solcast-key")
+    )
+    SiteBinding.objects.filter(pk=system.binding.pk).update(
+        dc_capacity_kw=1, settings_verification_reference="Verified test model settings"
+    )
+    archive(system, power_file(directory))
+
+
+WRITERS: dict[str, tuple[Callable[[System, Plant, Path], None], Callable[[Plant], bool]]] = {
     "observations": (write_observations, lambda plant: ProductionObservation.objects.exists()),
     "automation": (
         enable_automation,
         lambda plant: Plant.objects.get(pk=plant.pk).automatic_calibration_enabled,
     ),
     "outage": (declare_outage, lambda plant: PlantIncident.objects.filter(plant=plant).exists()),
+    "production_change": (
+        change_production,
+        lambda plant: ProductionObservation.objects.filter(plant=plant).exists(),
+    ),
+    "estimated_actuals": (
+        publish_estimated_actuals,
+        lambda plant: CollectionJob.objects.filter(
+            endpoint="estimated_actuals", status="succeeded"
+        ).exists(),
+    ),
+    "historical_import": (
+        import_history,
+        lambda plant: HistoricalReferenceImport.objects.exists(),
+    ),
 }
 
 
@@ -73,13 +142,16 @@ def committed_request(plant_id: int) -> datetime | None:
 
 @pytest.mark.parametrize("writer", sorted(WRITERS))
 def test_each_writer_commits_while_preparation_raises(
-    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture, writer: str
+    monkeypatch: pytest.MonkeyPatch,
+    pyracast_logs: pytest.LogCaptureFixture,
+    tmp_path: Path,
+    writer: str,
 ) -> None:
     system, plant = make_plant(monkeypatch)
-    write, persisted = WRITERS[writer]
+    perform, persisted = WRITERS[writer]
     monkeypatch.setattr(preparation, "latest_measurement_day", raise_private)
 
-    write(system, plant)
+    perform(system, plant, tmp_path)
 
     assert persisted(plant)
     retry_at = committed_request(plant.pk)
@@ -128,7 +200,7 @@ def crash_after_write(monkeypatch: pytest.MonkeyPatch, system: System, plant: Pl
     with monkeypatch.context() as patched:
         patched.setattr(preparation, "latest_measurement_day", crash)
         with pytest.raises(Crash):
-            write_observations(system, plant)
+            write_observations(system, plant, Path())
 
 
 def test_a_crash_between_the_write_and_its_preparation_loses_nothing(
@@ -156,27 +228,74 @@ def test_concurrent_dispatchers_prepare_one_request_once(
     actor = make_calibration_actor(StubBroker())
     original = preparation.prepare_calibration
     attempts: list[int] = []
-    barrier = Barrier(2)
 
-    def slow(plant_id: int, now: datetime | None = None) -> CalibrationRun | None:
+    def counted(plant_id: int, now: datetime | None = None) -> CalibrationRun | None:
         attempts.append(plant_id)
-        time.sleep(0.3)
         return original(plant_id, now)
 
-    monkeypatch.setattr(preparation, "prepare_calibration", slow)
+    monkeypatch.setattr(preparation, "prepare_calibration", counted)
 
-    def dispatch() -> int:
-        close_old_connections()
-        try:
-            barrier.wait(timeout=10)
-            return dispatch_calibrations(actor)
-        finally:
-            connection.close()
+    first, second = behind_open_transaction(
+        lambda: dispatch_calibrations(actor), lambda: dispatch_calibrations(actor)
+    )
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        list(pool.map(lambda _: dispatch(), range(2)))
     assert attempts == [plant.pk]
+    assert (first, second) == (1, 1), "the second dispatcher waited for the first one's commit"
     assert CalibrationRun.objects.count() == 1
+    assert committed_request(plant.pk) is None
+
+
+def test_a_failed_automatic_promotion_is_retried_without_a_new_fit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, plant = make_plant(monkeypatch)
+    enable_automation(system, plant, Path())
+    rows: list[ObservationInput] = []
+    for offset in range(30):
+        day = date(2026, 10, 9) + timedelta(days=offset)
+        actual_snapshot_for(system, day)
+        start, end = local_day_bounds(day, system.region.timezone)
+        while start < end:
+            rows.append(ObservationInput(start, start + timedelta(hours=1), 26))
+            start += timedelta(hours=1)
+    assert plant.current_configuration_id is not None
+    import_observations(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        plant.pk,
+        configuration_id=plant.current_configuration_id,
+        unit="MWh",
+        observations=rows,
+    )
+    run = CalibrationRun.objects.get()
+    original = automation.promote_automatic_calibration
+    calls: list[int] = []
+
+    def fail_once(plant: Plant, candidate: CalibrationRun, now: datetime) -> bool:
+        calls.append(candidate.pk)
+        if len(calls) == 1:
+            raise RuntimeError("private promotion detail")
+        return original(plant, candidate, now)
+
+    monkeypatch.setattr(automation, "promote_automatic_calibration", fail_once)
+
+    assert training.run_calibration(run.pk, NOW)
+
+    assert calls == [run.pk, run.pk]
+    assert CalibrationActivation.objects.get().calibration_id == run.pk
+    assert CalibrationRun.objects.count() == 1
+    assert list(
+        PlantEvent.objects.filter(
+            plant=plant,
+            action__in=("calibration_automatic_skipped", "calibration_automatically_activated"),
+        )
+        .order_by("pk")
+        .values_list("action", "details__reason")
+    ) == [
+        ("calibration_automatic_skipped", "promotion_failed"),
+        ("calibration_automatically_activated", None),
+    ]
     assert committed_request(plant.pk) is None
 
 

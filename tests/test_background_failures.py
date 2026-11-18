@@ -86,7 +86,10 @@ def test_log_failure_honours_suppressed_context_and_stops_at_cycles(
 def test_a_failed_back_off_is_logged_and_the_remaining_items_still_run(
     pyracast_logs: pytest.LogCaptureFixture,
 ) -> None:
+    attempted: list[int] = []
+
     def operation(item: int) -> int:
+        attempted.append(item)
         if item == 1:
             raise ValueError("secret item")
         return item * 10
@@ -96,6 +99,7 @@ def test_a_failed_back_off_is_logged_and_the_remaining_items_still_run(
 
     with pytest.raises(ItemsFailedError, match="1 item") as raised:
         isolate([1, 2], operation, logger=logger, event="phase_failed", name=str, back_off=back_off)
+    assert attempted == [1, 2]
     assert raised.value.count == 1
     messages = [record.getMessage() for record in pyracast_logs.records]
     assert [message.split(" error_type")[0] for message in messages] == [

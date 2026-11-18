@@ -1,11 +1,9 @@
-import time
 import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
-from threading import Barrier, Event
-from typing import Any
+from threading import Barrier
 
 import pytest
 from django.apps import apps
@@ -17,7 +15,6 @@ from django.db.models import QuerySet
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
-from pyracast import trash
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.historical_import import import_historical_reference
@@ -40,7 +37,6 @@ from pyracast.plants.models import (
     ProductionObservation,
 )
 from pyracast.plants.operations import create_plant
-from pyracast.regions.audit import record_audit
 from pyracast.regions.models import AuditEvent, Region
 from pyracast.trash import (
     RETENTION,
@@ -48,6 +44,7 @@ from pyracast.trash import (
     restore_region,
     trash_region,
 )
+from tests.support.concurrency import behind_open_transaction
 from tests.support.domain import NOW, System
 from tests.support.errors import raises_code
 from tests.support.historical_reference_import import power_file, source_settings, system_for_import
@@ -477,52 +474,22 @@ def test_restore_and_purge_at_the_deadline_never_both_succeed(
     trash_region(system.member, system.tenant.pk, system.region.pk)
     deadline = NOW + RETENTION
     monkeypatch.setattr(timezone, "now", lambda: deadline - timedelta(microseconds=1))
-    holding, release = Event(), Event()
-
-    def hold() -> None:
-        holding.set()
-        assert release.wait(timeout=10)
-
-    if first == "restore":
-
-        def audit(**kwargs: Any) -> None:
-            record_audit(**kwargs)
-            hold()
-
-        monkeypatch.setattr("pyracast.trash.record_audit", audit)
-    else:
-        original_purge = trash._purge_region
-
-        def purge_region(region: Region, plants: list[Plant]) -> None:
-            hold()
-            original_purge(region, plants)
-
-        monkeypatch.setattr(trash, "_purge_region", purge_region)
 
     def restore() -> str:
-        close_old_connections()
         try:
             restore_region(system.member, system.tenant.pk, system.region.pk)
             return "restored"
         except Region.DoesNotExist:
             return "missing"
-        finally:
-            connection.close()
 
     def purge() -> dict[str, int]:
-        close_old_connections()
-        try:
-            return purge_expired(deadline)
-        finally:
-            connection.close()
+        return purge_expired(deadline)
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        leader = pool.submit(restore if first == "restore" else purge)
-        assert holding.wait(timeout=10)
-        follower = pool.submit(purge if first == "restore" else restore)
-        time.sleep(0.3)
-        release.set()
-        outcomes = (leader.result(timeout=20), follower.result(timeout=20))
+    outcomes: tuple[object, object] = (
+        behind_open_transaction(restore, purge)
+        if first == "restore"
+        else behind_open_transaction(purge, restore)
+    )
 
     if first == "restore":
         assert outcomes == ("restored", {"regions": 0, "plants": 0})
