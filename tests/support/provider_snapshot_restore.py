@@ -316,7 +316,7 @@ def collections_before_reset(system: System) -> BeforeReset:
     return BeforeReset(approval, lookback, intraday, nights, forecasts, export_content())
 
 
-def binding_after_second_reset(system: System) -> SiteBinding:
+def replacement_binding(system: System, *, approved_at: datetime = NOW) -> SiteBinding:
     region = Region.objects.get(pk=system.region.pk)
     target = system.binding
     fresh = SiteBinding.objects.create(
@@ -335,9 +335,9 @@ def binding_after_second_reset(system: System) -> SiteBinding:
     CollectionJob.objects.create(
         binding=fresh,
         endpoint="forecasts",
-        scheduled_slot=NOW,
-        target_date=NOW.astimezone(ZoneInfo(ZONE)).date() + timedelta(days=1),
-        available_at=NOW,
+        scheduled_slot=approved_at,
+        target_date=approved_at.astimezone(ZoneInfo(ZONE)).date() + timedelta(days=1),
+        available_at=approved_at,
     )
     return fresh
 

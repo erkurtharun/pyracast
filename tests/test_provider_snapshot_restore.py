@@ -14,6 +14,7 @@ import pytest
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management import call_command
 from django.db import close_old_connections, connection
+from django.utils import timezone
 
 from pyracast.accounts.models import Tenant
 from pyracast.collection_window import INTRADAY_HISTORY_WINDOW
@@ -48,7 +49,6 @@ from tests.support.provider_snapshot_restore import (
     SITE,
     ZONE,
     acquisition,
-    binding_after_second_reset,
     binding_before_reset,
     collections_after_reset,
     collections_before_reset,
@@ -57,6 +57,7 @@ from tests.support.provider_snapshot_restore import (
     export_rows,
     job_fields,
     local,
+    replacement_binding,
     restore_system,
 )
 
@@ -345,6 +346,62 @@ def test_a_reminder_before_approval_does_not_wait_for_a_collection_after_a_resto
     assert delivery.prepared_message is not None
 
 
+def test_a_collection_whose_retry_window_was_open_at_approval_is_left_to_the_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = restore_system(monkeypatch)
+    night = date(2026, 11, 10)
+    approved, window_end = local(night, 1), local(night, 9)
+    erased = binding_before_reset(system)
+    closed = acquisition(
+        erased,
+        "estimated_actuals",
+        local(date(2026, 11, 9)),
+        local(date(2026, 11, 2)),
+        local(date(2026, 11, 9)),
+        target_date=date(2026, 11, 8),
+        retry_until=local(date(2026, 11, 9), 9),
+    )
+    incomplete = acquisition(
+        erased,
+        "estimated_actuals",
+        local(night),
+        local(date(2026, 11, 3)),
+        local(date(2026, 11, 9), 12),
+        target_date=date(2026, 11, 9),
+        retry_until=window_end,
+        available_at=local(night, 0, 30),
+        last_error="history_incomplete",
+    )
+    follow_up = local(night, 0, 31, 4)
+    CollectionJob.objects.create(
+        binding=erased,
+        endpoint="estimated_actuals",
+        scheduled_slot=follow_up,
+        target_date=date(2026, 11, 9),
+        available_at=follow_up,
+        retry_until=window_end,
+    )
+    content = export_content()
+    fresh = replacement_binding(system, approved_at=approved)
+    monkeypatch.setattr(timezone, "now", lambda: approved + timedelta(minutes=2))
+
+    summary = restore_provider_snapshots(
+        system.admin, system.tenant.pk, system.region.pk, fresh.pk, content
+    )
+    sweep = approved + timedelta(minutes=5)
+    leases = [claim(job, sweep) for job in enqueue_due(sweep)]
+
+    assert [(lease.endpoint, lease.target_date) for lease in leases if lease is not None] == [
+        ("estimated_actuals", date(2026, 11, 9))
+    ]
+    assert outcomes(summary) == {"estimated_actuals": {"restored": 1, "open_at_approval": 1}}
+    assert restored_copy(fresh, closed).job.retry_until == local(date(2026, 11, 9), 9)
+    assert not ForecastSnapshot.objects.filter(
+        binding=fresh, raw_payload__snapshot_restore__snapshot_id=incomplete.pk
+    ).exists()
+
+
 def test_a_collection_not_before_the_approval_collection_refuses_the_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -548,7 +605,7 @@ def test_rows_restored_before_a_later_reset_are_restored_again_with_their_lineag
     later = encode_rows(
         [row for row in export_rows(export_content()) if row["binding"]["id"] == system.binding.pk]
     )
-    fresh = binding_after_second_reset(system)
+    fresh = replacement_binding(system)
 
     summary = restore_provider_snapshots(
         system.admin, system.tenant.pk, system.region.pk, fresh.pk, later
