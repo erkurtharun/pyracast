@@ -2,16 +2,24 @@ import argparse
 import json
 import os
 import re
+import ssl
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 # Compose reads release.env literally; a value outside this set could break or extend it.
 VALUE = re.compile(r"[a-zA-Z0-9@.:/_+%-]+")
-CERTIFICATES = re.compile(
-    r"(?:-----BEGIN CERTIFICATE-----\n[A-Za-z0-9+/=\n]+-----END CERTIFICATE-----\n\n?)+"
-)
+CERTIFICATE = r"-----BEGIN CERTIFICATE-----\n[A-Za-z0-9+/=\n]+-----END CERTIFICATE-----\n"
+CERTIFICATES = re.compile(rf"(?:{CERTIFICATE}\n?)+")
 ORIGIN_PULL_CA = "origin-pull-ca.pem"
+
+
+def _loads_as_x509(certificate: str) -> bool:
+    try:
+        ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).load_verify_locations(cadata=certificate)
+    except ssl.SSLError:
+        return False
+    return True
 
 
 def origin_pull_authority(config: Mapping[str, Any]) -> str | None:
@@ -19,8 +27,14 @@ def origin_pull_authority(config: Mapping[str, Any]) -> str | None:
     if value == "":
         return None
     authority = value.strip() + "\n" if isinstance(value, str) else None
-    if authority is None or CERTIFICATES.fullmatch(authority) is None:
-        raise ValueError("origin_pull_ca must hold only PEM certificates of the edge's authority.")
+    if (
+        authority is None
+        or CERTIFICATES.fullmatch(authority) is None
+        or not all(map(_loads_as_x509, re.findall(CERTIFICATE, authority)))
+    ):
+        raise ValueError(
+            "origin_pull_ca must hold only PEM X.509 certificates of the edge's authority."
+        )
     return authority
 
 
