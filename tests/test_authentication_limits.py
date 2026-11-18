@@ -609,7 +609,7 @@ def company(index: int) -> dict[str, str]:
 def test_an_address_receives_one_verification_mail_per_minute(clock: Clock) -> None:
     assert signup(visitor(0), company(0)).status_code == 401
     clock.advance(59)
-    assert signup(visitor(1), company(1)).status_code == 429
+    assert signup(visitor(1), company(1)).status_code == 401
     clock.advance(2)
     assert signup(visitor(2), company(2)).status_code == 401
     assert len(mail.outbox) == 2
@@ -620,7 +620,7 @@ def test_an_address_receives_at_most_six_verification_mails_an_hour(clock: Clock
     for index in range(7):
         statuses.append(signup(visitor(index), company(index)).status_code)
         clock.advance(181)
-    assert statuses == [401] * 6 + [429]
+    assert statuses == [401] * 7
     assert len(mail.outbox) == 6
 
 

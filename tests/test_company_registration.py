@@ -534,6 +534,30 @@ def test_a_signup_waits_after_its_records_are_committed_and_its_mail_is_handed_o
     assert observed == [([], [template], (1,))]
 
 
+def test_a_signup_waits_after_its_session_is_released(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = Client(enforce_csrf_checks=True)
+    client.session.save()
+    held: list[tuple[int]] = []
+
+    def sleep(seconds: float) -> None:
+        with connections["auth_cache"].cursor() as cursor:
+            cursor.execute(
+                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND database = "
+                "(SELECT oid FROM pg_database WHERE datname = current_database())"
+            )
+            held.append(cursor.fetchone())
+
+    readings = iter((100.0, 100.25))
+    monkeypatch.setattr(
+        signup_view, "time", SimpleNamespace(monotonic=readings.__next__, sleep=sleep)
+    )
+
+    with override_settings(PYRACAST_SIGNUP_MINIMUM_ANSWER_SECONDS=1.0):
+        assert signup(client).status_code == 401
+
+    assert held == [(0,)]
+
+
 @pytest.mark.parametrize(
     "name",
     [
