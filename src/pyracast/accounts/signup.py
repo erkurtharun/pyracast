@@ -2,6 +2,7 @@ from typing import Any, cast
 
 from allauth.headless.account.inputs import SignupInput
 from allauth.headless.account.views import SignupView
+from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import (
     UserAttributeSimilarityValidator,
@@ -10,7 +11,7 @@ from django.contrib.auth.password_validation import (
 )
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse
 
 from pyracast.accounts.inputs import PasswordInput
 
@@ -32,6 +33,13 @@ class CompanySignupInput(PasswordInput, SignupInput):
             except ValidationError as error:
                 self.add_error("password", error)
         return data
+
+    def try_save(self, request: HttpRequest) -> tuple[User | None, HttpResponse | None]:
+        if self.account_already_exists:
+            # An address with an account gets no new account but the same password hashing, so
+            # both answers take as long.
+            make_password(self.cleaned_data.get("password"))
+        return cast(tuple[User | None, HttpResponse | None], super().try_save(request))
 
     def save(self, request: HttpRequest) -> User:
         with transaction.atomic():
