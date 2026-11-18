@@ -13,6 +13,7 @@ import pytest
 import requests
 from allauth.account.models import EmailAddress
 from allauth.core import context
+from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.headless.socialaccount.inputs import SignupInput
 from allauth.mfa.models import Authenticator
 from allauth.mfa.totp.internal.auth import generate_totp_secret
@@ -28,7 +29,6 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.test import Client, override_settings
 
 from pyracast.accounts import social, social_views
-from pyracast.accounts.forms import AccountSignupForm
 from pyracast.accounts.invitations import invite_workspace_member
 from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference, WorkspaceRole
 from pyracast.accounts.social import SocialAccountAdapter
@@ -528,20 +528,43 @@ def test_social_signup_has_same_rate_limit_as_password_signup(
         assert not User.objects.exists()
 
 
-def test_workspace_name_unique_race_rolls_back_identity_and_preserves_pending_signup(
-    oauth_profile: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+def test_a_social_signup_may_reuse_an_existing_workspace_name(
+    oauth_profile: dict[str, Any],
 ) -> None:
+    existing = Tenant.objects.create(name="Existing Solar")
     client = Client()
     complete(client, begin(client))
-    Tenant.objects.create(name="Existing Solar")
-    monkeypatch.setattr(AccountSignupForm, "clean_company_name", lambda self: "Existing Solar")
+
     response = submit(
         client,
         "auth/provider/signup",
         {"email": oauth_profile["email"], "company_name": "Existing Solar"},
     )
+
+    assert response.status_code == 200
+    membership = Membership.objects.get(user__email=oauth_profile["email"])
+    assert membership.tenant_id != existing.pk
+    assert (membership.tenant.name, membership.role) == ("Existing Solar", WorkspaceRole.ADMIN)
+
+
+def test_a_refused_social_signup_rolls_back_identity_and_preserves_pending_signup(
+    oauth_profile: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = Client()
+    complete(client, begin(client))
+    save = SignupInput.save
+
+    def refused(self: SignupInput, request: HttpRequest) -> User:
+        save(self, request)
+        raise ImmediateHttpResponse(HttpResponse(status=400))
+
+    monkeypatch.setattr(SignupInput, "save", refused)
+    response = submit(
+        client,
+        "auth/provider/signup",
+        {"email": oauth_profile["email"], "company_name": "Refused Solar"},
+    )
     assert response.status_code == 400
-    assert any(error.get("param") == "company_name" for error in response.json()["errors"])
     assert not User.objects.exists()
     assert not SocialAccount.objects.exists()
     assert not Membership.objects.exists()

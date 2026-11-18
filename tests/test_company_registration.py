@@ -268,7 +268,7 @@ def test_concurrent_signup_for_one_mailbox_can_be_recovered_by_its_owner(
     )
 
 
-def test_concurrent_signup_for_same_workspace_returns_validation_error(
+def test_concurrent_signups_with_one_workspace_name_both_wait_for_verification(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     ready = Barrier(2)
@@ -293,8 +293,37 @@ def test_concurrent_signup_for_same_workspace_returns_validation_error(
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         statuses = list(pool.map(register, (1, 2)))
-    assert sorted(statuses) == [400, 401]
-    assert User.objects.count() == Tenant.objects.count() == Membership.objects.count() == 1
+    assert statuses == [401, 401]
+    assert User.objects.count() == Tenant.objects.count() == Membership.objects.count() == 2
+    assert set(Tenant.objects.values_list("name", flat=True)) == {DETAILS["company_name"]}
+
+
+@override_settings(ACCOUNT_RATE_LIMITS={"confirm_email": "100/m/key"})
+@pytest.mark.parametrize("address_has_account", [False, True])
+def test_a_signup_answers_alike_for_a_reused_and_a_fresh_workspace_name(
+    address_has_account: bool,
+) -> None:
+    if address_has_account:
+        existing = signup(Client(enforce_csrf_checks=True), {"email": "first@example.com"})
+        assert existing.status_code == 401
+    first = signup(
+        Client(enforce_csrf_checks=True),
+        {"email": "first@example.com", "company_name": "Harbor Solar"},
+    )
+    reused = signup(
+        Client(enforce_csrf_checks=True),
+        {"email": "second@example.com", "company_name": " HARBOR  solar "},
+    )
+    fresh = signup(
+        Client(enforce_csrf_checks=True),
+        {"email": "third@example.com", "company_name": "Fresh Solar"},
+    )
+
+    assert first.status_code == reused.status_code == fresh.status_code == 401
+    assert first.json() == reused.json() == fresh.json()
+    reused_owner = Membership.objects.get(user__email="second@example.com")
+    assert (reused_owner.tenant.name, reused_owner.role) == ("HARBOR solar", WorkspaceRole.ADMIN)
+    assert Membership.objects.filter(tenant=reused_owner.tenant).count() == 1
 
 
 @pytest.mark.parametrize(

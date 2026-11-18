@@ -47,14 +47,18 @@ def platform_admin() -> User:
     return User.objects.create_superuser(username="platform", email="platform@example.com")
 
 
-def test_database_enforces_workspace_name_and_single_admin(
+def test_database_enforces_a_nonblank_workspace_name_and_single_admin(
     workspace: tuple[Tenant, User, User],
 ) -> None:
     tenant, _, viewer = workspace
     assert connection.vendor == "postgresql"
-    for name in (" SOLAR WORKSPACE ", " "):
-        with pytest.raises(IntegrityError), transaction.atomic():
-            Tenant.objects.create(name=name)
+    with pytest.raises(IntegrityError), transaction.atomic():
+        Tenant.objects.create(name=" ")
+    namesake = Tenant.objects.create(name=" SOLAR WORKSPACE ")
+    renamed = Tenant.objects.create(name="Bay workspace")
+    Tenant.objects.filter(pk=renamed.pk).update(name=tenant.name)
+    assert Tenant.objects.filter(name=tenant.name).count() == 2
+    assert Tenant.objects.get(pk=namesake.pk).name == " SOLAR WORKSPACE "
     with pytest.raises(IntegrityError), transaction.atomic():
         Membership.objects.filter(tenant=tenant, user=viewer).update(role="admin")
     with pytest.raises(IntegrityError), transaction.atomic():
@@ -227,16 +231,21 @@ def test_invited_signup_waits_for_verification_without_creating_workspace(
     assert Tenant.objects.count() == 1
 
 
-def test_duplicate_workspace_signup_fails_without_creating_account(
+def test_a_signup_may_reuse_an_existing_workspace_name(
     workspace: tuple[Tenant, User, User],
 ) -> None:
-    tenant, _, _ = workspace
+    tenant, administrator, viewer = workspace
     response = signup(
         Client(enforce_csrf_checks=True), {"company_name": f" {tenant.name.upper()} "}
     )
-    assert response.status_code == 400
-    assert not User.objects.filter(email="owner@example.com").exists()
-    assert Tenant.objects.count() == 1
+    assert response.status_code == 401
+    owner = Membership.objects.get(user__email="owner@example.com")
+    assert owner.tenant_id != tenant.pk
+    assert (owner.tenant.name, owner.role) == (tenant.name.upper(), WorkspaceRole.ADMIN)
+    assert set(Membership.objects.filter(tenant=tenant).values_list("user_id", flat=True)) == {
+        administrator.pk,
+        viewer.pk,
+    }
 
 
 @override_settings(
