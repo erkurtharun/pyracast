@@ -115,7 +115,7 @@ case "$MODE:$*" in
   support-postgres:*' up -d postgres') exit 46 ;;
   drain:*' stop -t 660 worker notifications') exit 47 ;;
   resume-drain:*' stop -t 660 worker notifications' | resume-drain:*'current/deploy/compose.yaml up -d --wait --wait-timeout 180') exit 47 ;;
-  migration:*' run --rm --no-deps migrate' | maintenance-migration:*' run --rm --no-deps migrate' | rotation-migration:*' run --rm --no-deps migrate') exit 43 ;;
+  migration:*' run --rm --no-deps migrate' | maintenance-migration:*' run --rm --no-deps migrate' | rotation-migration:*' run --rm --no-deps migrate' | legacy-migration:*' run --rm --no-deps migrate') exit 43 ;;
   health:*'releases/'*' up -d --wait --wait-timeout 180') exit 44 ;;
   killed:*' run --rm --no-deps migrate')
     test -f /var/lib/pyracast/release-blocked || exit 90
@@ -211,7 +211,7 @@ units_installed() {
   grep -Fxq 'systemctl enable --now pyracast-backup.timer pyracast-watchdog.timer' /calls
 }
 
-for MODE in preflight deploy-check plan secrets units-invalid metadata check-secrets image live-artifact redeploy-preflight drain backup support-postgres support-rabbit rotation-resume resume-failed resume-unready resume-drain maintenance-backup migration rotation-migration health tls response success rotation prune first-success redeploy final-start first-backup killed-backup killed lock-wait lock-timeout maintenance-success maintenance-migration maintenance-record-invalid record-invalid; do
+for MODE in preflight deploy-check plan secrets units-invalid metadata check-secrets image live-artifact redeploy-preflight drain backup support-postgres support-rabbit rotation-resume resume-failed resume-unready resume-drain maintenance-backup migration rotation-migration legacy-migration health tls response success rotation prune first-success redeploy final-start first-backup killed-backup killed lock-wait lock-timeout maintenance-success maintenance-migration maintenance-record-invalid record-invalid; do
   export MODE
   rm -rf /opt/pyracast/current /opt/pyracast/current.next /opt/pyracast/releases/* /run/pyracast
   rm -f /var/lib/pyracast/release-blocked /var/lib/pyracast/release-state.json /migration-entered /backup-entered /backup-complete /support-changed /database-initialized
@@ -234,6 +234,10 @@ for MODE in preflight deploy-check plan secrets units-invalid metadata check-sec
     printf 'BACKEND_IMAGE=%s\n' "$rebuilt_backend_image" >"$live/deploy/release.env"
     cp "$live/deploy/release.env" /live-release.env
     ln -s "$live" /opt/pyracast/current
+    # The previous release's recovery helper; the first upgrade's (main at df15e76) counts the gateway.
+    helper_services='"dispatcher", "worker", "notifications", "api", "web"'
+    if [[ $MODE == legacy-* ]]; then helper_services+=', "gateway"'; fi
+    printf 'APPLICATION_SERVICES = frozenset({%s})\n' "$helper_services" >"$live/deploy/reset_database.py"
   fi
   for unit in "${units[@]}"; do
     if [[ $MODE == redeploy ]]; then
@@ -358,7 +362,7 @@ for MODE in preflight deploy-check plan secrets units-invalid metadata check-sec
         if grep -Fq 'record-injected' /result; then exit 1; fi
         units_untouched
         ;;
-      first-backup|resume-failed|resume-unready|resume-drain|maintenance-backup|maintenance-record-invalid|migration|maintenance-migration|rotation-migration|health|tls|response)
+      first-backup|resume-failed|resume-unready|resume-drain|maintenance-backup|maintenance-record-invalid|migration|maintenance-migration|rotation-migration|legacy-migration|health|tls|response)
         case "$MODE" in
           first-backup|resume-failed|maintenance-backup) test "$result" == 45 ;;
           maintenance-record-invalid)
@@ -369,7 +373,7 @@ for MODE in preflight deploy-check plan secrets units-invalid metadata check-sec
             ;;
           resume-unready) test "$result" == 42 ;;
           resume-drain) test "$result" == 47 ;;
-          migration) test "$result" == 43 ;;
+          migration|legacy-migration) test "$result" == 43 ;;
           rotation-migration)
             test "$result" == 43
             test "$(grep -c 'bootstrap_database\.py switch-runtime ' /calls)" == 2
@@ -385,7 +389,12 @@ for MODE in preflight deploy-check plan secrets units-invalid metadata check-sec
         esac
         test -f /var/lib/pyracast/release-blocked
         if grep -q 'serves again' /result; then exit 1; fi
-        grep -Fq 'reset_database.py /etc/pyracast/host.json abort' /result
+        if [[ $MODE == first-* ]]; then
+          grep -Fq 'No release served before this one' /result
+          if grep -q 'reset_database.py' /result; then exit 1; fi
+        else
+          grep -Fq 'reset_database.py /etc/pyracast/host.json abort' /result
+        fi
         case "$MODE" in
           first-backup|resume-failed|resume-drain|maintenance-backup|maintenance-record-invalid)
             if grep -q 'restore --confirm' /result; then exit 1; fi
@@ -397,12 +406,18 @@ for MODE in preflight deploy-check plan secrets units-invalid metadata check-sec
         else
           grep -Fq 'Every stop command succeeded' /result
         fi
-        grep -Fq 'The gateway shows the maintenance notice.' /result
         grep -q "$new_release/deploy/compose.yaml up -d --no-deps --wait --wait-timeout 180 maintenance gateway$" /calls
         grep -q 'stop -t 660 dispatcher' /calls
         grep -q 'stop -t 660 worker notifications' /calls
         grep -q 'stop -t 100 api web$' /calls
-        absent 'stop .*gateway'
+        if [[ $MODE == legacy-* ]]; then
+          grep -Fq 'The gateway is stopped too' /result
+          grep -q "$new_release/deploy/compose.yaml stop -t 100 gateway maintenance api web$" /calls
+          if grep -Fq 'The gateway shows the maintenance notice.' /result; then exit 1; fi
+        else
+          grep -Fq 'The gateway shows the maintenance notice.' /result
+          absent 'stop .*gateway'
+        fi
         if [[ $MODE == first-* ]]; then
           test ! -e /opt/pyracast/current
           test -f /database-initialized
