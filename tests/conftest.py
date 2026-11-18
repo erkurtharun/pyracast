@@ -84,6 +84,7 @@ SUBPROCESS = frozenset(
         "test_release_images",
         "test_release_scope",
         "test_shutdown_process",
+        "test_solcast_capture",
         "test_test_settings",
     }
 )
