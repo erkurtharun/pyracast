@@ -14,7 +14,7 @@ from pyracast.forecasts.models import (
     RequestAttempt,
 )
 from pyracast.plants import forecast_archive
-from pyracast.plants.models import ForecastIssuance, Plant, PlantForecast
+from pyracast.plants.models import ForecastIssuance, Plant
 from pyracast.plants.operations import revise_plant
 from tests.support.domain import NOW, FakeAdapter, System
 from tests.support.plant_operations import make_plant, snapshot_for
@@ -52,7 +52,6 @@ def test_collection_publishes_electricity_without_an_archive_read(
     assert issuance.published_at == ForecastResult.objects.get(snapshot=snapshot).published_at
     assert issuance.payloads["30"]["energy_mwh"] == issuance.payloads["60"]["energy_mwh"]
     assert len(issuance.native_intervals) == 48
-    assert not PlantForecast.objects.exists()
     assert not RequestAttempt.objects.filter(purpose="forecast").exists()
     original = issuance.payloads
     assert not collect(snapshot.job_id, FakeAdapter(), calculate, NOW)

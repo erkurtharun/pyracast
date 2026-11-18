@@ -44,9 +44,7 @@ def notification_deliveries_for_issue(
             Q(lease_expires_at__lte=now) | Q(lease_expires_at__isnull=True), status="sending"
         )
     if issue == "failed_notifications":
-        return deliveries.filter(
-            status__in=("failed", "uncertain", "unavailable"), scheduled_for__gte=recent
-        )
+        return deliveries.filter(status__in=("failed", "uncertain"), scheduled_for__gte=recent)
     if issue == "missed_notifications":
         return deliveries.filter(
             status__in=("skipped", "failed"),
@@ -71,7 +69,7 @@ def notification_deliveries_for_issue(
 def metering_jobs_for_issue(
     issue: str, now: datetime, maximum_lag: timedelta = timedelta(minutes=5)
 ) -> QuerySet[EpiasCollectionJob]:
-    jobs = EpiasCollectionJob.objects.filter(plant__deleted_at__isnull=True)
+    jobs = EpiasCollectionJob.objects.filter(plant__region__deleted_at__isnull=True)
     if issue == "overdue_metering":
         return jobs.filter(status__in=("pending", "retry"), next_attempt_at__lt=now - maximum_lag)
     if issue == "interrupted_metering":
@@ -89,7 +87,6 @@ def regions_for_issue(issue: str, now: datetime) -> QuerySet[Region]:
         invalid_region_ids: list[int] = []
         for schedule in ReminderSchedule.objects.filter(
             enabled=True,
-            retired_at__isnull=True,
             region__deleted_at__isnull=True,
             region__status="approved",
             region__approved_binding__provider_account__enabled=True,

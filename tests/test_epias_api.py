@@ -14,6 +14,7 @@ from pyracast.metering import operations
 from pyracast.metering.jobs import run_epias_job
 from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
 from pyracast.plants.models import Plant, ProductionObservation
+from pyracast.regions.models import Region
 from tests.support.api import verified_admin
 from tests.support.epias import PASSWORD, PLANT, USERNAME
 from tests.support.epias_api import archive_source, connected_source
@@ -102,8 +103,7 @@ def test_production_source_is_scoped_before_provider_access(
         "message": "Sign in to continue.",
     }
     plant = Plant.objects.get(pk=plant_data["id"])
-    plant.deleted_at = timezone.now()
-    plant.save(update_fields=("deleted_at",))
+    Region.objects.filter(pk=plant.region_id).update(deleted_at=timezone.now())
     assert client.get(source).status_code == 404
 
 

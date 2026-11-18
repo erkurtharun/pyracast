@@ -338,11 +338,7 @@ def publish(
         expected_kind = "estimated_actuals" if job.endpoint == "estimated_actuals" else "forecast"
         if snapshot.source_kind != expected_kind:
             raise ValidationError("Snapshot source must match the collection endpoint.")
-        plant = (
-            Plant.objects.select_for_update()
-            .filter(region_id=lease.binding.region_id, deleted_at__isnull=True)
-            .first()
-        )
+        plant = Plant.objects.select_for_update().filter(region_id=lease.binding.region_id).first()
         ProviderAccount.objects.select_for_update().get(pk=lease.binding.provider_account_id)
         now += timedelta(seconds=time.monotonic() - started)
         if (
@@ -400,7 +396,6 @@ def publish(
 
             for plant_id in Plant.objects.filter(
                 region_id=binding.region_id,
-                deleted_at__isnull=True,
                 current_configuration__binding=binding,
             ).values_list("pk", flat=True):
                 prepare_calibration(plant_id, now)

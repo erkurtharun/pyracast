@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from django.contrib.auth.models import User
 from django.db import connection
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.contracts import ProviderData
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import (
@@ -54,7 +54,7 @@ def make_system(*, approved: bool = False) -> System:
     member = User.objects.create(username="member")
     admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
     tenant = Tenant.objects.create(name="Tenant")
-    Membership.objects.create(user=member, tenant=tenant, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=member, tenant=tenant, role=WorkspaceRole.ADMIN)
     region = submit_region(
         member, tenant.pk, name="Site", latitude=40, longitude=29, timezone="Europe/Istanbul"
     )

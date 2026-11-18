@@ -8,7 +8,7 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.utils.translation import gettext
 
-from pyracast.accounts.models import Membership
+from pyracast.accounts.models import Membership, WorkspaceRole
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasSnapshot
 from pyracast.plants.availability import (
@@ -175,7 +175,7 @@ def production_history(
             user=actor,
             user__is_active=True,
             tenant_id=plant.region.tenant_id,
-            role=Membership.Role.ADMIN,
+            role=WorkspaceRole.ADMIN,
         ).exists()
     )
     may_propose = (
@@ -184,7 +184,7 @@ def production_history(
             user=actor,
             user__is_active=True,
             tenant_id=plant.region.tenant_id,
-            role=Membership.Role.VIEWER,
+            role=WorkspaceRole.VIEWER,
         ).exists()
     )
     days, intervals = [], []

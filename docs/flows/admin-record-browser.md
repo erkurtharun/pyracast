@@ -1,11 +1,11 @@
 # Browse platform records in the stock Django admin
 
-A platform administrator who types or follows a stock Django admin URL under `/admin/{app}/{model}/` gets read-only changelists, detail pages and history pages for 17 platform models. Nothing in the workspace navigation links to them, and `ReadOnlyAdmin` refuses add, change and delete. The outcome is a server-rendered page (or JSON for `autocomplete/`). No application operation, queue job or provider call is involved.
+A platform administrator who types or follows a stock Django admin URL under `/admin/{app}/{model}/` gets read-only changelists, detail pages and history pages for 16 platform models. Nothing in the workspace navigation links to them, and `ReadOnlyAdmin` refuses add, change and delete. The outcome is a server-rendered page (or JSON for `autocomplete/`). No application operation, queue job or provider call is involved.
 
 ## Entry points
 
 - Stock model routes from `pyracast.admin.site`, mounted by `src/pyracast/urls.py` at `admin/`: `{app}/{model}/` (changelist), `{id}/change/`, `{id}/history/`, `{id}/` (302 to change), `add/`, `{id}/delete/`. Actor: platform administrator (active staff superuser with verified MFA). No component links here (`admin/workspace/base.html` navigates only to workspace views); dev-only `web/next.config.ts` rewrites `/admin/:path*/` (trailing slash only) to Django, and production Traefik routes the whole `/admin` prefix.
-- 17 read-only registrations in `src/pyracast/admin.py`: a bottom loop registers plain `ReadOnlyAdmin` for Tenant, SiteBinding, CollectionJob, ForecastResult, RequestAttempt, AuditEvent, Plant, PlantConfiguration, ProductionObservation, CalibrationRun, CalibrationActivation, PlantForecast and PlantEvent. `NotificationDeliveryAdmin`, `DispatcherStatusAdmin`, `RegionAdmin` and `RegionLocationChangeRequestAdmin` subclass it. Only the Region and delivery admins declare `search_fields`.
+- 16 read-only registrations in `src/pyracast/admin.py`: a bottom loop registers plain `ReadOnlyAdmin` for Tenant, SiteBinding, CollectionJob, ForecastResult, RequestAttempt, AuditEvent, Plant, PlantConfiguration, ProductionObservation, CalibrationRun, CalibrationActivation and PlantEvent. `NotificationDeliveryAdmin`, `DispatcherStatusAdmin`, `RegionAdmin` and `RegionLocationChangeRequestAdmin` subclass it. Only the Region and delivery admins declare `search_fields`.
 - Stock `AdminSite` views: `{app}/` (`app_index`), `jsi18n/`, `autocomplete/`, `r/{ct}/{obj}/`, `password_change/done/` and the final `catch_all_view`. `PlatformAdminSite.get_urls` replaces `password_change/` and `logout/`, and `index` renders the workspace overview.
 - `NotificationSettingsAdmin` (editable), the `RegionAdmin` setup view and the Region and location-change actions share the site but belong to `platform-settings`, `provider-connection-setup`, `plant-approval` and `change-request-review`.
 ## Sequence
@@ -46,8 +46,8 @@ sequenceDiagram
 | Table | R/W | What |
 |---|---|---|
 | accounts_tenant, connections_sitebinding, forecasts_collectionjob, forecasts_forecastresult, forecasts_requestattempt, forecasts_dispatcherstatus, regions_auditevent, regions_region, regions_regionlocationchangerequest | R | Changelist and detail rows, every column; detail pages also load the rows behind displayed foreign keys |
-| plants_plant, plants_plantconfiguration, plants_productionobservation, plants_calibrationrun, plants_calibrationactivation, plants_plantforecast, plants_plantevent | R | Same |
-| notifications_notificationdelivery, notifications_reminderschedule, forecasts_forecastsnapshot | R | Delivery detail limited to the listed `fields` (`lease_token`, `lease_expires_at`, `prepared_message`, `recipient_memberships`, `revoked_recipients`, `grouped`, `language` hidden); schedule and snapshot are joined for search and display |
+| plants_plant, plants_plantconfiguration, plants_productionobservation, plants_calibrationrun, plants_calibrationactivation, plants_plantevent | R | Same |
+| notifications_notificationdelivery, notifications_reminderschedule, forecasts_forecastsnapshot | R | Delivery detail limited to the listed `fields` (`lease_token`, `lease_expires_at`, `prepared_message`, `recipient_memberships`, `revoked_recipients`, `language` hidden); schedule and snapshot are joined for search and display |
 | django_admin_log | R | Stock history page. Written only by `NotificationSettings` saves and by `admin_workspace.WorkspaceSettingsForm.apply` |
 | django_session, usersessions_usersession | R/W | Per-request session and MFA evidence; `SessionLifetime` refreshes `last_activity_at` and `UserSessionsMiddleware` records activity |
 | auth_user, mfa_authenticator | R | Role flags for the site gate; `has_verified_mfa` only checks that the session's authenticator still exists |
@@ -76,9 +76,9 @@ sequenceDiagram
 ## Rules and invariants
 
 - Only `pyracast.admin.site` is mounted. The default `django.contrib.admin.site` holds 8 auth, allauth, socialaccount, mfa and usersessions registrations that have no URL, so users, emails, MFA factors and sessions cannot be browsed.
-- No model defines `__str__`, so the 13 plain `ReadOnlyAdmin` rows show as `Model object (pk)` with no search or filter. Only the Region, location-change, delivery and dispatcher admins declare columns.
+- No model defines `__str__`, so the 12 plain `ReadOnlyAdmin` rows show as `Model object (pk)` with no search or filter. Only the Region, location-change, delivery and dispatcher admins declare columns.
 - `autocomplete/` returns Region rows (searchable by name and tenant name) for any foreign key to Region, such as `plants.Plant.region`, although no admin declares `autocomplete_fields`.
-- History pages are empty for all 17 read-only models: nothing writes `django_admin_log` for them. `AuditEvent` is the real trail. Changelists use stock paging (100 rows, full `COUNT`) and select every column, including JSON payloads.
+- History pages are empty for all 16 read-only models: nothing writes `django_admin_log` for them. `AuditEvent` is the real trail. Changelists use stock paging (100 rows, full `COUNT`) and select every column, including JSON payloads.
 
 ## Tests
 
@@ -86,4 +86,4 @@ sequenceDiagram
 - `tests/test_account_security.py`: `test_mfa_evidence_is_bound_to_current_user_and_live_authenticator` pins `has_verified_mfa`; `test_admin_has_no_independent_password_entry_point` pins the login redirect.
 - `tests/test_admin_workspace.py::test_workspace_requires_live_verified_platform_administrator` covers anonymous, member, staff, unverified and inactive identities for workspace URLs only, not model routes; `test_delivery_admin_displays_shared_schedule_without_edit_permission` pins `has_change_permission` False on a detail page.
 - `tests/test_admin_setup.py` and `tests/test_region_editing.py` fetch the Region and location-change changelists and detail pages; `tests/test_public_data.py::test_provider_accounts_are_not_registered_in_admin` pins the unregistered account model.
-- Gaps: no HTTP test of 403 for `add/`, `delete/` or POST `change/` on a `ReadOnlyAdmin` model, history, `app_index`, `autocomplete/`, the catch-all, or the 17 registrations. No Playwright test for stock pages.
+- Gaps: no HTTP test of 403 for `add/`, `delete/` or POST `change/` on a `ReadOnlyAdmin` model, history, `app_index`, `autocomplete/`, the catch-all, or the 16 registrations. No Playwright test for stock pages.

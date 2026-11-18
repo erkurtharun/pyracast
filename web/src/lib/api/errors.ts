@@ -68,7 +68,6 @@ const ERROR_CODES: Record<ErrorCode, true> = {
     location_already_exists: true,
     calculation_out_of_range: true,
     trash_retention_expired: true,
-    parent_region_trashed: true,
     date_out_of_range: true,
     completed_day_required: true,
     invalid_epias_plant: true,

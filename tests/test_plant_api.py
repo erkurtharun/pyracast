@@ -10,19 +10,20 @@ from django.test import Client
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.api.serializers import FiniteFloat
+from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.models import CollectionJob, ForecastSnapshot
 from pyracast.plants.models import (
     CalibrationRun,
     Plant,
     PlantConfiguration,
-    PlantForecast,
     ProductionObservation,
 )
 from pyracast.plants.numerics import POLICY_VERSION
 from pyracast.plants.serializers import AwareDateTime
+from pyracast.regions.models import Region
 from tests.support.domain import make_system
 from tests.support.plant_api import setup_plant
 from tests.support.plant_operations import publish_snapshot
@@ -119,7 +120,6 @@ def test_new_plant_forecast_reports_unavailable_history_without_rejecting_capaci
     assert tomorrow.json()["configuration_id"] == configuration["id"]
     assert tomorrow.json()["unavailable_reason"] == "forecast_unavailable"
     assert tomorrow.json()["result"] is None
-    assert not PlantForecast.objects.exists()
 
 
 def test_tenant_scope_and_production_input_validation() -> None:
@@ -142,13 +142,22 @@ def test_tenant_scope_and_production_input_validation() -> None:
     }
     preview = detail + "production/preview/"
     configuration = PlantConfiguration.objects.get(pk=payload["configuration_id"])
-    other_plant = Plant.objects.create(
-        region=configuration.region, name="Archived PV", deleted_at=timezone.now()
+    other_region = Region.objects.create(
+        tenant_id=configuration.region.tenant_id,
+        name="Other location",
+        latitude=41,
+        longitude=30,
+        timezone="UTC",
     )
+    other_binding = SiteBinding.objects.get(pk=configuration.binding_id)
+    other_binding.pk = None
+    other_binding.region = other_region
+    other_binding.save()
+    other_plant = Plant.objects.create(region=other_region, name="Other PV")
     foreign_configuration = PlantConfiguration.objects.create(
         plant=other_plant,
-        region=configuration.region,
-        binding=configuration.binding,
+        region=other_region,
+        binding=other_binding,
         revision=1,
         dc_capacity_mw=1,
         created_by=configuration.created_by,
@@ -186,7 +195,7 @@ def test_tenant_scope_and_production_input_validation() -> None:
     assert not ProductionObservation.objects.exists()
     other = Tenant.objects.create(name="Other")
     user = User.objects.create_user(username="other")
-    Membership.objects.create(tenant=other, user=user, role=Membership.Role.ADMIN)
+    Membership.objects.create(tenant=other, user=user, role=WorkspaceRole.ADMIN)
     client.force_login(user)
     assert client.get(base).status_code == 403
     assert client.post(preview, payload, content_type="application/json").status_code == 403

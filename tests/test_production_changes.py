@@ -10,7 +10,7 @@ from django.db import IntegrityError, close_old_connections, connection, transac
 from django.test import Client
 from django.utils import timezone
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.errors import ConflictError
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.measurements import latest_measurement_day, select_measurements
@@ -276,7 +276,7 @@ def test_api_permissions_and_validation(monkeypatch: pytest.MonkeyPatch) -> None
     )
     stranger = User.objects.create(username="stranger")
     Membership.objects.create(
-        user=stranger, tenant=Tenant.objects.create(name="Other"), role=Membership.Role.ADMIN
+        user=stranger, tenant=Tenant.objects.create(name="Other"), role=WorkspaceRole.ADMIN
     )
     client.force_login(stranger)
     assert client.get(base).status_code == 403

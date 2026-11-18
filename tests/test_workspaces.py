@@ -23,6 +23,7 @@ from pyracast.accounts.models import (
     UserLanguagePreference,
     WorkspaceAdminChange,
     WorkspaceInvitation,
+    WorkspaceRole,
 )
 from pyracast.accounts.operations import reassign_workspace_admin
 from pyracast.errors import DomainError
@@ -37,7 +38,7 @@ def workspace() -> tuple[Tenant, User, User]:
     tenant = Tenant.objects.create(name="Solar workspace")
     administrator = User.objects.create_user(username="workspace-admin", email="admin@example.com")
     viewer = User.objects.create_user(username="viewer", email="viewer@example.com")
-    Membership.objects.create(tenant=tenant, user=administrator, role=Membership.Role.ADMIN)
+    Membership.objects.create(tenant=tenant, user=administrator, role=WorkspaceRole.ADMIN)
     Membership.objects.create(tenant=tenant, user=viewer)
     return tenant, administrator, viewer
 
@@ -91,9 +92,9 @@ def test_platform_reassignment_requires_active_existing_member_and_current_selec
         )
     for rejected in (administrator, platform):
         with pytest.raises(PermissionDenied), transaction.atomic():
-            tenant_membership(rejected, tenant.pk, role=Membership.Role.ADMIN, lock=True)
+            tenant_membership(rejected, tenant.pk, role=WorkspaceRole.ADMIN, lock=True)
     with transaction.atomic():
-        tenant_membership(viewer, tenant.pk, role=Membership.Role.ADMIN, lock=True)
+        tenant_membership(viewer, tenant.pk, role=WorkspaceRole.ADMIN, lock=True)
 
 
 @override_settings(
@@ -286,7 +287,7 @@ def test_workspace_invitation_api_is_scoped_and_never_returns_secrets(
     )
     assert invited.status_code == 201
     assert set(invited.json()) == {"id", "email", "expires_at", "delivery_status"}
-    assert invited.json()["delivery_status"] == "accepted"
+    assert invited.json()["delivery_status"] == "sent"
     token = invitation_token()
     assert token not in invited.content.decode()
     assert client.get(invitations_url).json() == {"invitations": [invited.json()]}
@@ -336,7 +337,7 @@ def test_workspace_invitation_api_is_scoped_and_never_returns_secrets(
     assert client.get(invitations_url).status_code == 403
     with transaction.atomic(), pytest.raises(PermissionDenied):
         tenant_membership(
-            administrator, tenant.pk + wrong_tenant.pk + 1, role=Membership.Role.ADMIN, lock=True
+            administrator, tenant.pk + wrong_tenant.pk + 1, role=WorkspaceRole.ADMIN, lock=True
         )
 
 

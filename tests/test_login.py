@@ -2,7 +2,7 @@ import pytest
 from django.contrib.auth.models import User
 from django.test import Client
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 
 pytestmark = pytest.mark.django_db
 
@@ -15,7 +15,7 @@ def test_tenant_list_includes_only_authenticated_users_memberships(is_superuser:
     hidden = Tenant.objects.create(name="Hidden")
     second = Tenant.objects.create(name="Second")
     Membership.objects.create(user=user, tenant=second)
-    Membership.objects.create(user=user, tenant=first, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=user, tenant=first, role=WorkspaceRole.ADMIN)
     Membership.objects.create(user=other, tenant=hidden)
     client = Client()
     client.force_login(user)

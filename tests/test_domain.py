@@ -101,7 +101,6 @@ def test_revision_invalidates_approval_and_preserves_previous_configuration() ->
         {"capacity_kw": 0},
         {"capacity_kw": float("nan")},
         {"power_basis": "xx"},
-        {"tilt_degrees": 1},
         {"capacity_semantics_verified": False},
         {"azimuth_degrees": 360},
         {"azimuth_degrees": float("inf")},
@@ -206,14 +205,24 @@ def test_approval_is_atomic_idempotent_and_permissions_checked() -> None:
     )
     assert first.pk == duplicate.pk
     assert first.target_date.isoformat() == "2026-11-10"
-    assert AuditEvent.objects.filter(action="approved").count() == 1
+    assert AuditEvent.objects.filter(action="region_approved").count() == 1
     assert CollectionJob.objects.count() == 1
     for status in ("suspended", "rejected"):
         assert transition_region(system.admin, system.region.pk, status).status == status
+        assert AuditEvent.objects.filter(action=f"region_{status}").count() == 1
     with pytest.raises(ValidationError):
         transition_region(system.admin, system.region.pk, "approved")
     with pytest.raises(ValidationError):
         approve_region(system.admin, system.region.pk, system.binding.pk, NOW.replace(tzinfo=None))
+
+
+def test_an_approved_region_keeps_its_binding_in_the_database() -> None:
+    system = make_system(approved=True)
+    with pytest.raises(IntegrityError, match="region_status_approved_binding_chk"):
+        Region.objects.filter(pk=system.region.pk).update(approved_binding=None)
+    Region.objects.filter(pk=system.region.pk).update(status="suspended", approved_binding=None)
+    with pytest.raises(IntegrityError, match="region_status_approved_binding_chk"):
+        Region.objects.filter(pk=system.region.pk).update(status="approved")
 
 
 def test_utc_quota_is_conservative_and_resets_on_utc_midnight() -> None:
@@ -258,8 +267,7 @@ def test_megawatt_reference_keeps_the_previous_capacity_revision() -> None:
         capacity_semantics_verified=True,
     )
     assert replacement.capacity_kw == replacement.dc_capacity_kw == 1000
-    assert replacement.tilt_degrees == replacement.azimuth_degrees == 0
-    assert replacement.losses_percent == 0
+    assert replacement.azimuth_degrees == replacement.losses_percent == 0
     system.region.refresh_from_db()
     assert replacement.region_revision == system.region.revision == 2
     assert system.region.status == "pending"

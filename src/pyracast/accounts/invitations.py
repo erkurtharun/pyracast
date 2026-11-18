@@ -15,7 +15,13 @@ from django.utils.translation import gettext as _
 
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.language import user_language
-from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation
+from pyracast.accounts.models import (
+    InvitationDeliveryStatus,
+    Membership,
+    Tenant,
+    WorkspaceInvitation,
+    WorkspaceRole,
+)
 from pyracast.errors import DomainError, ErrorCode, ForbiddenError
 from pyracast.mail.errors import NotSentError
 from pyracast.mail.send import send
@@ -41,7 +47,7 @@ def pending_invitation(token: str, email: str) -> WorkspaceInvitation:
 
 @transaction.atomic
 def invite_workspace_member(actor: User, tenant_id: int, email: str) -> WorkspaceInvitation:
-    tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
+    tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
     email = email.strip().lower()
     validate_email(email)
     if Membership.objects.filter(tenant_id=tenant_id, user__email__iexact=email).exists():
@@ -82,19 +88,19 @@ def invite_workspace_member(actor: User, tenant_id: int, email: str) -> Workspac
         try:
             send(message)
         except NotSentError as error:
-            status = "failed"
+            status = InvitationDeliveryStatus.FAILED
             logger.warning(
                 "invitation_mail_not_sent invitation_id=%s error_code=%s", invitation.pk, error.code
             )
         except Exception as error:
-            status = "uncertain"
+            status = InvitationDeliveryStatus.UNCERTAIN
             logger.warning(
                 "invitation_mail_uncertain invitation_id=%s error_type=%s",
                 invitation.pk,
                 type(error).__name__,
             )
         else:
-            status = "accepted"
+            status = InvitationDeliveryStatus.SENT
         invitation.delivery_status = status
         WorkspaceInvitation.objects.filter(pk=invitation.pk).update(delivery_status=status)
 
@@ -119,7 +125,7 @@ def accept_workspace_invitation(actor: User, token: str) -> Membership:
     ):
         raise ForbiddenError(ErrorCode.INVITATION_EMAIL_UNVERIFIED)
     membership, _created = Membership.objects.get_or_create(
-        tenant_id=invitation.tenant_id, user=actor, defaults={"role": Membership.Role.VIEWER}
+        tenant_id=invitation.tenant_id, user=actor, defaults={"role": WorkspaceRole.VIEWER}
     )
     invitation.accepted_at = timezone.now()
     invitation.save(update_fields=["accepted_at"])
@@ -128,7 +134,7 @@ def accept_workspace_invitation(actor: User, token: str) -> Membership:
 
 @transaction.atomic
 def revoke_workspace_invitation(actor: User, tenant_id: int, invitation_id: int) -> None:
-    tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
+    tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
     invitation = (
         WorkspaceInvitation.objects.select_for_update()
         .filter(tenant_id=tenant_id, pk=invitation_id)

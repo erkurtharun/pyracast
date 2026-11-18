@@ -13,7 +13,6 @@ from pyracast.plants.models import (
     CalibrationRun,
     ForecastIssuance,
     PlantConfiguration,
-    PlantForecast,
 )
 from pyracast.plants.operations import activate_calibration, revise_plant
 from tests.support.domain import NOW
@@ -59,7 +58,6 @@ def test_native_clipping_zero_missingness_and_immutable_issuance(
     )
     assert second["result"] == numerical
     assert second["as_of"] != result["as_of"]
-    assert not PlantForecast.objects.exists()
     assert ForecastIssuance.objects.count() == 1
     source.normalized_intervals[1]["power_kw"] = None
     source.save()
@@ -256,7 +254,6 @@ def test_archive_reader_never_recalculates_a_published_output(
         resolution_minutes=60,
     )
     assert cast(dict[str, Any], result["result"])["energy_mwh"] == frozen["energy_mwh"]
-    assert not PlantForecast.objects.exists()
 
 
 def test_measurement_basis_determines_limits(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -413,7 +410,6 @@ def test_finite_capacity_overflow_returns_validation_without_saving_forecast(
             "Choose another day or contact your administrator."
         ),
     }
-    assert not PlantForecast.objects.exists()
 
 
 def test_pure_projection_claims_archive_selection_only_after_publication(

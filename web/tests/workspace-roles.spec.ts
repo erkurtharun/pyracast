@@ -1,5 +1,5 @@
 import { test, expect } from "./support/test";
-import { mockApi, paged, user } from "./support/workspace";
+import { mockApi, paged, user, tenantRow } from "./support/workspace";
 import { allauthErrorBody, errorBody } from "./support/errors";
 
 test("Turkish workspace roles and invitation labels preserve readable characters", async ({
@@ -64,7 +64,9 @@ test("viewer reads shared settings without write controls or requests", async ({
     await mockApi(page);
     await page.route("**/api/tenants/", (route) =>
         route.fulfill({
-            json: paged([{ id: 1, name: "Sunfield Energy", role: "viewer" }]),
+            json: paged([
+                tenantRow({ id: 1, name: "Sunfield Energy", role: "viewer" }),
+            ]),
         }),
     );
     await page.route("**/outages/", (route) =>

@@ -84,14 +84,11 @@ def _restore_message(
         headers={"Message-ID": message_id(delivery)},
     )
     message.attach_alternative(payload["html"], "text/html")
-    if payload.get("format") == "xlsx":
-        message.attach(
-            payload["attachment_name"],
-            b64decode(payload["attachment_base64"], validate=True),
-            XLSX_MIME,
-        )
-    else:
-        message.attach(payload["csv_filename"], payload["csv"], "text/csv")
+    message.attach(
+        payload["attachment_name"],
+        b64decode(payload["attachment_base64"], validate=True),
+        XLSX_MIME,
+    )
     return message
 
 

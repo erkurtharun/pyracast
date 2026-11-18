@@ -13,7 +13,7 @@ from rest_framework.test import APIRequestFactory
 from rest_framework.views import APIView
 
 from pyracast import trash
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.accounts.operations import reassign_workspace_admin
 from pyracast.api.permissions import WorkspaceWritePermission
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule
@@ -50,8 +50,6 @@ def test_workspace_write_permission_rejects_anonymous_callers() -> None:
         ("put", "regions/{region}/reminders/"),
         ("post", "regions/{region}/plants/"),
         ("put", "regions/{region}/plants/{plant}/"),
-        ("delete", "regions/{region}/plants/{plant}/"),
-        ("post", "regions/{region}/plants/{plant}/restore/"),
         ("post", "regions/{region}/plants/{plant}/calibrations/"),
         ("post", "regions/{region}/plants/{plant}/calibrations/1/activate/"),
         ("post", "regions/{region}/plants/{plant}/calibration/reset/"),
@@ -81,9 +79,7 @@ def test_viewer_cannot_mutate_any_workspace_endpoint(method: str, suffix: str) -
     assert response.status_code == 403, response.content
     assert (Region.objects.count(), Plant.objects.count(), AuditEvent.objects.count()) == before
     system.region.refresh_from_db()
-    plant.refresh_from_db()
     assert system.region.deleted_at is None
-    assert plant.deleted_at is None
     assert not CollectionSchedule.objects.exists()
     assert not ReminderSchedule.objects.exists()
 
@@ -154,8 +150,6 @@ def mutation_calls(system: System, actor: User, plant: Plant) -> list[Callable[[
         ),
         lambda: trash.trash_region(actor, tenant_id, region_id),
         lambda: trash.restore_region(actor, tenant_id, region_id),
-        lambda: trash.trash_plant(actor, tenant_id, region_id, plant_id),
-        lambda: trash.restore_plant(actor, tenant_id, region_id, plant_id),
     ]
 
 
@@ -168,7 +162,7 @@ def test_application_mutations_require_current_workspace_administrator(identity:
     if identity in {"demoted", "inactive"}:
         actor = system.member
         if identity == "demoted":
-            Membership.objects.filter(user=actor).update(role=Membership.Role.VIEWER)
+            Membership.objects.filter(user=actor).update(role=WorkspaceRole.VIEWER)
         else:
             User.objects.filter(pk=actor.pk).update(is_active=False)
     else:
@@ -197,7 +191,6 @@ def test_viewer_reads_shared_records_and_changes_own_language() -> None:
         "sites/",
         f"regions/{system.region.pk}/location-change-requests/",
         "trash/regions/",
-        "trash/plants/",
     ):
         assert client.get(base + suffix).status_code == 200
     response = client.post(
@@ -251,4 +244,4 @@ def test_workspace_transfer_serializes_with_mutation_and_rechecks_waiting_writer
         transfer_future.result(timeout=15)
         mutation_future.result(timeout=15)
     assert not RegionLocationChangeRequest.objects.exists()
-    assert Membership.objects.get(user=replacement).role == Membership.Role.ADMIN
+    assert Membership.objects.get(user=replacement).role == WorkspaceRole.ADMIN

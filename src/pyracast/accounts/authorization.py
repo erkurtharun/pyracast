@@ -1,7 +1,7 @@
 from django.contrib.auth.models import AnonymousUser, User
 from django.http import HttpRequest
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.accounts.security import has_verified_mfa
 from pyracast.errors import ErrorCode, ForbiddenError
 
@@ -23,9 +23,9 @@ def tenant_membership(
         membership = active_membership(actor, tenant_id)
     if membership is None:
         raise ForbiddenError(ErrorCode.MEMBERSHIP_REQUIRED)
-    if role == Membership.Role.ADMIN and membership.role != role:
+    if role == WorkspaceRole.ADMIN and membership.role != role:
         raise ForbiddenError(ErrorCode.WORKSPACE_ADMIN_REQUIRED)
-    if role == Membership.Role.VIEWER and membership.role != role:
+    if role == WorkspaceRole.VIEWER and membership.role != role:
         raise ForbiddenError(ErrorCode.ADMIN_EDITS_DIRECTLY)
     return membership
 

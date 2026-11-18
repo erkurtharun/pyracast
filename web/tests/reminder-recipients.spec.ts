@@ -1,6 +1,6 @@
 import { expect, test } from "./support/test";
 import type { Page } from "@playwright/test";
-import { mockApi, paged, region, user } from "./support/workspace";
+import { mockApi, paged, region, user, tenantRow } from "./support/workspace";
 import { errorBody } from "./support/errors";
 
 test("shared reminder recipients and email language survive administrator transfer", async ({
@@ -256,7 +256,9 @@ test("workspace recipients stay readable while viewer controls are disabled", as
     await reminderApi(page, [], 5, true, {}, 10, ["member@example.test"], true);
     await page.route("**/api/tenants/", (route) =>
         route.fulfill({
-            json: paged([{ id: 1, name: "Sunfield Energy", role: "viewer" }]),
+            json: paged([
+                tenantRow({ id: 1, name: "Sunfield Energy", role: "viewer" }),
+            ]),
         }),
     );
     await openReminders(page);

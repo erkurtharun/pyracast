@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "./support/test";
-import { mockApi, paged, user } from "./support/workspace";
+import { mockApi, paged, user, tenantRow } from "./support/workspace";
 import { errorBody } from "./support/errors";
 
 const viewer = {
@@ -203,8 +203,8 @@ test("switching to a viewer workspace on Members shows Plants as current", async
     await page.route("**/api/tenants/", (route) =>
         route.fulfill({
             json: paged([
-                { id: 1, name: "Sunfield Energy", role: "admin" },
-                { id: 9, name: "Viewer workspace", role: "viewer" },
+                tenantRow({ id: 1, name: "Sunfield Energy", role: "admin" }),
+                tenantRow({ id: 9, name: "Viewer workspace", role: "viewer" }),
             ]),
         }),
     );
@@ -229,8 +229,8 @@ test("switching workspace discards a pending confirmation and uses the new tenan
     await page.route("**/api/tenants/", (route) =>
         route.fulfill({
             json: paged([
-                { id: 1, name: "Sunfield Energy", role: "admin" },
-                { id: 9, name: "Other workspace", role: "admin" },
+                tenantRow({ id: 1, name: "Sunfield Energy", role: "admin" }),
+                tenantRow({ id: 9, name: "Other workspace", role: "admin" }),
             ]),
         }),
     );

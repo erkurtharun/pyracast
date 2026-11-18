@@ -17,7 +17,7 @@ from django.utils import timezone
 
 from pyracast.accounts.adapters import AccountAdapter
 from pyracast.accounts.mfa import MFAAdapter
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.calculation import calculate
 from pyracast.connections.operations import validate_binding
 from pyracast.forecasts.jobs import collect
@@ -108,7 +108,7 @@ def test_browser_against_live_django(
 
     outsider = User.objects.create_user(username="other")
     other_tenant = Tenant.objects.create(name="Other")
-    Membership.objects.create(user=outsider, tenant=other_tenant, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=outsider, tenant=other_tenant, role=WorkspaceRole.ADMIN)
     other_region = submit_region(
         outsider,
         other_tenant.pk,
@@ -158,9 +158,11 @@ def test_browser_against_live_django(
     )
     NotificationDelivery.objects.create(
         schedule=review_reminder,
+        binding=review_binding,
         recipients=["operations-recipient@example.test"],
         status="uncertain",
         scheduled_for=now - timedelta(minutes=5),
+        preparation_deadline=now + timedelta(minutes=10),
         available_at=now,
         attempts=1,
         last_error="smtp_uncertain",
@@ -221,7 +223,6 @@ def test_browser_against_live_django(
     assert plant.current_configuration.mounting_type == "fixed"
     assert plant.current_configuration.surface_tilt == 33
     assert plant.current_configuration.surface_azimuth == 180
-    assert plant.deleted_at is None
     system.region.refresh_from_db()
     assert system.region.deleted_at is None
     revisions = list(ProductionObservation.objects.filter(plant=plant).order_by("id"))

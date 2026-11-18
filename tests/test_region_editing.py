@@ -7,10 +7,10 @@ from typing import Any
 import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import IntegrityError, close_old_connections, connection
+from django.db import close_old_connections, connection
 from django.test import Client
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import SiteBinding
 from pyracast.connections.operations import create_account, validate_binding
 from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest
@@ -67,7 +67,7 @@ def test_location_request_api_tenant_boundary_validation_and_soft_deletion() -> 
     )
     other = Tenant.objects.create(name="Other")
     other_member = User.objects.create(username="other")
-    Membership.objects.create(user=other_member, tenant=other, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=other_member, tenant=other, role=WorkspaceRole.ADMIN)
     client.force_login(other_member)
     assert client.get(path).status_code == 403
     assert client.post(path, data, content_type="application/json").status_code == 403
@@ -231,7 +231,7 @@ def test_request_operation_validation_permissions_and_rejection_keep_active_regi
             longitude=30,
             timezone="UTC",
         )
-    Membership.objects.create(user=system.member, tenant=other, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=system.member, tenant=other, role=WorkspaceRole.ADMIN)
     with pytest.raises(Region.DoesNotExist):
         request_location_change(
             system.member,
@@ -426,12 +426,6 @@ BINDING_FIELD_CHANGES: dict[str, Callable[[System], dict[str, Any]]] = {
 )
 def test_a_change_of_any_binding_setup_field_replaces_the_binding(field: str) -> None:
     system = make_system(approved=True)
-    if field == "tilt_degrees":
-        with pytest.raises(ValidationError):
-            submit_binding(system, tilt_degrees=5)
-        with pytest.raises(IntegrityError):
-            SiteBinding.objects.filter(pk=system.binding.pk).update(tilt_degrees=5)
-        return
     replacement = submit_binding(system, **BINDING_FIELD_CHANGES[field](system))
     assert replacement.pk != system.binding.pk
     system.region.refresh_from_db()

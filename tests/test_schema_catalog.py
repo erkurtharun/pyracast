@@ -1,145 +1,25 @@
+from typing import Any
+
 import pytest
 from django.apps import apps
 from django.db import connection, models
 
+from pyracast.schema_objects import SCHEMA_OBJECTS, CompositeForeignKey, Extension, RowTrigger
+
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
-def test_native_foreign_keys_have_validated_deferred_ownership_targets() -> None:
-    expected = {
-        "approved_binding_region_fk": (
-            "regions_region",
-            ("approved_binding_id", "id"),
-            "connections_sitebinding",
-            ("id", "region_id"),
-        ),
-        "request_binding_account_fk": (
-            "forecasts_requestattempt",
-            ("binding_id", "provider_account_id"),
-            "connections_sitebinding",
-            ("id", "provider_account_id"),
-        ),
-        "request_job_binding_fk": (
-            "forecasts_requestattempt",
-            ("job_id", "binding_id"),
-            "forecasts_collectionjob",
-            ("id", "binding_id"),
-        ),
-        "collection_import_binding_fk": (
-            "forecasts_collectionjob",
-            ("reference_import_id", "binding_id"),
-            "forecasts_historicalreferenceimport",
-            ("id", "binding_id"),
-        ),
-        "snapshot_job_binding_fk": (
-            "forecasts_forecastsnapshot",
-            ("job_id", "binding_id"),
-            "forecasts_collectionjob",
-            ("id", "binding_id"),
-        ),
-        "normalization_snapshot_binding_fk": (
-            "forecasts_referencecapacitynormalization",
-            ("snapshot_id", "target_binding_id"),
-            "forecasts_forecastsnapshot",
-            ("id", "binding_id"),
-        ),
-        "plant_current_config_owner_fk": (
-            "plants_plant",
-            ("current_configuration_id", "id"),
-            "plants_plantconfiguration",
-            ("id", "plant_id"),
-        ),
-        "observation_config_owner_fk": (
-            "plants_productionobservation",
-            ("configuration_id", "plant_id"),
-            "plants_plantconfiguration",
-            ("id", "plant_id"),
-        ),
-        "calibration_config_owner_fk": (
-            "plants_calibrationrun",
-            ("configuration_id", "plant_id"),
-            "plants_plantconfiguration",
-            ("id", "plant_id"),
-        ),
-        "calibration_config_binding_fk": (
-            "plants_calibrationrun",
-            ("configuration_id", "binding_id"),
-            "plants_plantconfiguration",
-            ("id", "binding_id"),
-        ),
-        "activation_config_owner_fk": (
-            "plants_calibrationactivation",
-            ("configuration_id", "plant_id"),
-            "plants_plantconfiguration",
-            ("id", "plant_id"),
-        ),
-        "activation_calibration_config_fk": (
-            "plants_calibrationactivation",
-            ("calibration_id", "configuration_id"),
-            "plants_calibrationrun",
-            ("id", "configuration_id"),
-        ),
-        "calibration_comparison_config_fk": (
-            "plants_calibrationrun",
-            ("comparison_activation_id", "configuration_id"),
-            "plants_calibrationactivation",
-            ("id", "configuration_id"),
-        ),
-        "forecast_calibration_config_fk": (
-            "plants_plantforecast",
-            ("calibration_id", "configuration_id"),
-            "plants_calibrationrun",
-            ("id", "configuration_id"),
-        ),
-        "incident_declared_config_owner_fk": (
-            "incidents_plantincident",
-            ("declared_configuration_id", "plant_id"),
-            "plants_plantconfiguration",
-            ("id", "plant_id"),
-        ),
-        "epias_snapshot_job_lineage_fk": (
-            "metering_epiassnapshot",
-            ("job_id", "connection_id", "configuration_id"),
-            "metering_epiascollectionjob",
-            ("id", "connection_id", "configuration_id"),
-        ),
-        "configuration_plant_region_fk": (
-            "plants_plantconfiguration",
-            ("plant_id", "region_id"),
-            "plants_plant",
-            ("id", "region_id"),
-        ),
-        "configuration_binding_region_fk": (
-            "plants_plantconfiguration",
-            ("binding_id", "region_id"),
-            "connections_sitebinding",
-            ("id", "region_id"),
-        ),
-        "epias_job_connection_plant_fk": (
-            "metering_epiascollectionjob",
-            ("connection_id", "plant_id"),
-            "metering_epiasconnection",
-            ("id", "plant_id"),
-        ),
-        "epias_job_configuration_plant_fk": (
-            "metering_epiascollectionjob",
-            ("configuration_id", "plant_id"),
-            "plants_plantconfiguration",
-            ("id", "plant_id"),
-        ),
-        "proposal_configuration_owner_fk": (
-            "change_requests_changerequest",
-            ("configuration_id", "plant_id"),
-            "plants_plantconfiguration",
-            ("id", "plant_id"),
-        ),
-    }
-    project_models = tuple(
-        model
-        for model in apps.get_models(include_auto_created=True)
-        if model.__module__.startswith("pyracast.")
+def project_tables() -> list[str]:
+    return sorted(
+        {
+            model._meta.db_table
+            for model in apps.get_models(include_auto_created=True)
+            if model.__module__.startswith("pyracast.")
+        }
     )
-    project_tables = sorted({model._meta.db_table for model in project_models})
+
+
+def foreign_keys() -> list[tuple[Any, ...]]:
     with connection.cursor() as cursor:
         cursor.execute(
             """
@@ -163,16 +43,27 @@ def test_native_foreign_keys_have_validated_deferred_ownership_targets() -> None
             WHERE c.contype = 'f' AND ns.nspname = current_schema()
                 AND child.relname::text = ANY(%s)
             """,
-            (project_tables,),
+            (project_tables(),),
         )
-        rows = cursor.fetchall()
+        return list(cursor.fetchall())
+
+
+def test_composite_foreign_keys_equal_the_declared_schema_objects() -> None:
+    declared = {
+        item.name: (item.table, item.columns, item.target, item.target_columns)
+        for item in SCHEMA_OBJECTS
+        if isinstance(item, CompositeForeignKey)
+    }
     actual = {
         name: (child, tuple(columns), parent, tuple(targets))
-        for name, child, columns, parent, targets, *_ in rows
+        for name, child, columns, parent, targets, *_ in foreign_keys()
+        if len(columns) > 1
     }
-    assert expected.keys() <= actual.keys()
-    for name, definition in expected.items():
-        assert actual[name] == definition, name
+    assert actual == declared
+
+
+def test_every_foreign_key_is_validated_and_initially_deferred() -> None:
+    rows = foreign_keys()
     model_foreign_keys = {
         (
             model._meta.db_table,
@@ -180,13 +71,89 @@ def test_native_foreign_keys_have_validated_deferred_ownership_targets() -> None
             field.target_field.model._meta.db_table,
             (field.target_field.column,),
         )
-        for model in project_models
+        for model in apps.get_models(include_auto_created=True)
+        if model.__module__.startswith("pyracast.")
         for field in model._meta.local_fields
         if isinstance(field, models.ForeignKey)
         and field.deconstruct()[3].get("db_constraint", True)
     }
-    assert model_foreign_keys <= set(actual.values())
+    actual = {
+        (child, tuple(columns), parent, tuple(targets))
+        for _, child, columns, parent, targets, *_ in rows
+    }
+    assert model_foreign_keys <= actual
     assert all(
         validated and deferred and initially_deferred
         for *_, validated, deferred, initially_deferred in rows
     )
+
+
+def test_triggers_and_their_functions_equal_the_declared_schema_objects() -> None:
+    declared = {
+        (
+            item.table,
+            item.name,
+            f"CREATE TRIGGER {item.name} {item.timing} ON public.{item.table} "
+            f"FOR EACH ROW EXECUTE FUNCTION {item.function}()",
+            item.function,
+            item.body,
+        )
+        for item in SCHEMA_OBJECTS
+        if isinstance(item, RowTrigger)
+    }
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT c.relname, t.tgname, pg_get_triggerdef(t.oid), p.proname, p.prosrc
+            FROM pg_trigger t
+            JOIN pg_class c ON c.oid = t.tgrelid
+            JOIN pg_namespace ns ON ns.oid = c.relnamespace
+            JOIN pg_proc p ON p.oid = t.tgfoid
+            WHERE ns.nspname = current_schema() AND NOT t.tgisinternal
+            """
+        )
+        triggers = set(cursor.fetchall())
+        cursor.execute(
+            """
+            SELECT p.proname
+            FROM pg_proc p
+            JOIN pg_namespace ns ON ns.oid = p.pronamespace
+            WHERE ns.nspname = current_schema() AND NOT EXISTS (
+                SELECT 1 FROM pg_depend d WHERE d.objid = p.oid AND d.deptype = 'e'
+            )
+            """
+        )
+        functions = {name for (name,) in cursor.fetchall()}
+    assert triggers == declared
+    assert functions == {item[3] for item in declared}
+
+
+def table_columns(table: str) -> set[str]:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_schema = current_schema() AND table_name = %s
+            """,
+            (table,),
+        )
+        return {name for (name,) in cursor.fetchall()}
+
+
+def test_forecasts_are_archived_only_as_issuances_for_horizontal_bindings() -> None:
+    assert table_columns("plants_forecastissuance")
+    assert not table_columns("plants_plantforecast")
+    assert "tilt_degrees" not in table_columns("connections_sitebinding")
+
+
+def test_plants_and_reminders_are_stored_in_their_one_current_shape() -> None:
+    assert "deleted_at" not in table_columns("plants_plant")
+    assert "retired_at" not in table_columns("notifications_reminderschedule")
+    assert "grouped" not in table_columns("notifications_notificationdelivery")
+
+
+def test_extensions_equal_the_declared_schema_objects() -> None:
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT extname FROM pg_extension WHERE extname <> 'plpgsql'")
+        installed = {name for (name,) in cursor.fetchall()}
+    assert installed == {item.name for item in SCHEMA_OBJECTS if isinstance(item, Extension)}

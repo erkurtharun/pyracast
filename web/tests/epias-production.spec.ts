@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "./support/test";
 import { readFile } from "node:fs/promises";
 import Papa from "papaparse";
-import { mockApi, paged, region, user } from "./support/workspace";
+import { mockApi, paged, region, user, tenantRow } from "./support/workspace";
 import { errorBody } from "./support/errors";
 
 type Saved = { id: number; energy: number; quality: string; source: string };
@@ -11,7 +11,9 @@ async function productionApi(page: Page, viewer = false) {
     if (viewer)
         await page.route("**/api/tenants/", (route) =>
             route.fulfill({
-                json: paged([{ id: 1, name: "Tenant", role: "viewer" }]),
+                json: paged([
+                    tenantRow({ id: 1, name: "Tenant", role: "viewer" }),
+                ]),
             }),
         );
     const provider: (number | null)[] = Array.from({ length: 24 }, (_, hour) =>

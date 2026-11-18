@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "./support/test";
 import AxeBuilder from "@axe-core/playwright";
 import type { components } from "../src/lib/schema";
-import { mockApi, paged, region, user } from "./support/workspace";
+import { mockApi, paged, region, user, tenantRow } from "./support/workspace";
 
 async function setup(page: Page) {
     await page.clock.setFixedTime(new Date("2026-01-08T12:00:00Z"));
@@ -50,29 +50,19 @@ async function setup(page: Page) {
     await page.route("**/outages/", (route) =>
         route.fulfill({ json: paged([]) }),
     );
-    await page.route("**/trash/**", (route) => {
-        const isPlant = new URL(route.request().url()).pathname.endsWith(
-            "/plants/",
-        );
-        return route.fulfill({
-            json: paged([
-                {
-                    id: 91,
-                    name: isPlant ? "Archived plant" : "Archived region",
+    await page.route("**/trash/regions/", (route) =>
+        route.fulfill({
+            json: paged(
+                ["Archived region", "Archived plant"].map((name, index) => ({
+                    id: 91 + index,
+                    name,
                     deleted_at: "2026-01-07T10:00:00Z",
                     purge_after: "2026-02-06T10:00:00Z",
                     can_restore: true,
-                    ...(isPlant
-                        ? {
-                              region_id: region.id,
-                              region_name: region.name,
-                              parent_deleted: false,
-                          }
-                        : {}),
-                },
-            ]),
-        });
-    });
+                })),
+            ),
+        }),
+    );
     await page.route("**/forecast/**", (route) => {
         const target =
             new URL(route.request().url()).searchParams.get("date") ??
@@ -618,7 +608,11 @@ for (const width of [320, 390, 1440]) {
             await page.route("**/api/tenants/", (route) =>
                 route.fulfill({
                     json: paged([
-                        { id: 1, name: "Sunfield Energy", role: "admin" },
+                        tenantRow({
+                            id: 1,
+                            name: "Sunfield Energy",
+                            role: "admin",
+                        }),
                         {
                             id: 2,
                             name: "A workspace with a long company name",
@@ -776,7 +770,9 @@ test("mobile viewer retains the read-only indicator and no workspace management 
     await mockApi(page);
     await page.route("**/api/tenants/", (route) =>
         route.fulfill({
-            json: paged([{ id: 1, name: "Sunfield Energy", role: "viewer" }]),
+            json: paged([
+                tenantRow({ id: 1, name: "Sunfield Energy", role: "viewer" }),
+            ]),
         }),
     );
     await page.goto("/app/");

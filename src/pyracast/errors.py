@@ -1,15 +1,15 @@
 from collections.abc import Mapping
-from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 if TYPE_CHECKING:
     from django_stubs_ext import StrOrPromise, StrPromise
 
 
-class ErrorCode(StrEnum):
+class ErrorCode(models.TextChoices):
     INVALID_REQUEST = "invalid_request"
     BAD_REQUEST = "bad_request"
     SESSION_ENDED = "session_ended"
@@ -47,7 +47,6 @@ class ErrorCode(StrEnum):
     LOCATION_ALREADY_EXISTS = "location_already_exists"
     CALCULATION_OUT_OF_RANGE = "calculation_out_of_range"
     TRASH_RETENTION_EXPIRED = "trash_retention_expired"
-    PARENT_REGION_TRASHED = "parent_region_trashed"
     DATE_OUT_OF_RANGE = "date_out_of_range"
     COMPLETED_DAY_REQUIRED = "completed_day_required"
     INVALID_EPIAS_PLANT = "invalid_epias_plant"
@@ -133,7 +132,6 @@ MESSAGES: Mapping[ErrorCode, StrPromise] = {
         "This forecast could not be calculated. Choose another day or contact your administrator."
     ),
     ErrorCode.TRASH_RETENTION_EXPIRED: _("The 30-day restore period has ended."),
-    ErrorCode.PARENT_REGION_TRASHED: _("Restore this plant's location before restoring the plant."),
     ErrorCode.DATE_OUT_OF_RANGE: _("Choose a date within the available forecast range."),
     ErrorCode.COMPLETED_DAY_REQUIRED: _("Choose a completed local day for historical estimates."),
     ErrorCode.INVALID_EPIAS_PLANT: _("Enter a positive EPİAŞ plant ID and the plant's EIC."),

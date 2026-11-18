@@ -18,17 +18,17 @@ from pyracast.notifications.models import NotificationDelivery
 
 
 def _available_by(moment: datetime) -> Q:
-    return (
-        Q(collected_at__lte=moment, forecastresult__published_at__lte=moment)
-        & (Q(available_at__isnull=True) | Q(available_at__lte=moment))
-        & (Q(issued_at__isnull=True) | Q(issued_at__lte=moment))
-    )
+    return Q(
+        collected_at__lte=moment,
+        available_at__lte=moment,
+        forecastresult__published_at__lte=moment,
+    ) & (Q(issued_at__isnull=True) | Q(issued_at__lte=moment))
 
 
 def eligible_saved_forecasts(
     delivery: NotificationDelivery, available_at: datetime
 ) -> QuerySet[ForecastSnapshot]:
-    cutoff = min(available_at, delivery.preparation_deadline or delivery.scheduled_for)
+    cutoff = min(available_at, delivery.preparation_deadline)
     return (
         ForecastSnapshot.objects.filter(
             binding=delivery.binding, job__status="succeeded", source_kind="forecast"
@@ -46,15 +46,14 @@ def eligible_saved_forecasts(
 def composed_report_source(
     delivery: NotificationDelivery, day: date, available_at: datetime
 ) -> PreparedIntradaySource | None:
-    assert delivery.binding is not None  # noqa: S101 -- Preparation pins an authorized binding.
     start, end = local_day_bounds(day, delivery.binding.timezone)
     snapshots = list(
         eligible_saved_forecasts(delivery, available_at).filter(
-            coverage_start__lt=end, coverage_end__gt=start, available_at__isnull=False
+            coverage_start__lt=end, coverage_end__gt=start
         )
     )
     cutoff = min(delivery.scheduled_for, available_at)
-    grace = min(available_at, delivery.preparation_deadline or delivery.scheduled_for)
+    grace = min(available_at, delivery.preparation_deadline)
     return prepare_intraday_source(
         delivery.binding,
         day,
@@ -68,7 +67,6 @@ def composed_report_source(
 def saved_report_results(
     delivery: NotificationDelivery, available_at: datetime
 ) -> list[dict[str, object] | None]:
-    assert delivery.binding is not None  # noqa: S101 -- Preparation pins an authorized binding.
     today = delivery.scheduled_for.astimezone(ZoneInfo(delivery.binding.timezone)).date()
     results = [
         saved_day_payload(delivery.snapshot, today + timedelta(days=offset))

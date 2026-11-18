@@ -318,7 +318,7 @@ export interface paths {
         get?: never;
         put: operations["tenants_regions_plants_update"];
         post?: never;
-        delete: operations["tenants_regions_plants_destroy"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -596,22 +596,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/restore/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["tenants_regions_plants_restore_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/tenants/{tenant_id}/regions/{region_id}/reminders/": {
         parameters: {
             query?: never;
@@ -660,22 +644,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/tenants/{tenant_id}/trash/plants/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["tenants_trash_plants_list"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/tenants/{tenant_id}/trash/regions/": {
         parameters: {
             query?: never;
@@ -707,6 +675,46 @@ export interface components {
         ApprovalInput: {
             review_fingerprint: string;
         };
+        /**
+         * @description * `region_renamed` - Plant location renamed
+         *     * `location_change_requested` - Location change requested
+         *     * `location_change_approved` - Location change approved
+         *     * `location_change_rejected` - Location change rejected
+         *     * `location_change_rebased` - Location change request moved to the new revision
+         *     * `binding_configured` - Provider connection configured
+         *     * `connection_validated` - Provider connection validated
+         *     * `region_approved` - Plant approved
+         *     * `region_rejected` - Plant rejected
+         *     * `region_suspended` - Plant suspended
+         *     * `region_trashed` - Plant location moved to trash
+         *     * `region_restored` - Plant location restored
+         *     * `collection_schedule_updated` - Collection schedule updated
+         *     * `historical_reference_imported` - Historical reference imported
+         *     * `reference_capacity_normalized` - Reference capacity normalized
+         *     * `provider_account_created` - Provider account created
+         *     * `provider_secret_rotated` - Provider key rotated
+         *     * `provider_cooldown_cleared` - Provider request pause cleared
+         * @enum {string}
+         */
+        AuditActionEnum:
+            | "region_renamed"
+            | "location_change_requested"
+            | "location_change_approved"
+            | "location_change_rejected"
+            | "location_change_rebased"
+            | "binding_configured"
+            | "connection_validated"
+            | "region_approved"
+            | "region_rejected"
+            | "region_suspended"
+            | "region_trashed"
+            | "region_restored"
+            | "collection_schedule_updated"
+            | "historical_reference_imported"
+            | "reference_capacity_normalized"
+            | "provider_account_created"
+            | "provider_secret_rotated"
+            | "provider_cooldown_cleared";
         AutomaticCalibrationAttemptOutput: {
             calibration_id: number | null;
             status: components["schemas"]["AutomaticCalibrationAttemptOutputStatusEnum"];
@@ -720,6 +728,13 @@ export interface components {
          * @enum {string}
          */
         AutomaticCalibrationAttemptOutputStatusEnum: "activated" | "skipped";
+        /**
+         * @description * `unknown` - Unknown
+         *     * `healthy` - Healthy
+         *     * `error` - Error
+         * @enum {string}
+         */
+        BindingHealthEnum: "unknown" | "healthy" | "error";
         CalibrationAutomationOutput: {
             enabled: boolean;
             authorized: boolean;
@@ -801,8 +816,8 @@ export interface components {
             readonly dataset_sha256: string;
         };
         /**
-         * @description * `production` - production
-         *     * `incident` - incident
+         * @description * `production` - Production
+         *     * `incident` - Incident
          * @enum {string}
          */
         ChangeRequestKindEnum: "production" | "incident";
@@ -833,10 +848,10 @@ export interface components {
             incident: components["schemas"]["IncidentChangeOutput"] | null;
         };
         /**
-         * @description * `pending` - pending
-         *     * `approved` - approved
-         *     * `rejected` - rejected
-         *     * `withdrawn` - withdrawn
+         * @description * `pending` - Pending
+         *     * `approved` - Approved
+         *     * `rejected` - Rejected
+         *     * `withdrawn` - Withdrawn
          * @enum {string}
          */
         ChangeRequestStatusEnum:
@@ -938,14 +953,6 @@ export interface components {
             /** Format: date-time */
             ends_at: string;
         };
-        /**
-         * @description * `pending` - Pending
-         *     * `accepted` - Accepted
-         *     * `failed` - Failed
-         *     * `uncertain` - Uncertain
-         * @enum {string}
-         */
-        DeliveryStatusEnum: "pending" | "accepted" | "failed" | "uncertain";
         EpiasConnectionOutput: {
             connected: boolean;
             provider_plant_id: number | null;
@@ -962,6 +969,148 @@ export interface components {
             pending_jobs: number;
             archived_days: number;
         };
+        /** @description Body of every failed /api/ response. */
+        Error: {
+            code: components["schemas"]["ErrorCode"];
+            /** @description Localized text for the user. */
+            message: string;
+            /** @description Localized text per dotted input path. */
+            fields?: {
+                [key: string]: string;
+            };
+            /** @description Seconds. */
+            retry_after?: number;
+            /** @description Reference to the server log. */
+            request_id?: string;
+        };
+        /**
+         * @description * `invalid_request` - Invalid Request
+         *     * `bad_request` - Bad Request
+         *     * `session_ended` - Session Ended
+         *     * `not_authenticated` - Not Authenticated
+         *     * `csrf_failed` - Csrf Failed
+         *     * `permission_denied` - Permission Denied
+         *     * `invalid_proxy_headers` - Invalid Proxy Headers
+         *     * `membership_required` - Membership Required
+         *     * `workspace_admin_required` - Workspace Admin Required
+         *     * `admin_edits_directly` - Admin Edits Directly
+         *     * `platform_admin_required` - Platform Admin Required
+         *     * `invitation_email_unverified` - Invitation Email Unverified
+         *     * `not_found` - Not Found
+         *     * `method_not_allowed` - Method Not Allowed
+         *     * `not_acceptable` - Not Acceptable
+         *     * `unsupported_media_type` - Unsupported Media Type
+         *     * `conflict` - Conflict
+         *     * `throttled` - Throttled
+         *     * `session_busy` - Session Busy
+         *     * `invitation_rate_limited` - Invitation Rate Limited
+         *     * `provider_throttled` - Provider Throttled
+         *     * `quota_exhausted` - Quota Exhausted
+         *     * `server_error` - Server Error
+         *     * `provider_unavailable` - Provider Unavailable
+         *     * `busy` - Busy
+         *     * `database_conflict` - Database Conflict
+         *     * `request_timeout` - Request Timeout
+         *     * `provider_authentication_failed` - Provider Authentication Failed
+         *     * `forecast_sources_changed` - Forecast Sources Changed
+         *     * `configuration_unavailable` - Configuration Unavailable
+         *     * `location_already_has_plant` - Location Already Has Plant
+         *     * `plant_submission_required` - Plant Submission Required
+         *     * `estimated_actuals_unavailable` - Estimated Actuals Unavailable
+         *     * `location_unchanged` - Location Unchanged
+         *     * `location_already_exists` - Location Already Exists
+         *     * `calculation_out_of_range` - Calculation Out Of Range
+         *     * `trash_retention_expired` - Trash Retention Expired
+         *     * `date_out_of_range` - Date Out Of Range
+         *     * `completed_day_required` - Completed Day Required
+         *     * `invalid_epias_plant` - Invalid Epias Plant
+         *     * `epias_plant_identity_mismatch` - Epias Plant Identity Mismatch
+         *     * `incident_closed` - Incident Closed
+         *     * `incident_overlap` - Incident Overlap
+         *     * `incident_starts_in_future` - Incident Starts In Future
+         *     * `incident_ends_before_start` - Incident Ends Before Start
+         *     * `incident_ends_in_future` - Incident Ends In Future
+         *     * `incident_capacity_exceeded` - Incident Capacity Exceeded
+         *     * `invitation_unavailable` - Invitation Unavailable
+         *     * `invitation_member_exists` - Invitation Member Exists
+         *     * `workspace_admin_not_removable` - Workspace Admin Not Removable
+         *     * `member_unavailable` - Member Unavailable
+         *     * `region_revision_changed` - Region Revision Changed
+         *     * `location_change_already_pending` - Location Change Already Pending
+         *     * `location_change_already_reviewed` - Location Change Already Reviewed
+         *     * `incident_revision_changed` - Incident Revision Changed
+         *     * `idempotency_key_reused` - Idempotency Key Reused
+         *     * `pending_request_limit` - Pending Request Limit
+         *     * `production_revision_changed` - Production Revision Changed
+         *     * `request_already_closed` - Request Already Closed
+         *     * `request_conflict` - Request Conflict
+         *     * `review_context_changed` - Review Context Changed
+         *     * `workspace_admin_changed` - Workspace Admin Changed
+         * @enum {string}
+         */
+        ErrorCode:
+            | "invalid_request"
+            | "bad_request"
+            | "session_ended"
+            | "not_authenticated"
+            | "csrf_failed"
+            | "permission_denied"
+            | "invalid_proxy_headers"
+            | "membership_required"
+            | "workspace_admin_required"
+            | "admin_edits_directly"
+            | "platform_admin_required"
+            | "invitation_email_unverified"
+            | "not_found"
+            | "method_not_allowed"
+            | "not_acceptable"
+            | "unsupported_media_type"
+            | "conflict"
+            | "throttled"
+            | "session_busy"
+            | "invitation_rate_limited"
+            | "provider_throttled"
+            | "quota_exhausted"
+            | "server_error"
+            | "provider_unavailable"
+            | "busy"
+            | "database_conflict"
+            | "request_timeout"
+            | "provider_authentication_failed"
+            | "forecast_sources_changed"
+            | "configuration_unavailable"
+            | "location_already_has_plant"
+            | "plant_submission_required"
+            | "estimated_actuals_unavailable"
+            | "location_unchanged"
+            | "location_already_exists"
+            | "calculation_out_of_range"
+            | "trash_retention_expired"
+            | "date_out_of_range"
+            | "completed_day_required"
+            | "invalid_epias_plant"
+            | "epias_plant_identity_mismatch"
+            | "incident_closed"
+            | "incident_overlap"
+            | "incident_starts_in_future"
+            | "incident_ends_before_start"
+            | "incident_ends_in_future"
+            | "incident_capacity_exceeded"
+            | "invitation_unavailable"
+            | "invitation_member_exists"
+            | "workspace_admin_not_removable"
+            | "member_unavailable"
+            | "region_revision_changed"
+            | "location_change_already_pending"
+            | "location_change_already_reviewed"
+            | "incident_revision_changed"
+            | "idempotency_key_reused"
+            | "pending_request_limit"
+            | "production_revision_changed"
+            | "request_already_closed"
+            | "request_conflict"
+            | "review_context_changed"
+            | "workspace_admin_changed";
         ForecastOutput: {
             region_id: number;
             /** Format: date */
@@ -1007,10 +1156,10 @@ export interface components {
             revision: number;
         };
         /**
-         * @description * `create` - create
-         *     * `update` - update
-         *     * `resolve` - resolve
-         *     * `cancel` - cancel
+         * @description * `create` - Create
+         *     * `update` - Update
+         *     * `resolve` - Resolve
+         *     * `cancel` - Cancel
          * @enum {string}
          */
         IncidentChangeActionEnum: "create" | "update" | "resolve" | "cancel";
@@ -1106,8 +1255,17 @@ export interface components {
         };
         InvitationAcceptanceOutput: {
             tenant_id: number;
-            role: components["schemas"]["RoleEnum"];
+            role: components["schemas"]["WorkspaceRoleEnum"];
         };
+        /**
+         * @description * `pending` - Pending
+         *     * `sent` - Sent
+         *     * `failed` - Failed
+         *     * `uncertain` - Uncertain
+         * @enum {string}
+         */
+        InvitationDeliveryStatusEnum:
+            "pending" | "sent" | "failed" | "uncertain";
         InvitationInput: {
             /** Format: email */
             email: string;
@@ -1118,11 +1276,11 @@ export interface components {
             readonly email: string;
             /** Format: date-time */
             readonly expires_at: string;
-            readonly delivery_status: components["schemas"]["DeliveryStatusEnum"];
+            readonly delivery_status: components["schemas"]["InvitationDeliveryStatusEnum"];
         };
         /**
-         * @description * `en` - en
-         *     * `tr` - tr
+         * @description * `en` - English
+         *     * `tr` - Türkçe
          * @enum {string}
          */
         LanguageEnum: "en" | "tr";
@@ -1148,12 +1306,19 @@ export interface components {
             readonly longitude: number;
             readonly timezone: string;
             readonly reason: string;
-            readonly status: string;
+            readonly status: components["schemas"]["LocationChangeStatusEnum"];
             /** Format: date-time */
             readonly created_at: string;
             /** Format: date-time */
             readonly reviewed_at: string | null;
         };
+        /**
+         * @description * `pending` - Pending
+         *     * `approved` - Approved
+         *     * `rejected` - Rejected
+         * @enum {string}
+         */
+        LocationChangeStatusEnum: "pending" | "approved" | "rejected";
         /**
          * @description * `net_export` - Net export
          *     * `ac_generation` - AC generation
@@ -1318,21 +1483,6 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["TenantOutput"][];
-        };
-        PaginatedTrashedPlantOutputList: {
-            /** @example 123 */
-            count: number;
-            /**
-             * Format: uri
-             * @example http://api.example.org/accounts/?page=4
-             */
-            next?: string | null;
-            /**
-             * Format: uri
-             * @example http://api.example.org/accounts/?page=2
-             */
-            previous?: string | null;
-            results: components["schemas"]["TrashedPlantOutput"][];
         };
         PaginatedTrashedRegionOutputList: {
             /** @example 123 */
@@ -1507,8 +1657,14 @@ export interface components {
             readonly created_at: string;
         };
         /**
-         * @description * `set` - set
-         *     * `revert` - revert
+         * @description * `ac` - AC
+         *     * `dc` - DC
+         * @enum {string}
+         */
+        PowerBasisEnum: "ac" | "dc";
+        /**
+         * @description * `set` - Set
+         *     * `revert` - Revert
          * @enum {string}
          */
         ProductionChangeActionEnum: "set" | "revert";
@@ -1701,8 +1857,16 @@ export interface components {
             readonly longitude: number;
             readonly timezone: string;
             readonly revision: number;
-            readonly status: string;
+            readonly status: components["schemas"]["RegionStatusEnum"];
         };
+        /**
+         * @description * `pending` - Awaiting approval
+         *     * `approved` - Approved
+         *     * `suspended` - Suspended
+         *     * `rejected` - Rejected
+         * @enum {string}
+         */
+        RegionStatusEnum: "pending" | "approved" | "suspended" | "rejected";
         RejectionInput: {
             reason: string;
         };
@@ -1766,12 +1930,6 @@ export interface components {
         RevisionInput: {
             expected_revision: number;
         };
-        /**
-         * @description * `admin` - Administrator
-         *     * `viewer` - Viewer
-         * @enum {string}
-         */
-        RoleEnum: "admin" | "viewer";
         SessionOutput: {
             user: components["schemas"]["SessionUserOutput"] | null;
             csrf_token: string;
@@ -1817,7 +1975,7 @@ export interface components {
             readonly longitude: number;
             readonly timezone: string;
             readonly revision: number;
-            readonly status: string;
+            readonly status: components["schemas"]["RegionStatusEnum"];
             readonly plant: components["schemas"]["PlantOutput"] | null;
         };
         /**
@@ -1829,21 +1987,9 @@ export interface components {
         TenantOutput: {
             readonly id: number;
             readonly name: string;
-            readonly role: components["schemas"]["RoleEnum"];
+            readonly role: components["schemas"]["WorkspaceRoleEnum"];
             readonly pending_review_count: number | null;
             readonly unread_outcome_count: number;
-        };
-        TrashedPlantOutput: {
-            readonly id: number;
-            readonly name: string;
-            region_id: number;
-            region_name: string;
-            readonly parent_deleted: boolean;
-            /** Format: date-time */
-            deleted_at: string;
-            /** Format: date-time */
-            readonly purge_after: string;
-            readonly can_restore: boolean;
         };
         TrashedRegionOutput: {
             readonly id: number;
@@ -1881,90 +2027,17 @@ export interface components {
             id: number;
             /** Format: email */
             email: string;
-            role: components["schemas"]["RoleEnum"];
+            role: components["schemas"]["WorkspaceRoleEnum"];
         };
         WorkspaceMembersOutput: {
             members: components["schemas"]["WorkspaceMemberOutput"][];
         };
-        /** @enum {string} */
-        ErrorCode:
-            | "invalid_request"
-            | "bad_request"
-            | "session_ended"
-            | "not_authenticated"
-            | "csrf_failed"
-            | "permission_denied"
-            | "invalid_proxy_headers"
-            | "membership_required"
-            | "workspace_admin_required"
-            | "admin_edits_directly"
-            | "platform_admin_required"
-            | "invitation_email_unverified"
-            | "not_found"
-            | "method_not_allowed"
-            | "not_acceptable"
-            | "unsupported_media_type"
-            | "conflict"
-            | "throttled"
-            | "session_busy"
-            | "invitation_rate_limited"
-            | "provider_throttled"
-            | "quota_exhausted"
-            | "server_error"
-            | "provider_unavailable"
-            | "busy"
-            | "database_conflict"
-            | "request_timeout"
-            | "provider_authentication_failed"
-            | "forecast_sources_changed"
-            | "configuration_unavailable"
-            | "location_already_has_plant"
-            | "plant_submission_required"
-            | "estimated_actuals_unavailable"
-            | "location_unchanged"
-            | "location_already_exists"
-            | "calculation_out_of_range"
-            | "trash_retention_expired"
-            | "parent_region_trashed"
-            | "date_out_of_range"
-            | "completed_day_required"
-            | "invalid_epias_plant"
-            | "epias_plant_identity_mismatch"
-            | "incident_closed"
-            | "incident_overlap"
-            | "incident_starts_in_future"
-            | "incident_ends_before_start"
-            | "incident_ends_in_future"
-            | "incident_capacity_exceeded"
-            | "invitation_unavailable"
-            | "invitation_member_exists"
-            | "workspace_admin_not_removable"
-            | "member_unavailable"
-            | "region_revision_changed"
-            | "location_change_already_pending"
-            | "location_change_already_reviewed"
-            | "incident_revision_changed"
-            | "idempotency_key_reused"
-            | "pending_request_limit"
-            | "production_revision_changed"
-            | "request_already_closed"
-            | "request_conflict"
-            | "review_context_changed"
-            | "workspace_admin_changed";
-        /** @description Body of every failed /api/ response. */
-        Error: {
-            code: components["schemas"]["ErrorCode"];
-            /** @description Localized text for the user. */
-            message: string;
-            /** @description Localized text per dotted input path. */
-            fields?: {
-                [key: string]: string;
-            };
-            /** @description Seconds. */
-            retry_after?: number;
-            /** @description Reference to the server log. */
-            request_id?: string;
-        };
+        /**
+         * @description * `admin` - Administrator
+         *     * `viewer` - Viewer
+         * @enum {string}
+         */
+        WorkspaceRoleEnum: "admin" | "viewer";
     };
     responses: never;
     parameters: never;
@@ -2763,37 +2836,6 @@ export interface operations {
             };
         };
     };
-    tenants_regions_plants_destroy: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                plant_id: number;
-                region_id: number;
-                tenant_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description No response body */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description API failure. */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
     tenants_regions_plants_calibration_automation_retrieve: {
         parameters: {
             query?: never;
@@ -3524,38 +3566,6 @@ export interface operations {
             };
         };
     };
-    tenants_regions_plants_restore_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                plant_id: number;
-                region_id: number;
-                tenant_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PlantOutput"];
-                };
-            };
-            /** @description API failure. */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
     tenants_regions_reminders_retrieve: {
         parameters: {
             query?: never;
@@ -3707,39 +3717,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SiteOutput"];
-                };
-            };
-            /** @description API failure. */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    tenants_trash_plants_list: {
-        parameters: {
-            query?: {
-                /** @description A page number within the paginated result set. */
-                page?: number;
-            };
-            header?: never;
-            path: {
-                tenant_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedTrashedPlantOutputList"];
                 };
             };
             /** @description API failure. */

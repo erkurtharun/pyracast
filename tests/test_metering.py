@@ -80,12 +80,12 @@ def test_connection_scope_identity_and_missing_configuration(
     Plant.objects.filter(pk=plant.pk).update(current_configuration=None)
     with raises_code("configuration_unavailable"):
         connect(plant, system.admin)
-    Plant.objects.filter(pk=plant.pk).update(deleted_at=NOW)
+    Region.objects.filter(pk=system.region.pk).update(deleted_at=NOW)
     with pytest.raises(Plant.DoesNotExist):
         get_epias_status(plant.pk, actor=system.member)
 
 
-@pytest.mark.parametrize("change", ["approval", "plant", "region", "configuration", "admin"])
+@pytest.mark.parametrize("change", ["approval", "region", "configuration", "admin"])
 def test_connection_rechecks_changes_after_validation(
     monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
@@ -94,8 +94,6 @@ def test_connection_rechecks_changes_after_validation(
     def revoke() -> None:
         if change == "approval":
             Region.objects.filter(pk=system.region.pk).update(status="suspended")
-        elif change == "plant":
-            Plant.objects.filter(pk=plant.pk).update(deleted_at=NOW)
         elif change == "region":
             Region.objects.filter(pk=system.region.pk).update(deleted_at=NOW)
         elif change == "admin":
@@ -193,7 +191,7 @@ def test_scheduler_respects_slots_and_rejects_naive_time(monkeypatch: pytest.Mon
     EpiasConnection.objects.filter(pk=linked.pk).update(updated_at=NOW + timedelta(days=2))
     assert enqueue_due_epias_jobs(now=NOW + timedelta(days=1)) == []
     EpiasConnection.objects.filter(pk=linked.pk).update(updated_at=NOW)
-    Plant.objects.filter(pk=plant.pk).update(deleted_at=NOW)
+    Region.objects.filter(pk=plant.region_id).update(deleted_at=NOW)
     assert enqueue_due_epias_jobs(now=NOW + timedelta(days=1)) == []
 
 
@@ -275,9 +273,7 @@ def test_duplicate_workers_only_one_external_acquisition(
     assert job_id.attempts == 1
 
 
-@pytest.mark.parametrize(
-    "change", ["approval", "plant", "region", "configuration", "disconnect", "delete"]
-)
+@pytest.mark.parametrize("change", ["approval", "region", "configuration", "disconnect", "delete"])
 def test_publication_rechecks_revocation_and_deletion(
     monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
@@ -290,8 +286,6 @@ def test_publication_rechecks_revocation_and_deletion(
             Region.objects.filter(pk=system.region.pk).update(status="suspended")
         elif change == "region":
             Region.objects.filter(pk=system.region.pk).update(deleted_at=NOW)
-        elif change == "plant":
-            Plant.objects.filter(pk=plant.pk).update(deleted_at=NOW)
         elif change == "configuration":
             Plant.objects.filter(pk=plant.pk).update(current_configuration=None)
         elif change == "disconnect":
@@ -531,16 +525,15 @@ def test_job_wait_clock_prevents_expired_publication(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.parametrize("operation", ["claim", "schedule"])
-@pytest.mark.parametrize("target", ["region", "plant", "connection"])
+@pytest.mark.parametrize("target", ["region", "connection"])
 def test_collection_tolerates_purge_after_reading_work_identifiers(
     monkeypatch: pytest.MonkeyPatch, operation: str, target: str
 ) -> None:
-    system, plant, linked = connected(monkeypatch)
+    system, _, linked = connected(monkeypatch)
     job = EpiasCollectionJob.objects.first()
     assert job is not None
     table = {
         "region": "regions_region",
-        "plant": "plants_plant",
         "connection": "metering_epiasconnection",
     }[target]
     armed = True
@@ -560,9 +553,6 @@ def test_collection_tolerates_purge_after_reading_work_identifiers(
                     deleted_at=NOW - timedelta(days=31)
                 )
                 assert purge_expired(NOW)["regions"] == 1
-            elif target == "plant":
-                Plant.objects.filter(pk=plant.pk).update(deleted_at=NOW - timedelta(days=31))
-                assert purge_expired(NOW)["plants"] == 1
             else:
                 EpiasCollectionJob.objects.filter(connection=linked).delete()
                 linked.delete()

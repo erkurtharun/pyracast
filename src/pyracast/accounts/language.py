@@ -1,9 +1,10 @@
 import re
 from collections.abc import Callable
-from typing import Literal, cast
+from typing import Literal, cast, get_args
 
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser, User
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse
 from django.utils import translation
@@ -12,7 +13,7 @@ from django.utils.cache import patch_vary_headers
 from pyracast.accounts.models import UserLanguagePreference
 
 Language = Literal["en", "tr"]
-LANGUAGES = ("en", "tr")
+LANGUAGES: tuple[Language, ...] = get_args(Language)
 LANGUAGE_COOKIE = "pyracast_language"
 _LANGUAGE_RANGE = re.compile(
     r"\s*([a-z]{1,8}(?:-[a-z0-9]{1,8})*|\*)\s*"
@@ -22,7 +23,7 @@ _LANGUAGE_RANGE = re.compile(
 
 
 def explicit_language(value: str | None) -> Language | None:
-    return cast(Language, value) if value in LANGUAGES else None
+    return value if value in LANGUAGES else None
 
 
 def user_language(user: User | AnonymousUser) -> Language | None:
@@ -38,6 +39,8 @@ def user_language(user: User | AnonymousUser) -> Language | None:
 
 @transaction.atomic
 def save_user_language(user: User, language: Language) -> None:
+    if language not in LANGUAGES:
+        raise ValidationError("unsupported_language")
     User.objects.select_for_update().get(pk=user.pk)
     UserLanguagePreference.objects.update_or_create(
         user_id=user.pk, defaults={"language": language}

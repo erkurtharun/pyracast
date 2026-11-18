@@ -64,7 +64,6 @@ def reference_transition_forecast(
         "latitude",
         "longitude",
         "timezone",
-        "tilt_degrees",
         "azimuth_degrees",
         "losses_percent",
         "power_basis",

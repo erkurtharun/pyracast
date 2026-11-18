@@ -40,7 +40,6 @@ PURGED = frozenset(
         "plants.Plant",
         "plants.PlantConfiguration",
         "plants.PlantEvent",
-        "plants.PlantForecast",
         "plants.ProductionObservation",
         "regions.AuditEvent",
         "regions.Region",

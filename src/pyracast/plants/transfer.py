@@ -10,7 +10,6 @@ def tracking_modeled(configuration: PlantConfiguration) -> bool:
     binding = configuration.binding
     return (
         configuration.mounting_type == "tracking"
-        and binding.tilt_degrees == 0
         and binding.dc_capacity_kw is not None
         and binding.dc_capacity_kw > 0
         and 0 <= binding.losses_percent < 100

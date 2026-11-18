@@ -12,7 +12,7 @@ from django.db import connections, transaction
 from django.utils import timezone
 
 from pyracast.accounts.authorization import tenant_membership
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.accounts.operations import reassign_workspace_admin, remove_workspace_member
 from pyracast.change_requests import operations, preparation, queries
 from pyracast.change_requests.models import ChangeRequest
@@ -55,7 +55,7 @@ def blocked_approval(
     fingerprint = review_fingerprint(case, proposal)
 
     def require_admin(actor: User, tenant_id: int, **options: Any) -> Membership:
-        if actor.pk == case.system.member.pk and options.get("role") == Membership.Role.ADMIN:
+        if actor.pk == case.system.member.pk and options.get("role") == WorkspaceRole.ADMIN:
             entered.set()
         return tenant_membership(actor, tenant_id, **options)
 
@@ -198,7 +198,7 @@ def test_submission_waiting_for_removed_membership_cannot_create_orphan_proposal
     entered = Event()
 
     def require_member(actor: User, tenant_id: int, **options: Any) -> Membership:
-        if options.get("role") == Membership.Role.VIEWER:
+        if options.get("role") == WorkspaceRole.VIEWER:
             entered.set()
         return tenant_membership(actor, tenant_id, **options)
 
@@ -227,7 +227,7 @@ def test_concurrent_submissions_preserve_idempotency_and_the_last_pending_slot(
     entered = Event()
 
     def require_member(actor: User, tenant_id: int, **options: Any) -> Membership:
-        if options.get("role") == Membership.Role.VIEWER:
+        if options.get("role") == WorkspaceRole.VIEWER:
             entered.set()
         return tenant_membership(actor, tenant_id, **options)
 

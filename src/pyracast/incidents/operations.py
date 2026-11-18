@@ -10,7 +10,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from pyracast.accounts.authorization import tenant_membership
-from pyracast.accounts.models import Membership
+from pyracast.accounts.models import WorkspaceRole
 from pyracast.errors import ConflictError, DomainError, ErrorCode
 from pyracast.incidents.models import IncidentRevision, PlantIncident
 from pyracast.plants.models import Plant, PlantConfiguration
@@ -120,7 +120,7 @@ def lock_incident_plant(
         regions = regions.select_for_update()
         plants = plants.select_for_update(of=("self",))
     regions.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
-    return plants.get(pk=plant_id, region_id=region_id, deleted_at__isnull=True)
+    return plants.get(pk=plant_id, region_id=region_id)
 
 
 def _validate(values: dict[str, Any], configuration: PlantConfiguration, now: datetime) -> None:
@@ -260,7 +260,7 @@ def save_incident(
     **values: Any,
 ) -> PlantIncident:
     with transaction.atomic():
-        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
+        tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
         plant = lock_incident_plant(tenant_id, region_id, plant_id)
         row = prepare_incident(
             actor,
@@ -319,7 +319,7 @@ def finish_incident(
     cancel: bool = False,
 ) -> PlantIncident:
     with transaction.atomic():
-        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
+        tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
         plant = lock_incident_plant(tenant_id, region_id, plant_id)
         row = prepare_incident_finish(
             actor,

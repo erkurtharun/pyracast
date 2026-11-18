@@ -31,7 +31,7 @@ from pyracast.plants.models import ProductionObservation
 from pyracast.plants.operations import revise_plant
 from pyracast.plants.production import production_history
 from pyracast.plants.production_changes import ProductionChange, change_production
-from pyracast.trash import RETENTION, purge_expired, restore_plant, trash_plant
+from pyracast.trash import RETENTION, purge_expired, restore_region, trash_region
 from tests.support.change_request_boundaries import (
     RequestCase,
     incident_values,
@@ -383,17 +383,18 @@ def test_trash_restore_and_purge_preserve_then_remove_request_children(
         idempotency_key=uuid4(),
         values=incident_values(),
     )
-    trash_plant(*case.scope(case.system.member))
+    location = case.scope(case.system.member)[:3]
+    trash_region(*location)
     with pytest.raises(ChangeRequest.DoesNotExist):
         request_detail(
             case.proposer,
             case.system.tenant.pk,
             ChangeRequest.objects.order_by("pk").get(kind="production").pk,
         )
-    restore_plant(*case.scope(case.system.member))
+    restore_region(*location)
     assert ChangeRequest.objects.count() == 2
-    trash_plant(*case.scope(case.system.member))
-    assert purge_expired(NOW + RETENTION)["plants"] == 1
+    trash_region(*location)
+    assert purge_expired(NOW + RETENTION) == {"regions": 1, "plants": 1}
     assert not ChangeRequest.objects.exists()
     assert not ProductionChangeItem.objects.exists()
     assert not IncidentChange.objects.exists()

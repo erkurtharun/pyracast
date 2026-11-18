@@ -12,7 +12,7 @@ from django.db import close_old_connections, connection
 from django.test import Client
 from django.utils import timezone
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.plants.models import (
@@ -267,7 +267,7 @@ def test_tenant_and_binding_boundaries(monkeypatch: pytest.MonkeyPatch) -> None:
     system, plant = make_plant(monkeypatch)
     stranger = User.objects.create(username="stranger")
     other = Tenant.objects.create(name="Other")
-    Membership.objects.create(user=stranger, tenant=other, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=stranger, tenant=other, role=WorkspaceRole.ADMIN)
     with pytest.raises(PermissionDenied):
         create_plant(stranger, system.tenant.pk, system.region.pk, name="X", dc_capacity_mw=1)
     with pytest.raises(Region.DoesNotExist):
@@ -739,7 +739,7 @@ def pending_submission(system: System) -> tuple[Plant, dict[str, Any]]:
 
 def second_workspace_admin(system: System) -> User:
     user = User.objects.create(username="second")
-    Membership.objects.filter(tenant=system.tenant, role=Membership.Role.ADMIN).update(user=user)
+    Membership.objects.filter(tenant=system.tenant, role=WorkspaceRole.ADMIN).update(user=user)
     return user
 
 

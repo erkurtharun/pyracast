@@ -23,6 +23,7 @@ from pyracast.accounts.models import (
     WorkspaceAdminChange,
     WorkspaceInvitation,
     WorkspaceMemberRemoval,
+    WorkspaceRole,
 )
 from pyracast.accounts.operations import reassign_workspace_admin, remove_workspace_member
 from pyracast.plants.models import Plant
@@ -39,7 +40,7 @@ def removal_workspace() -> tuple[Tenant, User, User]:
     tenant = Tenant.objects.create(name="Solar workspace")
     administrator = User.objects.create_user(username="workspace-admin", email="admin@example.com")
     viewer = User.objects.create_user(username="viewer", email="viewer@example.com")
-    Membership.objects.create(tenant=tenant, user=administrator, role=Membership.Role.ADMIN)
+    Membership.objects.create(tenant=tenant, user=administrator, role=WorkspaceRole.ADMIN)
     Membership.objects.create(tenant=tenant, user=viewer)
     return tenant, administrator, viewer
 
@@ -255,7 +256,7 @@ def test_removal_serializes_with_transfer_and_invitation_acceptance(
         assert WorkspaceAdminChange.objects.count() == 1
         assert not WorkspaceMemberRemoval.objects.exists()
         with pytest.raises(PermissionDenied):
-            tenant_membership(administrator, tenant.pk, role=Membership.Role.ADMIN)
+            tenant_membership(administrator, tenant.pk, role=WorkspaceRole.ADMIN)
     else:
         assert not Membership.objects.filter(tenant=tenant, user=viewer).exists()
         assert WorkspaceMemberRemoval.objects.count() == 1

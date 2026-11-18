@@ -198,7 +198,7 @@ from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.db import connection, ProgrammingError
 from django.utils import timezone
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.operations import create_account, validate_binding
 from pyracast.forecasts.models import ForecastResult
 from pyracast.providers import FixtureProvider
@@ -219,7 +219,7 @@ actor = User.objects.create_superuser(username='container-smoke', email='smoke@e
                                       password='container-smoke-password')
 EmailAddress.objects.create(user=actor, email=actor.email, primary=True, verified=True)
 tenant = Tenant.objects.create(name='Container smoke')
-Membership.objects.create(user=actor, tenant=tenant, role=Membership.Role.ADMIN)
+Membership.objects.create(user=actor, tenant=tenant, role=WorkspaceRole.ADMIN)
 region = submit_region(actor, tenant.pk, name='Synthetic Ankara', latitude=39.9,
                        longitude=32.8, timezone='Europe/Istanbul')
 account = create_account(actor, provider='fixture', external_account_id='container-smoke')

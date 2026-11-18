@@ -12,6 +12,7 @@ from django.urls import reverse
 from pyracast.admin_historical import PREVIEW_SALT
 from pyracast.forecasts.models import HistoricalReferenceImport
 from pyracast.plants.models import Plant
+from pyracast.regions.models import RegionStatus
 from tests.support.api import verified_admin
 from tests.support.historical_reference_import import system_for_import
 
@@ -146,8 +147,9 @@ def test_upload_access_methods_csrf_and_missing_configuration(
     method_client = Client()
     method_client.cookies = client.cookies
     assert method_client.put(url).status_code == 405
+    system.region.status = RegionStatus.PENDING
     system.region.approved_binding = None
-    system.region.save(update_fields=("approved_binding",))
+    system.region.save(update_fields=("status", "approved_binding"))
     assert b"Approve the current Solcast configuration" in client.get(url).content
 
 
@@ -219,8 +221,9 @@ def test_upload_validation_blocks_all_writes(monkeypatch: pytest.MonkeyPatch, in
         payload["metadata"] = {"capacity_kw": 9999}
         file = SimpleUploadedFile("history.json", json.dumps(payload).encode())
     if invalid == "binding":
+        system.region.status = RegionStatus.PENDING
         system.region.approved_binding = None
-        system.region.save(update_fields=("approved_binding",))
+        system.region.save(update_fields=("status", "approved_binding"))
     if invalid == "oversized":
         file = SimpleUploadedFile("large.json", b"x" * (7 * 1024 * 1024 + 1))
     response = client.post(

@@ -7,7 +7,7 @@ from django.contrib.auth.models import User
 from django.test import Client
 from django.utils import timezone
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.errors import DomainError
 from pyracast.incidents.operations import finish_incident, save_incident
 from pyracast.irradiance import local_day_bounds
@@ -192,7 +192,7 @@ def test_stale_production_correction_is_a_coded_conflict(monkeypatch: pytest.Mon
 def test_workspace_refusals_answer_their_own_codes() -> None:
     tenant = Tenant.objects.create(name="Solar workspace")
     admin = User.objects.create_user(username="admin", email="admin@example.com")
-    Membership.objects.create(tenant=tenant, user=admin, role=Membership.Role.ADMIN)
+    Membership.objects.create(tenant=tenant, user=admin, role=WorkspaceRole.ADMIN)
     client = signed_in(admin)
 
     removal = client.delete(f"/api/tenants/{tenant.pk}/members/{admin.pk}/")

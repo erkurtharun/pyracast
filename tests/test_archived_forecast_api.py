@@ -4,7 +4,6 @@ import pytest
 from django.test import Client
 
 from pyracast.accounts.models import Tenant
-from pyracast.plants.models import PlantForecast
 from tests.support.domain import NOW
 from tests.support.plant_operations import make_plant, publish_snapshot, snapshot_for
 
@@ -26,7 +25,6 @@ def test_archive_api_replays_published_source_without_creating_a_plant_forecast(
     assert payload["source_kind"] == "forecast"
     assert payload["result"]["provenance"]["snapshot_id"] == snapshot.pk
     assert "archived_forecast" in payload["result"]["quality_flags"]
-    assert not PlantForecast.objects.exists()
     assert (
         client.get(
             path,

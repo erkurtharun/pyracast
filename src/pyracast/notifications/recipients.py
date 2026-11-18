@@ -134,7 +134,7 @@ def remove_member_recipients(tenant_id: int, membership_id: int, emails: set[str
         if membership_id in members
     )
     for schedule in ReminderSchedule.objects.select_for_update().filter(
-        region__tenant_id=tenant_id, retired_at__isnull=True
+        region__tenant_id=tenant_id
     ):
         removed = {
             address.casefold()

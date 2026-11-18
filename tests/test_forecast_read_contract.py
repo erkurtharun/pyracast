@@ -6,7 +6,7 @@ from django.contrib.auth.models import User
 from django.test import Client
 from django.utils import timezone
 
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import create_plant
@@ -39,7 +39,7 @@ def client_for(user: User) -> Client:
 
 def viewer_of(system: System) -> User:
     viewer = User.objects.create(username="viewer")
-    Membership.objects.create(user=viewer, tenant=system.tenant, role=Membership.Role.VIEWER)
+    Membership.objects.create(user=viewer, tenant=system.tenant, role=WorkspaceRole.VIEWER)
     return viewer
 
 
@@ -82,7 +82,7 @@ def test_forecast_reads_answer_not_found_outside_the_url_scope(
     )
     other_member = User.objects.create(username="other-member")
     other_tenant = Tenant.objects.create(name="Other")
-    Membership.objects.create(user=other_member, tenant=other_tenant, role=Membership.Role.ADMIN)
+    Membership.objects.create(user=other_member, tenant=other_tenant, role=WorkspaceRole.ADMIN)
     foreign_region = submit_region(
         other_member,
         other_tenant.pk,

@@ -17,7 +17,7 @@ from psycopg.errors import DeadlockDetected, LockNotAvailable, QueryCanceled
 from rest_framework.exceptions import APIException, Throttled
 
 from pyracast.accounts import session_lock
-from pyracast.accounts.models import Membership, Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.api.session import SessionView
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.operations import QuotaExceededError, RequestDeferredError
@@ -243,7 +243,7 @@ CASES: dict[str, Case] = {
         403,
         "Workspace administrator required.",
         "Çal\u0131şma alan\u0131 yöneticisi yetkisi gereklidir.",
-        members_page(Membership.Role.VIEWER),
+        members_page(WorkspaceRole.VIEWER),
     ),
     "admin_edits_directly": Case(
         403,
@@ -419,12 +419,6 @@ CASES: dict[str, Case] = {
         "The 30-day restore period has ended.",
         "30 günlük geri yükleme süresi doldu.",
         domain("DomainError", "trash_retention_expired"),
-    ),
-    "parent_region_trashed": Case(
-        400,
-        "Restore this plant's location before restoring the plant.",
-        "Santrali geri yüklemeden önce konumunu geri yükleyin.",
-        domain("DomainError", "parent_region_trashed"),
     ),
     "date_out_of_range": Case(
         400,
@@ -632,7 +626,7 @@ def test_domain_error_fields_carry_the_localized_message(monkeypatch: pytest.Mon
 
 
 def test_serializer_field_and_form_errors_keep_their_places() -> None:
-    client, tenant = signed_in(Membership.Role.ADMIN)
+    client, tenant = signed_in(WorkspaceRole.ADMIN)
     path = f"/api/tenants/{tenant.pk}/invitations/"
     invalid = client.post(path, {"email": "not-an-address"}, content_type="application/json")
     assert invalid.status_code == 400
@@ -721,7 +715,7 @@ def test_django_validation_errors_keep_their_field_keys_and_translated_text(lazy
 def test_drf_session_csrf_refusal_is_coded() -> None:
     tenant = Tenant.objects.create(name="Workspace")
     user = User.objects.create_user(username="person", email="person@example.com")
-    Membership.objects.create(tenant=tenant, user=user, role=Membership.Role.ADMIN)
+    Membership.objects.create(tenant=tenant, user=user, role=WorkspaceRole.ADMIN)
     client = Client(enforce_csrf_checks=True)
     client.force_login(user)
     response = client.post(
@@ -990,7 +984,7 @@ def test_method_guards_answer_the_localized_contract_body(path: str) -> None:
 
 
 def test_drf_permission_classes_answer_coded_refusals() -> None:
-    client, tenant = signed_in(Membership.Role.VIEWER)
+    client, tenant = signed_in(WorkspaceRole.VIEWER)
     viewer = client.post(
         f"/api/tenants/{tenant.pk}/invitations/",
         {"email": "new@example.com"},

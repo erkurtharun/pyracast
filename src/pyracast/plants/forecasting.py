@@ -355,7 +355,7 @@ def plant_forecast(
 ) -> dict[str, object]:
     tenant_membership(actor, tenant_id)
     region = Region.objects.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
-    plant = Plant.objects.get(pk=plant_id, region=region, deleted_at__isnull=True)
+    plant = Plant.objects.get(pk=plant_id, region=region)
     now = timezone.now()
     today = now.astimezone(ZoneInfo(region.timezone)).date()
     if not today - timedelta(days=366) <= target_date <= today + timedelta(days=14):

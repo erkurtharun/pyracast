@@ -41,7 +41,6 @@ def calculate(binding: SiteBinding, target_date: date, data: ProviderData) -> di
         cast(PowerBasis, binding.power_basis),
         cast(PowerBasis, binding.power_basis),
         binding.capacity_semantics_verified,
-        binding.tilt_degrees,
     )
     vintage = ForecastVintage(
         binding.provider_account.provider,

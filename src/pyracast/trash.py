@@ -8,10 +8,9 @@ from django.db.models import Q
 from django.utils import timezone
 
 from pyracast.accounts.authorization import tenant_membership
-from pyracast.accounts.models import Membership
+from pyracast.accounts.models import WorkspaceRole
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.errors import DomainError, ErrorCode
-from pyracast.forecasts.jobs import binding_is_current
 from pyracast.forecasts.models import (
     CollectionJob,
     CollectionSchedule,
@@ -31,11 +30,9 @@ from pyracast.plants.models import (
     Plant,
     PlantConfiguration,
     PlantEvent,
-    PlantForecast,
-    PlantSubmission,
     ProductionObservation,
 )
-from pyracast.regions.models import AuditEvent, Region
+from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionStatus
 from pyracast.regions.operations import require_available_location
 
 RETENTION = timedelta(days=30)
@@ -55,7 +52,7 @@ def _cancel_calibrations(plants: list[int], now: datetime) -> None:
 
 def trash_region(actor: User, tenant_id: int, region_id: int) -> Region:
     with transaction.atomic():
-        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
+        tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
         region: Region = Region.objects.select_for_update().get(pk=region_id, tenant_id=tenant_id)
         if region.deleted_at is not None:
             return region
@@ -81,14 +78,14 @@ def trash_region(actor: User, tenant_id: int, region_id: int) -> Region:
             lease_expires_at=None,
         )
         AuditEvent.objects.create(
-            actor=actor, region=region, action="region_trashed", revision=region.revision
+            actor=actor, region=region, action=AuditAction.REGION_TRASHED, revision=region.revision
         )
         return region
 
 
 def restore_region(actor: User, tenant_id: int, region_id: int) -> Region:
     with transaction.atomic():
-        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
+        tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
         location = Region.objects.get(pk=region_id, tenant_id=tenant_id)
         require_available_location(
             tenant_id, location.latitude, location.longitude, exclude_region_id=region_id
@@ -109,74 +106,11 @@ def restore_region(actor: User, tenant_id: int, region_id: int) -> Region:
             },
         )
         CollectionSchedule.objects.filter(region=region).update(effective_from=now)
-        ReminderSchedule.objects.filter(region=region, retired_at__isnull=True).update(
-            effective_from=now
-        )
+        ReminderSchedule.objects.filter(region=region).update(effective_from=now)
         AuditEvent.objects.create(
-            actor=actor, region=region, action="region_restored", revision=region.revision
+            actor=actor, region=region, action=AuditAction.REGION_RESTORED, revision=region.revision
         )
         return region
-
-
-def trash_plant(actor: User, tenant_id: int, region_id: int, plant_id: int) -> Plant:
-    with transaction.atomic():
-        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
-        region: Region = Region.objects.select_for_update().get(pk=region_id, tenant_id=tenant_id)
-        plant: Plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
-        if plant.deleted_at is not None:
-            return plant
-        if region.deleted_at is not None:
-            raise DomainError(ErrorCode.PARENT_REGION_TRASHED)
-        now = timezone.now()
-        plant.deleted_at = now
-        plant.save(update_fields=("deleted_at",))
-        _cancel_calibrations([plant.pk], now)
-        PlantEvent.objects.create(plant=plant, actor=actor, action="plant_trashed")
-        return plant
-
-
-def restore_plant(actor: User, tenant_id: int, region_id: int, plant_id: int) -> Plant:
-    with transaction.atomic():
-        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
-        region = Region.objects.select_for_update().get(pk=region_id, tenant_id=tenant_id)
-        binding = None
-        if region.status == "approved" and region.approved_binding_id is not None:
-            binding = SiteBinding.objects.filter(
-                pk=region.approved_binding_id, region=region
-            ).first()
-            if binding is not None:
-                binding.provider_account = ProviderAccount.objects.select_for_update().get(
-                    pk=binding.provider_account_id
-                )
-        plant = Plant.objects.select_for_update().get(pk=plant_id, region=region)
-        if region.deleted_at is not None:
-            raise DomainError(ErrorCode.PARENT_REGION_TRASHED)
-        _restore_deadline(plant.deleted_at, timezone.now())
-        if plant.deleted_at is None:
-            return plant
-        if (
-            Plant.objects.filter(region=region, deleted_at__isnull=True)
-            .exclude(pk=plant.pk)
-            .exists()
-        ):
-            raise DomainError(ErrorCode.LOCATION_ALREADY_HAS_PLANT)
-        plant.deleted_at = None
-        plant.save(update_fields=("deleted_at",))
-        if (
-            binding is not None
-            and binding.validated_at is not None
-            and binding_is_current(binding)
-            and (
-                plant.current_configuration_id is not None
-                or PlantSubmission.objects.filter(plant=plant).exists()
-            )
-        ):
-            from pyracast.plants.operations import activate_submitted_plants
-
-            activate_submitted_plants(actor, region, binding)
-            plant.refresh_from_db()
-        PlantEvent.objects.create(plant=plant, actor=actor, action="plant_restored")
-        return plant
 
 
 def _purge_epias_history(plant: Plant) -> None:
@@ -191,7 +125,6 @@ def _purge_plant(plant: Plant) -> None:
     ChangeRequest.objects.filter(plant=plant).delete()
     IncidentRevision.objects.filter(incident__plant=plant).delete()
     PlantIncident.objects.filter(plant=plant).delete()
-    PlantForecast.objects.filter(configuration__plant=plant).delete()
     ForecastIssuance.objects.filter(plant=plant).delete()
     CalibrationRun.objects.filter(plant=plant).update(comparison_activation=None)
     CalibrationActivation.objects.filter(plant=plant).delete()
@@ -225,8 +158,9 @@ def _purge_region(region: Region, plants: list[Plant]) -> None:
     ForecastSnapshot.objects.filter(job__binding__region=region).delete()
     CollectionJob.objects.filter(binding__region=region).delete()
     HistoricalReferenceImport.objects.filter(binding__region=region).delete()
+    region.status = RegionStatus.PENDING
     region.approved_binding = None
-    region.save(update_fields=("approved_binding",))
+    region.save(update_fields=("status", "approved_binding"))
     SiteBinding.objects.filter(region=region).delete()
     AuditEvent.objects.filter(region=region).delete()
     region.delete()
@@ -256,21 +190,4 @@ def purge_expired(now: datetime | None = None) -> dict[str, int]:
             _purge_region(region, plants)
             counts["regions"] += 1
             counts["plants"] += len(plants)
-    plants_to_purge = list(
-        Plant.objects.filter(deleted_at__lte=cutoff)
-        .order_by("pk")
-        .values_list("pk", "region_id")[:PURGE_BATCH_SIZE]
-    )
-    for plant_id, region_id in plants_to_purge:
-        with transaction.atomic():
-            Region.objects.select_for_update().filter(pk=region_id).first()
-            plant = (
-                Plant.objects.select_for_update()
-                .filter(pk=plant_id, deleted_at__lte=cutoff)
-                .first()
-            )
-            if plant is None:
-                continue
-            _purge_plant(plant)
-            counts["plants"] += 1
     return counts

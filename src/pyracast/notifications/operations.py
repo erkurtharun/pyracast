@@ -9,7 +9,7 @@ from django.utils import translation
 from django.utils.translation import gettext
 
 from pyracast.accounts.authorization import tenant_membership
-from pyracast.accounts.models import Membership
+from pyracast.accounts.models import WorkspaceRole
 from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.models import (
     NotificationSettings,
@@ -35,7 +35,6 @@ def invalid_reminder_recipient_count() -> int:
     invalid = 0
     for schedule in ReminderSchedule.objects.filter(
         enabled=True,
-        retired_at__isnull=True,
         region__deleted_at__isnull=True,
         region__status="approved",
         region__approved_binding__provider_account__enabled=True,
@@ -79,9 +78,7 @@ def get_reminder_schedule(
 ) -> ReminderSchedule:
     tenant_membership(actor, tenant_id)
     region = Region.objects.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
-    return ReminderSchedule.objects.filter(
-        region=region, retired_at__isnull=True
-    ).first() or ReminderSchedule(
+    return ReminderSchedule.objects.filter(region=region).first() or ReminderSchedule(
         region=region, effective_from=now, language=translation.get_language()
     )
 
@@ -103,7 +100,7 @@ def configure_reminders(
     if language not in {"en", "tr"}:
         raise ValidationError(gettext("A supported reminder language is required."))
     with transaction.atomic():
-        tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
+        tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
         address_limit = recipient_limit(lock=True)
         actor.refresh_from_db(fields=["email"])
         addresses = normalize_recipients(
@@ -113,7 +110,7 @@ def configure_reminders(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )
         schedule, created = ReminderSchedule.objects.get_or_create(
-            region=region, retired_at__isnull=True, defaults={"effective_from": now}
+            region=region, defaults={"effective_from": now}
         )
         stored = _reminder_settings(schedule)
         stored_memberships = dict(schedule.recipient_memberships)

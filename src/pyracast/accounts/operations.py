@@ -11,17 +11,18 @@ from pyracast.accounts.models import (
     WorkspaceAdminChange,
     WorkspaceInvitation,
     WorkspaceMemberRemoval,
+    WorkspaceRole,
 )
 from pyracast.errors import ConflictError, DomainError, ErrorCode
 
 
 @transaction.atomic
 def remove_workspace_member(actor: User, tenant_id: int, user_id: int) -> None:
-    tenant_membership(actor, tenant_id, role=Membership.Role.ADMIN, lock=True)
+    tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
     membership = Membership.objects.filter(tenant_id=tenant_id, user_id=user_id).first()
     if membership is None:
         return
-    if membership.role == Membership.Role.ADMIN or user_id == actor.pk:
+    if membership.role == WorkspaceRole.ADMIN or user_id == actor.pk:
         raise DomainError(ErrorCode.WORKSPACE_ADMIN_NOT_REMOVABLE)
     emails = set(EmailAddress.objects.filter(user_id=user_id).values_list("email", flat=True))
     emails.add(membership.user.email)
@@ -49,7 +50,7 @@ def reassign_workspace_admin(
     require_platform_admin(actor)
     Tenant.objects.select_for_update().get(pk=tenant_id)
     current_admin_id = (
-        Membership.objects.filter(tenant_id=tenant_id, role=Membership.Role.ADMIN)
+        Membership.objects.filter(tenant_id=tenant_id, role=WorkspaceRole.ADMIN)
         .values_list("user_id", flat=True)
         .first()
     )
@@ -60,14 +61,14 @@ def reassign_workspace_admin(
     ).first()
     if membership is None:
         raise DomainError(ErrorCode.MEMBER_UNAVAILABLE)
-    if membership.role != Membership.Role.ADMIN:
+    if membership.role != WorkspaceRole.ADMIN:
         from pyracast.plants.automation import disable_workspace_automation
 
         disable_workspace_automation(actor, tenant_id)
-        Membership.objects.filter(tenant_id=tenant_id, role=Membership.Role.ADMIN).update(
-            role=Membership.Role.VIEWER
+        Membership.objects.filter(tenant_id=tenant_id, role=WorkspaceRole.ADMIN).update(
+            role=WorkspaceRole.VIEWER
         )
-        membership.role = Membership.Role.ADMIN
+        membership.role = WorkspaceRole.ADMIN
         membership.save(update_fields=["role"])
         WorkspaceInvitation.objects.filter(
             tenant_id=tenant_id, accepted_at__isnull=True, expires_at__gt=timezone.now()

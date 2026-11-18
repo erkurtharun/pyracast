@@ -3,8 +3,12 @@ from typing import Any, cast
 from django.utils.translation import gettext
 from rest_framework import serializers
 
-from pyracast.accounts.models import Membership, Tenant
-from pyracast.regions.models import Region, RegionLocationChangeRequest
+from pyracast.accounts.models import Tenant, WorkspaceRole
+from pyracast.connections.models import PowerBasis
+from pyracast.regions.models import (
+    Region,
+    RegionLocationChangeRequest,
+)
 
 
 class InputSerializer(serializers.Serializer[dict[str, Any]]):
@@ -39,7 +43,7 @@ class FiniteFloat(serializers.FloatField):
 
 
 class TenantOutput(serializers.ModelSerializer[Tenant]):
-    role = serializers.ChoiceField(choices=Membership.Role.choices, read_only=True)
+    role = serializers.ChoiceField(choices=WorkspaceRole.choices, read_only=True)
     pending_review_count = serializers.IntegerField(allow_null=True, read_only=True)
     unread_outcome_count = serializers.IntegerField(read_only=True)
 
@@ -101,9 +105,8 @@ class BindingInput(InputSerializer):
     site_id = serializers.CharField(max_length=200)
     capacity_kw = serializers.FloatField(min_value=0)
     dc_capacity_kw = serializers.FloatField(min_value=0, allow_null=True, default=None)
-    power_basis = serializers.ChoiceField(choices=("ac", "dc"), default="ac")
+    power_basis = serializers.ChoiceField(choices=PowerBasis.choices, default=PowerBasis.AC)
     capacity_semantics_verified = serializers.BooleanField()
-    tilt_degrees = serializers.FloatField(default=0)
     azimuth_degrees = serializers.FloatField(default=0)
     losses_percent = serializers.FloatField(default=0)
     installation_date = serializers.DateField(required=True)

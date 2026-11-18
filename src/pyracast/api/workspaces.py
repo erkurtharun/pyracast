@@ -14,7 +14,7 @@ from pyracast.accounts.invitations import (
     invite_workspace_member,
     revoke_workspace_invitation,
 )
-from pyracast.accounts.models import Membership, WorkspaceInvitation
+from pyracast.accounts.models import Membership, WorkspaceInvitation, WorkspaceRole
 from pyracast.accounts.operations import remove_workspace_member
 from pyracast.api.serializers import InputSerializer
 
@@ -37,7 +37,7 @@ class InvitationOutput(serializers.ModelSerializer[WorkspaceInvitation]):
 class WorkspaceMemberOutput(serializers.Serializer[dict[str, object]]):
     id = serializers.IntegerField()
     email = serializers.EmailField()
-    role = serializers.ChoiceField(choices=Membership.Role.choices)
+    role = serializers.ChoiceField(choices=WorkspaceRole.choices)
 
 
 class WorkspaceMembersOutput(serializers.Serializer[dict[str, object]]):
@@ -50,13 +50,13 @@ class WorkspaceInvitationsOutput(serializers.Serializer[dict[str, object]]):
 
 class InvitationAcceptanceOutput(serializers.Serializer[dict[str, object]]):
     tenant_id = serializers.IntegerField()
-    role = serializers.ChoiceField(choices=Membership.Role.choices)
+    role = serializers.ChoiceField(choices=WorkspaceRole.choices)
 
 
 class WorkspaceMembersView(APIView):
     @extend_schema(responses=WorkspaceMembersOutput)
     def get(self, request: Request, tenant_id: int) -> Response:
-        tenant_membership(cast(User, request.user), tenant_id, role=Membership.Role.ADMIN)
+        tenant_membership(cast(User, request.user), tenant_id, role=WorkspaceRole.ADMIN)
         memberships = (
             Membership.objects.filter(tenant_id=tenant_id, user__is_active=True)
             .select_related("user")
@@ -82,7 +82,7 @@ class WorkspaceMemberView(APIView):
 class WorkspaceInvitationsView(APIView):
     @extend_schema(responses=WorkspaceInvitationsOutput)
     def get(self, request: Request, tenant_id: int) -> Response:
-        tenant_membership(cast(User, request.user), tenant_id, role=Membership.Role.ADMIN)
+        tenant_membership(cast(User, request.user), tenant_id, role=WorkspaceRole.ADMIN)
         invitations = WorkspaceInvitation.objects.filter(
             tenant_id=tenant_id, accepted_at__isnull=True, expires_at__gt=timezone.now()
         ).order_by("id")

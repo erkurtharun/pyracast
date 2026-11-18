@@ -226,10 +226,6 @@ def test_region_history_respects_binding_status_and_tenant(monkeypatch: pytest.M
     )
     Region.objects.filter(pk=system.region.pk).update(approved_binding=replacement)
     assert client.get(path, query).json()["freshness"] == "missing"
-    Region.objects.filter(pk=system.region.pk).update(status="approved", approved_binding=None)
-    missing = client.get(path, query).json()
-    assert missing["freshness"] == "missing"
-    assert missing["result"] is None
     other = User.objects.create_user(username="other")
     tenant = Tenant.objects.create(name="Other")
     Membership.objects.create(user=other, tenant=tenant)

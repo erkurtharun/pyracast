@@ -316,9 +316,9 @@ def test_scheduler_deduplicates_local_cutoff_and_recovers_missed_slot() -> None:
 
 def test_scheduler_ignores_unvalidated_or_not_yet_valid_slots() -> None:
     system = make_system()
-    Region.objects.filter(pk=system.region.pk).update(status="approved")
-    assert enqueue_due(NOW) == []
     Region.objects.filter(pk=system.region.pk).update(approved_binding=system.binding)
+    assert enqueue_due(NOW) == []
+    Region.objects.filter(pk=system.region.pk).update(status="approved")
     assert enqueue_due(NOW) == []
     SiteBinding.objects.filter(pk=system.binding.pk).update(validated_at=NOW + timedelta(seconds=1))
     assert enqueue_due(NOW) == []
@@ -354,7 +354,7 @@ def test_concurrent_approvals_share_atomic_first_job() -> None:
     system = make_system(approved=True)
     CollectionJob.objects.all().delete()
     Region.objects.filter(pk=system.region.pk).update(status="pending", approved_binding=None)
-    AuditEvent.objects.filter(action="approved").delete()
+    AuditEvent.objects.filter(action="region_approved").delete()
     barrier = Barrier(2)
 
     def approve() -> int:
@@ -369,7 +369,7 @@ def test_concurrent_approvals_share_atomic_first_job() -> None:
         futures = [pool.submit(approve), pool.submit(approve)]
         assert len({future.result(timeout=15) for future in futures}) == 1
     assert CollectionJob.objects.count() == 1
-    assert AuditEvent.objects.filter(action="approved").count() == 1
+    assert AuditEvent.objects.filter(action="region_approved").count() == 1
 
 
 def test_concurrent_job_claims_have_a_single_lease_owner() -> None:

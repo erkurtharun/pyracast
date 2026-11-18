@@ -26,7 +26,7 @@ from pyracast.plants.operations import configuration_is_current, reset_calibrati
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.plants.training import run_calibration
 from pyracast.regions.models import Region
-from pyracast.trash import purge_expired, restore_plant, restore_region, trash_plant, trash_region
+from pyracast.trash import purge_expired, restore_region, trash_region
 from tests.support.domain import NOW, FakeAdapter
 from tests.support.jobs import calculate
 from tests.support.notifications import SLOT, configured, saved
@@ -36,26 +36,19 @@ from tests.support.trash_boundaries import _race_before_region_lock
 pytestmark = pytest.mark.django_db(transaction=True)
 
 
-@pytest.mark.parametrize("kind", ["region", "plant"])
-def test_trashed_definition_blocks_domain_and_restores_access(
-    monkeypatch: pytest.MonkeyPatch, kind: str
+def test_trashed_location_blocks_domain_and_restores_access(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
     configuration = plant.current_configuration
     assert configuration is not None
-    error: type[Exception]
-    if kind == "region":
-        trash_region(system.member, system.tenant.pk, system.region.pk)
-        assert not binding_is_current(system.binding)
-        error = Region.DoesNotExist
-    else:
-        trash_plant(system.member, system.tenant.pk, system.region.pk, plant.pk)
-        error = Plant.DoesNotExist
+    trash_region(system.member, system.tenant.pk, system.region.pk)
+    assert not binding_is_current(system.binding)
     assert not configuration_is_current(configuration)
     assert prepare_calibration(plant.pk) is None
-    with pytest.raises(error):
+    with pytest.raises(Region.DoesNotExist):
         reset_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk)
-    with pytest.raises(error):
+    with pytest.raises(Region.DoesNotExist):
         plant_outlook(
             system.member,
             system.tenant.pk,
@@ -64,10 +57,7 @@ def test_trashed_definition_blocks_domain_and_restores_access(
             target_date=date(2026, 11, 10),
             resolution_minutes=30,
         )
-    if kind == "region":
-        restore_region(system.member, system.tenant.pk, system.region.pk)
-    else:
-        restore_plant(system.member, system.tenant.pk, system.region.pk, plant.pk)
+    restore_region(system.member, system.tenant.pk, system.region.pk)
     assert configuration_is_current(configuration)
 
 
@@ -163,18 +153,14 @@ def test_reminder_candidate_purged_before_region_lock(monkeypatch: pytest.Monkey
     )
 
 
-@pytest.mark.parametrize("kind", ["region", "plant"])
 def test_calibration_identity_purged_before_region_lock(
-    monkeypatch: pytest.MonkeyPatch, kind: str
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant = make_plant(monkeypatch)
     run = request_run(system, plant)
 
     def purge() -> None:
-        if kind == "region":
-            trash_region(system.member, system.tenant.pk, system.region.pk)
-        else:
-            trash_plant(system.member, system.tenant.pk, system.region.pk, plant.pk)
+        trash_region(system.member, system.tenant.pk, system.region.pk)
         purge_expired(NOW + timedelta(days=31))
 
     assert (

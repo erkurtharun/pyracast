@@ -12,7 +12,7 @@ from pyracast.connections.models import ProviderAccount
 from pyracast.forecasts.models import ForecastResult, RequestAttempt
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.history import plant_outlook
-from pyracast.plants.models import ForecastIssuance, Plant, PlantConfiguration, PlantForecast
+from pyracast.plants.models import ForecastIssuance, Plant, PlantConfiguration
 from pyracast.plants.operations import activate_calibration
 from pyracast.regions.models import Region
 from tests.support.domain import NOW
@@ -44,7 +44,6 @@ def test_daily_acquisitions_refresh_live_outlook_and_keep_day_ahead_replay(
         assert payload["energy_mwh"] == pytest.approx(power * 3120)
         assert payload["intervals"][9]["mean_power_mw"] == pytest.approx(power * 130)
     assert payload["provenance"]["selection_policy"] == "latest-forecast-coverage-v2"
-    assert not PlantForecast.objects.exists()
     archived = plant_outlook(
         *scope, target_date=DAY, resolution_minutes=60, source=source, as_of=acquired
     )
@@ -55,7 +54,6 @@ def test_daily_acquisitions_refresh_live_outlook_and_keep_day_ahead_replay(
         == "latest-published-pre-daylight-issuance-v1"
     )
     assert archived_payload["energy_mwh"] == pytest.approx(936)
-    assert not PlantForecast.objects.exists()
     assert ForecastIssuance.objects.count() == 3
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=2))
     past = plant_outlook(*scope, target_date=DAY, resolution_minutes=60, source=source)
@@ -67,7 +65,6 @@ def test_daily_acquisitions_refresh_live_outlook_and_keep_day_ahead_replay(
         assert "forecast_fallback" in past_payload["quality_flags"]
     else:
         assert past["result"] == archived_payload
-    assert not PlantForecast.objects.exists()
     assert RequestAttempt.objects.count() == requests
 
 
@@ -188,7 +185,6 @@ def test_new_current_configuration_and_calibration_are_available_today(
     assert result["calibration_id"] == run.pk
     assert payload["factor"] == 0.5
     assert "historical_configuration_assumed" not in payload["quality_flags"]
-    assert not PlantForecast.objects.exists()
 
 
 @pytest.mark.parametrize("change", ["unconfigured", "future", "suspended", "disabled", "binding"])
@@ -206,7 +202,7 @@ def test_live_requires_current_approved_configuration(
     elif change == "disabled":
         ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=False)
     else:
-        Region.objects.filter(pk=system.region.pk).update(approved_binding=None)
+        Region.objects.filter(pk=system.region.pk).update(status="pending", approved_binding=None)
     result = plant_outlook(
         system.member,
         system.tenant.pk,
@@ -217,7 +213,6 @@ def test_live_requires_current_approved_configuration(
     )
     assert result["unavailable_reason"] == "configuration_unavailable"
     assert result["result"] is None
-    assert not PlantForecast.objects.exists()
 
 
 def test_live_forecast_api_keeps_tenant_boundary_and_rejects_corrupt_data(

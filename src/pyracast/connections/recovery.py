@@ -6,7 +6,7 @@ from django.db import transaction
 
 from pyracast.accounts.authorization import require_platform_admin
 from pyracast.connections.models import ProviderAccount
-from pyracast.regions.models import AuditEvent
+from pyracast.regions.models import AuditAction, AuditEvent
 
 
 def clear_provider_cooldown(
@@ -30,6 +30,6 @@ def clear_provider_cooldown(
         AuditEvent.objects.create(
             actor=actor,
             provider_account=account,
-            action="provider_cooldown_cleared",
+            action=AuditAction.PROVIDER_COOLDOWN_CLEARED,
             revision=account.credential_revision,
         )

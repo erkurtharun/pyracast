@@ -350,11 +350,13 @@ def test_admin_switcher_requires_csrf_and_uses_account_preference() -> None:
     assert Client().get("/admin/language/").status_code == 302
 
 
-def test_admin_audit_activity_translates_known_events_and_keeps_unknown_fallback() -> None:
+def test_admin_audit_activity_shows_each_action_label_translated_once() -> None:
     system = admin_system()
     client, user = verified_admin()
     UserLanguagePreference.objects.create(user=user, language="tr")
     expected = {
+        "region_approved": "Santral onayland\u0131",
+        "region_suspended": "Santral ask\u0131ya al\u0131nd\u0131",
         "connection_validated": "Sağlay\u0131c\u0131 bağlant\u0131s\u0131 doğruland\u0131",
         "region_renamed": "Santral konumu yeniden adland\u0131r\u0131ld\u0131",
         "collection_schedule_updated": "Veri toplama program\u0131 güncellendi",
@@ -363,7 +365,6 @@ def test_admin_audit_activity_translates_known_events_and_keeps_unknown_fallback
         "region_trashed": "Santral konumu çöp kutusuna taş\u0131nd\u0131",
         "region_restored": "Santral konumu geri yüklendi",
         "location_change_requested": "Konum değişikliği talep edildi",
-        "future_platform_action": "Future platform action",
     }
     AuditEvent.objects.filter(region=system.region).delete()
     for action in expected:
@@ -380,7 +381,6 @@ def test_admin_audit_activity_translates_known_events_and_keeps_unknown_fallback
     assert response.status_code == 200
     assert "Konum değişikliği talep edildi" in response.content.decode()
     assert "Location change requested" not in response.content.decode()
-    assert "Future platform action" in response.content.decode()
 
 
 @pytest.mark.parametrize(

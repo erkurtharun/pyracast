@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { expect, test, type Page } from "./support/test";
 import jsQR from "jsqr";
 import { PNG } from "pngjs";
-import { mockApi, paged, user } from "./support/workspace";
+import { mockApi, paged, user, tenantRow } from "./support/workspace";
 import { allauthErrorBody } from "./support/errors";
 
 const secret = "JBSWY3DPEHPK3PXP";
@@ -19,7 +19,11 @@ async function mockTwoFactor(
         await page.route("**/api/tenants/", (route) =>
             route.fulfill({
                 json: paged([
-                    { id: 1, name: "Sunfield Energy", role: "viewer" },
+                    tenantRow({
+                        id: 1,
+                        name: "Sunfield Energy",
+                        role: "viewer",
+                    }),
                 ]),
             }),
         );

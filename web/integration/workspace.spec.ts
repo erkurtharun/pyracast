@@ -472,11 +472,6 @@ test("a customer manages one plant site through the real API", async ({
         ),
     ).toEqual([]);
     await page.setViewportSize({ width: 1280, height: 900 });
-    const plantDeleted = page.waitForResponse(
-        (response) =>
-            response.request().method() === "DELETE" &&
-            /\/plants\/\d+\/$/.test(new URL(response.url()).pathname),
-    );
     const childDeleteStatus = await page.evaluate(async (url) => {
         const session = await (await fetch("/api/session/")).json();
         const response = await fetch(url, {
@@ -485,22 +480,9 @@ test("a customer manages one plant site through the real API", async ({
         });
         return response.status;
     }, plantUrl);
-    expect(childDeleteStatus).toBe(204);
-    await page.getByRole("button", { name: "All plants" }).click();
-    expect((await plantDeleted).ok()).toBeTruthy();
-    await expect(
-        page.getByRole("button", { name: /Browser plant/ }),
-    ).toHaveCount(0);
+    expect(childDeleteStatus).toBe(405);
     await page
-        .getByRole("button", { name: "Recycle bin", exact: true })
-        .click();
-    await page.getByRole("button", { name: "Restore Browser plant" }).click();
-    await expect(
-        page.getByText("Browser plant restored. Find it in Plants."),
-    ).toBeVisible();
-    await page
-        .getByRole("navigation", { name: "Main navigation" })
-        .getByRole("button", { name: "Plants", exact: true })
+        .getByRole("button", { name: "← All plants", exact: true })
         .click();
     await page.getByRole("button", { name: /Browser plant/ }).click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
