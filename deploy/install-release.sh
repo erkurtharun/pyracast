@@ -36,11 +36,8 @@ old=(docker compose --env-file /opt/pyracast/current/deploy/release.env -f /opt/
 maintenance_started=0
 resumable=0
 switched=0
-migrating=0
+recorded=0
 promoted=0
-prerelease_object=
-record_unreadable=0
-recovery='python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json'
 begin_maintenance() {
   maintenance_started=1
   touch /var/lib/pyracast/release-blocked && sync -f /var/lib/pyracast/release-blocked \
@@ -97,7 +94,7 @@ cleanup() {
       begin_maintenance || blocked=0
       stop_application
       if [[ -n $previous ]] && (( switched == 0 && stopped == 1 )) && switch_runtime; then switched=1; fi
-      if (( resumable == 1 && migrating == 0 && stopped == 1 && switched == 1 )); then resume=1; fi
+      if (( resumable == 1 && recorded == 0 && stopped == 1 && switched == 1 )); then resume=1; fi
       if (( resume == 1 )) && resume_previous; then
         echo "Release $revision failed before migrate; the previous release $previous serves again, started with the secrets /etc/pyracast/host.json names, and the marker is removed." >&2
       else
@@ -128,15 +125,8 @@ cleanup() {
         fi
         if [[ -z $previous ]]; then
           echo 'No release served before this one: fix the cause and run the release again.' >&2
-        elif reset_object=$(python3 "$release/deploy/release_record.py" --replaced-by-reset); then
-          echo "A reset replaced the database in this maintenance; recover with: $recovery restore --confirm $reset_object" >&2
-        elif (( migrating == 1 )); then
-          echo "Pre-release record: $release/prerelease-backup.json" >&2
-          echo "Release a forward fix, or recover with: $recovery restore --confirm $prerelease_object" >&2
-        elif (( record_unreadable == 1 )); then
-          echo "The pre-release record $release/prerelease-backup.json is unreadable. Recover with: $recovery abort" >&2
-        else
-          echo "Recover with: $recovery abort" >&2
+        elif ! python3 "$release/deploy/release_record.py" /etc/pyracast/host.json recovery >&2; then
+          echo 'The recovery of this maintenance could not be read; see the line above.' >&2
         fi
         echo 'See "A release that fails during maintenance" in the deployment guide.' >&2
       fi
@@ -242,15 +232,15 @@ probe_database api
 rm -f "$release/prerelease-backup.json"
 python3 "$release/deploy/backup.py" /etc/pyracast/host.json --release-dir "$release" --kind prerelease
 sync -f "$release"
-if ! candidate=$(python3 "$release/deploy/release_record.py" "$release/prerelease-backup.json"); then
-  record_unreadable=1
-  exit 1
-fi
-prerelease_object=$candidate
 "${compose[@]}" up -d postgres
 wait_for_database
 "${compose[@]}" up -d rabbitmq
-migrating=1
+# Once per maintenance, before the database changes, the reset helper's session names the object
+# that holds what the previous release served; every printed recovery and helper guard reads it.
+if [[ -n $previous ]]; then
+  python3 "$release/deploy/release_record.py" /etc/pyracast/host.json record "$release/prerelease-backup.json"
+  recorded=1
+fi
 "${compose[@]}" run --rm --no-deps migrate
 "${compose[@]}" run --rm --no-deps migrate pyracast migrate --check
 # Migrate creates the ledger table with the runtime role's default privileges; converge again.

@@ -973,8 +973,8 @@ def abort(host: Host) -> None:
         session = current_session(host)
         if session is not None and session.replaced:
             raise RefusedError(
-                "reset replaced the database in this maintenance; starting the previous release "
-                "now would serve it without its data. Run "
+                "the database changed in this maintenance; starting the previous release now "
+                "would serve it without the data it served. Run "
                 f"{host.command(f'restore --confirm {session.object}')}"
             )
         write_runtime_secrets(host)
@@ -1022,8 +1022,9 @@ def restore(host: Host, name: str) -> None:
         session = current_session(host)
         if session is not None and session.replaced and session.object != name:
             raise RefusedError(
-                f"reset replaced the database in this maintenance; only {session.object} holds "
-                f"its data. Run {host.command(f'restore --confirm {session.object}')}"
+                f"the database changed in this maintenance; only {session.object} holds the data "
+                "the previous release served. Run "
+                f"{host.command(f'restore --confirm {session.object}')}"
             )
         host.state.mkdir(mode=0o700, parents=True, exist_ok=True)
         write_runtime_secrets(host)

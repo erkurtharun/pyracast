@@ -22,7 +22,7 @@ from urllib.parse import quote, urlencode
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from deploy import host, release_record
+from deploy import host
 from deploy.operations_log import access_token, report
 
 HOURLY_LOCK_WAIT_SECONDS = 600
@@ -165,7 +165,7 @@ def store_backup(release: Path, bucket: str, kind: str, archive: Path) -> str:
     name = f"postgres/{stamp}-{kind}-{uuid.uuid4().hex}.dump"
     upload_backup(bucket, name, archive)
     if kind == "prerelease":
-        write_atomically(release / release_record.RECORD, json.dumps({"object": name}))
+        write_atomically(release / host.PRERELEASE_RECORD, json.dumps({"object": name}))
     write_atomically(host.LAST_BACKUP, json.dumps({"object": name, "completed_at": time.time()}))
     return name
 
