@@ -39,8 +39,12 @@ from pyracast.accounts.processes import PROVIDER_SIGNUP_SESSION_KEY, lock_accoun
 from pyracast.accounts.social import locked_social_user, record_social_refusal
 from pyracast.db import violated_constraint
 
-# Django's generated name for allauth's unique (provider, uid) of a provider identity.
-IDENTITY_CONSTRAINT = "socialaccount_socialaccount_provider_uid_fc810c6e_uniq"
+# A provider sign-up whose identity (Django's generated name for allauth's unique provider and
+# uid) or vouched address another account claimed meanwhile answers like nothing pending.
+CLAIMED_CONSTRAINTS = {
+    "socialaccount_socialaccount_provider_uid_fc810c6e_uniq",
+    "unique_verified_email",
+}
 
 
 class RetiredProvider(Provider):
@@ -88,7 +92,7 @@ class ProviderSignupView(AllauthProviderSignupView):
             request.session[PROVIDER_SIGNUP_SESSION_KEY] = pending
             raise
         except IntegrityError as error:
-            if violated_constraint(error) != IDENTITY_CONSTRAINT:
+            if violated_constraint(error) not in CLAIMED_CONSTRAINTS:
                 raise
             return ConflictResponse(request)
 
