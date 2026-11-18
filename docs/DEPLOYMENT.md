@@ -345,7 +345,8 @@ successful `main` CI runs trigger it automatically. The workflow:
    tested these exact images, and scans it again before any cloud credential exists,
    rejecting HIGH/CRITICAL vulnerabilities. A run whose commit `main` has moved past
    ends as a skip; only the deploy job waits for another release, and it checks `main`
-   again just before the transfer and cancels the run when it moved.
+   again just before the transfer. A run that `main` passes after the scan's check
+   therefore ends cancelled, not skipped, and transfers nothing.
 2. Publishes the backend, web, gateway and PostgreSQL images without rebuilding. OCI
    digests, SBOM and provenance are preserved; all four release references are
    immutable.
