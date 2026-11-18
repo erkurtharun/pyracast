@@ -301,11 +301,16 @@ def _status_error(
     )
 
 
+# Bytes; error bodies are small, so a larger one is not an error envelope worth parsing.
+ERROR_BODY_PARSE_LIMIT = 64 * 1024
+
+
 def _write_body(response: HttpResponse, body: Mapping[str, object]) -> None:
     response.content = json.dumps(body).encode()
     response["Content-Type"] = "application/json"
     if response.has_header("Content-Length"):
         response["Content-Length"] = str(len(response.content))
+    del response["ETag"]
 
 
 def refuse_in_place(request: HttpRequest, response: HttpResponse, code: ErrorCode) -> HttpResponse:
@@ -321,7 +326,12 @@ def refuse_in_place(request: HttpRequest, response: HttpResponse, code: ErrorCod
 def with_error_contract(request: HttpRequest, response: HttpResponse) -> HttpResponse:
     """Add the contract keys to a JSON error body that lacks them, keeping its own keys."""
     content_type = response.get("Content-Type", "").partition(";")[0].strip()
-    if response.status_code < 400 or response.streaming or content_type != "application/json":
+    if (
+        response.status_code < 400
+        or response.streaming
+        or content_type != "application/json"
+        or len(response.content) > ERROR_BODY_PARSE_LIMIT
+    ):
         return response
     try:
         body = json.loads(response.content)
