@@ -1,11 +1,14 @@
 import ast
+import dataclasses
 import io
 import ipaddress
 import itertools
+import os
 import re
 import runpy
 from collections import Counter
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -56,10 +59,18 @@ DEPLOY = ROOT / "deploy"
 TERRAFORM = ROOT / "infra" / "terraform"
 SUPPORT_SERVICES = {"postgres", "rabbitmq"}
 EDGE_SERVICES = {"gateway", "maintenance"}
+# POSIX only; the deployment helpers run on Linux.
+NO_FOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
 
 def text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def terraform_block(path: Path, header: str) -> str:
+    match = re.search(rf"^{re.escape(header)} \{{\n(.*?)\n\}}$", text(path), re.M | re.S)
+    assert match, header
+    return " ".join(match[1].split())
 
 
 def compose_services() -> dict[str, dict[str, Any]]:
@@ -579,17 +590,95 @@ def test_a_deliberately_skipped_backup_succeeds_and_every_other_exit_fails_the_u
 
 def test_host_paths_agree_between_scripts_units_and_helpers() -> None:
     installer = text(DEPLOY / "install-release.sh")
+    harness = text(DEPLOY / "test-release.sh")
+    template = text(TERRAFORM / "templates" / "startup.sh.tftpl")
     application = systemd_unit("pyracast.service")
+    helper = {field.name: field.default for field in dataclasses.fields(reset_database.Host)}
     lock = host.RELEASE_LOCK.as_posix()
     blocked = host.RELEASE_BLOCKED.as_posix()
+    state = host.RELEASE_BLOCKED.parent.as_posix()
+    mounted = template.index(f"mountpoint --quiet {state} || mount {state}\n")
 
-    assert f"exec 9>{lock}" in installer
+    assert host.RELEASE_LOCK.parent == host.RELEASE_BLOCKED.parent
+    assert f"install -d -o root -g root -m 0755 {state}\n" in template[mounted:]
+    assert helper["lock"] == host.RELEASE_LOCK
+    assert installer.count(lock) == 1
+    assert f"exec 9>>{lock}\n" in installer
+    assert template.count(lock) == 1
     assert application["ExecStop"].startswith(f"/usr/bin/flock {lock} ")
+    assert application["UMask"] == "0077"
+    assert f"['/usr/bin/flock', '{lock}', " in harness
+    assert "/run/lock" not in installer + harness + template
     assert f"touch {blocked}" in installer
     assert application["ConditionPathExists"] == f"!{blocked}"
     for name in ("pyracast-backup.service", "pyracast-watchdog.service"):
         (command,) = shipped_unit(name)["ExecStart"]
         assert f" {host.CURRENT_RELEASE.as_posix()}/deploy/" in command
+
+
+def test_the_python_helpers_open_the_release_lock_for_root_alone_without_following_a_link(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock = tmp_path / "release.lock"
+    lock.touch()
+    opened: list[tuple[object, int, int]] = []
+    real_open = os.open
+
+    def recording_open(path: Path, flags: int, mode: int) -> int:
+        opened.append((path, flags, mode))
+        return real_open(path, flags, mode)
+
+    free = SimpleNamespace(LOCK_EX=2, LOCK_NB=4, flock=lambda *_arguments: None)
+    for module in (host, reset_database):
+        monkeypatch.setattr(module, "importlib", SimpleNamespace(import_module=lambda _: free))
+    monkeypatch.setattr(host, "RELEASE_LOCK", lock)
+    helper = reset_database.Host(
+        config=tmp_path / "host.json",
+        release=tmp_path,
+        bucket="private-backups",
+        runtime_version="1",
+        lock=lock,
+    )
+    monkeypatch.setattr(os, "open", recording_open)
+
+    with host.release_lock(0) as locked, lock.open("a") as held:
+        assert locked
+        assert not host.holds_release_lock(held.fileno())
+    with reset_database.release_lock(helper):
+        pass
+
+    assert opened == [(lock, os.O_WRONLY | os.O_APPEND | os.O_CREAT | NO_FOLLOW, 0o600)] * 3
+
+
+def test_every_backup_generation_stays_recoverable_until_seven_days_after_its_creation() -> None:
+    bucket = terraform_block(TERRAFORM / "main.tf", 'resource "google_storage_bucket" "backup"')
+    rules = re.findall(r"lifecycle_rule \{ (.*?) \} \}", bucket)
+
+    assert "versioning { enabled = true }" in bucket
+    assert rules == ['condition { age = 7 with_state = "ANY" } action { type = "Delete"']
+    assert "soft_delete_policy { retention_duration_seconds = 0 }" in bucket
+
+
+def test_cloud_storage_reads_and_writes_reach_the_data_access_audit_log() -> None:
+    audit = terraform_block(
+        TERRAFORM / "iam.tf", 'resource "google_project_iam_audit_config" "storage"'
+    )
+
+    assert audit == (
+        'project = var.project_id service = "storage.googleapis.com" '
+        'audit_log_config { log_type = "DATA_READ" } audit_log_config { log_type = "DATA_WRITE" }'
+    )
+
+
+def test_the_application_subnet_records_sampled_flow_logs_with_all_metadata() -> None:
+    subnet = terraform_block(
+        TERRAFORM / "main.tf", 'resource "google_compute_subnetwork" "application"'
+    )
+
+    assert (
+        'log_config { aggregation_interval = "INTERVAL_10_MIN" flow_sampling = 0.5 '
+        'metadata = "INCLUDE_ALL_METADATA" }'
+    ) in subnet
 
 
 def test_dispatcher_is_unhealthy_once_its_heartbeat_is_older_than_the_delivery_lag() -> None:
@@ -1178,7 +1267,7 @@ def test_the_origin_requires_the_edge_certificate_only_once_the_host_names_its_a
 def test_the_prerelease_backup_proves_it_runs_under_the_installers_lock() -> None:
     script = installer()
 
-    assert "exec 9>/run/lock/pyracast-release.lock" in script
+    assert f"exec 9>>{host.RELEASE_LOCK.as_posix()}\n" in script
     assert (
         'python3 "$release/deploy/backup.py" /etc/pyracast/host.json --release-dir "$release" '
         "--lock-fd 9 --kind prerelease\n"

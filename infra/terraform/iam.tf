@@ -84,6 +84,17 @@ resource "google_storage_bucket_iam_member" "runtime_backup" {
   member   = google_service_account.runtime.member
 }
 
+resource "google_project_iam_audit_config" "storage" {
+  project = var.project_id
+  service = "storage.googleapis.com"
+  audit_log_config {
+    log_type = "DATA_READ"
+  }
+  audit_log_config {
+    log_type = "DATA_WRITE"
+  }
+}
+
 locals {
   ssh_members = merge(
     { deploy = google_service_account.deploy.member },

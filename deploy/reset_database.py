@@ -29,7 +29,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from deploy.backup import compose_command, upload_backup
-from deploy.host import LOCAL_HTTPS_PORT
+from deploy.host import LOCAL_HTTPS_PORT, RELEASE_LOCK, open_lock
 from deploy.operations_log import access_token
 
 # The installer's drain order (contract-tested): the producer, the consumers, then the servers
@@ -186,7 +186,7 @@ class Host:
     bucket: str
     runtime_version: str
     marker: Path = Path("/var/lib/pyracast/release-blocked")
-    lock: Path = Path("/run/lock/pyracast-release.lock")
+    lock: Path = RELEASE_LOCK
     state: Path = Path("/var/lib/pyracast/reset")
     environment: Path = Path("/run/pyracast")
 
@@ -402,7 +402,7 @@ def site_ready(host: Host, attempts: int) -> bool:
 def release_lock(host: Host) -> Iterator[None]:
     locks = importlib.import_module("fcntl")
     host.lock.parent.mkdir(parents=True, exist_ok=True)
-    with host.lock.open("a") as handle:
+    with open_lock(host.lock) as handle:
         try:
             locks.flock(handle, locks.LOCK_EX | locks.LOCK_NB)
         except BlockingIOError:

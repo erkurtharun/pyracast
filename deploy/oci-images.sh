@@ -18,8 +18,8 @@ case "$mode" in
       expected=$(jq -er --arg image "$image" '.images[$image].config_digest' "$directory/images.json")
       actual=$(docker run "${options[@]}" -v /var/run/docker.sock:/var/run/docker.sock "$skopeo" \
         inspect --raw "docker-daemon:pyracast-$image:ci" | jq -er '.config.digest')
-      test "$actual" = "$expected"
-      test "$(docker image inspect "pyracast-$image:ci" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$revision"
+      [[ "$actual" == "$expected" ]]
+      [[ "$(docker image inspect "pyracast-$image:ci" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" == "$revision" ]]
     done
     ;;
   publish)
@@ -39,10 +39,10 @@ case "$mode" in
       docker run "${options[@]}" "$skopeo" copy --all --preserve-digests \
         --authfile /credentials/auth.json --digestfile "/credentials/$image.digest" \
         "oci-archive:/images/$image.oci.tar" "docker://$registry/$image:$revision"
-      test "$(cat "$credentials/$image.digest")" = "$expected"
+      [[ "$(cat "$credentials/$image.digest")" == "$expected" ]]
       actual=$(docker run "${options[@]}" "$skopeo" inspect --authfile /credentials/auth.json \
         --raw "docker://$registry/$image@$expected" | sha256sum | cut -d ' ' -f 1)
-      test "sha256:$actual" = "$expected"
+      [[ "sha256:$actual" == "$expected" ]]
       printf '%s_IMAGE=%s/%s@%s\n' "${image^^}" "$registry" "$image" "$expected" >> "${GITHUB_ENV:?}"
     done
     ;;

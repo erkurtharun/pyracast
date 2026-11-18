@@ -21,7 +21,7 @@ for image in backend web gateway postgres; do
     || refuse "Invalid $image image reference; expected an Artifact Registry digest."
 done
 [[ -f "$bundle/deploy/compose.yaml" && -f "$migration" ]] || refuse 'Missing release bundle or migration secret.'
-exec 9>/run/lock/pyracast-release.lock
+exec 9>>/var/lib/pyracast/release.lock
 # systemd stop takes the same lock; releases must drain containers directly.
 flock --timeout 300 9 || { echo 'Timed out waiting for another release, backup or watchdog operation; nothing was changed.' >&2; exit 1; }
 mkdir -p /run/pyracast

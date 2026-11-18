@@ -482,12 +482,18 @@ fixtures do not establish provider access or inbox delivery.
   release lock and reports `pyracast_backup_skipped` when a release keeps the lock or stays blocked;
   that skip exits 75, which `pyracast-backup.service` counts as success, while any
   other failure leaves the unit failed.
-  Hourly backups and releases exclude each other through that lock from the dump to
-  the replacement of `/var/lib/pyracast/last-backup.json`, so the pointer always
-  names the newest snapshot; a release waits up to its 300-second lock timeout for a
-  running backup and otherwise stops without changing anything. Cloud Storage lifecycle cleanup expires objects after
-  seven days; deletion is asynchronous. Check the last successful upload, not just timer
-  activation. A one-hour recovery point depends on successful hourly backups;
+  The lock is `/var/lib/pyracast/release.lock` (root only), shared with the watchdog,
+  the reset tool and the stop of `pyracast.service`. Hourly backups and releases
+  exclude each other through it from the dump to the replacement of
+  `/var/lib/pyracast/last-backup.json`, so the pointer always names the newest
+  snapshot; a release waits up to its 300-second lock timeout for a running backup and
+  otherwise stops without changing anything. The bucket keeps object versions:
+  lifecycle cleanup deletes every generation seven days after its creation
+  (asynchronously), so a deleted or replaced dump stays recoverable until then. Find it
+  with `gcloud storage ls --all-versions gs://BUCKET/OBJECT` and copy
+  `gs://BUCKET/OBJECT#GENERATION` back to `gs://BUCKET/OBJECT`. Every read and write
+  of the bucket is in the Cloud Storage Data Access audit log. Check the last
+  successful upload, not just timer activation. A one-hour recovery point depends on successful hourly backups;
   failures increase possible data loss, and there is no WAL/PITR recovery. Keep
   the external encryption key separately. Rehearse `pg_restore` into a separate
   PostgreSQL 18 database and measure recovery time before launch and regularly
