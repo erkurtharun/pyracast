@@ -12,6 +12,7 @@ REQUIRED_CI_JOB = "CI result"
 CI_WORKFLOW_PATH = ".github/workflows/ci.yml"
 RELEASED_EVENTS = frozenset({"push", "workflow_dispatch"})
 SHA = re.compile(r"[0-9a-f]{40}")
+IMAGE_ARTIFACT = re.compile(r"release-images-(?P<sha>[0-9a-f]{40})-(?P<attempt>[1-9][0-9]*)")
 
 
 @dataclass(frozen=True)
@@ -70,15 +71,39 @@ def decide(facts: Mapping[str, Any]) -> Authorized | Superseded:
     results = [job["conclusion"] for job in facts["jobs"] if job["name"] == REQUIRED_CI_JOB]
     if results != ["success"]:
         raise RefusedError(f"The {REQUIRED_CI_JOB} job of CI run {run['id']} did not pass")
-    name = f"release-images-{main}-{run['run_attempt']}"
-    artifacts = [
-        artifact
-        for artifact in facts["artifacts"]
-        if artifact["name"] == name and not artifact["expired"] and artifact["head_sha"] == main
+    attempt, artifact = _newest_images(facts["artifacts"], main, int(run["run_attempt"]))
+    return Authorized(main, int(run["id"]), attempt, artifact)
+
+
+def _newest_images(
+    artifacts: Sequence[Mapping[str, Any]], sha: str, run_attempt: int
+) -> tuple[int, int]:
+    # The newest build up to the authorizing attempt: a partial re-run keeps earlier images, and a
+    # later attempt never changes what this release deploys.
+    built = [
+        (int(match["attempt"]), artifact)
+        for artifact in artifacts
+        if (match := IMAGE_ARTIFACT.fullmatch(artifact["name"])) and match["sha"] == sha
     ]
-    if len(artifacts) != 1:
+    attempt = max((built_in for built_in, _ in built if built_in <= run_attempt), default=0)
+    newest = [artifact for built_in, artifact in built if built_in == attempt]
+    if len(newest) != 1 or newest[0]["expired"] or newest[0]["head_sha"] != sha:
         raise RefusedError("Run CI again to produce an unexpired image artifact")
-    return Authorized(main, int(run["id"]), int(run["run_attempt"]), int(artifacts[0]["id"]))
+    return attempt, int(newest[0]["id"])
+
+
+def cleanup_order(artifacts: Sequence[Mapping[str, Any]], sha: str, run_attempt: int) -> list[int]:
+    # Mirrors the cleanup job of release.yml: every unexpired build up to the released attempt,
+    # oldest first, so a partly failed cleanup never leaves an older build without the selected one.
+    built = sorted(
+        (int(match["attempt"]), int(artifact["id"]))
+        for artifact in artifacts
+        if (match := IMAGE_ARTIFACT.fullmatch(artifact["name"]))
+        and match["sha"] == sha
+        and int(match["attempt"]) <= run_attempt
+        and not artifact["expired"]
+    )
+    return [identifier for _, identifier in built]
 
 
 def _append(path: str | None, line: str) -> None:

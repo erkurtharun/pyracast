@@ -49,9 +49,11 @@ jobs:
             });
             const { data: main } = await github.rest.repos.getBranch({ ...repository, branch: 'main' });
             let run = null;
+            // A re-run keeps the original event payload, so it judges the same CI attempt.
             if (context.eventName === 'workflow_run') {
-              ({ data: run } = await github.rest.actions.getWorkflowRun({
+              ({ data: run } = await github.rest.actions.getWorkflowRunAttempt({
                 ...repository, run_id: context.payload.workflow_run.id,
+                attempt_number: context.payload.workflow_run.run_attempt,
               }));
             } else {
               const { data } = await github.rest.actions.listWorkflowRuns({
@@ -60,8 +62,8 @@ jobs:
               run = data.workflow_runs.find(candidate =>
                 ['push', 'workflow_dispatch'].includes(candidate.event) && candidate.conclusion === 'success') ?? null;
             }
-            const jobs = run ? await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
-              ...repository, run_id: run.id, filter: 'latest', per_page: 100,
+            const jobs = run ? await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, {
+              ...repository, run_id: run.id, attempt_number: run.run_attempt, per_page: 100,
             }) : [];
             const artifacts = run ? await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
               ...repository, run_id: run.id, per_page: 100,
@@ -348,12 +350,29 @@ jobs:
     permissions:
       actions: write
     steps:
-      - name: Remove the transferred image artifact after successful deployment
+      # Same rule as cleanup_order in deploy/release_authorization.py: a Release re-run then finds
+      # no build of this commit to fall back to and is refused.
+      - name: Remove every image build up to the released one after successful deployment
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          ARTIFACT_ID: ${{ needs.authorize.outputs.artifact_id }}
+          RELEASE_SHA: ${{ needs.authorize.outputs.sha }}
+          CI_RUN_ID: ${{ needs.authorize.outputs.ci_run_id }}
+          CI_RUN_ATTEMPT: ${{ needs.authorize.outputs.ci_run_attempt }}
         with:
           script: |
-            await github.rest.actions.deleteArtifact({
-              ...context.repo, artifact_id: Number(process.env.ARTIFACT_ID),
+            const { RELEASE_SHA: sha, CI_RUN_ID: runId, CI_RUN_ATTEMPT: released } = process.env;
+            if (!/^[0-9a-f]{40}$/.test(sha) || !/^[1-9][0-9]*$/.test(runId) || !/^[1-9][0-9]*$/.test(released)) {
+              throw new Error('Unreadable release handover; nothing was removed.');
+            }
+            const pattern = new RegExp(`^release-images-${sha}-([1-9][0-9]*)$`);
+            const artifacts = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              ...context.repo, run_id: Number(runId), per_page: 100,
             });
+            const builds = artifacts
+              .map(artifact => ({ artifact, match: pattern.exec(artifact.name) }))
+              .filter(({ artifact, match }) => match && Number(match[1]) <= Number(released) && !artifact.expired)
+              .map(({ artifact, match }) => ({ attempt: Number(match[1]), id: artifact.id }))
+              .sort((first, second) => first.attempt - second.attempt || first.id - second.id);
+            for (const { id } of builds) {
+              await github.rest.actions.deleteArtifact({ ...context.repo, artifact_id: id });
+            }

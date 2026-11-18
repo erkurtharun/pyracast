@@ -117,20 +117,71 @@ def test_only_a_single_passing_ci_result_job_authorizes(jobs: list[dict[str, str
         decide(facts(jobs=jobs))
 
 
+def images(attempt: int, artifact: int = 91, **changes: Any) -> dict[str, Any]:
+    name = f"release-images-{MAIN}-{attempt}"
+    return {"id": artifact, "name": name, "expired": False, "head_sha": MAIN, **changes}
+
+
+def test_a_partial_rerun_releases_the_images_of_the_attempt_that_built_them() -> None:
+    assert decide(facts(artifacts=[images(1, 90)])) == Authorized(
+        sha=MAIN, ci_run_id=7001, ci_run_attempt=1, artifact_id=90
+    )
+
+
+def test_images_rebuilt_in_a_later_attempt_replace_the_earlier_ones() -> None:
+    assert decide(facts(artifacts=[images(1, 91), images(2, 90)])) == Authorized(
+        sha=MAIN, ci_run_id=7001, ci_run_attempt=2, artifact_id=90
+    )
+
+
+def test_a_later_ci_attempt_leaves_the_images_of_the_authorizing_attempt_in_place() -> None:
+    artifacts = [images(1, 90), images(2, 91)]
+
+    assert decide(facts({"run_attempt": 1}, artifacts=artifacts)) == Authorized(
+        sha=MAIN, ci_run_id=7001, ci_run_attempt=1, artifact_id=90
+    )
+
+
+def test_a_release_rerun_after_its_cleanup_finds_no_earlier_build_to_deploy() -> None:
+    artifacts = [images(1, 90), images(2, 91), {**images(1, 89), "name": "coverage-1"}]
+    released = decide(facts(artifacts=artifacts))
+    assert isinstance(released, Authorized)
+
+    removed = release_authorization.cleanup_order(artifacts, released.sha, released.ci_run_attempt)
+    remaining = [artifact for artifact in artifacts if artifact["id"] not in removed]
+
+    with pytest.raises(RefusedError, match="Run CI again"):
+        decide(facts(artifacts=remaining))
+    assert remaining == [artifacts[2]]
+
+
+def test_the_cleanup_keeps_later_attempts_and_other_commits_and_removes_the_selected_last() -> None:
+    artifacts = [
+        images(2, 91),
+        images(3, 93),
+        images(1, 90),
+        images(1, 88, expired=True),
+        {**images(1, 87), "name": f"release-images-{OLDER}-1"},
+    ]
+
+    assert release_authorization.cleanup_order(artifacts, MAIN, 2) == [90, 91]
+
+
 @pytest.mark.parametrize(
     "artifacts",
     [
         [],
-        [{"id": 91, "name": f"release-images-{MAIN}-2", "expired": True, "head_sha": MAIN}],
-        [{"id": 91, "name": f"release-images-{MAIN}-1", "expired": False, "head_sha": MAIN}],
-        [{"id": 91, "name": f"release-images-{MAIN}-2", "expired": False, "head_sha": OLDER}],
-        [
-            {"id": 91, "name": f"release-images-{MAIN}-2", "expired": False, "head_sha": MAIN},
-            {"id": 93, "name": f"release-images-{MAIN}-2", "expired": False, "head_sha": MAIN},
-        ],
+        [images(2, expired=True)],
+        [images(1, 90), images(2, expired=True)],
+        [images(2, head_sha=OLDER)],
+        [images(1, 90), images(2, head_sha=OLDER)],
+        [images(2), images(2, 93)],
+        [images(3)],
+        [{**images(2), "name": f"release-images-{OLDER}-2"}],
+        [{**images(2), "name": f"release-images-{MAIN}-0"}],
     ],
 )
-def test_exactly_one_unexpired_image_artifact_of_the_run_attempt_is_required(
+def test_the_newest_image_build_must_be_one_unexpired_artifact_of_the_commit(
     artifacts: list[dict[str, Any]],
 ) -> None:
     with pytest.raises(RefusedError, match="unexpired image artifact"):

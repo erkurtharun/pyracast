@@ -22,6 +22,7 @@ TOOLING = frozenset(
     {
         "test_agent_graph",
         "test_api_schema_generation",
+        "test_ci_artifacts",
         "test_ci_images",
         "test_ci_result",
         "test_deployment_backup",

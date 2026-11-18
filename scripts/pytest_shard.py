@@ -26,10 +26,10 @@ def selected_nodes(nodes: list[str], index: int, count: int) -> list[str]:
 
 
 def run_identity() -> dict[str, str]:
+    # Shards of different attempts of one run combine: a partial re-run repeats only failed shards.
     return {
         "sha": os.environ.get("GITHUB_SHA", "local"),
         "run_id": os.environ.get("GITHUB_RUN_ID", "local"),
-        "run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", "local"),
         "platform": platform.system(),
         "python": platform.python_version(),
     }
