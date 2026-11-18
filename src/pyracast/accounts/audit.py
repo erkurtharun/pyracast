@@ -22,6 +22,8 @@ from django.dispatch import Signal
 from django.http import HttpRequest
 from django.utils.crypto import salted_hmac
 
+from pyracast.event_details import INTEGER, OPTIONAL_INTEGER, OPTIONAL_TEXT, TEXT, Kind
+
 logger = logging.getLogger("pyracast.security")
 failure_logger = logging.getLogger(__name__)
 
@@ -101,21 +103,19 @@ SIGNAL_EVENTS: Mapping[Signal, SecurityEvent] = {
 
 # A line never carries an address, name, token, code or password: an address becomes `subject`.
 # `method` is allauth's step (password, code, mfa, socialaccount); `provider` a provider id.
-LINE_KEYS = frozenset(
-    {
-        "event",
-        "user_id",
-        "client_ip",
-        "subject",
-        "tenant_id",
-        "target_id",
-        "reason",
-        "view",
-        "method",
-        "authenticator_type",
-        "provider",
-    }
-)
+LINE_KINDS: Mapping[str, Kind] = {
+    "user_id": OPTIONAL_INTEGER,
+    "client_ip": OPTIONAL_TEXT,
+    "subject": TEXT,
+    "tenant_id": INTEGER,
+    "target_id": INTEGER,
+    "reason": TEXT,
+    "view": TEXT,
+    "method": TEXT,
+    "authenticator_type": TEXT,
+    "provider": TEXT,
+}
+LINE_KEYS = frozenset({"event", *LINE_KINDS})
 # The details each event may carry beside event, user and client IP; a line with any other
 # detail is refused. A signalled event carries what allauth reports about the step, and of
 # those only a failed sign-in names an address.
@@ -207,8 +207,12 @@ def record_security_event(
             "event": event.value,
             "user_id": user_id,
             "client_ip": _client_ip(request, client_ip),
-        }
-        logger.info("%s", json.dumps(line | carried, sort_keys=True))
+        } | carried
+        if mistyped := [
+            key for key, kind in LINE_KINDS.items() if key in line and not kind.accepts(line[key])
+        ]:
+            raise ValueError(f"{event} takes {', '.join(mistyped)} of another type.")
+        logger.info("%s", json.dumps(line, sort_keys=True))
 
 
 def record_on_commit(event: SecurityEvent, **fields: Any) -> None:

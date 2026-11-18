@@ -1,18 +1,37 @@
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 
-type DetailShape = Mapping[str, tuple[type, ...]]
 
-INTEGER: tuple[type, ...] = (int,)
-OPTIONAL_INTEGER: tuple[type, ...] = (int, type(None))
-TEXT: tuple[type, ...] = (str,)
-INTEGERS: tuple[type, ...] = (list,)
+@dataclass(frozen=True)
+class Kind:
+    name: str
+    accepts: Callable[[object], bool]
+
+
+def _integer(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _text(value: object) -> bool:
+    return isinstance(value, str)
+
+
+def _integers(value: object) -> bool:
+    return isinstance(value, list) and all(map(_integer, value))
+
+
+INTEGER = Kind("an integer", _integer)
+OPTIONAL_INTEGER = Kind("an integer or null", lambda value: value is None or _integer(value))
+TEXT = Kind("text", _text)
+OPTIONAL_TEXT = Kind("text or null", lambda value: value is None or _text(value))
+INTEGERS = Kind("a list of integers", _integers)
+
+type DetailShape = Mapping[str, Kind]
 
 
 def shaped(
     trail: str, action: str, details: Mapping[str, object], shapes: Mapping[str, DetailShape]
 ) -> dict[str, object]:
-    """Return `details` when they carry exactly the keys and value types `shapes` declares for
-    the action; anything else is a programming error and is refused before it is stored."""
     shape = shapes.get(action)
     if shape is None:
         raise ValueError(f"The {trail} action '{action}' declares no details.")
@@ -21,11 +40,7 @@ def shaped(
             f"The {trail} action '{action}' takes the details {sorted(shape)}, "
             f"not {sorted(details)}."
         )
-    for key, kinds in shape.items():
-        value = details[key]
-        if not isinstance(value, kinds) or (isinstance(value, bool) and bool not in kinds):
-            raise ValueError(
-                f"The {trail} action '{action}' takes '{key}' as "
-                f"{' or '.join(kind.__name__ for kind in kinds)}."
-            )
+    for key, kind in shape.items():
+        if not kind.accepts(details[key]):
+            raise ValueError(f"The {trail} action '{action}' takes '{key}' as {kind.name}.")
     return dict(details)
