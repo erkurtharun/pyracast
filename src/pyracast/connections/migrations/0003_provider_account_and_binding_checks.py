@@ -1,35 +1,32 @@
 from typing import ClassVar
 
-from django.apps.registry import Apps
 from django.conf import settings
 from django.db import migrations, models
-from django.db.backends.base.schema import BaseDatabaseSchemaEditor
 from django.db.migrations.operations.base import Operation
 
-from pyracast.db import fire_deferred_checks, refuse_rows
+from pyracast.db import refuse_rows
 
 MAX_DAILY_QUOTA = 10
 
 
-def repair_accounts_and_bindings(apps: Apps, schema_editor: BaseDatabaseSchemaEditor) -> None:
-    """Clamp a quota into 1..10, raise a zero credential revision to 1, drop an authentication
-    failure recorded for a revision the account never had, and clear a validation stored
-    without its moment or its credential revision (the binding is validated again)."""
-    alias = schema_editor.connection.alias
-    accounts = apps.get_model("connections", "ProviderAccount")._default_manager.using(alias)
-    accounts.filter(daily_quota__lt=1).update(daily_quota=1)
-    accounts.filter(daily_quota__gt=MAX_DAILY_QUOTA).update(daily_quota=MAX_DAILY_QUOTA)
-    accounts.filter(credential_revision__lt=1).update(credential_revision=1)
-    accounts.filter(
-        models.Q(authentication_failed_revision__lt=1)
-        | models.Q(authentication_failed_revision__gt=models.F("credential_revision"))
-    ).update(authentication_failed_revision=None)
-    bindings = apps.get_model("connections", "SiteBinding")._default_manager.using(alias)
-    bindings.filter(
-        models.Q(validated_at__isnull=True, validated_credential_revision__isnull=False)
-        | models.Q(validated_at__isnull=False, validated_credential_revision__isnull=True)
-    ).update(validated_at=None, validated_credential_revision=None)
-    fire_deferred_checks(schema_editor)
+def quota_outside(model: type[models.Model]) -> models.Q:
+    return models.Q(daily_quota__lt=1) | models.Q(daily_quota__gt=MAX_DAILY_QUOTA)
+
+
+def revision_below_one(model: type[models.Model]) -> models.Q:
+    return models.Q(credential_revision__lt=1)
+
+
+def failure_outside_revisions(model: type[models.Model]) -> models.Q:
+    return models.Q(authentication_failed_revision__lt=1) | models.Q(
+        authentication_failed_revision__gt=models.F("credential_revision")
+    )
+
+
+def half_validation(model: type[models.Model]) -> models.Q:
+    return models.Q(validated_at__isnull=True, validated_credential_revision__isnull=False) | (
+        models.Q(validated_at__isnull=False, validated_credential_revision__isnull=True)
+    )
 
 
 def shared_region_revision(model: type[models.Model]) -> models.Q:
@@ -50,7 +47,7 @@ class Migration(migrations.Migration):
     ]
 
     operations: ClassVar[list[Operation]] = [
-        migrations.RunPython(repair_accounts_and_bindings, migrations.RunPython.noop),
+        refuse_rows("connections.provideraccount", quota_outside, "a daily quota between 1 and 10"),
         migrations.AddConstraint(
             model_name="provideraccount",
             constraint=models.CheckConstraint(
@@ -58,12 +55,20 @@ class Migration(migrations.Migration):
                 name="provideraccount_daily_quota_chk",
             ),
         ),
+        refuse_rows(
+            "connections.provideraccount", revision_below_one, "a credential revision from 1"
+        ),
         migrations.AddConstraint(
             model_name="provideraccount",
             constraint=models.CheckConstraint(
                 condition=models.Q(("credential_revision__gte", 1)),
                 name="provideraccount_credential_revision_chk",
             ),
+        ),
+        refuse_rows(
+            "connections.provideraccount",
+            failure_outside_revisions,
+            "an authentication failure names a credential revision of the account",
         ),
         migrations.AddConstraint(
             model_name="provideraccount",
@@ -78,6 +83,11 @@ class Migration(migrations.Migration):
                 ),
                 name="provideraccount_authentication_failed_revision_chk",
             ),
+        ),
+        refuse_rows(
+            "connections.sitebinding",
+            half_validation,
+            "a validation stores its moment with its credential revision",
         ),
         migrations.AddConstraint(
             model_name="sitebinding",
