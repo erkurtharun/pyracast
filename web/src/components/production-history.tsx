@@ -1,9 +1,12 @@
 "use client";
 import { useLocale, useTranslations } from "next-intl";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { request } from "@/lib/api";
+import type { PlantScope } from "@/lib/api";
+import { api, buildUrl } from "@/lib/api/client";
+import { send } from "@/lib/api/lane";
 import type { components } from "@/lib/schema";
 import { dataIntervalRange, intervalTimeFormatter } from "@/lib/intervals";
+import { QUALITIES, qualityOf, type Quality } from "@/lib/production";
 import { CsvDownload } from "./csv-download";
 import { localDay } from "./data-source";
 import { ProductionImport } from "./production-import";
@@ -17,8 +20,8 @@ import {
 
 type History = components["schemas"]["ProductionHistoryOutput"];
 type Interval = components["schemas"]["ProductionIntervalOutput"];
+type ChangeRow = components["schemas"]["ProductionChangeRow"];
 
-type Connection = components["schemas"]["EpiasConnectionOutput"];
 type Loaded =
     | { status: "loading" }
     | { status: "error"; query: string; revision: number; error: string }
@@ -36,7 +39,7 @@ type Editor =
           key: string;
           energy: string;
           reason?: string;
-          quality: string;
+          quality: Quality;
           expectedRevision: number | null;
           error?: string;
           pendingWrite?: boolean;
@@ -73,6 +76,24 @@ function reconcileEditor(
               error: undefined,
           }
         : editor;
+}
+
+function mostFrequentReason(rows: Interval[]) {
+    const counts = new Map<string, number>();
+    for (const row of rows) {
+        const code = row.proposal_unavailable_reason;
+        if (code) counts.set(code, (counts.get(code) ?? 0) + 1);
+    }
+    let best: Interval | undefined;
+    let most = 0;
+    for (const row of rows) {
+        const count = counts.get(row.proposal_unavailable_reason ?? "") ?? 0;
+        if (count > most) {
+            best = row;
+            most = count;
+        }
+    }
+    return best;
 }
 
 function ProductionReading({
@@ -154,16 +175,14 @@ function ProductionReading({
 }
 
 export function ProductionHistory({
-    base,
+    scope,
     configuration,
     timezone,
-    token,
     onSaved,
 }: {
-    base: string;
+    scope: PlantScope;
     configuration?: number;
     timezone: string;
-    token: string;
     onSaved: () => void;
 }) {
     const t = useTranslations("ProductionHistory");
@@ -188,16 +207,23 @@ export function ProductionHistory({
     useEffect(() => {
         editorClosed.current = editor.status === "closed";
     }, [editor.status]);
-    const connection = useResource<Connection>(
-        `${base}production-source/`,
+    const connection = useResource(
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production-source/",
+        { path: scope },
         revision,
     );
-    const query = `${base}production/?${new URLSearchParams({ start_date: date, end_date: date, native_intervals: "true" })}`;
+    const query = buildUrl(
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/",
+        {
+            path: scope,
+            query: { start_date: date, end_date: date, native_intervals: true },
+        },
+    );
     useEffect(() => {
         let current = true;
         const load = () => {
             const sequence = nextReadSequence();
-            request<History>(query).then(
+            send<History>({ method: "GET", url: query }).then(
                 (history) => {
                     if (current && sequence === readSequence.current) {
                         setLoaded({
@@ -324,7 +350,7 @@ export function ProductionHistory({
         const sequence = nextReadSequence();
         setEditor({ ...attempt, status: "reloading" });
         try {
-            const updated = await request<History>(query);
+            const updated = await send<History>({ method: "GET", url: query });
             if (sequence !== readSequence.current) return;
             setLoaded({ status: "ready", query, revision, history: updated });
             const row = updated.intervals.find(
@@ -375,7 +401,7 @@ export function ProductionHistory({
                 : {
                       key: key(row),
                       energy: row.effective?.energy_mwh.toString() ?? "",
-                      quality: row.observation?.quality ?? "valid",
+                      quality: qualityOf(row.observation?.quality),
                       expectedRevision: row.revision_id,
                       reason: "",
                   };
@@ -402,42 +428,47 @@ export function ProductionHistory({
         setEditor({ ...attempt, status: "saving" });
         setMessage("");
         try {
+            const change: ChangeRow = {
+                starts_at: row.starts_at,
+                ends_at: row.ends_at,
+                expected_revision_id: attempt.expectedRevision,
+                action,
+                ...(action === "set"
+                    ? {
+                          energy,
+                          quality: attempt.quality,
+                          source: row.observation?.source ?? "meter",
+                      }
+                    : // A revert ignores quality and source; these are the server defaults.
+                      { quality: "valid", source: "operator" }),
+            };
             const payload = {
                 configuration_id: configuration,
-                unit: "MWh",
-                changes: [
-                    {
-                        starts_at: row.starts_at,
-                        ends_at: row.ends_at,
-                        expected_revision_id: attempt.expectedRevision,
-                        action,
-                        ...(action === "set"
-                            ? {
-                                  energy,
-                                  quality: attempt.quality,
-                                  source: row.observation?.source ?? "meter",
-                              }
-                            : {}),
-                    },
-                ],
+                unit: "MWh" as const,
+                changes: [change],
             };
             if (canManage) {
-                await request(
-                    `${base}production/changes/`,
-                    "POST",
-                    payload,
-                    token,
+                await api.post(
+                    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/production/changes/",
+                    {
+                        path: scope,
+                        body: payload,
+                    },
                 );
             } else {
-                const proposal = { ...payload, reason: attempt.reason!.trim() };
-                await request(
-                    `${base}change-requests/production/`,
-                    "POST",
+                const proposal = {
+                    ...payload,
+                    reason: attempt.reason?.trim() ?? "",
+                };
+                await api.post(
+                    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/change-requests/production/",
                     {
-                        ...proposal,
-                        idempotency_key: proposalKey.forPayload(proposal),
+                        path: scope,
+                        body: {
+                            ...proposal,
+                            idempotency_key: proposalKey.forPayload(proposal),
+                        },
                     },
-                    token,
                 );
                 proposalKey.reset();
                 requestsChanged();
@@ -465,6 +496,14 @@ export function ProductionHistory({
             );
         }
     }
+    const unavailable = (row: Interval | undefined) => {
+        const code = canManage
+            ? row?.edit_unavailable_reason
+            : row?.proposal_unavailable_reason;
+        return code && t.has(`reasons.${code}`)
+            ? t(`reasons.${code}`)
+            : t("unavailable");
+    };
     const refreshButton = (
         <button
             className="button secondary production-refresh"
@@ -587,6 +626,17 @@ export function ProductionHistory({
                                 </span>
                             )}
                         </div>
+                        {!canManage &&
+                            rows.length > 0 &&
+                            !rows.some((row) => row.can_propose) && (
+                                <Notice>
+                                    {t("none_available", {
+                                        reason: unavailable(
+                                            mostFrequentReason(rows),
+                                        ),
+                                    })}
+                                </Notice>
+                            )}
                         {!rows.length ? (
                             <p>{t("no_intervals")}</p>
                         ) : (
@@ -710,8 +760,8 @@ export function ProductionHistory({
                                                                     </button>
                                                                 ) : (
                                                                     <span className="fine">
-                                                                        {t(
-                                                                            "unavailable",
+                                                                        {unavailable(
+                                                                            row,
                                                                         )}
                                                                     </span>
                                                                 )}
@@ -800,20 +850,17 @@ export function ProductionHistory({
                                                                                         ...editor,
                                                                                         status: "editing",
                                                                                         quality:
-                                                                                            event
-                                                                                                .target
-                                                                                                .value,
+                                                                                            qualityOf(
+                                                                                                event
+                                                                                                    .target
+                                                                                                    .value,
+                                                                                            ),
                                                                                         error: undefined,
                                                                                     },
                                                                                 )
                                                                             }
                                                                         >
-                                                                            {[
-                                                                                "valid",
-                                                                                "outage",
-                                                                                "curtailed",
-                                                                                "invalid",
-                                                                            ].map(
+                                                                            {QUALITIES.map(
                                                                                 (
                                                                                     quality,
                                                                                 ) => (
@@ -1086,10 +1133,9 @@ export function ProductionHistory({
                         {t("import_csv")}
                     </summary>
                     <ProductionImport
-                        base={base}
+                        scope={scope}
                         configuration={configuration}
                         timezone={timezone}
-                        token={token}
                         onSaved={() => {
                             setRevision((value) => value + 1);
                             onSaved();

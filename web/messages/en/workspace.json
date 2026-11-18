@@ -204,6 +204,9 @@
     },
     "Outages": {
         "plantOutages": "Plant outages",
+        "configurationRequired": "Outages can be reported once the plant configuration is approved.",
+        "capacityRequired": "Enter at least one available capacity, or choose unknown impact.",
+        "capacityCeiling": "At most {value} MW, the configured capacity.",
         "reportOutage": "Report outage",
         "howToReportAnOutage": "How to report an outage",
         "editOutage": "Edit outage",
@@ -452,6 +455,7 @@
         "beforeChange": "Before change",
         "unchanged": "Unchanged",
         "withdrawHelp": "To revise a submission, withdraw it and send a new one.",
-        "unread": "Unread outcome"
+        "unread": "Unread outcome",
+        "intervals": "{count, plural, one {# interval} other {# intervals}}"
     }
 }

@@ -28,7 +28,7 @@ export function allauthErrorBody(
         errors,
         ...errorBody(
             code,
-            errors[0].message,
+            errors[0]?.message ?? "",
             Object.keys(fields).length ? { fields } : {},
         ),
     };

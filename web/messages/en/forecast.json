@@ -351,6 +351,16 @@
         "interval_changed": "This interval changed and is no longer available. Your attempted value is preserved below. Cancel to choose a current interval.",
         "attempted_energy": "Attempted production for {interval} (MWh)",
         "unavailable": "Editing unavailable for this interval.",
+        "none_available": "Nothing on this day can be changed. {reason}",
+        "reasons": {
+            "configuration_unavailable": "The plant has no approved configuration.",
+            "configuration_not_current": "Values recorded under an earlier plant configuration cannot be changed.",
+            "configuration_mismatch": "Values recorded under another plant configuration cannot be changed here.",
+            "observation_overlap": "A saved value overlaps this period.",
+            "interval_not_completed": "Only completed intervals can be changed.",
+            "unsupported_interval": "Only whole half-hour or hourly intervals can be changed.",
+            "workspace_readonly": "Your role can view production but not change it."
+        },
         "download_csv": "Download CSV",
         "source_details": "Source and correction details",
         "source_policy": "EPİAŞ settlement injection is preferred, then provisional reported production. Missing values remain missing; zero means measured zero.",

@@ -38,7 +38,8 @@ ROOT = Path(__file__).resolve().parents[1]
 REVISION = "a" * 40
 BACKEND_IMAGE = "registry.example/backend@sha256:" + "1" * 64
 SUPPORT = {"postgres", "rabbitmq"}
-APPLICATION = {"gateway", "api", "web", "dispatcher", "worker", "notifications"}
+EDGE = {"gateway", "maintenance"}
+APPLICATION = {"api", "web", "dispatcher", "worker", "notifications"}
 FOREIGN_OBJECT = "postgres/2026/11/16/20261116T220000Z-prerelease-0123456789abcdef.dump"
 DEFERRED = (signal.SIGINT, signal.SIGTERM)
 
@@ -51,7 +52,7 @@ class FakeCommands:
         self.calls: list[list[str]] = []
         self.inputs: list[str] = []
         self.unservable = False
-        self.running = APPLICATION | SUPPORT
+        self.running = APPLICATION | EDGE | SUPPORT
         self.stuck: set[str] = set()
         self.live: dict[str, int] = {"accounts_tenant": 2, "django_migrations": 88}
         self.throwaway: dict[str, int] = {}
@@ -105,7 +106,7 @@ class FakeCommands:
             self.running -= set(command[command.index("stop") + 3 :]) - self.stuck
         elif "up" in command:
             named = set(command[command.index("--wait-timeout") + 2 :])
-            self.running |= named or APPLICATION | SUPPORT
+            self.running |= named or APPLICATION | EDGE | SUPPORT
         elif "pg_dump" in command:
             kwargs["stdout"].write(json.dumps(self.live).encode())
         elif "pg_restore" in command:
@@ -278,7 +279,7 @@ def full_start(commands: FakeCommands) -> int:
 def finish_release(commands: FakeCommands, host: Host) -> None:
     """What a successful install does: it migrates, starts and removes the marker."""
     commands.live = {"accounts_tenant": 1, "django_migrations": 89}
-    commands.running = APPLICATION | SUPPORT
+    commands.running = APPLICATION | EDGE | SUPPORT
     host.marker.unlink()
 
 
@@ -301,15 +302,15 @@ def test_prepare_blocks_drains_dumps_uploads_verifies_and_keeps_the_archive(
     assert archive.read_bytes() == uploads[name]
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     assert host.marker.exists()
-    assert commands.running == SUPPORT
+    assert commands.running == EDGE | SUPPORT
     stops = [call[call.index("stop") + 1 :] for call in commands.calls if "stop" in call]
     assert stops == [
         ["-t", "660", "dispatcher"],
         ["-t", "660", "worker", "notifications"],
-        ["-t", "100", "gateway", "api", "web"],
+        ["-t", "100", "api", "web"],
     ]
     assert commands.calls.index(["sync", "-f", str(host.marker)]) < commands.index(" stop ")
-    assert commands.index(" stop -t 100 gateway") < commands.index("pg_dump")
+    assert commands.index(" stop -t 100 api") < commands.index("pg_dump")
     listed = commands.calls[commands.index(" ps --services")]
     assert listed[-6:] == ["--status", "running", "--status", "restarting", "--status", "paused"]
     probe = commands.calls[0]
@@ -361,7 +362,7 @@ def test_prepare_refuses_when_the_site_is_not_ready(
     with pytest.raises(RefusedError, match="health/ready"):
         reset_database.prepare(host)
     assert not host.marker.exists()
-    assert commands.running == APPLICATION | SUPPORT
+    assert commands.running == APPLICATION | EDGE | SUPPORT
 
 
 @pytest.mark.parametrize("subcommand", ["prepare", "abort", "reset", "restore"])
@@ -578,7 +579,7 @@ def test_abort_starts_the_previous_release_and_clears_the_marker(
     prepared(host, uploads)
     reset_database.abort(host)
     assert not host.marker.exists()
-    assert commands.running == APPLICATION | SUPPORT
+    assert commands.running == APPLICATION | EDGE | SUPPORT
     # The previous release renders its own secrets: the failed release may have changed them.
     secrets = commands.calls.index(secrets_call(host))
     check = commands.index("api pyracast migrate --check")
@@ -598,7 +599,7 @@ def test_abort_stops_the_application_again_and_keeps_the_marker_when_readiness_f
     with pytest.raises(RuntimeError, match="did not answer ok"):
         reset_database.abort(host)
     assert host.marker.exists()
-    assert commands.running == SUPPORT
+    assert commands.running == EDGE | SUPPORT
     commands.ready = True
     reset_database.abort(host)
     assert not host.marker.exists()
@@ -649,12 +650,12 @@ def test_service_unit_failure_preserves_maintenance_for_retry(
     assert isinstance(failed.value.failure, subprocess.CalledProcessError)
     assert host.marker.read_text() == identity
     assert reset_database.current_session(host) is not None
-    assert commands.running == SUPPORT
+    assert commands.running == EDGE | SUPPORT
     commands.fail = None
     action()
     assert not host.marker.exists()
     assert not host.session.exists()
-    assert commands.running == APPLICATION | SUPPORT
+    assert commands.running == APPLICATION | EDGE | SUPPORT
 
 
 def test_abort_refuses_once_the_database_was_replaced(
@@ -663,7 +664,8 @@ def test_abort_refuses_once_the_database_was_replaced(
     name = prepared(host, uploads)
     reset_database.reset(host, name)
     calls = len(commands.calls)
-    with pytest.raises(RefusedError, match=f"restore --confirm {name}"):
+    changed = f"the database changed in this maintenance.* restore --confirm {name}"
+    with pytest.raises(RefusedError, match=changed):
         reset_database.abort(host)
     assert commands.calls[calls:] == []
     assert host.marker.exists()
@@ -692,7 +694,7 @@ def test_abort_stays_refused_when_restored_counts_differ(
         reset_database.restore(host, name)
     with pytest.raises(RefusedError, match=f"restore --confirm {name}"):
         reset_database.abort(host)
-    assert commands.running == SUPPORT
+    assert commands.running == EDGE | SUPPORT
 
 
 def test_abort_serves_the_new_database_after_a_successful_reset_release(
@@ -707,7 +709,7 @@ def test_abort_serves_the_new_database_after_a_successful_reset_release(
     fail_release(commands, host)
     reset_database.abort(host)
     assert commands.live == {"accounts_tenant": 1, "django_migrations": 89}
-    assert commands.running == APPLICATION | SUPPORT
+    assert commands.running == APPLICATION | EDGE | SUPPORT
     assert not host.marker.exists()
     assert "restore --confirm" not in capsys.readouterr().err
     reset_database.prepare(host)
@@ -943,8 +945,9 @@ def test_reset_purges_every_queue_recreates_the_database_and_checks_both_roles(
         "CREATE DATABASE pyracast",
     ]
     assert commands.index("purge_queue") < commands.index("DROP DATABASE")
-    bootstrap = next(script for script in commands.inputs if "REVOKE ALL ON DATABASE" in script)
-    assert "CREATE ROLE" not in bootstrap
+    assert (ROOT / "deploy/bootstrap.sql").read_text() in commands.inputs
+    applied = commands.calls[commands.index("--single-transaction")]
+    assert applied[applied.index("-d") + 1] == "pyracast"
     assert reset_database.ROLE_CHECK_SQL in commands.inputs
     connect = commands.calls[commands.index("run --rm --no-deps api")]
     assert connect[-1] == reset_database.CONNECT_CHECK
@@ -1072,12 +1075,40 @@ def test_restore_brings_back_the_kept_archive_with_owners_and_starts_the_previou
     assert order[0] > 0
     assert not host.marker.exists()
     assert not host.session.exists()
-    assert commands.running == APPLICATION | SUPPORT
+    assert commands.running == APPLICATION | EDGE | SUPPORT
     assert "serves again" in capsys.readouterr().out
     calls = len(commands.calls)
     with pytest.raises(RefusedError, match="only during maintenance"):
         reset_database.abort(host)
     assert len(commands.calls) == calls
+
+
+def test_restore_converges_provisioning_over_the_privileges_the_archive_brought_back(
+    host: Host, commands: FakeCommands, uploads: dict[str, bytes]
+) -> None:
+    name = prepared(host, uploads)
+    reset_database.reset(host, name)
+    calls = len(commands.calls)
+
+    reset_database.restore(host, name)
+
+    later = commands.calls[calls:]
+    restored = next(
+        position
+        for position, call in enumerate(later)
+        if "pg_restore" in call and "--no-owner" not in call
+    )
+    checked = next(
+        position for position, call in enumerate(later) if call[-1] == reset_database.ROLE_CHECK_SQL
+    )
+    bootstrap = (ROOT / "deploy/bootstrap.sql").read_text()
+    converged = [
+        position
+        for position, call in enumerate(later[restored:checked], restored)
+        if call[-1] == bootstrap
+    ]
+    assert len(converged) == 1
+    assert "--single-transaction" in later[converged[0]]
 
 
 def test_restore_keeps_the_site_stopped_when_restored_counts_differ(
@@ -1088,7 +1119,7 @@ def test_restore_keeps_the_site_stopped_when_restored_counts_differ(
     with pytest.raises(RuntimeError, match="django_migrations: expected 88, found None"):
         reset_database.restore(host, name)
     assert host.marker.exists()
-    assert commands.running == SUPPORT
+    assert commands.running == EDGE | SUPPORT
 
 
 def test_restore_refuses_another_object_once_reset_replaced_the_database(
@@ -1097,7 +1128,8 @@ def test_restore_refuses_another_object_once_reset_replaced_the_database(
     name = prepared(host, uploads)
     reset_database.reset(host, name)
     calls = len(commands.calls)
-    with pytest.raises(RefusedError, match=f"only {name} holds its data"):
+    changed = f"the database changed in this maintenance; only {name} holds the data"
+    with pytest.raises(RefusedError, match=changed):
         reset_database.restore(host, FOREIGN_OBJECT)
     assert commands.destructive_calls()[-1][-1] == "CREATE DATABASE pyracast"
     assert not any("pg_restore" in call for call in commands.calls[calls:])
@@ -1134,7 +1166,7 @@ def test_restore_keeps_the_site_in_maintenance_when_the_release_cannot_serve_the
     with pytest.raises(RuntimeError, match="cannot serve the restored database"):
         reset_database.restore(host, name)
     assert host.marker.exists()
-    assert commands.running == SUPPORT
+    assert commands.running == EDGE | SUPPORT
     with pytest.raises(RefusedError, match=f"restore --confirm {name}"):
         reset_database.abort(host)
 
@@ -1251,19 +1283,6 @@ def test_restore_refuses_a_download_that_differs_from_the_bucket_checksum(
     assert host.marker.exists()
 
 
-def test_database_bootstrap_keeps_only_the_statements_inside_the_database() -> None:
-    source = (ROOT / "deploy/bootstrap.sql").read_text()
-    statements = reset_database.database_bootstrap(source).splitlines()
-    assert statements == [
-        line
-        for line in source.splitlines()
-        if not line.startswith(("CREATE ROLE ", "GRANT pyracast_owner TO "))
-    ]
-    assert statements[1] == "BEGIN;"
-    assert statements[-1] == "COMMIT;"
-    assert len(source.splitlines()) - len(statements) == 3
-
-
 def test_host_configuration_selects_the_production_paths(tmp_path: Path) -> None:
     config = tmp_path / "host.json"
     config.write_text(
@@ -1316,18 +1335,18 @@ def test_command_line_reports_refusals_failures_and_the_next_step(
     error = capsys.readouterr().err
     assert "restore failed: The release started, but /health/ready/ did not answer ok." in error
     assert f"reset_database.py {config} restore --confirm {name} again" in error
-    assert commands.running == SUPPORT
+    assert commands.running == EDGE | SUPPORT
     commands.ready = True
     assert reset_database.main([config, "restore", "--confirm", name]) == 0
     assert not host.marker.exists()
 
 
 CLEANUP_HEADER = "Writing the maintenance marker back and stopping the application again"
-ORDERED_STOPS = [["dispatcher"], ["worker", "notifications"], ["gateway", "api", "web"]]
+ORDERED_STOPS = [["dispatcher"], ["worker", "notifications"], ["api", "web"]]
 STOP_POINTS = {
     "dispatcher stop": "dispatcher",
     "consumer stop": "worker, notifications",
-    "ingress stop": "gateway, api, web",
+    "ingress stop": "api, web",
 }
 STOP_SUMMARY = "Stop commands in the installer's order: "
 ARRIVED = "{} arrived after the start failed; every cleanup step was still attempted."
@@ -1342,7 +1361,7 @@ FAULT_POINTS: dict[str, Callable[[list[str], Host], bool]] = {
     "readiness": lambda call, _host: call[0] == "curl",
     "unit": lambda call, _host: call[:2] == ["systemctl", "start"],
     "marker sync": lambda call, host: call == ["sync", "-f", str(host.marker)],
-    "ingress stop": lambda call, _host: "stop" in call and "gateway" in call,
+    "ingress stop": lambda call, _host: "stop" in call and "web" in call,
     "dispatcher stop": lambda call, _host: "stop" in call and "dispatcher" in call,
     "consumer stop": lambda call, _host: "stop" in call and "worker" in call,
     "status": lambda call, _host: "ps" in call,
@@ -1476,7 +1495,7 @@ def inject_faults(
             "abort",
             {"unit": "failure", "ingress stop": "error"},
             "held",
-            {"gateway", "api", "web"},
+            {"api", "web"},
             1,
             id="shutdown-error",
         ),
@@ -1603,7 +1622,7 @@ def test_a_failed_start_attempts_the_shutdown_and_reports_the_state_it_observed(
     assert reset_database.main([str(host.config), *arguments]) == code
     assert stop_calls(attempted) == ORDERED_STOPS
     assert commands.running & APPLICATION == (running or set())
-    assert commands.running == SUPPORT | (running or set())
+    assert commands.running == EDGE | SUPPORT | (running or set())
     assert host.marker.is_file() == (marker != "missing")
     if host.marker.is_file():
         assert host.marker.read_bytes().decode() == identity
@@ -1710,7 +1729,7 @@ def handlers() -> list[object]:
         pytest.param(CLEANUP_HEADER, "SIGINT", id="sigint-at-the-cleanup-header"),
         pytest.param("Stopping dispatcher", "SIGINT", id="sigint-after-the-marker-restoration"),
         pytest.param("Stopping worker", "SIGINT", id="sigint-between-two-stops"),
-        pytest.param("Stopping gateway", "SIGTERM", id="sigterm-before-the-last-stop"),
+        pytest.param("Stopping api", "SIGTERM", id="sigterm-before-the-last-stop"),
     ],
 )
 def test_a_failed_start_shuts_down_despite_a_failing_console_or_a_signal(
@@ -1730,7 +1749,7 @@ def test_a_failed_start_shuts_down_despite_a_failing_console_or_a_signal(
     signalled = fault.startswith("SIG")
     assert code == (130 if signalled else 1)
     assert cleanup_stops(commands) == ORDERED_STOPS
-    assert commands.running == SUPPORT
+    assert commands.running == EDGE | SUPPORT
     assert handlers() == [raise_interrupt] * 2
     assert host.marker.read_text() == identity
     error = capsys.readouterr().err
@@ -1763,7 +1782,7 @@ def test_a_failed_start_keeps_its_exit_status_while_the_report_is_written(
     console = FailingConsole("abort failed", fault)
     assert run_abort(host, monkeypatch, contextlib.redirect_stderr(console)) == code
     assert cleanup_stops(commands) == ORDERED_STOPS
-    assert commands.running == SUPPORT
+    assert commands.running == EDGE | SUPPORT
     assert handlers() == [raise_interrupt] * 2
     assert host.marker.read_text() == identity
     report = console.getvalue()
@@ -1801,7 +1820,7 @@ def test_a_sigint_right_after_the_handlers_are_restored_keeps_the_report(
     assert delivered == [signal.SIGINT]
     assert handlers() == [raise_interrupt] * 2
     assert stop_calls(attempted) == ORDERED_STOPS
-    assert commands.running == SUPPORT | {"worker"}
+    assert commands.running == EDGE | SUPPORT | {"worker"}
     assert not host.marker.exists()
     error = capsys.readouterr().err
     assert error.startswith("abort failed: ")

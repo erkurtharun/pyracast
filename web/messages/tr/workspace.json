@@ -204,6 +204,9 @@
     },
     "Outages": {
         "plantOutages": "Santral kesintileri",
+        "configurationRequired": "Kesinti, santral yapılandırması onaylandıktan sonra bildirilebilir.",
+        "capacityRequired": "En az bir kullanılabilir kapasite girin veya etkiyi bilinmiyor olarak seçin.",
+        "capacityCeiling": "En fazla {value} MW, yapılandırılmış kapasite.",
         "reportOutage": "Kesinti bildir",
         "howToReportAnOutage": "Kesinti nasıl bildirilir",
         "editOutage": "Kesintiyi düzenle",
@@ -452,6 +455,7 @@
         "beforeChange": "Değişiklik öncesi",
         "unchanged": "Değişmedi",
         "withdrawHelp": "Başvuruyu değiştirmek için geri çekip yeniden gönderin.",
+        "intervals": "{count, plural, other {# aralık}}",
         "unread": "Okunmamış sonuç"
     }
 }

@@ -73,6 +73,23 @@ test("retry hints and request references are kept", () => {
     );
 });
 
+test("the gateway's maintenance notice is a coded error with its retry delay", () => {
+    const error = errorFromResponse(
+        503,
+        errorBody(
+            "maintenance",
+            "Pyracast is being updated. Try again in a minute; your data is safe.",
+            { retry_after: 60 },
+        ),
+    );
+    expect(error.code).toBe("maintenance");
+    expect(error.message).toBe(
+        "Pyracast is being updated. Try again in a minute; your data is safe.",
+    );
+    expect(error.retryAfter).toBe(60);
+    expect(error.status).toBe(503);
+});
+
 for (const [name, body] of [
     ["an empty body", null],
     ["a gateway page", "<html>Bad gateway</html>"],
@@ -146,7 +163,7 @@ test.describe("authentication requests", () => {
                 request_id: "0123456789abcdef0123456789abcdef",
             }),
         );
-        const error = await authRequest("auth/session", "GET", "token").catch(
+        const error = await authRequest("auth/session", "GET").catch(
             (failure: unknown) => failure,
         );
         expect(error).toBeInstanceOf(ApiError);
@@ -171,12 +188,9 @@ test.describe("authentication requests", () => {
                 fields: { email: "Enter an email." },
             }),
         });
-        const error = await authRequest(
-            "auth/login",
-            "POST",
-            "token",
-            {},
-        ).catch((failure: unknown) => failure);
+        const error = await authRequest("auth/login", "POST", {}).catch(
+            (failure: unknown) => failure,
+        );
         expect(error).toBeInstanceOf(ApiError);
         expect(error).toMatchObject({
             status: 400,
@@ -194,7 +208,6 @@ test.describe("authentication requests", () => {
         const error = await authRequest(
             "auth/provider/signup",
             "POST",
-            "token",
             {},
         ).catch((failure: unknown) => failure);
         expect(error).toMatchObject({
@@ -211,19 +224,16 @@ test.describe("authentication requests", () => {
             meta: { is_authenticated: false },
             ...errorBody("not_authenticated", "Sign in to continue."),
         });
-        const result = await authRequest("auth/session", "GET", "token");
+        const result = await authRequest("auth/session", "GET");
         expect(result.data?.flows).toEqual([{ id: "login" }]);
         expect(result.meta?.is_authenticated).toBe(false);
     });
 
     test("a body without the contract keys names the status", async () => {
         answer(400, { status: 400, errors: allauthErrors });
-        const error = await authRequest(
-            "auth/login",
-            "POST",
-            "token",
-            {},
-        ).catch((failure: unknown) => failure);
+        const error = await authRequest("auth/login", "POST", {}).catch(
+            (failure: unknown) => failure,
+        );
         expect(error).toMatchObject({
             status: 400,
             code: null,

@@ -3,7 +3,9 @@ import { useTranslations, useLocale, useFormatter } from "next-intl";
 import { ScrollRegion } from "./scroll-region";
 import { useEffect, useId, useRef, useState } from "react";
 import type { components } from "@/lib/schema";
-import { request, type Region } from "@/lib/api";
+import type { Region, RegionScope } from "@/lib/api";
+import { api } from "@/lib/api/client";
+import { isLanguage } from "@/i18n/language";
 import { ActionForm, Empty, Notice, Tag, useResource } from "./ui";
 type ReminderSchedule = components["schemas"]["ReminderOutput"];
 function useRowFocus(rows: { id: number }[]) {
@@ -73,9 +75,9 @@ function DeliveryTimes({
                                 index: index + 1,
                             })}
                             onClick={() => {
-                                focusRow(
-                                    (rows[index + 1] ?? rows[index - 1]).id,
-                                );
+                                const neighbour =
+                                    rows[index + 1] ?? rows[index - 1];
+                                if (neighbour) focusRow(neighbour.id);
                                 setRows(
                                     rows.filter((item) => item.id !== row.id),
                                 );
@@ -216,9 +218,9 @@ function RecipientFields({ data }: { data: ReminderSchedule }) {
                                 index: index + 1,
                             })}
                             onClick={() => {
-                                focusRow(
-                                    (rows[index + 1] ?? rows[index - 1]).id,
-                                );
+                                const neighbour =
+                                    rows[index + 1] ?? rows[index - 1];
+                                if (neighbour) focusRow(neighbour.id);
                                 setRows(
                                     rows.filter((item) => item.id !== row.id),
                                 );
@@ -254,16 +256,15 @@ function RecipientFields({ data }: { data: ReminderSchedule }) {
     );
 }
 type ReminderProps = {
-    base: string;
+    scope: RegionScope;
     region: Region;
-    token: string;
 };
 
 export function Reminders(props: ReminderProps) {
     const [version, setVersion] = useState(0);
     return (
         <ReminderSettings
-            key={`${props.base}-${version}`}
+            key={`${props.scope.region_id}-${version}`}
             {...props}
             onSaved={() => setVersion((current) => current + 1)}
         />
@@ -271,9 +272,8 @@ export function Reminders(props: ReminderProps) {
 }
 
 function ReminderSettings({
-    base,
+    scope,
     region,
-    token,
     onSaved,
 }: ReminderProps & { onSaved: () => void }) {
     const t = useTranslations("Reminders");
@@ -320,7 +320,10 @@ function ReminderSettings({
         no_saved_forecast: t("noSavedForecast"),
     };
 
-    const resource = useResource<ReminderSchedule>(`${base}reminders/`);
+    const resource = useResource(
+        "/api/tenants/{tenant_id}/regions/{region_id}/reminders/",
+        { path: scope },
+    );
     if (resource.loading)
         return <p role="status">{t("loadingEmailReminders")}</p>;
     if (resource.error) return <Notice error>{resource.error}</Notice>;
@@ -389,22 +392,26 @@ function ReminderSettings({
                             ).size !== recipients.length
                         )
                             throw new Error(t("duplicateEmail"));
-                        await request(
-                            `${base}reminders/`,
-                            "PUT",
+                        const language = String(form.get("language"));
+                        await api.put(
+                            "/api/tenants/{tenant_id}/regions/{region_id}/reminders/",
                             {
-                                enabled,
-                                recipients,
-                                include_workspace_members:
-                                    includeWorkspaceMembers,
-                                language: form.get("language"),
-                                times: [...new Set(times)].sort(
-                                    (a, b) =>
-                                        Number(a.replace(":", "")) -
-                                        Number(b.replace(":", "")),
-                                ),
+                                path: scope,
+                                body: {
+                                    enabled,
+                                    recipients,
+                                    include_workspace_members:
+                                        includeWorkspaceMembers,
+                                    language: isLanguage(language)
+                                        ? language
+                                        : "en",
+                                    times: [...new Set(times)].sort(
+                                        (a, b) =>
+                                            Number(a.replace(":", "")) -
+                                            Number(b.replace(":", "")),
+                                    ),
+                                },
                             },
-                            token,
                         );
                         onSaved();
                     }}

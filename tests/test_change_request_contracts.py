@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -385,5 +385,193 @@ def test_production_review_query_count_does_not_grow_with_existing_head_items(
         assert len(context) == count
         assert all(item["current"]["energy_mwh"] == 1 for item in context)
         assert all(item["proposed"]["energy_mwh"] == 2 for item in context)
+        query_counts.append(len(captured))
+    assert query_counts == [query_counts[0]] * 3
+
+
+TRIAGE_FIELDS = (
+    "timezone",
+    "item_count",
+    "period_start",
+    "period_end",
+    "incident_action",
+    "incident_title",
+)
+
+
+def _inbox(case: RequestCase) -> tuple[Client, dict[int, dict[str, Any]]]:
+    client = Client()
+    client.force_login(case.system.member)
+    response = client.get(f"/api/tenants/{case.system.tenant.pk}/change-requests/?scope=pending")
+    assert response.status_code == 200
+    return client, {row["id"]: row for row in response.json()["results"]}
+
+
+def _moment(value: str | None) -> datetime | None:
+    return None if value is None else datetime.fromisoformat(value)
+
+
+def test_inbox_summaries_name_the_period_item_count_and_outage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    case = make_request_case(monkeypatch)
+    configuration_id = case.plant.current_configuration_id
+    assert configuration_id is not None
+    production = submit_production(
+        *case.scope(case.proposer),
+        configuration_id=configuration_id,
+        unit="MWh",
+        changes=[
+            ProductionChange(NOW - timedelta(hours=3), NOW - timedelta(hours=2), None, "set", 1),
+            ProductionChange(NOW - timedelta(hours=2), NOW - timedelta(hours=1), None, "set", 2),
+        ],
+        reason="Verified meter readings",
+        idempotency_key=uuid4(),
+    )
+    created = submit_incident(
+        *case.scope(case.proposer),
+        action="create",
+        idempotency_key=uuid4(),
+        values={**incident_values(), "starts_at": NOW - timedelta(hours=6)},
+    )
+    ongoing = save_incident(*case.scope(case.system.member), **incident_values())
+    updated = submit_incident(
+        *case.scope(case.proposer),
+        action="update",
+        idempotency_key=uuid4(),
+        values={**incident_values(), "title": "Inverter replaced"},
+        incident_id=ongoing.pk,
+        expected_revision=ongoing.revision,
+    )
+    resolved = submit_incident(
+        *case.scope(case.proposer),
+        action="resolve",
+        idempotency_key=uuid4(),
+        ends_at=NOW - timedelta(minutes=30),
+        incident_id=ongoing.pk,
+        expected_revision=ongoing.revision,
+    )
+    cancelled = submit_incident(
+        *case.scope(case.proposer),
+        action="cancel",
+        idempotency_key=uuid4(),
+        incident_id=ongoing.pk,
+        expected_revision=ongoing.revision,
+    )
+    timezone_name = case.system.region.timezone
+    expected = {
+        production.pk: (2, NOW - timedelta(hours=3), NOW - timedelta(hours=1), None, None),
+        created.pk: (1, NOW - timedelta(hours=6), None, "create", "Inverter maintenance"),
+        updated.pk: (1, ongoing.starts_at, None, "update", "Inverter replaced"),
+        resolved.pk: (
+            1,
+            ongoing.starts_at,
+            NOW - timedelta(minutes=30),
+            "resolve",
+            "Inverter maintenance",
+        ),
+        cancelled.pk: (1, ongoing.starts_at, None, "cancel", "Inverter maintenance"),
+    }
+    client, rows = _inbox(case)
+    assert rows.keys() == expected.keys()
+    for request_id, (count, start, end, action, title) in expected.items():
+        summary = rows[request_id]
+        assert summary["timezone"] == timezone_name
+        assert summary["item_count"] == count
+        assert _moment(summary["period_start"]) == start
+        assert _moment(summary["period_end"]) == end
+        assert summary["incident_action"] == action
+        assert summary["incident_title"] == title
+        detail = client.get(f"/api/tenants/{case.system.tenant.pk}/change-requests/{request_id}/")
+        assert {field: detail.json()[field] for field in TRIAGE_FIELDS} == {
+            field: summary[field] for field in TRIAGE_FIELDS
+        }
+
+
+def test_resolve_and_cancel_summaries_describe_the_revision_they_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    case = make_request_case(monkeypatch)
+    ongoing = save_incident(*case.scope(case.system.member), **incident_values())
+    resolved = submit_incident(
+        *case.scope(case.proposer),
+        action="resolve",
+        idempotency_key=uuid4(),
+        ends_at=NOW - timedelta(minutes=30),
+        incident_id=ongoing.pk,
+        expected_revision=ongoing.revision,
+    )
+    cancelled = submit_incident(
+        *case.scope(case.proposer),
+        action="cancel",
+        idempotency_key=uuid4(),
+        incident_id=ongoing.pk,
+        expected_revision=ongoing.revision,
+    )
+    save_incident(
+        *case.scope(case.system.member),
+        incident_id=ongoing.pk,
+        expected_revision=ongoing.revision,
+        **{**incident_values(), "title": "Grid outage", "starts_at": NOW - timedelta(minutes=20)},
+    )
+    client, rows = _inbox(case)
+    for request, end, action in (
+        (resolved, NOW - timedelta(minutes=30), "resolve"),
+        (cancelled, None, "cancel"),
+    ):
+        summary = rows[request.pk]
+        assert summary["incident_action"] == action
+        assert summary["incident_title"] == "Inverter maintenance"
+        assert _moment(summary["period_start"]) == ongoing.starts_at
+        assert _moment(summary["period_end"]) == end
+        detail = client.get(case.detail_path(request)).json()
+        assert {field: detail[field] for field in TRIAGE_FIELDS} == {
+            field: summary[field] for field in TRIAGE_FIELDS
+        }
+
+
+def test_inbox_query_count_does_not_grow_with_items(monkeypatch: pytest.MonkeyPatch) -> None:
+    case = make_request_case(monkeypatch)
+    configuration_id = case.plant.current_configuration_id
+    assert configuration_id is not None
+    client = Client()
+    client.force_login(case.system.member)
+    path = f"/api/tenants/{case.system.tenant.pk}/change-requests/?scope=pending"
+    assert client.get(path).status_code == 200
+    query_counts = []
+    for round_number in range(3):
+        end = NOW - timedelta(hours=4 * round_number)
+        submit_production(
+            *case.scope(case.proposer),
+            configuration_id=configuration_id,
+            unit="MWh",
+            changes=[
+                ProductionChange(
+                    end - timedelta(hours=2), end - timedelta(hours=1), None, "set", 1
+                ),
+                ProductionChange(end - timedelta(hours=1), end, None, "set", 1),
+            ],
+            reason="Verified meter readings",
+            idempotency_key=uuid4(),
+        )
+        incident = save_incident(
+            *case.scope(case.system.member),
+            **{
+                **incident_values(),
+                "starts_at": end - timedelta(hours=3),
+                "ends_at": end - timedelta(hours=2),
+            },
+        )
+        submit_incident(
+            *case.scope(case.proposer),
+            action="cancel",
+            idempotency_key=uuid4(),
+            incident_id=incident.pk,
+            expected_revision=incident.revision,
+        )
+        with CaptureQueriesContext(connection) as captured:
+            response = client.get(path)
+        assert response.status_code == 200
+        assert len(response.json()["results"]) == 2 * (round_number + 1)
         query_counts.append(len(captured))
     assert query_counts == [query_counts[0]] * 3

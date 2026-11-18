@@ -20,7 +20,7 @@ from django.views.generic import RedirectView
 from rest_framework.exceptions import ValidationError as APIValidationError
 
 from pyracast.accounts.authorization import has_platform_admin_session
-from pyracast.accounts.language import explicit_language, save_user_language, set_language_cookie
+from pyracast.accounts.language import save_user_language, set_language_cookie
 from pyracast.accounts.models import Tenant
 from pyracast.admin_forms import BindingActionForm, EpiasConnectionForm, ProviderSetupForm
 from pyracast.admin_historical import historical_import
@@ -49,6 +49,7 @@ from pyracast.forecasts.models import (
     ForecastResult,
     RequestAttempt,
 )
+from pyracast.languages import explicit_language
 from pyracast.metering.models import EpiasConnection
 from pyracast.metering.operations import connect_epias, disconnect_epias
 from pyracast.notifications.models import NotificationDelivery, NotificationSettings

@@ -1,4 +1,5 @@
 import ast
+import io
 import ipaddress
 import itertools
 import re
@@ -13,10 +14,20 @@ import yaml
 from allauth.account.models import EmailAddress
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.test import Client
 from django.urls import URLPattern, URLResolver
 from dramatiq.brokers.stub import StubBroker
 
-from deploy import authorize_gmail, backup, host, release_record, reset_database, watchdog
+from deploy import (
+    authorize_gmail,
+    backup,
+    host,
+    release_state,
+    reset_database,
+    runtime_secrets,
+    watchdog,
+)
+from pyracast import maintenance
 from pyracast.accounts.authentication import email_identity
 from pyracast.accounts.models import Membership, WorkspaceRole
 from pyracast.forecasts.historical_upload import MAX_UPLOAD_BYTES
@@ -36,6 +47,7 @@ DEPLOY = ROOT / "deploy"
 TERRAFORM = ROOT / "infra" / "terraform"
 WORKFLOWS = ROOT / ".github" / "workflows"
 SUPPORT_SERVICES = {"postgres", "rabbitmq"}
+EDGE_SERVICES = {"gateway", "maintenance"}
 
 
 def text(path: Path) -> str:
@@ -67,10 +79,9 @@ def gateway_environment() -> dict[str, str]:
     return environment
 
 
-def stop_groups(script: str, command: str) -> list[tuple[int, tuple[str, ...]]]:
-    pattern = re.compile(
-        rf'^\s*"\$\{{{command}\[@\]\}}" stop -t (\d+) ([a-z ]+?)(?: \|\| stopped=0)?$'
-    )
+def stop_groups(script: str, *, cleanup: bool) -> list[tuple[int, tuple[str, ...]]]:
+    suffix = r" \|\| stopped=0" if cleanup else ""
+    pattern = re.compile(rf'^\s*"\$\{{(?:old|compose)\[@\]\}}" stop -t (\d+) ([a-z ]+?){suffix}$')
     return [
         (int(match[1]), tuple(match[2].split()))
         for line in script.splitlines()
@@ -300,6 +311,28 @@ def test_watchdog_supervises_every_long_running_compose_service() -> None:
 
 
 @pytest.mark.django_db
+def test_smoke_accepts_the_anonymous_session_contract(
+    client: Client,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    response = client.get("/api/session/")
+    assert response.status_code == 200
+    probe = re.search(
+        r"^csrf_token=.*?python -c '\n(.*?)\n'\)", text(DEPLOY / "smoke.sh"), re.M | re.S
+    )
+    assert probe
+    fixture = tmp_path / "smoke_session.py"
+    fixture.write_text(probe[1], encoding="utf-8")
+    monkeypatch.setattr("sys.stdin", io.StringIO(response.content.decode()))
+
+    runpy.run_path(str(fixture))
+
+    assert capsys.readouterr().out.strip() == response.json()["csrf_token"]
+
+
+@pytest.mark.django_db
 def test_smoke_sign_in_uses_a_verified_email_identity(tmp_path: Path) -> None:
     script = text(DEPLOY / "smoke.sh")
     imports = re.search(r"^from pyracast.accounts.models import .*$", script, re.M)
@@ -324,12 +357,16 @@ def test_smoke_sign_in_uses_a_verified_email_identity(tmp_path: Path) -> None:
 
 def test_release_drains_every_application_service_within_its_stop_grace_period() -> None:
     script = text(DEPLOY / "install-release.sh")
-    drain = stop_groups(script, "old")
+    drain = stop_groups(script, cleanup=False)
     services = compose_services()
 
-    assert stop_groups(script, "compose") == drain
+    cleanup = stop_groups(script, cleanup=True)
+    # For a previous helper that refuses to run beside it, the failure path stops the notice too.
+    beside_helper = (drain[-1][0], ("gateway", "maintenance", *drain[-1][1]))
+    assert [group for group in cleanup if group != beside_helper] == drain
+    assert beside_helper in cleanup
     assert sorted(name for _, group in drain for name in group) == sorted(
-        long_running_services() - SUPPORT_SERVICES
+        long_running_services() - SUPPORT_SERVICES - EDGE_SERVICES
     )
     for timeout, group in drain:
         for name in group:
@@ -650,7 +687,9 @@ def test_release_ships_the_watchdog_and_backup_units_and_the_host_keeps_its_own(
 def test_watchdog_unit_outlasts_its_deadline_and_runs_while_a_release_is_blocked() -> None:
     unit = shipped_unit("pyracast-watchdog.service")
     application = systemd_unit("pyracast.service")
-    drain = max(timeout for timeout, _ in stop_groups(text(DEPLOY / "install-release.sh"), "old"))
+    drain = max(
+        timeout for timeout, _ in stop_groups(text(DEPLOY / "install-release.sh"), cleanup=False)
+    )
 
     assert int(unit["TimeoutStartSec"][0]) >= watchdog.DEADLINE_SECONDS + 60
     assert unit["ConditionPathExists"] == ["/opt/pyracast/current/deploy/watchdog.py"]
@@ -667,6 +706,15 @@ def test_hourly_backup_unit_leaves_the_release_lock_and_block_to_the_backup() ->
     assert unit["ConditionPathExists"] == ["/opt/pyracast/current/deploy/backup.py"]
     budget = int(unit["TimeoutStartSec"][0])
     assert budget > backup.HOURLY_LOCK_WAIT_SECONDS + backup.DUMP_TIMEOUT_SECONDS
+
+
+def test_a_deliberately_skipped_backup_succeeds_and_every_other_exit_fails_the_unit() -> None:
+    unit = shipped_unit("pyracast-backup.service")
+
+    # systemd counts 0 and these statuses as success; everything else leaves the unit failed.
+    assert unit["SuccessExitStatus"] == [str(backup.SKIPPED_EXIT_STATUS)]
+    assert backup.SKIPPED_EXIT_STATUS not in (0, 1, 2, 143)
+    assert text(DEPLOY / "backup.py").count("SKIPPED_EXIT_STATUS") == 2
 
 
 def test_host_paths_agree_between_scripts_units_and_helpers() -> None:
@@ -726,54 +774,81 @@ def test_a_silent_watchdog_is_alerted() -> None:
 
 
 def test_release_drains_producers_and_workers_while_the_site_still_serves() -> None:
-    drain = stop_groups(text(DEPLOY / "install-release.sh"), "old")
+    drain = stop_groups(text(DEPLOY / "install-release.sh"), cleanup=False)
 
     assert [group for _, group in drain] == [
         ("dispatcher",),
         ("worker", "notifications"),
-        ("gateway", "api", "web"),
+        ("api", "web"),
     ]
 
 
 def test_reset_tool_stops_the_application_in_the_installers_drain_order() -> None:
-    drain = stop_groups(text(DEPLOY / "install-release.sh"), "old")
+    drain = stop_groups(text(DEPLOY / "install-release.sh"), cleanup=False)
 
     assert [(int(timeout), group) for timeout, group in reset_database.STOP_ORDER] == drain
 
 
-def test_failed_maintenance_names_the_recorded_prerelease_object_for_the_reset_tool() -> None:
+def test_an_upgrade_records_the_maintenance_recovery_point_right_before_migrate() -> None:
     script = text(DEPLOY / "install-release.sh")
-    deployment = text(ROOT / "docs" / "DEPLOYMENT.md")
-    tool = "python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json"
-    record = f'"$release/{release_record.RECORD}"'
-    dump = script.index("--kind prerelease")
-
-    assert script.index(record) < dump < script.index(record, dump)
-    assert script.index(record, dump) < script.index("run --rm --no-deps migrate\n")
-    assert f"recovery='{tool}'" in script
-    assert "$recovery abort" in script
-    assert "$recovery restore --confirm $prerelease_object" in script
-    assert f"{tool} abort" in deployment
-    assert f"{tool} restore --confirm OBJECT" in deployment
-    assert f"/opt/pyracast/releases/<sha>-<hash>/{release_record.RECORD}" in deployment
-    assert "last-backup.json` and run" not in deployment
-
-
-def test_installer_takes_the_recorded_object_only_from_the_validating_reader() -> None:
-    script = text(DEPLOY / "install-release.sh")
-    reader = (
-        f'if ! candidate=$(python3 "$release/deploy/release_record.py" '
-        f'"$release/{release_record.RECORD}"); then'
+    record = script.index(
+        "if [[ -n $previous ]]; then\n"
+        '  python3 "$release/deploy/release_record.py" /etc/pyracast/host.json record '
+        f'"$release/{host.PRERELEASE_RECORD}"\n'
+        "  recorded=1\n"
+        "fi\n"
+        '"${compose[@]}" run --rm --no-deps migrate\n'
     )
 
-    assert re.findall(r"prerelease_object=\S*", script) == [
-        "prerelease_object=",
-        "prerelease_object=$candidate",
-    ]
-    assert reader in script
-    assert script.index(reader) < script.index("prerelease_object=$candidate")
-    assert script.count(release_record.RECORD) == script.count(f"$release/{release_record.RECORD}")
-    assert '["object"]' not in script
+    assert script.index("--kind prerelease") < script.index('"${compose[@]}" up -d rabbitmq')
+    assert script.index('"${compose[@]}" up -d rabbitmq') < record
+    assert script.count("release_record.py") == 2
+    assert script.count(host.PRERELEASE_RECORD) == 2
+    assert (
+        f'rm -f "$release/{host.PRERELEASE_RECORD}"' in script[: script.index("--kind prerelease")]
+    )
+
+
+def test_every_printed_recovery_reads_the_maintenance_session() -> None:
+    script = text(DEPLOY / "install-release.sh")
+    path = failure_path()
+    printed = (
+        '  elif ! python3 "$release/deploy/release_record.py" /etc/pyracast/host.json recovery >&2;'
+        " then\n"
+    )
+
+    assert printed in path
+    assert path.index("No release served before this one") < path.index(printed)
+    for retired in (
+        "$recovery",
+        "prerelease_object",
+        "record_unreadable",
+        "migrating",
+        "candidate",
+    ):
+        assert retired not in script
+    assert "restore --confirm" not in script
+    assert " abort" not in script
+
+
+def test_the_printed_recovery_runs_the_helper_in_current_with_the_host_configuration(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "host.json"
+    config.write_text('{"backup_bucket": "pyracast-backups", "runtime_secret_version": "1"}')
+    deployment = text(ROOT / "docs" / "DEPLOYMENT.md")
+    tool = "python3 /opt/pyracast/current/deploy/reset_database.py /etc/pyracast/host.json"
+
+    loaded = reset_database.load_host(config)
+
+    assert (loaded.config, loaded.release, loaded.marker) == (
+        config,
+        host.CURRENT_RELEASE,
+        host.RELEASE_BLOCKED,
+    )
+    assert f"{tool} abort" in deployment
+    assert f"{tool} restore --confirm OBJECT" in deployment
+    assert "last-backup.json` and run" not in deployment
 
 
 def test_a_release_that_cannot_get_the_lock_says_nothing_changed() -> None:
@@ -786,3 +861,235 @@ def test_a_release_that_cannot_get_the_lock_says_nothing_changed() -> None:
     assert "backup" in wait[2]
     assert "nothing was changed" in wait[2]
     assert script.index(wait[0]) < script.index("mkdir -p /run/pyracast")
+
+
+def installer() -> str:
+    return text(DEPLOY / "install-release.sh")
+
+
+def test_gateway_serves_the_maintenance_notice_only_while_the_application_is_unreachable() -> None:
+    routes = yaml.safe_load(text(DEPLOY / "routes.yml"))["http"]
+    services = compose_services()
+    queries = {}
+    for name in ("backend", "frontend"):
+        (notice,) = [
+            middleware
+            for middleware in routes["routers"][name]["middlewares"]
+            if "errors" in routes["middlewares"][middleware]
+        ]
+        errors = routes["middlewares"][notice]["errors"]
+        assert errors["status"] == ["502"]
+        assert errors["statusRewrites"] == {"502": 503}
+        assert errors["service"] == "maintenance"
+        queries[name] = errors["query"]
+
+    assert queries == {"backend": "/api", "frontend": "/page"}
+    assert routes["services"]["maintenance"]["loadBalancer"]["servers"] == [
+        {"url": f"http://maintenance:{maintenance.PORT}"}
+    ]
+    assert services["gateway"]["depends_on"] == {"maintenance": {"condition": "service_healthy"}}
+    assert services["maintenance"]["image"] == services["api"]["image"]
+    assert "from pyracast.maintenance import main" in services["maintenance"]["command"][-1]
+    assert "env_file" not in services["maintenance"]
+
+
+def test_the_application_never_answers_the_status_the_gateway_reserves_for_maintenance() -> None:
+    sources = "\n".join(text(path) for path in (ROOT / "src" / "pyracast").rglob("*.py"))
+
+    assert "status=502" not in sources
+    assert "HTTP_502" not in sources
+
+
+def test_each_release_reads_the_secrets_staged_for_it() -> None:
+    compose = text(DEPLOY / "compose.yaml")
+    script = installer()
+    variables = set(re.findall(r"\$\{([A-Z]+_ENV_FILE):-", compose))
+    written = set(re.findall(r"'([A-Z]+_ENV_FILE)': f'\{secrets\}/[a-z]+\.env'", script))
+
+    assert variables == {
+        "RUNTIME_ENV_FILE",
+        "BROKER_ENV_FILE",
+        "DATABASE_ENV_FILE",
+        "MIGRATION_ENV_FILE",
+    }
+    assert written == variables
+    assert release_state.SECRETS == runtime_secrets.SECRETS
+    assert f'secrets="{runtime_secrets.SECRETS.as_posix()}/${{release##*/}}"' in script
+    assert "/run/pyracast/runtime.env" not in script
+    assert "environment_files" not in script
+
+
+def test_the_new_gateway_answers_with_the_notice_before_api_and_web_stop() -> None:
+    script = installer()
+    edge = '"${compose[@]}" up -d --no-deps --wait --wait-timeout 180 maintenance gateway'
+    drain = script.index('  "${old[@]}" stop -t 660 worker notifications\n')
+    stop = script.index('  "${compose[@]}" stop -t 100 api web\n')
+    cleanup = script.index('"${compose[@]}" stop -t 100 api web || stopped=0')
+
+    assert drain < script.index(f"  {edge}\n") < stop
+    assert script.index(f"{edge} || noticed=0") < cleanup
+    assert '"${old[@]}" stop -t 100' not in script
+
+
+def preflight() -> str:
+    script = installer()
+    return script[script.index("trap cleanup EXIT\n") : script.index("\nbegin_maintenance\n")]
+
+
+def function_body(script: str, name: str) -> str:
+    start = script.index(f"{name}() {{\n")
+    return script[start : script.index("\n}\n", start)]
+
+
+def test_preflight_changes_nothing_the_serving_release_reads() -> None:
+    body = preflight()
+
+    assert '"${old[@]}"' not in body
+    assert "switch_runtime" not in body
+    assert "switch-runtime" not in body
+    assert "/opt/pyracast/current/deploy/runtime_secrets.py" not in body
+    assert 'python3 "$release/deploy/bootstrap_database.py" converge "$release" "$secrets"' in body
+
+
+def test_staged_secrets_that_cannot_read_the_stored_secrets_refuse_before_maintenance() -> None:
+    body = preflight()
+    check = '"${compose[@]}" run --rm --no-deps migrate pyracast check_secrets || {'
+
+    assert check in body
+    refusal = body[body.index(check) : body.index("\n}\n", body.index(check))]
+    assert "status=$?" in refusal
+    assert 'exit "$status"' in refusal
+    assert "api pyracast check_secrets" not in installer()
+
+
+def failure_path() -> str:
+    script = installer()
+    return script[
+        script.index("elif (( maintenance_started == 1 )); then") : script.index(
+            "trap cleanup EXIT"
+        )
+    ]
+
+
+def test_the_normal_path_switches_the_runtime_role_once_the_serving_api_and_web_stopped() -> None:
+    script = installer()
+    body = script[script.index("\nbegin_maintenance\n") :]
+    switch = body.index("\nswitch_runtime\nswitched=1\nprobe_database api\n")
+
+    assert body.index('  "${compose[@]}" stop -t 100 api web\n') < switch
+    assert switch < body.index("--kind prerelease")
+    assert script.count("\nswitch_runtime\n") == 1
+    assert function_body(script, "switch_runtime").endswith('switch-runtime "$release" "$secrets"')
+
+
+def test_the_failure_path_switches_and_resumes_only_after_every_stop_succeeded() -> None:
+    path = failure_path()
+    stops = path.index("stop_application\n")
+    switch = path.index("(( switched == 0 && stopped == 1 )) && switch_runtime")
+    decided = path.index(
+        "if (( resumable == 1 && recorded == 0 && stopped == 1 && switched == 1 )); then resume=1"
+    )
+    resume = path.index("(( resume == 1 )) && resume_previous")
+
+    assert stops < switch < decided < resume
+    assert path.count("switch_runtime") == 1
+    assert "stopped=0" not in path
+    # A resume that did not serve is stopped again before the report.
+    assert path.index("stop_application\n", resume) < path.index("if (( stopped == 1 )); then")
+
+
+def test_a_resume_starts_the_previous_release_as_pyracast_service_starts_it() -> None:
+    resume = function_body(installer(), "resume_previous")
+    unit = systemd_unit("pyracast.service")
+    render = unit["ExecStartPre"].removeprefix("/usr/bin/")
+    start = '"${old[@]}" up -d --wait --wait-timeout 180'
+
+    assert (
+        render == "python3 /opt/pyracast/current/deploy/runtime_secrets.py /etc/pyracast/host.json"
+    )
+    assert unit["ExecStart"].endswith("up --detach --wait --wait-timeout 180")
+    assert resume.index(render) < resume.index(start) < resume.index("rm -f")
+
+
+def test_a_failure_before_migrate_resumes_the_previous_release() -> None:
+    script = installer()
+    migrate = script.index('"${compose[@]}" run --rm --no-deps migrate\n')
+
+    assert script.index("resumable=1") < script.index("--kind prerelease") < migrate
+    assert script.rindex("recorded=1", 0, migrate) > script.index('"${compose[@]}" up -d rabbitmq')
+    assert re.findall(r"recorded=\d", script) == ["recorded=0", "recorded=1"]
+    assert "if [[ -e /var/lib/pyracast/release-blocked ]]; then blocked_before=1; fi" in script
+
+
+def test_pruning_runs_after_promotion_and_never_fails_the_release() -> None:
+    script = installer()
+    promoted = script.index("promoted=1")
+    record = script.index('release_state.py" record "$release" ${previous:+"$previous"}')
+    prune = script.index('release_state.py" prune')
+
+    assert promoted < record < prune
+    assert re.search(r'release_state\.py" prune \|\| echo "WARNING', script)
+    assert release_state.STATE.parent == host.RELEASE_BLOCKED.parent
+    assert release_state.CURRENT == host.CURRENT_RELEASE
+
+
+def test_preflight_proves_the_metadata_guard_and_the_stored_secrets_before_maintenance() -> None:
+    script = installer()
+    maintenance_begins = script.index("\nbegin_maintenance\n")
+
+    assert script.index("169.254.169.254") < maintenance_begins
+    assert script.index("run --rm --no-deps migrate pyracast check_secrets") < maintenance_begins
+    for service in compose_services().values():
+        assert "network_mode" not in service
+        assert "dns" not in service
+
+
+def test_every_release_converges_database_provisioning_before_and_after_migrate() -> None:
+    script = installer()
+    converge = 'python3 "$release/deploy/bootstrap_database.py" converge "$release" "$secrets"'
+    first = script.index(converge)
+    migrate = script.index('"${compose[@]}" run --rm --no-deps migrate\n')
+
+    assert script.count(converge) == 2
+    assert first < script.index("\nbegin_maintenance\n") < migrate < script.rindex(converge)
+    assert "if [[ ! -L /opt/pyracast/current ]]; then\n  begin_maintenance\n" in script
+
+
+def test_postgresql_admits_the_superuser_only_over_its_local_socket() -> None:
+    postgres = compose_services()["postgres"]
+    rules = [
+        line.split()
+        for line in text(DEPLOY / "postgres" / "pg_hba.conf").splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+
+    assert "hba_file=/etc/postgresql/pg_hba.conf" in postgres["command"]
+    assert "COPY pg_hba.conf /etc/postgresql/pg_hba.conf" in text(
+        DEPLOY / "postgres" / "Dockerfile"
+    )
+    assert rules == [
+        ["local", "all", "postgres", "trust"],
+        ["host", "pyracast", "pyracast_owner,pyracast_app", "all", "scram-sha-256"],
+    ]
+    assert "-h" not in postgres["healthcheck"]["test"]
+
+
+def test_smoke_proves_the_maintenance_notice_and_the_restricted_roles() -> None:
+    smoke = text(DEPLOY / "smoke.sh")
+
+    assert "https://localhost:18443/app/) == 503 ]]" in smoke
+    assert "https://localhost:18443/api/session/) == 503 ]]" in smoke
+    assert f"retry-after: {maintenance.RETRY_AFTER_SECONDS}" in smoke
+    assert f"== '{maintenance.api_body('en').decode()}' ]]" in smoke
+    turkish = '"message": "Pyracast g\\u00fcncelleniyor.'
+    assert turkish in maintenance.api_body("tr").decode()
+    assert f"*'{turkish}'*" in smoke
+    logged = smoke.index("ALTER SYSTEM SET log_statement = 'all'")
+    switched = smoke.index('"${bootstrap[@]}" switch-runtime "$temporary" "$temporary/rotated"\n')
+    refused = smoke.index("if runtime_connects; then exit 1; fi", switched)
+    back = smoke.index('"${bootstrap[@]}" switch-runtime "$temporary" "$temporary"\n', refused)
+    assert logged < switched
+    assert smoke.index("\nruntime_connects\n", back) < smoke.index("run --rm --no-deps migrate\n")
+    assert "INSERT INTO django_migrations" in smoke
+    assert "== '42501'" in smoke
+    assert "no pg_hba.conf entry" in smoke

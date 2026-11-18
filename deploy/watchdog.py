@@ -18,7 +18,15 @@ from deploy.backup import compose_command
 from deploy.operations_log import report
 
 SUPPORT_SERVICES = ("postgres", "rabbitmq")
-APPLICATION_SERVICES = ("api", "web", "worker", "notifications", "dispatcher", "gateway")
+APPLICATION_SERVICES = (
+    "api",
+    "web",
+    "worker",
+    "notifications",
+    "dispatcher",
+    "gateway",
+    "maintenance",
+)
 SERVICES = (*SUPPORT_SERVICES, *APPLICATION_SERVICES)
 HEALTHY = ("running", "healthy")
 # The unit's TimeoutStartSec leaves 90 s after this deadline for the reports.

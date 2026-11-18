@@ -19,10 +19,11 @@ def encrypt_secret(raw: str) -> str:
 
 
 @sensitive_variables()
-def decrypt_api_key(encrypted: str) -> str:
+def decrypt_api_key(encrypted: str, *, primary_only: bool = False) -> str:
     if not encrypted.startswith(PREFIX) or len(encrypted) > 2048:
         raise ProviderError("invalid_provider_secret")
+    cipher = secret_cipher(KEY_CONTEXT, primary_only=primary_only)
     try:
-        return secret_cipher(KEY_CONTEXT).decrypt(encrypted[len(PREFIX) :]).decode("utf-8")
+        return cipher.decrypt(encrypted[len(PREFIX) :]).decode("utf-8")
     except InvalidToken, ValueError:
         raise ProviderError("invalid_provider_secret") from None

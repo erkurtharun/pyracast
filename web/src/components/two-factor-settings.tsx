@@ -1,14 +1,8 @@
 "use client";
 
 import { useLocale, useTranslations } from "next-intl";
-import {
-    useCallback,
-    useEffect,
-    useEffectEvent,
-    useRef,
-    useState,
-} from "react";
-import { request, type Session } from "@/lib/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { loadSession } from "@/lib/session-client";
 import { ApiError } from "@/lib/api/errors";
 import { browserErrors } from "@/i18n/browser";
 import {
@@ -101,17 +95,13 @@ function parseAuthenticators(records: AuthenticatorRecord[] | undefined): {
 }
 
 export function TwoFactorSettings({
-    token,
     mfaRequired,
     hasPassword,
     email,
-    onSession,
 }: {
-    token: string;
     mfaRequired: boolean;
     hasPassword: boolean;
     email: string;
-    onSession: (session: Session) => void;
 }) {
     const t = useTranslations("Security");
     const locale = useLocale();
@@ -160,27 +150,15 @@ export function TwoFactorSettings({
         const result = await authRequest<AuthenticatorRecord[]>(
             "account/authenticators",
             "GET",
-            token,
         );
         if (result.status === 401) {
             if (!result.meta?.is_authenticated) {
-                await refreshExpiredSession(onSession, t("sessionExpired"));
+                await refreshExpiredSession(t("sessionExpired"));
             }
             throw new ApiError(t("confirmIdentityFirst"));
         }
         return parseAuthenticators(result.data);
-    }, [onSession, t, token]);
-
-    const loadAuthenticators = useEffectEvent(() =>
-        authRequest<AuthenticatorRecord[]>(
-            "account/authenticators",
-            "GET",
-            token,
-        ),
-    );
-    const refreshSession = useEffectEvent(async () => {
-        onSession(await request<Session>("/api/session/"));
-    });
+    }, [t]);
 
     useEffect(() => {
         mountedRef.current = true;
@@ -188,12 +166,12 @@ export function TwoFactorSettings({
         const blobEntries = activeBlobUrlsRef.current;
         let active = true;
 
-        loadAuthenticators()
+        authRequest<AuthenticatorRecord[]>("account/authenticators", "GET")
             .then(async (result) => {
                 if (!active || !mountedRef.current) return;
                 if (result.status === 401) {
                     if (!result.meta?.is_authenticated) {
-                        await refreshSession();
+                        await loadSession();
                         if (!active || !mountedRef.current) return;
                         setView({
                             kind: "loadError",
@@ -247,7 +225,7 @@ export function TwoFactorSettings({
         if (!mountedRef.current) return true;
         if (result.status !== 401) return false;
         if (!result.meta?.is_authenticated) {
-            await refreshExpiredSession(onSession, t("sessionExpired"));
+            await refreshExpiredSession(t("sessionExpired"));
         }
         if (isReplay) {
             throw new ApiError(t("reauthStillRequired"), { status: 401 });
@@ -274,7 +252,6 @@ export function TwoFactorSettings({
         const result = await authRequest(
             "account/authenticators/recovery-codes",
             "GET",
-            token,
         );
         const returnView: TwoFactorView = {
             kind: "enabled",
@@ -334,7 +311,6 @@ export function TwoFactorSettings({
                     const result = await authRequest(
                         "account/authenticators/totp",
                         "GET",
-                        token,
                     );
                     if (
                         await handleAuthenticated401(
@@ -376,7 +352,6 @@ export function TwoFactorSettings({
                     const result = await authRequest(
                         "account/authenticators/totp",
                         "POST",
-                        token,
                         { code: operation.code },
                     );
                     if (
@@ -437,7 +412,6 @@ export function TwoFactorSettings({
                     const result = await authRequest(
                         "account/authenticators/recovery-codes",
                         "POST",
-                        token,
                         {},
                     );
                     if (
@@ -491,7 +465,6 @@ export function TwoFactorSettings({
                     const result = await authRequest(
                         "account/authenticators/totp",
                         "DELETE",
-                        token,
                     );
                     if (
                         await handleAuthenticated401(
@@ -993,8 +966,6 @@ export function TwoFactorSettings({
                         key={view.mode}
                         mode={view.mode}
                         email={email}
-                        token={token}
-                        onSession={onSession}
                         autoFocus
                         disabled={isBusy}
                         onCancel={() => {

@@ -197,8 +197,8 @@ Reviewed maintenance can override `--lock-timeout-seconds` and
 see [database rollout](docs/ARCHITECTURE.md#database-invariants-and-rollout).
 
 During application-secret rotation, retain the old key in
-`PYRACAST_SECRET_KEY_FALLBACKS`, run `uv run --locked pyracast reencrypt_secrets`,
-verify provider/MFA decryption, then remove the fallback. Do not discard legacy
+`PYRACAST_SECRET_KEY_FALLBACKS`, run `uv run --locked pyracast reencrypt_secrets --verify`,
+then remove the fallback once `pyracast check_secrets --require-primary` exits 0. Do not discard legacy
 authenticators, mark unverified emails verified, or invent account identities to
 bypass an upgrade failure. Run `uv run --locked pyracast clearsessions` regularly.
 

@@ -7,13 +7,23 @@ import {
     useChangeRequestUpdates,
     useProposalKey,
 } from "./change-request-updates";
-import { request } from "@/lib/api";
+import type { Plant, PlantScope } from "@/lib/api";
+import { api } from "@/lib/api/client";
 import type { components } from "@/lib/schema";
 import { ActionForm, Field, Notice, Select, Tag, useCollection } from "./ui";
 import { CsvDownload } from "./csv-download";
 
 type Outage = components["schemas"]["IncidentOutput"];
 type OutageInput = components["schemas"]["IncidentInput"];
+type Configuration = NonNullable<Plant["current_configuration"]>;
+type IncidentRequest = Omit<
+    components["schemas"]["IncidentRequestInput"],
+    "idempotency_key"
+>;
+type Ceilings = Pick<
+    Configuration,
+    "dc_capacity_mw" | "inverter_capacity_mw" | "export_limit_mw"
+>;
 
 function localInput(value: string): string {
     const date = new Date(value);
@@ -38,17 +48,15 @@ function timestamp(
 }
 
 export function Outages({
-    base,
-    token,
+    scope,
     timezone,
     onChanged,
-    currentConfigurationId,
+    configuration,
 }: {
-    base: string;
-    token: string;
+    scope: PlantScope;
     timezone: string;
     onChanged: () => void;
-    currentConfigurationId?: number;
+    configuration?: Configuration | null;
 }) {
     const t = useTranslations("Outages");
     const canManage = useCanManageWorkspace();
@@ -56,15 +64,16 @@ export function Outages({
     const proposalKey = useProposalKey();
     const requestsChanged = useChangeRequestUpdates();
     const [submitted, setSubmitted] = useState(false);
-    async function propose(payload: unknown) {
-        await request(
-            `${base}change-requests/incidents/`,
-            "POST",
+    async function propose(payload: IncidentRequest) {
+        await api.post(
+            "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/change-requests/incidents/",
             {
-                ...(payload as object),
-                idempotency_key: proposalKey.forPayload(payload),
+                path: scope,
+                body: {
+                    ...payload,
+                    idempotency_key: proposalKey.forPayload(payload),
+                },
             },
-            token,
         );
         proposalKey.reset();
         setSubmitted(true);
@@ -83,7 +92,30 @@ export function Outages({
     const [revision, setRevision] = useState(0);
     const [editor, setEditor] = useState<Outage | "new" | null>(null);
     const [resolving, setResolving] = useState<number | null>(null);
-    const resource = useCollection<Outage>(`${base}outages/`, revision);
+    const resource = useCollection(
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/",
+        { path: scope },
+        revision,
+    );
+    const statusTag = (status: string) =>
+        status === "active"
+            ? { tone: "warning" as const, label: proposals("active") }
+            : {
+                  tone: "neutral" as const,
+                  label:
+                      status === "resolved"
+                          ? proposals("resolved")
+                          : status === "cancelled"
+                            ? proposals("cancelled")
+                            : status,
+              };
+    const ceilings = (outage?: Outage): Ceilings | undefined =>
+        configuration &&
+        (!outage ||
+            !outage.ends_at ||
+            outage.declared_configuration_id === configuration.id)
+            ? configuration
+            : undefined;
     const deviceTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const format = (value: string) =>
         new Date(value).toLocaleString(locale, { timeZone: deviceTimezone });
@@ -97,7 +129,7 @@ export function Outages({
                 <div>
                     <h2>{t("plantOutages")}</h2>
                 </div>
-                {(canManage || currentConfigurationId) && (
+                {configuration && (
                     <button
                         className="button"
                         onClick={() => {
@@ -111,6 +143,7 @@ export function Outages({
                     </button>
                 )}
             </div>
+            {!configuration && <Notice>{t("configurationRequired")}</Notice>}
             {submitted && <Notice>{proposals("submitted")}</Notice>}
             {!canManage && <p className="fine">{proposals("approvalHelp")}</p>}
             <p className="fine">
@@ -140,6 +173,9 @@ export function Outages({
                                 : `${editor.id}-${editor.revision}`
                         }
                         outage={editor === "new" ? undefined : editor}
+                        ceilings={ceilings(
+                            editor === "new" ? undefined : editor,
+                        )}
                         proposal={!canManage}
                         onSave={async (data, reason) => {
                             const existing =
@@ -157,22 +193,28 @@ export function Outages({
                                         : {}),
                                     values: data,
                                 });
-                            } else
-                                await request(
-                                    `${base}outages/${existing ? `${existing.id}/` : ""}`,
-                                    existing ? "PUT" : "POST",
+                            } else if (existing)
+                                await api.put(
+                                    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/{incident_id}/",
                                     {
-                                        ...data,
-                                        ...(existing
-                                            ? {
-                                                  expected_revision:
-                                                      existing.revision,
-                                              }
-                                            : {}),
-                                    } satisfies
-                                        | OutageInput
-                                        | components["schemas"]["IncidentUpdate"],
-                                    token,
+                                        path: {
+                                            ...scope,
+                                            incident_id: existing.id,
+                                        },
+                                        body: {
+                                            ...data,
+                                            expected_revision:
+                                                existing.revision,
+                                        },
+                                    },
+                                );
+                            else
+                                await api.post(
+                                    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/",
+                                    {
+                                        path: scope,
+                                        body: data,
+                                    },
                                 );
                             setEditor(null);
                             changed();
@@ -222,7 +264,9 @@ export function Outages({
                         <article key={outage.id} className="provenance">
                             <div className="section-heading">
                                 <h3>{outage.title}</h3>
-                                <Tag>{outage.status}</Tag>
+                                <Tag tone={statusTag(outage.status).tone}>
+                                    <>{statusTag(outage.status).label}</>
+                                </Tag>
                             </div>
                             <p>
                                 {t("started", {
@@ -286,9 +330,9 @@ export function Outages({
                             </dl>
                             {outage.notes && <p>{outage.notes}</p>}
                             {outage.status === "active" &&
-                                currentConfigurationId &&
+                                configuration &&
                                 outage.declared_configuration_id !==
-                                    currentConfigurationId && (
+                                    configuration.id && (
                                     <Notice>{t("configurationChanged")}</Notice>
                                 )}
                             {outage.status !== "cancelled" && (
@@ -355,15 +399,19 @@ export function Outages({
                                                 ),
                                             });
                                         else
-                                            await request(
-                                                `${base}outages/${outage.id}/resolve/`,
-                                                "POST",
+                                            await api.post(
+                                                "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/{incident_id}/resolve/",
                                                 {
-                                                    expected_revision:
-                                                        outage.revision,
-                                                    ends_at: ends,
-                                                } satisfies components["schemas"]["ResolveInput"],
-                                                token,
+                                                    path: {
+                                                        ...scope,
+                                                        incident_id: outage.id,
+                                                    },
+                                                    body: {
+                                                        expected_revision:
+                                                            outage.revision,
+                                                        ends_at: ends,
+                                                    },
+                                                },
                                             );
                                         setResolving(null);
                                         changed();
@@ -407,14 +455,19 @@ export function Outages({
                                                     ),
                                                 });
                                             else
-                                                await request(
-                                                    `${base}outages/${outage.id}/cancel/`,
-                                                    "POST",
+                                                await api.post(
+                                                    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/outages/{incident_id}/cancel/",
                                                     {
-                                                        expected_revision:
-                                                            outage.revision,
-                                                    } satisfies components["schemas"]["RevisionInput"],
-                                                    token,
+                                                        path: {
+                                                            ...scope,
+                                                            incident_id:
+                                                                outage.id,
+                                                        },
+                                                        body: {
+                                                            expected_revision:
+                                                                outage.revision,
+                                                        },
+                                                    },
                                                 );
                                             changed();
                                         }}
@@ -442,15 +495,24 @@ export function Outages({
 
 function OutageForm({
     outage,
+    ceilings,
     onSave,
     proposal = false,
 }: {
     outage?: Outage;
+    ceilings?: Ceilings;
     proposal?: boolean;
     onSave: (data: OutageInput, reason: string) => Promise<void>;
 }) {
     const t = useTranslations("Outages");
     const proposals = useTranslations("ChangeRequests");
+    const format = useFormatter();
+    const ceiling = (value?: number | null) =>
+        value == null
+            ? undefined
+            : t("capacityCeiling", {
+                  value: format.number(value, { maximumFractionDigits: 6 }),
+              });
 
     const capacities = [
         outage?.available_dc_mw,
@@ -493,6 +555,16 @@ function OutageForm({
                     ["inverter", "panels", "grid", "other", "multiple"] as const
                 ).find((value) => value === data.get("kind"));
                 if (!kind) throw new Error(t("chooseAValidOutageType"));
+                const capacities = {
+                    available_dc_mw: capacity("available_dc_mw"),
+                    available_inverter_mw: capacity("available_inverter_mw"),
+                    available_export_mw: capacity("available_export_mw"),
+                };
+                if (
+                    impact === "reduced" &&
+                    Object.values(capacities).every((value) => value === null)
+                )
+                    throw new Error(t("capacityRequired"));
                 await onSave(
                     {
                         kind,
@@ -500,11 +572,7 @@ function OutageForm({
                         notes: String(data.get("notes") ?? ""),
                         starts_at: starts,
                         ends_at: ends,
-                        available_dc_mw: capacity("available_dc_mw"),
-                        available_inverter_mw: capacity(
-                            "available_inverter_mw",
-                        ),
-                        available_export_mw: capacity("available_export_mw"),
+                        ...capacities,
                     },
                     String(data.get("reason") ?? ""),
                 );
@@ -566,6 +634,8 @@ function OutageForm({
                             name="available_dc_mw"
                             type="number"
                             min={0}
+                            max={ceilings?.dc_capacity_mw}
+                            hint={ceiling(ceilings?.dc_capacity_mw)}
                             step="any"
                             required={false}
                             defaultValue={outage?.available_dc_mw ?? ""}
@@ -575,6 +645,8 @@ function OutageForm({
                             name="available_inverter_mw"
                             type="number"
                             min={0}
+                            max={ceilings?.inverter_capacity_mw ?? undefined}
+                            hint={ceiling(ceilings?.inverter_capacity_mw)}
                             step="any"
                             required={false}
                             defaultValue={outage?.available_inverter_mw ?? ""}
@@ -584,6 +656,8 @@ function OutageForm({
                             name="available_export_mw"
                             type="number"
                             min={0}
+                            max={ceilings?.export_limit_mw ?? undefined}
+                            hint={ceiling(ceilings?.export_limit_mw)}
                             step="any"
                             required={false}
                             defaultValue={outage?.available_export_mw ?? ""}

@@ -351,6 +351,16 @@
         "interval_changed": "Bu aralık değişti ve artık kullanılamıyor. Yazdığınız değer aşağıda korundu. Güncel bir aralık seçmek için Vazgeç işlemini kullanın.",
         "attempted_energy": "{interval} aralığı için yazdığınız üretim (MWh)",
         "unavailable": "Bu aralık düzenlenemiyor.",
+        "none_available": "Bu gündeki hiçbir değer değiştirilemez. {reason}",
+        "reasons": {
+            "configuration_unavailable": "Santralin onaylanmış bir yapılandırması yok.",
+            "configuration_not_current": "Önceki bir santral yapılandırmasıyla kaydedilen değerler değiştirilemez.",
+            "configuration_mismatch": "Başka bir santral yapılandırmasıyla kaydedilen değerler burada değiştirilemez.",
+            "observation_overlap": "Kayıtlı bir değer bu dönemle çakışıyor.",
+            "interval_not_completed": "Yalnızca tamamlanmış aralıklar değiştirilebilir.",
+            "unsupported_interval": "Yalnızca tam yarım saatlik veya saatlik aralıklar değiştirilebilir.",
+            "workspace_readonly": "Rolünüz üretimi görüntüleyebilir ancak değiştiremez."
+        },
         "download_csv": "CSV indir",
         "source_details": "Kaynak ve düzeltme ayrıntıları",
         "source_policy": "Önce EPİAŞ uzlaştırmaya esas veriş miktarı, ardından geçici bildirilen üretim tercih edilir. Eksik değerler eksik kalır; sıfır, ölçülen sıfırdır.",

@@ -4,9 +4,10 @@ import Image from "next/image";
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { authRequest } from "@/lib/auth-api";
+import { useSessionState } from "@/lib/session-client";
 
 export type SocialProvider = "google" | "microsoft";
-export function useSocialProviders(token: string, provided?: SocialProvider[]) {
+export function useSocialProviders(provided?: SocialProvider[]) {
     const [providers, setProviders] = useState<SocialProvider[]>([]);
     useEffect(() => {
         if (provided) return;
@@ -14,7 +15,6 @@ export function useSocialProviders(token: string, provided?: SocialProvider[]) {
         authRequest<{ socialaccount?: { providers?: { id: string }[] } }>(
             "config",
             "GET",
-            token,
         )
             .then((result) => {
                 if (active)
@@ -31,21 +31,20 @@ export function useSocialProviders(token: string, provided?: SocialProvider[]) {
         return () => {
             active = false;
         };
-    }, [token, provided]);
+    }, [provided]);
     return provided ?? providers;
 }
 
 export function SocialProviderButtons({
-    token,
     process = "login",
     enabledProviders,
 }: {
-    token: string;
     process?: "login" | "connect";
     enabledProviders?: SocialProvider[];
 }) {
     const t = useTranslations("SocialAuth");
-    const providers = useSocialProviders(token, enabledProviders);
+    const csrfToken = useSessionState().session?.csrf_token ?? "";
+    const providers = useSocialProviders(enabledProviders);
     if (!providers.length) return null;
     return (
         <div className="social-providers">
@@ -70,7 +69,7 @@ export function SocialProviderButtons({
                     <input
                         type="hidden"
                         name="csrfmiddlewaretoken"
-                        value={token}
+                        value={csrfToken}
                     />
                     <input type="hidden" name="provider" value={provider} />
                     <input type="hidden" name="process" value={process} />

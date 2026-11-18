@@ -169,7 +169,7 @@ test("a customer manages one plant site through the real API", async ({
             (row) => Number(row.mean_power_mw) > 0,
         );
         expect(positive).toHaveLength(fullCount / 2);
-        expect(parsed.data[0].mean_power_mw).toBe("0");
+        expect(parsed.data[0]?.mean_power_mw).toBe("0");
         expect(parsed.data.at(-1)!.mean_power_mw).toBe("0");
         const localTime = (stamp: string) =>
             new Intl.DateTimeFormat("en-GB", {
@@ -178,10 +178,10 @@ test("a customer manages one plant site through the real API", async ({
                 minute: "2-digit",
                 hourCycle: "h23",
             }).format(new Date(stamp));
-        expect(localTime(parsed.data[0].start)).toBe("00:00");
-        expect(localTime(parsed.data.at(-1)!.end)).toBe("00:00");
-        expect(localTime(positive[0].start)).toBe("06:00");
-        expect(localTime(positive.at(-1)!.end)).toBe("18:00");
+        expect(localTime(parsed.data[0]?.start ?? "")).toBe("00:00");
+        expect(localTime(parsed.data.at(-1)?.end ?? "")).toBe("00:00");
+        expect(localTime(positive[0]?.start ?? "")).toBe("06:00");
+        expect(localTime(positive.at(-1)?.end ?? "")).toBe("18:00");
     }
     await expectFullForecastCsv(24);
     await page.getByLabel("Resolution").selectOption("30");
@@ -254,7 +254,7 @@ test("a customer manages one plant site through the real API", async ({
                 row.affected_energy_mwh === "0",
         ),
     ).toBe(true);
-    expect(outageCsv.data[0]["outage_scenario.incidents"]).toContain(
+    expect(outageCsv.data[0]?.["outage_scenario.incidents"]).toContain(
         "Browser inverter outage",
     );
     await page.screenshot({
@@ -269,7 +269,7 @@ test("a customer manages one plant site through the real API", async ({
         .getByLabel("Resolved at (device time)", { exact: true })
         .fill(outageTimes.ends);
     await page.getByRole("button", { name: "Save resolution" }).click();
-    await expect(page.getByText("resolved", { exact: true })).toBeVisible();
+    await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Forecast", exact: true }).click();
     await expect(
         page.getByText("Estimated energy", { exact: true }),

@@ -1,5 +1,7 @@
+from datetime import UTC, datetime
 from typing import Any
 
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.middleware.csrf import get_token
 from django.utils.decorators import method_decorator
@@ -47,6 +49,15 @@ class SessionOutput(serializers.Serializer[Any]):
     user = SessionUserOutput(allow_null=True)
     csrf_token = serializers.CharField()
     language = serializers.ChoiceField(choices=Language.choices)
+    expires_at = serializers.DateTimeField(allow_null=True)
+
+
+def _expires_at(request: Request) -> datetime | None:
+    if not request.user.is_authenticated:
+        return None
+    # SessionLifetime has already ended a session without a valid start time.
+    started: float = request.session["authenticated_at"]
+    return datetime.fromtimestamp(started + settings.SESSION_COOKIE_AGE, UTC)
 
 
 def session_output(request: Request) -> dict[str, Any]:
@@ -59,6 +70,7 @@ def session_output(request: Request) -> dict[str, Any]:
         ),
         "csrf_token": get_token(request._request),
         "language": request._request.LANGUAGE_CODE,
+        "expires_at": _expires_at(request),
     }
 
 

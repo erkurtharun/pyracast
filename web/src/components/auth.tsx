@@ -2,12 +2,12 @@
 import { useLocale, useTranslations } from "next-intl";
 
 import { useEffect, useRef, useState } from "react";
-import { request, type Session } from "@/lib/api";
 import { ApiError } from "@/lib/api/errors";
 import { authRequest, type AuthResult } from "@/lib/auth-api";
+import { loadSession, useSessionState } from "@/lib/session-client";
 import { isLanguage } from "@/i18n/language";
 import { publicPath } from "@/lib/public-metadata";
-import { ActionForm, Field } from "./ui";
+import { ActionForm, Field, Notice } from "./ui";
 import { SocialProviderButtons } from "./social-provider-buttons";
 import { LanguageSelect } from "./language-select";
 import { clearWorkspaceInvitation } from "./workspace-invitation";
@@ -30,17 +30,15 @@ type AuthMessage =
     | "passwordChanged";
 
 export function Auth({
-    session,
-    onSession,
     invitationToken,
     initialMode,
 }: {
-    session: Session;
     invitationToken?: string | null;
     initialMode: "login" | "register";
-    onSession: (session: Session) => void;
 }) {
     const t = useTranslations("Auth");
+    const dashboard = useTranslations("Dashboard");
+    const { ended } = useSessionState();
     const locale = useLocale();
     const language = isLanguage(locale) ? locale : "en";
     const invitationLabels = useTranslations("WorkspaceMembers");
@@ -55,7 +53,7 @@ export function Auth({
 
     async function finish(result: AuthResult) {
         if (result.meta?.is_authenticated) {
-            onSession(await request<Session>("/api/session/"));
+            await loadSession();
             return;
         }
         const pending = result.data?.flows?.find((flow) => flow.is_pending)?.id;
@@ -93,7 +91,7 @@ export function Auth({
                 `${callback.pathname}${callback.search}${callback.hash}`,
             );
         }
-        authRequest("auth/session", "GET", session.csrf_token)
+        authRequest("auth/session", "GET")
             .then((result) => {
                 if (!active) return;
                 setSocialError(callbackError);
@@ -128,7 +126,6 @@ export function Auth({
                     authRequest<{ email?: { email: string }[] }>(
                         "auth/provider/signup",
                         "GET",
-                        session.csrf_token,
                     )
                         .then((signup) => {
                             if (active)
@@ -151,7 +148,7 @@ export function Auth({
         return () => {
             active = false;
         };
-    }, [session.csrf_token]);
+    }, []);
 
     const titles: Record<Mode, string> = {
         login: t("welcome"),
@@ -187,7 +184,7 @@ export function Auth({
                     className="auth-form-panel"
                     aria-labelledby="auth-title"
                 >
-                    <LanguageSelect session={session} onSession={onSession} />
+                    <LanguageSelect />
                     <nav className="auth-mode-nav" aria-label={t("access")}>
                         <button
                             type="button"
@@ -211,6 +208,7 @@ export function Auth({
                         </button>
                     </nav>
                     <h1 id="auth-title">{titles[mode]}</h1>
+                    {ended && <Notice>{dashboard("sessionExpired")}</Notice>}
                     {socialError && (
                         <p className="notice error" role="alert">
                             {social("callbackError")}
@@ -218,7 +216,7 @@ export function Auth({
                     )}
                     {mode === "socialSignup" && <p>{social("signupHint")}</p>}
                     {(mode === "login" || mode === "register") && (
-                        <SocialProviderButtons token={session.csrf_token} />
+                        <SocialProviderButtons />
                     )}
                     {message && <p role="status">{t(message)}</p>}
                     <ActionForm
@@ -248,7 +246,6 @@ export function Auth({
                                 await authRequest(
                                     "auth/password/request",
                                     "POST",
-                                    session.csrf_token,
                                     payload,
                                 );
                                 setMessage("resetSent");
@@ -257,7 +254,6 @@ export function Auth({
                                 const result = await authRequest(
                                     "auth/password/reset",
                                     "POST",
-                                    session.csrf_token,
                                     {
                                         key: payload.key,
                                         password: payload.password,
@@ -292,7 +288,6 @@ export function Auth({
                                 const result = await authRequest(
                                     path,
                                     "POST",
-                                    session.csrf_token,
                                     payload,
                                 ).catch((error: unknown) => {
                                     if (
@@ -407,7 +402,6 @@ export function Auth({
                     {mode === "verify" && (
                         <ResendCode
                             key={codeSentAt}
-                            token={session.csrf_token}
                             sentAt={codeSentAt}
                             onSent={() => {
                                 setCodeSentAt(Date.now());
@@ -464,11 +458,9 @@ const RESEND_SECONDS = 60;
 const RESEND_MILLISECONDS = RESEND_SECONDS * 1000;
 
 function ResendCode({
-    token,
     sentAt,
     onSent,
 }: {
-    token: string;
     sentAt: number;
     onSent: () => void;
 }) {
@@ -500,7 +492,6 @@ function ResendCode({
             const result = await authRequest(
                 "auth/email/verify/resend",
                 "POST",
-                token,
                 {},
             );
             if (result.status === 200) {

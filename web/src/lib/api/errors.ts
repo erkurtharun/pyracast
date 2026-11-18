@@ -59,6 +59,7 @@ const ERROR_CODES: Record<ErrorCode, true> = {
     database_conflict: true,
     request_timeout: true,
     provider_authentication_failed: true,
+    maintenance: true,
     forecast_sources_changed: true,
     configuration_unavailable: true,
     location_already_has_plant: true,

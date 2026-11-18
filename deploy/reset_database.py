@@ -31,19 +31,18 @@ if __package__ in (None, ""):
 from deploy.backup import compose_command, upload_backup
 from deploy.operations_log import access_token
 
-# The installer's drain order (contract-tested): the producer, the consumers, then ingress.
+# The installer's drain order (contract-tested): the producer, the consumers, then the servers
+# behind the gateway, which keeps answering with the maintenance notice.
 STOP_ORDER = (
     ("660", ("dispatcher",)),
     ("660", ("worker", "notifications")),
-    ("100", ("gateway", "api", "web")),
+    ("100", ("api", "web")),
 )
 APPLICATION_SERVICES = frozenset(service for _, group in STOP_ORDER for service in group)
 SUPPORT_SERVICES = ("postgres", "rabbitmq")
 OBJECT_PATTERN = re.compile(r"postgres/[A-Za-z0-9/_.-]+\.dump")
 PRERESET = "-prereset-"
 BUCKET_PATTERN = re.compile(r"[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]")
-# Roles and their memberships belong to the cluster and survive DROP DATABASE.
-ROLE_STATEMENTS = ("CREATE ROLE ", "GRANT pyracast_owner TO ")
 COUNT_SQL = (
     "SELECT c.relname || ' ' || (xpath('/row/n/text()', query_to_xml("
     "format('SELECT count(*) AS n FROM public.%I', c.relname), false, true, '')))[1]::text "
@@ -73,10 +72,10 @@ SOLCAST_EXPORT_SQL = (
 )
 ROLE_CHECK_SQL = """DO $$
 BEGIN
-  IF NOT has_database_privilege('pyracast_app', 'pyracast', 'CONNECT') THEN
+  IF NOT has_database_privilege('pyracast_app', current_database(), 'CONNECT') THEN
     RAISE EXCEPTION 'pyracast_app cannot connect to database pyracast';
   END IF;
-  IF has_database_privilege('pyracast_owner', 'pyracast', 'CREATE') THEN
+  IF has_database_privilege('pyracast_owner', current_database(), 'CREATE') THEN
     RAISE EXCEPTION 'pyracast_owner keeps CREATE on database pyracast';
   END IF;
   IF NOT EXISTS (SELECT FROM pg_extension WHERE extname = 'btree_gist') THEN
@@ -90,6 +89,11 @@ BEGIN
              AND NOT has_table_privilege('pyracast_app', format('%I.%I', schemaname, tablename),
                                          'SELECT')) THEN
     RAISE EXCEPTION 'pyracast_app cannot read every table in schema public';
+  END IF;
+  IF to_regclass('public.django_migrations') IS NOT NULL
+     AND has_table_privilege('pyracast_app', 'public.django_migrations',
+                             'INSERT, UPDATE, DELETE, TRUNCATE') THEN
+    RAISE EXCEPTION 'pyracast_app can write the migration ledger';
   END IF;
 END $$;
 BEGIN;
@@ -744,11 +748,6 @@ def purge_queues(host: Host) -> None:
     step(f"Purged {len(queues)} queues: {', '.join(queues)}")
 
 
-def database_bootstrap(statements: str) -> str:
-    lines = statements.splitlines()
-    return "\n".join(line for line in lines if not line.startswith(ROLE_STATEMENTS)) + "\n"
-
-
 def recreate_database(host: Host) -> None:
     step("Dropping and recreating database pyracast")
     psql(
@@ -759,9 +758,13 @@ def recreate_database(host: Host) -> None:
         "-c",
         "CREATE DATABASE pyracast",
     )
-    step("Applying the database part of deploy/bootstrap.sql")
+    provision(host)
+
+
+def provision(host: Host) -> None:
+    step("Applying deploy/bootstrap.sql")
     bootstrap = (host.release / "deploy/bootstrap.sql").read_text()
-    psql(host, "pyracast", script=database_bootstrap(bootstrap))
+    psql(host, "pyracast", "--single-transaction", script=bootstrap)
 
 
 def check_roles(host: Host) -> None:
@@ -970,8 +973,8 @@ def abort(host: Host) -> None:
         session = current_session(host)
         if session is not None and session.replaced:
             raise RefusedError(
-                "reset replaced the database in this maintenance; starting the previous release "
-                "now would serve it without its data. Run "
+                "the database changed in this maintenance; starting the previous release now "
+                "would serve it without the data it served. Run "
                 f"{host.command(f'restore --confirm {session.object}')}"
             )
         write_runtime_secrets(host)
@@ -1019,8 +1022,9 @@ def restore(host: Host, name: str) -> None:
         session = current_session(host)
         if session is not None and session.replaced and session.object != name:
             raise RefusedError(
-                f"reset replaced the database in this maintenance; only {session.object} holds "
-                f"its data. Run {host.command(f'restore --confirm {session.object}')}"
+                f"the database changed in this maintenance; only {session.object} holds the data "
+                "the previous release served. Run "
+                f"{host.command(f'restore --confirm {session.object}')}"
             )
         host.state.mkdir(mode=0o700, parents=True, exist_ok=True)
         write_runtime_secrets(host)
@@ -1040,6 +1044,7 @@ def restore(host: Host, name: str) -> None:
         save_session(host, Session(marker=identity, object=name, release=release, replaced=True))
         recreate_database(host)
         restore_live(host, archive)
+        provision(host)
         require_equal_counts(record.counts, table_counts(host), "Archived and restored")
         check_roles(host)
         if not release_serves(host):

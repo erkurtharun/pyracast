@@ -5,13 +5,13 @@ http:
       rule: 'Host(`{{ env "SITE_ADDRESS" }}`) && (Path(`/api`) || PathPrefix(`/api/`) || Path(`/admin`) || PathPrefix(`/admin/`) || PathPrefix(`/static/`) || PathPrefix(`/health/`))'
       entryPoints: [websecure]
       priority: 100
-      middlewares: [security, body-limit, compression]
+      middlewares: [security, maintenance-api, body-limit, compression]
       service: backend
     frontend:
       rule: 'Host(`{{ env "SITE_ADDRESS" }}`)'
       entryPoints: [websecure]
       priority: 10
-      middlewares: [security, body-limit, compression]
+      middlewares: [security, maintenance-page, body-limit, compression]
       service: frontend
   services:
     backend:
@@ -20,6 +20,9 @@ http:
     frontend:
       loadBalancer:
         servers: [{url: "http://web:3000"}]
+    maintenance:
+      loadBalancer:
+        servers: [{url: "http://maintenance:8080"}]
   middlewares:
     security:
       headers:
@@ -31,6 +34,11 @@ http:
         stsSeconds: 31536000
         contentTypeNosniff: true
         referrerPolicy: same-origin
+    # Traefik answers 502 only when api or web is unreachable; the application never does.
+    maintenance-api:
+      errors: {status: ["502"], statusRewrites: {"502": 503}, service: maintenance, query: /api}
+    maintenance-page:
+      errors: {status: ["502"], statusRewrites: {"502": 503}, service: maintenance, query: /page}
     body-limit:
       buffering:
         maxRequestBodyBytes: 8388608

@@ -8,5 +8,7 @@ ConditionPathExists=/opt/pyracast/current/deploy/backup.py
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/python3 /opt/pyracast/current/deploy/backup.py /etc/pyracast/host.json
+# backup.py exits 75 when it skips for the release lock or marker; that is not a failure.
+SuccessExitStatus=75
 PrivateTmp=true
 TimeoutStartSec=2400

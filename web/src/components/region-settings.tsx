@@ -1,17 +1,16 @@
 "use client";
 import { useTranslations, useFormatter } from "next-intl";
 import { useState } from "react";
-import { request, type LocationChangeRequest, type Region } from "@/lib/api";
+import type { Region, RegionScope } from "@/lib/api";
+import { api } from "@/lib/api/client";
 import { ActionForm, Field, Notice, Tag, useCollection } from "./ui";
 
 export function RegionSettings({
     region,
-    base,
-    token,
+    scope,
 }: {
     region: Region;
-    base: string;
-    token: string;
+    scope: RegionScope;
 }) {
     const t = useTranslations("RegionSettings");
 
@@ -24,8 +23,7 @@ export function RegionSettings({
                 <LocationRequests
                     key={version}
                     region={region}
-                    base={base}
-                    token={token}
+                    scope={scope}
                     onSubmitted={() => setVersion((value) => value + 1)}
                 />
             </details>
@@ -35,20 +33,21 @@ export function RegionSettings({
 
 function LocationRequests({
     region,
-    base,
-    token,
+    scope,
     onSubmitted,
 }: {
     region: Region;
-    base: string;
-    token: string;
+    scope: RegionScope;
     onSubmitted: () => void;
 }) {
     const t = useTranslations("RegionSettings");
     const format = useFormatter();
 
-    const requests = useCollection<LocationChangeRequest>(
-        `${base}location-change-requests/`,
+    const requests = useCollection(
+        "/api/tenants/{tenant_id}/regions/{region_id}/location-change-requests/",
+        {
+            path: scope,
+        },
     );
     const pending = requests.data?.results.find(
         (row) => row.status === "pending",
@@ -90,17 +89,20 @@ function LocationRequests({
                 <ActionForm
                     submit={t("submitLocationRequest")}
                     onSubmit={async (data) => {
-                        await request<LocationChangeRequest>(
-                            `${base}location-change-requests/`,
-                            "POST",
+                        await api.post(
+                            "/api/tenants/{tenant_id}/regions/{region_id}/location-change-requests/",
                             {
-                                latitude: Number(data.get("latitude")),
-                                longitude: Number(data.get("longitude")),
-                                timezone: data.get("timezone"),
-                                reason: data.get("reason"),
-                                expected_revision: region.revision,
+                                path: scope,
+                                body: {
+                                    latitude: Number(data.get("latitude")),
+                                    longitude: Number(data.get("longitude")),
+                                    timezone: String(
+                                        data.get("timezone") ?? "",
+                                    ),
+                                    reason: String(data.get("reason") ?? ""),
+                                    expected_revision: region.revision,
+                                },
                             },
-                            token,
                         );
                         onSubmitted();
                     }}

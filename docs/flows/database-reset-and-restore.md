@@ -57,7 +57,7 @@ sequenceDiagram
 | database-level grants, schema `public`, `btree_gist`, default privileges | W | The database part of `deploy/bootstrap.sql`, applied by `reset` and `restore`; roles and their memberships belong to the cluster and survive the drop |
 | `postgres/<stamp>-prereset-<uuid>.dump` in the backup bucket | W, R | Uploaded by `prepare`; `restore` downloads an object it has no record for |
 | `/var/lib/pyracast/reset/<object>.dump` and `<object>.json` | W, R | The kept archive and its record: object name, SHA-256, row count per table |
-| `/var/lib/pyracast/reset/session.json` | W, R | Marker identity, object, release commit and whether the database was replaced (synced before `DROP DATABASE`). Current only while the marker holds the same identity; removed by `abort` and `restore` |
+| `/var/lib/pyracast/reset/session.json` | W, R | Marker identity, object, release commit and whether the database was replaced (synced before `DROP DATABASE`; the installer writes it too, right before `migrate`). Current only while the marker holds the same identity; removed by `abort` and `restore` |
 | `/var/lib/pyracast/release-blocked` | W, R | Written with a session identity and synced by `prepare` (`restore` adds one to an empty marker); the installer keeps its content and removes it on success; removed by `abort` and `restore` after readiness |
 | RabbitMQ queues | W | Purged by `reset` and `restore`, dead-letter queues included |
 
@@ -65,22 +65,22 @@ sequenceDiagram
 
 - Host: root on the VM (OS Login admin through the IAP tunnel); `host.json` is mode 0600. The tool calls Docker, curl, `sync` and `systemctl` with argument lists, never a shell.
 - Bucket: the VM's service account token from the metadata server; it can create and read objects, never overwrite or delete them. The object name must match `postgres/....dump`.
-- Destructive steps need `--confirm` naming the archive of the current session (or, for `restore` without a reset in this maintenance, any verified archive with applied migrations), the marker, and no running, restarting or paused application container.
+- Destructive steps need `--confirm` naming the archive of the current session (or, for `restore` while the database is unchanged in this maintenance, any verified archive with applied migrations), the marker, and no running, restarting or paused application container.
 
 ## Failure paths
 
 | Condition | Result |
 | --- | --- |
 | Release lock held | "Refused: Another release, backup or watchdog operation holds the release lock...", exit 2 |
-| `prepare` with the marker present or the site not ready | Refused before anything is written; with the marker it names `abort`, or `restore` of the session's object once `reset` replaced the database |
+| `prepare` with the marker present or the site not ready | Refused before anything is written; with the marker it names `abort`, or `restore` of the session's object once the database changed in this maintenance |
 | `prepare` fails after the marker (stop, dump, upload, counts differ, throwaway restore) | Exit 1; the site stays down; the message names `abort`; no record is written, so `reset` refuses that object |
-| `abort` after `reset` replaced the database in this maintenance | Refused, naming the `restore` command for the session's object |
+| `abort` once the database changed in this maintenance (`reset`, `restore` or a release's `migrate`) | Refused, naming the `restore` command for the session's object |
 | `abort` when `migrate --check` of the release fails on the database | Refused before the application starts |
 | `abort` without a maintenance marker | Refused before any service command |
 | `abort` or `restore` start, readiness or service-unit startup fails or is interrupted | Exit 1, or 130 if any step was interrupted; the tool writes the marker back and attempts the shutdown even after a failed or interrupted step, then prints every error with its captured stderr, the observed marker and application containers, and the next step: the same command once none runs and the marker holds the identity, else first the stop command or the identity to write back |
 | Interrupted (Ctrl-C) | Exit 130 with the command to run next |
 | `reset` without a current session for that object (no `prepare`, an earlier maintenance, another prefix), with no marker, an application container running, a malformed object, a missing record, a missing or changed archive, or missing roles | Refused before any purge or drop |
-| `restore` of another object once `reset` replaced the database, of an archive recorded for another object, or of an archive without applied migrations | Refused before any purge or drop |
+| `restore` of another object once the database changed in this maintenance, of an archive recorded for another object, or of an archive without applied migrations | Refused before any purge or drop |
 | `restore` when `migrate --check` fails on the restored database | Exit 1; marker and session kept, release not started |
 | A queue keeps messages after the purge | Exit 1 before the drop |
 | Downloaded object differs from the bucket's MD5 or size | Refused, partial file removed, nothing dropped |
@@ -90,7 +90,7 @@ sequenceDiagram
 
 - Stop order equals the installer's: gateway, api, web (100 s), dispatcher (660 s), worker and notifications (660 s). PostgreSQL and RabbitMQ stay up.
 - An archive is used only when its record names the confirmed object and its file still has the recorded SHA-256; a record is written only after a throwaway restore succeeded (and, in `prepare`, matched the live row counts).
-- A session ends with its maintenance: the installer touches an existing marker without changing it and removes it on success (`deploy/test-release.sh` modes `maintenance-success` and `maintenance-migration`), so a later failed release cannot inherit a reset's refusal.
+- A session ends with its maintenance: the installer touches an existing marker without changing it and removes it on success (`deploy/test-release.sh` modes `maintenance-success` and `maintenance-migration`), so a later maintenance cannot inherit an earlier one's refusal.
 - Queues are purged before every drop: primary keys restart at 1, so a leftover message would address an unrelated row.
 - The throwaway restore uses the PostgreSQL image of the current release, no network, and is removed in `finally`. The live restore keeps owners and ACLs.
 - `abort` and `restore` start the release `/opt/pyracast/current` points to only after its `migrate --check` passes; the tool never changes that link or the installer.
@@ -99,5 +99,5 @@ sequenceDiagram
 
 - `tests/test_deployment_reset.py`: real PostgreSQL verifies schema-qualified table access for readable and unreadable roles. A fake `subprocess` covers stop order and marker identity, verified archives, refusals, sessions, locking, queue purge, bootstrap and restore order, checksum, host restart, readiness and service-unit failure with retry, errors and interrupts at each step of a failed start with the reported state, and command-line recovery. `tests/test_deployment_helpers.py`: Python 3.12 syntax and `--help` without dependencies.
 - `deploy/smoke.sh` (CI and Release): `prepare` then `abort` serves again; `prepare`, `reset`, a pre-release dump of the empty database, `migrate` from zero under the restricted owner and a start; an `abort` that is refused after the reset; the stop of a failed release, then `restore`: row counts, table owners, the runtime role's missing DDL right and a stored password are back and the site is ready.
-- `deploy/test-release.sh`: the installer with a marker that holds a session succeeds and removes it, or fails in `migrate` and keeps its content.
+- `deploy/test-release.sh`: the installer with a marker that holds a session succeeds and removes it, or fails in `migrate` and keeps its content; a prepared session becomes replaced, a replaced one stays, and a second release keeps the first run's recovery point. `tests/test_deployment_previous_helper.py` runs each printed recovery through this helper and main's against a model of the database.
 - Gaps: the real bucket upload and download, the production readiness probe, `systemctl` and the release lock on the VM run first on the host; the proof of a restored sign-in is a stored password checked in the container, not an HTTP login (email verification and MFA). `dump_database` and `verify_archive` copy about 90 lines of `deploy/backup.py` (`create_backup`, `restore_archive`) to keep this package off the S list; folding them together belongs to P109, which changes `backup.py`. No Playwright coverage applies.

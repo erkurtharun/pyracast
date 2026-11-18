@@ -2,21 +2,21 @@
 import { useTranslations, useLocale } from "next-intl";
 import { useEffect, useState } from "react";
 import type { components } from "@/lib/schema";
-import { request, type Region } from "@/lib/api";
+import type { Region, RegionScope } from "@/lib/api";
+import { api } from "@/lib/api/client";
 import { ActionForm, Notice, Stat } from "./ui";
 
 type Schedule = components["schemas"]["CollectionScheduleOutput"];
 
 export function CollectionSchedule({
-    base,
+    scope,
     region,
-    token,
 }: {
-    base: string;
+    scope: RegionScope;
     region: Region;
-    token: string;
 }) {
     const t = useTranslations("CollectionSchedule");
+    const { tenant_id, region_id } = scope;
 
     const [version, setVersion] = useState(0);
     const [data, setData] = useState<Schedule>();
@@ -26,7 +26,10 @@ export function CollectionSchedule({
         let sequence = 0;
         const load = () => {
             const requestSequence = ++sequence;
-            request<Schedule>(`${base}collection-schedule/`)
+            api.get(
+                "/api/tenants/{tenant_id}/regions/{region_id}/collection-schedule/",
+                { path: { tenant_id, region_id } },
+            )
                 .then((result) => {
                     if (active && requestSequence === sequence) {
                         setData(result);
@@ -44,7 +47,7 @@ export function CollectionSchedule({
             active = false;
             clearInterval(timer);
         };
-    }, [base, version]);
+    }, [tenant_id, region_id, version]);
     if (!data)
         return error ? (
             <Notice error>{error}</Notice>
@@ -57,9 +60,8 @@ export function CollectionSchedule({
             <ScheduleEditor
                 key={JSON.stringify([data.enabled, data.times])}
                 data={data}
-                base={base}
+                scope={scope}
                 region={region}
-                token={token}
                 onSaved={() => setVersion((current) => current + 1)}
             />
         </>
@@ -68,15 +70,13 @@ export function CollectionSchedule({
 
 function ScheduleEditor({
     data,
-    base,
+    scope,
     region,
-    token,
     onSaved,
 }: {
     data: Schedule;
-    base: string;
+    scope: RegionScope;
     region: Region;
-    token: string;
     onSaved: () => void;
 }) {
     const t = useTranslations("CollectionSchedule");
@@ -153,11 +153,12 @@ function ScheduleEditor({
                                 )
                         )
                             return;
-                        await request(
-                            `${base}collection-schedule/`,
-                            "PUT",
-                            { enabled, times: sorted },
-                            token,
+                        await api.put(
+                            "/api/tenants/{tenant_id}/regions/{region_id}/collection-schedule/",
+                            {
+                                path: scope,
+                                body: { enabled, times: sorted },
+                            },
                         );
                         onSaved();
                     }}

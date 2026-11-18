@@ -2,7 +2,8 @@
 import { useCanManageWorkspace } from "./workspace-access";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
-import { request, type Calibration } from "@/lib/api";
+import type { Calibration, PlantScope } from "@/lib/api";
+import { api } from "@/lib/api/client";
 import { CalibrationAutomationPanel } from "./calibration-automation";
 import { CsvDownload } from "./csv-download";
 import { ScrollRegion } from "./scroll-region";
@@ -17,13 +18,11 @@ type ActionState =
     | { status: "error"; error: string };
 
 export function Calibrations({
-    base,
-    token,
+    scope,
     productionRevision,
     currentConfigurationId,
 }: {
-    base: string;
-    token: string;
+    scope: PlantScope;
     productionRevision: number;
     currentConfigurationId: number | null;
 }) {
@@ -52,17 +51,18 @@ export function Calibrations({
         return () => {
             sequence.current++;
         };
-    }, [base]);
-    const resource = useCollection<Calibration>(
-        `${base}calibrations/`,
+    }, [scope.plant_id]);
+    const resource = useCollection(
+        "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibrations/",
+        { path: scope },
         version + productionRevision,
         30_000,
     );
-    async function action(url: string) {
+    async function action(run: () => Promise<unknown>) {
         if (!canManage) return;
         setActionState({ status: "pending" });
         try {
-            await request(url, "POST", {}, token);
+            await run();
             setActionState({ status: "success" });
             setVersion((current) => current + 1);
         } catch (error) {
@@ -76,8 +76,9 @@ export function Calibrations({
         const sequence = ++detailSequence.current;
         setDetail({ status: "loading" });
         try {
-            const data = await request<Calibration>(
-                `${base}calibrations/${runId}/`,
+            const data = await api.get(
+                "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibrations/{calibration_id}/",
+                { path: { ...scope, calibration_id: runId } },
             );
             if (sequence === detailSequence.current)
                 setDetail({ status: "loaded", data });
@@ -89,9 +90,8 @@ export function Calibrations({
     return (
         <>
             <CalibrationAutomationPanel
-                key={base}
-                base={base}
-                token={token}
+                key={scope.plant_id}
+                scope={scope}
                 refresh={version + productionRevision}
                 disabled={actionState.status === "pending"}
                 onPendingChange={setAutomationPending}
@@ -131,7 +131,14 @@ export function Calibrations({
                                     automationPending
                                 }
                                 onClick={() =>
-                                    action(`${base}calibration/reset/`)
+                                    action(() =>
+                                        api.post(
+                                            "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibration/reset/",
+                                            {
+                                                path: scope,
+                                            },
+                                        ),
+                                    )
                                 }
                             >
                                 {t("reset_to_baseline")}
@@ -244,8 +251,17 @@ export function Calibrations({
                                                             automationPending
                                                         }
                                                         onClick={() =>
-                                                            action(
-                                                                `${base}calibrations/${run.id}/activate/`,
+                                                            action(() =>
+                                                                api.post(
+                                                                    "/api/tenants/{tenant_id}/regions/{region_id}/plants/{plant_id}/calibrations/{calibration_id}/activate/",
+                                                                    {
+                                                                        path: {
+                                                                            ...scope,
+                                                                            calibration_id:
+                                                                                run.id,
+                                                                        },
+                                                                    },
+                                                                ),
                                                             )
                                                         }
                                                     >
@@ -448,25 +464,29 @@ function CalibrationAssessment({ run }: { run: Calibration }) {
                             </tr>
                         </thead>
                         <tbody>
-                            {[
+                            {(
                                 [
-                                    "interval_mae_mw",
-                                    t("interval_mean_absolute_error_mw"),
-                                ],
-                                ["bias_mw", t("interval_bias_mw")],
-                                [
-                                    "daily_mae_mwh",
-                                    daylightMetrics
-                                        ? t("daylight_energy_mae_mwh")
-                                        : t("daily_mean_absolute_error_mwh"),
-                                ],
-                                [
-                                    "daily_bias_mwh",
-                                    daylightMetrics
-                                        ? t("daylight_energy_bias_mwh")
-                                        : t("daily_bias_mwh"),
-                                ],
-                            ].map(([key, label]) => (
+                                    [
+                                        "interval_mae_mw",
+                                        t("interval_mean_absolute_error_mw"),
+                                    ],
+                                    ["bias_mw", t("interval_bias_mw")],
+                                    [
+                                        "daily_mae_mwh",
+                                        daylightMetrics
+                                            ? t("daylight_energy_mae_mwh")
+                                            : t(
+                                                  "daily_mean_absolute_error_mwh",
+                                              ),
+                                    ],
+                                    [
+                                        "daily_bias_mwh",
+                                        daylightMetrics
+                                            ? t("daylight_energy_bias_mwh")
+                                            : t("daily_bias_mwh"),
+                                    ],
+                                ] as const
+                            ).map(([key, label]) => (
                                 <tr key={key}>
                                     <th>{label}</th>
                                     <td>{format(baseline[key])}</td>
