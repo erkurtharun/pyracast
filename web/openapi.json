@@ -4417,7 +4417,8 @@
                 "properties": {
                     "email": {
                         "type": "string",
-                        "format": "email"
+                        "format": "email",
+                        "maxLength": 254
                     }
                 },
                 "required": ["email"]

@@ -1,13 +1,11 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
-from functools import partial
-from typing import Any, cast
+from typing import cast
 
 from allauth.account.internal.flows import reauthentication
 from allauth.account.models import EmailAddress
 from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.mfa.models import Authenticator
-from allauth.socialaccount import signals
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
 from allauth.socialaccount.internal.flows.connect import do_connect
 from allauth.socialaccount.models import SocialAccount, SocialApp, SocialLogin
@@ -20,7 +18,6 @@ from django.db import IntegrityError, transaction
 from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponseRedirect
 
-from pyracast.accounts.audit import record_security_event
 from pyracast.accounts.authorization import requires_admin_mfa
 
 
@@ -150,26 +147,3 @@ class SocialAccountAdapter(DefaultSocialAccountAdapter):
         )
         if not password_login and not other_enabled_provider:
             raise self.validation_error("disconnect_last")
-
-
-def _record_social_event(
-    event: str,
-    *,
-    request: HttpRequest,
-    sociallogin: SocialLogin | None = None,
-    socialaccount: SocialAccount | None = None,
-    **_kwargs: Any,
-) -> None:
-    account = socialaccount if socialaccount is not None else cast(SocialLogin, sociallogin).account
-    record_security_event(event, request=request, user=account.user)
-
-
-for _signal, _event in (
-    (signals.social_account_added, "social_account_connected"),
-    (signals.social_account_removed, "social_account_disconnected"),
-):
-    _signal.connect(
-        partial(_record_social_event, _event),
-        weak=False,
-        dispatch_uid=f"pyracast.security.{_event}",
-    )

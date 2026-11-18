@@ -38,6 +38,12 @@ msgstr "Pyracast çalışma alanı daveti"
 msgid "This workspace name is already in use."
 msgstr "Bu çalışma alanı adı zaten kullanılıyor."
 
+msgid "Workspace names cannot contain control or invisible characters."
+msgstr "Çalışma alanı adları kontrol veya görünmez karakter içeremez."
+
+msgid "Workspace names cannot contain web or email addresses."
+msgstr "Çalışma alanı adları web veya e-posta adresi içeremez."
+
 msgid "A workspace name is required."
 msgstr "Çalışma alanı adı gereklidir."
 

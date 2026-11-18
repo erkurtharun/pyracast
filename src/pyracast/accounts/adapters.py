@@ -1,4 +1,5 @@
 import logging
+import secrets
 from typing import Any, cast
 
 from allauth.account.adapter import DefaultAccountAdapter
@@ -17,10 +18,11 @@ from django.utils import translation
 from django.utils.translation import gettext_lazy
 
 from pyracast.accounts.account_mail import NOTICES, render_notice
-from pyracast.accounts.audit import record_security_event
+from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.language import user_language
 from pyracast.accounts.login_limits import reserve_address_failure, reserve_client_failure
 from pyracast.accounts.security import normalize_client_ip
+from pyracast.db import violated_constraint
 from pyracast.mail.errors import DeliveryUncertainError, NotSentError
 from pyracast.mail.send import send
 
@@ -80,15 +82,16 @@ class AccountAdapter(DefaultAccountAdapter):
     def pre_authenticate(self, request: HttpRequest, **credentials: Any) -> None:
         # Replaces allauth's consume of `login_failed`, which keeps the 10-minute hit when the
         # daily rate refuses; allauth's success path rolls `_login_failed_rl_usage` back.
+        address = credentials.get("email")
         self._client_failure = reserve_client_failure(request)
         if self._client_failure is None:
-            record_security_event("login_locked", request=request)
+            record_security_event(SecurityEvent.LOGIN_LOCKED, request=request, address=address)
             raise self.validation_error("too_many_login_attempts")
         key = self._get_login_attempts_cache_key(request, **credentials)
         self._login_failed_rl_usage = reserve_address_failure(request, key)
         if self._login_failed_rl_usage is None:
             self._client_failure.rollback()
-            record_security_event("login_locked", request=request)
+            record_security_event(SecurityEvent.LOGIN_LOCKED, request=request, address=address)
             raise self.validation_error("too_many_login_attempts")
 
     def authenticate(self, request: HttpRequest, **credentials: Any) -> User | None:
@@ -96,6 +99,12 @@ class AccountAdapter(DefaultAccountAdapter):
         if user is not None and self._client_failure is not None:
             self._client_failure.rollback()
         return user
+
+    def populate_username(self, request: HttpRequest, user: AbstractBaseUser) -> None:
+        # The suffix keeps concurrent sign-ups with one mailbox name from taking one username.
+        account = cast(User, user)
+        super().populate_username(request, account)
+        account.username = f"{account.username[:140]}-{secrets.token_hex(2)}"
 
     def get_client_ip(self, request: HttpRequest) -> str:
         try:
@@ -110,10 +119,7 @@ class AccountAdapter(DefaultAccountAdapter):
             with transaction.atomic():
                 confirmed = super().confirm_email(request, email_address)
         except IntegrityError as error:
-            if (
-                getattr(getattr(error.__cause__, "diag", None), "constraint_name", None)
-                != "unique_verified_email"
-            ):
+            if violated_constraint(error) != "unique_verified_email":
                 raise
             confirmed = False
         if not confirmed:

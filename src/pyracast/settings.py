@@ -118,8 +118,8 @@ PASSWORD_HASHERS = [
 AUTHENTICATION_BACKENDS = ["pyracast.accounts.authentication.AuthenticationBackend"]
 ACCOUNT_ADAPTER = "pyracast.accounts.adapters.AccountAdapter"
 ACCOUNT_LOGIN_METHODS = {"email"}
-ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
-ACCOUNT_SIGNUP_FORM_CLASS = "pyracast.accounts.forms.CompanySignupForm"
+ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*"]
+ACCOUNT_SIGNUP_FORM_CLASS = "pyracast.accounts.forms.AccountSignupForm"
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
 ACCOUNT_EMAIL_VERIFICATION_SUPPORTS_RESEND = 3
 ACCOUNT_EMAIL_VERIFICATION_BY_CODE_ENABLED = True
@@ -158,7 +158,6 @@ for _provider in ("google", "microsoft"):
         }
 ACCOUNT_SESSION_REMEMBER = False
 ACCOUNT_LOGOUT_ON_PASSWORD_CHANGE = True
-ACCOUNT_LOGIN_ON_EMAIL_CONFIRMATION = False
 ACCOUNT_LOGIN_ON_PASSWORD_RESET = False
 ACCOUNT_LOGIN_TIMEOUT = 900
 PASSWORD_RESET_TIMEOUT = 3600

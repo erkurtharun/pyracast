@@ -19,6 +19,7 @@ from django.test import RequestFactory
 from pyracast.accounts.audit import (
     LINE_KEYS,
     SIGNAL_EVENTS,
+    RefusalThrottle,
     SecurityEvent,
     connect_security_events,
     logger,
@@ -60,7 +61,7 @@ def arguments(signal: Signal) -> dict[str, Any]:
     with_address = {"user": user(), "email_address": address()}
     with_factor = {"user": user(), "authenticator": authenticator()}
     rejected_code = {"user": user(), "last_attempt": False}
-    return {
+    table: dict[Signal, dict[str, Any]] = {
         auth_signals.user_logged_in: by_user,
         auth_signals.user_logged_out: by_user,
         auth_signals.user_login_failed: {
@@ -90,7 +91,8 @@ def arguments(signal: Signal) -> dict[str, Any]:
             "sociallogin": SocialLogin(user=user(), account=social_account())
         },
         social_signals.social_account_removed: {"socialaccount": social_account()},
-    }[signal]
+    }
+    return table[signal]
 
 
 def lines(caplog: pytest.LogCaptureFixture) -> list[dict[str, Any]]:
@@ -186,3 +188,14 @@ def test_one_email_confirmation_carries_no_key_into_the_line(
         {"event": "email_verified", "user_id": USER_ID, "client_ip": "127.0.0.1"}
     ]
     assert HIDDEN not in caplog.text
+
+
+def test_the_refusal_throttle_admits_a_key_once_per_interval_and_forgets_the_oldest() -> None:
+    throttle = RefusalThrottle()
+    throttle.capacity = 2
+
+    assert throttle.admit((1, "view", "code"))
+    assert not throttle.admit((1, "view", "code"))
+    assert throttle.admit((2, "view", "code"))
+    assert throttle.admit((3, "view", "code"))
+    assert throttle.admit((1, "view", "code"))

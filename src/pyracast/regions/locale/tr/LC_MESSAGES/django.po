@@ -2096,8 +2096,8 @@ msgstr "Bu kesinti zaten kapatılmış."
 msgid "This request no longer matches the plant. Review it again."
 msgstr "Bu talep artık santralle uyuşmuyor. Yeniden inceleyin."
 
-msgid "Too many invitations were sent. Wait a minute and try again."
-msgstr "Çok fazla davet gönderildi. Bir dakika bekleyip tekrar deneyin."
+msgid "Too many invitations were sent. Try again later."
+msgstr "Çok fazla davet gönderildi. Daha sonra tekrar deneyin."
 
 msgid "Too many requests. Wait a moment and try again."
 msgstr "Çok fazla istek gönderildi. Biraz bekleyip tekrar deneyin."

@@ -28,7 +28,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseRedirect
 from django.test import Client, override_settings
 
 from pyracast.accounts import social, social_views
-from pyracast.accounts.forms import CompanySignupForm
+from pyracast.accounts.forms import AccountSignupForm
 from pyracast.accounts.invitations import invite_workspace_member
 from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference, WorkspaceRole
 from pyracast.accounts.social import SocialAccountAdapter
@@ -534,7 +534,7 @@ def test_workspace_name_unique_race_rolls_back_identity_and_preserves_pending_si
     client = Client()
     complete(client, begin(client))
     Tenant.objects.create(name="Existing Solar")
-    monkeypatch.setattr(CompanySignupForm, "clean_company_name", lambda self: "Existing Solar")
+    monkeypatch.setattr(AccountSignupForm, "clean_company_name", lambda self: "Existing Solar")
     response = submit(
         client,
         "auth/provider/signup",

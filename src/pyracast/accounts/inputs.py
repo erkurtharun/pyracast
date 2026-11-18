@@ -31,7 +31,7 @@ from django import forms
 from django.contrib.auth.models import User
 from django.core.validators import MaxLengthValidator
 
-from pyracast.accounts.audit import record_security_event
+from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.authentication import email_identity
 from pyracast.accounts.login_limits import check_second_factor
 
@@ -71,7 +71,11 @@ class ChangePasswordInput(PasswordInput, AllauthChangePasswordInput):
     def clean_current_password(self) -> str:
         current_password: str = self.cleaned_data["current_password"]
         if current_password and not self.user.check_password(current_password):
-            record_security_event("password_change_failed", request=context.request, user=self.user)
+            record_security_event(
+                SecurityEvent.CURRENT_CREDENTIAL_REFUSED,
+                request=context.request,
+                user_id=self.user.pk,
+            )
             raise get_adapter().validation_error("enter_current_password")
         return current_password
 

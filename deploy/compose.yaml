@@ -98,6 +98,13 @@ services:
 
   api:
     <<: *process
+    # The API writes the pyracast.security lines; a full buffer must delay them, not drop them.
+    logging:
+      driver: gcplogs
+      options:
+        mode: blocking
+        cache-max-size: 10m
+        cache-max-file: "5"
     mem_limit: 512m
     cpus: 1.0
     pids_limit: 100

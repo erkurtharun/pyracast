@@ -1,7 +1,7 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from django.db import connection, models, transaction
+from django.db import IntegrityError, connection, models, transaction
 from django.db.transaction import TransactionManagementError
 
 
@@ -12,6 +12,11 @@ def choices_check(
         condition=models.Q(**{f"{field}__in": choices.values}),
         name=name or f"%(class)s_{field}_chk",
     )
+
+
+def violated_constraint(error: IntegrityError) -> str | None:
+    name = getattr(getattr(error.__cause__, "diag", None), "constraint_name", None)
+    return name if isinstance(name, str) else None
 
 
 @contextmanager

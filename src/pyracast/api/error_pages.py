@@ -5,7 +5,7 @@ from django.utils.cache import patch_cache_control
 from django.views import csrf, defaults
 
 from pyracast.accounts.social import social_callback_url
-from pyracast.api.errors import api_error, coded, error_json
+from pyracast.api.errors import api_error, coded, error_json, record_refused
 from pyracast.errors import ErrorCode
 
 # Routes a browser reaches by a top-level form navigation, where a JSON body would strand the user.
@@ -48,9 +48,10 @@ def server_error(request: HttpRequest) -> HttpResponse:
 
 
 def csrf_failure(request: HttpRequest, reason: str = "") -> HttpResponse:
+    route = request.resolver_match.url_name if request.resolver_match else None
+    record_refused(request, ErrorCode.CSRF_FAILED, route or "-", None)
     if not _api(request):
         return _private(csrf.csrf_failure(request, reason))
-    route = request.resolver_match.url_name if request.resolver_match else None
     if route in PROVIDER_NAVIGATIONS and request.headers.get("Sec-Fetch-Mode") == "navigate":
         return _private(HttpResponseRedirect(f"{social_callback_url()}&error=expired_form"))
     return error_json(request, lambda: coded(ErrorCode.CSRF_FAILED, 403))

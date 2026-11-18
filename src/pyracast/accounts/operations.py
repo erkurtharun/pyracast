@@ -4,16 +4,25 @@ from django.db import transaction
 from django.db.models.functions import Lower
 from django.utils import timezone
 
+from pyracast.accounts.audit import SecurityEvent, record_on_commit
 from pyracast.accounts.authorization import require_platform_admin, tenant_membership
 from pyracast.accounts.models import (
     Membership,
     Tenant,
+    UserLanguagePreference,
     WorkspaceAdminChange,
     WorkspaceInvitation,
     WorkspaceMemberRemoval,
     WorkspaceRole,
 )
 from pyracast.errors import ConflictError, DomainError, ErrorCode
+
+
+def register_account(user: User, *, language: str, workspace_name: str | None) -> None:
+    if workspace_name is not None:
+        tenant = Tenant.objects.create(name=workspace_name)
+        Membership.objects.create(user=user, tenant=tenant, role=WorkspaceRole.ADMIN)
+    UserLanguagePreference.objects.create(user=user, language=language)
 
 
 @transaction.atomic
@@ -41,6 +50,12 @@ def remove_workspace_member(actor: User, tenant_id: int, user_id: int) -> None:
     ).update(expires_at=now)
     WorkspaceMemberRemoval.objects.create(tenant_id=tenant_id, actor=actor, user_id=user_id)
     membership.delete()
+    record_on_commit(
+        SecurityEvent.WORKSPACE_MEMBER_REMOVED,
+        user_id=actor.pk,
+        tenant_id=tenant_id,
+        target_id=user_id,
+    )
 
 
 @transaction.atomic
@@ -78,5 +93,11 @@ def reassign_workspace_admin(
             actor=actor,
             administrator_id=user_id,
             previous_administrator_id=current_admin_id,
+        )
+        record_on_commit(
+            SecurityEvent.WORKSPACE_ADMIN_REASSIGNED,
+            user_id=actor.pk,
+            tenant_id=tenant_id,
+            target_id=user_id,
         )
     return membership

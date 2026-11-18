@@ -9,7 +9,7 @@ from django.contrib.auth import logout
 from django.core.exceptions import ImproperlyConfigured, PermissionDenied
 from django.http import HttpRequest, HttpResponse
 
-from pyracast.accounts.audit import record_security_event
+from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.authorization import requires_admin_mfa
 from pyracast.accounts.checks import validate_public_origin
 from pyracast.accounts.security import normalize_client_ip
@@ -73,7 +73,7 @@ class TrustedProxyHeaders:
     @staticmethod
     def _refuse(peer: IPv4Address | IPv6Address) -> NoReturn:
         # The allauth adapter cannot resolve the client here: it would refuse the same headers.
-        record_security_event("invalid_proxy_headers", client_ip=str(peer))
+        record_security_event(SecurityEvent.INVALID_PROXY_HEADERS, client_ip=str(peer))
         raise ForbiddenError(ErrorCode.INVALID_PROXY_HEADERS)
 
     def _forwarded_client_ip(self, forwarded_for: str | None) -> str:

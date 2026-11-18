@@ -8,6 +8,8 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest
 
+from pyracast.accounts.audit import SecurityEvent, record_security_event
+
 APP = "allauth.account"
 FAILED_LOGIN = "login_failed"
 FAILED_LOGIN_FROM_CLIENT = "login_failed_ip"
@@ -55,6 +57,7 @@ def check_second_factor(
     if client is None or account is None:
         if client is not None:
             client.rollback()
+        record_security_event(SecurityEvent.SECOND_FACTOR_LOCKED, request=request, user_id=user.pk)
         raise get_adapter().validation_error(refusal)
     try:
         code = check()

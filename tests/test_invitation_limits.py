@@ -43,7 +43,10 @@ def security_log(
 
 def security_lines(log: pytest.LogCaptureFixture) -> list[dict[str, Any]]:
     return [
-        json.loads(record.message) for record in log.records if record.name == "pyracast.security"
+        line
+        for record in log.records
+        if record.name == "pyracast.security"
+        and (line := json.loads(record.message))["event"] != "login_succeeded"
     ]
 
 
@@ -147,7 +150,8 @@ def test_the_daily_sender_budget_spans_the_senders_workspaces() -> None:
     earlier_invitations(second, sender, [timedelta(hours=3)] * 25)
 
     assert_wait(invite(sender, second), 3_599, 3_600)
-    assert invite(*reversed(workspace("other"))).status_code == 201
+    other, other_admin = workspace("other")
+    assert invite(other_admin, other).status_code == 201
 
 
 def test_revoked_invitations_count_towards_the_daily_recipient_budget() -> None:
@@ -230,7 +234,6 @@ def test_invitation_and_membership_changes_are_recorded_without_addresses(
     lines = [
         (line["event"], line["user_id"], line["tenant_id"], line.get("target_id"))
         for line in security_lines(security_log)
-        if line["event"] != "login_succeeded"
     ]
     assert lines == [
         ("invitation_sent", administrator.pk, tenant.pk, sent.json()["id"]),
