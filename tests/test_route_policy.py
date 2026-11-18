@@ -34,6 +34,7 @@ FORECAST, CALIBRATION, IMPORT, SUBMISSION = (
     "submission",
 )
 POLICIES: dict[str, dict[str, tuple[str, str | None]]] = {
+    "api/csp-reports/": {"POST": (PUBLIC, None)},
     "api/session/": {"GET": (PUBLIC, None)},
     "api/session/language/": {"POST": (PUBLIC, None)},
     "api/tenants/": {"GET": (ACCOUNT, None)},
@@ -97,6 +98,7 @@ INVALID, NOT_FOUND = (400, "invalid_request"), (404, "not_found")
 NO_CONFIGURATION = (400, "configuration_unavailable")
 # Admitted roles' answers with a real tenant, region and plant, other ids absent and body {}.
 ANSWERS: dict[str, dict[str, tuple[int, str | None]]] = {
+    "api/csp-reports/": {"POST": NO_CONTENT},
     "api/session/": {"GET": OK},
     "api/session/language/": {"POST": INVALID},
     "api/tenants/": {"GET": OK},
@@ -172,7 +174,7 @@ def framework_views() -> dict[str, type[APIView]]:
 
 def test_every_framework_route_and_method_has_exactly_one_policy() -> None:
     table = ROUTE_POLICIES
-    assert {route: set(methods) for route, methods in table.items()} == {
+    expected = {
         route: {
             method.upper()
             for method in view.http_method_names
@@ -180,6 +182,8 @@ def test_every_framework_route_and_method_has_exactly_one_policy() -> None:
         }
         for route, view in framework_views().items()
     }
+    expected["api/csp-reports/"] = {"POST"}
+    assert {route: set(methods) for route, methods in table.items()} == expected
 
 
 def test_every_framework_view_takes_its_permission_from_the_route_policy() -> None:
