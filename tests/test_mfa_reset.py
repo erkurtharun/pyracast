@@ -17,7 +17,12 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import Client, override_settings
 
-from tests.support.account_sessions import capture_security_events
+from tests.support.account_sessions import (
+    answer,
+    browser,
+    capture_security_events,
+    session_user,
+)
 from tests.support.admin_mfa_bootstrap import (
     NEW_PASSWORD,
     TEST_PASSWORD,
@@ -27,7 +32,7 @@ from tests.support.admin_mfa_bootstrap import (
     enrollment_secret,
     run,
 )
-from tests.support.auth_lifecycle import totp_code
+from tests.support.auth_lifecycle import mailed_code, submit, totp_code
 
 pytestmark = pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
 
@@ -125,6 +130,39 @@ def test_an_administrator_without_a_factor_is_enrolled_again_after_a_reset(
     )
 
     assert Authenticator.objects.filter(user=user, type="totp").count() == 1
+
+
+def test_a_reset_ends_the_pending_steps_of_the_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = time.time()
+    monkeypatch.setattr(totp_auth, "time", SimpleNamespace(time=lambda: now))
+    user = customer()
+    secret = generate_totp_secret()
+    TOTP.activate(user, secret)
+    reset = browser()
+    assert submit(reset, "auth/password/request", {"email": user.email}).status_code == 401
+    code = mailed_code()
+    sign_in = browser()
+    credentials = {"email": user.email, "password": TEST_PASSWORD}
+    assert submit(sign_in, "auth/login", credentials).status_code == 401
+    run("reset_mfa", [user.email], email=user.email, reason="compromised")
+    mail.outbox.clear()
+    new_password = {"key": code, "password": NEW_PASSWORD}
+    second_factor = {"code": totp_code(secret, now)}
+    nothing_pending = (
+        answer(submit(browser(), "auth/password/reset", new_password)),
+        answer(submit(browser(), "auth/2fa/authenticate", second_factor)),
+    )
+
+    completed = (
+        answer(submit(reset, "auth/password/reset", new_password)),
+        answer(submit(sign_in, "auth/2fa/authenticate", second_factor)),
+    )
+
+    assert completed == nothing_pending
+    user.refresh_from_db()
+    assert user.check_password(TEST_PASSWORD)
+    assert (session_user(reset), session_user(sign_in)) == (None, None)
+    assert mail.outbox == []
 
 
 def test_a_dry_run_changes_nothing_and_asks_nothing(

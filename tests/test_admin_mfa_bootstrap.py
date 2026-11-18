@@ -12,9 +12,10 @@ from allauth.account.models import EmailAddress
 from allauth.mfa.models import Authenticator
 from allauth.mfa.totp.internal import auth as totp_auth
 from django.contrib.auth.models import User
+from django.core import mail
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import Client, RequestFactory
+from django.test import Client, RequestFactory, override_settings
 
 from pyracast.accounts.mfa import MFAAdapter
 from tests.support.account_sessions import capture_security_events
@@ -28,7 +29,7 @@ from tests.support.admin_mfa_bootstrap import (
     run,
     setup_link,
 )
-from tests.support.auth_lifecycle import totp_code
+from tests.support.auth_lifecycle import mailed_code, submit, totp_code
 
 pytestmark = pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
 ADDRESS = "first.admin@example.com"
@@ -63,7 +64,11 @@ def snapshot() -> tuple[list[Any], ...]:
                 "pk", "username", "email", "password", "is_active", "is_staff", "is_superuser"
             )
         ),
-        list(EmailAddress.objects.order_by("pk").values_list("user_id", "email", "primary")),
+        list(
+            EmailAddress.objects.order_by("pk").values_list(
+                "user_id", "email", "primary", "verified"
+            )
+        ),
         list(Authenticator.objects.order_by("pk").values_list("user_id", "type", "data")),
     )
 
@@ -338,6 +343,125 @@ def test_a_factor_added_meanwhile_stops_the_enrollment(now: float) -> None:
     assert Authenticator.objects.filter(user=user).count() == 1
     user.refresh_from_db()
     assert user.check_password(TEST_PASSWORD)
+
+
+OTHER = "other.admin@example.com"
+LOCAL_MAIL = {"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
+Rows = tuple[tuple[str, bool, bool], ...]
+
+
+def arranged(rows: Rows) -> User:
+    # An administrator without a factor whose account address is ADDRESS and whose address rows
+    # are (email, verified, primary).
+    user = User.objects.create_user(
+        username="operator",
+        email=ADDRESS,
+        password=TEST_PASSWORD,
+        is_staff=True,
+        is_superuser=True,
+    )
+    for email, verified, primary in rows:
+        EmailAddress.objects.create(user=user, email=email, verified=verified, primary=primary)
+    return user
+
+
+SIGN_IN_ARRANGEMENTS: dict[str, Rows] = {
+    "verified": ((ADDRESS, True, True),),
+    "verified-beside-another": ((ADDRESS, True, True), (OTHER, False, False)),
+    "verified-not-primary": ((OTHER, True, True), (ADDRESS, True, False)),
+    "unverified-sole-primary": ((ADDRESS, False, True),),
+    "no-address-row": (),
+}
+REFUSED_ARRANGEMENTS: dict[str, Rows] = {
+    "no-row-beside-another": ((OTHER, False, True),),
+    "unverified-beside-verified": ((OTHER, True, True), (ADDRESS, False, False)),
+    "unverified-not-primary": ((ADDRESS, False, False),),
+}
+UNUSABLE = (
+    "The administrator could not sign in with this address: it must be verified or the "
+    "account's only, primary address. Nothing was changed."
+)
+
+
+def pending_flow(response: Any) -> str | None:
+    assert response.status_code == 401
+    flows = response.json()["data"]["flows"]
+    return next((flow["id"] for flow in flows if flow.get("is_pending")), None)
+
+
+@override_settings(MAILERS=LOCAL_MAIL)
+@pytest.mark.parametrize("arrangement", SIGN_IN_ARRANGEMENTS)
+def test_an_enrolled_administrator_signs_in_with_the_address_password_and_authenticator(
+    arrangement: str, now: float
+) -> None:
+    arranged(SIGN_IN_ARRANGEMENTS[arrangement])
+    shown, _terminal = run("bootstrap_admin", guided(now), email=ADDRESS)
+    client = Client(enforce_csrf_checks=True)
+
+    response = submit(client, "auth/login", {"email": ADDRESS, "password": NEW_PASSWORD})
+    if pending_flow(response) == "verify_email":
+        response = submit(client, "auth/email/verify", {"key": mailed_code()})
+    assert pending_flow(response) == "mfa_authenticate"
+    second_factor = {"code": totp_code(enrollment_secret(shown), now)}
+
+    assert submit(client, "auth/2fa/authenticate", second_factor).status_code == 200
+    assert client.get("/admin/").status_code == 200
+
+
+@pytest.mark.parametrize("arrangement", REFUSED_ARRANGEMENTS)
+def test_an_address_the_administrator_could_not_sign_in_with_is_refused(
+    arrangement: str, now: float, events: Callable[[], list[dict[str, Any]]]
+) -> None:
+    arranged(REFUSED_ARRANGEMENTS[arrangement])
+    before = snapshot()
+
+    first, shown, terminal = refusal(guided(now))
+    second, _shown, _terminal = refusal(guided(now))
+    dry, _shown, _terminal = refusal([], dry_run=True)
+
+    assert first == second == dry == UNUSABLE
+    assert (shown, terminal.asked) == ("", 0)
+    assert snapshot() == before
+    assert events() == []
+
+
+def test_an_arrangement_changed_meanwhile_stops_the_enrollment(now: float) -> None:
+    user = arranged(((ADDRESS, False, True),))
+
+    def code_while_another_address_is_added(shown: str) -> str:
+        EmailAddress.objects.create(user=user, email=OTHER, verified=False)
+        return current_code(now)(shown)
+
+    message, _shown, _terminal = refusal(
+        [NEW_PASSWORD, NEW_PASSWORD, code_while_another_address_is_added]
+    )
+
+    assert message == UNUSABLE
+    assert not Authenticator.objects.exists()
+    user.refresh_from_db()
+    assert user.check_password(TEST_PASSWORD)
+
+
+@override_settings(MAILERS=LOCAL_MAIL)
+def test_an_enrollment_ends_the_pending_steps_of_the_administrator(now: float) -> None:
+    user = administrator()
+    reset = Client(enforce_csrf_checks=True)
+    assert submit(reset, "auth/password/request", {"email": user.email}).status_code == 401
+    code = mailed_code()
+    run("bootstrap_admin", guided(now), email=user.email)
+    mail.outbox.clear()
+    new_password = {"key": code, "password": "reset-only-" + "glacier-river-77"}
+    nothing_pending = submit(Client(enforce_csrf_checks=True), "auth/password/reset", new_password)
+
+    response = submit(reset, "auth/password/reset", new_password)
+
+    assert (response.status_code, response.json()) == (
+        nothing_pending.status_code,
+        nothing_pending.json(),
+    )
+    user.refresh_from_db()
+    assert user.check_password(NEW_PASSWORD)
+    assert mail.outbox == []
 
 
 def test_a_console_without_a_terminal_font_still_gets_the_enrollment_link(now: float) -> None:

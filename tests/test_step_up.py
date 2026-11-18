@@ -1,16 +1,20 @@
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from types import SimpleNamespace
 
 import pytest
+from allauth.account.internal.flows.login import AUTHENTICATION_METHODS_SESSION_KEY
 from allauth.account.models import EmailAddress
+from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
 from allauth.mfa.totp.internal import auth as totp_auth
-from django.conf import settings
+from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
 from django.contrib.auth.models import User
 from django.core import mail
 from django.test import Client, override_settings
 
+from tests.support.account_sessions import session_user
 from tests.support.auth_lifecycle import AUTH, PASSWORD, mailed_code, totp_code
+from tests.support.social_accounts import CALLBACK
 from tests.support.step_up import FLOWS, STRONGEST, call, holder, proofs, signed_in, with_proof
 
 pytestmark = pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
@@ -170,13 +174,181 @@ def test_a_connection_needs_a_proof_by_the_strongest_factor() -> None:
         {
             "provider": "google",
             "process": "connect",
-            "callback_url": settings.PYRACAST_SOCIAL_CALLBACK_URL,
+            "callback_url": CALLBACK,
         },
         HTTP_X_CSRFTOKEN=token,
     )
 
     assert response.status_code == 302
     assert "error=reauthentication_required" in response["Location"]
+
+
+def password_set(user: User) -> None:
+    user.set_password(PASSWORD + "-elsewhere")
+    user.save(update_fields=["password"])
+
+
+def factor_added(user: User) -> None:
+    if user.authenticator_set.filter(type="totp").exists():
+        RecoveryCodes.activate(user)
+    else:
+        TOTP.activate(user, generate_totp_secret())
+
+
+def factor_removed(user: User) -> None:
+    user.authenticator_set.filter(type="recovery_codes").delete()
+
+
+def factor_reset(user: User) -> None:
+    factor_removed(user)
+    RecoveryCodes.activate(user)
+
+
+def address_replaced(user: User) -> None:
+    EmailAddress.objects.filter(user=user).update(email="replaced@example.com")
+
+
+# Credential changes made outside the session that holds the step. A password change ends every
+# session of the account (the session hash and ACCOUNT_LOGOUT_ON_PASSWORD_CHANGE); the others
+# keep the session, so only the step can end.
+CHANGES_OF: dict[str, dict[str, Callable[[User], None]]] = {
+    "code": {"password-set": password_set, "factor-added": factor_added},
+    "password": {"password-changed": password_set, "factor-added": factor_added},
+    "authenticator": {
+        "password-changed": password_set,
+        "factor-removed": factor_removed,
+        "factor-reset": factor_reset,
+    },
+}
+for changes in CHANGES_OF.values():
+    changes["address-replaced"] = address_replaced
+SESSION_ENDING = {"password-set", "password-changed"}
+PROVEN_ACTIONS = {
+    "code": ["add-address"],
+    "password": ["add-address"],
+    "authenticator": ["add-address", "change-password"],
+}
+PROOF_CHANGES = [
+    (kind, action, change)
+    for kind, changes in CHANGES_OF.items()
+    for action in PROVEN_ACTIONS[kind]
+    for change in ["unchanged", *changes]
+]
+
+
+def proven(kind: str, now: float) -> tuple[User, Client]:
+    user, secret = holder(kind)
+    if secret is not None:
+        RecoveryCodes.activate(user)
+    client = signed_in(user)
+    code = totp_code(secret, now) if secret else ""
+    assert reauthenticate(client, user, STRONGEST[kind], code) == 200
+    assert len(proofs(client)) == 1
+    mail.outbox.clear()
+    return user, client
+
+
+def strongest_now(user: User) -> str:
+    current = User.objects.get(pk=user.pk)
+    if current.authenticator_set.exists():
+        return "mfa"
+    return "password" if current.has_usable_password() else "code"
+
+
+@pytest.mark.parametrize(("kind", "action", "change"), PROOF_CHANGES)
+def test_a_step_up_proof_holds_only_while_the_credential_state_it_was_given_under_holds(
+    kind: str, action: str, change: str, now: float
+) -> None:
+    user, client = proven(kind, now)
+    if change != "unchanged":
+        CHANGES_OF[kind][change](user)
+    before = stored(user)
+
+    response = call(client, *ACTIONS[action])
+
+    if change == "unchanged":
+        if action == "add-address":
+            assert response.status_code == 200
+            assert [message.to for message in mail.outbox] == [["added@example.com"]]
+        else:
+            assert User.objects.get(pk=user.pk).check_password(CHANGED_PASSWORD)
+        return
+    assert stored(user) == before
+    assert mail.outbox == []
+    if change in SESSION_ENDING:
+        signed_out = call(Client(enforce_csrf_checks=True), *ACTIONS[action])
+        assert (response.status_code, response.json()) == (
+            signed_out.status_code,
+            signed_out.json(),
+        )
+        assert session_user(client) is None
+        return
+    assert response.status_code == 401
+    assert [flow["id"] for flow in response.json()["data"]["flows"]] == [FLOWS[strongest_now(user)]]
+    assert proofs(client) == []
+    assert session_user(client) == user.pk
+
+
+@pytest.mark.parametrize("change", ["unchanged", *CHANGES_OF["code"]])
+def test_a_reauthentication_code_completes_only_under_the_state_it_was_sent_under(
+    change: str,
+) -> None:
+    user, _secret = holder("code")
+    client = signed_in(user)
+    requested = call(client, "post", "auth/reauthenticate/code/request", {"email": user.email})
+    assert requested.status_code == 200
+    data = {"code": mailed_code()}
+    mail.outbox.clear()
+    if change == "unchanged":
+        assert call(client, "post", "auth/reauthenticate/code/confirm", data).status_code == 200
+        assert [proof["method"] for proof in proofs(client)] == ["code"]
+        return
+    CHANGES_OF["code"][change](user)
+    nothing_pending = call(signed_in(user), "post", "auth/reauthenticate/code/confirm", data)
+
+    response = call(client, "post", "auth/reauthenticate/code/confirm", data)
+
+    assert proofs(client) == []
+    assert mail.outbox == []
+    if change in SESSION_ENDING:
+        assert response.status_code == 401
+        assert session_user(client) is None
+        return
+    assert (response.status_code, response.json()) == (
+        nothing_pending.status_code,
+        nothing_pending.json(),
+    )
+    assert session_user(client) == user.pk
+
+
+def methods(client: Client) -> list[str]:
+    records = client.session.get(AUTHENTICATION_METHODS_SESSION_KEY) or []
+    return [record["method"] for record in records]
+
+
+def test_an_ended_proof_leaves_the_session_and_its_records_in_place(now: float) -> None:
+    user, client = proven("authenticator", now)
+    recorded = methods(client)
+    factor_removed(user)
+
+    assert call(client, "get", "account/authenticators").status_code == 200
+
+    assert proofs(client) == []
+    assert methods(client) == recorded
+    assert session_user(client) == user.pk
+
+
+def test_a_session_without_a_proof_is_left_as_it_is() -> None:
+    user, _secret = holder("authenticator")
+    client = signed_in(user)
+    with_proof(client, user, "mfa", age=0, reauthenticated=False, type="totp", id=1)
+    recorded = client.session[AUTHENTICATION_METHODS_SESSION_KEY]
+    address_replaced(user)
+
+    assert call(client, "get", "account/authenticators").status_code == 200
+
+    assert client.session[AUTHENTICATION_METHODS_SESSION_KEY] == recorded
+    assert session_user(client) == user.pk
 
 
 @pytest.mark.parametrize("action", ["add-address", "change-password"])

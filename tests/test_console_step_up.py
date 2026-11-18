@@ -1,11 +1,12 @@
 import re
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote
 
 import pytest
+from allauth.account.models import EmailAddress
 from allauth.mfa.models import Authenticator
 from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
 from allauth.mfa.totp.internal import auth as totp_auth
@@ -29,8 +30,9 @@ from tests.support.step_up import with_proof
 pytestmark = pytest.mark.django_db
 CONFIRMATION = "admin/workspace/confirm.html"
 # Signing out and confirming with the authenticator are the console's only writes that need no
-# recent confirmation; the login route only redirects.
-UNGUARDED = {"login", "logout", "workspace_confirm"}
+# recent confirmation. Django's console login route stores nothing and only redirects.
+UNGUARDED = {"logout", "workspace_confirm"}
+REDIRECTS = {"login"}
 SAMPLES = {"app_label": "regions", "url": "unknown/"}
 SESSION_TABLES = ('"django_session"', '"usersessions_usersession"')
 BOUND = settings.ACCOUNT_REAUTHENTICATION_TIMEOUT
@@ -72,7 +74,7 @@ def writes(queries: CaptureQueriesContext) -> list[str]:
 
 
 def test_the_routes_that_need_no_confirmation_are_console_routes() -> None:
-    assert {name for _route, name in ROUTES} >= UNGUARDED
+    assert {name for _route, name in ROUTES} >= UNGUARDED | REDIRECTS
 
 
 def stale_admin(evidence: str) -> tuple[Client, User]:
@@ -93,7 +95,10 @@ def test_a_console_write_without_recent_mfa_evidence_is_refused_and_stores_nothi
     with CaptureQueriesContext(connection) as queries:
         response = client.post(concrete(route), {"action": "approve", "language": "tr"})
 
-    if name in UNGUARDED:
+    if name in REDIRECTS:
+        assert response.status_code == 302
+        assert writes(queries) == []
+    elif name in UNGUARDED:
         assert not refused(response)
     else:
         assert refused(response)
@@ -229,6 +234,68 @@ def test_confirming_with_the_authenticator_allows_console_writes(
     assert right.status_code == 302
     assert right["Location"] == settings_path
     assert not refused(client.post(settings_path, {}))
+
+
+def recovery_codes_removed(user: User) -> None:
+    Authenticator.objects.filter(user=user, type="recovery_codes").delete()
+
+
+def recovery_codes_reset(user: User) -> None:
+    recovery_codes_removed(user)
+    RecoveryCodes.activate(user)
+
+
+def password_set(user: User) -> None:
+    user.set_password("operator-only-" + "harbour-lantern-58")
+    user.save(update_fields=["password"])
+
+
+def address_added(user: User) -> None:
+    EmailAddress.objects.create(user=user, email="elsewhere@example.com", verified=False)
+
+
+# Credential changes made outside the confirmed session; only a password change ends the session.
+CONSOLE_CHANGES: dict[str, Callable[[User], object]] = {
+    "password-set": password_set,
+    "factor-added": RecoveryCodes.activate,
+    "factor-removed": recovery_codes_removed,
+    "factor-reset": recovery_codes_reset,
+    "address-added": address_added,
+}
+
+
+@CODE_LIMITS
+@pytest.mark.parametrize("change", ["unchanged", *CONSOLE_CHANGES])
+def test_a_console_confirmation_holds_only_while_the_credential_state_it_was_given_under_holds(
+    operator: tuple[Client, str, float], change: str
+) -> None:
+    client, secret, now = operator
+    user = User.objects.get(username="operator")
+    if change != "factor-added":
+        RecoveryCodes.activate(user)
+    NotificationSettings.objects.update_or_create(pk=1, defaults={"max_recipients": 5})
+    settings_path = reverse("admin:workspace_settings")
+    confirmed = client.post(
+        reverse("admin:workspace_confirm"), {"code": totp_code(secret, now), "next": settings_path}
+    )
+    assert confirmed.status_code == 302
+    if change != "unchanged":
+        CONSOLE_CHANGES[change](user)
+
+    response = client.post(settings_path, {"max_recipients": 8, "expected_max_recipients": 5})
+
+    if change == "unchanged":
+        assert response.status_code == 302
+        assert NotificationSettings.objects.get().max_recipients == 8
+        return
+    assert NotificationSettings.objects.get().max_recipients == 5
+    assert not LogEntry.objects.exists()
+    if change == "password-set":
+        # A password change ends every session of the account, and the confirmation with it.
+        assert client.get("/api/session/").json()["user"] is None
+        return
+    assert refused(response)
+    assert client.get(reverse("admin:index")).status_code == 200
 
 
 @CODE_LIMITS

@@ -920,7 +920,7 @@ def test_a_password_change_started_while_a_reset_code_is_requested_waits_and_end
 def test_an_address_replacement_started_while_a_reauthentication_code_is_requested_ends_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    user = account("owner")
+    user = passwordless("owner")
     EmailAddress.objects.create(user=user, email=SECOND, verified=True)
     client = signed_in(user)
     changes = changing(
@@ -1038,6 +1038,8 @@ def spent_reset(user: User) -> Client:
 
 
 def spent_reauthentication_code(user: User) -> Client:
+    user.set_unusable_password()
+    user.save(update_fields=["password"])
     client = signed_in(user)
     for _ in range(3):
         response = submit(client, "auth/reauthenticate/code/request", {"email": OWNER})
@@ -1086,7 +1088,7 @@ def test_a_start_refused_by_its_budget_waits_for_no_lock(start: str) -> None:
 def test_a_reauthentication_code_admitted_after_its_budget_looked_spent_sends_no_code(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    user = account("owner")
+    user = passwordless("owner")
     client = signed_in(user)
     monkeypatch.setattr(headless, "spent", lambda *args, **kwargs: True)
 
