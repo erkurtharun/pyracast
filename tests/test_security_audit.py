@@ -8,6 +8,7 @@ import pytest
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
 from django.contrib.auth.signals import user_login_failed
+from django.core.exceptions import PermissionDenied
 from django.db import connections
 from django.http import HttpRequest
 from django.test import Client, RequestFactory, override_settings
@@ -16,6 +17,7 @@ from pyracast.accounts import session_lock
 from pyracast.accounts.audit import connect_security_events, logger
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.accounts.session_lock import serialize_session
+from pyracast.api import error_pages
 from tests.support.admin_recovery_security import AUTH, authenticated_account
 
 PASSWORD = "test-only-" + "harbor-lantern-58!"
@@ -196,6 +198,50 @@ def test_a_signed_in_csrf_refusal_is_recorded_for_api_and_authentication_views(
     assert [
         (line["event"], line["user_id"], line["reason"]) for line in security_lines(caplog)
     ] == [("csrf_refused", viewer.pk, "csrf_failed")] * 2
+
+
+@pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+def test_refusals_are_recorded_and_throttled_per_route_for_routes_without_names(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client, _, viewer = signed_in_viewer()
+    for route in ("auth/reauthenticate", "account/password/change", "auth/reauthenticate"):
+        refused = client.post(AUTH + route, {"password": PASSWORD}, content_type="application/json")
+        assert refused.status_code == 403
+
+    assert [(line["event"], line["user_id"], line["view"]) for line in security_lines(caplog)] == [
+        ("csrf_refused", viewer.pk, "api/auth/browser/v1/auth/reauthenticate"),
+        ("csrf_refused", viewer.pk, "api/auth/browser/v1/account/password/change"),
+    ]
+
+
+@pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+def test_a_refusal_before_routing_is_recorded_with_its_route(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    operator = User.objects.create_user(username="route-operator", is_staff=True)
+    client = Client()
+    client.force_login(operator)
+
+    assert client.get(AUTH + "account/authenticators/totp").status_code == 403
+
+    assert [(line["event"], line["view"]) for line in security_lines(caplog)] == [
+        ("authorization_denied", "api/auth/browser/v1/account/authenticators/totp")
+    ]
+
+
+def test_a_refusal_is_attributed_to_its_route_pattern_and_never_to_its_path(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    request = RequestFactory().get("/api/tenants/7341/regions/9257/forecast/")
+    request.user = User(pk=990_001, username="route-pattern")
+
+    assert error_pages.permission_denied(request, PermissionDenied()).status_code == 403
+
+    [line] = security_lines(caplog)
+    assert line["view"] == "api/tenants/<int:tenant_id>/regions/<int:region_id>/forecast/"
+    assert "7341" not in caplog.text
+    assert "9257" not in caplog.text
 
 
 @pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
