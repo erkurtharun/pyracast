@@ -128,9 +128,8 @@ has one source in `web/src/components/public-site/legal-copy.ts`.
 ## Approval flow
 
 Company registration creates a non-staff user, a new tenant and its administrator
-membership in one transaction. Workspace names are unique without case or surrounding
-space distinctions, enforced by PostgreSQL. It never joins an existing company by
-name or email. The
+membership in one transaction. Workspace names need not be unique; registration
+always creates a new workspace and never joins an existing company by name or email. The
 django-allauth browser API owns registration, email verification, login, recovery,
 reauthentication, MFA and session management. Email ownership is mandatory before
 login. Django validates passwords with a 12-character minimum and common-password

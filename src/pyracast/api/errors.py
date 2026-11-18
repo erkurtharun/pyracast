@@ -26,6 +26,7 @@ from rest_framework.response import Response
 from rest_framework.settings import api_settings
 from rest_framework.views import set_rollback
 
+from pyracast.accounts.audit import SecurityEvent, record_refusal
 from pyracast.accounts.language import request_language
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.operations import QuotaExceededError, RequestDeferredError
@@ -256,12 +257,34 @@ def _view_name(context: dict[str, Any]) -> str:
     return "-" if view is None else type(view).__name__
 
 
+def record_refused(request: Any, code: ErrorCode, view: str, tenant_id: object) -> None:
+    # Only signed-in refusals are recorded, so an anonymous flood writes no lines.
+    http_request = getattr(request, "_request", request)
+    user = getattr(http_request, "user", None)
+    if user is None or not user.is_authenticated:
+        return
+    record_refusal(
+        SecurityEvent.CSRF_REFUSED
+        if code == ErrorCode.CSRF_FAILED
+        else SecurityEvent.AUTHORIZATION_DENIED,
+        request=http_request,
+        user_id=user.pk,
+        view=view,
+        reason=code.value,
+        tenant_id=tenant_id if isinstance(tenant_id, int) else None,
+    )
+
+
 def exception_handler(exc: Exception, context: dict[str, Any]) -> Response | None:
     if isinstance(exc, SuspiciousOperation | BadRequest):
         # Django answers these through handler400 and logs them on django.security.
         return None
     set_rollback()
-    error = api_error(exc, context.get("request"), _view_name(context))
+    view = _view_name(context)
+    error = api_error(exc, context.get("request"), view)
+    if error.status == 403:
+        tenant_id = (context.get("kwargs") or {}).get("tenant_id")
+        record_refused(context.get("request"), error.code, view, tenant_id)
     return Response(error.body(), status=error.status, headers=error.headers())
 
 

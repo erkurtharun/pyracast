@@ -4,6 +4,7 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management.base import BaseCommand, CommandError, CommandParser
+from django.db import transaction
 from django.utils import timezone
 
 from pyracast.accounts.authorization import is_platform_admin
@@ -62,11 +63,21 @@ def _binding(actor: User, region: Region) -> SiteBinding:
     return binding
 
 
+@transaction.atomic
+def _workspace(actor: User) -> Tenant:
+    User.objects.select_for_update().get(pk=actor.pk)
+    name = f"Fixture demonstration (user {actor.pk})"
+    tenant = Tenant.objects.filter(
+        name=name, membership__user=actor, membership__role=WorkspaceRole.ADMIN
+    ).first()
+    if tenant is None:
+        tenant = Tenant.objects.create(name=name)
+        Membership.objects.create(user=actor, tenant=tenant, role=WorkspaceRole.ADMIN)
+    return tenant
+
+
 def run_demo(actor: User) -> str:
-    tenant, _ = Tenant.objects.get_or_create(name=f"Fixture demonstration (user {actor.pk})")
-    Membership.objects.get_or_create(
-        user=actor, tenant=tenant, defaults={"role": WorkspaceRole.ADMIN}
-    )
+    tenant = _workspace(actor)
     region = _region(actor, tenant)
     plant = _plant(actor, region)
     binding = _binding(actor, region)

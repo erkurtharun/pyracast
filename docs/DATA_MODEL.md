@@ -265,7 +265,6 @@ erDiagram
 
 #### `accounts_tenant`
 
-- `unique_workspace_name`: `UNIQUE INDEX ((LOWER(TRIM("name"))))`
 - `workspace_name_not_blank`: `CHECK (NOT ("name"::text ~  E'^\\s*$'))`
 
 #### `accounts_userlanguagepreference`

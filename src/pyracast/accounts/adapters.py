@@ -1,4 +1,5 @@
 import logging
+import secrets
 from typing import Any, cast
 
 from allauth.account.adapter import DefaultAccountAdapter
@@ -12,15 +13,17 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.mail import EmailMultiAlternatives
 from django.db import IntegrityError, transaction
-from django.http import HttpRequest
+from django.http import HttpRequest, HttpResponse
 from django.utils import translation
 from django.utils.translation import gettext_lazy
 
 from pyracast.accounts.account_mail import NOTICES, render_notice
-from pyracast.accounts.audit import record_security_event
+from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.language import user_language
 from pyracast.accounts.login_limits import reserve_address_failure, reserve_client_failure
 from pyracast.accounts.security import normalize_client_ip
+from pyracast.accounts.social import record_social_refusal
+from pyracast.db import violated_constraint
 from pyracast.mail.errors import DeliveryUncertainError, NotSentError
 from pyracast.mail.send import send
 
@@ -31,10 +34,6 @@ CODE_TIMEOUTS = {
     "account/email/password_reset_code": "ACCOUNT_PASSWORD_RESET_BY_CODE_TIMEOUT",
     "account/email/login_code": "ACCOUNT_LOGIN_BY_CODE_TIMEOUT",
 }
-
-
-def violated_constraint(error: IntegrityError) -> str | None:
-    return getattr(getattr(error.__cause__, "diag", None), "constraint_name", None)
 
 
 LOGIN_LIMITED_MESSAGE = gettext_lazy(
@@ -85,15 +84,16 @@ class AccountAdapter(DefaultAccountAdapter):
     def pre_authenticate(self, request: HttpRequest, **credentials: Any) -> None:
         # Replaces allauth's consume of `login_failed`, which keeps the 10-minute hit when the
         # daily rate refuses; allauth's success path rolls `_login_failed_rl_usage` back.
+        address = credentials.get("email")
         self._client_failure = reserve_client_failure(request)
         if self._client_failure is None:
-            record_security_event("login_locked", request=request)
+            record_security_event(SecurityEvent.LOGIN_LOCKED, request=request, address=address)
             raise self.validation_error("too_many_login_attempts")
         key = self._get_login_attempts_cache_key(request, **credentials)
         self._login_failed_rl_usage = reserve_address_failure(request, key)
         if self._login_failed_rl_usage is None:
             self._client_failure.rollback()
-            record_security_event("login_locked", request=request)
+            record_security_event(SecurityEvent.LOGIN_LOCKED, request=request, address=address)
             raise self.validation_error("too_many_login_attempts")
 
     def authenticate(self, request: HttpRequest, **credentials: Any) -> User | None:
@@ -101,6 +101,28 @@ class AccountAdapter(DefaultAccountAdapter):
         if user is not None and self._client_failure is not None:
             self._client_failure.rollback()
         return user
+
+    def pre_login(
+        self, request: HttpRequest, user: AbstractBaseUser, **kwargs: Any
+    ) -> HttpResponse | None:
+        # allauth refuses an inactive account here. The authentication backend refuses an
+        # inactive password sign-in earlier, so only a provider sign-in arrives inactive.
+        sociallogin = (kwargs.get("signal_kwargs") or {}).get("sociallogin")
+        if not user.is_active and sociallogin is not None:
+            record_social_refusal(
+                request, sociallogin.account.provider, "inactive", cast(User, user)
+            )
+        return super().pre_login(request, user, **kwargs)
+
+    def generate_unique_username(self, txts: list[str | None], regex: str | None = None) -> str:
+        # A random part before allauth's uniqueness check keeps concurrent sign-ups with one
+        # mailbox name from choosing one username; allauth still avoids any taken name.
+        token = secrets.token_hex(8)
+        candidates: list[str | None] = []
+        for text in txts:
+            name, at, domain = (text or "").partition("@")
+            candidates.append(f"{name}-{token}{at}{domain}" if name else text)
+        return super().generate_unique_username(candidates, regex)
 
     def get_client_ip(self, request: HttpRequest) -> str:
         try:

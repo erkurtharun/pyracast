@@ -25,6 +25,7 @@ from allauth.socialaccount.providers.microsoft.provider import MicrosoftGraphPro
 from allauth.socialaccount.providers.microsoft.views import oauth2_callback as microsoft_callback
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.db import transaction
 from django.http import (
     HttpRequest,
     HttpResponse,
@@ -34,13 +35,16 @@ from django.http import (
 from django.template.loader import render_to_string
 from django.views.decorators.http import require_GET
 
-from pyracast.accounts.signup import workspace_signup_transaction
-from pyracast.accounts.social import locked_social_user, social_callback_url
+from pyracast.accounts.social import (
+    locked_social_user,
+    record_social_refusal,
+    social_callback_url,
+)
 
 
 class CompanySocialSignupInput(SignupInput):
     def save(self, request: HttpRequest) -> User:
-        with workspace_signup_transaction(request, self):
+        with transaction.atomic():
             return cast(User, super().save(request))
 
 
@@ -149,6 +153,8 @@ class ManageProvidersView(AllauthManageProvidersView):
 @require_GET
 def provider_callback(request: HttpRequest, provider: str) -> HttpResponseBase:
     if provider not in settings.SOCIALACCOUNT_PROVIDERS:
+        user = request.user if request.user.is_authenticated else None
+        record_social_refusal(request, provider, "provider_disabled", user)
         return HttpResponseRedirect(f"{social_callback_url()}&error=provider_unavailable")
     callback = google_callback if provider == "google" else microsoft_callback
     return cast(HttpResponseBase, callback(request))

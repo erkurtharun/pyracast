@@ -13,7 +13,7 @@ from django.core.validators import validate_email
 from django.db import transaction
 from django.views.decorators.debug import sensitive_variables
 
-from pyracast.accounts.audit import record_security_event
+from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.authorization import is_platform_admin
 from pyracast.accounts.mfa import MFAAdapter
 
@@ -72,7 +72,7 @@ class Command(BaseCommand):
             Authenticator.objects.create(
                 user=user, type="totp", data={"secret": MFAAdapter().encrypt(secret)}
             )
-        record_security_event("admin_mfa_provisioned", user=user)
+        record_security_event(SecurityEvent.ADMIN_MFA_PROVISIONED, user_id=user.pk)
         label = quote(f"Pyracast:{user.email or user.username}", safe="")
         parameters = urlencode({"secret": secret, "issuer": "Pyracast", "period": 30, "digits": 6})
         uri = f"otpauth://totp/{label}?{parameters}"

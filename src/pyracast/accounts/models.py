@@ -1,6 +1,5 @@
 from django.conf import settings
 from django.db import models
-from django.db.models.functions import Lower, Trim
 
 from pyracast.db import choices_check
 
@@ -27,7 +26,6 @@ class Tenant(models.Model):
 
     class Meta:
         constraints = (
-            models.UniqueConstraint(Lower(Trim("name")), name="unique_workspace_name"),
             models.CheckConstraint(
                 condition=~models.Q(name__regex=r"^\s*$"), name="workspace_name_not_blank"
             ),

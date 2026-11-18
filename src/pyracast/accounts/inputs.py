@@ -29,9 +29,11 @@ from allauth.mfa.models import Authenticator
 from allauth.mfa.totp.internal import auth as totp_auth
 from django import forms
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxLengthValidator
+from django.http import HttpRequest
 
-from pyracast.accounts.audit import record_security_event
+from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.authentication import email_identity
 from pyracast.accounts.login_limits import check_second_factor
 
@@ -60,6 +62,16 @@ class RequestPasswordResetInput(AllauthRequestPasswordResetInput):
         self.users = [user] if user is not None and user.is_active else []
         return email
 
+    def save(self, request: HttpRequest, **kwargs: Any) -> str:
+        email: str = super().save(request, **kwargs)
+        record_security_event(
+            SecurityEvent.RESET_REQUESTED,
+            request=request,
+            user_id=self.users[0].pk if self.users else None,
+            address=email,
+        )
+        return email
+
 
 class ResetPasswordInput(PasswordInput, AllauthResetPasswordInput):
     pass
@@ -71,13 +83,30 @@ class ChangePasswordInput(PasswordInput, AllauthChangePasswordInput):
     def clean_current_password(self) -> str:
         current_password: str = self.cleaned_data["current_password"]
         if current_password and not self.user.check_password(current_password):
-            record_security_event("password_change_failed", request=context.request, user=self.user)
+            record_security_event(
+                SecurityEvent.CURRENT_CREDENTIAL_REFUSED,
+                request=context.request,
+                user_id=self.user.pk,
+            )
             raise get_adapter().validation_error("enter_current_password")
         return current_password
 
 
 class ReauthenticateInput(PasswordInput, AllauthReauthenticateInput):
-    pass
+    user: User
+
+    def clean_password(self) -> str:
+        try:
+            password: str = super().clean_password()
+        except ValidationError:
+            record_security_event(
+                SecurityEvent.REAUTHENTICATION_FAILED,
+                request=context.request,
+                user_id=self.user.pk,
+                method="password",
+            )
+            raise
+        return password
 
 
 class ResendEmailVerificationInput(AllauthResendEmailVerificationInput):

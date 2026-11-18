@@ -212,7 +212,7 @@ def test_workspace_refusals_answer_their_own_codes() -> None:
     assert repeated["Retry-After"] == "60"
     assert repeated.json() == {
         "code": "invitation_rate_limited",
-        "message": "Too many invitations were sent. Wait a minute and try again.",
+        "message": "Too many invitations were sent. Try again later.",
         "retry_after": 60,
     }
 

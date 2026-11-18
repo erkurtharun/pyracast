@@ -97,9 +97,7 @@ MESSAGES: Mapping[ErrorCode, StrPromise] = {
     ErrorCode.CONFLICT: _("The request conflicts with the current state. Reload and try again."),
     ErrorCode.THROTTLED: _("Too many requests. Wait a moment and try again."),
     ErrorCode.SESSION_BUSY: _("Another request from this session is still running. Try again."),
-    ErrorCode.INVITATION_RATE_LIMITED: _(
-        "Too many invitations were sent. Wait a minute and try again."
-    ),
+    ErrorCode.INVITATION_RATE_LIMITED: _("Too many invitations were sent. Try again later."),
     ErrorCode.PROVIDER_THROTTLED: _("The forecast provider is limiting requests. Try again later."),
     ErrorCode.QUOTA_EXHAUSTED: _(
         "The forecast provider's daily quota is used up. Try again tomorrow."

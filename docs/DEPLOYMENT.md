@@ -381,8 +381,13 @@ fixtures do not establish provider access or inbox delivery.
   database; `/health/ready/` also checks PostgreSQL. They expose no operational
   details and are not cached. HTTPS uptime alerts detect sustained API/database
   failure. Container stdout/stderr goes to Cloud Logging with a bounded local
-  cache. Nonblocking logging can drop entries during overload/network failure;
-  durable job/audit records remain in PostgreSQL. API logs omit query strings and
+  cache. Logging is best effort: the API logs in blocking mode, but the gcplogs
+  client can still drop entries on overflow or outage; the other containers log
+  nonblocking. `pyracast.security` lines, including those of `exec` commands, go to
+  the container stream through `PYRACAST_SECURITY_LOG_PATH`. Log-based alerts in
+  `monitoring.tf` count them; the release does not apply Terraform, so after a
+  change there run the `plan`/`apply` commands above and confirm the policies
+  under Monitoring → Alerting. Durable job/audit records remain in PostgreSQL. API logs omit query strings and
   referrers. A 500 `server_error` answer carries a `request_id`; search the logs for its
   `api_server_error` traceback. A 503 `request_timeout` reference identifies an
   `api_request_timeout` traceback. Database error detail can appear in either log.

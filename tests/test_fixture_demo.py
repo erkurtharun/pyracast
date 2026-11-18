@@ -5,7 +5,7 @@ from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
 
-from pyracast.accounts.models import Tenant
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.management.commands import fixture_demo
 from pyracast.forecasts.models import CollectionJob, ForecastResult
@@ -84,6 +84,21 @@ def test_fixture_demo_resumes_after_an_interrupted_run(
 
     assert CollectionJob.objects.get().status == "succeeded"
     assert ForecastResult.objects.count() == 1
+
+
+def test_fixture_demo_keeps_to_its_own_workspace_when_another_has_its_name(
+    demo_user: User,
+) -> None:
+    namesake = Tenant.objects.create(name=f"Fixture demonstration (user {demo_user.pk})")
+
+    first = call_command("fixture_demo", "--username", "demo")
+    second = call_command("fixture_demo", "--username", "demo")
+
+    assert second == first
+    assert not Membership.objects.filter(tenant=namesake).exists()
+    demo = Membership.objects.get(user=demo_user)
+    assert (demo.tenant.name, demo.role) == (namesake.name, WorkspaceRole.ADMIN)
+    assert f"/api/tenants/{demo.tenant_id}/" in first
 
 
 def test_each_superuser_gets_an_own_demo_workspace(demo_user: User) -> None:

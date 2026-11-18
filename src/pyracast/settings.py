@@ -56,6 +56,8 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.csp.ContentSecurityPolicyMiddleware",
     "pyracast.api.middleware.PrivateAPIResponses",
+    # Outside the session lock, so a sign-up's session is free while its answer waits.
+    "pyracast.accounts.signup.SignupMinimumAnswerTime",
     "pyracast.accounts.session_lock.SessionRequestSerialization",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -118,8 +120,8 @@ PASSWORD_HASHERS = [
 AUTHENTICATION_BACKENDS = ["pyracast.accounts.authentication.AuthenticationBackend"]
 ACCOUNT_ADAPTER = "pyracast.accounts.adapters.AccountAdapter"
 ACCOUNT_LOGIN_METHODS = {"email"}
-ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
-ACCOUNT_SIGNUP_FORM_CLASS = "pyracast.accounts.forms.CompanySignupForm"
+ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*"]
+ACCOUNT_SIGNUP_FORM_CLASS = "pyracast.accounts.forms.AccountSignupForm"
 ACCOUNT_EMAIL_VERIFICATION = "mandatory"
 ACCOUNT_EMAIL_VERIFICATION_SUPPORTS_RESEND = 3
 ACCOUNT_EMAIL_VERIFICATION_BY_CODE_ENABLED = True
@@ -158,9 +160,10 @@ for _provider in ("google", "microsoft"):
         }
 ACCOUNT_SESSION_REMEMBER = False
 ACCOUNT_LOGOUT_ON_PASSWORD_CHANGE = True
-ACCOUNT_LOGIN_ON_EMAIL_CONFIRMATION = False
 ACCOUNT_LOGIN_ON_PASSWORD_RESET = False
 ACCOUNT_LOGIN_TIMEOUT = 900
+# A password sign-up not refused by a rate limit answers no sooner than this after it arrives.
+PYRACAST_SIGNUP_MINIMUM_ANSWER_SECONDS = 1.0
 PASSWORD_RESET_TIMEOUT = 3600
 HEADLESS_ONLY = True
 HEADLESS_CLIENTS = ("browser",)
@@ -348,6 +351,9 @@ elif _email_backend == "gmail":
 else:
     _mailer = {"BACKEND": "django.core.mail.backends.console.EmailBackend"}
 MAILERS = {"default": _mailer}
+# A command run through `docker compose exec` writes to its own stream, which the log driver
+# never sees; deployments point this at PID 1's stdout so every security line is shipped.
+_security_log_path = os.environ.get("PYRACAST_SECURITY_LOG_PATH")
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -359,6 +365,20 @@ LOGGING = {
             "stream": "ext://sys.stdout",
         },
         "discard": {"class": "logging.NullHandler"},
+        "security": (
+            {
+                "class": "logging.FileHandler",
+                "formatter": "standard",
+                "filename": _security_log_path,
+                "delay": True,
+            }
+            if _security_log_path
+            else {
+                "class": "logging.StreamHandler",
+                "formatter": "standard",
+                "stream": "ext://sys.stdout",
+            }
+        ),
     },
     "loggers": {
         "pyracast": {
@@ -366,6 +386,7 @@ LOGGING = {
             "level": os.environ.get("PYRACAST_LOG_LEVEL", "INFO"),
             "propagate": False,
         },
+        "pyracast.security": {"handlers": ["security"], "level": "INFO", "propagate": False},
         "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
         "django.security": {"handlers": ["console"], "level": "WARNING", "propagate": False},
         "django.security.DisallowedHost": {"handlers": ["discard"], "propagate": False},

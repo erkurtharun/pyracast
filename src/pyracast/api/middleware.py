@@ -3,7 +3,7 @@ from collections.abc import Callable
 from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, HttpResponseNotAllowed
 from django.utils.cache import patch_cache_control
 
-from pyracast.accounts.audit import record_security_event
+from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.api.errors import refuse_in_place, with_error_contract
 from pyracast.errors import ErrorCode
 
@@ -25,5 +25,5 @@ class PrivateAPIResponses:
         response = with_error_contract(request, response)
         patch_cache_control(response, private=True, no_store=True)
         if request.path.startswith("/api/auth/") and response.status_code == 429:
-            record_security_event("authentication_request_throttled", request=request)
+            record_security_event(SecurityEvent.AUTHENTICATION_REQUEST_THROTTLED, request=request)
         return response

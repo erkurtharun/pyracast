@@ -1,11 +1,12 @@
 import sys
 
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseRedirect
+from django.urls import Resolver404, ResolverMatch, resolve
 from django.utils.cache import patch_cache_control
 from django.views import csrf, defaults
 
 from pyracast.accounts.social import social_callback_url
-from pyracast.api.errors import api_error, coded, error_json
+from pyracast.api.errors import api_error, coded, error_json, record_refused
 from pyracast.errors import ErrorCode
 
 # Routes a browser reaches by a top-level form navigation, where a JSON body would strand the user.
@@ -14,6 +15,22 @@ PROVIDER_NAVIGATIONS = frozenset({"provider_redirect", "google_callback", "micro
 
 def _api(request: HttpRequest) -> bool:
     return request.path.startswith("/api/")
+
+
+def _match(request: HttpRequest) -> ResolverMatch | None:
+    # Middleware refusals arrive before URL resolution.
+    if request.resolver_match is not None:
+        return request.resolver_match
+    try:
+        return resolve(request.path_info, getattr(request, "urlconf", None))
+    except Resolver404:
+        return None
+
+
+def _route(match: ResolverMatch | None) -> str:
+    # The matched pattern, never the path, so identifiers neither reach the line nor split the
+    # refusal throttle.
+    return (match.route if match else None) or "-"
 
 
 def _private(response: HttpResponse) -> HttpResponse:
@@ -28,6 +45,7 @@ def bad_request(request: HttpRequest, exception: Exception) -> HttpResponse:
 
 
 def permission_denied(request: HttpRequest, exception: Exception) -> HttpResponse:
+    record_refused(request, ErrorCode.PERMISSION_DENIED, _route(_match(request)), None)
     if not _api(request):
         return _private(defaults.permission_denied(request, exception))
     return error_json(request, lambda: api_error(exception, request, "-"))
@@ -48,9 +66,11 @@ def server_error(request: HttpRequest) -> HttpResponse:
 
 
 def csrf_failure(request: HttpRequest, reason: str = "") -> HttpResponse:
+    match = _match(request)
+    record_refused(request, ErrorCode.CSRF_FAILED, _route(match), None)
     if not _api(request):
         return _private(csrf.csrf_failure(request, reason))
-    route = request.resolver_match.url_name if request.resolver_match else None
-    if route in PROVIDER_NAVIGATIONS and request.headers.get("Sec-Fetch-Mode") == "navigate":
+    name = match.url_name if match else None
+    if name in PROVIDER_NAVIGATIONS and request.headers.get("Sec-Fetch-Mode") == "navigate":
         return _private(HttpResponseRedirect(f"{social_callback_url()}&error=expired_form"))
     return error_json(request, lambda: coded(ErrorCode.CSRF_FAILED, 403))

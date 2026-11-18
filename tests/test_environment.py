@@ -95,6 +95,38 @@ def test_application_logs_use_stdout_and_configured_level(tmp_path: Path, level:
     assert result.stderr == ""
 
 
+@pytest.mark.parametrize("routed", [False, True])
+def test_security_lines_go_to_the_configured_stream_at_any_log_level(
+    tmp_path: Path, routed: bool
+) -> None:
+    stream = tmp_path / "container-stream"
+    routing = {"PYRACAST_SECURITY_LOG_PATH": str(stream)} if routed else {}
+    environment = {
+        key: value for key, value in os.environ.items() if key != "PYRACAST_SECURITY_LOG_PATH"
+    }
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import logging, logging.config; "
+            "from pyracast.settings import LOGGING; "
+            "logging.config.dictConfig(LOGGING); "
+            "logging.getLogger('pyracast.security').info('security-line'); "
+            "logging.shutdown()",
+        ],
+        cwd=tmp_path,
+        env=environment | routing | {"PYRACAST_LOG_LEVEL": "WARNING"},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    written = stream.read_text(encoding="utf-8") if routed else result.stdout
+    assert "pyracast.security security-line" in written
+    assert ("security-line" in result.stdout) is not routed
+    assert result.stderr == ""
+
+
 def test_local_console_mail_prints_messages_without_smtp(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

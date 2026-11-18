@@ -476,10 +476,28 @@ def test_a_refused_login_records_one_login_locked_event_without_the_address(
         assert error_codes(login(client, user.email, WRONG)) == ["email_password_mismatch"]
     security_log.clear()
     assert error_codes(login(client, user.email, PASSWORD)) == ["too_many_login_attempts"]
-    assert security_events(security_log) == [
-        {"event": "login_locked", "user_id": None, "client_ip": "127.0.0.1"}
-    ]
+    [line] = security_events(security_log)
+    assert len(line.pop("subject")) == 16
+    assert line == {"event": "login_locked", "user_id": None, "client_ip": "127.0.0.1"}
     assert user.email not in security_log.text
+
+
+def test_a_locked_second_factor_check_is_recorded(
+    clock: Clock, monkeypatch: pytest.MonkeyPatch, security_log: pytest.LogCaptureFixture
+) -> None:
+    client, _ = pending_second_factor(monkeypatch, time.time(), "member")
+    user = User.objects.get(username="member")
+    for _ in range(5):
+        assert error_codes(submit(client, "auth/2fa/authenticate", {"code": "000000"})) == [
+            "incorrect_code"
+        ]
+    security_log.clear()
+    assert error_codes(submit(client, "auth/2fa/authenticate", {"code": "000000"})) == [
+        "too_many_login_attempts"
+    ]
+    assert security_events(security_log) == [
+        {"event": "second_factor_locked", "user_id": user.pk, "client_ip": "127.0.0.1"}
+    ]
 
 
 def test_a_hundred_failures_in_a_day_lock_the_address_until_a_password_reset(
@@ -591,7 +609,7 @@ def company(index: int) -> dict[str, str]:
 def test_an_address_receives_one_verification_mail_per_minute(clock: Clock) -> None:
     assert signup(visitor(0), company(0)).status_code == 401
     clock.advance(59)
-    assert signup(visitor(1), company(1)).status_code == 429
+    assert signup(visitor(1), company(1)).status_code == 401
     clock.advance(2)
     assert signup(visitor(2), company(2)).status_code == 401
     assert len(mail.outbox) == 2
@@ -602,7 +620,7 @@ def test_an_address_receives_at_most_six_verification_mails_an_hour(clock: Clock
     for index in range(7):
         statuses.append(signup(visitor(index), company(index)).status_code)
         clock.advance(181)
-    assert statuses == [401] * 6 + [429]
+    assert statuses == [401] * 7
     assert len(mail.outbox) == 6
 
 

@@ -1,8 +1,10 @@
 from allauth.account.auth_backends import AuthenticationBackend as AllauthAuthenticationBackend
 from allauth.account.models import EmailAddress
+from allauth.core import context
 from allauth.mfa.models import Authenticator
 from django.contrib.auth.models import User
 
+from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.authorization import requires_admin_mfa
 
 
@@ -23,13 +25,15 @@ def email_identity(email: str, *, for_recovery: bool = False) -> User | None:
     return initial[0].user if len(initial) == 1 else None
 
 
-def may_sign_in_with_password(user: User) -> bool:
+def password_sign_in_refusal(user: User) -> str | None:
     if not user.is_active:
-        return False
-    return (
-        not requires_admin_mfa(user)
-        or Authenticator.objects.filter(user=user, type=Authenticator.Type.TOTP).exists()
-    )
+        return "inactive"
+    if (
+        requires_admin_mfa(user)
+        and not Authenticator.objects.filter(user=user, type=Authenticator.Type.TOTP).exists()
+    ):
+        return "mfa_not_provisioned"
+    return None
 
 
 class AuthenticationBackend(AllauthAuthenticationBackend):
@@ -40,6 +44,14 @@ class AuthenticationBackend(AllauthAuthenticationBackend):
         if user is None:
             return None
         self._did_check_password = True
-        if not user.check_password(password) or not may_sign_in_with_password(user):
+        if not user.check_password(password):
+            return None
+        if (refusal := password_sign_in_refusal(user)) is not None:
+            record_security_event(
+                SecurityEvent.LOGIN_REFUSED,
+                request=context.request,
+                user_id=user.pk,
+                reason=refusal,
+            )
             return None
         return user

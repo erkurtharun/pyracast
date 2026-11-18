@@ -152,9 +152,7 @@ def test_removal_expires_known_email_invitations_but_allows_intentional_new_invi
     foreign.refresh_from_db()
     assert unrelated.expires_at > timezone.now()
     assert foreign.expires_at > timezone.now()
-    WorkspaceInvitation.objects.filter(tenant=tenant).update(
-        created_at=timezone.now() - timedelta(minutes=2)
-    )
+    WorkspaceInvitation.objects.update(created_at=timezone.now() - timedelta(days=1, minutes=1))
     invite_workspace_member(administrator, tenant.pk, "alias@example.com")
     assert accept_workspace_invitation(viewer, invitation_token()).role == "viewer"
     assert WorkspaceMemberRemoval.objects.count() == 1

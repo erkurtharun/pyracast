@@ -28,6 +28,8 @@ x-process: &process
     PGHOST: postgres
     PGPORT: "5432"
     PGDATABASE: pyracast
+    # PID 1 (docker-init) holds the container stream; `exec` commands log there too.
+    PYRACAST_SECURITY_LOG_PATH: /proc/1/fd/1
   networks: [application]
   depends_on:
     postgres: {condition: service_healthy}
@@ -118,6 +120,14 @@ services:
 
   api:
     <<: *process
+    # Blocking removes Docker's dropping ring buffer for the security lines; the gcplogs client
+    # can still drop entries when its own buffer overflows.
+    logging:
+      driver: gcplogs
+      options:
+        mode: blocking
+        cache-max-size: 10m
+        cache-max-file: "5"
     mem_limit: 512m
     cpus: 1.0
     pids_limit: 100

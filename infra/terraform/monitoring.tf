@@ -165,3 +165,80 @@ resource "google_monitoring_alert_policy" "watchdog_heartbeat" {
     content   = "The host watchdog has reported nothing for fifteen minutes: the VM is down or pyracast-watchdog.timer stopped. Inspect systemctl status pyracast-watchdog.timer and journalctl -u pyracast-watchdog.service."
   }
 }
+
+# Counts the pyracast.security lines the API ships through the gcplogs driver, by event.
+resource "google_logging_metric" "security_events" {
+  name = "${var.name}-security-events"
+
+  filter = join(" AND ", [
+    "resource.type=\"gce_instance\"",
+    "logName=\"projects/${var.project_id}/logs/gcplogs-docker-driver\"",
+    "jsonPayload.message:\" pyracast.security \"",
+  ])
+
+  label_extractors = {
+    event = "REGEXP_EXTRACT(jsonPayload.message, \"\\\"event\\\": \\\"([a-z_]+)\\\"\")"
+  }
+
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+
+    labels {
+      key        = "event"
+      value_type = "STRING"
+    }
+  }
+
+  depends_on = [google_project_service.required]
+}
+
+resource "google_monitoring_alert_policy" "security" {
+  for_each = {
+    sign_in_lockouts       = { signal = "login_locked", threshold = 20, description = "More than 20 sign-ins were refused by the failure limits within ten minutes. Inspect the pyracast.security lines for the client addresses and subjects involved." }
+    second_factor_lockouts = { signal = "second_factor_locked", threshold = 5, description = "More than 5 second-factor checks were refused by the failure limits within ten minutes. Inspect the pyracast.security lines for the accounts involved." }
+    authorization_refusals = { signal = "authorization_denied", threshold = 30, description = "Signed-in accounts were refused more than 30 times within ten minutes. Inspect the pyracast.security lines for the accounts, views and workspaces involved." }
+    csrf_refusals          = { signal = "csrf_refused", threshold = 10, description = "Signed-in requests failed the CSRF check more than 10 times within ten minutes. Inspect the pyracast.security lines and the client addresses involved." }
+    invitation_limits      = { signal = "invitation_limited", threshold = 10, description = "Invitation budgets refused more than 10 invitations within ten minutes. Inspect the pyracast.security lines for the senders and workspaces involved." }
+    proxy_headers          = { signal = "invalid_proxy_headers", threshold = 0, description = "A request reached the API with proxy headers it does not trust. Inspect the gateway configuration and the peer address in the pyracast.security line." }
+    admin_factor           = { signal = "admin_mfa_provisioned", threshold = 0, description = "An operator provisioned a platform administrator's second factor. Confirm the change was planned." }
+  }
+  display_name          = "${var.name} security ${each.key}"
+  combiner              = "OR"
+  enabled               = true
+  notification_channels = [google_monitoring_notification_channel.operator.name]
+  user_labels           = local.labels
+
+  conditions {
+    display_name = "${each.value.signal} above ${each.value.threshold} in ten minutes"
+    condition_threshold {
+      filter = join(" AND ", [
+        "metric.type=\"logging.googleapis.com/user/${google_logging_metric.security_events.name}\"",
+        "metric.label.event=\"${each.value.signal}\"",
+        "resource.type=\"gce_instance\"",
+      ])
+      comparison      = "COMPARISON_GT"
+      threshold_value = each.value.threshold
+      duration        = "0s"
+
+      aggregations {
+        alignment_period     = "600s"
+        per_series_aligner   = "ALIGN_SUM"
+        cross_series_reducer = "REDUCE_SUM"
+      }
+
+      trigger {
+        count = 1
+      }
+    }
+  }
+
+  alert_strategy {
+    auto_close = "86400s"
+  }
+
+  documentation {
+    mime_type = "text/markdown"
+    content   = each.value.description
+  }
+}
