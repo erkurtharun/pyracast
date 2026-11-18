@@ -6,6 +6,7 @@ from threading import Event
 from typing import Any
 
 import pytest
+from allauth.account import utils as account_utils
 from allauth.account.internal.flows.password_reset_by_code import (
     PasswordResetVerificationProcess,
 )
@@ -633,6 +634,35 @@ def test_a_provider_signup_answers_like_nothing_pending_when_its_identity_is_con
     assert mail.outbox == []
     assert list(User.objects.values_list("username", flat=True)) == ["other"]
     assert session_user(client) is None
+
+
+def test_a_provider_signup_answers_like_nothing_pending_when_its_address_is_verified_during_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = pending_provider_signup(monkeypatch, "google")
+    details = provider_details("google")
+    expected = answer(submit(browser(), "auth/provider/signup", details))
+
+    def verify_elsewhere() -> None:
+        EmailAddress.objects.create(user=account("other"), email=details["email"], verified=True)
+
+    changes = changing(
+        monkeypatch, account_utils, "cleanup_email_addresses", verify_elsewhere, after=True
+    )
+
+    response = submit(client, "auth/provider/signup", details)
+    committed = committed_first(changes)
+
+    assert answer(response) == expected
+    assert mail.outbox == []
+    assert list(User.objects.values_list("username", flat=True)) == ["other"]
+    assert list(
+        EmailAddress.objects.filter(email=details["email"]).values_list(
+            "user__username", "verified"
+        )
+    ) == [("other", True)]
+    assert session_user(client) is None
+    assert committed
 
 
 def credentialed_account() -> tuple[User, str]:
