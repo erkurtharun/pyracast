@@ -20,7 +20,6 @@ ALLAUTH_PROTOCOL = {
     "accounts/inputs.py:TOTPActivationInput.clean_code.matching_code",
     "accounts/login_limits.py:check_second_factor",
     "accounts/mfa_views.py:require_mfa_reauthentication",
-    "accounts/signup.py:workspace_signup_transaction",
     "accounts/social.py:SocialAccountAdapter.connect_account",
     "accounts/social.py:SocialAccountAdapter.validate_disconnect",
 }

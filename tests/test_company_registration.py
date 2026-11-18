@@ -415,7 +415,7 @@ def test_a_signup_whose_random_username_part_repeats_still_gets_a_unique_usernam
 @override_settings(
     MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
 )
-def test_an_invited_signup_ignores_a_workspace_name_that_is_taken() -> None:
+def test_an_invited_signup_ignores_the_workspace_name() -> None:
     tenant = Tenant.objects.create(name="Sunfield Energy")
     administrator = User.objects.create_user(username="administrator", email="admin@example.com")
     Membership.objects.create(tenant=tenant, user=administrator, role=WorkspaceRole.ADMIN)

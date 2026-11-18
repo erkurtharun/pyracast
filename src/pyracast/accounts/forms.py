@@ -3,12 +3,10 @@ import unicodedata
 
 from django import forms
 from django.contrib.auth.models import User
-from django.db.models.functions import Lower, Trim
 from django.http import HttpRequest
 from django.utils.translation import gettext as _
 
 from pyracast.accounts.invitations import pending_invitation
-from pyracast.accounts.models import Tenant
 from pyracast.accounts.operations import register_account
 
 # Control, format (zero-width, bidirectional) and line or paragraph separator characters.
@@ -35,15 +33,7 @@ class AccountSignupForm(forms.Form):
     def clean_company_name(self) -> str:
         if self.data.get("invitation_token"):
             return ""
-        name = workspace_name(str(self.cleaned_data.get("company_name", "")))
-        if (
-            name
-            and Tenant.objects.alias(identity=Lower(Trim("name")))
-            .filter(identity=name.lower())
-            .exists()
-        ):
-            raise forms.ValidationError(_("This workspace name is already in use."))
-        return name
+        return workspace_name(str(self.cleaned_data.get("company_name", "")))
 
     def clean(self) -> dict[str, object]:
         data = super().clean() or {}

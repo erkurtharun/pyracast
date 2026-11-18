@@ -25,6 +25,7 @@ from allauth.socialaccount.providers.microsoft.provider import MicrosoftGraphPro
 from allauth.socialaccount.providers.microsoft.views import oauth2_callback as microsoft_callback
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.db import transaction
 from django.http import (
     HttpRequest,
     HttpResponse,
@@ -34,13 +35,12 @@ from django.http import (
 from django.template.loader import render_to_string
 from django.views.decorators.http import require_GET
 
-from pyracast.accounts.signup import workspace_signup_transaction
 from pyracast.accounts.social import locked_social_user, social_callback_url
 
 
 class CompanySocialSignupInput(SignupInput):
     def save(self, request: HttpRequest) -> User:
-        with workspace_signup_transaction(request, self):
+        with transaction.atomic():
             return cast(User, super().save(request))
 
 
