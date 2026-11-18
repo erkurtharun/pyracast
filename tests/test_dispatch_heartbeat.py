@@ -19,6 +19,7 @@ def test_dispatcher_touches_its_heartbeat_before_every_cycle_even_after_a_failed
         "make_notification_actor",
         "make_epias_actor",
         "purge_expired",
+        "sweep_accounts",
         "dispatch_calibrations",
         "dispatch_notifications",
     ):

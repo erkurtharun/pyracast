@@ -56,7 +56,7 @@ def _expires_at(request: Request) -> datetime | None:
         return None
     # SessionLifetime has already ended a session without a valid start time.
     started: float = request.session["authenticated_at"]
-    return datetime.fromtimestamp(started + settings.SESSION_COOKIE_AGE, UTC)
+    return datetime.fromtimestamp(started + settings.PYRACAST_SESSION_ABSOLUTE_SECONDS, UTC)
 
 
 def session_output(request: Request) -> dict[str, Any]:

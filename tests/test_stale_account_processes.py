@@ -645,10 +645,11 @@ def test_reset_never_writes_over_an_address_changed_before_completion(
     assert answer(submit(client, "auth/password/reset", reset)) == nothing_pending
 
 
-def test_reset_of_an_address_replaced_before_completion_changes_only_the_password(
+def test_reset_of_an_address_replaced_before_completion_answers_like_nothing_pending(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     owner, client, reset = pending_unverified_reset()
+    nothing_pending = answer(submit(browser(), "auth/password/reset", reset))
 
     def replaced() -> None:
         EmailAddress.objects.filter(user=owner).delete()
@@ -660,10 +661,10 @@ def test_reset_of_an_address_replaced_before_completion_changes_only_the_passwor
 
     response = submit(client, "auth/password/reset", reset)
 
-    assert response.status_code == 401
-    assert sent() == [("account/email/password_reset", ["changed@example.com"])]
+    assert answer(response) == nothing_pending
+    assert sent() == []
     owner.refresh_from_db()
-    assert owner.check_password(PASSWORD + "reset")
+    assert owner.check_password(PASSWORD)
     assert addresses(owner) == [("changed@example.com", True, True)]
 
 

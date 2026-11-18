@@ -200,7 +200,7 @@ During application-secret rotation, retain the old key in
 `PYRACAST_SECRET_KEY_FALLBACKS`, run `uv run --locked pyracast reencrypt_secrets --verify`,
 then remove the fallback once `pyracast check_secrets --require-primary` exits 0. Do not discard legacy
 authenticators, mark unverified emails verified, or invent account identities to
-bypass an upgrade failure. Run `uv run --locked pyracast clearsessions` regularly.
+bypass an upgrade failure.
 
 ### Administrative data commands
 

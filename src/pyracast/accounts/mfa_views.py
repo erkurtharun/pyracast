@@ -3,6 +3,8 @@ from typing import Any
 
 from allauth.account import app_settings
 from allauth.account.internal.flows.login import get_authentication_records
+from allauth.account.internal.stagekit import LOGIN_SESSION_KEY, clear_login
+from allauth.headless.base.response import UnauthorizedResponse
 from allauth.headless.internal.restkit.inputs import Input
 from allauth.headless.internal.restkit.response import APIResponse
 from allauth.headless.mfa import views
@@ -12,7 +14,7 @@ from allauth.mfa.models import Authenticator
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.http import HttpRequest, HttpResponseBase
+from django.http import HttpRequest, HttpResponse, HttpResponseBase
 from django.utils.translation import gettext
 
 from pyracast.accounts.authorization import requires_admin_mfa
@@ -21,6 +23,7 @@ from pyracast.accounts.inputs import (
     SecondFactorReauthenticateInput,
     TOTPActivationInput,
 )
+from pyracast.accounts.processes import AuthorityChangedError, require_authority
 
 
 def recently_reauthenticated_with_mfa(request: HttpRequest) -> bool:
@@ -63,6 +66,15 @@ def require_mfa_reauthentication(request: HttpRequest) -> APIResponse | None:
 
 class AuthenticateView(views.AuthenticateView):
     input_class = SecondFactorInput
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+        try:
+            with transaction.atomic():
+                require_authority(request, LOGIN_SESSION_KEY)
+                return super().post(request, *args, **kwargs)
+        except AuthorityChangedError:
+            clear_login(request)
+            return UnauthorizedResponse(request)
 
 
 class ReauthenticateView(views.ReauthenticateView):

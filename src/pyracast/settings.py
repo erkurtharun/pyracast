@@ -62,12 +62,12 @@ MIDDLEWARE = [
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "pyracast.accounts.middleware.SessionLifetime",
+    "pyracast.accounts.processes.PendingProcessAuthority",
     "pyracast.accounts.language.RequestLanguage",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "pyracast.accounts.middleware.PrivilegedAuthenticatorEnrollment",
     "allauth.account.middleware.AccountMiddleware",
-    "allauth.usersessions.middleware.UserSessionsMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -110,7 +110,7 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {
         "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
-        "OPTIONS": {"min_length": 12},
+        "OPTIONS": {"min_length": 15},
     },
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
 ]
@@ -119,6 +119,7 @@ PASSWORD_HASHERS = [
 ]
 AUTHENTICATION_BACKENDS = ["pyracast.accounts.authentication.AuthenticationBackend"]
 ACCOUNT_ADAPTER = "pyracast.accounts.adapters.AccountAdapter"
+ACCOUNT_DEFAULT_HTTP_PROTOCOL = "http" if DEBUG else "https"
 ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*"]
 ACCOUNT_SIGNUP_FORM_CLASS = "pyracast.accounts.forms.AccountSignupForm"
@@ -170,20 +171,20 @@ HEADLESS_CLIENTS = ("browser",)
 PYRACAST_PUBLIC_ORIGIN = os.environ.get("PYRACAST_PUBLIC_ORIGIN", "http://127.0.0.1:3000").rstrip(
     "/"
 )
+PYRACAST_SOCIAL_CALLBACK_URL = f"{PYRACAST_PUBLIC_ORIGIN}/app/?social_callback=1"
 HEADLESS_FRONTEND_URLS = {
     "account_login": f"{PYRACAST_PUBLIC_ORIGIN}/app/",
     "account_confirm_email": f"{PYRACAST_PUBLIC_ORIGIN}/app/",
     "account_reset_password": f"{PYRACAST_PUBLIC_ORIGIN}/app/",
     "account_reset_password_from_key": f"{PYRACAST_PUBLIC_ORIGIN}/app/",
     "account_signup": f"{PYRACAST_PUBLIC_ORIGIN}/app/?signup=1",
-    "socialaccount_login_error": f"{PYRACAST_PUBLIC_ORIGIN}/app/?social_callback=1",
+    "socialaccount_login_error": PYRACAST_SOCIAL_CALLBACK_URL,
 }
 MFA_SUPPORTED_TYPES = ["totp", "recovery_codes"]
 MFA_ADAPTER = "pyracast.accounts.mfa.MFAAdapter"
 MFA_REAUTHENTICATION_REQUIRED = True
 MFA_RECOVERY_CODES_SHOW_ONCE = True
 MFA_TOTP_ISSUER = "Pyracast"
-USERSESSIONS_TRACK_ACTIVITY = True
 PASSWORD_CHANGE_MAX_ATTEMPTS = 5
 PASSWORD_CHANGE_WINDOW_MINUTES = 10
 # allauth clears every rate of `login_failed` after a second-factor success or a password reset,
@@ -197,6 +198,7 @@ ACCOUNT_RATE_LIMITS = {
     "reset_password_from_key": "10/h/ip",
     "confirm_email": "1/1m/key,6/h/key",
     "change_password": f"{PASSWORD_CHANGE_MAX_ATTEMPTS}/{PASSWORD_CHANGE_WINDOW_MINUTES}m/user",
+    "request_email_change": "3/10m/user,10/d/user,20/h/ip",
 }
 CACHES = {
     "default": {
@@ -291,7 +293,8 @@ SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_NAME = "sessionid" if DEBUG else "__Host-pyracast-sessionid"
 CSRF_COOKIE_NAME = "csrftoken" if DEBUG else "__Host-pyracast-csrftoken"
-SESSION_COOKIE_AGE = 12 * 60 * 60
+PYRACAST_SESSION_ABSOLUTE_SECONDS = 12 * 60 * 60
+SESSION_COOKIE_AGE = PYRACAST_SESSION_ABSOLUTE_SECONDS
 SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 PYRACAST_SESSION_IDLE_SECONDS = 30 * 60
 CSRF_COOKIE_SAMESITE = "Lax"

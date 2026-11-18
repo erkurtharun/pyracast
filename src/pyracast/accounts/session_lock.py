@@ -32,20 +32,18 @@ def serialize_session(session_key: str) -> Iterator[None]:
     digest = hashlib.sha256(b"pyracast.session-request.v1\0" + session_key.encode("ascii")).digest()
     lock_id = int.from_bytes(digest[:8], signed=True)
     try:
+        # The wait applies to this transaction only; the advisory lock outlives it.
         with transaction.atomic(), connection.cursor() as cursor:
-            cursor.execute("SELECT current_setting('lock_timeout')")
-            previous_timeout = cursor.fetchone()[0]
             cursor.execute("SELECT set_config('lock_timeout', %s, true)", [_LOCK_TIMEOUT])
             cursor.execute("SELECT pg_advisory_lock(%s)", [lock_id])
             locked_connection = connection.connection
-            cursor.execute("SELECT set_config('lock_timeout', %s, true)", [previous_timeout])
-    except BaseException as error:
+    except OperationalError as error:
+        if getattr(error.__cause__, "sqlstate", None) != "55P03":
+            connection.close()
+            raise
+        raise SessionBusyError from None
+    except BaseException:
         connection.close()
-        if (
-            isinstance(error, OperationalError)
-            and getattr(error.__cause__, "sqlstate", None) == "55P03"
-        ):
-            raise SessionBusyError from None
         raise
 
     def require_locked_connection(

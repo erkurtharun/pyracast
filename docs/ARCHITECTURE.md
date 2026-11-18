@@ -132,7 +132,7 @@ membership in one transaction. Workspace names need not be unique; registration
 always creates a new workspace and never joins an existing company by name or email. The
 django-allauth browser API owns registration, email verification, login, recovery,
 reauthentication, MFA and session management. Email ownership is mandatory before
-login. Django validates passwords with a 12-character minimum and common-password
+login. Django validates passwords with a 15-character minimum and common-password
 screening, hashes new passwords with Argon2 and rotates session identifiers on login.
 Mutations enforce CSRF before authentication. Allauth's account and IP rate limits
 share an atomic PostgreSQL JSON/TTL cache; ingress limits and per-user API throttles on
@@ -495,11 +495,21 @@ production gateway owns this routing. Django owns authentication and
 authorization; the allauth browser API enforces CSRF even before login. Sessions
 use HttpOnly, SameSite=Lax cookies, with Secure and a `__Host-` prefix in production.
 Revoke sessions after 12 hours or 30 minutes without requests; automatic polling
-counts as activity. Sessions predating the lifetime markers fail closed. API
+counts as activity. Sessions predating the lifetime markers fail closed. A request
+whose session another session of the account ended while it ran answers 400
+`session_ended`, also when its own work committed; the client signs in again. API
 responses are private and non-cacheable. The frontend reads stored results and
 never handles provider credentials. A fixed public HTTPS origin determines
 security-email navigation. Verification and recovery codes expire after ten minutes,
-allow at most three attempts and are bound to the initiating browser session. Real
+allow at most three attempts and are bound to the initiating browser session. A
+pending code or sign-in step rests on the credential state of its account (password,
+active flag, addresses, provider identities, authenticators) as read under lock where
+the request identified the account; any change of that state ends every pending step
+of the account, a state equal again counts as the same, ending sessions by hand ends
+none, and a step without an account (a provider sign-up, the new address of a change)
+is guarded by the unique constraints when it completes. Starting or completing a step
+and reclaiming an abandoned sign-up lock the account's addresses, provider identities
+and account row, in that order, before its authenticators or workspaces. Real
 mail delivery through the Gmail API or SMTP is a production requirement, separate
 from mocked mail validation. Gmail uses only `gmail.send` with OAuth credentials
 for the configured sender; credentials remain deployment secrets.

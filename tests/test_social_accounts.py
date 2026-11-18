@@ -663,7 +663,9 @@ def test_concurrent_sessions_cannot_disconnect_both_passwordless_login_methods()
     with ThreadPoolExecutor(max_workers=2) as pool:
         futures = [pool.submit(disconnect, index) for index in range(2)]
         statuses = sorted(future.result(timeout=20) for future in futures)
-    assert statuses == [200, 400]
+    # The first removal ends the account's other sessions, so the second is refused either as
+    # the last way to sign in (400) or because its session has ended (401).
+    assert statuses in ([200, 400], [200, 401])
     assert SocialAccount.objects.filter(user=user).count() == 1
 
 

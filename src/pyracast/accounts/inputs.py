@@ -1,7 +1,6 @@
 from typing import Any
 
 from allauth.account.adapter import get_adapter
-from allauth.account.models import EmailAddress
 from allauth.core import context
 from allauth.headless.account.inputs import (
     ChangePasswordInput as AllauthChangePasswordInput,
@@ -14,9 +13,6 @@ from allauth.headless.account.inputs import (
 )
 from allauth.headless.account.inputs import (
     RequestPasswordResetInput as AllauthRequestPasswordResetInput,
-)
-from allauth.headless.account.inputs import (
-    ResendEmailVerificationInput as AllauthResendEmailVerificationInput,
 )
 from allauth.headless.account.inputs import (
     ResetPasswordInput as AllauthResetPasswordInput,
@@ -34,7 +30,7 @@ from django.core.validators import MaxLengthValidator
 from django.http import HttpRequest
 
 from pyracast.accounts.audit import SecurityEvent, record_security_event
-from pyracast.accounts.authentication import email_identity
+from pyracast.accounts.authentication import recovery_identity
 from pyracast.accounts.login_limits import check_second_factor
 
 
@@ -58,8 +54,8 @@ class RequestPasswordResetInput(AllauthRequestPasswordResetInput):
 
     def clean_email(self) -> str:
         email: str = super().clean_email()
-        user = email_identity(email, for_recovery=True)
-        self.users = [user] if user is not None and user.is_active else []
+        user = recovery_identity(email)
+        self.users = [] if user is None else [user]
         return email
 
     def save(self, request: HttpRequest, **kwargs: Any) -> str:
@@ -107,16 +103,6 @@ class ReauthenticateInput(PasswordInput, AllauthReauthenticateInput):
             )
             raise
         return password
-
-
-class ResendEmailVerificationInput(AllauthResendEmailVerificationInput):
-    def clean(self) -> dict[str, Any] | None:
-        cleaned_data = super().clean()
-        address = self.cleaned_data.get("email")
-        # allauth would mail a code for it that its verify view then answers with 500.
-        if isinstance(address, EmailAddress) and address.verified:
-            self.add_error("email", get_adapter().validation_error("email_already_verified"))
-        return cleaned_data
 
 
 class SecondFactorCode(BaseAuthenticateForm):

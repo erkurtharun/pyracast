@@ -36,6 +36,32 @@ def validate_public_origin() -> None:
         raise ImproperlyConfigured("PYRACAST_PUBLIC_ORIGIN must be a valid public origin.")
 
 
+# Each entry reads what the one before it established: the session lock, the session, the user,
+# the session's limits, then the pending account processes resting on that account.
+SESSION_MIDDLEWARE = (
+    "pyracast.accounts.session_lock.SessionRequestSerialization",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "pyracast.accounts.middleware.SessionLifetime",
+    "pyracast.accounts.processes.PendingProcessAuthority",
+)
+
+
+@register(Tags.security)
+def check_session_middleware_order(**_kwargs: Any) -> list[CheckMessage]:
+    middleware = list(settings.MIDDLEWARE)
+    positions = [middleware.index(name) for name in SESSION_MIDDLEWARE if name in middleware]
+    if len(positions) == len(SESSION_MIDDLEWARE) and positions == sorted(positions):
+        return []
+    return [
+        Error(
+            "The session middleware is missing or out of order.",
+            hint="List in this order: " + ", ".join(SESSION_MIDDLEWARE) + ".",
+            id="accounts.E003",
+        )
+    ]
+
+
 @register(Tags.security, deploy=True)
 def check_authentication_origin(**_kwargs: Any) -> list[CheckMessage]:
     try:

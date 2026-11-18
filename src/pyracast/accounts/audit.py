@@ -36,6 +36,7 @@ class SecurityEvent(StrEnum):
     LOGIN_LOCKED = "login_locked"
     LOGIN_CODE_REJECTED = "login_code_rejected"
     SESSION_EXPIRED = "session_expired"
+    SESSIONS_REVOKED = "sessions_revoked"
     REAUTHENTICATED = "reauthenticated"
     REAUTHENTICATION_FAILED = "reauthentication_failed"
     SIGNUP = "signup"
@@ -116,6 +117,7 @@ LINE_KINDS: Mapping[str, Kind] = {
     "authenticator_type": TEXT,
     "provider": TEXT,
     "scope": TEXT,
+    "count": INTEGER,
 }
 LINE_KEYS = frozenset({"event", *LINE_KINDS})
 # The details each event may carry beside event, user and client IP; a line with any other
@@ -131,6 +133,7 @@ SECURITY_EVENT_DETAILS: Mapping[SecurityEvent, frozenset[str]] = {
     SecurityEvent.LOGIN_REFUSED: frozenset({"reason"}),
     SecurityEvent.LOGIN_LOCKED: frozenset({"subject"}),
     SecurityEvent.SESSION_EXPIRED: frozenset({"reason"}),
+    SecurityEvent.SESSIONS_REVOKED: frozenset({"reason", "count"}),
     SecurityEvent.RESET_REQUESTED: frozenset({"subject"}),
     SecurityEvent.CURRENT_CREDENTIAL_REFUSED: frozenset(),
     SecurityEvent.AUTHENTICATOR_UNREADABLE: frozenset(),
@@ -192,6 +195,7 @@ def record_security_event(
     authenticator_type: str | None = None,
     provider: str | None = None,
     scope: str | None = None,
+    count: int | None = None,
 ) -> None:
     with _contained(event):
         details = {
@@ -204,6 +208,7 @@ def record_security_event(
             "authenticator_type": authenticator_type,
             "provider": provider,
             "scope": scope,
+            "count": count,
         }
         carried = {key: value for key, value in details.items() if value is not None}
         if undeclared := carried.keys() - SECURITY_EVENT_DETAILS[event]:

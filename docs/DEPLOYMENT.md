@@ -312,10 +312,12 @@ exact production redirect URIs:
 
 Add `PYRACAST_GOOGLE_CLIENT_ID`, `PYRACAST_GOOGLE_CLIENT_SECRET`,
 `PYRACAST_MICROSOFT_CLIENT_ID` and `PYRACAST_MICROSOFT_CLIENT_SECRET` to the runtime
-secret. Each provider appears only when both of its values are configured. Keep
+secret. Set both values for a provider or neither; a single value stops the
+application at startup. Keep
 client secrets on the backend, rotate them before expiry, and use separate clients
 for local development. Login does not request mailbox access or retain provider
-tokens. Account connections are managed in **Account → Security**.
+tokens. Account connections are managed in **Account settings → Connected
+accounts**.
 
 For Google **Branding**, use app name **Pyracast**, support/developer contact
 **info@pyracast.app**, homepage `https://pyracast.app/`, privacy policy

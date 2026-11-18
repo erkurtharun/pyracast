@@ -1,6 +1,4 @@
-import time
 from ipaddress import IPv6Address, ip_address
-from typing import Any
 
 from allauth.account.internal.flows.login import get_authentication_records
 from allauth.mfa.models import Authenticator
@@ -12,12 +10,6 @@ def normalize_client_ip(value: str) -> str:
     if isinstance(address, IPv6Address) and address.ipv4_mapped:
         address = address.ipv4_mapped
     return str(address)
-
-
-def start_user_session(*, request: HttpRequest, **_kwargs: Any) -> None:
-    now = time.time()
-    request.session["authenticated_at"] = now
-    request.session["last_activity_at"] = now
 
 
 def has_verified_mfa(request: HttpRequest) -> bool:

@@ -34,22 +34,8 @@ FAMILIES = (
     Combination("login", "unverified-new", "own-primary", "signed-out", "none"),
     Combination("provider-login", "unverified-returning", "own-primary", "signed-out", "microsoft"),
     Combination("verify", "verified", "none", "pending-change", "none"),
-    Combination("resend", "unverified-secondary", "none", "pending-stored-change", "none"),
+    Combination("resend", "verified", "none", "pending-change", "none"),
     Combination("add-address", "verified", "unknown", "reauthenticated", "none"),
-    Combination(
-        "select-address",
-        "unverified-secondary",
-        "own-unverified-secondary",
-        "signed-in",
-        "none",
-    ),
-    Combination(
-        "make-primary",
-        "verified-secondary",
-        "own-verified-secondary",
-        "reauthenticated",
-        "none",
-    ),
     Combination(
         "remove-address",
         "unverified-secondary",

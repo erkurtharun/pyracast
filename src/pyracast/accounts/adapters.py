@@ -43,9 +43,6 @@ LOGIN_LIMITED_MESSAGE = gettext_lazy(
 
 
 class AccountAdapter(DefaultAccountAdapter):
-    error_messages = DefaultAccountAdapter.error_messages | {
-        "email_already_verified": gettext_lazy("This email address is already verified.")
-    }
     _client_failure: RateLimitUsage | None = None
     _login_failed_rl_usage: RateLimitUsage | None = None
 
@@ -113,6 +110,14 @@ class AccountAdapter(DefaultAccountAdapter):
                 request, sociallogin.account.provider, "inactive", cast(User, user)
             )
         return super().pre_login(request, user, **kwargs)
+
+    def get_login_stages(self) -> list[str]:
+        return [
+            "pyracast.accounts.signup.EmailVerificationStage"
+            if stage == "allauth.account.stages.EmailVerificationStage"
+            else stage
+            for stage in super().get_login_stages()
+        ]
 
     def generate_unique_username(self, txts: list[str | None], regex: str | None = None) -> str:
         # A random part before allauth's uniqueness check keeps concurrent sign-ups with one

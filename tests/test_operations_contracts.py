@@ -31,7 +31,7 @@ from deploy import (
     watchdog,
 )
 from pyracast import maintenance
-from pyracast.accounts.authentication import email_identity
+from pyracast.accounts.authentication import login_identity
 from pyracast.accounts.models import Membership, WorkspaceRole
 from pyracast.forecasts.historical_upload import MAX_UPLOAD_BYTES
 from pyracast.forecasts.management.commands.check_delivery_health import (
@@ -227,7 +227,7 @@ def test_smoke_sign_in_uses_a_verified_email_identity(tmp_path: Path) -> None:
         str(fixture), init_globals={"User": User, "EmailAddress": EmailAddress}
     )["actor"]
 
-    assert email_identity(actor.email) == actor
+    assert login_identity(actor.email) == actor
     assert actor.has_usable_password()
     assert EmailAddress.objects.filter(
         user=actor, email=actor.email, primary=True, verified=True
