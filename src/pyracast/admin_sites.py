@@ -63,7 +63,8 @@ def _choices(vocabulary: type[models.TextChoices]) -> list[tuple[str, StrOrPromi
 def _text(value: object) -> str:
     if value is None:
         return ""
-    return f"{value:.15g}" if isinstance(value, float) else str(value)
+    text = str(value)
+    return text.removesuffix(".0") if isinstance(value, float) else text
 
 
 class SiteForm(forms.Form):

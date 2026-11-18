@@ -320,7 +320,6 @@ def _save_plant_parameters(
         return
     values = {"binding": _binding(region), **parameters}
     _rename(actor, plant, region, name)
-    # `values` holds every column a revision writes, so a match on all of them is a no-op.
     current_id = plant.current_configuration_id
     if (
         current_id is not None

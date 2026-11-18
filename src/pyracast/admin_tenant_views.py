@@ -6,13 +6,12 @@ from django.core.exceptions import ValidationError
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
-from django.utils import timezone
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from pyracast.accounts.invitations import (
     has_workspace_admin,
-    invite_workspace_member,
+    reissue_workspace_invitation,
     revoke_workspace_invitation,
 )
 from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, WorkspaceRole
@@ -28,7 +27,6 @@ from pyracast.admin_tenants import (
     tenant_list_context,
     workspace_context,
 )
-from pyracast.errors import MESSAGES, ErrorCode
 from pyracast.plants.models import Plant
 
 if TYPE_CHECKING:
@@ -159,18 +157,10 @@ def new_invitation(
 
 @require_POST
 def invitation_reissue(request: HttpRequest, tenant_id: int, invitation_id: int) -> HttpResponse:
-    invitation = get_object_or_404(WorkspaceInvitation, pk=invitation_id, tenant_id=tenant_id)
-    if invitation.accepted_at is not None or invitation.expires_at <= timezone.now():
-        messages.error(request, MESSAGES[ErrorCode.INVITATION_UNAVAILABLE])
-        return _workspace_section(tenant_id, "invitations-title")
+    get_object_or_404(WorkspaceInvitation, pk=invitation_id, tenant_id=tenant_id)
     try:
-        replacement = invite_workspace_member(
-            _actor(request),
-            tenant_id,
-            invitation.email,
-            role=invitation.role,
-            language=request.LANGUAGE_CODE,
-            platform=True,
+        replacement = reissue_workspace_invitation(
+            _actor(request), tenant_id, invitation_id, language=request.LANGUAGE_CODE
         )
     except ValidationError as refusal:
         messages.error(request, " ".join(refusal.messages))

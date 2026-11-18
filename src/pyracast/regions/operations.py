@@ -316,7 +316,6 @@ def configure_binding(
         }
         current = SiteBinding.objects.filter(region=region, region_revision=region.revision).first()
         if current is not None:
-            # `values` holds every setup column, so a match on all of them is a no-op.
             if SiteBinding.objects.filter(pk=current.pk, **values).exists():
                 return current
             _start_revision(actor, region)

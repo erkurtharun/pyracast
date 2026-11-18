@@ -288,3 +288,21 @@ def revoke_workspace_invitation(
         tenant_id=tenant_id,
         target_id=invitation.pk,
     )
+
+
+@transaction.atomic
+def reissue_workspace_invitation(
+    actor: User, tenant_id: int, invitation_id: int, *, language: str | None = None
+) -> WorkspaceInvitation:
+    authorize_workspace_admin(actor, tenant_id, platform=True)
+    invitation = WorkspaceInvitation.objects.filter(
+        tenant_id=tenant_id,
+        pk=invitation_id,
+        accepted_at__isnull=True,
+        expires_at__gt=timezone.now(),
+    ).first()
+    if invitation is None:
+        raise DomainError(ErrorCode.INVITATION_UNAVAILABLE)
+    return invite_workspace_member(
+        actor, tenant_id, invitation.email, role=invitation.role, language=language, platform=True
+    )
