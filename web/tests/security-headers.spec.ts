@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { productionServer } from "./support/server";
 
 test("a fresh CSP nonce permits the app and blocks injected scripts", async ({
     page,
@@ -43,7 +44,7 @@ test("a fresh CSP nonce permits the app and blocks injected scripts", async ({
     const second = await page.reload();
     expect(injectedResponse).toBe(true);
     await expect(page.locator("html")).not.toHaveAttribute("data-injected");
-    if (process.env.PLAYWRIGHT_COVERAGE === "1") {
+    if (productionServer) {
         expect(policy).not.toContain("'unsafe-eval'");
         expect(
             await page

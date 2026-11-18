@@ -25,8 +25,10 @@ from deploy.authorize_gmail import (
     authorize,
     exchange_code,
     load_client,
+    load_runtime,
     main,
     merge_runtime,
+    send_check_mail,
 )
 
 
@@ -307,3 +309,87 @@ def test_credentials_are_saved_only_after_the_sender_mails_itself(
     else:
         assert str(mail[header]) == "1.0"
     assert "private" not in str(capsys.readouterr())
+
+
+def forbidden(*_args: object, **_kwargs: object) -> None:
+    raise AssertionError("This step must not run.")
+
+
+def test_runtime_secrets_must_be_a_regular_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = tmp_path / "runtime.json"
+    runtime.write_text('{"PYRACAST_SECRET_KEY":"preserved"}')
+    monkeypatch.setattr(Path, "is_symlink", lambda _path: True)
+
+    with pytest.raises(ValueError, match="regular file"):
+        load_runtime(runtime, replace=False)
+
+
+@pytest.mark.parametrize("payload", ["[]", "{}", '{"PGPASSWORD": 1}', '"text"'])
+def test_runtime_secrets_must_be_a_json_object_of_strings(tmp_path: Path, payload: str) -> None:
+    runtime = tmp_path / "runtime.json"
+    runtime.write_text(payload)
+
+    with pytest.raises(ValueError, match="existing JSON object of strings"):
+        load_runtime(runtime, replace=False)
+
+
+@pytest.mark.parametrize("answer", [b"[]", b"{}", b'{"id": ""}'])
+def test_a_check_mail_gmail_did_not_accept_fails_the_authorization(
+    monkeypatch: pytest.MonkeyPatch, answer: bytes
+) -> None:
+    monkeypatch.setattr(
+        "deploy.authorize_gmail.urllib.request.urlopen",
+        lambda _request, *, timeout: BytesIO(answer),
+    )
+
+    with pytest.raises(ValueError, match="did not accept the sender check mail"):
+        send_check_mail("private-access", "info@pyracast.app")
+
+
+def test_a_malformed_callback_is_refused_and_a_denial_ends_the_authorization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    statuses: list[int] = []
+
+    def callback(redirect: str, query: str) -> None:
+        parsed = urlsplit(redirect)
+        connection = http.client.HTTPConnection("127.0.0.1", parsed.port, timeout=5)
+        try:
+            connection.request("GET", parsed.path + "?" + query)
+            response = connection.getresponse()
+            response.read()
+            statuses.append(response.status)
+        finally:
+            connection.close()
+
+    def deny(url: str) -> None:
+        parameters = parse_qs(urlsplit(url).query)
+        redirect = parameters["redirect_uri"][0]
+        callback(redirect, "state")
+        callback(redirect, urlencode({"state": parameters["state"][0], "error": "access_denied"}))
+
+    monkeypatch.setattr("deploy.authorize_gmail.exchange_code", forbidden)
+    with (
+        ThreadPoolExecutor(max_workers=1) as executor,
+        pytest.raises(ValueError, match="denied"),
+    ):
+        authorize(
+            OAuthClient("client", "private-client"),
+            "info@pyracast.app",
+            timeout_seconds=5,
+            open_browser=lambda url: executor.submit(deny, url),
+        )
+    assert statuses == [400, 200]
+
+
+@pytest.mark.parametrize("sender", ["info", "info@@pyracast.app", "@pyracast.app", "in fo@x.app"])
+def test_main_refuses_a_sender_that_is_not_one_mailbox_address(
+    monkeypatch: pytest.MonkeyPatch, sender: str
+) -> None:
+    monkeypatch.setattr("deploy.authorize_gmail.load_client", forbidden)
+    monkeypatch.setattr(sys, "argv", ["authorize_gmail", "--sender", sender])
+
+    with pytest.raises(SystemExit, match="Gmail authorization failed"):
+        main()

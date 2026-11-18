@@ -46,7 +46,7 @@ development broker with its state in `%LOCALAPPDATA%\pyracast\rabbitmq`; `start.
 runs both helpers when a dependency is down. On Ubuntu with Docker:
 
 ```text
-docker run -d --name pyracast-rabbitmq --hostname pyracast-rabbitmq -v pyracast-rabbitmq-data:/var/lib/rabbitmq -p 127.0.0.1:5672:5672 rabbitmq:4.4.0@sha256:485319d42170eab53d8a030e1cc49d95e41f5d325479fa504736db8091981eb7
+docker run -d --name pyracast-rabbitmq --hostname pyracast-rabbitmq -v pyracast-rabbitmq-data:/var/lib/rabbitmq -p 127.0.0.1:5672:5672 rabbitmq:4.4.0@sha256:1166559c9e77b0208b9d96bfaf265ddbdd491ce3cebb8cf990aabe9274f16d2c
 ```
 
 ### Local settings
@@ -259,7 +259,7 @@ Additional checks:
 | Command or opt-in | Boundary |
 | --- | --- |
 | `npm --prefix web run check:coverage` | Production-browser V8 coverage of authored TypeScript; writes `web/coverage/lcov.info` |
-| `PYRACAST_BROWSER_TEST=1` with `uv run --locked pytest tests/test_browser.py -n 1 --no-cov` | Browser ? real Django/PostgreSQL, fixture providers/mail |
+| `npm --prefix web run build`, then `uv run --locked pytest tests/e2e -m browser -n 1 --no-cov` | Browser ? real Django/PostgreSQL behind the production routes and web build, fixture providers/mail |
 | `PYRACAST_LIVE_QUEUE=1` and dedicated `PYRACAST_RABBITMQ_URL` | Real-broker tests; uses default/calibration queues |
 | `uv run --no-project --python 3.15.2 python scripts/check_scientific.py` | Locked optional scientific stack with checksum-pinned HDF5 build; pvlib recomputation of the tracker gain table |
 

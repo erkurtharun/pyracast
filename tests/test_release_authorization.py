@@ -212,3 +212,8 @@ def test_the_currency_check_refuses_an_unreadable_commit(tmp_path: Path, value: 
 
     assert (status, outputs) == (1, {"current": "false"})
     assert summary.startswith("Refused: ")
+
+
+def test_outside_a_workflow_the_decision_needs_no_step_output_files() -> None:
+    assert release_authorization.main(["current", MAIN, OLDER], {}) == 0
+    assert release_authorization.main(["current", "HEAD", MAIN], {}) == 1

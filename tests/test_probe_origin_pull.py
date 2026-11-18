@@ -5,6 +5,7 @@ import ssl
 import threading
 from collections.abc import Iterator
 from pathlib import Path
+from typing import cast
 
 import pytest
 from cryptography import x509
@@ -200,4 +201,66 @@ def test_main_fails_an_entrypoint_that_closes_during_the_handshake(
     assert capsys.readouterr().err == (
         f"The public entrypoint 127.0.0.1:{port} ({SITE}) does not enforce origin pulls: it "
         "closed the connection during the handshake.\n"
+    )
+
+
+class Handshaken:
+    def __init__(self, answer: bytes | BaseException) -> None:
+        self.answer = answer
+
+    def recv(self, _size: int) -> bytes:
+        if isinstance(self.answer, BaseException):
+            raise self.answer
+        return self.answer
+
+
+def tls_alert(reason: str) -> ssl.SSLError:
+    error = ssl.SSLError(1, "alert")
+    error.reason = reason
+    return error
+
+
+@pytest.mark.parametrize(
+    ("answer", "observation"),
+    [
+        (b"\x17", probe_origin_pull.ACCEPTED),
+        (b"", "closed the connection after the handshake"),
+        (tls_alert("TLSV13_ALERT_CERTIFICATE_REQUIRED"), probe_origin_pull.ENFORCED),
+        (tls_alert("SSLV3_ALERT_BAD_CERTIFICATE"), "ended the connection after the handshake"),
+        (tls_alert(""), "ended the connection after the handshake (alert)"),
+        (ConnectionResetError("reset"), "ended the connection after the handshake (reset)"),
+        (TimeoutError(), probe_origin_pull.ACCEPTED),
+    ],
+)
+def test_the_first_record_after_the_handshake_decides_the_observation(
+    answer: bytes | BaseException, observation: str
+) -> None:
+    secure = cast(ssl.SSLSocket, Handshaken(answer))
+
+    assert probe_origin_pull._after_handshake(secure).startswith(observation)
+
+
+def test_an_entrypoint_that_refuses_the_connection_could_not_be_reached(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def refuse(_address: tuple[str, int], *, timeout: float) -> socket.socket:
+        raise ConnectionRefusedError("refused")
+
+    monkeypatch.setattr(socket, "create_connection", refuse)
+
+    assert probe_origin_pull.observe("127.0.0.1", 9, SITE, None, 1.0) == (
+        "could not be reached (refused)"
+    )
+
+
+def test_a_connection_timeout_reports_the_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def time_out(_address: tuple[str, int], *, timeout: float) -> socket.socket:
+        raise TimeoutError
+
+    monkeypatch.setattr(socket, "create_connection", time_out)
+
+    assert probe_origin_pull.observe("127.0.0.1", 443, SITE, None, 1.5) == (
+        "did not answer within 1.5 s"
     )

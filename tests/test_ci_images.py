@@ -4,7 +4,9 @@ import json
 import subprocess
 import sys
 import tarfile
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -34,7 +36,7 @@ def _archive(
     config = blob(
         {
             "architecture": "amd64",
-            "os": "linux",
+            "os": "windows" if defect == "platform" else "linux",
             "config": {
                 "Labels": {"org.opencontainers.image.revision": revision},
             },
@@ -42,7 +44,13 @@ def _archive(
         "application/vnd.oci.image.config.v1+json",
     )
     runtime = blob(
-        {"schemaVersion": 2, "mediaType": MANIFEST, "config": config, "layers": []}, MANIFEST
+        {
+            "schemaVersion": 1 if defect == "manifest-schema" else 2,
+            "mediaType": MANIFEST,
+            "config": config,
+            "layers": [],
+        },
+        MANIFEST,
     )
     runtime_digest = str(runtime["digest"])
     layers = []
@@ -61,6 +69,13 @@ def _archive(
                     "predicateType": predicate,
                     "predicate": {},
                 },
+                "application/json" if defect == "layer-type" else "application/vnd.in-toto+json",
+            )
+        )
+    if defect == "untyped-predicate":
+        layers.append(
+            blob(
+                {"subject": [{"digest": {"sha256": runtime_digest[7:]}}], "predicateType": 7},
                 "application/vnd.in-toto+json",
             )
         )
@@ -74,7 +89,7 @@ def _archive(
         attestation.update(
             {
                 "artifactType": "application/vnd.docker.attestation.manifest.v1+json",
-                "subject": runtime.copy(),
+                "subject": {**runtime, "size": 1} if defect == "subject" else runtime.copy(),
             }
         )
     attestation_descriptor = blob(attestation, MANIFEST)
@@ -90,12 +105,28 @@ def _archive(
         }
     )
     runtime["platform"] = {"architecture": "amd64", "os": "linux"}
+    if defect == "manifest-type":
+        runtime["mediaType"] = "application/vnd.docker.distribution.manifest.v2+json"
+    if defect == "size":
+        runtime["size"] = int(str(runtime["size"])) + 1
+    if defect == "urls":
+        runtime["urls"] = ["https://registry.example/blob"]
     manifests = [runtime, attestation_descriptor]
     if defect == "duplicate-platform":
         manifests.append(runtime)
-    root = blob({"schemaVersion": 2, "mediaType": INDEX, "manifests": manifests}, INDEX)
-    entries["index.json"] = json.dumps({"schemaVersion": 2, "manifests": [root]}).encode()
-    entries["oci-layout"] = b'{"imageLayoutVersion":"1.0.0"}'
+    root = blob(
+        {
+            "schemaVersion": 1 if defect == "index-schema" else 2,
+            "mediaType": INDEX,
+            "manifests": manifests,
+        },
+        INDEX,
+    )
+    roots = [root, root] if defect == "two-roots" else [root]
+    entries["index.json"] = json.dumps({"schemaVersion": 2, "manifests": roots}).encode()
+    if defect != "missing-layout":
+        version = "2.0.0" if defect == "layout-version" else "1.0.0"
+        entries["oci-layout"] = json.dumps({"imageLayoutVersion": version}).encode()
     if defect == "corrupt-blob":
         entries["blobs/sha256/" + str(config["digest"])[7:]] = b"{}"
     if defect == "missing-blob":
@@ -143,6 +174,17 @@ def test_oci_archive_records_exact_attested_build(tmp_path: Path, modern: bool) 
         ("symlink", "Unsafe OCI"),
         ("traversal", "Unsafe OCI"),
         ("duplicate", "Duplicate OCI"),
+        ("missing-layout", "Missing OCI layout"),
+        ("layout-version", "Invalid OCI layout version"),
+        ("two-roots", "Expected one OCI image index"),
+        ("index-schema", "Invalid OCI image index"),
+        ("manifest-type", "Expected an OCI image manifest"),
+        ("manifest-schema", "Invalid OCI manifest"),
+        ("size", "OCI blob size mismatch"),
+        ("urls", "External OCI blobs are not permitted"),
+        ("platform", "Runtime configuration platform mismatch"),
+        ("subject", "OCI attestation subject mismatch"),
+        ("layer-type", "Expected an in-toto attestation"),
     ],
 )
 def test_oci_archive_rejects_tampering(tmp_path: Path, defect: str, message: str) -> None:
@@ -183,3 +225,80 @@ def test_cli_rechecks_trusted_identity_and_archive_bytes(tmp_path: Path, mutatio
     result = subprocess.run(command, check=False, capture_output=True, text=True)  # noqa: S603
     assert result.returncode != 0
     assert "mismatch" in result.stderr
+
+
+def test_oci_archive_ignores_an_attestation_layer_without_a_predicate_type(tmp_path: Path) -> None:
+    path, digest, _ = _archive(tmp_path, defect="untyped-predicate")
+
+    assert ci_images.inspect_archive(path, SHA, digest)["digest"] == digest
+
+
+@pytest.mark.parametrize(
+    ("check", "value", "message"),
+    [
+        (ci_images._object, [], "Expected a JSON object"),
+        (ci_images._objects, {}, "Expected a JSON array"),
+        (ci_images._digest, "sha256:" + "0" * 63, "Invalid OCI digest"),
+        (ci_images._digest, None, "Invalid OCI digest"),
+    ],
+)
+def test_oci_documents_reject_values_of_the_wrong_shape(
+    check: Callable[[object], object], value: object, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        check(value)
+
+
+class Archive:
+    def __init__(self, member: tarfile.TarInfo) -> None:
+        self.member = member
+
+    def __iter__(self) -> Iterator[tarfile.TarInfo]:
+        return iter([self.member])
+
+    def getmember(self, _name: str) -> tarfile.TarInfo:
+        return self.member
+
+    def extractfile(self, _member: tarfile.TarInfo) -> None:
+        return None
+
+
+def test_oci_documents_are_read_only_from_bounded_regular_files() -> None:
+    oversized = tarfile.TarInfo("index.json")
+    oversized.size = 128 * 1024 * 1024 + 1
+    blob = tarfile.TarInfo("blobs/sha256/" + "0" * 64)
+
+    with pytest.raises(ValueError, match="Oversized OCI JSON document"):
+        ci_images._json(cast(tarfile.TarFile, Archive(oversized)), "index.json")
+    with pytest.raises(ValueError, match="Missing OCI document"):
+        ci_images._json(cast(tarfile.TarFile, Archive(tarfile.TarInfo("index.json"))), "index.json")
+    with pytest.raises(ValueError, match="Missing OCI blob data"):
+        ci_images._check_entries(cast(tarfile.TarFile, Archive(blob)))
+
+
+def test_the_ci_image_record_needs_a_full_commit_and_positive_run_identity(tmp_path: Path) -> None:
+    for sha, run_id, run_attempt in [("1" * 39, 1, 1), (SHA, 0, 1), (SHA, 1, 0)]:
+        with pytest.raises(ValueError, match="Invalid CI identity"):
+            ci_images.record(tmp_path, sha, run_id, run_attempt)
+
+
+def test_verify_accepts_only_the_record_that_prepare_wrote(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path, digest, _ = _archive(tmp_path)
+    for name in ci_images.IMAGES:
+        (tmp_path / f"{name}.oci.tar").write_bytes(path.read_bytes())
+        (tmp_path / f"{name}.digest").write_text(digest + "\n")
+
+    def command(step: str) -> None:
+        monkeypatch.setattr(sys, "argv", ["ci_images.py", step, str(tmp_path), SHA, "42", "3"])
+        ci_images.main()
+
+    command("prepare")
+    command("verify")
+    manifest = tmp_path / "images.json"
+    record = json.loads(manifest.read_text(encoding="utf-8"))
+    assert (record["sha"], record["run_id"], record["run_attempt"]) == (SHA, 42, 3)
+    manifest.write_text(json.dumps({**record, "run_attempt": 4}), encoding="utf-8")
+    with pytest.raises(ValueError, match="CI image record mismatch"):
+        command("verify")

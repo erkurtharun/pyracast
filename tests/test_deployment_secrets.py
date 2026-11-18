@@ -1,9 +1,16 @@
+import base64
+import getpass
+import io
 import json
+import secrets
+import urllib.request
+from collections.abc import Callable
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
-from deploy import runtime_secrets
+from deploy import create_secrets, runtime_secrets
 from deploy.runtime_secrets import (
     environment_values,
     prepare_database,
@@ -122,3 +129,116 @@ def test_staged_directory_belongs_to_the_resolved_release() -> None:
     assert runtime_secrets.staged_directory(script) == runtime_secrets.SECRETS / (
         "abc-123456789012"
     )
+
+
+def test_a_secret_is_read_with_the_instance_identity_from_its_pinned_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[tuple[str, dict[str, str], float]] = []
+    payload = base64.b64encode(json.dumps({"POSTGRES_PASSWORD": "admin"}).encode()).decode()
+    answers = {
+        "metadata.google.internal": {"access_token": "instance-token"},
+        "secretmanager.googleapis.com": {"payload": {"data": payload}},
+    }
+
+    def urlopen(request: urllib.request.Request, *, timeout: float) -> io.BytesIO:
+        requests.append((request.full_url, dict(request.header_items()), timeout))
+        host = urlsplit(request.full_url).hostname
+        return io.BytesIO(json.dumps(answers[str(host)]).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+
+    assert runtime_secrets.access_secret("projects/p/secrets/database/versions/2") == {
+        "POSTGRES_PASSWORD": "admin"
+    }
+    assert [(url, timeout) for url, _, timeout in requests] == [
+        (
+            "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/"
+            "default/token",
+            10,
+        ),
+        (
+            "https://secretmanager.googleapis.com/v1/projects/p/secrets/database/versions/2:access",
+            15,
+        ),
+    ]
+    assert requests[0][1] == {"Metadata-flavor": "Google"}
+    assert requests[1][1] == {"Authorization": "Bearer instance-token"}
+
+
+@pytest.mark.parametrize(
+    "resource",
+    [
+        "projects/p/secrets/runtime/versions/latest",
+        "projects/p/secrets/runtime",
+        "projects/P/secrets/runtime/versions/1",
+    ],
+)
+def test_a_secret_must_name_a_numeric_version(
+    monkeypatch: pytest.MonkeyPatch, resource: str
+) -> None:
+    monkeypatch.setattr(urllib.request, "urlopen", forbidden)
+
+    with pytest.raises(ValueError, match="numeric Secret Manager version"):
+        runtime_secrets.access_secret(resource)
+
+
+def forbidden(*_args: object, **_kwargs: object) -> None:
+    raise AssertionError("This step must not run.")
+
+
+def answer(*replies: str) -> Callable[[str], str]:
+    queue = list(replies)
+    return lambda _prompt: queue.pop(0)
+
+
+@pytest.mark.parametrize("backend", ["gmail", "smtp"])
+def test_secret_creation_writes_three_private_files_once(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    backend: str,
+) -> None:
+    replies = [backend, ""] + (["smtp.example", "mailer"] if backend == "smtp" else [])
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("builtins.input", answer(*replies))
+    monkeypatch.setattr(getpass, "getpass", lambda _prompt: "smtp-password")
+
+    create_secrets.main()
+
+    secrets = tmp_path / "secrets"
+    runtime = json.loads((secrets / "runtime.json").read_text(encoding="utf-8"))
+    migration = json.loads((secrets / "migration.json").read_text(encoding="utf-8"))
+    database = json.loads((secrets / "database.json").read_text(encoding="utf-8"))
+    assert runtime["PYRACAST_EMAIL_BACKEND"] == backend
+    assert runtime["PYRACAST_FROM_EMAIL"] == "info@pyracast.app"
+    assert ("PYRACAST_EMAIL_PASSWORD" in runtime) is (backend == "smtp")
+    assert runtime["PGUSER"] == "pyracast_app"
+    assert migration["PGUSER"] == "pyracast_owner"
+    assert len({runtime["PGPASSWORD"], migration["PGPASSWORD"], database["POSTGRES_PASSWORD"]}) == 3
+    assert ("authorize_gmail.py" in capsys.readouterr().out) is (backend == "gmail")
+    with pytest.raises(SystemExit, match="already exist"):
+        create_secrets.main()
+
+
+def test_secret_creation_offers_only_the_supported_mail_backends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("builtins.input", answer("sendmail"))
+
+    with pytest.raises(SystemExit, match="Choose gmail or smtp"):
+        create_secrets.main()
+    assert list((tmp_path / "secrets").iterdir()) == []
+
+
+def test_secret_creation_refuses_an_empty_database_password(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("builtins.input", answer("", ""))
+    monkeypatch.setattr(secrets, "token_urlsafe", lambda _size: "")
+
+    with pytest.raises(SystemExit, match="cannot be empty"):
+        create_secrets.main()
+    assert list((tmp_path / "secrets").iterdir()) == []

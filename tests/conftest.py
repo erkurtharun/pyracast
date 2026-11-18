@@ -1,6 +1,7 @@
 import logging
 import os
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from django.core.cache import caches
@@ -16,41 +17,56 @@ settings.register_profile("explore", max_examples=2000, deadline=None)
 settings.load_profile(os.environ.get("HYPOTHESIS_PROFILE", "gate"))
 
 
+E2E = Path(__file__).resolve().parent / "e2e"
 TOOLING = frozenset(
     {
         "test_agent_graph",
         "test_api_schema_generation",
         "test_ci_images",
+        "test_ci_result",
         "test_deployment_backup",
         "test_deployment_backup_lock",
+        "test_deployment_bootstrap",
+        "test_deployment_entry_points",
         "test_deployment_helpers",
         "test_deployment_host",
         "test_deployment_previous_helper",
+        "test_deployment_release_state",
         "test_deployment_reset",
         "test_deployment_secrets",
         "test_deployment_watchdog",
         "test_dev_dependencies",
         "test_dev_launcher",
         "test_er_diagram",
+        "test_gmail_authorization",
         "test_hooks",
+        "test_image_scans",
+        "test_npm_audit",
+        "test_operations_contracts",
         "test_postgres_workspace",
+        "test_probe_origin",
+        "test_probe_origin_pull",
         "test_pytest_shard",
         "test_quality_gate",
+        "test_release_authorization",
+        "test_release_environment",
         "test_release_images",
         "test_release_scope",
+        "test_release_unit",
+        "test_release_workflow",
+        "test_shutdown_process",
         "test_solcast_capture",
         "test_start_postgres",
         "test_start_rabbitmq",
         "test_suite_conventions",
-        "test_support_images",
         "test_translations",
+        "test_version_pins",
     }
 )
 SUBPROCESS = frozenset(
     {
         "test_agent_graph",
         "test_api_schema_generation",
-        "test_browser",
         "test_ci_images",
         "test_deployment_helpers",
         "test_deployment_previous_helper",
@@ -153,7 +169,7 @@ SELECTION_SETS = {
     "tooling": TOOLING,
     "subprocess": SUBPROCESS,
     "migration": MIGRATION,
-    "browser": frozenset({"test_browser"}),
+    "browser": frozenset(path.stem for path in E2E.glob("test_*.py")),
     "live": frozenset({"test_epias_live", "test_live_queue"}),
 }
 MODULE_MARKERS = {

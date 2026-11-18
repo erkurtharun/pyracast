@@ -1,8 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
-const coverage = process.env.PLAYWRIGHT_COVERAGE === "1";
+import { coverage, productionServer } from "./tests/support/server";
 const port = coverage ? 3102 : 3100;
 const startCommand = `npm start -- --port ${port}`;
-const normalCommand = process.env.CI
+const normalCommand = productionServer
     ? startCommand
     : `npm run dev -- --port ${port}`;
 export default defineConfig({

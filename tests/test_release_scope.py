@@ -556,3 +556,15 @@ def test_main_writes_the_decision_and_its_reason(
     assert (outputs / "output").read_text(encoding="utf-8") == expected
     summary = (outputs / "summary").read_text(encoding="utf-8")
     assert summary == release_scope.decide(RUN, deployed, head, repository).reason + "\n"
+
+
+def test_main_writes_the_decision_without_a_step_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+
+    release_scope.main(["workflow_dispatch", "", ""])
+
+    assert (tmp_path / "output").read_text(encoding="utf-8") == "release=true\n"
+    assert capsys.readouterr().out == "Event 'workflow_dispatch' always releases.\n"
