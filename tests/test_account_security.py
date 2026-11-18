@@ -2,6 +2,7 @@ import json
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 from runpy import run_path
 from threading import Barrier
@@ -475,6 +476,18 @@ def test_session_activity_refresh_never_extends_absolute_lifetime() -> None:
     assert client.session["last_activity_at"] > time.time() - 60
     assert client.session["authenticated_at"] == started
     assert client.get("/api/session/").json()["user"]["id"] == user.pk
+
+
+@pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)
+def test_session_names_the_end_of_its_absolute_lifetime() -> None:
+    client = Client()
+    assert client.get("/api/session/").json()["expires_at"] is None
+    client.force_login(verified_member())
+    started = client.session["authenticated_at"]
+    expires_at = client.get("/api/session/").json()["expires_at"]
+    assert datetime.fromisoformat(expires_at).timestamp() == pytest.approx(
+        started + project_settings.SESSION_COOKIE_AGE, abs=1
+    )
 
 
 @pytest.mark.django_db(databases=["default", "auth_cache"], transaction=True)

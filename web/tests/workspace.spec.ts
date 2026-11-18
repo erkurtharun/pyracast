@@ -11,6 +11,7 @@ import {
     mockApi,
     tenantRow,
 } from "./support/workspace";
+import { errorBody } from "./support/errors";
 
 test("mock contract: signs in with CSRF, selects region, and signs out", async ({
     page,
@@ -1553,4 +1554,84 @@ test("recycle bin ignores a prior workspace response and restores only in the se
             { exact: true },
         ),
     ).toBeVisible();
+});
+
+test("a session that ends while the tab is open returns to sign in with a notice", async ({
+    page,
+}) => {
+    await page.clock.install();
+    await mockApi(page);
+    let ended = false;
+    await page.route("**/api/tenants/", (route) =>
+        ended
+            ? route.fulfill({
+                  status: 403,
+                  json: errorBody("not_authenticated", "Sign in to continue."),
+              })
+            : route.fallback(),
+    );
+    await page.route("**/api/session/", (route) =>
+        ended
+            ? route.fulfill({
+                  json: { user: null, csrf_token: "anonymous-token" },
+              })
+            : route.fallback(),
+    );
+    await page.goto("/app/");
+    await expect(page.getByRole("heading", { name: "Plants" })).toBeVisible();
+    ended = true;
+    await page.clock.fastForward(30_000);
+    await expect(
+        page.getByText("Your session has expired. Please sign in again."),
+    ).toBeVisible();
+    await expect(
+        page.locator("form").getByRole("button", { name: "Sign in" }),
+    ).toBeVisible();
+});
+
+test("a failed portfolio refresh keeps the plant cards until access is denied", async ({
+    page,
+}) => {
+    await page.clock.install();
+    await mockApi(page);
+    let outcome: "ok" | "busy" | "denied" = "ok";
+    await page.route("**/api/tenants/1/sites/", (route) =>
+        outcome === "busy"
+            ? route.fulfill({
+                  status: 503,
+                  json: errorBody(
+                      "busy",
+                      "Plants are temporarily unavailable.",
+                  ),
+              })
+            : outcome === "denied"
+              ? route.fulfill({
+                    status: 403,
+                    json: errorBody(
+                        "membership_required",
+                        "You are not a member of this workspace.",
+                    ),
+                })
+              : route.fallback(),
+    );
+    await page.goto("/app/");
+    const card = page.getByRole("button", { name: /East array/ });
+    await expect(card).toBeVisible();
+    outcome = "busy";
+    await page.clock.fastForward(30_000);
+    await expect(
+        page.getByText("Plants are temporarily unavailable."),
+    ).toBeVisible();
+    await expect(card).toBeVisible();
+    outcome = "ok";
+    await page.clock.fastForward(30_000);
+    await expect(
+        page.getByText("Plants are temporarily unavailable."),
+    ).toHaveCount(0);
+    outcome = "denied";
+    await page.clock.fastForward(30_000);
+    await expect(
+        page.getByText("You are not a member of this workspace."),
+    ).toBeVisible();
+    await expect(card).toHaveCount(0);
 });
