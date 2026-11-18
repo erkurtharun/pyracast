@@ -390,7 +390,7 @@ def log_line(diagnostic: psycopg.errors.Diagnostic) -> str:
 
 class ServerPsql:
     # psql opens its session with the startup options of its -d connection string, and -1 sends
-    # BEGIN before the script and COMMIT after it. Records each log line the server sends it.
+    # BEGIN before the script and COMMIT after it.
     def __init__(self, database: str) -> None:
         self.database = database
         self.commands: list[list[str]] = []

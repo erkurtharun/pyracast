@@ -25,6 +25,32 @@ IMAGE_SOURCES = (
     "scripts/*.py",
     "README.md",
 )
+IMAGES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "BuildKit": (
+        "moby/buildkit",
+        (".github/workflows/ci.yml", ".github/workflows/image-rescan.yml"),
+    ),
+    "Dockerfile syntax": (
+        "docker/dockerfile",
+        ("Dockerfile", "web/Dockerfile", "deploy/gateway/Dockerfile"),
+    ),
+    "Go": ("golang", ("deploy/gateway/Dockerfile",)),
+    "Node.js": ("node", ("web/Dockerfile",)),
+    "PostgreSQL in development and CI": ("postgres", ("scripts/start_postgres.py",)),
+    "PostgreSQL in production": ("postgres", ("deploy/postgres/Dockerfile",)),
+    "Python": ("python", ("Dockerfile", ".github/workflows/ci.yml", "deploy/scan-images.sh")),
+    "RabbitMQ": ("rabbitmq", ("deploy/compose.yaml", ".github/workflows/ci.yml", "README.md")),
+    "SBOM scanner": ("docker/buildkit-syft-scanner", (".github/workflows/ci.yml",)),
+    "Skopeo": ("quay.io/containers/skopeo", ("deploy/oci-images.sh",)),
+    "Trivy": ("aquasec/trivy", ("deploy/scan-images.sh",)),
+    "actionlint": ("rhysd/actionlint", (".github/workflows/ci.yml",)),
+    "distroless C runtime": ("gcr.io/distroless/cc-debian13", ("Dockerfile", "web/Dockerfile")),
+    "distroless static runtime": (
+        "gcr.io/distroless/static-debian13",
+        ("deploy/gateway/Dockerfile",),
+    ),
+    "uv": ("ghcr.io/astral-sh/uv", ("Dockerfile",)),
+}
 
 
 @dataclass(frozen=True)
@@ -203,16 +229,45 @@ def test_the_build_backend_range_admits_the_pinned_uv() -> None:
     assert uv[:2] < release(match[2])
 
 
+def pinned_images() -> list[tuple[str, str, str, str]]:
+    return [
+        (match[1], match[2], match[3], path.relative_to(ROOT).as_posix())
+        for pattern in IMAGE_SOURCES
+        for path in sorted(ROOT.glob(pattern))
+        for match in IMAGE.finditer(path.read_text(encoding="utf-8"))
+    ]
+
+
+def image_references(image: str, path: str) -> set[str]:
+    text = (ROOT / path).read_text(encoding="utf-8")
+    pattern = rf"(?<![\w./-]){re.escape(image)}(?::[A-Za-z0-9][\w.-]*)?(?:@[\w:]+)?"
+    return set(re.findall(pattern, text)) - {image}
+
+
 def test_every_image_tag_resolves_to_one_digest() -> None:
     digests: dict[tuple[str, str], set[str]] = defaultdict(set)
-    for pattern in IMAGE_SOURCES:
-        for path in sorted(ROOT.glob(pattern)):
-            for name, tag, digest in IMAGE.findall(path.read_text(encoding="utf-8")):
-                digests[name, tag].add(digest)
-    names = {name for name, _ in digests}
+    for name, tag, digest, _ in pinned_images():
+        digests[name, tag].add(digest)
 
-    assert {"python", "node", "rabbitmq", "postgres", "golang", "aquasec/trivy"} <= names
     assert {image: found for image, found in digests.items() if len(found) != 1} == {}
+
+
+def test_the_image_table_lists_every_location_of_a_pinned_image() -> None:
+    assert {(name, path) for name, _, _, path in pinned_images()} == {
+        (image, path) for image, paths in IMAGES.values() for path in paths
+    }
+
+
+@pytest.mark.parametrize("name", sorted(IMAGES))
+def test_every_location_of_an_image_names_the_same_tag_and_digest(name: str) -> None:
+    image, paths = IMAGES[name]
+    found = {path: image_references(image, path) for path in paths}
+    references = set[str]().union(*found.values())
+
+    assert all(found.values()), found
+    assert len(references) == 1, found
+    (reference,) = references
+    assert IMAGE.fullmatch(reference), found
 
 
 def test_every_action_is_pinned_to_one_commit_and_release() -> None:

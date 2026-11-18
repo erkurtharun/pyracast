@@ -2,7 +2,6 @@ version: "1.0"
 linter: qodana-python
 withinDocker: false
 
-# Python only; qodana-js.yaml analyses web/.
 failureConditions:
   severityThresholds:
     critical: 0
