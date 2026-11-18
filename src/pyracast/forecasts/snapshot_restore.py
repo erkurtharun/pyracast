@@ -63,8 +63,7 @@ SETTINGS = (
     "longitude",
     "timezone",
 )
-# Copies of the provider site's own settings that no calculation reads, so an operator may
-# accept a value the recreated binding recorded differently.
+# Record-only copies of the provider's site settings: no calculation reads them.
 RECORDED_SETTINGS = ("installation_date",)
 ACCEPTED_KEY = "accepted_differences"
 SOURCE_LABELS: dict[str, str] = {
@@ -133,7 +132,7 @@ class EndpointSummary:
 
 @dataclass(frozen=True)
 class AcceptedDifference:
-    # Values are JSON text: a string keeps its quotes, a missing value reads null.
+    # Values are JSON text: a string keeps its quotes.
     name: str
     exported: tuple[str, ...]
     binding: str
@@ -366,7 +365,11 @@ def _accepted_differences(
     binding: SiteBinding, rows: list[ExportRow], accepted: frozenset[str]
 ) -> tuple[AcceptedDifference, ...]:
     differing = _differing_settings(binding, rows)
-    refused = [name for name in differing if name not in accepted]
+    refused = [
+        name
+        for name in differing
+        if name not in accepted or any(name not in row.binding for row in rows)
+    ]
     if refused:
         raise RestoreRefusedError(
             f"The export's provider site differs from the binding in: {', '.join(refused)}."
@@ -379,7 +382,7 @@ def _accepted_differences(
     return tuple(
         AcceptedDifference(
             name,
-            tuple(sorted({json.dumps(row.binding.get(name)) for row in rows})),
+            tuple(sorted({json.dumps(row.binding[name]) for row in rows})),
             json.dumps(_setting(binding, name)),
         )
         for name in differing
@@ -429,7 +432,7 @@ def _store(
     if accepted:
         record[ACCEPTED_KEY] = {
             item.name: {
-                "export": row.binding.get(item.name),
+                "export": row.binding[item.name],
                 "binding": _setting(binding, item.name),
             }
             for item in accepted
@@ -594,8 +597,7 @@ def restore_provider_snapshots(
     accepted: Iterable[str] = (),
 ) -> RestoreSummary:
     """Store the live collections of a reset export (`deploy/reset_database.py`) as native
-    collections of the binding that now holds the same provider site; a dry run rolls back.
-    `accepted` names recorded settings whose differing value the operator accepts."""
+    collections of the binding that now holds the same provider site; a dry run rolls back."""
     require_platform_admin(actor)
     names = frozenset(accepted)
     unrecorded = sorted(names.difference(RECORDED_SETTINGS))

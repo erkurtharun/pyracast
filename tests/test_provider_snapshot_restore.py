@@ -118,7 +118,6 @@ ACCEPTED_LINE = (
 
 
 def installation_date_recorded_differently(system: System) -> BeforeReset:
-    """The erased binding declared 1 March; the recreated one records 4 March."""
     SiteBinding.objects.filter(pk=system.binding.pk).update(installation_date=EXPORTED_DATE)
     system.binding.refresh_from_db()
     before = collections_before_reset(system)
@@ -1465,12 +1464,20 @@ def test_command_accepts_a_recorded_difference_by_name_and_reports_it_on_every_r
         "The export's provider site differs from the binding in: installation_date."
     )
 
+    def stored() -> tuple[int, int, int]:
+        return (
+            CollectionJob.objects.count(),
+            ForecastSnapshot.objects.count(),
+            ForecastResult.objects.count(),
+        )
+
     reports = []
     for options in (("--dry-run", *accept), accept, (*accept, *accept)):
+        before_run = stored()
         output = StringIO()
         call_command("restore_provider_snapshots", *arguments, *options, stdout=output)
         reports.append(output.getvalue().splitlines())
-    jobs = CollectionJob.objects.count()
+    assert stored() == before_run
 
     for report, outcome in zip(
         reports,
@@ -1482,7 +1489,6 @@ def test_command_accepts_a_recorded_difference_by_name_and_reports_it_on_every_r
         assert report[-1] == outcome
         assert sum(ACCEPTED_LINE in line for line in report) == 1
     assert restored_count(system) == 8
-    assert CollectionJob.objects.count() == jobs
     assert [
         record.getMessage() for record in pyracast_logs.records if record.name == COMMAND_LOGGER
     ] == [
@@ -1524,6 +1530,34 @@ def test_command_reports_every_exported_value_of_an_accepted_setting(
         'Accepted recorded difference in installation_date: export "2025-03-01", null; '
         'binding "2025-03-04".'
     )
+
+
+def test_command_never_accepts_a_setting_the_export_lacks(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    system = restore_system(monkeypatch)
+    before = installation_date_recorded_differently(system)
+    rows = export_rows(before.content)
+    del next(row for row in rows if row["id"] == before.nights[1].pk)["binding"][
+        "installation_date"
+    ]
+    path = tmp_path / "export.solcast.jsonl.gz"
+    path.write_bytes(encode_rows(rows))
+
+    with pytest.raises(CommandError) as refused:
+        call_command(
+            "restore_provider_snapshots",
+            *command_arguments(system, str(path)),
+            "--accept-recorded-difference",
+            "installation_date",
+            stdout=StringIO(),
+        )
+
+    assert str(refused.value) == (
+        "Provider snapshot restore failed: "
+        "The export's provider site differs from the binding in: installation_date."
+    )
+    assert restored_count(system) == 0
 
 
 def test_command_refuses_an_accepted_setting_that_does_not_differ(

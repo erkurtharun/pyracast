@@ -19,7 +19,7 @@ from pyracast.forecasts.snapshot_restore import (
 
 logger = logging.getLogger(__name__)
 
-# Output names no path, exception message or export value: each can hold the site id.
+# A refusal names no path, exception message or export value: each can hold the site id.
 REFUSALS: tuple[tuple[type[Exception], str], ...] = (
     (User.DoesNotExist, "The user does not exist."),
     (ObjectDoesNotExist, "The region or binding does not exist in that tenant."),
