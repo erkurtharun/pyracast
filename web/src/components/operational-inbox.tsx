@@ -362,7 +362,7 @@ function RequestDetail({
                     )}
                     {item.conflict && (
                         <Notice error>
-                            {t("conflict")} {item.conflict.detail}
+                            {t("conflict")} {item.conflict.message}
                         </Notice>
                     )}
                     {reviewBlocked && (

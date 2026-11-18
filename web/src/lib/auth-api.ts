@@ -1,15 +1,5 @@
-import { ApiError, failureMessage } from "./api";
+import { ApiError, errorFromResponse } from "./api/errors";
 import { browserErrors } from "@/i18n/browser";
-
-export class AuthResponseError extends ApiError {
-    constructor(
-        message: string,
-        readonly status: number,
-        fields: Record<string, string> = {},
-    ) {
-        super(message, fields);
-    }
-}
 
 export type AuthData = {
     flows?: { id: string; is_pending?: boolean }[];
@@ -60,13 +50,13 @@ export async function authRequest<TData = AuthData>(
     });
     const data: unknown = await response.json().catch(() => null);
     if (!data || typeof data !== "object" || Array.isArray(data))
-        throw new AuthResponseError(
+        throw new ApiError(
             response.ok
                 ? t("invalidResponse")
                 : t("request", { status: response.status }),
-            response.status,
+            { status: response.status },
         );
-    const result = data as AuthResult<TData>;
+    // A 401 carries allauth's flows and the 404 means no authenticator yet: callers read both.
     if (
         !response.ok &&
         response.status !== 401 &&
@@ -75,18 +65,7 @@ export async function authRequest<TData = AuthData>(
             method === "GET" &&
             path === "account/authenticators/totp"
         )
-    ) {
-        const errors = result.errors ?? [];
-        throw new AuthResponseError(
-            errors.map((error) => error.message).join(" ") ||
-                failureMessage(data, response.status),
-            response.status,
-            Object.fromEntries(
-                errors
-                    .filter((error) => error.param)
-                    .map((error) => [error.param!, error.message]),
-            ),
-        );
-    }
-    return result;
+    )
+        throw errorFromResponse(response.status, data);
+    return data as AuthResult<TData>;
 }

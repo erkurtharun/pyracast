@@ -11,6 +11,7 @@ from django.utils.translation import gettext
 
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import WorkspaceRole
+from pyracast.errors import ConflictError, ErrorCode
 from pyracast.plants.measurements import select_measurements, select_provider_measurements
 from pyracast.plants.models import Plant, PlantConfiguration, PlantEvent, ProductionObservation
 from pyracast.plants.observations import observation_heads
@@ -22,11 +23,6 @@ from pyracast.plants.operations import (
 )
 from pyracast.plants.preparation import prepare_calibration
 from pyracast.regions.models import Region
-
-
-class ProductionRevisionConflictError(Exception):
-    def __init__(self) -> None:
-        super().__init__(gettext("Production changed. Reload the latest values before saving."))
 
 
 @dataclass(frozen=True)
@@ -129,7 +125,7 @@ def prepare_production_changes(
             not capture_revisions
             and (previous.pk if previous else None) != change.expected_revision_id
         ):
-            raise ProductionRevisionConflictError
+            raise ConflictError(ErrorCode.PRODUCTION_REVISION_CHANGED)
         if previous is not None and previous.configuration_id != configuration.pk:
             raise ValidationError(gettext("Production belongs to a previous configuration."))
         if change.action == "revert" and previous is None:

@@ -113,10 +113,6 @@
         "currentLocation": "Mevcut konum: {latitude}°, {longitude}° · {timezone}",
         "location": "{latitude}°, {longitude}° · {timezone}",
         "approvalHelp": "Konum değişikliği yönetici onayı ve bağlantının yeniden doğrulanmasını gerektirir.",
-        "requestFailed": "Talep gönderilemedi.",
-        "locationChanged": "Santral konumu değişti. Santral listesine dönüp yeniden açın.",
-        "requestPending": "Bekleyen başka bir konum talebi var. Görmek için düzenleyiciyi yeniden açın.",
-        "locationUnchanged": "Mevcut konumdan farklı bir konum girin.",
         "ianaTimezone": "IANA saat dilimi"
     },
     "RegionWorkspace": {

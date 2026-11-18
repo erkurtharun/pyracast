@@ -36,7 +36,7 @@ def test_revising_an_approved_plant_requires_a_current_validated_binding_and_kee
     assert response.status_code == 400
     assert response.json() == {
         "code": "invalid_request",
-        "detail": ["An approved current provider binding is required."],
+        "message": "An approved current provider binding is required.",
     }
     plant.refresh_from_db()
     assert plant.name == "Plant"

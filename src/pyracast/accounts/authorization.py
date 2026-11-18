@@ -1,10 +1,9 @@
 from django.contrib.auth.models import AnonymousUser, User
-from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest
-from django.utils.translation import gettext as _
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.accounts.security import has_verified_mfa
+from pyracast.errors import ErrorCode, ForbiddenError
 
 
 def active_membership(actor: User, tenant_id: int) -> Membership | None:
@@ -23,13 +22,11 @@ def tenant_membership(
         Tenant.objects.select_for_update().get(pk=tenant_id)
         membership = active_membership(actor, tenant_id)
     if membership is None:
-        raise PermissionDenied("Tenant membership required.")
+        raise ForbiddenError(ErrorCode.MEMBERSHIP_REQUIRED)
     if role == WorkspaceRole.ADMIN and membership.role != role:
-        raise PermissionDenied(_("Workspace administrator required."))
+        raise ForbiddenError(ErrorCode.WORKSPACE_ADMIN_REQUIRED)
     if role == WorkspaceRole.VIEWER and membership.role != role:
-        raise PermissionDenied(
-            _("Workspace members submit requests; administrators edit directly.")
-        )
+        raise ForbiddenError(ErrorCode.ADMIN_EDITS_DIRECTLY)
     return membership
 
 
@@ -47,4 +44,4 @@ def has_platform_admin_session(request: HttpRequest) -> bool:
 
 def require_platform_admin(actor: User) -> None:
     if not is_platform_admin(actor):
-        raise PermissionDenied("Platform administrator required.")
+        raise ForbiddenError(ErrorCode.PLATFORM_ADMIN_REQUIRED)

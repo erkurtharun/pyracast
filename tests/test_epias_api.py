@@ -94,8 +94,14 @@ def test_production_source_is_scoped_before_provider_access(
     outsider = User.objects.create_user("epias-outsider")
     foreign = Client()
     foreign.force_login(outsider)
-    for viewer in (foreign, Client()):
-        assert viewer.get(source).status_code == 403
+    assert foreign.get(source).status_code == 403
+    anonymous = Client().get(source)
+    assert anonymous.status_code == 401
+    assert anonymous.headers["WWW-Authenticate"] == "Session"
+    assert anonymous.json() == {
+        "code": "not_authenticated",
+        "message": "Sign in to continue.",
+    }
     plant = Plant.objects.get(pk=plant_data["id"])
     Region.objects.filter(pk=plant.region_id).update(deleted_at=timezone.now())
     assert client.get(source).status_code == 404

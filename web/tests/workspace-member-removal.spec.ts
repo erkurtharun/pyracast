@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "./support/test";
 import { mockApi, paged, user, tenantRow } from "./support/workspace";
+import { errorBody } from "./support/errors";
 
 const viewer = {
     id: 2,
@@ -125,7 +126,10 @@ test("failed removal refreshes current membership and permits a fresh confirmati
     await page.route("**/api/tenants/1/members/2/", (route) =>
         route.fulfill({
             status: 400,
-            json: { detail: "Unable to remove this member. Try again." },
+            json: errorBody(
+                "invalid_request",
+                "Unable to remove this member. Try again.",
+            ),
         }),
     );
     await openMembers(page);
@@ -164,7 +168,10 @@ test("lost administrator access refreshes workspace role and removes write contr
         role = "viewer";
         return route.fulfill({
             status: 403,
-            json: { detail: "Workspace administrator access is required." },
+            json: errorBody(
+                "workspace_admin_required",
+                "Workspace administrator access is required.",
+            ),
         });
     });
     await openMembers(page);

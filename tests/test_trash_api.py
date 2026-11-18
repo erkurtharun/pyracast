@@ -88,7 +88,7 @@ def test_trash_and_restore_keep_tenant_boundaries_and_session_csrf(
     client = Client()
     tenant = f"/api/tenants/{system.tenant.pk}/"
     region = f"{tenant}regions/{system.region.pk}/"
-    assert client.delete(region).status_code == 403
+    assert client.delete(region).status_code == 401
     protected = Client(enforce_csrf_checks=True)
     protected.force_login(system.member)
     assert protected.delete(region).status_code == 403

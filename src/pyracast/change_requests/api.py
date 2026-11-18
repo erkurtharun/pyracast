@@ -27,11 +27,6 @@ from pyracast.plants.serializers import EmptyInput
 class RequestView(GenericAPIView[ChangeRequest]):
     serializer_class = ChangeRequestOutput  # type: ignore[assignment]
 
-    def handle_exception(self, exc: Exception) -> Response:
-        if isinstance(exc, operations.RequestConflictError):
-            return Response({"code": exc.code, "detail": exc.detail}, status=409)
-        return super().handle_exception(exc)
-
     def output(
         self, request: Request, tenant_id: int, row: ChangeRequest, *, status: int = 200
     ) -> Response:

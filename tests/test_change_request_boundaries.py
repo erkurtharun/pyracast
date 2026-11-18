@@ -13,7 +13,6 @@ from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.accounts.operations import reassign_workspace_admin, remove_workspace_member
 from pyracast.change_requests.models import ChangeRequest, IncidentChange
 from pyracast.change_requests.operations import (
-    RequestConflictError,
     approve_request,
     mark_seen,
     reject_request,
@@ -21,6 +20,7 @@ from pyracast.change_requests.operations import (
     withdraw_request,
 )
 from pyracast.change_requests.queries import inbox, request_detail
+from pyracast.errors import ConflictError
 from pyracast.incidents.models import IncidentRevision, PlantIncident
 from pyracast.incidents.operations import save_incident, select_incidents
 from pyracast.plants.measurements import select_measurements
@@ -164,7 +164,7 @@ def test_approved_request_cannot_be_closed_with_an_opposite_decision(
         ),
         "withdraw": lambda: withdraw_request(case.proposer, case.system.tenant.pk, proposal.pk),
     }
-    with pytest.raises(RequestConflictError) as conflict:
+    with pytest.raises(ConflictError) as conflict:
         actions[decision]()
     assert conflict.value.code == "request_already_closed"
     proposal.refresh_from_db()
@@ -187,7 +187,7 @@ def test_submission_key_replays_terminal_result_and_rejects_changed_payload(
         withdraw_request(case.proposer, case.system.tenant.pk, proposal.pk)
     replay = production_request(case, key=key)
     assert (replay.pk, replay.status) == (proposal.pk, terminal)
-    with pytest.raises(RequestConflictError, match="new request key"):
+    with pytest.raises(ConflictError, match="new request key"):
         production_request(case, key=key, energy=1000)
     assert ChangeRequest.objects.count() == 1
     assert ProductionObservation.objects.count() == int(terminal == "approved")

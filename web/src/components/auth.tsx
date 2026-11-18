@@ -2,12 +2,9 @@
 import { useLocale, useTranslations } from "next-intl";
 
 import { useEffect, useRef, useState } from "react";
-import { ApiError, request, type Session } from "@/lib/api";
-import {
-    AuthResponseError,
-    authRequest,
-    type AuthResult,
-} from "@/lib/auth-api";
+import { request, type Session } from "@/lib/api";
+import { ApiError } from "@/lib/api/errors";
+import { authRequest, type AuthResult } from "@/lib/auth-api";
 import { isLanguage } from "@/i18n/language";
 import { publicPath } from "@/lib/public-metadata";
 import { ActionForm, Field } from "./ui";
@@ -299,7 +296,7 @@ export function Auth({
                                     payload,
                                 ).catch((error: unknown) => {
                                     if (
-                                        error instanceof AuthResponseError &&
+                                        error instanceof ApiError &&
                                         error.status === 429
                                     )
                                         throw new ApiError(
@@ -516,8 +513,7 @@ function ResendCode({
                 final: true,
             });
         } catch (error) {
-            const status =
-                error instanceof AuthResponseError ? error.status : undefined;
+            const status = error instanceof ApiError ? error.status : undefined;
             if (status === 429) {
                 setAvailableAt(Date.now() + RESEND_MILLISECONDS);
                 setSeconds(RESEND_SECONDS);

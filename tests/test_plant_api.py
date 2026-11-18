@@ -11,6 +11,7 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
+from pyracast.api.serializers import FiniteFloat
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY
 from pyracast.forecasts.models import CollectionJob, ForecastSnapshot
@@ -21,7 +22,7 @@ from pyracast.plants.models import (
     ProductionObservation,
 )
 from pyracast.plants.numerics import POLICY_VERSION
-from pyracast.plants.serializers import AwareDateTime, FiniteFloat
+from pyracast.plants.serializers import AwareDateTime
 from pyracast.regions.models import Region
 from tests.support.domain import make_system
 from tests.support.plant_api import setup_plant
