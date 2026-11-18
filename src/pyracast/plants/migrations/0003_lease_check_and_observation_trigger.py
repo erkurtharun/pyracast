@@ -5,7 +5,32 @@ from django.db import migrations, models
 from django.db.migrations.operations.base import Operation
 
 from pyracast import schema_objects
-from pyracast.db import refuse_rows, repair_leases
+from pyracast.db import refuse_rows, refuse_values_outside, repair_leases
+
+OPEN = ("pending", "running")
+ASSESSMENTS = [
+    ("insufficient", "Insufficient"),
+    ("provisional", "Provisional"),
+    ("evaluated", "Evaluated"),
+]
+
+
+def finished_without_completion(model: type[models.Model]) -> models.Q:
+    return ~models.Q(status__in=OPEN) & models.Q(completed_at__isnull=True)
+
+
+def partial_automation(model: type[models.Model]) -> models.Q:
+    enabled = models.Q(
+        automatic_calibration_enabled=True,
+        automatic_calibration_enabled_by__isnull=False,
+        next_calibration_check_at__isnull=False,
+    )
+    disabled = models.Q(
+        automatic_calibration_enabled=False,
+        automatic_calibration_enabled_by__isnull=True,
+        next_calibration_check_at__isnull=True,
+    )
+    return ~(enabled | disabled)
 
 
 def revision_of_another_interval(model: type[models.Model]) -> models.Q:
@@ -44,6 +69,59 @@ class Migration(migrations.Migration):
                     _connector="OR",
                 ),
                 name="calibrationrun_lease_chk",
+            ),
+        ),
+        refuse_rows(
+            "plants.calibrationrun",
+            finished_without_completion,
+            "a terminal run carries its completion time",
+        ),
+        migrations.AddConstraint(
+            model_name="calibrationrun",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    ("status__in", OPEN), ("completed_at__isnull", False), _connector="OR"
+                ),
+                name="calibrationrun_completed_at_chk",
+            ),
+        ),
+        refuse_values_outside(
+            "plants.calibrationrun", "assessment", ["", *(value for value, _ in ASSESSMENTS)]
+        ),
+        migrations.AlterField(
+            model_name="calibrationrun",
+            name="assessment",
+            field=models.CharField(blank=True, choices=ASSESSMENTS, default="", max_length=200),
+        ),
+        migrations.AddConstraint(
+            model_name="calibrationrun",
+            constraint=models.CheckConstraint(
+                condition=models.Q(("assessment__in", ["", *(value for value, _ in ASSESSMENTS)])),
+                name="calibrationrun_assessment_chk",
+            ),
+        ),
+        refuse_rows(
+            "plants.plant",
+            partial_automation,
+            "automation is enabled with its user and next check or holds neither",
+        ),
+        migrations.AddConstraint(
+            model_name="plant",
+            constraint=models.CheckConstraint(
+                condition=models.Q(
+                    models.Q(
+                        ("automatic_calibration_enabled", True),
+                        ("automatic_calibration_enabled_by__isnull", False),
+                        ("next_calibration_check_at__isnull", False),
+                    ),
+                    models.Q(
+                        ("automatic_calibration_enabled", False),
+                        ("automatic_calibration_enabled_by__isnull", True),
+                        ("next_calibration_check_at__isnull", True),
+                    ),
+                    _connector="OR",
+                ),
+                name="plant_automation_chk",
             ),
         ),
         refuse_rows(

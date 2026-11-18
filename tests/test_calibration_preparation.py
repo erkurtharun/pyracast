@@ -128,17 +128,17 @@ def test_preparation_pins_reset_and_refits_once_after_comparator_change(
     add_days(system, plant, 1, 7)
     run = CalibrationRun.objects.exclude(pk=incumbent.pk).get()
     assert run.comparison_activation_id == active.pk
-    run.status = "rejected"
+    run.status, run.completed_at = "rejected", NOW
     run.result = {"policy_version": POLICY_VERSION}
-    run.save(update_fields=("status", "result"))
+    run.save(update_fields=("status", "completed_at", "result"))
     assert prepare_calibration(plant.pk) is None
     reset = reset_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk)
     next_run = prepare_calibration(plant.pk)
     assert next_run is not None
     assert next_run.comparison_activation_id == reset.pk
-    next_run.status = "rejected"
+    next_run.status, next_run.completed_at = "rejected", NOW
     next_run.result = {"policy_version": POLICY_VERSION}
-    next_run.save(update_fields=("status", "result"))
+    next_run.save(update_fields=("status", "completed_at", "result"))
     assert prepare_calibration(plant.pk) is None
 
 
@@ -159,9 +159,9 @@ def test_legacy_policy_does_not_block_one_current_policy_fit(
     system, plant = make_plant(monkeypatch)
     add_days(system, plant, 1, 7)
     old = CalibrationRun.objects.get()
-    old.status = old_status
+    old.status, old.completed_at = old_status, NOW
     old.result = {"policy_version": "regularized-huber-v2"}
-    old.save(update_fields=("status", "result"))
+    old.save(update_fields=("status", "completed_at", "result"))
     current = prepare_calibration(plant.pk)
     assert current is not None
     assert current.pk != old.pk
@@ -180,9 +180,9 @@ def test_current_policy_terminal_run_does_not_repeat_unchanged_data(
     system, plant = make_plant(monkeypatch)
     add_days(system, plant, 1, 7)
     run = CalibrationRun.objects.get()
-    run.status = status
+    run.status, run.completed_at = status, NOW
     run.result = {} if status == "failed" else {"policy_version": POLICY_VERSION}
-    run.save(update_fields=("status", "result"))
+    run.save(update_fields=("status", "completed_at", "result"))
     assert prepare_calibration(plant.pk) is None
     assert CalibrationRun.objects.count() == 1
 
@@ -213,7 +213,7 @@ def test_current_source_transition_refits_once_but_identical_native_reacquisitio
     old_snapshot.job.save()
     historical_run = prepare_calibration(plant.pk)
     assert historical_run is not None
-    historical_run.status = "rejected"
+    historical_run.status, historical_run.completed_at = "rejected", NOW
     historical_run.result = {"policy_version": POLICY_VERSION}
     historical_run.save()
     native = actual_snapshot_for(system, target, collected_at=NOW - timedelta(minutes=4))
@@ -223,7 +223,7 @@ def test_current_source_transition_refits_once_but_identical_native_reacquisitio
     assert current_run.input_fingerprint != historical_run.input_fingerprint
     assert current_run.reference_snapshot_ids is not None
     assert current_run.reference_snapshot_ids[target.isoformat()] == native.pk
-    current_run.status = "rejected"
+    current_run.status, current_run.completed_at = "rejected", NOW
     current_run.result = {"policy_version": POLICY_VERSION}
     current_run.save()
     reacquired = actual_snapshot_for(system, target, collected_at=NOW - timedelta(minutes=3))
@@ -243,7 +243,7 @@ def test_reference_selection_policy_upgrade_refits_unchanged_values_once(
     )
     add_days(system, plant, 1, 7)
     previous = CalibrationRun.objects.get()
-    previous.status = "rejected"
+    previous.status, previous.completed_at = "rejected", NOW
     previous.result = {"policy_version": POLICY_VERSION}
     previous.save()
     monkeypatch.setattr(measurements, "HISTORY_SELECTION_POLICY", HISTORY_SELECTION_POLICY)
@@ -251,7 +251,7 @@ def test_reference_selection_policy_upgrade_refits_unchanged_values_once(
     assert current is not None
     assert current.input_fingerprint != previous.input_fingerprint
     assert current.reference_snapshot_ids == previous.reference_snapshot_ids
-    current.status = "rejected"
+    current.status, current.completed_at = "rejected", NOW
     current.result = {"policy_version": POLICY_VERSION}
     current.save()
     assert prepare_calibration(plant.pk) is None

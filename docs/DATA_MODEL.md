@@ -760,6 +760,8 @@ erDiagram
 - `calibration_id_config_unique`: `UNIQUE ("id", "configuration_id")`
 - `calibration_status_valid`: `CHECK ("status" IN ('pending', 'running', 'ready', 'insufficient', 'rejected', 'failed', 'superseded'))`
 - `calibration_window_valid`: `CHECK ("window_end" >= ("window_start"))`
+- `calibrationrun_assessment_chk`: `CHECK ("assessment" IN ('', 'insufficient', 'provisional', 'evaluated'))`
+- `calibrationrun_completed_at_chk`: `CHECK (("status" IN ('pending', 'running') OR "completed_at" IS NOT NULL))`
 - `calibrationrun_last_error_chk`: `CHECK ("last_error" IN ('', 'attempt_limit', 'invalid_cutoff', 'invalid_calibration_data'))`
 - `calibrationrun_lease_chk`: `CHECK ((("lease_expires_at" IS NOT NULL AND "lease_token" IS NOT NULL AND "status" IN ('running')) OR ("lease_expires_at" IS NULL AND "lease_token" IS NULL AND NOT ("status" IN ('running')))))`
 - `plant_one_pending_calibration`: `UNIQUE INDEX ("plant_id") WHERE "status" IN ('pending', 'running')`
@@ -780,6 +782,7 @@ erDiagram
 #### `plants_plant`
 
 - `one_plant_per_region`: `UNIQUE ("region_id")`
+- `plant_automation_chk`: `CHECK ((("automatic_calibration_enabled" AND "automatic_calibration_enabled_by_id" IS NOT NULL AND "next_calibration_check_at" IS NOT NULL) OR (NOT "automatic_calibration_enabled" AND "automatic_calibration_enabled_by_id" IS NULL AND "next_calibration_check_at" IS NULL)))`
 - `plant_current_config_owner_fk`: `FOREIGN KEY (current_configuration_id, id) REFERENCES plants_plantconfiguration (id, plant_id) DEFERRABLE INITIALLY DEFERRED`
 - `plant_region_identity`: `UNIQUE ("id", "region_id")`
 

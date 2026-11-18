@@ -130,9 +130,9 @@ def test_full_native_and_composite_representations_share_effective_day_fingerpri
     full = actual_snapshot_for(system, DAY)
     import_day(system, plant, DAY)
     run = CalibrationRun.objects.get(plant=plant)
-    run.status = "insufficient"
+    run.status, run.completed_at = "insufficient", NOW
     run.result = {"policy_version": POLICY_VERSION}
-    run.save(update_fields=("status", "result"))
+    run.save(update_fields=("status", "completed_at", "result"))
     assert plant.current_configuration is not None
     start, end = local_day_bounds(DAY, system.binding.timezone)
     rows, _ = select_measurements(plant.current_configuration, start, end, NOW)

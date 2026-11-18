@@ -44,6 +44,12 @@ class CalibrationError(models.TextChoices):
     INVALID_CALIBRATION_DATA = "invalid_calibration_data", "Invalid calibration data"
 
 
+class CalibrationAssessment(models.TextChoices):
+    INSUFFICIENT = "insufficient", "Insufficient"
+    PROVISIONAL = "provisional", "Provisional"
+    EVALUATED = "evaluated", "Evaluated"
+
+
 class PlantEventAction(models.TextChoices):
     SUBMISSION_SAVED = "submission_saved", "Submission saved"
     CONFIGURATION_CREATED = "configuration_created", "Configuration created"
@@ -108,6 +114,19 @@ class Plant(models.Model):
         constraints = (
             models.UniqueConstraint(fields=("id", "region"), name="plant_region_identity"),
             models.UniqueConstraint(fields=("region",), name="one_plant_per_region"),
+            models.CheckConstraint(
+                condition=Q(
+                    automatic_calibration_enabled=True,
+                    automatic_calibration_enabled_by__isnull=False,
+                    next_calibration_check_at__isnull=False,
+                )
+                | Q(
+                    automatic_calibration_enabled=False,
+                    automatic_calibration_enabled_by__isnull=True,
+                    next_calibration_check_at__isnull=True,
+                ),
+                name="%(class)s_automation_chk",
+            ),
         )
 
 
@@ -304,7 +323,9 @@ class CalibrationRun(models.Model):
     status = models.CharField(
         max_length=20, choices=CalibrationStatus, default=CalibrationStatus.PENDING
     )
-    assessment = models.CharField(max_length=200, default="")
+    assessment = models.CharField(
+        max_length=200, choices=CalibrationAssessment, blank=True, default=""
+    )
     factor = models.FloatField(null=True)
     result = models.JSONField(default=dict)
     dataset_manifest = models.JSONField(default=dict)
@@ -334,6 +355,12 @@ class CalibrationRun(models.Model):
             ),
             choices_check("status", CalibrationStatus, name="calibration_status_valid"),
             lease_check((CalibrationStatus.RUNNING,)),
+            models.CheckConstraint(
+                condition=Q(status__in=(CalibrationStatus.PENDING, CalibrationStatus.RUNNING))
+                | Q(completed_at__isnull=False),
+                name="%(class)s_completed_at_chk",
+            ),
+            choices_check("assessment", CalibrationAssessment, blank=True),
         )
 
 

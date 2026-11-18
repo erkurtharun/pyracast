@@ -24,6 +24,7 @@ from pyracast.plants.measurement_policy import MEASUREMENT_POLICY
 from pyracast.plants.models import (
     CONFIGURATION_PARAMETERS,
     CalibrationActivation,
+    CalibrationAssessment,
     CalibrationRun,
     CalibrationStatus,
     MeasurementBasis,
@@ -600,7 +601,8 @@ def _validate_activation(
         or run.completed_at is None
         or run.completed_at > now
         or run.cutoff_at > now
-        or run.assessment not in {"provisional", "evaluated"}
+        or run.assessment
+        not in {CalibrationAssessment.PROVISIONAL, CalibrationAssessment.EVALUATED}
         or not run.result.get("holdout_days")
         or not run.result.get("candidate")
         or not run.result.get("baseline")

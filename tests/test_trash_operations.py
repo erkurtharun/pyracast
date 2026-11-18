@@ -338,6 +338,7 @@ def test_purge_removes_a_calibration_that_compared_an_activation(
         window_end=previous.window_end,
         cutoff_at=NOW,
         status="rejected",
+        completed_at=NOW,
         comparison_activation=CalibrationActivation.objects.get(plant=plant),
     )
     trash_region(system.member, system.tenant.pk, system.region.pk)

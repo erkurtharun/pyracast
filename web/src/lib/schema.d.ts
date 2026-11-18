@@ -745,6 +745,13 @@ export interface components {
         BindingHealthEnum: "unknown" | "healthy" | "error";
         /** @enum {unknown} */
         BlankEnum: "";
+        /**
+         * @description * `insufficient` - Insufficient
+         *     * `provisional` - Provisional
+         *     * `evaluated` - Evaluated
+         * @enum {string}
+         */
+        CalibrationAssessmentEnum: "insufficient" | "provisional" | "evaluated";
         CalibrationAutomationOutput: {
             enabled: boolean;
             authorized: boolean;
@@ -786,7 +793,9 @@ export interface components {
             /** Format: date-time */
             readonly completed_at: string | null;
             readonly status: components["schemas"]["CalibrationStatusEnum"];
-            readonly assessment: string;
+            readonly assessment:
+                | components["schemas"]["CalibrationAssessmentEnum"]
+                | components["schemas"]["BlankEnum"];
             /** Format: double */
             readonly factor: number | null;
             readonly result: unknown;
@@ -827,7 +836,9 @@ export interface components {
             /** Format: date-time */
             readonly completed_at: string | null;
             readonly status: components["schemas"]["CalibrationStatusEnum"];
-            readonly assessment: string;
+            readonly assessment:
+                | components["schemas"]["CalibrationAssessmentEnum"]
+                | components["schemas"]["BlankEnum"];
             /** Format: double */
             readonly factor: number | null;
             readonly result: unknown;
