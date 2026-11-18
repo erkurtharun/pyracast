@@ -134,6 +134,14 @@ def test_images_rebuilt_in_a_later_attempt_replace_the_earlier_ones() -> None:
     )
 
 
+def test_a_later_ci_attempt_leaves_the_images_of_the_authorizing_attempt_in_place() -> None:
+    artifacts = [images(1, 90), images(2, 91)]
+
+    assert decide(facts({"run_attempt": 1}, artifacts=artifacts)) == Authorized(
+        sha=MAIN, ci_run_id=7001, ci_run_attempt=1, artifact_id=90
+    )
+
+
 @pytest.mark.parametrize(
     "artifacts",
     [

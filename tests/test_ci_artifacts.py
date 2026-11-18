@@ -1,9 +1,11 @@
 import re
+from pathlib import PurePosixPath
 from typing import Any
 
 from deploy import release_authorization
 from tests.support.workflows import WORKFLOWS, ci_jobs, release_jobs, step, workflow
 
+SONAR = WORKFLOWS.parents[1] / "sonar-project.properties"
 UPLOAD = "actions/upload-artifact@"
 DOWNLOAD = "actions/download-artifact@"
 REPORTS = ("pytest-results-", "playwright-results-")
@@ -48,10 +50,11 @@ def artifact_references(job: dict[str, Any], download: dict[str, Any]) -> list[s
     return str(job.get("env", {}).get(match["name"], "")).split(",") if match else []
 
 
-def assert_uploaded_by(producer: dict[str, Any], key: str) -> None:
+def upload_behind(producer: dict[str, Any], key: str) -> dict[str, Any]:
     (identifier,) = [match["step"] for match in UPLOADED_ID.finditer(producer["outputs"][key])]
     (upload,) = [candidate for candidate in producer["steps"] if candidate.get("id") == identifier]
     assert uses(upload, UPLOAD)
+    return upload
 
 
 def outputs_read_by_downloads() -> set[tuple[str, str]]:
@@ -108,12 +111,33 @@ def test_every_ci_download_reads_the_artifact_ids_its_producers_uploaded() -> No
                 match = NEEDS_OUTPUT.fullmatch(reference)
                 assert match, reference
                 assert match["job"] in needed(job), reference
-                assert_uploaded_by(jobs[match["job"]], match["key"])
+                upload_behind(jobs[match["job"]], match["key"])
             more = f"(,[0-9]+){{{len(references) - 1}}}" if len(references) > 1 else ""
             guard = step(job, GUARD)
             assert f"[[ ${variable['name']} =~ ^[0-9]+{more}$ ]]" in guard["run"].splitlines()
             assert job["steps"].index(guard) < job["steps"].index(download)
         assert job.get("permissions") == {"contents": "read", "actions": "read"}, identifier
+
+
+def test_each_sonar_report_path_receives_the_report_its_producer_uploaded() -> None:
+    jobs = ci_jobs()
+    sonar = jobs["sonar"]
+    properties = dict(
+        line.split("=", 1) for line in SONAR.read_text(encoding="utf-8").splitlines() if "=" in line
+    )
+    delivered: dict[str, str] = {}
+    for download in downloads(sonar):
+        (reference,) = artifact_references(sonar, download)
+        match = NEEDS_OUTPUT.fullmatch(reference)
+        assert match, reference
+        report = PurePosixPath(upload_behind(jobs[match["job"]], match["key"])["with"]["path"])
+        destination = PurePosixPath(download["with"].get("path", ".")) / report.name
+        delivered[str(destination)] = str(report)
+
+    assert delivered == {
+        properties[key]: properties[key]
+        for key in ("sonar.python.coverage.reportPaths", "sonar.javascript.lcov.reportPaths")
+    }
 
 
 def test_no_consumer_derives_an_artifact_from_the_run_attempt() -> None:
@@ -175,3 +199,20 @@ def test_the_release_downloads_and_verifies_the_images_its_authorization_selecte
             "CI_RUN_ATTEMPT": "${{ needs.authorize.outputs.ci_run_attempt }}",
         }
         assert "github.run_attempt" not in str(jobs[identifier])
+
+
+def test_the_release_judges_the_ci_attempt_that_triggered_it() -> None:
+    collect = step(release_jobs()["authorize"], "Collect the CI run of the current main commit")
+    script = " ".join(collect["with"]["script"].split())
+
+    assert (
+        "github.rest.actions.getWorkflowRunAttempt({ ...repository, "
+        "run_id: context.payload.workflow_run.id, "
+        "attempt_number: context.payload.workflow_run.run_attempt, })"
+    ) in script
+    assert (
+        "github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, { ...repository, "
+        "run_id: run.id, attempt_number: run.run_attempt, per_page: 100, })"
+    ) in script
+    assert "getWorkflowRun(" not in script
+    assert "listJobsForWorkflowRun," not in script
