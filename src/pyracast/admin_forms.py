@@ -12,6 +12,7 @@ from django.utils.translation import gettext_lazy
 from django.views.decorators.debug import sensitive_variables
 
 from pyracast.api.serializers import BindingInput
+from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import (
     MAX_DAILY_QUOTA,
     PowerBasis,
@@ -39,6 +40,64 @@ CONSOLE_MESSAGES = {
         "Approve or reject it before correcting the location."
     ),
 }
+_REJECTED_KEY = gettext_lazy(
+    "The provider rejected the API key. Enter the current key for this account, "
+    "then validate again."
+)
+_UNREADABLE_ANSWER = gettext_lazy(
+    "The provider's answer could not be read. Try validating again later."
+)
+_UNSUPPORTED_ACCOUNT = gettext_lazy(
+    "This account cannot be validated here. Select a Solcast account."
+)
+_VALIDATION_FAILED = gettext_lazy(
+    "Connection validation failed. Check the private credentials and site settings."
+)
+_PROVIDER_ANSWERED_WITH_ERROR = gettext_lazy(
+    "The provider answered with an error. Try validating again later."
+)
+_REFUSED_REQUEST = gettext_lazy(
+    "The provider refused the request. Check the resource ID and site settings, "
+    "then validate again."
+)
+_FAILURES_WITHOUT_STATUS = {
+    "provider_request_failed": gettext_lazy(
+        "The provider could not be reached. Try validating again in a few minutes."
+    ),
+    "invalid_site_id": gettext_lazy(
+        "The resource ID contains characters the provider does not use. "
+        "Use only letters, digits, hyphens and underscores."
+    ),
+    "invalid_provider_secret": gettext_lazy(
+        "The saved API key cannot be read. Enter the key again, then validate."
+    ),
+    "invalid_provider_endpoint": _UNREADABLE_ANSWER,
+    "invalid_provider_schema": _UNREADABLE_ANSWER,
+    "invalid_provider_interval": _UNREADABLE_ANSWER,
+    "unsafe_provider_response": _UNREADABLE_ANSWER,
+    "fixture_account_required": _UNSUPPORTED_ACCOUNT,
+    "unsupported_provider": _UNSUPPORTED_ACCOUNT,
+}
+_FAILURES_BY_STATUS = {
+    401: _REJECTED_KEY,
+    403: _REJECTED_KEY,
+    404: gettext_lazy(
+        "The provider found no site with this resource ID for this API key. Check the "
+        "resource ID and that the key belongs to the account that owns the site."
+    ),
+    429: gettext_lazy("The provider is limiting requests. Wait before validating again."),
+}
+
+
+def validation_failure_message(error: ProviderError) -> str:
+    status = error.status_code
+    if status is None:
+        message = _FAILURES_WITHOUT_STATUS.get(error.code, _VALIDATION_FAILED)
+    elif status >= 500:
+        message = _PROVIDER_ANSWERED_WITH_ERROR
+    else:
+        message = _FAILURES_BY_STATUS.get(status, _REFUSED_REQUEST)
+    return str(message)
 
 
 def form_data(request: HttpRequest) -> QueryDict | None:
@@ -277,7 +336,7 @@ class BindingActionForm(forms.Form):
     expected_cooldown_until = forms.DateTimeField(required=False, widget=forms.HiddenInput)
     provider_recovered = forms.BooleanField(
         required=False,
-        label=gettext_lazy("The provider has confirmed that this account can make requests again."),
+        label=gettext_lazy("The provider has confirmed that this account can make requests again"),
     )
 
     def current_binding(self, region: Region) -> SiteBinding:

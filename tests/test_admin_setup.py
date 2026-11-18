@@ -1,5 +1,7 @@
+import re
 from datetime import date, timedelta
 
+import httpx
 import pytest
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
@@ -7,6 +9,7 @@ from django.db import connection
 from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.html import escape
 
 from pyracast.admin_forms import BindingActionForm, ProviderSetupForm
 from pyracast.connections.contracts import ProviderError
@@ -15,8 +18,15 @@ from pyracast.connections.operations import rotate_secret
 from pyracast.connections.secrets import decrypt_api_key, encrypt_secret
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.plants.models import Plant, PlantConfiguration
+from pyracast.providers import SolcastProvider
 from pyracast.regions.models import AuditEvent, Region
-from tests.support.admin_setup import admin_system, setup_input, setup_url, submitted_plant
+from tests.support.admin_setup import (
+    VALIDATION_FAILURES,
+    admin_system,
+    setup_input,
+    setup_url,
+    submitted_plant,
+)
 from tests.support.api import verified_admin
 from tests.support.domain import NOW, FakeAdapter, System, make_system
 
@@ -31,6 +41,10 @@ def action_input(system: System, action: str, **changes: object) -> dict[str, ob
         "credential_revision": system.account.credential_revision,
         **changes,
     }
+
+
+def visible_text(html: str) -> str:
+    return re.sub(r"<[^>]*>", "", html)
 
 
 def test_admin_can_review_configure_validate_and_approve_without_exposing_key(
@@ -344,6 +358,100 @@ def test_validation_failures_and_quota_exhaustion_are_safe(
     assert response.status_code == 400
     assert b"request budget is unavailable" in response.content
     assert RequestAttempt.objects.count() == 1
+
+
+@pytest.mark.parametrize(("code", "status", "message"), VALIDATION_FAILURES)
+def test_failed_validation_shows_its_cause_once_and_logs_one_line(
+    monkeypatch: pytest.MonkeyPatch,
+    pyracast_logs: pytest.LogCaptureFixture,
+    code: str,
+    status: int | None,
+    message: str,
+) -> None:
+    system = admin_system()
+    client, _ = verified_admin()
+
+    def fail() -> None:
+        raise ProviderError(code, status_code=status)
+
+    monkeypatch.setattr("pyracast.admin.adapter_for", lambda binding: FakeAdapter(fail))
+    response = client.post(setup_url(system), action_input(system, "validate"))
+
+    assert response.status_code == 400
+    html = response.content.decode()
+    assert html.count(escape(message)) == 1
+    assert "__all__" not in html
+    assert [
+        record.getMessage()
+        for record in pyracast_logs.records
+        if record.name == "pyracast.connections.operations"
+    ] == [
+        f"provider_validation_failed provider=solcast binding_id={system.binding.pk} "
+        f"error_code={code} status_code={status}"
+    ]
+    assert RequestAttempt.objects.get().outcome == "failed"
+    system.binding.refresh_from_db()
+    system.account.refresh_from_db()
+    assert system.binding.health == "error"
+    assert (system.account.authentication_failed_revision is not None) is (status == 401)
+    assert (system.account.request_blocked_until is not None) is (status == 429)
+
+
+def test_a_site_the_key_cannot_see_is_reported_as_such_without_the_provider_body(
+    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+) -> None:
+    system = admin_system()
+    client, _ = verified_admin()
+    body = '{"response_status":{"error_code":"NotFound","message":"Location is not accessible"}}'
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, text=body)
+
+    monkeypatch.setattr(
+        "pyracast.admin.adapter_for", lambda binding: SolcastProvider(httpx.MockTransport(handle))
+    )
+    response = client.post(setup_url(system), action_input(system, "validate"))
+
+    assert response.status_code == 400
+    html = response.content.decode()
+    assert "The provider found no site with this resource ID for this API key." in html
+    assert "Location is not accessible" not in html + pyracast_logs.text
+    assert "original-fixture-key" not in pyracast_logs.text
+    assert f"binding_id={system.binding.pk} error_code=provider_request_failed status_code=404" in (
+        pyracast_logs.text
+    )
+
+
+def test_stale_action_fields_ask_for_a_reload_without_naming_form_keys() -> None:
+    system = admin_system()
+    client, _ = verified_admin()
+    url = setup_url(system)
+
+    response = client.post(url, {"action": "validate"})
+
+    assert response.status_code == 400
+    html = response.content.decode()
+    assert html.count(f'<li>This field is required. <a href="{url}">Reload this page</a></li>') == 3
+    for key in ("__all__", "expected_revision", "binding_id", "credential_revision"):
+        assert key not in visible_text(html)
+    assert not RequestAttempt.objects.exists()
+
+
+def test_a_missing_recovery_confirmation_is_named_by_its_label() -> None:
+    system = admin_system()
+    system.account.request_blocked_until = timezone.now() + timedelta(hours=1)
+    system.account.save(update_fields=("request_blocked_until",))
+    client, _ = verified_admin()
+
+    response = client.post(setup_url(system), action_input(system, "clear_cooldown"))
+
+    assert response.status_code == 400
+    html = response.content.decode()
+    assert (
+        '<a href="#id_provider_recovered">The provider has confirmed that this account can '
+        "make requests again: This field is required.</a>"
+    ) in html
+    assert "provider_recovered" not in visible_text(html)
 
 
 @pytest.mark.parametrize("authentication_failure", [True, False])

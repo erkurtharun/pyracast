@@ -24,7 +24,12 @@ from pyracast import admin_tenant_views as workspace_views
 from pyracast.accounts.authorization import has_platform_admin_session
 from pyracast.accounts.language import save_user_language, set_language_cookie
 from pyracast.accounts.models import Tenant
-from pyracast.admin_forms import BindingActionForm, EpiasConnectionForm, ProviderSetupForm
+from pyracast.admin_forms import (
+    BindingActionForm,
+    EpiasConnectionForm,
+    ProviderSetupForm,
+    validation_failure_message,
+)
 from pyracast.admin_historical import historical_import
 from pyracast.admin_sites import new_plant, plant_details_page
 from pyracast.admin_workspace import (
@@ -532,14 +537,8 @@ class RegionAdmin(ReadOnlyAdmin):
                         None,
                         _("The provider's request budget is unavailable. Try validation later."),
                     )
-                except ProviderError:
-                    form.add_error(
-                        None,
-                        _(
-                            "Connection validation failed. Check the private credentials "
-                            "and site settings."
-                        ),
-                    )
+                except ProviderError as error:
+                    form.add_error(None, validation_failure_message(error))
                 except ObjectDoesNotExist, ValidationError, APIValidationError:
                     form.add_error(
                         None,
