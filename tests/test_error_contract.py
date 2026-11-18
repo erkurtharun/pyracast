@@ -820,6 +820,32 @@ def api_routes(patterns: list[Any] | None = None, prefix: str = "") -> Iterator[
             yield f"/{route}"
 
 
+MALFORMED_BODIES = (b"{", b"[]", b"null", b'"text"', b"\xff")
+
+
+@pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+@pytest.mark.parametrize("accept", ["en", "tr"])
+@pytest.mark.parametrize("content", MALFORMED_BODIES)
+@pytest.mark.parametrize("path", [f"{ALLAUTH}auth/login", "/api/session/language/"])
+def test_malformed_or_non_object_json_is_a_localized_refusal(
+    path: str, content: bytes, accept: str
+) -> None:
+    response = Client().generic(
+        "POST", path, content, content_type="application/json", headers=language(accept)
+    )
+    assert response.status_code == 400
+    assert response["Content-Type"] == "application/json"
+    body = response.json()
+    assert body["code"] in {"bad_request", "invalid_request"}
+    english = Client().generic(
+        "POST", path, content, content_type="application/json", headers=language("en")
+    )
+    if accept == "tr":
+        assert body["message"] != english.json()["message"]
+    if path.startswith(ALLAUTH):
+        assert body == {"code": "bad_request", "message": getattr(CASES["bad_request"], accept)}
+
+
 def carries_the_contract(body: Any) -> bool:
     if not isinstance(body, dict) or body.get("code") not in CASES:
         return False
@@ -836,11 +862,16 @@ def test_every_api_route_answers_every_error_with_the_contract_body(signed_in: b
     failures = {}
     requests = 0
     for path in sorted(api_routes()):
-        for method in ("GET", "POST", "PROPFIND"):
+        for method, content in (
+            ("GET", b""),
+            ("POST", b"{}"),
+            ("PROPFIND", b""),
+            *(("POST", body) for body in MALFORMED_BODIES),
+        ):
             response = client.generic(
                 method,
                 path,
-                "{}" if method == "POST" else "",
+                content,
                 content_type="application/json",
                 headers={"Accept-Language": "tr"},
             )
@@ -850,8 +881,8 @@ def test_every_api_route_answers_every_error_with_the_contract_body(signed_in: b
             json_body = response["Content-Type"] == "application/json"
             body = response.json() if json_body else None
             if not carries_the_contract(body):
-                failures[f"{method} {path}"] = (response.status_code, body)
-    assert requests > 90
+                failures[f"{method} {path} {content!r}"] = (response.status_code, body)
+    assert requests > 300
     assert failures == {}
 
 
