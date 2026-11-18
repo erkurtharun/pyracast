@@ -461,7 +461,8 @@ fixtures do not establish provider access or inbox delivery.
   secrets reaches its SQL role with the next release: the owner's in preflight (the
   serving release does not use it), while the runtime role's password changes only after
   that release has stopped the serving API and web servers, together with the secret
-  the new release starts with.
+  the new release starts with; a release that fails before `migrate` starts the
+  previous release with that secret too.
 - **Patching and storage:** review weekly Dependabot PRs, rebuild and test images;
   exact image digests do not update themselves. Review Ubuntu security updates and
   pinned Docker/Compose/PostgreSQL versions during planned maintenance. PostgreSQL
@@ -617,67 +618,76 @@ An interrupted `prepare` is recovered with `abort`, then `prepare` again; runnin
 
 ### A release that fails during maintenance
 
-The Release run is red in every case below; the log says which one applies.
+The Release run is red in every case below. The installer never restores an earlier
+password. A release it leaves serving runs as a restart of `pyracast.service` or a
+reboot would start it: with the secrets `/etc/pyracast/host.json` names, whose runtime
+password the runtime role has. It changes that password only while no API or web
+container runs, in a session that logs no statement text.
 
-- **Preflight:** the running release keeps serving and no marker is created (the run
-  may have written the new release directory and staged secrets and enabled or reset
-  `pyracast.service`); during a reset the marker `reset` left stays. Provisioning may
-  have changed the owner's password, which the serving release does not use. When the
-  release's staged keys cannot read a stored secret, the log says "Release SHA refused
-  before maintenance: check_secrets exited N ..." with the rows and the run exits with
-  that status; correct the runtime secret version in `/etc/pyracast/host.json` before
-  `pyracast.service` restarts, since each start renders that version.
-- **Before `migrate`, in an upgrade that began without the marker** (drain, the runtime
-  password switch or probe, pre-release backup or its record, PostgreSQL or RabbitMQ
-  start): the installer writes the runtime role's previous password back if this run
-  changed it, starts the previous release from its own Compose file with its own
-  secrets, probes readiness and removes the marker; the log says "Release SHA failed
-  before migrate; the previous release ... serves again and the marker is removed." Fix
-  the cause and release again. After a password revert the log also says that
-  `host.json` names the new secret: release again instead of restarting `pyracast.service`.
-- **After promotion:** the log prints "Release SHA is serving", stops nothing and names
-  the command that finishes the release. The new release serves the migrated database,
-  so the fix goes forward; a rerun of that release is refused because it is already
-  live. `restore` cannot bring the previous release back: it refuses without the marker,
-  and the previous release may not fit the migrated schema. The release state
-  file and pruning keep that release's directory and images for a reviewed rollback.
+On a failure during maintenance the installer stops the application in the drain
+order. The gateway keeps the maintenance notice, unless the helper in
+`/opt/pyracast/current` predates the notice (the first upgrade to it): that helper's
+`restore` refuses beside the gateway, so the gateway and the notice stop too and the
+site is unreachable until recovery. Only if every stop succeeded does the runtime role
+get `host.json`'s secret. Before `migrate`, in an upgrade that began without the
+marker, the installer then starts the previous release as `pyracast.service` does,
+probes readiness and removes the marker; a start that does not serve is stopped
+again. The log names the state and prints its recovery:
 
-Any other failure, or a resume that fails, prints "Release failed during maintenance."
-with the outcome of the stop commands: either every one succeeded and the application
-is stopped, or one failed and the log names the `docker compose ... ps` command that
-shows what still runs; stop it before recovery. The log then says whether the gateway
-shows the maintenance notice. When the helper in `/opt/pyracast/current` predates the
-maintenance notice (the first upgrade to it), its `restore` refuses while the gateway
-runs, so the installer stops the gateway and the notice as well and the site is
-unreachable until recovery. The runtime role keeps the release's password, which
-`abort` and `restore` render from `host.json`; when setting it fails the log prints
-the commands to run first. A first installation names no helper: fix the cause and
-release again. Support images are not downgraded: `abort` and `restore`
-start PostgreSQL and RabbitMQ from the previous release's Compose file. Both refuse
-without the marker (the log says when writing it failed) and `restore` also refuses
-while an application container runs, but `abort` does not check for running
-containers. The log then prints the recovery commands; `current` still points to the
-release that served before maintenance.
+| State | Marker | `current` | Runtime password | Running | Recovery |
+| --- | --- | --- | --- | --- | --- |
+| Refused before the lock, or the lock timed out | unchanged | unchanged | unchanged | unchanged | none |
+| Preflight (staging, images, checks, provisioning, plan, `check_secrets`) | none added | previous | unchanged | previous release, untouched | fix the cause and release again |
+| Before `migrate`, resumed | removed | previous | `host.json`'s | previous release | fix the cause and release again |
+| Before `migrate`, otherwise | yes | previous | `host.json`'s | PostgreSQL, RabbitMQ, the notice | `abort` |
+| In or after `migrate` | yes | previous | `host.json`'s | PostgreSQL, RabbitMQ, the notice | a forward fix, or `restore --confirm` this run's pre-release dump |
+| A reset replaced the database in this maintenance | session identity | previous | `host.json`'s | PostgreSQL, RabbitMQ, the notice | `restore --confirm` the reset's archive (step 6 above) |
+| A stop or the password change failed | yes | previous | as the run left it | what `docker compose ... ps` lists | stop it, run the password command below, then the row's recovery |
+| First installation | yes | none | `host.json`'s, or not set yet | PostgreSQL, the notice | fix the cause and release again |
+| After promotion | removed | new | `host.json`'s | new release | the printed command that finishes the release |
+| Killed or rebooted after the marker, before promotion | yes | previous | `host.json`'s once the run changed it | after a reboot PostgreSQL and RabbitMQ | release again; or stop the application, run the password command, then `abort` or `restore` |
+| Killed after `current` moved | yes | new | `host.json`'s | the new release, or after a reboot support only | `bash /opt/pyracast/current/deploy/install-units.sh install /opt/pyracast/current && rm /var/lib/pyracast/release-blocked && systemctl start pyracast.service` |
 
-- During the one-time reset: step 6 above.
-- Failure before `migrate` (a maintenance that began with the marker, or a resume that
-  failed): run `reset_database.py /etc/pyracast/host.json abort`. It refuses when the
-  previous release cannot serve the database.
-- Failure in or after `migrate`: release a forward fix, or run the printed
-  `restore --confirm` command. It names the pre-release dump that this run took,
-  recorded before `migrate` in
-  `/opt/pyracast/releases/<sha>-<hash>/prerelease-backup.json`, the path the log
-  prints as "Pre-release record"; a rerun of the same release replaces that record,
-  so note the object first. When the record is unreadable the log says so and
-  offers only `abort`. `restore` downloads and verifies the object before it drops
-  anything.
+A preflight refusal changes nothing the serving release reads; provisioning may have
+set the owner's password, which that release does not use. When the staged keys cannot
+read a stored secret, the run exits with `check_secrets`' status after it names the
+rows. During a key rotation `host.json` names a runtime secret the serving release does
+not run with until a release succeeds, so release right after changing it.
+
+The password command renders the release's secrets from `host.json` and needs nothing
+from `/run`, which a reboot empties; `<release>` is the release directory
+(`<sha>-<hash>`) the log names:
+
+```bash
+python3 /opt/pyracast/releases/<release>/deploy/runtime_secrets.py /etc/pyracast/host.json \
+  && docker compose --env-file /opt/pyracast/releases/<release>/deploy/release.env \
+    -f /opt/pyracast/releases/<release>/deploy/compose.yaml \
+    up -d --no-recreate --wait --wait-timeout 180 postgres \
+  && python3 /opt/pyracast/releases/<release>/deploy/bootstrap_database.py \
+    switch-runtime /opt/pyracast/releases/<release> /run/pyracast/releases/<release>
+```
+
+`abort` and `restore` run `python3 /opt/pyracast/current/deploy/reset_database.py
+/etc/pyracast/host.json`. `abort` starts the release in `current`; it refuses when that
+release's `migrate --check` fails on the database or a reset replaced it. `restore
+--confirm` takes the pre-release dump that this run recorded before `migrate` in
+`/opt/pyracast/releases/<sha>-<hash>/prerelease-backup.json` (the log prints it as
+"Pre-release record"; a rerun of the same release replaces it, so note the object
+first) and downloads and verifies it before it drops anything. Both start PostgreSQL
+and RabbitMQ from the previous release's Compose file and refuse without the marker;
+`restore` also refuses while an application container runs. After promotion the new
+release serves the migrated database: `restore` refuses without the marker, and the
+previous release may not fit the schema. The release state file and pruning keep that
+release's directory and images for a reviewed rollback.
 
 ## Verification boundary
 
 `deploy/smoke.sh BACKEND_IMAGE WEB_IMAGE GATEWAY_IMAGE POSTGRES_IMAGE` runs the actual production Compose
 services with disposable PostgreSQL, volumes and locally issued TLS certificates.
 HTTPS checks validate the certificate chain and hostname. It provisions the database
-twice, applies migrations under the restricted owner, provisions again, checks that
+twice, changes the runtime role's password while the server logs every statement and
+finds no verifier or password in that log, applies migrations under the restricted
+owner, provisions again, checks that
 the runtime role can neither create tables nor write the migration ledger and that
 the superuser cannot sign in over TCP, checks frontend/API/static
 routing and forged proxy headers, including a simulated Cloudflare socket peer
@@ -692,10 +702,15 @@ answers 503 with `Retry-After` (the maintenance page for a navigation, the
 `reset`, a refused `abort`, a pre-release dump of the empty database, `migrate` from zero under the
 restricted owner and a start; then the stop a failed release leaves and `restore`,
 after which ownership, privileges, stored rows and a stored password are back and
-the site is ready. `deploy/test-release.sh` runs the installer with a reset session
-already in the marker: success removes it; a migration failure keeps its content. It
-also proves that a failure before `migrate` serves the previous release again and
-that pruning keeps the previous release.
+the site is ready. `deploy/test-release.sh` runs the installer against a model of which
+secret each release starts with and which one the runtime role's password matches. It
+proves that a failure before `migrate` starts the previous release with the secret
+`host.json` names, that no password change happens while API or web run or after a
+failed stop, that the printed password command works after `/run` is emptied, that a
+reset session keeps its marker and is recovered with its own archive, and that pruning
+keeps the previous release. `tests/test_deployment_previous_helper.py` runs each
+recovery the installer prints through the current helper and the one on `main` before
+the maintenance notice.
 `tests/test_operations_contracts.py` keeps the values that `deploy/`,
 `infra/terraform` and the workflows restate in agreement: worker queues, the
 watchdog and drain service lists, the shipped units and host paths, stop grace
