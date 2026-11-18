@@ -3,9 +3,9 @@ from collections.abc import Callable, Iterator
 from datetime import date, datetime, timedelta
 
 import pytest
-from django.db import models
+from django.db import connection, models
 from django.db.models import F
-from django.db.models.functions import Now
+from psycopg import sql
 
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.models import (
@@ -22,6 +22,7 @@ from tests.support.invariants import (
     BINDING_REVISION_RULE,
     CALIBRATION_RUN_RULE,
     IMPORT_SHAPE_RULE,
+    LEASE_RULES,
     NORMALIZATION_FACTOR_RULE,
     OBSERVATION_LINEAGE_RULE,
     PLANT_AUTOMATION_RULE,
@@ -117,24 +118,30 @@ def _all_new() -> tuple[set[str], set[str]]:
     )
 
 
+def _tuples() -> dict[tuple[str, int], str]:
+    """The physical row version of every job row: an UPDATE gives a row a new xmin."""
+    found = {}
+    with connection.cursor() as cursor:
+        for table in CLEAN:
+            cursor.execute(sql.SQL("SELECT id, xmin::text FROM {}").format(sql.Identifier(table)))
+            found |= {(table, key): version for key, version in cursor.fetchall()}
+    return found
+
+
 @pytest.mark.usefixtures("leaf")
 def test_invariant_migrations_repair_the_named_rows_and_reverse(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system, plant, _ = connected(monkeypatch)
     collection = list(CollectionJob.objects.order_by("pk"))
-    stray, unleased = (
-        CollectionJob.objects.create(
-            binding=system.binding,
-            scheduled_slot=NOW + timedelta(hours=hours),
-            target_date=NOW.date(),
-            available_at=NOW,
-        )
-        for hours in (1, 2)
+    released = CollectionJob.objects.create(
+        binding=system.binding,
+        scheduled_slot=NOW + timedelta(hours=1),
+        target_date=NOW.date(),
+        available_at=NOW,
     )
     held = collection[0]
-    epias = EpiasCollectionJob.objects.order_by("pk")[0]
-    run = request_run(system, plant)
+    request_run(system, plant)
     delivery = _delivery(system)
     original = _observation(system, plant, NOW - timedelta(days=2))
     ProductionObservation.objects.filter(pk=original.pk).update(is_current=False)
@@ -150,41 +157,44 @@ def test_invariant_migrations_repair_the_named_rows_and_reverse(
     migrate(*PREVIOUS.values())
     assert _installed() == (set(), set())
     token = uuid.uuid4()
-    CollectionJob.objects.filter(pk=stray.pk).update(lease_token=token, lease_expires_at=NOW)
-    CollectionJob.objects.filter(pk=unleased.pk).update(status="running")
+    # Main's claim marked an expired running job stale and kept its lease.
+    CollectionJob.objects.filter(pk=released.pk).update(
+        status="stale", lease_token=token, lease_expires_at=NOW
+    )
     CollectionJob.objects.filter(pk=held.pk).update(
         status="running", lease_token=token, lease_expires_at=NOW + timedelta(minutes=5)
     )
-    EpiasCollectionJob.objects.filter(pk=epias.pk).update(status="running", lease_token=token)
-    CalibrationRun.objects.filter(pk=run.pk).update(lease_expires_at=NOW)
     NotificationDelivery.objects.filter(pk=delivery.pk).update(
-        status="uncertain", lease_token=token
+        status="uncertain", lease_token=token, lease_expires_at=NOW
     )
+    valid = _tuples()
+    del valid["forecasts_collectionjob", released.pk]
     stored_account = ProviderAccount.objects.values().get(pk=system.account.pk)
     stored_binding = SiteBinding.objects.values().get(pk=system.binding.pk)
-    assert {label.partition(":")[0] for label in stored_violations()} == set(CLEAN)
+    assert set(stored_violations()) == {
+        f"forecasts_collectionjob: {LEASE_RULES['forecasts_collectionjob']}"
+    }
 
     forward()
 
     assert stored_violations() == {}
     assert _installed() == _all_new()
     assert lease_violations() == CLEAN
-    stray.refresh_from_db()
-    assert (stray.status, stray.lease_token, stray.lease_expires_at) == ("pending", None, None)
-    unleased.refresh_from_db()
-    assert unleased.status == "running"
-    assert unleased.lease_token is not None
-    assert unleased.lease_expires_at is not None
+    released.refresh_from_db()
+    assert (released.status, released.lease_token, released.lease_expires_at) == (
+        "stale",
+        None,
+        None,
+    )
+    assert {key: _tuples()[key] for key in valid} == valid
     held.refresh_from_db()
     assert (held.lease_token, held.lease_expires_at) == (token, NOW + timedelta(minutes=5))
-    epias.refresh_from_db()
-    assert (epias.status, epias.lease_token) == ("running", token)
-    assert epias.lease_expires_at is not None
-    run.refresh_from_db()
-    assert (run.status, run.lease_token, run.lease_expires_at) == ("pending", None, None)
     delivery.refresh_from_db()
-    assert (delivery.status, delivery.lease_token) == ("uncertain", token)
-    assert delivery.lease_expires_at is not None
+    assert (delivery.status, delivery.lease_token, delivery.lease_expires_at) == (
+        "uncertain",
+        token,
+        NOW,
+    )
     assert ProviderAccount.objects.values().get(pk=system.account.pk) == stored_account
     assert SiteBinding.objects.values().get(pk=system.binding.pk) == stored_binding
     assert violations("connections_provideraccount", PROVIDER_ACCOUNT_RULE) == 0
@@ -406,29 +416,50 @@ def _notification_delivery(monkeypatch: pytest.MonkeyPatch) -> models.Model:
     return _delivery(make_system())
 
 
+TOKEN = uuid.uuid4()
+OWNERLESS = {"lease_token": None, "lease_expires_at": NOW + timedelta(days=1)}
+FREE = {"lease_token": None, "lease_expires_at": None}
+
+
 @pytest.mark.usefixtures("leaf")
 @pytest.mark.parametrize(
-    ("row", "leased"),
+    ("row", "stored", "correction"),
     [
-        (_collection_job, "running"),
-        (_epias_job, "running"),
-        (_calibration_run, "running"),
-        (_notification_delivery, "sending"),
+        (_collection_job, {"status": "running"} | OWNERLESS, {"status": "pending"} | FREE),
+        (_collection_job, {"lease_token": TOKEN, "lease_expires_at": NOW}, FREE),
+        (_collection_job, {"status": "stale", "lease_token": TOKEN}, FREE),
+        (_epias_job, {"status": "running"} | OWNERLESS, {"status": "pending"} | FREE),
+        (_epias_job, {"status": "failed", "lease_token": TOKEN, "lease_expires_at": NOW}, FREE),
+        (_calibration_run, {"status": "running"} | OWNERLESS, {"status": "pending"} | FREE),
+        (_calibration_run, {"lease_expires_at": NOW}, FREE),
+        (_notification_delivery, {"status": "sending"} | OWNERLESS, {"status": "failed"} | FREE),
+        (_notification_delivery, {"status": "uncertain", "lease_token": TOKEN}, FREE),
+        (_notification_delivery, {"lease_token": TOKEN, "lease_expires_at": NOW}, FREE),
     ],
 )
-def test_lease_repair_expires_an_ownerless_lease_at_the_migration(
+def test_lease_migrations_refuse_leases_no_writer_produces(
     row: Callable[[pytest.MonkeyPatch], models.Model],
-    leased: str,
+    stored: dict[str, object],
+    correction: dict[str, object],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    stored = row(monkeypatch)
-    rows = type(stored)._default_manager.filter(pk=stored.pk)
+    created = row(monkeypatch)
+    rows = type(created)._default_manager.filter(pk=created.pk)
+    table = created._meta.db_table
+    check = f"{table.split('_', 1)[1]}_lease_chk"
     migrate(*PREVIOUS.values())
-    rows.update(status=leased, lease_token=None, lease_expires_at=Now() + timedelta(days=1))
+    rows.update(**stored)
+    kept = rows.values().get()
+    assert set(stored_violations()) == {f"{table}: {LEASE_RULES[table]}"}
 
+    with pytest.raises(ValueError, match=rf"{table} holds 1 row.*lease"):
+        forward()
+
+    assert check not in checks(table)
+    assert rows.values().get() == kept
+    rows.update(**correction)
     forward()
-
-    assert rows.filter(lease_token__isnull=False, lease_expires_at__lte=Now()).exists()
+    assert check in checks(table)
     assert lease_violations() == CLEAN
 
 
