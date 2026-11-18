@@ -76,6 +76,34 @@ def test_each_job_runs_only_after_the_decision_before_it() -> None:
         assert step(jobs["authorize"], name)["if"] == "steps.decision.outputs.authorized == 'true'"
 
 
+def test_the_cleanup_removes_every_image_build_of_the_authorizing_run_up_to_the_released_one() -> (
+    None
+):
+    cleanup = release_jobs()["cleanup"]
+    (remove,) = cleanup["steps"]
+    script = " ".join(remove["with"]["script"].split())
+
+    assert cleanup["permissions"] == {"actions": "write"}
+    assert remove["env"] == {
+        "RELEASE_SHA": "${{ needs.authorize.outputs.sha }}",
+        "CI_RUN_ID": "${{ needs.authorize.outputs.ci_run_id }}",
+        "CI_RUN_ATTEMPT": "${{ needs.authorize.outputs.ci_run_attempt }}",
+    }
+    assert "outputs.artifact_id" not in str(cleanup)
+    assert "context.payload" not in script
+    assert (
+        "github.paginate(github.rest.actions.listWorkflowRunArtifacts, "
+        "{ ...context.repo, run_id: Number(runId), per_page: 100, })"
+    ) in script
+    assert "new RegExp(`^release-images-${sha}-([1-9][0-9]*)$`)" in script
+    assert "Number(match[1]) <= Number(released) && !artifact.expired" in script
+    assert "first.attempt - second.attempt || first.id - second.id" in script
+    assert script.endswith(
+        "for (const { id } of builds) { await github.rest.actions.deleteArtifact"
+        "({ ...context.repo, artifact_id: id }); }"
+    )
+
+
 def test_every_image_is_scanned_before_any_cloud_credential_exists() -> None:
     jobs = release_jobs()
     scan = jobs["scan"]

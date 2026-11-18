@@ -142,6 +142,31 @@ def test_a_later_ci_attempt_leaves_the_images_of_the_authorizing_attempt_in_plac
     )
 
 
+def test_a_release_rerun_after_its_cleanup_finds_no_earlier_build_to_deploy() -> None:
+    artifacts = [images(1, 90), images(2, 91), {**images(1, 89), "name": "coverage-1"}]
+    released = decide(facts(artifacts=artifacts))
+    assert isinstance(released, Authorized)
+
+    removed = release_authorization.cleanup_order(artifacts, released.sha, released.ci_run_attempt)
+    remaining = [artifact for artifact in artifacts if artifact["id"] not in removed]
+
+    with pytest.raises(RefusedError, match="Run CI again"):
+        decide(facts(artifacts=remaining))
+    assert remaining == [artifacts[2]]
+
+
+def test_the_cleanup_keeps_later_attempts_and_other_commits_and_removes_the_selected_last() -> None:
+    artifacts = [
+        images(2, 91),
+        images(3, 93),
+        images(1, 90),
+        images(1, 88, expired=True),
+        {**images(1, 87), "name": f"release-images-{OLDER}-1"},
+    ]
+
+    assert release_authorization.cleanup_order(artifacts, MAIN, 2) == [90, 91]
+
+
 @pytest.mark.parametrize(
     "artifacts",
     [

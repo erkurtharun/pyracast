@@ -92,6 +92,20 @@ def _newest_images(
     return attempt, int(newest[0]["id"])
 
 
+def cleanup_order(artifacts: Sequence[Mapping[str, Any]], sha: str, run_attempt: int) -> list[int]:
+    # Mirrors the cleanup job of release.yml: every unexpired build up to the released attempt,
+    # oldest first, so a partly failed cleanup never leaves an older build without the selected one.
+    built = sorted(
+        (int(match["attempt"]), int(artifact["id"]))
+        for artifact in artifacts
+        if (match := IMAGE_ARTIFACT.fullmatch(artifact["name"]))
+        and match["sha"] == sha
+        and int(match["attempt"]) <= run_attempt
+        and not artifact["expired"]
+    )
+    return [identifier for _, identifier in built]
+
+
 def _append(path: str | None, line: str) -> None:
     if path:
         with open(path, "a", encoding="utf-8") as stream:
