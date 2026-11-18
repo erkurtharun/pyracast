@@ -245,3 +245,37 @@ def test_workspace_transfer_serializes_with_mutation_and_rechecks_waiting_writer
         mutation_future.result(timeout=15)
     assert not RegionLocationChangeRequest.objects.exists()
     assert Membership.objects.get(user=replacement).role == WorkspaceRole.ADMIN
+
+
+def test_list_reads_answer_without_waiting_while_a_writer_holds_the_tenant() -> None:
+    system = make_system()
+    outsider = User.objects.create_user(username="outsider")
+    base = f"/api/tenants/{system.tenant.pk}/"
+    reads = (
+        "members/",
+        "invitations/",
+        "change-requests/",
+        "sites/",
+        "trash/regions/",
+        f"regions/{system.region.pk}/plants/",
+        f"regions/{system.region.pk}/location-change-requests/",
+    )
+
+    def status(user: User, path: str) -> int:
+        client = Client()
+        client.force_login(user)
+        try:
+            return client.get(base + path).status_code
+        finally:
+            connections.close_all()
+
+    with ThreadPoolExecutor(max_workers=1) as pool, transaction.atomic():
+        Tenant.objects.select_for_update().get(pk=system.tenant.pk)
+        # The connection's lock timeout is 5 s: a read that queued would fail these deadlines.
+        answers = {
+            path: pool.submit(status, system.member, path).result(timeout=4) for path in reads
+        }
+        refused = {path: pool.submit(status, outsider, path).result(timeout=4) for path in reads}
+
+    assert answers == dict.fromkeys(reads, 200)
+    assert refused == dict.fromkeys(reads, 403)

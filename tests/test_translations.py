@@ -29,6 +29,17 @@ def test_packaged_catalogs_are_complete_and_compiled() -> None:
         get_template(template.relative_to(templates).as_posix())
 
 
+def test_every_catalog_ends_with_exactly_one_newline() -> None:
+    sources = sorted(ROOT.glob("src/**/locale/*/LC_MESSAGES/*.po"))
+
+    assert sources
+    assert [
+        source.relative_to(ROOT).as_posix()
+        for source in sources
+        if not source.read_bytes().endswith(b'"\n')
+    ] == []
+
+
 def test_every_turkish_catalog_translates_in_the_test_run() -> None:
     sources = sorted(ROOT.glob("src/**/locale/tr/LC_MESSAGES/django.po"))
 

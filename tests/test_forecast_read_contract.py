@@ -187,3 +187,73 @@ def test_region_reads_explicit_estimated_actuals_for_today(
     weather = body["result"]["weather_reference"]
     assert weather["energy_kwh_m2"] == pytest.approx(14.4)
     assert weather["intervals"][0]["ghi_wm2"] == 600
+
+
+ENVELOPE = {
+    "date",
+    "timezone",
+    "source_kind",
+    "freshness",
+    "unavailable_reason",
+    "result",
+}
+REGION_ENVELOPE = ENVELOPE | {"collected_at", "issued_at", "binding_id"}
+PLANT_ENVELOPE = ENVELOPE | {
+    "plant_id",
+    "as_of",
+    "configuration_id",
+    "calibration_id",
+    "regional_irradiance",
+    "outage_scenario",
+    "production_diagnostic",
+}
+
+
+def test_each_forecast_read_sends_exactly_its_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
+    system, plant = make_plant(monkeypatch)
+    snapshot = publish_snapshot(snapshot_for(system, DAY))
+    client = client_for(system.member)
+    today = {"date": DAY.isoformat()}
+    region = client.get(region_path(system), today).json()
+    live = client.get(plant_path(system, plant), today).json()
+    monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=2))
+    client = client_for(system.member)
+    archived = client.get(plant_path(system, plant), today).json()
+    past = client.get(region_path(system), {**today, "data_source": "estimated_actuals"}).json()
+
+    assert set(region) == set(past) == REGION_ENVELOPE
+    assert region["binding_id"] == system.binding.pk
+    assert set(live) == PLANT_ENVELOPE
+    assert set(archived) == PLANT_ENVELOPE | {"issuance_id", "snapshot_id"}
+    assert archived["snapshot_id"] == snapshot.pk
+
+
+def test_forecast_envelopes_share_one_documented_vocabulary() -> None:
+    from drf_spectacular.generators import SchemaGenerator
+
+    schema = SchemaGenerator().get_schema(request=None, public=True)
+    components = schema["components"]["schemas"]
+    region, plant = components["ForecastOutput"], components["PlantForecastOutput"]
+    assert set(region["properties"]) == REGION_ENVELOPE
+    assert set(plant["properties"]) == PLANT_ENVELOPE | {"issuance_id", "snapshot_id"}
+    for field in ENVELOPE:
+        assert region["properties"][field] == plant["properties"][field]
+    assert components[region["properties"]["freshness"]["$ref"].rsplit("/", 1)[1]]["enum"] == [
+        "fresh",
+        "stale",
+        "missing",
+    ]
+    for name in ("ForecastOutput", "PlantForecastOutput", "PerformanceOutput"):
+        operations = [
+            operation
+            for methods in schema["paths"].values()
+            for operation in methods.values()
+            if operation["responses"]
+            .get("200", {})
+            .get("content", {})
+            .get("application/json", {})
+            .get("schema")
+            == {"$ref": f"#/components/schemas/{name}"}
+        ]
+        assert len(operations) == 1
+        assert {"400", "403", "404", "429"} <= set(operations[0]["responses"])

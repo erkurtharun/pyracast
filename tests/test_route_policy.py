@@ -1,0 +1,231 @@
+from collections.abc import Callable, Iterator
+from typing import Any
+
+import pytest
+from django.contrib.auth.models import User
+from django.test import Client
+from django.urls import URLPattern, URLResolver, get_resolver, path
+from drf_spectacular.generators import SchemaGenerator
+from rest_framework.request import Request
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from pyracast.accounts.models import Membership, WorkspaceRole
+from pyracast.api import permissions
+from tests.support.api import verified_admin
+from tests.support.domain import make_system
+
+TENANT = "api/tenants/<int:tenant_id>/"
+REGION = TENANT + "regions/<int:region_id>/"
+PLANT = REGION + "plants/<int:plant_id>/"
+PUBLIC, ACCOUNT, MEMBER, ADMIN = "public", "account", "member", "admin"
+FORECAST, CALIBRATION, IMPORT, SUBMISSION = (
+    "forecast",
+    "calibration",
+    "production_import",
+    "submission",
+)
+POLICIES: dict[str, dict[str, tuple[str, str | None]]] = {
+    "api/session/": {"GET": (PUBLIC, None)},
+    "api/session/language/": {"POST": (PUBLIC, None)},
+    "api/tenants/": {"GET": (ACCOUNT, None)},
+    "api/invitations/accept/": {"POST": (ACCOUNT, SUBMISSION)},
+    TENANT + "change-requests/": {"GET": (MEMBER, None)},
+    TENANT + "change-requests/<int:request_id>/": {"GET": (MEMBER, None)},
+    TENANT + "change-requests/<int:request_id>/approve/": {"POST": (ADMIN, None)},
+    TENANT + "change-requests/<int:request_id>/reject/": {"POST": (ADMIN, None)},
+    TENANT + "change-requests/<int:request_id>/seen/": {"POST": (MEMBER, None)},
+    TENANT + "change-requests/<int:request_id>/withdraw/": {"POST": (MEMBER, None)},
+    TENANT + "invitations/": {"GET": (ADMIN, None), "POST": (ADMIN, None)},
+    TENANT + "invitations/<int:invitation_id>/": {"DELETE": (ADMIN, None)},
+    TENANT + "members/": {"GET": (ADMIN, None)},
+    TENANT + "members/<int:user_id>/": {"DELETE": (ADMIN, None)},
+    TENANT + "sites/": {"GET": (MEMBER, None), "POST": (ADMIN, SUBMISSION)},
+    TENANT + "trash/regions/": {"GET": (MEMBER, None)},
+    REGION: {"DELETE": (ADMIN, None)},
+    REGION + "collection-schedule/": {"GET": (MEMBER, None), "PUT": (ADMIN, None)},
+    REGION + "forecast/": {"GET": (MEMBER, FORECAST)},
+    REGION + "location-change-requests/": {
+        "GET": (MEMBER, None),
+        "POST": (ADMIN, SUBMISSION),
+    },
+    REGION + "plants/": {"GET": (MEMBER, None), "POST": (ADMIN, None)},
+    REGION + "reminders/": {"GET": (MEMBER, None), "PUT": (ADMIN, None)},
+    REGION + "restore/": {"POST": (ADMIN, SUBMISSION)},
+    PLANT: {"PUT": (ADMIN, None)},
+    PLANT + "calibration/automation/": {"GET": (MEMBER, None), "PATCH": (ADMIN, None)},
+    PLANT + "calibration/reset/": {"POST": (ADMIN, None)},
+    PLANT + "calibrations/": {"GET": (MEMBER, None), "POST": (ADMIN, CALIBRATION)},
+    PLANT + "calibrations/<int:calibration_id>/": {"GET": (MEMBER, None)},
+    PLANT + "calibrations/<int:calibration_id>/activate/": {"POST": (ADMIN, None)},
+    PLANT + "change-requests/incidents/": {"POST": (MEMBER, SUBMISSION)},
+    PLANT + "change-requests/production/": {"POST": (MEMBER, IMPORT)},
+    PLANT + "forecast/": {"GET": (MEMBER, FORECAST)},
+    PLANT + "outages/": {"GET": (MEMBER, None), "POST": (ADMIN, None)},
+    PLANT + "outages/<int:incident_id>/": {"PUT": (ADMIN, None)},
+    PLANT + "outages/<int:incident_id>/cancel/": {"POST": (ADMIN, None)},
+    PLANT + "outages/<int:incident_id>/resolve/": {"POST": (ADMIN, None)},
+    PLANT + "performance/": {"GET": (MEMBER, FORECAST)},
+    PLANT + "production-source/": {"GET": (MEMBER, None)},
+    PLANT + "production/": {"GET": (MEMBER, None)},
+    PLANT + "production/changes/": {"POST": (ADMIN, IMPORT)},
+    PLANT + "production/preview/": {"POST": (ADMIN, IMPORT)},
+}
+ROLES = ("anonymous", "outsider", "platform_admin", "viewer", "workspace_admin")
+SIGNED_OUT = {"anonymous": (401, "not_authenticated")}
+NOT_A_MEMBER = {
+    **SIGNED_OUT,
+    "outsider": (403, "membership_required"),
+    "platform_admin": (403, "membership_required"),
+}
+REFUSALS: dict[str, dict[str, tuple[int, str]]] = {
+    PUBLIC: {},
+    ACCOUNT: SIGNED_OUT,
+    MEMBER: NOT_A_MEMBER,
+    ADMIN: {**NOT_A_MEMBER, "viewer": (403, "workspace_admin_required")},
+}
+ACCESS_CODES = {
+    "not_authenticated",
+    "membership_required",
+    "workspace_admin_required",
+    "permission_denied",
+}
+
+
+class UnlistedView(APIView):
+    def get(self, request: Request) -> Response:
+        return Response({"served": True})
+
+
+urlpatterns = [path("api/unlisted/", UnlistedView.as_view())]
+
+
+def _walk(
+    patterns: list[URLPattern | URLResolver], prefix: str = ""
+) -> Iterator[tuple[str, Callable[..., Any]]]:
+    for pattern in patterns:
+        if isinstance(pattern, URLResolver):
+            yield from _walk(pattern.url_patterns, prefix + str(pattern.pattern))
+        else:
+            yield prefix + str(pattern.pattern), pattern.callback
+
+
+def served_methods() -> dict[str, set[str]]:
+    served: dict[str, set[str]] = {}
+    for route, callback in _walk(get_resolver().url_patterns):
+        view = getattr(callback, "cls", None)
+        if route.startswith("api/") and isinstance(view, type) and issubclass(view, APIView):
+            served[route] = {
+                method.upper()
+                for method in view.http_method_names
+                if method not in {"head", "options"} and hasattr(view, method)
+            }
+    return served
+
+
+def test_every_framework_route_and_method_has_exactly_one_policy() -> None:
+    table = permissions.ROUTE_POLICIES
+    assert {route: set(methods) for route, methods in table.items()} == served_methods()
+
+
+def test_the_policy_table_is_the_reviewed_access_matrix() -> None:
+    table = permissions.ROUTE_POLICIES
+    assert {
+        route: {method: (rule.access, rule.throttle) for method, rule in methods.items()}
+        for route, methods in table.items()
+    } == POLICIES
+
+
+def client_for(role: str, tenant_id: int, admin: User) -> Client:
+    if role == "platform_admin":
+        return verified_admin()[0]
+    client = Client(raise_request_exception=False)
+    if role == "workspace_admin":
+        client.force_login(admin)
+    elif role in {"outsider", "viewer"}:
+        user = User.objects.create_user(username=role)
+        if role == "viewer":
+            Membership.objects.create(user=user, tenant_id=tenant_id, role=WorkspaceRole.VIEWER)
+        client.force_login(user)
+    return client
+
+
+def concrete(route: str, ids: dict[str, int]) -> str:
+    for name, value in ids.items():
+        route = route.replace(f"<int:{name}>", str(value))
+    return "/" + route
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.parametrize(
+    ("route", "method"),
+    [(route, method) for route, methods in POLICIES.items() for method in methods],
+)
+def test_each_role_meets_the_route_policy(route: str, method: str) -> None:
+    system = make_system()
+    access = POLICIES[route][method][0]
+    absent = dict.fromkeys(
+        ("plant_id", "request_id", "invitation_id", "user_id", "calibration_id", "incident_id"),
+        999999,
+    )
+    url = concrete(route, {"tenant_id": system.tenant.pk, "region_id": system.region.pk, **absent})
+    outcomes = {}
+    for role in ROLES:
+        client = client_for(role, system.tenant.pk, system.member)
+        response = client.generic(method, url, b"{}", content_type="application/json")
+        code = response.json().get("code") if response.status_code >= 400 else None
+        outcomes[role] = (
+            (response.status_code, code) if code in ACCESS_CODES else "reaches the view"
+        )
+        assert response.status_code < 500
+    assert outcomes == {role: REFUSALS[access].get(role, "reaches the view") for role in ROLES}
+
+
+@pytest.mark.django_db
+@pytest.mark.urls("tests.test_route_policy")
+def test_a_route_without_a_policy_is_refused() -> None:
+    client = Client()
+    client.force_login(User.objects.create_user(username="person"))
+    response = client.get("/api/unlisted/")
+    assert response.status_code == 403
+    assert response.json()["code"] == "permission_denied"
+
+
+@pytest.mark.django_db
+def test_a_method_without_a_policy_answers_405_before_the_view_runs() -> None:
+    system = make_system()
+    client = Client()
+    client.force_login(system.member)
+    members = f"/api/tenants/{system.tenant.pk}/members/"
+    response = client.options(members)
+    assert response.status_code == 405
+    assert response.json()["code"] == "method_not_allowed"
+    assert client.head(members).status_code == 200
+    outsider = Client()
+    outsider.force_login(User.objects.create_user(username="outsider"))
+    assert outsider.head(members).status_code == 403
+
+
+def test_operations_document_the_refusals_their_policy_allows() -> None:
+    schema = SchemaGenerator().get_schema(request=None, public=True)
+    documented = {}
+    for route, methods in schema["paths"].items():
+        for method, operation in methods.items():
+            documented[(route, method)] = sorted(
+                status for status in operation["responses"] if status.startswith(("4", "5"))
+            )
+    error = {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+    assert documented[("/api/session/", "get")] == []
+    assert documented[("/api/session/language/", "post")] == ["400"]
+    assert documented[("/api/tenants/", "get")] == ["403", "404"]
+    assert documented[("/api/tenants/{tenant_id}/members/", "get")] == ["403"]
+    assert documented[("/api/tenants/{tenant_id}/members/{user_id}/", "delete")] == [
+        "403",
+        "404",
+    ]
+    assert documented[("/api/tenants/{tenant_id}/sites/", "post")] == ["400", "403", "429"]
+    forecast = schema["paths"]["/api/tenants/{tenant_id}/regions/{region_id}/forecast/"]["get"]
+    assert sorted(forecast["responses"]) == ["200", "400", "403", "404", "429", "default"]
+    assert all(
+        forecast["responses"][status]["content"] == error for status in ("400", "403", "404", "429")
+    )

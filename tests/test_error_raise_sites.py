@@ -302,3 +302,15 @@ def test_the_scan_recognises_a_replaced_caught_error() -> None:
         "            raise error\n"
     )
     assert framework_errors_and_translations(sample) == [5]
+
+
+def test_the_scan_recognises_status_constants_and_keyword_codes() -> None:
+    sample = ast.parse(
+        "def answer(request, body):\n"
+        "    Response(body, status=status.HTTP_400_BAD_REQUEST)\n"
+        "    Response(body, status=status.HTTP_200_OK)\n"
+        "    raise ValidationError(message='unsupported_language')\n"
+        "    raise ValidationError(message='Choose a supported language.')\n"
+    )
+    assert handmade_error_bodies(sample) == [2]
+    assert coded_validation_errors(sample) == [4]
