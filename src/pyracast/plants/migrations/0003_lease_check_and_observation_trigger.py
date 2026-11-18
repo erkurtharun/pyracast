@@ -5,7 +5,17 @@ from django.db import migrations, models
 from django.db.migrations.operations.base import Operation
 
 from pyracast import schema_objects
-from pyracast.db import repair_leases
+from pyracast.db import refuse_rows, repair_leases
+
+
+def revision_of_another_interval(model: type[models.Model]) -> models.Q:
+    same = model._default_manager.filter(
+        pk=models.OuterRef("supersedes"),
+        plant=models.OuterRef("plant"),
+        starts_at=models.OuterRef("starts_at"),
+        ends_at=models.OuterRef("ends_at"),
+    )
+    return models.Q(supersedes__isnull=False) & ~models.Q(models.Exists(same))
 
 
 class Migration(migrations.Migration):
@@ -35,6 +45,11 @@ class Migration(migrations.Migration):
                 ),
                 name="calibrationrun_lease_chk",
             ),
+        ),
+        refuse_rows(
+            "plants.productionobservation",
+            revision_of_another_interval,
+            "a revision supersedes the same plant and interval",
         ),
         *schema_objects.operations("plants", "0003_lease_check_and_observation_trigger"),
     ]
