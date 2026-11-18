@@ -135,7 +135,8 @@ reauthentication, MFA and session management. Email ownership is mandatory befor
 login. Django validates passwords with a 12-character minimum and common-password
 screening, hashes new passwords with Argon2 and rotates session identifiers on login.
 Mutations enforce CSRF before authentication. Allauth's account and IP rate limits
-share an atomic PostgreSQL JSON/TTL cache; ingress limits additionally protect capacity.
+share an atomic PostgreSQL JSON/TTL cache; ingress limits and per-user API throttles on
+expensive endpoints additionally protect capacity.
 Failed sign-ins are limited per address (also per day) and, under a project action
 that no sign-in success or password reset clears, per client IP; a refused account
 answers and counts exactly like a wrong password.
@@ -157,7 +158,9 @@ working login method. Provider sign-in retains Pyracast's local MFA requirements
 Each workspace has one administrator; other members can read data and propose production
 corrections or outage changes for that administrator's approval. Workspace
 administrators can invite members and change that workspace's customer settings, but
-gain no platform privileges. Application operations enforce these permissions through
+gain no platform privileges. Every API route and method declares its access and throttle
+scope in the route policy table of `api/permissions.py`; a route or method without one is
+refused. Application operations enforce these permissions again through
 `accounts/authorization.py`; mutations check membership, then lock the tenant before its
 resources, and reads take no tenant lock. Personal account,
 security and language settings remain available to each user. Verified platform

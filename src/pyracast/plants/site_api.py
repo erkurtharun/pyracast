@@ -37,7 +37,7 @@ class SitesView(GenericAPIView[Region]):
     serializer_class = SiteOutput
 
     def get_queryset(self) -> QuerySet[Region]:
-        return site_queryset(cast(User, self.request.user), self.kwargs["tenant_id"])
+        return site_queryset(self.kwargs["tenant_id"])
 
     @extend_schema(responses=SiteOutput(many=True))
     def get(self, request: Request, tenant_id: int) -> Response:

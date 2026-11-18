@@ -36,8 +36,7 @@ def forecast_time_limit(daily_quota: int) -> int:
     return min(MAX_COLLECTION_TIMES, max(daily_quota - 1, 0))
 
 
-def get_schedule(actor: User, tenant_id: int, region_id: int, now: datetime) -> CollectionSchedule:
-    tenant_membership(actor, tenant_id)
+def get_schedule(tenant_id: int, region_id: int, now: datetime) -> CollectionSchedule:
     region = Region.objects.select_related("approved_binding__provider_account").get(
         pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
     )

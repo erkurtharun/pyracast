@@ -3,6 +3,7 @@ import os
 from collections.abc import Iterator
 
 import pytest
+from django.core.cache import caches
 from django.db.backends.base.base import NO_DB_ALIAS, BaseDatabaseWrapper
 from django.db.backends.signals import connection_created
 from hypothesis import settings
@@ -157,6 +158,11 @@ def pytest_runtest_call(item: pytest.Item) -> Iterator[None]:
         from tests.support.invariants import stored_violations
 
         assert stored_violations() == {}
+
+
+@pytest.fixture(autouse=True)
+def fresh_throttle_counters() -> None:
+    caches["throttle"].clear()
 
 
 @pytest.fixture

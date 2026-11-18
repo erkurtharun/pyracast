@@ -11,7 +11,6 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from pyracast import trash
-from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import Tenant, WorkspaceRole
 from pyracast.api.serializers import (
     ForecastOutput,
@@ -27,8 +26,7 @@ from pyracast.regions.models import Region, RegionLocationChangeRequest
 from pyracast.regions.operations import request_location_change
 
 
-def member_region(actor: User, tenant_id: int, region_id: int) -> Region:
-    tenant_membership(actor, tenant_id)
+def tenant_region(tenant_id: int, region_id: int) -> Region:
     return get_object_or_404(Region, pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
 
 
@@ -88,9 +86,7 @@ class LocationChangeRequestsView(GenericAPIView[RegionLocationChangeRequest]):
     serializer_class = LocationChangeOutput
 
     def get_region(self) -> Region:
-        return member_region(
-            cast(User, self.request.user), self.kwargs["tenant_id"], self.kwargs["region_id"]
-        )
+        return tenant_region(self.kwargs["tenant_id"], self.kwargs["region_id"])
 
     def get_queryset(self) -> QuerySet[RegionLocationChangeRequest]:
         return RegionLocationChangeRequest.objects.filter(region=self.get_region()).order_by("-id")
@@ -115,7 +111,7 @@ class ForecastView(APIView):
     @extend_schema(parameters=[ForecastQuery], responses=ForecastOutput)
     def get(self, request: Request, tenant_id: int, region_id: int) -> Response:
         with read_snapshot():
-            region = member_region(cast(User, request.user), tenant_id, region_id)
+            region = tenant_region(tenant_id, region_id)
             query = ForecastQuery(data=request.query_params)
             query.is_valid(raise_exception=True)
             result = regional_outlook(
@@ -124,4 +120,4 @@ class ForecastView(APIView):
                 query.validated_data["data_source"],
                 timezone.now(),
             )
-        return Response(result)
+        return Response(ForecastOutput(result).data)

@@ -7,11 +7,7 @@ from django.core.exceptions import ValidationError
 from django.db import connection, transaction
 from django.test import Client
 from django.test.utils import CaptureQueriesContext
-from rest_framework.request import Request
-from rest_framework.test import APIRequestFactory
 
-from pyracast.api.permissions import WorkspaceMemberWritePermission
-from pyracast.change_requests.api import ProductionRequestsView
 from pyracast.change_requests.models import ChangeRequest, IncidentChange
 from pyracast.change_requests.operations import (
     approve_request,
@@ -338,13 +334,6 @@ def test_completed_incident_proposal_preserves_its_bounded_period(
     revision = approved.incident_change.applied_revision
     assert revision is not None
     assert revision.snapshot["ends_at"] == values["ends_at"].isoformat()
-
-
-def test_request_permission_rejects_an_anonymous_actor() -> None:
-    request = Request(APIRequestFactory().post("/"))
-    view = ProductionRequestsView()
-    view.kwargs = {"tenant_id": 1}
-    assert not WorkspaceMemberWritePermission().has_permission(request, view)
 
 
 def test_production_review_query_count_does_not_grow_with_existing_head_items(

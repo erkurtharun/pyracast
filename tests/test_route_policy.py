@@ -1,20 +1,23 @@
+import json
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
 from django.contrib.auth.models import User
 from django.test import Client
 from django.urls import URLPattern, URLResolver, get_resolver, path
-from drf_spectacular.generators import SchemaGenerator
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.test import APIRequestFactory
 from rest_framework.views import APIView
 
 from pyracast.accounts.models import Membership, WorkspaceRole
-from pyracast.api import permissions
+from pyracast.api.permissions import ROUTE_POLICIES, RoutePolicy
 from tests.support.api import verified_admin
 from tests.support.domain import make_system
 
+OPENAPI = Path(__file__).resolve().parents[1] / "web" / "openapi.json"
 TENANT = "api/tenants/<int:tenant_id>/"
 REGION = TENANT + "regions/<int:region_id>/"
 PLANT = REGION + "plants/<int:plant_id>/"
@@ -124,12 +127,12 @@ def served_methods() -> dict[str, set[str]]:
 
 
 def test_every_framework_route_and_method_has_exactly_one_policy() -> None:
-    table = permissions.ROUTE_POLICIES
+    table = ROUTE_POLICIES
     assert {route: set(methods) for route, methods in table.items()} == served_methods()
 
 
 def test_the_policy_table_is_the_reviewed_access_matrix() -> None:
-    table = permissions.ROUTE_POLICIES
+    table = ROUTE_POLICIES
     assert {
         route: {method: (rule.access, rule.throttle) for method, rule in methods.items()}
         for route, methods in table.items()
@@ -207,7 +210,7 @@ def test_a_method_without_a_policy_answers_405_before_the_view_runs() -> None:
 
 
 def test_operations_document_the_refusals_their_policy_allows() -> None:
-    schema = SchemaGenerator().get_schema(request=None, public=True)
+    schema = json.loads(OPENAPI.read_text(encoding="utf-8"))
     documented = {}
     for route, methods in schema["paths"].items():
         for method, operation in methods.items():
@@ -216,16 +219,21 @@ def test_operations_document_the_refusals_their_policy_allows() -> None:
             )
     error = {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
     assert documented[("/api/session/", "get")] == []
-    assert documented[("/api/session/language/", "post")] == ["400"]
-    assert documented[("/api/tenants/", "get")] == ["403", "404"]
-    assert documented[("/api/tenants/{tenant_id}/members/", "get")] == ["403"]
+    assert documented[("/api/session/language/", "post")] == ["400", "403"]
+    assert documented[("/api/tenants/", "get")] == ["401", "404"]
+    assert documented[("/api/tenants/{tenant_id}/members/", "get")] == ["401", "403"]
     assert documented[("/api/tenants/{tenant_id}/members/{user_id}/", "delete")] == [
+        "401",
         "403",
         "404",
     ]
-    assert documented[("/api/tenants/{tenant_id}/sites/", "post")] == ["400", "403", "429"]
+    assert documented[("/api/tenants/{tenant_id}/sites/", "post")] == ["400", "401", "403", "429"]
     forecast = schema["paths"]["/api/tenants/{tenant_id}/regions/{region_id}/forecast/"]["get"]
-    assert sorted(forecast["responses"]) == ["200", "400", "403", "404", "429", "default"]
-    assert all(
-        forecast["responses"][status]["content"] == error for status in ("400", "403", "404", "429")
-    )
+    refusals = ("400", "401", "403", "404", "429")
+    assert sorted(forecast["responses"]) == ["200", *refusals, "default"]
+    assert all(forecast["responses"][status]["content"] == error for status in refusals)
+
+
+def test_a_request_that_bypassed_the_url_resolver_is_refused() -> None:
+    request = Request(APIRequestFactory().get("/api/session/"))
+    assert not RoutePolicy().has_permission(request, APIView())

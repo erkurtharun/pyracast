@@ -372,6 +372,7 @@ def test_openapi_has_distinct_forecast_and_status_components() -> None:
     schema = json.loads(output.getvalue())
     components = schema["components"]["schemas"]
     assert "regional_irradiance" in components["PlantForecastOutput"]["properties"]
-    assert "region_id" in components["ForecastOutput"]["properties"]
+    assert "binding_id" in components["ForecastOutput"]["properties"]
+    assert "binding_id" not in components["PlantForecastOutput"]["properties"]
     assert "ready" in components["CalibrationStatusEnum"]["enum"]
     assert "approved" not in components["CalibrationStatusEnum"]["enum"]

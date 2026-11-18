@@ -36,7 +36,7 @@ def inbox(
     actor: User, tenant_id: int, *, scope: str = "pending", plant_id: int | None = None
 ) -> QuerySet[ChangeRequest]:
     membership = tenant_membership(actor, tenant_id)
-    rows = visible_requests(actor, tenant_id)
+    rows = visible_requests(actor, membership)
     if membership.role != WorkspaceRole.ADMIN or scope == "mine":
         rows = rows.filter(proposed_by=actor, proposer_membership_id=membership.pk)
     if scope == "pending":

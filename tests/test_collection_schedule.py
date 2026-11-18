@@ -201,7 +201,7 @@ def test_solcast_actuals_requests_only_required_bounded_lookback(days: int, hour
 
 def test_schedule_configuration_quota_and_effective_boundary() -> None:
     system = make_system(approved=True)
-    default = get_schedule(system.member, system.tenant.pk, system.region.pk, NOW)
+    default = get_schedule(system.tenant.pk, system.region.pk, NOW)
     assert not CollectionSchedule.objects.exists()
     assert default.times == ["16:00"]
     payload = schedule_payload(default, NOW)
@@ -218,7 +218,7 @@ def test_schedule_configuration_quota_and_effective_boundary() -> None:
         now=NOW,
     )
     assert configured.times == ["09:00", "18:00"]
-    assert get_schedule(system.member, system.tenant.pk, system.region.pk, NOW).pk == configured.pk
+    assert get_schedule(system.tenant.pk, system.region.pk, NOW).pk == configured.pk
     assert enqueue_due(NOW) == []
     ids = enqueue_due(NOW + timedelta(hours=2))
     assert len(ids) == 2
@@ -372,15 +372,13 @@ def test_schedule_requires_approval_membership_and_aware_timestamp() -> None:
         )
     other = Tenant.objects.create(name="Other")
     with pytest.raises(PermissionDenied):
-        get_schedule(system.member, other.pk, system.region.pk, NOW)
-    with pytest.raises(PermissionDenied):
         configure_schedule(
             system.member, other.pk, system.region.pk, enabled=False, times=[], now=NOW
         )
     Membership.objects.create(user=system.member, tenant=other)
     with pytest.raises(Region.DoesNotExist):
-        get_schedule(system.member, other.pk, system.region.pk, NOW)
-    default = get_schedule(system.member, system.tenant.pk, system.region.pk, NOW)
+        get_schedule(other.pk, system.region.pk, NOW)
+    default = get_schedule(system.tenant.pk, system.region.pk, NOW)
     assert schedule_payload(default, NOW)["recent_jobs"] == []
     assert schedule_payload(default, NOW)["next_collection_at"] is None
     assert (

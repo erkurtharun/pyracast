@@ -1,9 +1,59 @@
+import re
 from typing import Any
 
 from django.db import models
-from drf_spectacular.plumbing import build_choice_field, deep_import_string
+from drf_spectacular import openapi
+from drf_spectacular.plumbing import ComponentRegistry, build_choice_field, deep_import_string
 from drf_spectacular.settings import spectacular_settings
 from rest_framework import serializers
+
+from pyracast.api.permissions import ROUTE_POLICIES, Access, Policy
+
+REFUSALS = {
+    "400": "The request input was refused.",
+    "401": "Sign-in is required.",
+    "403": "Access was refused.",
+    "404": "The addressed item or page does not exist.",
+    "429": "Too many requests; Retry-After gives the seconds to wait.",
+}
+
+
+def documented_refusals(policy: Policy, method: str, operation: dict[str, Any]) -> list[str]:
+    parameters = operation.get("parameters", [])
+    query = {parameter["name"] for parameter in parameters if parameter["in"] == "query"}
+    path = {parameter["name"] for parameter in parameters if parameter["in"] == "path"}
+    statuses = {
+        "400": method in {"POST", "PUT", "PATCH"} or bool(query - {"page"}),
+        "401": policy.access != Access.PUBLIC,
+        # Every unsafe method also answers 403 when the session's CSRF check fails.
+        "403": method not in {"GET", "HEAD"} or policy.access in {Access.MEMBER, Access.ADMIN},
+        "404": bool(path - {"tenant_id"}) or "page" in query,
+        "429": policy.throttle is not None,
+    }
+    return [status for status, applies in statuses.items() if applies]
+
+
+class AutoSchema(openapi.AutoSchema):
+    def get_operation(
+        self,
+        path: str,
+        path_regex: str,
+        path_prefix: str,
+        method: str,
+        registry: ComponentRegistry,
+    ) -> dict[str, Any] | None:
+        operation = super().get_operation(path, path_regex, path_prefix, method, registry)
+        if operation is not None:
+            route = re.sub(r"\{(\w+)\}", r"<int:\1>", path.removeprefix("/"))
+            policy = ROUTE_POLICIES[route][self.method]
+            for status in documented_refusals(policy, self.method, operation):
+                operation["responses"][status] = {
+                    "description": REFUSALS[status],
+                    "content": {
+                        "application/json": {"schema": {"$ref": "#/components/schemas/Error"}}
+                    },
+                }
+        return operation
 
 
 def error_components(result: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:

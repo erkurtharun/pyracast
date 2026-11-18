@@ -1,3 +1,5 @@
+from typing import cast
+
 import pytest
 from django.conf import settings
 from django.contrib.auth.models import User
@@ -11,7 +13,8 @@ pytestmark = pytest.mark.django_db(transaction=True)
 
 
 def one_forecast_a_minute() -> override_settings:
-    rates = {**settings.REST_FRAMEWORK.get("DEFAULT_THROTTLE_RATES", {}), "forecast": "1/min"}
+    rates = cast(dict[str, str], settings.REST_FRAMEWORK.get("DEFAULT_THROTTLE_RATES", {}))
+    rates = {**rates, "forecast": "1/min"}
     return override_settings(
         REST_FRAMEWORK={**settings.REST_FRAMEWORK, "DEFAULT_THROTTLE_RATES": rates}
     )
@@ -24,7 +27,7 @@ def signed_in(user: User) -> Client:
 
 
 def test_production_rates_cover_every_endpoint_kind() -> None:
-    rates = settings.REST_FRAMEWORK.get("DEFAULT_THROTTLE_RATES", {})
+    rates = cast(dict[str, str], settings.REST_FRAMEWORK.get("DEFAULT_THROTTLE_RATES", {}))
     assert set(rates) == {"forecast", "calibration", "production_import", "submission"}
 
 

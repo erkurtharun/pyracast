@@ -53,7 +53,7 @@ class CollectionScheduleView(APIView):
     @extend_schema(responses=CollectionScheduleOutput)
     def get(self, request: Request, tenant_id: int, region_id: int) -> Response:
         now = timezone.now()
-        schedule = get_schedule(cast(User, request.user), tenant_id, region_id, now)
+        schedule = get_schedule(tenant_id, region_id, now)
         return Response(schedule_payload(schedule, now))
 
     @extend_schema(request=CollectionScheduleInput, responses=CollectionScheduleOutput)

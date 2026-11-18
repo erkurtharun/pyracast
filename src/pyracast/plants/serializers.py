@@ -4,7 +4,7 @@ from django.utils.dateparse import parse_datetime
 from django.utils.translation import gettext
 from rest_framework import serializers
 
-from pyracast.api.serializers import FiniteFloat, InputSerializer
+from pyracast.api.serializers import FiniteFloat, ForecastEnvelope, InputSerializer
 from pyracast.change_requests.models import ProductionChangeAction
 from pyracast.plants.models import (
     CalibrationActivation,
@@ -455,25 +455,13 @@ class ForecastQuery(InputSerializer):
     as_of = AwareDateTime(required=False)
 
 
-class PlantForecastOutput(serializers.Serializer[dict[str, Any]]):
+class PlantForecastOutput(ForecastEnvelope):
     plant_id = serializers.IntegerField()
-    date = serializers.DateField()
-    timezone = serializers.CharField()
     as_of = serializers.DateTimeField()
     configuration_id = serializers.IntegerField(allow_null=True)
     calibration_id = serializers.IntegerField(allow_null=True)
     issuance_id = serializers.IntegerField(allow_null=True, required=False)
-    freshness = serializers.CharField()
-    source_kind = serializers.ChoiceField(choices=("forecast", "estimated_actuals", "mixed"))
-    unavailable_reason = serializers.ChoiceField(
-        choices=(
-            "configuration_unavailable",
-            "forecast_unavailable",
-            "estimated_actuals_unavailable",
-        ),
-        allow_null=True,
-    )
-    result = serializers.JSONField(allow_null=True)
+    snapshot_id = serializers.IntegerField(allow_null=True, required=False)
     regional_irradiance = serializers.JSONField(allow_null=True)
     outage_scenario = serializers.JSONField(allow_null=True, default=None)
     production_diagnostic = serializers.JSONField(allow_null=True, default=None)

@@ -12,7 +12,6 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from pyracast import trash
-from pyracast.accounts.authorization import tenant_membership
 from pyracast.api.serializers import RegionOutput
 from pyracast.plants.serializers import EmptyInput
 from pyracast.regions.models import Region
@@ -43,11 +42,9 @@ class TrashedRegionsView(GenericAPIView[Region]):
     serializer_class = TrashedRegionOutput
 
     def get_queryset(self) -> QuerySet[Region]:
-        tenant_id = self.kwargs["tenant_id"]
-        tenant_membership(cast(User, self.request.user), tenant_id)
-        return Region.objects.filter(tenant_id=tenant_id, deleted_at__isnull=False).order_by(
-            "deleted_at", "id"
-        )
+        return Region.objects.filter(
+            tenant_id=self.kwargs["tenant_id"], deleted_at__isnull=False
+        ).order_by("deleted_at", "id")
 
     @extend_schema(responses=TrashedRegionOutput(many=True))
     def get(self, _request: Request, **_kwargs: Any) -> Response:

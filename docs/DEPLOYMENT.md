@@ -131,7 +131,9 @@ usage. Verify current [VM](https://cloud.google.com/products/compute/pricing/gen
 [disk](https://cloud.google.com/compute/disks-image-pricing) and
 [network](https://cloud.google.com/vpc/pricing) prices before applying Terraform.
 Set a Billing budget and alerts; alerts do not cap spending. Measure memory during
-collection and calibration before resizing; low HTTP traffic does not remove
+collection and calibration before resizing, and read the costliest statements from
+`pg_stat_statements` (preloaded, created by `bootstrap.sql`) as the `postgres` superuser;
+low HTTP traffic does not remove
 the always-on worker, broker and database footprint. This is a single-VM deployment
 with no automatic failover.
 

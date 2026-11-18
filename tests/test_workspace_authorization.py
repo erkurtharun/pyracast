@@ -8,14 +8,10 @@ from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.db import close_old_connections, connections, transaction
 from django.test import Client
-from rest_framework.request import Request
-from rest_framework.test import APIRequestFactory
-from rest_framework.views import APIView
 
 from pyracast import trash
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.accounts.operations import reassign_workspace_admin
-from pyracast.api.permissions import WorkspaceWritePermission
 from pyracast.forecasts.models import CollectionJob, CollectionSchedule
 from pyracast.forecasts.schedule import configure_schedule
 from pyracast.incidents.operations import finish_incident, save_incident
@@ -30,13 +26,6 @@ from pyracast.regions.operations import request_location_change, submit_region
 from tests.support.domain import NOW, System, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
-
-
-def test_workspace_write_permission_rejects_anonymous_callers() -> None:
-    request = Request(APIRequestFactory().post("/api/tenants/1/regions/"))
-    view = APIView()
-    view.kwargs = {"tenant_id": 1}
-    assert not WorkspaceWritePermission().has_permission(request, view)
 
 
 @pytest.mark.parametrize(

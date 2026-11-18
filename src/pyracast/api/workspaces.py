@@ -8,7 +8,6 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.invitations import (
     accept_workspace_invitation,
     invite_workspace_member,
@@ -56,7 +55,6 @@ class InvitationAcceptanceOutput(serializers.Serializer[dict[str, object]]):
 class WorkspaceMembersView(APIView):
     @extend_schema(responses=WorkspaceMembersOutput)
     def get(self, request: Request, tenant_id: int) -> Response:
-        tenant_membership(cast(User, request.user), tenant_id, role=WorkspaceRole.ADMIN)
         memberships = (
             Membership.objects.filter(tenant_id=tenant_id, user__is_active=True)
             .select_related("user")
@@ -82,7 +80,6 @@ class WorkspaceMemberView(APIView):
 class WorkspaceInvitationsView(APIView):
     @extend_schema(responses=WorkspaceInvitationsOutput)
     def get(self, request: Request, tenant_id: int) -> Response:
-        tenant_membership(cast(User, request.user), tenant_id, role=WorkspaceRole.ADMIN)
         invitations = WorkspaceInvitation.objects.filter(
             tenant_id=tenant_id, accepted_at__isnull=True, expires_at__gt=timezone.now()
         ).order_by("id")

@@ -1,4 +1,6 @@
+import json
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -19,6 +21,7 @@ from tests.support.plant_operations import make_plant, publish_snapshot, snapsho
 from tests.support.weather_collection import WeatherFixture
 
 pytestmark = pytest.mark.django_db(transaction=True)
+OPENAPI = Path(__file__).resolve().parents[1] / "web" / "openapi.json"
 DAY = date(2026, 11, 10)
 
 
@@ -211,27 +214,28 @@ PLANT_ENVELOPE = ENVELOPE | {
 
 def test_each_forecast_read_sends_exactly_its_envelope(monkeypatch: pytest.MonkeyPatch) -> None:
     system, plant = make_plant(monkeypatch)
-    snapshot = publish_snapshot(snapshot_for(system, DAY))
+    snapshot = publish_snapshot(snapshot_for(system, DAY, collected_at=NOW))
     client = client_for(system.member)
     today = {"date": DAY.isoformat()}
     region = client.get(region_path(system), today).json()
-    live = client.get(plant_path(system, plant), today).json()
+    issued = client.get(plant_path(system, plant), today).json()
     monkeypatch.setattr(timezone, "now", lambda: NOW + timedelta(days=2))
     client = client_for(system.member)
+    actuals = {**today, "data_source": "estimated_actuals"}
     archived = client.get(plant_path(system, plant), today).json()
-    past = client.get(region_path(system), {**today, "data_source": "estimated_actuals"}).json()
+    plant_actuals = client.get(plant_path(system, plant), actuals).json()
+    region_actuals = client.get(region_path(system), actuals).json()
 
-    assert set(region) == set(past) == REGION_ENVELOPE
+    assert set(region) == set(region_actuals) == REGION_ENVELOPE
     assert region["binding_id"] == system.binding.pk
-    assert set(live) == PLANT_ENVELOPE
-    assert set(archived) == PLANT_ENVELOPE | {"issuance_id", "snapshot_id"}
+    declared = PLANT_ENVELOPE | {"issuance_id", "snapshot_id"}
+    assert set(issued) == set(archived) == declared
+    assert PLANT_ENVELOPE <= set(plant_actuals) <= declared
     assert archived["snapshot_id"] == snapshot.pk
 
 
 def test_forecast_envelopes_share_one_documented_vocabulary() -> None:
-    from drf_spectacular.generators import SchemaGenerator
-
-    schema = SchemaGenerator().get_schema(request=None, public=True)
+    schema = json.loads(OPENAPI.read_text(encoding="utf-8"))
     components = schema["components"]["schemas"]
     region, plant = components["ForecastOutput"], components["PlantForecastOutput"]
     assert set(region["properties"]) == REGION_ENVELOPE

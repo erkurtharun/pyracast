@@ -51,7 +51,6 @@ CUSTOMER_FIELDS = {
     "before",
     "bias_mw",
     "binding_id",
-    "binding_revision",
     "calibration_id",
     "can_admin",
     "can_edit",

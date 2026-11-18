@@ -117,7 +117,7 @@ def test_regional_forecast_selects_the_normalized_copy_of_the_same_vintage(
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["binding_revision"] == target.pk
+    assert body["binding_id"] == target.pk
     assert body["result"]["reference_capacity_normalization"]["factor"] == 1000
 
 
