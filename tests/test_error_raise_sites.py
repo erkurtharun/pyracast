@@ -5,6 +5,23 @@ from pathlib import Path
 SOURCE = Path(__file__).resolve().parents[1] / "src" / "pyracast"
 CODE = re.compile(r"[a-z][a-z0-9_]*")
 VIEW_BASES = {"APIView", "GenericAPIView", "ScopedView", "RequestView"}
+ERROR_KEYS = {"code", "detail", "message", "error", "errors"}
+# Refusals inside allauth's own flows speak allauth's protocol (`errors[].code` is read by allauth
+# and the sign-in screens); PrivateAPIResponses adds the contract keys to every such body.
+ALLAUTH_PROTOCOL = {
+    "accounts/adapters.py:AccountAdapter.validation_error",
+    "accounts/adapters.py:AccountAdapter.pre_authenticate",
+    "accounts/adapters.py:AccountAdapter.confirm_email",
+    "accounts/inputs.py:ChangePasswordInput.clean_current_password",
+    "accounts/inputs.py:ResendEmailVerificationInput.clean",
+    "accounts/inputs.py:SecondFactorCode.matching_code",
+    "accounts/inputs.py:TOTPActivationInput.clean_code.matching_code",
+    "accounts/login_limits.py:check_second_factor",
+    "accounts/mfa_views.py:require_mfa_reauthentication",
+    "accounts/signup.py:workspace_signup_transaction",
+    "accounts/social.py:SocialAccountAdapter.connect_account",
+    "accounts/social.py:SocialAccountAdapter.validate_disconnect",
+}
 
 
 def modules() -> list[tuple[Path, ast.Module]]:
@@ -25,6 +42,22 @@ def name_of(node: ast.expr) -> str:
     return ""
 
 
+def root_of(node: ast.expr) -> str:
+    while isinstance(node, ast.Attribute | ast.Subscript):
+        node = node.value
+    return node.id if isinstance(node, ast.Name) else ""
+
+
+def allauth_views(tree: ast.Module) -> set[str]:
+    return {
+        alias.asname or alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("allauth.")
+        for alias in node.names
+        if (node.module or "").endswith("views") or alias.name == "views"
+    }
+
+
 def coded_validation_errors(tree: ast.Module) -> list[int]:
     return [
         node.lineno
@@ -38,12 +71,19 @@ def coded_validation_errors(tree: ast.Module) -> list[int]:
     ]
 
 
+def translates(handler: ast.ExceptHandler) -> bool:
+    last = handler.body[-1]
+    return not (isinstance(last, ast.Raise) and last.exc is None)
+
+
 def framework_errors_and_translations(tree: ast.Module) -> list[int]:
     lines = []
+    view_bases = VIEW_BASES | allauth_views(tree)
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef):
             continue
         bases = {name_of(base) for base in node.bases}
+        roots = {root_of(base) for base in node.bases}
         if "APIException" in bases:
             lines.append(node.lineno)
         lines.extend(
@@ -51,46 +91,99 @@ def framework_errors_and_translations(tree: ast.Module) -> list[int]:
             for item in node.body
             if isinstance(item, ast.FunctionDef) and item.name == "handle_exception"
         )
-        if bases & VIEW_BASES:
+        if (bases | roots) & view_bases:
             lines.extend(
                 handler.lineno
                 for method in node.body
                 if isinstance(method, ast.FunctionDef)
                 for handler in ast.walk(method)
-                if isinstance(handler, ast.ExceptHandler)
+                if isinstance(handler, ast.ExceptHandler) and translates(handler)
             )
     return lines
 
 
+def response_body(node: ast.Call) -> ast.expr | None:
+    if node.args:
+        return node.args[0]
+    return next((keyword.value for keyword in node.keywords if keyword.arg == "data"), None)
+
+
+def refusing_status(node: ast.Call) -> bool:
+    status = next((keyword.value for keyword in node.keywords if keyword.arg == "status"), None)
+    return (
+        isinstance(status, ast.Constant) and isinstance(status.value, int) and status.value >= 400
+    )
+
+
 def handmade_error_bodies(tree: ast.Module) -> list[int]:
+    lines = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = name_of(node.func)
+        keywords = {keyword.arg for keyword in node.keywords}
+        if name in {"APIResponse", "ErrorResponse"} and (
+            name == "ErrorResponse" or "errors" in keywords
+        ):
+            lines.append(node.lineno)
+        if name not in {"Response", "JsonResponse"}:
+            continue
+        body = response_body(node)
+        literal = isinstance(body, ast.Dict) and any(
+            isinstance(key, ast.Constant) and key.value in ERROR_KEYS for key in body.keys
+        )
+        variable = body is not None and not isinstance(body, ast.Dict) and refusing_status(node)
+        if literal or variable:
+            lines.append(node.lineno)
+    return lines
+
+
+def validation_error_factories(tree: ast.Module) -> list[int]:
     return [
         node.lineno
         for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and name_of(node.func) in {"Response", "JsonResponse"}
-        and node.args
-        and isinstance(node.args[0], ast.Dict)
-        and any(
-            isinstance(key, ast.Constant) and key.value in {"code", "detail"}
-            for key in node.args[0].keys
-        )
+        if isinstance(node, ast.Call) and name_of(node.func) == "validation_error"
     ]
+
+
+def enclosing_names(tree: ast.Module) -> dict[int, str]:
+    names: dict[int, str] = {}
+
+    def visit(node: ast.AST, scope: tuple[str, ...]) -> None:
+        for child in ast.iter_child_nodes(node):
+            inner = scope
+            if isinstance(child, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+                inner = (*scope, child.name)
+            if hasattr(child, "lineno") and inner:
+                names.setdefault(child.lineno, ".".join(inner))
+            visit(child, inner)
+
+    visit(tree, ())
+    return names
 
 
 def old_style_sites() -> list[str]:
-    return [
-        f"{path.relative_to(SOURCE).as_posix()}:{line}"
-        for path, tree in modules()
-        for line in (
+    sites = []
+    for path, tree in modules():
+        names = enclosing_names(tree)
+        lines = (
             coded_validation_errors(tree)
             + framework_errors_and_translations(tree)
             + handmade_error_bodies(tree)
+            + validation_error_factories(tree)
         )
-    ]
+        sites.extend(
+            f"{path.relative_to(SOURCE).as_posix()}:{names.get(line, '<module>')}" for line in lines
+        )
+    return sites
 
 
 def test_no_error_is_raised_or_answered_outside_the_shared_contract() -> None:
-    assert old_style_sites() == []
+    assert sorted(set(old_style_sites()) - ALLAUTH_PROTOCOL) == []
+
+
+def test_every_allauth_protocol_exception_is_still_a_site() -> None:
+    assert sorted(ALLAUTH_PROTOCOL - set(old_style_sites())) == []
 
 
 def test_the_scan_recognises_each_old_style_shape() -> None:
@@ -110,3 +203,33 @@ def test_the_scan_recognises_each_old_style_shape() -> None:
     assert coded_validation_errors(sample) == [9]
     assert sorted(framework_errors_and_translations(sample)) == [2, 5, 10]
     assert sorted(handmade_error_bodies(sample)) == [6, 11]
+
+
+def test_the_scan_recognises_allauth_and_indirect_shapes() -> None:
+    sample = ast.parse(
+        "from allauth.headless.account import views\n"
+        "from allauth.headless.mfa.views import AuthenticateView\n"
+        "class Login(views.LoginView):\n"
+        "    def post(self, request):\n"
+        "        try:\n"
+        "            pass\n"
+        "        except KeyError:\n"
+        "            return APIResponse(request, status=400, errors=[{'message': 'x'}])\n"
+        "class Second(AuthenticateView):\n"
+        "    def post(self, request):\n"
+        "        try:\n"
+        "            pass\n"
+        "        except KeyError:\n"
+        "            raise\n"
+        "def answer(request, body):\n"
+        "    Response(data={'message': 'x'})\n"
+        "    Response(body, status=409)\n"
+        "    JsonResponse({'errors': []})\n"
+        "    ErrorResponse(request, input=body)\n"
+        "    Response(body)\n"
+        "    raise get_adapter().validation_error('incorrect_code')\n"
+    )
+    assert framework_errors_and_translations(sample) == [7]
+    assert sorted(handmade_error_bodies(sample)) == [8, 16, 17, 18, 19]
+    assert validation_error_factories(sample) == [21]
+    assert enclosing_names(sample)[8] == "Login.post"
