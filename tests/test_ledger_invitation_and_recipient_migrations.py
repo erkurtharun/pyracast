@@ -10,6 +10,7 @@ from django.db.models import F
 
 from pyracast.accounts.models import (
     Membership,
+    Tenant,
     WorkspaceAdminChange,
     WorkspaceInvitation,
     WorkspaceRole,
@@ -233,12 +234,22 @@ def test_migration_uses_the_earliest_successor_time_in_primary_key_order(
     older = invited(case, ADDRESS, START, START + timedelta(days=4))
     middle = invited(case, ADDRESS, START + timedelta(days=5), START + timedelta(days=3))
     latest = invited(case, ADDRESS, START + timedelta(days=3), START + WEEK)
+    invitations = previous_invitations()
+    other = invitations.create(
+        tenant_id=Tenant.objects.create(name="Other workspace").pk,
+        created_by_id=case.system.member.pk,
+        email=ADDRESS,
+        token_hash=uuid4().hex,
+        expires_at=START + WEEK,
+    )
+    invitations.filter(pk=other.pk).update(created_at=START + timedelta(days=2))
 
     with pytest.raises(ValueError, match=r"holds 1 row.*still open"):
         forward()
 
-    invitations = previous_invitations()
-    assert invitations.get(pk=older).expires_at == START + timedelta(days=4)
+    assert invitations.values_list("expires_at", flat=True).get(pk=older) == START + timedelta(
+        days=4
+    )
     invitations.filter(pk=older).update(expires_at=START + timedelta(days=3))
     forward()
 
@@ -246,6 +257,7 @@ def test_migration_uses_the_earliest_successor_time_in_primary_key_order(
         older: START + timedelta(days=3),
         middle: START + timedelta(days=3),
         latest: None,
+        other.pk: None,
     }
     assert broken_rules() == {}
 

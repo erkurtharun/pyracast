@@ -20,25 +20,38 @@ def close_superseded_invitations(apps: Apps, schema_editor: BaseDatabaseSchemaEd
     invitations = apps.get_model("accounts", "WorkspaceInvitation")._default_manager.using(
         schema_editor.connection.alias
     )
-    unaccepted = list(
+    unaccepted = (
         invitations.filter(accepted_at__isnull=True)
-        .order_by("tenant_id", "pk")
+        .order_by("-tenant_id", "-pk")
         .values("pk", "tenant_id", "email", "role", "created_at", "expires_at")
     )
+    earliest_address: dict[tuple[int, str], datetime] = {}
+    earliest_administrator: dict[int, datetime] = {}
     ended: dict[int, datetime] = {}
     open_after_successor: list[int] = []
-    for index, row in enumerate(unaccepted):
+    for row in unaccepted.iterator():
+        address = (row["tenant_id"], row["email"])
         successors = [
-            later["created_at"]
-            for later in unaccepted[index + 1 :]
-            if later["tenant_id"] == row["tenant_id"]
-            and (later["email"] == row["email"] or later["role"] == row["role"] == ADMIN)
+            created
+            for created in (
+                earliest_address.get(address),
+                earliest_administrator.get(row["tenant_id"]) if row["role"] == ADMIN else None,
+            )
+            if created is not None
         ]
         if successors and row["expires_at"] <= min(successors):
             ended[row["pk"]] = row["expires_at"]
         elif successors:
             open_after_successor.append(row["pk"])
+        earliest_address[address] = min(
+            earliest_address.get(address, row["created_at"]), row["created_at"]
+        )
+        if row["role"] == ADMIN:
+            earliest_administrator[row["tenant_id"]] = min(
+                earliest_administrator.get(row["tenant_id"], row["created_at"]), row["created_at"]
+            )
     if open_after_successor:
+        open_after_successor.reverse()
         raise ValueError(
             f"accounts_workspaceinvitation holds {len(open_after_successor)} row(s) still open "
             "when a newer invitation of their address, or of the administrator role, was "
