@@ -1159,6 +1159,32 @@ def test_every_router_limits_each_client_by_the_address_the_edge_appended() -> N
     assert routers()["authentication"]["priority"] > routers()["api"]["priority"]
 
 
+def test_the_smoke_spends_each_routers_own_budget_and_finds_the_next_router_untouched() -> None:
+    smoke = text(DEPLOY / "smoke.sh")
+    client = middleware("client-rate")["rateLimit"]
+    sign_in = middleware("authentication-rate")["rateLimit"]
+    in_flight = middleware("client-in-flight")["inFlightReq"]["amount"]
+    budgets = {
+        "RATE_AVERAGE": f"{per_second(client):g}",
+        "RATE_BURST": client["burst"],
+        "SIGN_IN_AVERAGE": f"{per_second(sign_in):g}",
+        "SIGN_IN_BURST": sign_in["burst"],
+        "IN_FLIGHT": in_flight,
+    }
+    start = smoke.index("ROUTERS = {\n")
+    paths = dict(
+        re.findall(r"^    '(\w+)': '([^']+)',$", smoke[start : smoke.index("}", start)], re.M)
+    )
+
+    assert " ".join(f"--env {name}={value}" for name, value in budgets.items()) in smoke
+    assert {router: routed_router(path) for router, path in paths.items()} == {
+        router: router for router in routers()
+    }
+    assert "for router, path in ROUTERS.items():" in smoke
+    assert sign_in["burst"] < in_flight
+    assert "if router != 'authentication'" in smoke
+
+
 def test_a_body_over_the_api_limit_is_refused_with_the_api_error_body() -> None:
     errors = middleware("api-refusals")["errors"]
     smoke = text(DEPLOY / "smoke.sh")
