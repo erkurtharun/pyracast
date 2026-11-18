@@ -3,7 +3,7 @@ from typing import Any
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import transaction
-from django.db.models import QuerySet
+from django.db.models import Count, Max, Min, QuerySet
 
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import Membership, WorkspaceRole
@@ -44,9 +44,47 @@ def inbox(
         rows = rows.exclude(status=ChangeRequestStatus.PENDING)
     if plant_id is not None:
         rows = rows.filter(plant_id=plant_id)
-    return rows.select_related("plant__region", "proposed_by", "reviewed_by").order_by(
-        "-submitted_at", "-pk"
+    return _with_triage(rows).order_by("-submitted_at", "-pk")
+
+
+def _with_triage(rows: QuerySet[ChangeRequest]) -> QuerySet[ChangeRequest]:
+    return rows.select_related(
+        "plant__region",
+        "configuration__binding",
+        "proposed_by",
+        "reviewed_by",
+        "incident_change__incident",
+    ).annotate(
+        item_count=Count("production_items"),
+        period_start=Min("production_items__starts_at"),
+        period_end=Max("production_items__ends_at"),
     )
+
+
+def _triage(row: Any) -> dict[str, Any]:
+    triage = {"timezone": row.configuration.binding.timezone}
+    if row.kind == ChangeRequestKind.PRODUCTION:
+        return {
+            **triage,
+            "item_count": row.item_count,
+            "period_start": row.period_start,
+            "period_end": row.period_end,
+            "incident_action": None,
+            "incident_title": None,
+        }
+    change = row.incident_change
+    edits = change.action in INCIDENT_EDITS
+    target = change if edits else change.incident
+    return {
+        **triage,
+        "item_count": 1,
+        "period_start": target.starts_at,
+        "period_end": change.ends_at
+        if edits or change.action == IncidentChangeAction.RESOLVE
+        else target.ends_at,
+        "incident_action": change.action,
+        "incident_title": target.title,
+    }
 
 
 def _user(user: User | None) -> dict[str, Any] | None:
@@ -116,7 +154,6 @@ def request_detail(actor: User, tenant_id: int, request_id: int) -> dict[str, An
         "plant_id": plant.pk,
         "region_id": plant.region_id,
         "plant_name": plant.name,
-        "timezone": request.configuration.binding.timezone,
         "configuration_id": request.configuration_id,
         "proposed_by": _user(request.proposed_by),
         "reason": request.reason,
@@ -133,6 +170,7 @@ def request_detail(actor: User, tenant_id: int, request_id: int) -> dict[str, An
         "review_fingerprint": fingerprint,
         "production_items": items,
         "incident": incident,
+        **_triage(_with_triage(ChangeRequest.objects.filter(pk=request.pk)).get()),
     }
 
 
@@ -178,6 +216,7 @@ def request_summaries(
             and row.proposer_membership_id == membership.pk
             and row.status in DECIDED
             and row.outcome_seen_at is None,
+            **_triage(row),
         }
         for row in rows
     ]

@@ -544,7 +544,7 @@ for (const width of [320, 390, 768, 1440]) {
         for (const [button, heading] of [
             ["Account", "Account settings"],
             ["Recycle bin", "Recycle bin"],
-        ]) {
+        ] as const) {
             if (button === "Recycle bin")
                 await page
                     .getByRole("navigation", { name: "Main navigation" })

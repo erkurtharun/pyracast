@@ -2,21 +2,22 @@
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { request, type Session, type Tenant } from "@/lib/api";
+import type { Tenant } from "@/lib/api";
+import { api } from "@/lib/api/client";
 import {
-    ActionForm,
-    Empty,
-    Field,
-    Notice,
-    Tag,
-    useResource,
-    useCollection,
-} from "./ui";
+    adoptSession,
+    loadSession,
+    signOut,
+    useSessionState,
+    type Session,
+    type SessionUser,
+} from "@/lib/session-client";
+import { Empty, Notice, Tag, useCollection } from "./ui";
 import { RegionWorkspace } from "./region-workspace";
 import { PlantOnboarding, type PlantSite } from "./plant-onboarding";
 import { Auth } from "./auth";
-import { authRequest } from "@/lib/auth-api";
 import { AccountSecurity } from "./account-security";
+import { EmailChange } from "./email-change";
 import { PlantIcon } from "./plant-icon";
 import { RecycleBin } from "./recycle-bin";
 import { SessionLanguage } from "./session-language";
@@ -37,10 +38,18 @@ export function Dashboard() {
     }>({
         status: isLanguage(requestedLanguage) ? "pending" : "ready",
     });
-    const [version, setVersion] = useState(0),
-        [session, setSession] = useState<Session>();
-    const initial = useResource<Session>("/api/session/", version);
-    const current = session ?? initial.data;
+    const [attempt, setAttempt] = useState(0);
+    const [failure, setFailure] = useState<string>();
+    const { session: current } = useSessionState();
+    useEffect(() => {
+        let active = true;
+        loadSession().catch((error: Error) => {
+            if (active) setFailure(error.message);
+        });
+        return () => {
+            active = false;
+        };
+    }, [attempt]);
     useEffect(() => {
         if (
             !current ||
@@ -58,18 +67,15 @@ export function Dashboard() {
                 "",
                 `${url.pathname}${url.search}${url.hash}`,
             );
-            setSession(updated);
+            adoptSession(updated);
             setEntry({ status: "ready" });
         };
         if (current.user || current.language === requestedLanguage) {
             finish(current);
         } else {
-            request<Session>(
-                "/api/session/language/",
-                "POST",
-                { language: requestedLanguage },
-                current.csrf_token,
-            )
+            api.post("/api/session/language/", {
+                body: { language: requestedLanguage },
+            })
                 .then(finish)
                 .catch(() => {
                     if (active) setEntry({ status: "failed" });
@@ -86,14 +92,16 @@ export function Dashboard() {
                 error={
                     entry.status === "failed"
                         ? languageLabels("failed")
-                        : initial.error
+                        : failure
                 }
                 retry={() => {
                     if (entry.status === "failed")
                         setEntry({ status: "pending" });
-                    else setVersion(version + 1);
+                    else {
+                        setFailure(undefined);
+                        setAttempt((value) => value + 1);
+                    }
                 }}
-                onSession={setSession}
             />
         </SessionLanguage>
     );
@@ -103,12 +111,10 @@ function DashboardView({
     current,
     error,
     retry,
-    onSession,
 }: {
     current?: Session;
     error?: string;
     retry: () => void;
-    onSession: (session: Session) => void;
 }) {
     const t = useTranslations("Dashboard");
     const searchParams = useSearchParams();
@@ -153,9 +159,7 @@ function DashboardView({
         if (!current) return;
         const refresh = () => {
             if (document.visibilityState === "visible")
-                request<Session>("/api/session/")
-                    .then(onSession)
-                    .catch(() => {});
+                loadSession().catch(() => {});
         };
         window.addEventListener("focus", refresh);
         document.addEventListener("visibilitychange", refresh);
@@ -163,7 +167,7 @@ function DashboardView({
             window.removeEventListener("focus", refresh);
             document.removeEventListener("visibilitychange", refresh);
         };
-    }, [current, onSession]);
+    }, [current]);
     if (!current)
         return (
             <main className="auth-page">
@@ -196,8 +200,6 @@ function DashboardView({
         return (
             <WorkspaceAccess value={true}>
                 <Auth
-                    session={current}
-                    onSession={onSession}
                     invitationToken={invitation.token}
                     initialMode={
                         searchParams.get("signup") === "1"
@@ -216,14 +218,17 @@ function DashboardView({
     if (invitation.token)
         return (
             <WorkspaceAccess value={true}>
-                <AcceptInvitation token={invitation.token} session={current} />
+                <AcceptInvitation
+                    invitationToken={invitation.token}
+                    session={current}
+                />
             </WorkspaceAccess>
         );
     return (
         <Workspace
             key={current.user.id}
             session={current}
-            onSession={onSession}
+            user={current.user}
         />
     );
 }
@@ -252,27 +257,18 @@ function Brand() {
         </div>
     );
 }
-function Workspace({
-    session,
-    onSession,
-}: {
-    session: Session;
-    onSession: (value: Session) => void;
-}) {
+function Workspace({ session, user }: { session: Session; user: SessionUser }) {
     const t = useTranslations("Dashboard");
     const searchParams = useSearchParams();
     const [tenantsVersion, setTenantsVersion] = useState(0);
-    const tenants = useCollection<Tenant>(
-        "/api/tenants/",
-        tenantsVersion,
-        30_000,
-    );
+    const tenants = useCollection("/api/tenants/", {}, tenantsVersion, 30_000);
+    const endingSoon = useEndingSoon(session.expires_at);
     const [selected, setSelected] = useState<number>(),
         [view, setView] = useState<
             "regions" | "profile" | "trash" | "members" | "inbox"
         >(searchParams.get("account") === "security" ? "profile" : "regions"),
         [logoutError, setLogoutError] = useState("");
-    const tenant =
+    const tenant: Tenant | undefined =
         tenants.data?.results.find((row) => row.id === selected) ??
         tenants.data?.results[0];
     const canManage = tenant?.role === "admin";
@@ -325,7 +321,7 @@ function Workspace({
                     </p>
                 )}
                 <nav aria-label={t("navigation")}>
-                    {session.user?.can_admin && (
+                    {user.can_admin && (
                         <a href="/admin/">{t("administration")}</a>
                     )}
                     <button
@@ -384,27 +380,20 @@ function Workspace({
                         <span aria-hidden="true">⚙</span> {t("account")}
                     </button>
                 </nav>
-                <LanguageSelect session={session} onSession={onSession} />
+                <LanguageSelect />
                 <div className="user-box">
                     <div className="avatar">
-                        {session.user?.username.slice(0, 1).toUpperCase()}
+                        {user.username.slice(0, 1).toUpperCase()}
                     </div>
                     <div>
-                        <strong>{session.user?.username}</strong>
+                        <strong>{user.username}</strong>
                     </div>
                     <button
                         title={t("signOut")}
                         aria-label={t("signOut")}
                         onClick={async () => {
                             try {
-                                await authRequest(
-                                    "auth/session",
-                                    "DELETE",
-                                    session.csrf_token,
-                                );
-                                onSession(
-                                    await request<Session>("/api/session/"),
-                                );
+                                await signOut();
                             } catch (error) {
                                 setLogoutError((error as Error).message);
                             }
@@ -439,6 +428,13 @@ function Workspace({
                         page === "profile" ? "account-settings" : undefined
                     }
                 >
+                    {endingSoon && (
+                        <Notice>
+                            {t("sessionEndingSoon", {
+                                time: new Date(endingSoon).toLocaleTimeString(),
+                            })}
+                        </Notice>
+                    )}
                     {logoutError && <Notice error>{logoutError}</Notice>}
                     {tenants.error && <Notice error>{tenants.error}</Notice>}
                     <ChangeRequestUpdates value={refreshTenants}>
@@ -455,134 +451,32 @@ function Workspace({
                                     <section className="panel narrow">
                                         <h2>{t("emailAddress")}</h2>
                                         <p className="account-email">
-                                            {session.user?.email}
+                                            {user.email}
                                         </p>
-                                        <details className="account-disclosure">
-                                            <summary>
-                                                {t("changeEmail")}
-                                            </summary>
-                                            <p className="fine">
-                                                {t("currentEmail", {
-                                                    email:
-                                                        session.user?.email ??
-                                                        "",
-                                                })}
-                                            </p>
-                                            <ActionForm
-                                                submit={t("sendVerification")}
-                                                onSubmit={async (data) => {
-                                                    const result =
-                                                        await authRequest(
-                                                            "account/email",
-                                                            "POST",
-                                                            session.csrf_token,
-                                                            {
-                                                                email: data.get(
-                                                                    "email",
-                                                                ),
-                                                            },
-                                                        );
-                                                    if (
-                                                        result.status === 401 &&
-                                                        !result.meta
-                                                            ?.is_authenticated
-                                                    ) {
-                                                        onSession(
-                                                            await request<Session>(
-                                                                "/api/session/",
-                                                            ),
-                                                        );
-                                                        throw new Error(
-                                                            t("sessionExpired"),
-                                                        );
-                                                    }
-                                                    if (result.status === 401)
-                                                        throw new Error(
-                                                            t(
-                                                                "confirmIdentity",
-                                                            ),
-                                                        );
-                                                }}
-                                            >
-                                                <Field
-                                                    label={t("newEmail")}
-                                                    name="email"
-                                                    type="email"
-                                                />
-                                            </ActionForm>
-                                            <ActionForm
-                                                submit={t("verifyEmail")}
-                                                onSubmit={async (data) => {
-                                                    const result =
-                                                        await authRequest(
-                                                            "auth/email/verify",
-                                                            "POST",
-                                                            session.csrf_token,
-                                                            {
-                                                                key: data.get(
-                                                                    "key",
-                                                                ),
-                                                            },
-                                                        );
-                                                    if (result.status === 401) {
-                                                        if (
-                                                            !result.meta
-                                                                ?.is_authenticated
-                                                        )
-                                                            onSession(
-                                                                await request<Session>(
-                                                                    "/api/session/",
-                                                                ),
-                                                            );
-                                                        throw new Error(
-                                                            result.meta
-                                                                ?.is_authenticated
-                                                                ? t(
-                                                                      "confirmIdentity",
-                                                                  )
-                                                                : t(
-                                                                      "sessionExpired",
-                                                                  ),
-                                                        );
-                                                    }
-                                                    onSession(
-                                                        await request<Session>(
-                                                            "/api/session/",
-                                                        ),
-                                                    );
-                                                }}
-                                            >
-                                                <Field
-                                                    label={t("emailCode")}
-                                                    name="key"
-                                                    autoComplete="one-time-code"
-                                                />
-                                            </ActionForm>
-                                        </details>
+                                        <EmailChange
+                                            email={user.email}
+                                            hasPassword={
+                                                user.has_usable_password
+                                            }
+                                        />
                                     </section>
                                     <AccountSecurity
-                                        key={`${session.user!.id}:${session.user!.mfa_required}`}
-                                        token={session.csrf_token}
-                                        mfaRequired={session.user!.mfa_required}
-                                        hasPassword={
-                                            session.user!.has_usable_password
-                                        }
-                                        email={session.user!.email}
-                                        onSession={onSession}
+                                        key={`${user.id}:${user.mfa_required}`}
+                                        mfaRequired={user.mfa_required}
+                                        hasPassword={user.has_usable_password}
+                                        email={user.email}
                                     />
                                 </>
                             ) : tenant && page === "inbox" ? (
                                 <OperationalInbox
                                     key={`${tenant.id}:${tenant.role}`}
                                     tenant={tenant}
-                                    token={session.csrf_token}
                                 />
                             ) : tenant && page === "members" ? (
                                 <WorkspaceMembers
                                     key={tenant.id}
                                     tenant={tenant}
-                                    token={session.csrf_token}
-                                    userId={session.user!.id}
+                                    userId={user.id}
                                     onAccessChange={refreshTenants}
                                 />
                             ) : tenant && page === "trash" ? (
@@ -596,14 +490,12 @@ function Workspace({
                                     <RecycleBin
                                         key={tenant.id}
                                         tenant={tenant.id}
-                                        token={session.csrf_token}
                                     />
                                 </>
                             ) : tenant ? (
                                 <Regions
                                     key={tenant.id}
                                     tenant={tenant}
-                                    token={session.csrf_token}
                                     onTrash={() => setView("trash")}
                                 />
                             ) : tenants.loading ? (
@@ -620,15 +512,7 @@ function Workspace({
         </div>
     );
 }
-function Regions({
-    tenant,
-    token,
-    onTrash,
-}: {
-    tenant: Tenant;
-    token: string;
-    onTrash: () => void;
-}) {
+function Regions({ tenant, onTrash }: { tenant: Tenant; onTrash: () => void }) {
     const t = useTranslations("Dashboard");
     const locale = useLocale();
     const canManage = tenant.role === "admin";
@@ -639,8 +523,9 @@ function Regions({
     const [creating, setCreating] = useState(false);
     const [search, setSearch] = useState("");
     const [status, setStatus] = useState("all");
-    const sites = useCollection<PlantSite>(
-        `/api/tenants/${tenant.id}/sites/`,
+    const sites = useCollection(
+        "/api/tenants/{tenant_id}/sites/",
+        { path: { tenant_id: tenant.id } },
         version,
         30_000,
     );
@@ -686,7 +571,6 @@ function Regions({
                             : undefined
                     }
                     tenant={tenant.id}
-                    token={token}
                     onBack={back}
                     onDeleted={() => {
                         setDeleted((current) => [...current, selected.id]);
@@ -726,7 +610,6 @@ function Regions({
             {canManage && creating && (
                 <PlantOnboarding
                     tenant={tenant.id}
-                    token={token}
                     onCancel={() => setCreating(false)}
                     onCreated={(site) => {
                         setCreated(site);
@@ -775,9 +658,7 @@ function Regions({
                         </label>
                     </div>
                 )}
-                {sites.loading ? (
-                    <p role="status">{t("loadingPlants")}</p>
-                ) : sites.error ? (
+                {sites.error && (
                     <>
                         <Notice error>{sites.error}</Notice>
                         <button
@@ -787,7 +668,10 @@ function Regions({
                             {t("retry")}
                         </button>
                     </>
-                ) : filtered.length ? (
+                )}
+                {sites.loading ? (
+                    <p role="status">{t("loadingPlants")}</p>
+                ) : !sites.data ? null : filtered.length ? (
                     <div className="region-grid">
                         {filtered.map((site) => {
                             const metadata =
@@ -845,4 +729,18 @@ function Regions({
             </section>
         </>
     );
+}
+
+function useEndingSoon(expiresAt: string | null) {
+    const [endingAt, setEndingAt] = useState<string>();
+    useEffect(() => {
+        if (!expiresAt) return;
+        // Five minutes (300 000 ms) before the absolute session limit.
+        const timer = setTimeout(
+            () => setEndingAt(expiresAt),
+            Math.max(0, new Date(expiresAt).getTime() - Date.now() - 300_000),
+        );
+        return () => clearTimeout(timer);
+    }, [expiresAt]);
+    return endingAt;
 }

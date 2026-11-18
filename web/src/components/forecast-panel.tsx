@@ -141,6 +141,8 @@ export function ForecastPanel({
         diagnostic?.reference_kind === "uncalibrated_reference";
     const latestShortfall = diagnostic?.latest_day_status === "shortfall";
     const diagnosticDays = diagnostic?.days.map((day) => day.day).sort() ?? [];
+    const [firstDay] = diagnosticDays;
+    const lastDay = diagnosticDays.at(-1);
     const result = forecast.result as Record<string, unknown>;
     const daylight = result.daylight as DaylightSummary | undefined;
     const primary = daylight ?? result;
@@ -229,6 +231,8 @@ export function ForecastPanel({
     const rows = showFullDay
         ? fullDayIntervals(allRows, result.start, result.end)
         : generationRows;
+    const [firstRow] = rows;
+    const lastRow = rows.at(-1);
     const max = Math.max(
         1,
         ...rows.map((row) =>
@@ -549,11 +553,11 @@ export function ForecastPanel({
                         ))}
                     </div>
                     <div className="chart-axis">
-                        <span>{time(rows[0].start)}</span>
+                        <span>{firstRow && time(firstRow.start)}</span>
                         <span>
                             {t("local_time", { timezone: forecast.timezone })}
                         </span>
-                        <span>{time(rows[rows.length - 1].end)}</span>
+                        <span>{lastRow && time(lastRow.end)}</span>
                     </div>
                     <ForecastIntervals
                         rows={rows}
@@ -580,11 +584,12 @@ export function ForecastPanel({
                             ? t("uncalibrated_reference_model")
                             : t("active_calibration_reference")}
                         .
-                        {diagnosticDays.length > 0 &&
+                        {firstDay &&
+                            lastDay &&
                             t("qualifying_days", {
                                 count: diagnosticDays.length,
-                                start: diagnosticDays[0],
-                                end: diagnosticDays[diagnosticDays.length - 1],
+                                start: firstDay,
+                                end: lastDay,
                             })}
                         {diagnostic.performance_ratio !== null &&
                             t("median_ratio", {

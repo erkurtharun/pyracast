@@ -48,6 +48,7 @@
     },
     "Security": {
         "sessionExpired": "Oturumunuzun süresi doldu. Tekrar giriş yapın.",
+        "sessionEndingSoon": "Oturumunuz {time} saatinde sona erecek. Çalışmanızı kaydedin; yeniden oturum açmanız gerekecek.",
         "verifyAuthenticator": "Devam etmek için doğrulama uygulamanızla onaylayın.",
         "confirmPasswordFirst": "Aşağıda şifrenizi doğrulayıp tekrar deneyin.",
         "identity": "Kimliğinizi doğrulayın",
@@ -223,7 +224,9 @@
     "Errors": {
         "request": "İstek başarısız oldu ({status}). Tekrar deneyin.",
         "invalidResponse": "Sunucu geçersiz bir yanıt döndürdü. Tekrar deneyin.",
-        "reference": "Referans: {reference}"
+        "reference": "Referans: {reference}",
+        "network": "Sunucuya ulaşılamadı. Bağlantınızı kontrol edip tekrar deneyin.",
+        "unconfirmed": "Sunucu değişikliği onaylamadı. Kaydedilip kaydedilmediğini görmek için sayfayı yenileyin."
     },
     "ProductionCsv": {
         "size": "En fazla 2 MiB boyutunda bir CSV seçin.",

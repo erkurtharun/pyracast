@@ -175,7 +175,9 @@ test("member submits a native production correction with a stable retry key and 
         .click();
     await expect(page.getByText(/^Sent for approval\./)).toBeVisible();
     expect(submissions).toHaveLength(2);
-    expect(submissions[0].idempotency_key).toBe(submissions[1].idempotency_key);
+    expect(submissions[0]?.idempotency_key).toBe(
+        submissions[1]?.idempotency_key,
+    );
     expect(submissions[1]).toMatchObject({
         reason: "Checked meter",
         unit: "MWh",
@@ -207,10 +209,10 @@ test("member submits a native production correction with a stable retry key and 
         changes: [{ action: "revert", expected_revision_id: 4 }],
     });
     expect(
-        (submissions[2].changes as Record<string, unknown>[])[0],
+        (submissions[2]?.changes as Record<string, unknown>[] | undefined)?.[0],
     ).not.toHaveProperty("energy");
-    expect(submissions[2].idempotency_key).not.toBe(
-        submissions[1].idempotency_key,
+    expect(submissions[2]?.idempotency_key).not.toBe(
+        submissions[1]?.idempotency_key,
     );
     expect(direct).toEqual([]);
 });

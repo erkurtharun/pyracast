@@ -1,23 +1,21 @@
 "use client";
 import { useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import { request, type Session, type Tenant } from "@/lib/api";
-import { authRequest } from "@/lib/auth-api";
+import type { Tenant } from "@/lib/api";
+import { api } from "@/lib/api/client";
+import { signOut, type Session } from "@/lib/session-client";
 import type { components } from "@/lib/schema";
 import { ActionForm, Field, Notice, useResource } from "./ui";
 import { clearWorkspaceInvitation } from "./workspace-invitation";
 
 type Member = components["schemas"]["WorkspaceMemberOutput"];
-type Invitation = components["schemas"]["InvitationOutput"];
 
 export function WorkspaceMembers({
     tenant,
-    token,
     userId,
     onAccessChange,
 }: {
     tenant: Tenant;
-    token: string;
     userId: number;
     onAccessChange: () => void;
 }) {
@@ -31,13 +29,15 @@ export function WorkspaceMembers({
     >({ status: "idle" });
     const removing = useRef(false);
     const membersHeading = useRef<HTMLHeadingElement>(null);
-    const base = `/api/tenants/${tenant.id}/`;
-    const members = useResource<{ members: Member[] }>(
-        `${base}members/`,
+    const scope = { path: { tenant_id: tenant.id } };
+    const members = useResource(
+        "/api/tenants/{tenant_id}/members/",
+        scope,
         version,
     );
-    const invitations = useResource<{ invitations: Invitation[] }>(
-        `${base}invitations/`,
+    const invitations = useResource(
+        "/api/tenants/{tenant_id}/invitations/",
+        scope,
         version,
     );
     return (
@@ -53,11 +53,14 @@ export function WorkspaceMembers({
                 <ActionForm
                     submit={t("sendInvitation")}
                     onSubmit={async (data) => {
-                        await request(
-                            `${base}invitations/`,
-                            "POST",
-                            { email: data.get("email") },
-                            token,
+                        await api.post(
+                            "/api/tenants/{tenant_id}/invitations/",
+                            {
+                                ...scope,
+                                body: {
+                                    email: String(data.get("email") ?? ""),
+                                },
+                            },
                         );
                         setVersion((value) => value + 1);
                     }}
@@ -150,11 +153,14 @@ export function WorkspaceMembers({
                                     const member = removal.member;
                                     setRemoval({ status: "pending", member });
                                     try {
-                                        await request(
-                                            `${base}members/${member.id}/`,
-                                            "DELETE",
-                                            undefined,
-                                            token,
+                                        await api.delete(
+                                            "/api/tenants/{tenant_id}/members/{user_id}/",
+                                            {
+                                                path: {
+                                                    tenant_id: tenant.id,
+                                                    user_id: member.id,
+                                                },
+                                            },
                                         );
                                         setRemoval({
                                             status: "success",
@@ -211,11 +217,15 @@ export function WorkspaceMembers({
                                         children={null}
                                         submit={t("cancel")}
                                         onSubmit={async () => {
-                                            await request(
-                                                `${base}invitations/${invitation.id}/`,
-                                                "DELETE",
-                                                undefined,
-                                                token,
+                                            await api.delete(
+                                                "/api/tenants/{tenant_id}/invitations/{invitation_id}/",
+                                                {
+                                                    path: {
+                                                        tenant_id: tenant.id,
+                                                        invitation_id:
+                                                            invitation.id,
+                                                    },
+                                                },
                                             );
                                             setVersion((value) => value + 1);
                                         }}
@@ -232,10 +242,10 @@ export function WorkspaceMembers({
 }
 
 export function AcceptInvitation({
-    token,
+    invitationToken,
     session,
 }: {
-    token: string;
+    invitationToken: string;
     session: Session;
 }) {
     const t = useTranslations("WorkspaceMembers");
@@ -248,12 +258,9 @@ export function AcceptInvitation({
                     children={null}
                     submit={t("accept")}
                     onSubmit={async () => {
-                        await request(
-                            "/api/invitations/accept/",
-                            "POST",
-                            { token },
-                            session.csrf_token,
-                        );
+                        await api.post("/api/invitations/accept/", {
+                            body: { token: invitationToken },
+                        });
                         clearWorkspaceInvitation();
                         window.location.replace("/app/?workspace=customer");
                     }}
@@ -262,11 +269,7 @@ export function AcceptInvitation({
                     children={null}
                     submit={t("useAnotherAccount")}
                     onSubmit={async () => {
-                        await authRequest(
-                            "auth/session",
-                            "DELETE",
-                            session.csrf_token,
-                        );
+                        await signOut();
                         window.location.replace("/app/");
                     }}
                 />

@@ -3467,6 +3467,33 @@
                     "timezone": {
                         "type": "string"
                     },
+                    "item_count": {
+                        "type": "integer"
+                    },
+                    "period_start": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "period_end": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "incident_action": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/IncidentChangeActionEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "incident_title": {
+                        "type": "string",
+                        "nullable": true
+                    },
                     "conflict": {
                         "allOf": [
                             {
@@ -3504,7 +3531,12 @@
                     "former_member",
                     "id",
                     "incident",
+                    "incident_action",
+                    "incident_title",
+                    "item_count",
                     "kind",
+                    "period_end",
+                    "period_start",
                     "plant_id",
                     "plant_name",
                     "production_items",
@@ -3585,6 +3617,36 @@
                     },
                     "unread": {
                         "type": "boolean"
+                    },
+                    "timezone": {
+                        "type": "string"
+                    },
+                    "item_count": {
+                        "type": "integer"
+                    },
+                    "period_start": {
+                        "type": "string",
+                        "format": "date-time"
+                    },
+                    "period_end": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
+                    },
+                    "incident_action": {
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/IncidentChangeActionEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
+                    },
+                    "incident_title": {
+                        "type": "string",
+                        "nullable": true
                     }
                 },
                 "required": [
@@ -3595,7 +3657,12 @@
                     "decision_reason",
                     "former_member",
                     "id",
+                    "incident_action",
+                    "incident_title",
+                    "item_count",
                     "kind",
+                    "period_end",
+                    "period_start",
                     "plant_id",
                     "plant_name",
                     "proposed_by",
@@ -3604,6 +3671,7 @@
                     "reviewed_by",
                     "status",
                     "submitted_at",
+                    "timezone",
                     "unread"
                 ]
             },
@@ -6690,9 +6758,14 @@
                     },
                     "language": {
                         "$ref": "#/components/schemas/LanguageEnum"
+                    },
+                    "expires_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "nullable": true
                     }
                 },
-                "required": ["csrf_token", "language", "user"]
+                "required": ["csrf_token", "expires_at", "language", "user"]
             },
             "SessionUserOutput": {
                 "type": "object",

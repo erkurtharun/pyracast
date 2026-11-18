@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { request, type Session } from "@/lib/api";
+import { loadSession } from "@/lib/session-client";
 import { ApiError } from "@/lib/api/errors";
 import { authRequest } from "@/lib/auth-api";
 import {
@@ -16,17 +16,13 @@ import { TwoFactorSettings } from "./two-factor-settings";
 import { ActionForm, Field } from "./ui";
 
 export function AccountSecurity({
-    token,
     mfaRequired,
     hasPassword,
     email,
-    onSession,
 }: {
-    token: string;
     mfaRequired: boolean;
     hasPassword: boolean;
     email: string;
-    onSession: (session: Session) => void;
 }) {
     const t = useTranslations("Security");
     const [pendingPassword, setPendingPassword] = useState<{
@@ -40,7 +36,6 @@ export function AccountSecurity({
         const result = await authRequest(
             "account/password/change",
             "POST",
-            token,
             payload,
         );
         if (result.status === 401) {
@@ -55,10 +50,10 @@ export function AccountSecurity({
                     } catch {
                         // Browser privacy settings can disable session storage.
                     }
-                    onSession(await request<Session>("/api/session/"));
+                    await loadSession();
                     return;
                 }
-                await refreshExpiredSession(onSession, t("sessionExpired"));
+                await refreshExpiredSession(t("sessionExpired"));
             }
             if (replay) throw new ApiError(t("reauthStillRequired"));
             setPendingPassword({
@@ -68,7 +63,7 @@ export function AccountSecurity({
             return;
         }
         setPendingPassword(undefined);
-        onSession(await request<Session>("/api/session/"));
+        await loadSession();
     }
 
     return (
@@ -84,8 +79,6 @@ export function AccountSecurity({
                         <ReauthenticationForm
                             mode={pendingPassword.mode}
                             email={email}
-                            token={token}
-                            onSession={onSession}
                             autoFocus
                             onCancel={() => setPendingPassword(undefined)}
                             onVerified={() =>
@@ -121,18 +114,11 @@ export function AccountSecurity({
                 </details>
             </section>
             <TwoFactorSettings
-                token={token}
                 mfaRequired={mfaRequired}
                 hasPassword={hasPassword}
                 email={email}
-                onSession={onSession}
             />
-            <LinkedAccounts
-                token={token}
-                email={email}
-                hasPassword={hasPassword}
-                onSession={onSession}
-            />
+            <LinkedAccounts email={email} hasPassword={hasPassword} />
         </>
     );
 }

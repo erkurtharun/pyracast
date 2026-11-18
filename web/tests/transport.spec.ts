@@ -72,6 +72,7 @@ test("a busy session is retried once after its Retry-After", async () => {
             longitude: 30.7,
             timezone: "Europe/Istanbul",
             dc_capacity_mw: 5,
+            measurement_basis: "net_export",
             mounting_type: "fixed",
         },
     });

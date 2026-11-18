@@ -16,18 +16,32 @@ type Configuration = Pick<
     | "surface_azimuth"
 >;
 
+function choice<T extends string>(
+    value: FormDataEntryValue | null,
+    options: readonly [T, ...T[]],
+): T {
+    return options.find((option) => option === value) ?? options[0];
+}
+
 export function configurationInput(data: FormData) {
     const optional = (name: string) => {
         const value = data.get(name);
         return value === null || value === "" ? null : Number(value);
     };
-    const mounting = data.get("mounting_type");
+    const mounting = choice(data.get("mounting_type"), [
+        "unknown",
+        "fixed",
+        "tracking",
+    ]);
     return {
-        name: data.get("name"),
+        name: String(data.get("name") ?? ""),
         dc_capacity_mw: Number(data.get("dc_capacity_mw")),
         inverter_capacity_mw: optional("inverter_capacity_mw"),
         export_limit_mw: optional("export_limit_mw"),
-        measurement_basis: data.get("measurement_basis"),
+        measurement_basis: choice(data.get("measurement_basis"), [
+            "net_export",
+            "ac_generation",
+        ]),
         mounting_type: mounting,
         surface_tilt: mounting === "fixed" ? optional("surface_tilt") : null,
         surface_azimuth:

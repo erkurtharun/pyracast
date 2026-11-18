@@ -285,7 +285,7 @@ test("actual production defaults to generation hours and full day restores every
         { header: true, skipEmptyLines: true },
     ).data;
     expect(records).toHaveLength(24);
-    expect(records[8].energy).toBe("");
+    expect(records[8]?.energy).toBe("");
     expect(records[0]).toMatchObject({
         energy: "0",
         unit: "MWh",
@@ -388,7 +388,7 @@ test("generation filtering preserves native intervals and repeated local hours a
             energy === null
                 ? null
                 : {
-                      ...oneInterval(1).intervals[0].effective,
+                      ...oneInterval(1).intervals[0]?.effective,
                       energy_mwh: energy,
                   },
     }));
@@ -543,7 +543,8 @@ test("importing a different native interval preserves an open draft for recovery
     await page.route("**/production/?*", (route) => {
         if (!imported) return route.fallback();
         const history = oneInterval(0.25);
-        history.intervals[0].ends_at = "2026-11-09T08:30:00+03:00";
+        const [interval] = history.intervals;
+        if (interval) interval.ends_at = "2026-11-09T08:30:00+03:00";
         return route.fulfill({ json: history });
     });
     await page.route("**/production/changes/", (route) => {

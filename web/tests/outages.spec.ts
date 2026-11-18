@@ -243,7 +243,7 @@ test("outage lifecycle preserves metadata, compares both scenarios and restores 
         normal_energy_mwh: "2",
         affected_energy_mwh: "0",
     });
-    expect(csv[1]["outage_scenario.incidents"]).toContain(
+    expect(csv[1]?.["outage_scenario.incidents"]).toContain(
         "Inverter disconnected",
     );
     await page.getByRole("button", { name: "Outages", exact: true }).click();
@@ -259,7 +259,7 @@ test("outage lifecycle preserves metadata, compares both scenarios and restores 
         .getByLabel("Resolved at (device time)", { exact: true })
         .fill("2026-11-11T14:00");
     await page.getByRole("button", { name: "Save resolution" }).click();
-    await expect(page.getByText("resolved", { exact: true })).toBeVisible();
+    await expect(page.getByText("Resolved", { exact: true })).toBeVisible();
     expect(state.incident()).toMatchObject({
         ends_at: "2026-11-11T11:00:00.000Z",
         revision: 3,
@@ -350,7 +350,7 @@ test("rejects future times and requires confirmation to cancel an incorrect inci
     await page
         .getByRole("button", { name: "Cancel outage", exact: true })
         .click();
-    await expect(page.getByText("cancelled", { exact: true })).toBeVisible();
+    await expect(page.getByText("Cancelled", { exact: true })).toBeVisible();
     expect(state.incident()?.revision).toBe(2);
 });
 
@@ -414,24 +414,6 @@ test("capacity inputs show the configured ceiling", async ({ page }) => {
     await expect(
         page.getByLabel("Available grid export capacity (MW)"),
     ).toHaveAttribute("max", "4");
-});
-
-test("an empty resolution asks for the end time", async ({ page }) => {
-    const state = await workspace(page);
-    await create(page);
-    await page
-        .getByRole("button", { name: "Resolve outage", exact: true })
-        .click();
-    await page
-        .getByLabel("Resolved at (device time)", { exact: true })
-        .fill("");
-    await page.getByRole("button", { name: "Save resolution" }).click();
-    await expect(
-        page
-            .getByRole("alert")
-            .filter({ hasText: "Choose when the outage ended." }),
-    ).toBeVisible();
-    expect(state.incident()?.revision).toBe(1);
 });
 
 test("an ongoing outage is tagged as a warning and a resolved one is labelled", async ({

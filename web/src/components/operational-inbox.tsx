@@ -1,28 +1,34 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useFormatter, useLocale, useTranslations } from "next-intl";
-import { request, type Tenant, type Page } from "@/lib/api";
+import type { Tenant } from "@/lib/api";
+import { api, buildUrl } from "@/lib/api/client";
 import type { components } from "@/lib/schema";
 import { ActionForm, Notice, Tag, useResource } from "./ui";
 import { useChangeRequestUpdates } from "./change-request-updates";
 
 type ChangeRequest = components["schemas"]["ChangeRequestOutput"];
 type Summary = components["schemas"]["ChangeRequestSummaryOutput"];
+type Scope = "pending" | "history" | "mine";
 type Reading = components["schemas"]["ProductionValueOutput"];
 type Decision = "approve" | "reject" | "withdraw" | "seen";
 
 export function OwnPendingRequests({
-    tenantBase,
+    tenantId,
     plantId,
     revision,
 }: {
-    tenantBase: string;
+    tenantId: number;
     plantId: number;
     revision: number;
 }) {
     const t = useTranslations("ChangeRequests");
-    const items = useResource<Page<Summary>>(
-        `${tenantBase}change-requests/?scope=pending&plant_id=${plantId}`,
+    const items = useResource(
+        "/api/tenants/{tenant_id}/change-requests/",
+        {
+            path: { tenant_id: tenantId },
+            query: { scope: "pending", plant_id: plantId },
+        },
         revision,
         30_000,
     );
@@ -31,17 +37,9 @@ export function OwnPendingRequests({
     return <Notice>{t("pendingContext", { count })}</Notice>;
 }
 
-export function OperationalInbox({
-    tenant,
-    token,
-}: {
-    tenant: Tenant;
-    token: string;
-}) {
+export function OperationalInbox({ tenant }: { tenant: Tenant }) {
     const t = useTranslations("ChangeRequests");
-    const [scope, setScope] = useState<"pending" | "history" | "mine">(
-        "pending",
-    );
+    const [scope, setScope] = useState<Scope>("pending");
     const [update, setUpdate] = useState<{
         revision: number;
         outcome: Decision | null;
@@ -50,7 +48,6 @@ export function OperationalInbox({
     const [page, setPage] = useState(1);
     const admin = tenant.role === "admin";
     const effectiveScope = admin ? scope : "mine";
-    const base = `/api/tenants/${tenant.id}/change-requests/`;
     const changed = (outcome: Decision | null = null) => {
         if (outcome && outcome !== "seen" && effectiveScope === "pending")
             setPage(1);
@@ -106,11 +103,10 @@ export function OperationalInbox({
             )}
             <InboxPage
                 key={`${effectiveScope}:${page}`}
-                base={base}
+                tenantId={tenant.id}
                 scope={effectiveScope}
                 page={page}
                 revision={update.revision}
-                token={token}
                 onChanged={changed}
                 onPage={setPage}
             />
@@ -119,25 +115,28 @@ export function OperationalInbox({
 }
 
 function InboxPage({
-    base,
+    tenantId,
     scope,
     page,
     revision,
-    token,
     onChanged,
     onPage,
 }: {
-    base: string;
-    scope: string;
+    tenantId: number;
+    scope: Scope;
     page: number;
     revision: number;
-    token: string;
     onChanged: (action: Decision) => void;
     onPage: (page: number) => void;
 }) {
     const t = useTranslations("ChangeRequests");
-    const items = useResource<Page<Summary>>(
-        `${base}?scope=${scope}&page=${page}`,
+    const path = { tenant_id: tenantId };
+    const base = buildUrl("/api/tenants/{tenant_id}/change-requests/", {
+        path,
+    });
+    const items = useResource(
+        "/api/tenants/{tenant_id}/change-requests/",
+        { path, query: { scope, page } },
         revision,
         30_000,
     );
@@ -199,6 +198,7 @@ function InboxPage({
                                 ? ` · ${t("formerMember")}`
                                 : ""}
                         </p>
+                        <Triage item={item} />
                         <SubmissionTime value={item.submitted_at} />
                         <button
                             className="button secondary"
@@ -214,8 +214,7 @@ function InboxPage({
                             <RequestDetail
                                 key={item.id}
                                 id={item.id}
-                                base={base}
-                                token={token}
+                                tenantId={tenantId}
                                 onChanged={onChanged}
                             />
                         )}
@@ -248,6 +247,42 @@ function InboxPage({
     );
 }
 
+function Triage({ item }: { item: Summary }) {
+    const t = useTranslations("ChangeRequests");
+    const locale = useLocale();
+    const time = new Intl.DateTimeFormat(locale, {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: item.timezone,
+    });
+    return (
+        <>
+            <p>
+                <time dateTime={item.period_start}>
+                    {time.format(new Date(item.period_start))}
+                </time>{" "}
+                –{" "}
+                {item.period_end ? (
+                    <time dateTime={item.period_end}>
+                        {time.format(new Date(item.period_end))}
+                    </time>
+                ) : (
+                    t("ongoing")
+                )}
+                {item.kind === "production" &&
+                    ` · ${t("intervals", { count: item.item_count })}`}
+            </p>
+            {item.incident_action && (
+                <p>
+                    {t(item.incident_action)}: {item.incident_title}
+                </p>
+            )}
+        </>
+    );
+}
+
 function SubmissionTime({ value }: { value: string }) {
     const t = useTranslations("ChangeRequests");
     const format = useFormatter();
@@ -269,19 +304,22 @@ function SubmissionTime({ value }: { value: string }) {
 
 function RequestDetail({
     id,
-    base,
-    token,
+    tenantId,
     onChanged,
 }: {
     id: number;
-    base: string;
-    token: string;
+    tenantId: number;
     onChanged: (action: Decision) => void;
 }) {
     const t = useTranslations("ChangeRequests");
     const refreshCounters = useChangeRequestUpdates();
     const [revision, setRevision] = useState(0);
-    const resource = useResource<ChangeRequest>(`${base}${id}/`, revision);
+    const path = { tenant_id: tenantId, request_id: id };
+    const resource = useResource(
+        "/api/tenants/{tenant_id}/change-requests/{request_id}/",
+        { path },
+        revision,
+    );
     const [state, setState] = useState<
         { status: "idle" | "pending" } | { status: "error"; message: string }
     >({ status: "idle" });
@@ -294,11 +332,11 @@ function RequestDetail({
     useEffect(() => {
         heading.current?.focus();
     }, []);
-    async function act(action: Decision, body: unknown = {}) {
+    async function act(action: Decision, run: () => Promise<unknown>) {
         if (state.status === "pending") return;
         setState({ status: "pending" });
         try {
-            await request(`${base}${id}/${action}/`, "POST", body, token);
+            await run();
             setState({ status: "idle" });
             setRevision((value) => value + 1);
             onChanged(action);
@@ -387,10 +425,20 @@ function RequestDetail({
                                     !!resource.error
                                 }
                                 onClick={() => {
-                                    void act("approve", {
-                                        review_fingerprint:
-                                            item.review_fingerprint,
-                                    }).catch(() => {});
+                                    const fingerprint = item.review_fingerprint;
+                                    if (fingerprint)
+                                        void act("approve", () =>
+                                            api.post(
+                                                "/api/tenants/{tenant_id}/change-requests/{request_id}/approve/",
+                                                {
+                                                    path,
+                                                    body: {
+                                                        review_fingerprint:
+                                                            fingerprint,
+                                                    },
+                                                },
+                                            ),
+                                        ).catch(() => {});
                                 }}
                             >
                                 {t("approve")}
@@ -404,7 +452,12 @@ function RequestDetail({
                                     ).trim();
                                     if (!reason)
                                         throw new Error(t("rejectReason"));
-                                    await act("reject", { reason });
+                                    await act("reject", () =>
+                                        api.post(
+                                            "/api/tenants/{tenant_id}/change-requests/{request_id}/reject/",
+                                            { path, body: { reason } },
+                                        ),
+                                    );
                                 }}
                             >
                                 <label className="field">
@@ -425,7 +478,12 @@ function RequestDetail({
                                 className="button secondary"
                                 disabled={pending}
                                 onClick={() => {
-                                    void act("withdraw").catch(() => {});
+                                    void act("withdraw", () =>
+                                        api.post(
+                                            "/api/tenants/{tenant_id}/change-requests/{request_id}/withdraw/",
+                                            { path },
+                                        ),
+                                    ).catch(() => {});
                                 }}
                             >
                                 {t("withdraw")}
@@ -437,7 +495,12 @@ function RequestDetail({
                             className="button secondary"
                             disabled={pending}
                             onClick={() => {
-                                void act("seen").catch(() => {});
+                                void act("seen", () =>
+                                    api.post(
+                                        "/api/tenants/{tenant_id}/change-requests/{request_id}/seen/",
+                                        { path },
+                                    ),
+                                ).catch(() => {});
                             }}
                         >
                             {t("markSeen")}

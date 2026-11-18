@@ -374,8 +374,10 @@ test("all translated messages are valid ICU and preserve keys and interpolation 
     const turkish = flatten(messages.tr);
     expect(Object.keys(turkish).sort()).toEqual(Object.keys(english).sort());
     for (const [key, value] of Object.entries(english)) {
-        expect(turkish[key].trim(), key).not.toBe("");
-        expect(argumentsIn(parse(turkish[key])), key).toEqual(
+        const translated = turkish[key];
+        expect(typeof translated, key).toBe("string");
+        expect(translated?.trim(), key).not.toBe("");
+        expect(argumentsIn(parse(translated ?? "")), key).toEqual(
             argumentsIn(parse(value)),
         );
     }

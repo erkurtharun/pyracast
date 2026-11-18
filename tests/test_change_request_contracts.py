@@ -435,23 +435,28 @@ def test_inbox_summaries_name_the_period_item_count_and_outage(
         values={**incident_values(), "starts_at": NOW - timedelta(hours=6)},
     )
     ongoing = save_incident(*case.scope(case.system.member), **incident_values())
-    target = {"incident_id": ongoing.pk, "expected_revision": ongoing.revision}
     updated = submit_incident(
         *case.scope(case.proposer),
         action="update",
         idempotency_key=uuid4(),
         values={**incident_values(), "title": "Inverter replaced"},
-        **target,
+        incident_id=ongoing.pk,
+        expected_revision=ongoing.revision,
     )
     resolved = submit_incident(
         *case.scope(case.proposer),
         action="resolve",
         idempotency_key=uuid4(),
         ends_at=NOW - timedelta(minutes=30),
-        **target,
+        incident_id=ongoing.pk,
+        expected_revision=ongoing.revision,
     )
     cancelled = submit_incident(
-        *case.scope(case.proposer), action="cancel", idempotency_key=uuid4(), **target
+        *case.scope(case.proposer),
+        action="cancel",
+        idempotency_key=uuid4(),
+        incident_id=ongoing.pk,
+        expected_revision=ongoing.revision,
     )
     timezone_name = case.system.region.timezone
     expected = {

@@ -1,4 +1,5 @@
 import { ApiError, errorFromResponse } from "./api/errors";
+import { exchange, type Method } from "./api/lane";
 import { browserErrors } from "@/i18n/browser";
 
 export type AuthData = {
@@ -31,41 +32,30 @@ export type AuthResult<TData = AuthData> = {
 
 export async function authRequest<TData = AuthData>(
     path: string,
-    method: string,
-    token: string,
+    method: Method,
     body?: unknown,
 ): Promise<AuthResult<TData>> {
     const t = browserErrors();
-    const response = await fetch(`/api/auth/browser/v1/${path}`, {
+    const { status, ok, data } = await exchange({
         method,
-        credentials: "same-origin",
-        cache: "no-store",
-        headers: {
-            "X-CSRFToken": token,
-            ...(body === undefined
-                ? {}
-                : { "Content-Type": "application/json" }),
-        },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        url: `/api/auth/browser/v1/${path}`,
+        body,
     });
-    const data: unknown = await response.json().catch(() => null);
     if (!data || typeof data !== "object" || Array.isArray(data))
         throw new ApiError(
-            response.ok
-                ? t("invalidResponse")
-                : t("request", { status: response.status }),
-            { status: response.status },
+            ok ? t("invalidResponse") : t("request", { status }),
+            { status },
         );
     // A 401 carries allauth's flows and the 404 means no authenticator yet: callers read both.
     if (
-        !response.ok &&
-        response.status !== 401 &&
+        !ok &&
+        status !== 401 &&
         !(
-            response.status === 404 &&
+            status === 404 &&
             method === "GET" &&
             path === "account/authenticators/totp"
         )
     )
-        throw errorFromResponse(response.status, data);
+        throw errorFromResponse(status, data);
     return data as AuthResult<TData>;
 }

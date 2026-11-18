@@ -2,16 +2,11 @@
 
 import { useId, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { request, type Session } from "@/lib/api";
+import { api } from "@/lib/api/client";
+import { adoptSession } from "@/lib/session-client";
 import { isLanguage } from "@/i18n/language";
 
-export function LanguageSelect({
-    session,
-    onSession,
-}: {
-    session: Session;
-    onSession: (session: Session) => void;
-}) {
+export function LanguageSelect() {
     const t = useTranslations("Language");
     const locale = useLocale();
     const id = useId();
@@ -47,13 +42,11 @@ export function LanguageSelect({
                         if (!isLanguage(language)) return;
                         setState({ status: "saving" });
                         try {
-                            const updated = await request<Session>(
-                                "/api/session/language/",
-                                "POST",
-                                { language },
-                                session.csrf_token,
+                            adoptSession(
+                                await api.post("/api/session/language/", {
+                                    body: { language },
+                                }),
                             );
-                            onSession(updated);
                             setState({ status: "idle" });
                         } catch {
                             setState({ status: "error" });

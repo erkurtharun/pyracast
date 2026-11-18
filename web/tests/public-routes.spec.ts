@@ -26,10 +26,10 @@ test("slash-less public paths redirect permanently", async ({ request }) => {
         ["/tr", "/tr/"],
         ["/privacy", "/privacy/"],
         ["/tr/terms?ref=mail", "/tr/terms/?ref=mail"],
-    ]) {
+    ] as const) {
         const response = await request.get(path, { maxRedirects: 0 });
         expect(response.status()).toBe(308);
-        const location = new URL(response.headers().location, "http://x");
+        const location = new URL(response.headers().location ?? "", "http://x");
         expect(`${location.pathname}${location.search}`).toBe(target);
     }
 });

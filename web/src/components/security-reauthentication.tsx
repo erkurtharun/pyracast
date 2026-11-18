@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
-import { request, type Session } from "@/lib/api";
+import { loadSession } from "@/lib/session-client";
 import { ApiError } from "@/lib/api/errors";
 import { authRequest, type AuthResult } from "@/lib/auth-api";
 
@@ -22,18 +22,15 @@ export function getReauthMode(
 }
 
 export async function refreshExpiredSession(
-    onSession: (session: Session) => void,
     expiredMessage: string,
 ): Promise<never> {
-    onSession(await request<Session>("/api/session/"));
+    await loadSession();
     throw new ApiError(expiredMessage, { status: 401 });
 }
 
 export function ReauthenticationForm({
     mode,
     email,
-    token,
-    onSession,
     onVerified,
     onCancel,
     disabled = false,
@@ -43,8 +40,6 @@ export function ReauthenticationForm({
 }: {
     mode: ReauthMode;
     email?: string;
-    token: string;
-    onSession: (session: Session) => void;
     onVerified: () => Promise<void> | void;
     onCancel?: () => void;
     disabled?: boolean;
@@ -99,11 +94,10 @@ export function ReauthenticationForm({
                 const sent = await authRequest(
                     "auth/reauthenticate/code/request",
                     "POST",
-                    token,
                     { email },
                 );
                 if (sent.status === 401 && !sent.meta?.is_authenticated)
-                    await refreshExpiredSession(onSession, t("sessionExpired"));
+                    await refreshExpiredSession(t("sessionExpired"));
                 if (sent.status !== 200)
                     throw new ApiError(t("reauthStillRequired"));
                 if (mountedRef.current) setCodeSent(true);
@@ -116,7 +110,6 @@ export function ReauthenticationForm({
                       ? "auth/reauthenticate/code/confirm"
                       : "auth/reauthenticate",
                 "POST",
-                token,
                 mode !== "password"
                     ? { code: payloadValue }
                     : { password: payloadValue },
@@ -124,7 +117,7 @@ export function ReauthenticationForm({
 
             if (result.status === 401) {
                 if (!result.meta?.is_authenticated) {
-                    await refreshExpiredSession(onSession, t("sessionExpired"));
+                    await refreshExpiredSession(t("sessionExpired"));
                 }
                 throw new ApiError(
                     result.errors?.map((item) => item.message).join(" ") ||
