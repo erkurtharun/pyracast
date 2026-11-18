@@ -466,9 +466,7 @@ def test_windows_tests_run_in_four_shards_that_the_verify_job_combines() -> None
         f"Windows tests ({index}/{count})" for index in indexes
     }
     assert f"--shard ${{{{ env.TEST_SHARD }}}}/{count} " in partition
-    assert re.findall(r"windows-shard-\$\{\{ github\.run_attempt \}\}-(\d+)\"", combine) == [
-        str(index) for index in indexes
-    ]
+    assert re.findall(r"windows-shards/(\d+)\"", combine) == [str(index) for index in indexes]
     assert jobs["verify_windows"]["needs"] == "verify_windows_shards"
 
 

@@ -99,7 +99,7 @@ def write_shard(root: Path, index: int, nodes: list[str]) -> Path:
 
 
 @pytest.mark.parametrize(
-    "defect", ["missing", "duplicate", "overlap", "inventory", "identity", "coverage"]
+    "defect", ["missing", "duplicate", "overlap", "inventory", "identity", "run", "coverage"]
 )
 def test_aggregate_rejects_incomplete_or_unrelated_shards(tmp_path: Path, defect: str) -> None:
     nodes = ["tests/a.py::test_first", "tests/b.py::test_second"]
@@ -115,12 +115,28 @@ def test_aggregate_rejects_incomplete_or_unrelated_shards(tmp_path: Path, defect
         manifest["collected"] = ["tests/c.py::test_unexpected"]
     elif defect == "identity":
         manifest["identity"] = {**run_identity(), "sha": "another-commit"}
+    elif defect == "run":
+        manifest["identity"] = {**run_identity(), "run_id": "another-run"}
     else:
         (outputs[1] / "coverage.dat").unlink()
     if defect not in {"missing", "duplicate"}:
         (outputs[1] / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(ValueError, match=r"shard|inventory"):
         validate_shards(outputs)
+
+
+def test_shards_from_different_attempts_of_one_run_combine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    nodes = ["tests/a.py::test_first", "tests/b.py::test_second"]
+    monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+    monkeypatch.setenv("GITHUB_RUN_ID", "7001")
+    outputs = []
+    for index, attempt in ((1, "1"), (2, "2")):
+        monkeypatch.setenv("GITHUB_RUN_ATTEMPT", attempt)
+        outputs.append(write_shard(tmp_path, index, nodes))
+
+    assert validate_shards(outputs) == [output / "coverage.dat" for output in outputs]
 
 
 def test_workers_with_different_collections_cannot_publish_a_manifest(tmp_path: Path) -> None:

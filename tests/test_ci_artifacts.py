@@ -1,0 +1,172 @@
+import re
+from typing import Any
+
+from deploy import release_authorization
+from tests.support.workflows import WORKFLOWS, ci_jobs, release_jobs, step, workflow
+
+UPLOAD = "actions/upload-artifact@"
+DOWNLOAD = "actions/download-artifact@"
+REPORTS = ("pytest-results-", "playwright-results-")
+GUARD = "Require the artifacts the producing jobs uploaded"
+NEEDS_OUTPUT = re.compile(r"\$\{\{ needs\.(?P<job>[\w-]+)\.outputs\.(?P<key>[\w-]+) \}\}")
+ENV = re.compile(r"\$\{\{ env\.(?P<name>\w+) \}\}")
+UPLOADED_ID = re.compile(r"steps\.(?P<step>[\w-]+)\.outputs\.artifact-id")
+SHA = "a" * 40
+
+
+def uses(candidate: dict[str, Any], action: str) -> bool:
+    return str(candidate.get("uses", "")).startswith(action)
+
+
+def uploads() -> list[tuple[str, str, dict[str, Any]]]:
+    return [
+        (path.name, identifier, candidate)
+        for path in sorted(WORKFLOWS.glob("*.yml"))
+        for identifier, job in workflow(path.name)["jobs"].items()
+        for candidate in job["steps"]
+        if uses(candidate, UPLOAD)
+    ]
+
+
+def downloads(job: dict[str, Any]) -> list[dict[str, Any]]:
+    return [candidate for candidate in job["steps"] if uses(candidate, DOWNLOAD)]
+
+
+def needed(job: dict[str, Any]) -> list[str]:
+    value = job.get("needs", [])
+    return [value] if isinstance(value, str) else list(value)
+
+
+def artifact_references(job: dict[str, Any], download: dict[str, Any]) -> list[str]:
+    match = ENV.fullmatch(str(download["with"].get("artifact-ids", "")))
+    return str(job.get("env", {}).get(match["name"], "")).split(",") if match else []
+
+
+def uploaded_by(producer: dict[str, Any], key: str) -> dict[str, Any]:
+    (identifier,) = [match["step"] for match in UPLOADED_ID.finditer(producer["outputs"][key])]
+    (upload,) = [candidate for candidate in producer["steps"] if candidate.get("id") == identifier]
+    assert uses(upload, UPLOAD)
+    return upload
+
+
+def outputs_read_by_downloads() -> set[tuple[str, str]]:
+    read: set[tuple[str, str]] = set()
+    for job in ci_jobs().values():
+        for download in downloads(job):
+            for reference in artifact_references(job, download):
+                if match := NEEDS_OUTPUT.fullmatch(reference):
+                    read.add((match["job"], match["key"]))
+    return read
+
+
+def test_every_uploaded_artifact_has_a_consumer_or_is_a_report() -> None:
+    read = outputs_read_by_downloads()
+
+    for source, identifier, upload in uploads():
+        name = upload["with"]["name"]
+        if name.startswith(REPORTS):
+            assert "id" not in upload, name
+        elif name.startswith("release-images-"):
+            assert (source, identifier) == ("ci.yml", "deployment")
+        else:
+            outputs = workflow(source)["jobs"][identifier].get("outputs", {})
+            keys = {
+                key
+                for key, value in outputs.items()
+                if f"steps.{upload.get('id')}.outputs.artifact-id" in value
+            }
+            assert keys, name
+            assert {(identifier, key) for key in keys} <= read, name
+
+
+def test_every_ci_download_reads_the_artifact_ids_its_producers_uploaded() -> None:
+    jobs = ci_jobs()
+    consumers = {identifier: job for identifier, job in jobs.items() if downloads(job)}
+
+    assert set(consumers) == {"sonar", "verify_windows"}
+    for identifier, job in consumers.items():
+        for download in downloads(job):
+            options = download["with"]
+            assert set(options) - {"path", "merge-multiple"} == {
+                "artifact-ids",
+                "github-token",
+                "run-id",
+                "digest-mismatch",
+            }, identifier
+            assert options["github-token"] == "${{ github.token }}"
+            assert options["run-id"] == "${{ github.run_id }}"
+            assert options["digest-mismatch"] == "error"
+            variable = ENV.fullmatch(options["artifact-ids"])
+            assert variable, identifier
+            references = artifact_references(job, download)
+            for reference in references:
+                match = NEEDS_OUTPUT.fullmatch(reference)
+                assert match, reference
+                assert match["job"] in needed(job), reference
+                uploaded_by(jobs[match["job"]], match["key"])
+            more = f"(,[0-9]+){{{len(references) - 1}}}" if len(references) > 1 else ""
+            guard = step(job, GUARD)
+            assert f"[[ ${variable['name']} =~ ^[0-9]+{more}$ ]]" in guard["run"].splitlines()
+            assert job["steps"].index(guard) < job["steps"].index(download)
+        assert job.get("permissions") == {"contents": "read", "actions": "read"}, identifier
+
+
+def test_no_consumer_derives_an_artifact_from_the_run_attempt() -> None:
+    for identifier, job in ci_jobs().items():
+        if downloads(job):
+            assert "github.run_attempt" not in str(job), identifier
+
+
+def test_each_windows_shard_exposes_its_own_artifact_to_the_combine() -> None:
+    jobs = ci_jobs()
+    shards = jobs["verify_windows_shards"]
+    indexes = shards["strategy"]["matrix"]["shard"]
+    upload = step(shards, "Upload Windows coverage and test inventory")
+    partition = step(shards, "Run a complete Windows test partition")["run"]
+    uploaded = f"steps.{upload.get('id')}.outputs.artifact-id"
+    combine = jobs["verify_windows"]
+    (download,) = downloads(combine)
+
+    assert shards.get("outputs") == {
+        f"shard-{index}": f"${{{{ matrix.shard == {index} && {uploaded} || '' }}}}"
+        for index in indexes
+    }
+    assert '--shard-output "${{ runner.temp }}/windows-shards/${{ env.TEST_SHARD }}"' in partition
+    assert upload["with"]["path"] == "${{ runner.temp }}/windows-shards/"
+    assert download["with"].get("path") == "${{ runner.temp }}/windows-shards"
+    assert download["with"].get("merge-multiple") is True
+    assert artifact_references(combine, download) == [
+        f"${{{{ needs.verify_windows_shards.outputs.shard-{index} }}}}" for index in indexes
+    ]
+
+
+def test_the_release_reads_the_attempt_from_the_image_artifact_name_ci_uploads() -> None:
+    (upload,) = [candidate for candidate in uploads() if candidate[1] == "deployment"]
+    name = (
+        upload[2]["with"]["name"]
+        .replace("${{ github.sha }}", SHA)
+        .replace("${{ github.run_attempt }}", "3")
+    )
+    match = release_authorization.IMAGE_ARTIFACT.fullmatch(name)
+
+    assert match
+    assert (match["sha"], match["attempt"]) == (SHA, "3")
+
+
+def test_the_release_downloads_and_verifies_the_images_its_authorization_selected() -> None:
+    jobs = release_jobs()
+
+    for identifier in ("scan", "deploy"):
+        (download,) = downloads(jobs[identifier])
+        (verify,) = [
+            candidate
+            for candidate in jobs[identifier]["steps"]
+            if "deploy/ci_images.py verify" in candidate.get("run", "")
+        ]
+        assert download["with"]["artifact-ids"] == "${{ needs.authorize.outputs.artifact_id }}"
+        assert download["with"]["run-id"] == "${{ needs.authorize.outputs.ci_run_id }}"
+        assert verify["env"] == {
+            "CI_RUN_ID": "${{ needs.authorize.outputs.ci_run_id }}",
+            "CI_RUN_ATTEMPT": "${{ needs.authorize.outputs.ci_run_attempt }}",
+        }
+        assert "github.run_attempt" not in str(jobs[identifier])
