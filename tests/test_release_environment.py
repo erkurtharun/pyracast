@@ -1,8 +1,13 @@
+import datetime
 import json
 from pathlib import Path
 from typing import Any
 
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import NameOID
 
 from deploy import release_environment
 
@@ -16,6 +21,39 @@ SECRETS = "/run/pyracast/releases/abc-123"
 AUTHORITY = (Path(__file__).resolve().parents[1] / "deploy" / "origin-pull-off.pem").read_text(
     encoding="utf-8"
 )
+KEY = (
+    ec.generate_private_key(ec.SECP256R1())
+    .private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    )
+    .decode()
+)
+LINES = AUTHORITY.splitlines()
+TRUNCATED = "\n".join([*LINES[: len(LINES) // 2], LINES[-1]]) + "\n"
+
+
+def envelope(body: str) -> str:
+    return f"-----BEGIN CERTIFICATE-----\n{body}\n-----END CERTIFICATE-----\n"
+
+
+def issued_authority() -> str:
+    now = datetime.datetime.now(datetime.UTC)
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Pyracast edge authority")])
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(minutes=1))
+        .not_valid_after(now + datetime.timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    return certificate.public_bytes(serialization.Encoding.PEM).decode()
 
 
 def config(**changes: Any) -> dict[str, Any]:
@@ -65,6 +103,35 @@ def test_a_host_that_names_its_origin_pull_authority_requires_the_edge_certifica
     assert values["ORIGIN_PULL"] == "required"
     assert values["ORIGIN_PULL_CA"] == stored.as_posix()
     assert stored.read_text(encoding="utf-8") == authority.strip() + "\n"
+
+
+def test_an_issued_edge_authority_loads_as_an_x509_certificate(tmp_path: Path) -> None:
+    authority = issued_authority()
+
+    values = release_environment.render(config(origin_pull_ca=authority), SECRETS, IMAGES, tmp_path)
+
+    assert values["ORIGIN_PULL"] == "required"
+    assert (tmp_path / release_environment.ORIGIN_PULL_CA).read_text(encoding="utf-8") == authority
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(envelope("AAAA"), id="pem-envelope-around-bytes-that-are-not-a-certificate"),
+        pytest.param(TRUNCATED, id="truncated-certificate"),
+        pytest.param(KEY.replace("PRIVATE KEY", "CERTIFICATE"), id="private-key-as-certificate"),
+        pytest.param(KEY, id="private-key"),
+        pytest.param(AUTHORITY + envelope("AAAA"), id="certificate-then-non-certificate"),
+        pytest.param(envelope(""), id="empty-certificate"),
+        pytest.param("\n", id="empty-bundle"),
+    ],
+)
+def test_an_origin_pull_authority_that_does_not_load_as_x509_certificates_is_refused(
+    tmp_path: Path, value: str
+) -> None:
+    with pytest.raises(ValueError, match="origin_pull_ca"):
+        release_environment.render(config(origin_pull_ca=value), SECRETS, IMAGES, tmp_path)
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.parametrize(
