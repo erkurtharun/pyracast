@@ -20,7 +20,7 @@ from pyracast.forecasts.models import (
     HistoricalReferenceImport,
 )
 from pyracast.regions.models import Region
-from tests.support.domain import System
+from tests.support.domain import NOW, System
 from tests.support.historical_reference_import import archive, power_file, system_for_import
 from tests.support.plant_operations import half_hours
 
@@ -331,6 +331,13 @@ def binding_after_second_reset(system: System) -> SiteBinding:
     )
     Region.objects.filter(pk=region.pk).update(
         revision=fresh.region_revision, approved_binding=fresh
+    )
+    CollectionJob.objects.create(
+        binding=fresh,
+        endpoint="forecasts",
+        scheduled_slot=NOW,
+        target_date=NOW.astimezone(ZoneInfo(ZONE)).date() + timedelta(days=1),
+        available_at=NOW,
     )
     return fresh
 

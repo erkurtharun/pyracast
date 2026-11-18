@@ -21,13 +21,20 @@ from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.actuals import select_archived_actual_source
 from pyracast.forecasts.coverage import intervals_cover_day
 from pyracast.forecasts.intraday import native_actual_snapshots
+from pyracast.forecasts.jobs import claim
 from pyracast.forecasts.models import (
     CollectionJob,
+    CollectionSchedule,
     ForecastResult,
     ForecastSnapshot,
     RequestAttempt,
 )
+from pyracast.forecasts.scheduler import enqueue_due
 from pyracast.forecasts.snapshot_restore import RestoreSummary, restore_provider_snapshots
+from pyracast.notifications import scheduler as notification_scheduler
+from pyracast.notifications.models import NotificationDelivery
+from pyracast.notifications.operations import configure_reminders
+from pyracast.notifications.preparation import prepare_delivery
 from pyracast.plants.models import ForecastIssuance
 from pyracast.plants.operations import create_plant
 from pyracast.regions.models import Region
@@ -72,6 +79,16 @@ def restore(system: System, content: bytes, *, dry_run: bool = False) -> Restore
 
 def outcomes(summary: RestoreSummary) -> dict[str, dict[str, int]]:
     return {item.endpoint: dict(item.outcomes) for item in summary.endpoints}
+
+
+def collection_clocks(system: System, *times: str) -> None:
+    """Clocks configured a week before the binding's approval at NOW (16:00 local)."""
+    CollectionSchedule.objects.create(
+        region=system.region,
+        enabled=True,
+        times=list(times),
+        effective_from=NOW - timedelta(days=7),
+    )
 
 
 def restored_copy(binding: SiteBinding, original: ForecastSnapshot) -> ForecastSnapshot:
@@ -237,6 +254,92 @@ def test_restored_actuals_are_admitted_at_their_slot_as_the_exported_ones(
         (before.nights[0], True),
         (before.nights[2], True),
     ]
+
+
+def test_the_approval_acquisition_still_runs_after_older_forecasts_are_restored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = restore_system(monkeypatch)
+    approval = CollectionJob.objects.get(binding=system.binding)
+    collection_clocks(system, "08:00", "10:00")
+    restore(system, collections_before_reset(system).content)
+
+    lease = claim(approval.pk, NOW)
+
+    approval.refresh_from_db()
+    assert lease is not None
+    assert (approval.status, approval.last_error) == ("running", "")
+
+
+def test_the_scheduler_backfills_no_slot_before_approval_after_a_restore(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = restore_system(monkeypatch)
+    collection_clocks(system, "08:00", "10:00")
+    restore(system, collections_before_reset(system).content)
+    jobs = CollectionJob.objects.count()
+
+    assert enqueue_due(NOW + timedelta(minutes=30)) == []
+    assert CollectionJob.objects.count() == jobs
+
+
+def test_a_reminder_before_approval_does_not_wait_for_a_collection_after_a_restore(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = restore_system(monkeypatch)
+    collection_clocks(system, "15:50")
+    restore(system, collections_before_reset(system).content)
+    configure_reminders(
+        system.member,
+        system.tenant.pk,
+        system.region.pk,
+        language="en",
+        enabled=True,
+        recipients=["owner@example.com"],
+        times=["15:50"],
+        now=NOW - timedelta(days=7),
+    )
+    notification_scheduler.enqueue_due(NOW + timedelta(seconds=30))
+    delivery = NotificationDelivery.objects.get(
+        schedule__region=system.region, scheduled_for=local(date(2026, 11, 9), 15, 50)
+    )
+    assert delivery.preparation_deadline > NOW + timedelta(minutes=1)
+
+    assert prepare_delivery(delivery, NOW + timedelta(minutes=1))
+    assert delivery.prepared_message is not None
+
+
+def test_a_collection_not_before_the_approval_collection_refuses_the_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = restore_system(monkeypatch)
+    before = collections_before_reset(system)
+    rows = export_rows(before.content)
+    line = next(number for number, row in enumerate(rows, 1) if row["id"] == before.lookback.pk)
+    rows[line - 1].update(collected_at=NOW.isoformat())
+    rows[line - 1]["job"].update(scheduled_slot=NOW.isoformat())
+
+    with pytest.raises(ValidationError) as refused:
+        restore(system, encode_rows(rows))
+
+    assert refused.value.messages == [
+        f"Export line {line} is not before the binding's approval collection: job.scheduled_slot."
+    ]
+    assert restored_count(system) == 0
+
+
+def test_a_binding_without_its_approval_collection_refuses_the_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = restore_system(monkeypatch)
+    before = collections_before_reset(system)
+    CollectionJob.objects.filter(binding=system.binding).delete()
+
+    with pytest.raises(ValidationError) as refused:
+        restore(system, before.content)
+
+    assert refused.value.messages == ["The binding holds no approval collection."]
+    assert restored_count(system) == 0
 
 
 def test_a_second_run_with_the_same_export_adds_nothing_and_says_so(
