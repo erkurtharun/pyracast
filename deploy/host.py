@@ -9,6 +9,7 @@ CURRENT_RELEASE = Path("/opt/pyracast/current")
 RELEASE_BLOCKED = Path("/var/lib/pyracast/release-blocked")
 RELEASE_LOCK = Path("/run/lock/pyracast-release.lock")
 LAST_BACKUP = Path("/var/lib/pyracast/last-backup.json")
+PRERELEASE_RECORD = "prerelease-backup.json"
 # Covers the hourly timer, its 300 s randomized delay and the backup's 600 s lock wait.
 BACKUP_MAX_AGE_SECONDS = 90 * 60
 

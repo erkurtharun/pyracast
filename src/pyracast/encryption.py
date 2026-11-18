@@ -9,7 +9,12 @@ from django.views.decorators.debug import sensitive_variables
 
 
 @sensitive_variables()
-def secret_cipher(context: bytes) -> MultiFernet:
+def secret_cipher(context: bytes, *, primary_only: bool = False) -> MultiFernet:
+    keys = (
+        (settings.SECRET_KEY,)
+        if primary_only
+        else (settings.SECRET_KEY, *settings.SECRET_KEY_FALLBACKS)
+    )
     return MultiFernet(
         [
             Fernet(
@@ -19,6 +24,6 @@ def secret_cipher(context: bytes) -> MultiFernet:
                     )
                 )
             )
-            for key in (settings.SECRET_KEY, *settings.SECRET_KEY_FALLBACKS)
+            for key in keys
         ]
     )

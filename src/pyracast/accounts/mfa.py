@@ -24,9 +24,15 @@ class MFAAdapter(DefaultMFAAdapter):
 
     @sensitive_variables()
     def decrypt(self, encrypted_text: str) -> str:
-        if not encrypted_text.startswith(PREFIX):
-            raise PermissionDenied("Authenticator could not be verified.")
-        try:
-            return secret_cipher(KEY_CONTEXT).decrypt(encrypted_text[len(PREFIX) :]).decode()
-        except InvalidToken, ValueError:
-            raise PermissionDenied("Authenticator could not be verified.") from None
+        return decrypt_payload(encrypted_text)
+
+
+@sensitive_variables()
+def decrypt_payload(encrypted_text: str, *, primary_only: bool = False) -> str:
+    if not encrypted_text.startswith(PREFIX):
+        raise PermissionDenied("Authenticator could not be verified.")
+    cipher = secret_cipher(KEY_CONTEXT, primary_only=primary_only)
+    try:
+        return cipher.decrypt(encrypted_text[len(PREFIX) :]).decode()
+    except InvalidToken, ValueError:
+        raise PermissionDenied("Authenticator could not be verified.") from None

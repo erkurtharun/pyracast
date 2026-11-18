@@ -16,6 +16,7 @@ import pytest
         "pin_release_images.py",
         "release_record.py",
         "release_scope.py",
+        "release_state.py",
         "reset_database.py",
         "runtime_secrets.py",
         "watchdog.py",
@@ -40,4 +41,26 @@ def test_smoke_helpers_run_without_application_dependencies_or_project_working_d
         check=True,
     )
     assert "usage:" in result.stdout
+    assert result.stderr == ""
+
+
+def test_the_installers_recovery_reader_runs_as_a_host_script(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[1]
+    config = tmp_path / "host.json"
+    config.write_text('{"backup_bucket": "pyracast-backups", "runtime_secret_version": "1"}')
+    result = subprocess.run(  # noqa: S603 -- The interpreter and helper path are repository controlled.
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            str(root / "deploy/release_record.py"),
+            str(config),
+            "recovery",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "in this maintenance" in result.stdout
     assert result.stderr == ""

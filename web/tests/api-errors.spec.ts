@@ -73,6 +73,23 @@ test("retry hints and request references are kept", () => {
     );
 });
 
+test("the gateway's maintenance notice is a coded error with its retry delay", () => {
+    const error = errorFromResponse(
+        503,
+        errorBody(
+            "maintenance",
+            "Pyracast is being updated. Try again in a minute; your data is safe.",
+            { retry_after: 60 },
+        ),
+    );
+    expect(error.code).toBe("maintenance");
+    expect(error.message).toBe(
+        "Pyracast is being updated. Try again in a minute; your data is safe.",
+    );
+    expect(error.retryAfter).toBe(60);
+    expect(error.status).toBe(503);
+});
+
 for (const [name, body] of [
     ["an empty body", null],
     ["a gateway page", "<html>Bad gateway</html>"],

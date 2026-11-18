@@ -101,10 +101,44 @@ mkdir -p "$temporary/deploy"
 "${compose[@]}" config > "$temporary/deploy/compose.yaml"
 : > "$temporary/deploy/release.env"
 cp "$root/deploy/bootstrap.sql" "$temporary/deploy/bootstrap.sql"
-uv run --no-project --python 3.15.2 python "$root/deploy/bootstrap_database.py" "$temporary" --environment-directory "$temporary"
-# Bootstrap must also succeed on an initialized database.
-uv run --no-project --python 3.15.2 python "$root/deploy/bootstrap_database.py" "$temporary" --environment-directory "$temporary"
+bootstrap=(uv run --no-project --python 3.15.2 python "$root/deploy/bootstrap_database.py")
+"${bootstrap[@]}" converge "$temporary" "$temporary"
+"${bootstrap[@]}" converge "$temporary" "$temporary"
+"${bootstrap[@]}" switch-runtime "$temporary" "$temporary"
+runtime_connects() {
+  "${compose[@]}" run --rm --no-deps api python -c \
+    'import django; django.setup(); from django.db import connection; connection.ensure_connection()'
+}
+runtime_connects
+# Password changes log nothing even while the server logs, samples and parses every statement.
+superuser=("${compose[@]}" exec -T postgres psql -X -v ON_ERROR_STOP=1 -U postgres -d pyracast)
+logging=(log_statement log_min_duration_statement log_transaction_sample_rate debug_print_parse)
+"${superuser[@]}" -c "ALTER SYSTEM SET log_statement = 'all'" \
+  -c 'ALTER SYSTEM SET log_min_duration_statement = 0' \
+  -c 'ALTER SYSTEM SET log_transaction_sample_rate = 1' \
+  -c 'ALTER SYSTEM SET debug_print_parse = on' -c 'SELECT pg_reload_conf()'
+for attempt in {1..10}; do
+  if [[ $("${superuser[@]}" -Atc 'SHOW log_statement') == all ]]; then break; fi
+  (( attempt < 10 )) && sleep 1
+done
+"${superuser[@]}" -Atc "SELECT 'smoke-logged-probe'"
+mkdir "$temporary/rotated"
+printf 'PGUSER=pyracast_app\nPGPASSWORD=smoke-rotated\n' > "$temporary/rotated/runtime.env"
+printf 'PGUSER=pyracast_owner\nPGPASSWORD=smoke-owner-rotated\n' > "$temporary/rotated/migration.env"
+"${bootstrap[@]}" converge "$temporary" "$temporary/rotated"
+"${bootstrap[@]}" converge "$temporary" "$temporary"
+"${bootstrap[@]}" switch-runtime "$temporary" "$temporary/rotated"
+if runtime_connects; then exit 1; fi
+"${bootstrap[@]}" switch-runtime "$temporary" "$temporary"
+for name in "${logging[@]}"; do "${superuser[@]}" -c "ALTER SYSTEM RESET $name"; done
+"${superuser[@]}" -c 'SELECT pg_reload_conf()'
+runtime_connects
+database_log=$("${compose[@]}" logs --no-log-prefix postgres)
+[[ $database_log == *smoke-logged-probe* ]]
+[[ $database_log != *SCRAM-SHA-256* && $database_log != *smoke-rotated* ]]
+[[ $database_log != *smoke-owner-rotated* && $database_log != *'ALTER ROLE pyracast_'* ]]
 "${compose[@]}" run --rm --no-deps migrate
+"${bootstrap[@]}" converge "$temporary" "$temporary"
 "${compose[@]}" run --rm --no-deps migrate pyracast check --deploy --fail-level WARNING
 "${compose[@]}" up -d --wait --wait-timeout 180
 # The ephemeral CA has no revocation service; Schannel still verifies its chain and hostname.
@@ -193,6 +227,7 @@ with translation.override("tr"):
 import os
 import time
 import django
+import psycopg
 django.setup()
 from allauth.account.models import EmailAddress
 from django.contrib.auth.models import User
@@ -215,6 +250,20 @@ except ProgrammingError:
     pass
 else:
     raise SystemExit('Runtime role unexpectedly owns DDL permission')
+try:
+    with connection.cursor() as cursor:
+        cursor.execute("INSERT INTO django_migrations (app, name, applied) VALUES ('smoke', 'smoke', now())")
+except ProgrammingError as error:
+    assert getattr(error.__cause__, 'sqlstate', None) == '42501', error
+else:
+    raise SystemExit('Runtime role can write the migration ledger')
+try:
+    psycopg.connect(host='postgres', dbname='pyracast', user='postgres',
+                    password='smoke-bootstrap-only', connect_timeout=5).close()
+except psycopg.OperationalError as error:
+    assert 'no pg_hba.conf entry' in str(error), error
+else:
+    raise SystemExit('The PostgreSQL superuser can sign in over TCP')
 actor = User.objects.create_superuser(username='container-smoke', email='smoke@example.com',
                                       password='container-smoke-password')
 EmailAddress.objects.create(user=actor, email=actor.email, primary=True, verified=True)
@@ -328,12 +377,20 @@ raise SystemExit(reset_database.main([str(temporary / 'host.json'), *sys.argv[3:
 PY
 reset_tool=(uv run --no-project --python 3.15.2 python "$temporary/reset_tool.py" "$root" "$temporary")
 application_running() {
-  "${compose[@]}" ps --services --status running gateway api web dispatcher worker notifications
+  "${compose[@]}" ps --services --status running api web dispatcher worker notifications
 }
 ready() { [[ $("${secure_curl[@]}" https://localhost:18443/health/ready/) == ok ]]; }
 "${reset_tool[@]}" prepare
 test -f "$temporary/release-blocked"
 [[ -z $(application_running) ]]
+[[ $("${tls_curl[@]}" -H 'Accept: text/html' --dump-header "$temporary/notice.headers" \
+  --output "$temporary/notice.html" --write-out '%{http_code}' https://localhost:18443/app/) == 503 ]]
+grep -qi '^retry-after: 60' "$temporary/notice.headers"
+grep -qF '<title>Pyracast maintenance</title>' "$temporary/notice.html"
+[[ $("${tls_curl[@]}" -H 'Accept-Language: en' --output "$temporary/notice.json" \
+  --write-out '%{http_code}' https://localhost:18443/api/session/) == 503 ]]
+[[ $(<"$temporary/notice.json") == '{"code": "maintenance", "message": "Pyracast is being updated. Try again in a minute; your data is safe.", "retry_after": 60}' ]]
+[[ $("${tls_curl[@]}" -H 'Accept-Language: tr' https://localhost:18443/api/session/) == *'"message": "Pyracast g\u00fcncelleniyor.'* ]]
 "${reset_tool[@]}" abort
 test ! -e "$temporary/release-blocked"
 ready
@@ -377,7 +434,7 @@ PY
 # A release that fails after maintenance began leaves the application stopped; restore recovers it.
 "${compose[@]}" stop -t 660 dispatcher
 "${compose[@]}" stop -t 660 worker notifications
-"${compose[@]}" stop -t 100 gateway api web
+"${compose[@]}" stop -t 100 api web
 "${reset_tool[@]}" restore --confirm "$object"
 test ! -e "$temporary/release-blocked"
 ready
@@ -401,4 +458,4 @@ except ProgrammingError:
 else:
     raise SystemExit('Runtime role unexpectedly owns DDL permission after the restore')
 PY
-echo 'Production containers, TLS routing, static assets, Turkish catalogs, session and sign-in API, workspace app shell, database roles, fixture queue publication, graceful idle shutdown, and database reset and restore passed.'
+echo 'Production containers, TLS routing, static assets, Turkish catalogs, session and sign-in API, workspace app shell, database roles and access rules, fixture queue publication, graceful idle shutdown, the maintenance notice, and database reset and restore passed.'

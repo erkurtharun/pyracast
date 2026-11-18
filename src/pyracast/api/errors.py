@@ -157,7 +157,8 @@ def _provider(error: QuotaExceededError | ProviderError) -> ApiError:
         )
     if isinstance(error, QuotaExceededError):
         return coded(ErrorCode.QUOTA_EXHAUSTED, 429)
-    return coded(ErrorCode.PROVIDER_UNAVAILABLE, 502)
+    # 502 belongs to the gateway: it means the application is unreachable (maintenance).
+    return coded(ErrorCode.PROVIDER_UNAVAILABLE, 503)
 
 
 def _database(error: DatabaseError, request: HttpRequest | None, view: str) -> ApiError | None:

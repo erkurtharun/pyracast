@@ -38,6 +38,7 @@ class ErrorCode(models.TextChoices):
     DATABASE_CONFLICT = "database_conflict"
     REQUEST_TIMEOUT = "request_timeout"
     PROVIDER_AUTHENTICATION_FAILED = "provider_authentication_failed"
+    MAINTENANCE = "maintenance"
     FORECAST_SOURCES_CHANGED = "forecast_sources_changed"
     CONFIGURATION_UNAVAILABLE = "configuration_unavailable"
     LOCATION_ALREADY_HAS_PLANT = "location_already_has_plant"
@@ -110,6 +111,9 @@ MESSAGES: Mapping[ErrorCode, StrPromise] = {
     ErrorCode.REQUEST_TIMEOUT: _("The request took too long. Try again later."),
     ErrorCode.PROVIDER_AUTHENTICATION_FAILED: _(
         "The forecast provider rejected the stored credentials. Contact your administrator."
+    ),
+    ErrorCode.MAINTENANCE: _(
+        "Pyracast is being updated. Try again in a minute; your data is safe."
     ),
     ErrorCode.FORECAST_SOURCES_CHANGED: _("The forecast sources changed while loading. Try again."),
     ErrorCode.CONFIGURATION_UNAVAILABLE: _(

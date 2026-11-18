@@ -1164,6 +1164,7 @@ export interface components {
          *     * `database_conflict` - Database Conflict
          *     * `request_timeout` - Request Timeout
          *     * `provider_authentication_failed` - Provider Authentication Failed
+         *     * `maintenance` - Maintenance
          *     * `forecast_sources_changed` - Forecast Sources Changed
          *     * `configuration_unavailable` - Configuration Unavailable
          *     * `location_already_has_plant` - Location Already Has Plant
@@ -1229,6 +1230,7 @@ export interface components {
             | "database_conflict"
             | "request_timeout"
             | "provider_authentication_failed"
+            | "maintenance"
             | "forecast_sources_changed"
             | "configuration_unavailable"
             | "location_already_has_plant"

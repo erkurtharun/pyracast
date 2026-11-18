@@ -40,7 +40,7 @@ def main() -> None:
         if command[0] == "curl":
             os.close(reader)
             return subprocess.CompletedProcess(command, 22, "", "")
-        if deliver and "stop" in command and "gateway" in command:
+        if deliver and "stop" in command and "web" in command:
             signal.raise_signal(signal.SIGINT)
         return subprocess.CompletedProcess(command, 0, "", "")
 

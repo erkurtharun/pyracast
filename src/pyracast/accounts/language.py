@@ -1,6 +1,5 @@
-import re
 from collections.abc import Callable
-from typing import Literal, cast, get_args
+from typing import cast
 
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser, User
@@ -12,19 +11,7 @@ from django.utils.translation import gettext_lazy as _
 
 from pyracast.accounts.models import UserLanguagePreference
 from pyracast.errors import DomainError, ErrorCode
-
-Language = Literal["en", "tr"]
-LANGUAGES: tuple[Language, ...] = get_args(Language)
-LANGUAGE_COOKIE = "pyracast_language"
-_LANGUAGE_RANGE = re.compile(
-    r"\s*([a-z]{1,8}(?:-[a-z0-9]{1,8})*|\*)\s*"
-    r"(?:;\s*q=(0(?:\.[0-9]{0,3})?|1(?:\.0{0,3})?)\s*)?",
-    re.IGNORECASE,
-)
-
-
-def explicit_language(value: str | None) -> Language | None:
-    return value if value in LANGUAGES else None
+from pyracast.languages import LANGUAGE_COOKIE, LANGUAGES, Language, negotiated_language
 
 
 def user_language(user: User | AnonymousUser) -> Language | None:
@@ -61,36 +48,14 @@ def set_language_cookie(response: HttpResponse, language: Language) -> None:
     )
 
 
-def browser_language(header: str) -> tuple[Language | None, frozenset[str]]:
-    if len(header) > 8192:
-        return None, frozenset({"*"})
-    ranked: list[tuple[float, Language]] = []
-    rejected: set[str] = set()
-    for item in header.split(","):
-        match = _LANGUAGE_RANGE.fullmatch(item)
-        if match is None:
-            continue
-        tag, quality = match.groups()
-        base = tag.lower().split("-", 1)[0]
-        weight = float(quality) if quality is not None else 1.0
-        if weight == 0:
-            rejected.add(base)
-        elif base in LANGUAGES:
-            ranked.append((weight, cast(Language, base)))
-    if ranked:
-        return max(ranked, key=lambda candidate: candidate[0])[1], frozenset(rejected)
-    return None, frozenset(rejected)
-
-
 def request_language(request: HttpRequest, preference: Language | None) -> Language:
-    cookie = explicit_language(request.COOKIES.get(LANGUAGE_COOKIE))
-    if preference is not None or cookie is not None:
-        return preference or cast(Language, cookie)
-    browser, rejected = browser_language(request.headers.get("Accept-Language", ""))
-    if browser is not None:
-        return browser
-    country: Language = "tr" if request.META.get("HTTP_CF_IPCOUNTRY") == "TR" else "en"
-    return country if country not in rejected and "*" not in rejected else "en"
+    if preference is not None:
+        return preference
+    return negotiated_language(
+        request.COOKIES.get(LANGUAGE_COOKIE),
+        request.headers.get("Accept-Language", ""),
+        request.META.get("HTTP_CF_IPCOUNTRY"),
+    )
 
 
 class RequestLanguage:

@@ -93,8 +93,28 @@ services:
       retries: 3
       start_period: 10s
     depends_on:
-      api: {condition: service_healthy}
-      web: {condition: service_healthy}
+      maintenance: {condition: service_healthy}
+
+  maintenance:
+    image: ${BACKEND_IMAGE:?Set BACKEND_IMAGE to the verified digest}
+    init: true
+    restart: on-failure:5
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    command: [python, -c, "from pyracast.maintenance import main; main()"]
+    networks: [application]
+    mem_limit: 64m
+    cpus: 0.25
+    pids_limit: 20
+    stop_grace_period: 10s
+    healthcheck:
+      test: [CMD, python, -c, "import socket, urllib.request; urllib.request.urlopen(f'http://{socket.gethostname()}:8080/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging: *logs
 
   api:
     <<: *process
@@ -200,7 +220,7 @@ services:
     environment:
       POSTGRES_DB: pyracast
       POSTGRES_INITDB_ARGS: --data-checksums
-    command: [postgres, -c, shared_buffers=128MB, -c, max_connections=40]
+    command: [postgres, -c, shared_buffers=128MB, -c, max_connections=40, -c, hba_file=/etc/postgresql/pg_hba.conf]
     volumes:
       - ${DATA_ROOT:-/var/lib/pyracast}/postgres:/var/lib/postgresql
     tmpfs: ["/tmp:uid=70,gid=70,mode=0700,size=32m", "/var/run/postgresql:uid=70,gid=70,mode=0770,size=16m"]
@@ -209,7 +229,7 @@ services:
     networks: [application]
     stop_grace_period: 120s
     healthcheck:
-      test: [CMD, pg_isready, -h, 127.0.0.1, -U, postgres, -d, pyracast]
+      test: [CMD, pg_isready, -U, postgres, -d, pyracast]
       interval: 10s
       timeout: 5s
       retries: 12
