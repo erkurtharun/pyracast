@@ -14,7 +14,7 @@ from allauth.mfa.models import Authenticator
 from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
-from django.http import HttpRequest, HttpResponse, HttpResponseBase
+from django.http import HttpRequest, HttpResponseBase
 from django.utils.translation import gettext
 
 from pyracast.accounts.authorization import requires_admin_mfa
@@ -67,11 +67,15 @@ def require_mfa_reauthentication(request: HttpRequest) -> APIResponse | None:
 class AuthenticateView(views.AuthenticateView):
     input_class = SecondFactorInput
 
-    def post(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
+    def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
+        if request.method != "POST":
+            return super().handle(request, *args, **kwargs)
+        # The step is checked under the account's locks before its input uses up a code, so the
+        # code, the authenticator write and the sign-in commit together.
         try:
             with transaction.atomic():
                 require_authority(request, LOGIN_SESSION_KEY)
-                return super().post(request, *args, **kwargs)
+                return super().handle(request, *args, **kwargs)
         except AuthorityChangedError:
             clear_login(request)
             return UnauthorizedResponse(request)

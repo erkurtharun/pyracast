@@ -19,7 +19,7 @@ ALLAUTH_PROTOCOL = {
     "accounts/headless.py:VerifyEmailView.post",
     "accounts/headless.py:ResendEmailVerificationCodeView.post",
     "accounts/headless.py:ConfirmReauthenticationCodeView.post",
-    "accounts/mfa_views.py:AuthenticateView.post",
+    "accounts/mfa_views.py:AuthenticateView.handle",
     "accounts/headless.py:ManageEmailView.post",
     "accounts/social_views.py:ProviderSignupView.handle",
     "accounts/inputs.py:ChangePasswordInput.clean_current_password",
