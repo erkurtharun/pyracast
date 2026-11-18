@@ -29,9 +29,7 @@ def social_callback_url() -> str:
 def record_social_refusal(
     request: HttpRequest, provider: str, reason: str, user: User | None = None
 ) -> None:
-    # Before an identity is known the caller is an anonymous callback, so such refusals are
-    # written at most once a minute per provider and reason, like other refusals.
-    if user is None and not refusal_throttle.admit((0, f"social:{provider}", reason)):
+    if not refusal_throttle.admit((0 if user is None else user.pk, f"social:{provider}", reason)):
         return
     record_security_event(
         SecurityEvent.SOCIAL_LOGIN_REFUSED,
@@ -138,11 +136,19 @@ class SocialAccountAdapter(DefaultSocialAccountAdapter):
         origin = sociallogin.state.get("data") or {}
         user_id = origin.get("user_id")
         if not isinstance(user_id, int):
+            user = request.user if request.user.is_authenticated else None
+            record_social_refusal(
+                request, sociallogin.account.provider, "initiating_user_missing", user
+            )
             raise PermissionDenied("Account connection requires an initiating user.")
         with locked_social_user(request, user_id) as user:
             if user is None or reauthentication.is_reauthentication_required(
                 request, app="allauth.socialaccount"
             ):
+                actor = request.user if request.user.is_authenticated else None
+                record_social_refusal(
+                    request, sociallogin.account.provider, "reauthentication_required", actor
+                )
                 raise PermissionDenied("Account connection requires current reauthentication.")
             try:
                 with transaction.atomic():

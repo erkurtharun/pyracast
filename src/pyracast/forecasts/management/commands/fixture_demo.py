@@ -65,6 +65,7 @@ def _binding(actor: User, region: Region) -> SiteBinding:
 
 @transaction.atomic
 def _workspace(actor: User) -> Tenant:
+    User.objects.select_for_update().get(pk=actor.pk)
     name = f"Fixture demonstration (user {actor.pk})"
     tenant = Tenant.objects.filter(
         name=name, membership__user=actor, membership__role=WorkspaceRole.ADMIN

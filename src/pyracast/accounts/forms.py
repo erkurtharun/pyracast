@@ -31,7 +31,7 @@ class AccountSignupForm(forms.Form):
     invitation_token = forms.CharField(max_length=128, required=False)
 
     def clean_company_name(self) -> str:
-        if self.data.get("invitation_token"):
+        if str(self.data.get("invitation_token") or "").strip():
             return ""
         return workspace_name(str(self.cleaned_data.get("company_name", "")))
 

@@ -153,7 +153,8 @@ class ManageProvidersView(AllauthManageProvidersView):
 @require_GET
 def provider_callback(request: HttpRequest, provider: str) -> HttpResponseBase:
     if provider not in settings.SOCIALACCOUNT_PROVIDERS:
-        record_social_refusal(request, provider, "provider_disabled")
+        user = request.user if request.user.is_authenticated else None
+        record_social_refusal(request, provider, "provider_disabled", user)
         return HttpResponseRedirect(f"{social_callback_url()}&error=provider_unavailable")
     callback = google_callback if provider == "google" else microsoft_callback
     return cast(HttpResponseBase, callback(request))
