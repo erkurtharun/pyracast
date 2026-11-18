@@ -72,6 +72,11 @@ JOB_KEY = "job"
 _MISSING = object()
 
 
+class RestoreRefusedError(ValidationError):
+    # Its message is a fixed sentence naming only lines and fields; the command prints it.
+    pass
+
+
 class Outcome(StrEnum):
     RESTORED = "restored"
     ALREADY_RESTORED = "already_restored"
@@ -159,7 +164,7 @@ def _row(line: int, text: bytes) -> ExportRow:
         ):
             raise ValueError("The line does not identify a provider snapshot")
     except (KeyError, TypeError, ValueError) as error:
-        raise ValidationError(f"Export line {line} is not a provider snapshot.") from error
+        raise RestoreRefusedError(f"Export line {line} is not a provider snapshot.") from error
     return ExportRow(
         line,
         identifier,
@@ -176,7 +181,7 @@ def _read_export(content: bytes) -> tuple[ExportRow, ...]:
         try:
             content = gzip.decompress(content)
         except (OSError, EOFError, zlib.error) as error:
-            raise ValidationError("The export is not readable gzip.") from error
+            raise RestoreRefusedError("The export is not readable gzip.") from error
     # JSON text may hold U+2028 and other line separators, so only a newline ends a row.
     return tuple(
         _row(line, text) for line, text in enumerate(content.split(b"\n"), start=1) if text.strip()
@@ -248,7 +253,7 @@ def _job_value[T](row: ExportRow, job: dict[str, Any], name: str, parse: Callabl
     try:
         return parse(job[name])
     except (KeyError, TypeError, ValueError, OverflowError) as error:
-        raise ValidationError(
+        raise RestoreRefusedError(
             f"Export line {row.line} does not hold a succeeded live job: {JOB_KEY}.{name}."
         ) from error
 
@@ -257,7 +262,7 @@ def _exported_job(row: ExportRow, collected_at: datetime) -> ExportedJob:
     # Id, binding and creation time belong to the erased database and are not taken.
     job = row.values.get(JOB_KEY)
     if not isinstance(job, dict):
-        raise ValidationError(
+        raise RestoreRefusedError(
             f"Export line {row.line} does not hold a succeeded live job: {JOB_KEY}."
         )
     for name, expected in (
@@ -296,7 +301,7 @@ def _acquisition(row: ExportRow, now: datetime) -> Acquisition:
         ):
             raise ValueError("The row is not a restorable live acquisition")
     except (KeyError, TypeError, ValueError, OverflowError) as error:
-        raise ValidationError(
+        raise RestoreRefusedError(
             f"Export line {row.line} does not hold a restorable live acquisition."
         ) from error
     return Acquisition(
@@ -344,7 +349,9 @@ def _publish_forecast(snapshot: ForecastSnapshot, binding: SiteBinding, line: in
     try:
         payload = calculate(binding, snapshot.job.target_date, data)
     except (ValueError, ArithmeticError) as error:
-        raise ValidationError(f"Export line {line}: the forecast cannot be calculated.") from error
+        raise RestoreRefusedError(
+            f"Export line {line}: the forecast cannot be calculated."
+        ) from error
     ForecastResult.objects.create(
         snapshot=snapshot,
         payload=payload,
@@ -441,7 +448,7 @@ def _restore_rows(
             outcomes[row.endpoint][skipped] += 1
     differing = _differing_settings(binding, matching)
     if differing:
-        raise ValidationError(
+        raise RestoreRefusedError(
             f"The export's provider site differs from the binding in: {', '.join(differing)}."
         )
     acquisitions = sorted(
@@ -451,13 +458,13 @@ def _restore_rows(
     # The binding's own schedule starts at its approval collection; restored ones lie before.
     _, approval_slot = approval_job(binding.pk) or (None, None)
     if approval_slot is None:
-        raise ValidationError("The binding holds no approval collection.")
+        raise RestoreRefusedError("The binding holds no approval collection.")
     later = min(
         (item.row.line for item in acquisitions if item.job.scheduled_slot >= approval_slot),
         default=None,
     )
     if later is not None:
-        raise ValidationError(
+        raise RestoreRefusedError(
             f"Export line {later} is not before the binding's approval collection: "
             f"{JOB_KEY}.scheduled_slot."
         )
@@ -538,7 +545,12 @@ def restore_provider_snapshots(
         account = ProviderAccount.objects.select_for_update().get(pk=binding.provider_account_id)
         binding = SiteBinding.objects.select_for_update().get(pk=binding.pk)
         binding.provider_account = account
-        _validate_authorized_binding(binding)
+        try:
+            _validate_authorized_binding(binding)
+        except ValidationError as error:
+            raise RestoreRefusedError(
+                "A current authorized and validated Solcast binding is required."
+            ) from error
         summary = _restore_rows(
             actor,
             binding,

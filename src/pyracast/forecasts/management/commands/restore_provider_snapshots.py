@@ -4,18 +4,27 @@ from pathlib import Path
 from typing import Any
 
 from django.contrib.auth.models import User
-from django.core.exceptions import ObjectDoesNotExist, PermissionDenied, ValidationError
+from django.core.exceptions import ObjectDoesNotExist, PermissionDenied
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
-from pyracast.background.failures import log_failure
+from pyracast.background.failures import failure_origin, log_failure
 from pyracast.forecasts.snapshot_restore import (
     EndpointSummary,
     Outcome,
+    RestoreRefusedError,
     RestoreSummary,
     restore_provider_snapshots,
 )
 
 logger = logging.getLogger(__name__)
+
+# Output names no path, exception message or export value: each can hold the site id.
+REFUSALS: tuple[tuple[type[Exception], str], ...] = (
+    (User.DoesNotExist, "The user does not exist."),
+    (ObjectDoesNotExist, "The region or binding does not exist in that tenant."),
+    (PermissionDenied, "The user is not a platform administrator."),
+    (OSError, "The export cannot be read."),
+)
 
 REMEDIES = {
     "historical_import": "import its source file again",
@@ -49,6 +58,12 @@ def _endpoint_line(item: EndpointSummary, *, dry_run: bool) -> str:
         else f"; covers {item.period[0].isoformat()} to {item.period[1].isoformat()}"
     )
     return f"{item.endpoint}: {phrases}{period}."
+
+
+def _refusal(error: Exception) -> str:
+    if isinstance(error, RestoreRefusedError):
+        return " ".join(error.messages)
+    return next(sentence for kind, sentence in REFUSALS if isinstance(error, kind))
 
 
 def _report(summary: RestoreSummary) -> list[str]:
@@ -101,16 +116,19 @@ class Command(BaseCommand):
                 content,
                 dry_run=options["dry_run"],
             )
-        except (ObjectDoesNotExist, PermissionDenied, ValidationError, OSError) as exc:
+        except (ObjectDoesNotExist, PermissionDenied, RestoreRefusedError, OSError) as exc:
             logger.warning(
                 "provider_snapshot_restore_refused binding_id=%s error_type=%s",
                 binding_id,
                 type(exc).__name__,
             )
-            raise CommandError("Provider snapshot restore failed: " + str(exc)) from exc
+            raise CommandError(f"Provider snapshot restore failed: {_refusal(exc)}") from None
         except Exception as exc:
             log_failure(logger, "provider_snapshot_restore_failed", exc, binding_id=binding_id)
-            raise
+            raise CommandError(
+                "Provider snapshot restore failed unexpectedly: "
+                f"{type(exc).__name__} at {failure_origin(exc)}."
+            ) from None
         logger.info(
             "provider_snapshot_restore_finished binding_id=%s dry_run=%s restored=%s skipped=%s "
             "export_sha256=%s",

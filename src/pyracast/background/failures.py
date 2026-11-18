@@ -16,7 +16,7 @@ def _chain(error: BaseException) -> list[BaseException]:
     return chain
 
 
-def _origin(error: BaseException) -> str:
+def failure_origin(error: BaseException) -> str:
     for exception in reversed(_chain(error)):
         for frame in reversed(traceback.extract_tb(exception.__traceback__)):
             path = Path(frame.filename).resolve()
@@ -36,5 +36,5 @@ def log_failure(logger: logging.Logger, event: str, error: BaseException, **fiel
         f"{event}{names} error_type=%s origin=%s",
         *fields.values(),
         type(error).__name__,
-        _origin(error),
+        failure_origin(error),
     )
