@@ -32,7 +32,9 @@ def kept_releases(state: Path) -> set[str] | None:
         names = {payload["current"], payload["previous"]} - {None}
     except (OSError, ValueError, KeyError, TypeError):
         return None
-    if not all(isinstance(name, str) and NAME.fullmatch(name) for name in names):
+    if payload["current"] is None or not all(
+        isinstance(name, str) and NAME.fullmatch(name) for name in names
+    ):
         return None
     return names
 

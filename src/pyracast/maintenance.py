@@ -3,7 +3,6 @@ import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = 8080
-# A release keeps the application stopped for a few minutes; clients retry after this delay.
 RETRY_AFTER_SECONDS = 60
 PAGE = f"""<!doctype html>
 <html lang="en">
@@ -47,8 +46,7 @@ class Notice(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    # BaseHTTPRequestHandler dispatches by this exact name; the gateway's errors middleware always
-    # asks with GET, for /page on frontend routes and /api on backend routes.
+    # Traefik's errors middleware always asks with GET: /page for frontend, /api for backend routes.
     def do_GET(self) -> None:
         if self.path == "/health":
             self.answer(200, "text/plain", b"ok")

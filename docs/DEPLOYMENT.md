@@ -312,14 +312,14 @@ successful `main` CI runs trigger it automatically. The workflow:
 4. Checks configuration, that containers cannot reach the metadata server, database
    provisioning and access, the migration plan, that every stored secret decrypts
    with the configured keys (`check_secrets`) and the shipped systemd units; stops
-   the dispatcher and drains workers while the site still serves, stops the API and
-   web servers (the gateway then answers with a maintenance notice), takes a database
-   dump and waits for its off-host upload before upgrading PostgreSQL/RabbitMQ,
-   migrates with the schema owner, and starts the tested revision. A failure before
-   `migrate` starts the previous release again. The plan step refuses a database
-   whose migration ledger names Pyracast migrations that are no longer in the release
-   (a database from before the migration baseline); the running release keeps
-   serving until the database is reset.
+   the dispatcher and drains workers while the site still serves, starts the new
+   gateway with its maintenance notice and stops the API and web servers, takes a
+   database dump and waits for its off-host upload before upgrading
+   PostgreSQL/RabbitMQ, migrates with the schema owner, and starts the tested
+   revision; "A release that fails during maintenance" below covers failures. The
+   plan step refuses a database whose migration ledger names Pyracast migrations that
+   are no longer in the release (a database from before the migration baseline); the
+   running release keeps serving until the database is reset.
 5. Promotes `current` only after container readiness checks and a local HTTPS request
    verify the public certificate, routing and database health, then installs the
    release's watchdog and backup units. Each build has its own release directory;
@@ -405,28 +405,15 @@ fixtures do not establish provider access or inbox delivery.
   their existing 600-second drain and broker cleanup. Google host failure or a
   forced console stop can interrupt that budget; DB leases and idempotency recover
   safe work. No configuration can promise graceful completion after host failure.
-- **Failed deployment:** preflight failures preserve the running release and its
-  environment files. Before stopping anything, the script durably creates
-  `/var/lib/pyracast/release-blocked`; only then does it drain the dispatcher and
-  workers, stop the API and web servers, back up the existing database and upgrade
-  support services. A first deployment initializes PostgreSQL under the same block
-  before its initial backup. When an upgrade that began without the marker fails
-  before `migrate`, the script starts the previous release from its own Compose
-  file and secrets, probes readiness and removes the marker. Any other maintenance
-  failure, or a resume that fails, stops the application again (the gateway keeps
-  the maintenance notice), reports whether every stop command succeeded and
-  downgrades no support image (`reset_database.py` `abort` and `restore` later start
-  PostgreSQL and RabbitMQ from the previous release's Compose file). A failure after
-  promotion stops nothing: the new release keeps serving the migrated database, the
-  log prints the command that finishes the release, and the fix goes forward.
-  The block clears only after readiness and release promotion, or once the resumed
-  previous release is ready; even
-  after an abrupt host restart, systemd refuses automatic application startup
-  while this marker exists. Application containers retry process failures up to
-  five times; they rely on systemd for host startup so Docker cannot bypass the
-  migration block. Recover with `reset_database.py` as described in "A release
-  that fails during maintenance" below. A rerun of the verified release after remediation also clears the marker on
-  success. Never use `migrate --fake` or automatically reverse migrations.
+- **Failed deployment:** before stopping anything, the installer durably creates
+  `/var/lib/pyracast/release-blocked`; a first deployment initializes PostgreSQL
+  under the same block. Even after an abrupt host restart, systemd refuses automatic
+  application startup while this marker exists. Application containers retry
+  process failures up to five times; they rely on systemd for host startup so Docker
+  cannot bypass the migration block. "A release that fails during maintenance"
+  below says what each failure leaves and how to recover. A rerun of the verified
+  release after remediation also clears the marker on success. Never use
+  `migrate --fake` or automatically reverse migrations.
 - **Rollback:** prefer a reviewed Git revert on `main`, successful CI and Release.
   This deploys the former behavior with the current database. Only do this after
   confirming schema compatibility. An incompatible schema change needs a forward
@@ -466,7 +453,8 @@ fixtures do not establish provider access or inbox delivery.
   only initializes a new data directory: existing broker passwords require a
   coordinated `rabbitmqctl change_password` and application restart. Never delete
   the broker data volume to rotate a password. A database password changed in the
-  secrets reaches its SQL role with the next release, before maintenance.
+  secrets reaches its SQL role with the next release, before maintenance; when the
+  runtime role's password changes, the serving release restarts with it at once.
 - **Patching and storage:** review weekly Dependabot PRs, rebuild and test images;
   exact image digests do not update themselves. Review Ubuntu security updates and
   pinned Docker/Compose/PostgreSQL versions during planned maintenance. PostgreSQL
@@ -497,8 +485,8 @@ and name the `restore` command for that object.
 | --- | --- | --- |
 | `prepare` | the release lock is free, no `release-blocked` marker, the site answers `/health/ready/` | writes the marker, stops the application in the installer's order (PostgreSQL, RabbitMQ and the gateway with its maintenance notice stay up), dumps the database into `/var/lib/pyracast/reset/`, uploads it as `postgres/<stamp>-prereset-<uuid>.dump`, restores it into a throwaway PostgreSQL without network, compares every table's row count with the live database, exports the Solcast forecast snapshots with their site parameters as `<archive>.solcast.jsonl.gz`, checks it against the database's count and uploads it too; records both objects' SHA-256 and the counts and opens the session; prints them with the release commit, its image digests, the runtime secret version and any earlier archives kept on the host |
 | `abort` | the marker; `reset` has not replaced the database in this maintenance; `migrate --check` of the release in `/opt/pyracast/current` passes on the database | writes the runtime secrets with that release, starts it with `docker compose --env-file deploy/release.env -f deploy/compose.yaml up --detach --wait`, probes `/health/ready/` and removes the marker and the session |
-| `reset --confirm OBJECT` | the marker, no running, restarting or paused application container, `OBJECT` is the session's archive and its file and Solcast export still have the recorded SHA-256, both database roles | writes the runtime secrets; purges every RabbitMQ queue, dead-letter queues included, and checks that none holds a message; marks the session replaced and syncs it; runs `DROP DATABASE pyracast WITH (FORCE)` and `CREATE DATABASE pyracast`; applies `deploy/bootstrap.sql`; checks that the owner can create a table, that the runtime role can connect and read, and that the owner lost database `CREATE`. The marker stays |
-| `restore --confirm OBJECT` | the marker, no application container, `OBJECT` is the session's archive once `reset` replaced the database, a pre-reset archive's Solcast export still has the recorded SHA-256, the archive has applied migrations, both database roles | writes the runtime secrets; uses the archive `prepare` kept, or downloads `OBJECT` (a pre-reset archive with its Solcast export) from the backup bucket, checks each against the bucket's MD5 and size and verifies them in a throwaway PostgreSQL first; then purges the queues, recreates the database as `reset` does, restores the archive with its owners and privileges, compares every table's row count with the record, checks both roles and `migrate --check`, starts the release in `/opt/pyracast/current`, probes readiness and removes the marker and the session |
+| `reset --confirm OBJECT` | the marker, no running, restarting or paused application container, `OBJECT` is the session's archive and its file and Solcast export still have the recorded SHA-256, both database roles | writes the runtime secrets; purges every RabbitMQ queue, dead-letter queues included, and checks that none holds a message; marks the session replaced and syncs it; runs `DROP DATABASE pyracast WITH (FORCE)` and `CREATE DATABASE pyracast`; applies `deploy/bootstrap.sql`; checks that the owner can create a table, that the runtime role can connect and read but cannot write the migration ledger, and that the owner lost database `CREATE`. The marker stays |
+| `restore --confirm OBJECT` | the marker, no application container, `OBJECT` is the session's archive once `reset` replaced the database, a pre-reset archive's Solcast export still has the recorded SHA-256, the archive has applied migrations, both database roles | writes the runtime secrets; uses the archive `prepare` kept, or downloads `OBJECT` (a pre-reset archive with its Solcast export) from the backup bucket, checks each against the bucket's MD5 and size and verifies them in a throwaway PostgreSQL first; then purges the queues, recreates the database as `reset` does, restores the archive with its owners and privileges, applies `deploy/bootstrap.sql` again over the archive's privileges, compares every table's row count with the record, checks both roles and `migrate --check`, starts the release in `/opt/pyracast/current`, probes readiness and removes the marker and the session |
 
 When the start, readiness or the service unit fails or is interrupted, `abort` and
 `restore` write the marker back and send each stop command of the installer's
@@ -596,7 +584,8 @@ verification and restart on the real host in about five minutes of downtime.
    ```
 
    Expect the runtime secrets line, the purge, recreate and role lines of step 4,
-   `==> Restoring <archive> with owners and privileges`, the migration check line,
+   `==> Restoring <archive> with owners and privileges`, `==> Applying
+   deploy/bootstrap.sql` again, the role and migration check lines,
    `==> Starting the release in /opt/pyracast/current`, and
    `OBJECT is restored and the previous release serves again; the marker is removed.`
    Production then serves the previous release with its data. A failure after
@@ -621,22 +610,30 @@ An interrupted `prepare` is recovered with `abort`, then `prepare` again; runnin
 
 ### A release that fails during maintenance
 
-When an upgrade that began without the marker fails before `migrate` (drain, pre-release
-backup or its record, PostgreSQL or RabbitMQ start), the installer starts the previous
-release again and the log says "Release SHA failed before migrate; the previous release
-... serves again and the marker is removed." The Release run is red; fix the cause and
-release again. A failure after promotion prints "Release SHA is serving" instead, stops
-nothing and names the command that finishes it; the new release serves the migrated
-database, so the fix goes forward and a rerun of that release is refused because it is
-already live. A preflight failure prints none of this, keeps the running release and
-its environment files and creates no marker (it may have written the new release
-directory and staged secrets and enabled or reset `pyracast.service`); during a reset
-the marker `reset` left stays.
+The Release run is red in every case below; the log says which one applies.
 
-Otherwise the log has "Release failed during maintenance." with the outcome of the
-stop commands: either every one succeeded and the application is stopped behind the
-maintenance notice, or one failed and the log names the `docker compose ... ps` command
-that shows what still runs; stop it before recovery. Both `abort` and `restore` refuse
+- **Preflight:** the running release keeps serving and no marker is created (the run
+  may have written the new release directory and staged secrets and enabled or reset
+  `pyracast.service`); during a reset the marker `reset` left stays. Provisioning may already have changed a database password; the serving
+  release then restarted with it, or the log names `systemctl restart pyracast.service`.
+- **Before `migrate`, in an upgrade that began without the marker** (drain, pre-release
+  backup or its record, PostgreSQL or RabbitMQ start): the installer starts the previous
+  release from its own Compose file, probes readiness and removes the marker; the log
+  says "Release SHA failed before migrate; the previous release ... serves again and
+  the marker is removed." Fix the cause and release again.
+- **After promotion:** the log prints "Release SHA is serving", stops nothing and names
+  the command that finishes the release. The new release serves the migrated database,
+  so the fix goes forward; a rerun of that release is refused because it is already
+  live. `restore` cannot bring the previous release back: it refuses without the marker,
+  and the previous release may not fit the migrated schema. The release state
+  file and pruning keep that release's directory and images for a reviewed rollback.
+
+Any other failure, or a resume that fails, prints "Release failed during maintenance."
+with the outcome of the stop commands: either every one succeeded and the application
+is stopped, or one failed and the log names the `docker compose ... ps` command that
+shows what still runs; stop it before recovery. The log then says whether the gateway
+shows the maintenance notice. Support images are not downgraded: `abort` and `restore`
+start PostgreSQL and RabbitMQ from the previous release's Compose file. Both refuse
 without the marker (the log says when writing it failed) and `restore` also refuses
 while an application container runs, but `abort` does not check for running
 containers. The log then prints the recovery commands; `current` still points to the

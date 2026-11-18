@@ -72,10 +72,10 @@ SOLCAST_EXPORT_SQL = (
 )
 ROLE_CHECK_SQL = """DO $$
 BEGIN
-  IF NOT has_database_privilege('pyracast_app', 'pyracast', 'CONNECT') THEN
+  IF NOT has_database_privilege('pyracast_app', current_database(), 'CONNECT') THEN
     RAISE EXCEPTION 'pyracast_app cannot connect to database pyracast';
   END IF;
-  IF has_database_privilege('pyracast_owner', 'pyracast', 'CREATE') THEN
+  IF has_database_privilege('pyracast_owner', current_database(), 'CREATE') THEN
     RAISE EXCEPTION 'pyracast_owner keeps CREATE on database pyracast';
   END IF;
   IF NOT EXISTS (SELECT FROM pg_extension WHERE extname = 'btree_gist') THEN
@@ -89,6 +89,11 @@ BEGIN
              AND NOT has_table_privilege('pyracast_app', format('%I.%I', schemaname, tablename),
                                          'SELECT')) THEN
     RAISE EXCEPTION 'pyracast_app cannot read every table in schema public';
+  END IF;
+  IF to_regclass('public.django_migrations') IS NOT NULL
+     AND has_table_privilege('pyracast_app', 'public.django_migrations',
+                             'INSERT, UPDATE, DELETE, TRUNCATE') THEN
+    RAISE EXCEPTION 'pyracast_app can write the migration ledger';
   END IF;
 END $$;
 BEGIN;
@@ -753,6 +758,10 @@ def recreate_database(host: Host) -> None:
         "-c",
         "CREATE DATABASE pyracast",
     )
+    provision(host)
+
+
+def provision(host: Host) -> None:
     step("Applying deploy/bootstrap.sql")
     bootstrap = (host.release / "deploy/bootstrap.sql").read_text()
     psql(host, "pyracast", "--single-transaction", script=bootstrap)
@@ -1034,6 +1043,7 @@ def restore(host: Host, name: str) -> None:
         save_session(host, Session(marker=identity, object=name, release=release, replaced=True))
         recreate_database(host)
         restore_live(host, archive)
+        provision(host)
         require_equal_counts(record.counts, table_counts(host), "Archived and restored")
         check_roles(host)
         if not release_serves(host):

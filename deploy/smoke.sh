@@ -220,8 +220,8 @@ else:
 try:
     with connection.cursor() as cursor:
         cursor.execute("INSERT INTO django_migrations (app, name, applied) VALUES ('smoke', 'smoke', now())")
-except ProgrammingError:
-    pass
+except ProgrammingError as error:
+    assert getattr(error.__cause__, 'sqlstate', None) == '42501', error
 else:
     raise SystemExit('Runtime role can write the migration ledger')
 try:
@@ -349,7 +349,6 @@ ready() { [[ $("${secure_curl[@]}" https://localhost:18443/health/ready/) == ok 
 "${reset_tool[@]}" prepare
 test -f "$temporary/release-blocked"
 [[ -z $(application_running) ]]
-# The gateway answers with the maintenance notice while the application is stopped.
 [[ $("${tls_curl[@]}" -H 'Accept: text/html' --dump-header "$temporary/notice.headers" \
   --output "$temporary/notice.html" --write-out '%{http_code}' https://localhost:18443/app/) == 503 ]]
 grep -qi '^retry-after: 60' "$temporary/notice.headers"

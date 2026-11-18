@@ -95,7 +95,6 @@ services:
     depends_on:
       maintenance: {condition: service_healthy}
 
-  # Answers for api and web while a release or reset has them stopped (routes.yml, errors).
   maintenance:
     image: ${BACKEND_IMAGE:?Set BACKEND_IMAGE to the verified digest}
     init: true

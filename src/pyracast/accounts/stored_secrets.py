@@ -78,5 +78,5 @@ def readability(secret: StoredSecret) -> Readability:
     return "primary" if decrypts(secret, primary_only=True) else "fallback"
 
 
-def tables_exist() -> bool:
-    return {PROVIDERS, AUTHENTICATORS} <= set(connection.introspection.table_names())
+def missing_tables() -> set[str]:
+    return {PROVIDERS, AUTHENTICATORS} - set(connection.introspection.table_names())

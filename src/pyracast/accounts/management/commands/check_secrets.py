@@ -6,17 +6,17 @@ from django.core.management.base import BaseCommand, CommandError, CommandParser
 from pyracast.accounts.stored_secrets import (
     AUTHENTICATORS,
     PROVIDERS,
+    missing_tables,
     readability,
     stored_secrets,
-    tables_exist,
 )
 
 
 class Command(BaseCommand):
     help = (
         "Prove that every stored provider and MFA secret decrypts with the configured keys. "
-        "Exit 1: a secret is unreadable or malformed; exit 2: --require-primary and a secret "
-        "still needs a fallback key."
+        "Exit 1: a secret is unreadable or malformed, or one secret table is missing; exit 2: "
+        "--require-primary and a secret still needs a fallback key."
     )
 
     def add_arguments(self, parser: CommandParser) -> None:
@@ -27,9 +27,15 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args: Any, **options: Any) -> None:
-        if not tables_exist():
+        missing = missing_tables()
+        if missing == {PROVIDERS, AUTHENTICATORS}:
             self.stdout.write("No stored secrets: the tables do not exist yet.")
             return
+        if missing:
+            raise CommandError(
+                f"{', '.join(sorted(missing))} does not exist; the schema is incomplete.",
+                returncode=1,
+            )
         counts = {PROVIDERS: Counter[str](), AUTHENTICATORS: Counter[str]()}
         unreadable = []
         for secret in stored_secrets():

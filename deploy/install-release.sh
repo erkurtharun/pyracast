@@ -32,6 +32,7 @@ blocked_before=0
 if [[ -e /var/lib/pyracast/release-blocked ]]; then blocked_before=1; fi
 previous=
 if [[ -L /opt/pyracast/current ]]; then previous=$(readlink -f /opt/pyracast/current); fi
+old=(docker compose --env-file /opt/pyracast/current/deploy/release.env -f /opt/pyracast/current/deploy/compose.yaml)
 maintenance_started=0
 resumable=0
 promoted=0
@@ -65,14 +66,21 @@ cleanup() {
     elif (( maintenance_started == 1 )); then
       blocked=1
       stopped=1
+      noticed=1
       begin_maintenance || blocked=0
       "${compose[@]}" stop -t 660 dispatcher || stopped=0
       "${compose[@]}" stop -t 660 worker notifications || stopped=0
+      "${compose[@]}" up -d --no-deps --wait --wait-timeout 180 maintenance gateway || noticed=0
       "${compose[@]}" stop -t 100 api web || stopped=0
       if (( stopped == 1 )); then
-        echo 'Release failed during maintenance. Every stop command succeeded; the application is stopped and the gateway shows the maintenance notice.' >&2
+        echo 'Release failed during maintenance. Every stop command succeeded; the application is stopped.' >&2
       else
         echo "Release failed during maintenance. A stop command failed; the application may still run. Check with: ${compose[*]} ps" >&2
+      fi
+      if (( noticed == 1 )); then
+        echo 'The gateway shows the maintenance notice.' >&2
+      else
+        echo "The maintenance notice did not start. Check with: ${compose[*]} ps gateway maintenance" >&2
       fi
       if (( blocked == 0 )); then
         echo 'Writing /var/lib/pyracast/release-blocked failed; recreate it before recovery.' >&2
@@ -162,7 +170,15 @@ if [[ ! -L /opt/pyracast/current ]]; then
   begin_maintenance
   "${compose[@]}" up -d --no-recreate --wait --wait-timeout 180 postgres
 fi
-python3 "$release/deploy/bootstrap_database.py" "$release" "$secrets"
+rotated=$(python3 "$release/deploy/bootstrap_database.py" "$release" "$secrets")
+# The runtime role's password just changed: the serving release reconnects with the host's secrets.
+if [[ $rotated == *pyracast_app* && -n $previous ]] && (( blocked_before == 0 )); then
+  if ! { python3 /opt/pyracast/current/deploy/runtime_secrets.py /etc/pyracast/host.json \
+    && "${old[@]}" up -d --wait --wait-timeout 180; }; then
+    echo 'The runtime database password changed, but the previous release did not restart with it. Once this run ends: systemctl restart pyracast.service' >&2
+    exit 1
+  fi
+fi
 wait_for_database
 "${compose[@]}" run --rm --no-deps migrate pyracast migrate --plan
 probe_database api
@@ -170,12 +186,13 @@ probe_database api
 
 begin_maintenance
 if [[ -L /opt/pyracast/current ]]; then
-  old=(docker compose --env-file /opt/pyracast/current/deploy/release.env -f /opt/pyracast/current/deploy/compose.yaml)
   if (( blocked_before == 0 )); then resumable=1; fi
   # Only the dispatcher publishes work, so the site keeps serving while it and the workers drain.
   "${old[@]}" stop -t 660 dispatcher
   "${old[@]}" stop -t 660 worker notifications
-  "${old[@]}" stop -t 100 api web
+  # The previous gateway may depend on api and web; this one answers with the notice once they stop.
+  "${compose[@]}" up -d --no-deps --wait --wait-timeout 180 maintenance gateway
+  "${compose[@]}" stop -t 100 api web
 fi
 # Back up the running database before a new support image can modify its data directory.
 rm -f "$release/prerelease-backup.json"
