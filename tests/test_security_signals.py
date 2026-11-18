@@ -94,6 +94,7 @@ WRITTEN = frozenset(
         "invitation_limited",
         "invitation_revoked",
         "invitation_accepted",
+        "invitation_denied",
         "workspace_member_removed",
         "workspace_admin_reassigned",
     }

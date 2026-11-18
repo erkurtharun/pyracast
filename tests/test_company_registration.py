@@ -4,6 +4,7 @@ from typing import Any
 
 import pytest
 from allauth.account.models import EmailAddress
+from django.contrib.auth.hashers import BasePasswordHasher, get_hasher
 from django.contrib.auth.models import User
 from django.core import mail
 from django.db import IntegrityError, connections
@@ -324,6 +325,30 @@ def test_a_signup_answers_alike_for_a_reused_and_a_fresh_workspace_name(
     reused_owner = Membership.objects.get(user__email="second@example.com")
     assert (reused_owner.tenant.name, reused_owner.role) == ("HARBOR solar", WorkspaceRole.ADMIN)
     assert Membership.objects.filter(tenant=reused_owner.tenant).count() == 1
+
+
+@override_settings(ACCOUNT_RATE_LIMITS={"confirm_email": "100/m/key"})
+@pytest.mark.parametrize("address_has_account", [False, True])
+def test_a_signup_hashes_its_password_once_whether_or_not_the_address_has_an_account(
+    address_has_account: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if address_has_account:
+        assert signup(Client(enforce_csrf_checks=True)).status_code == 401
+    hasher = type(get_hasher())
+    encode = hasher.encode
+    hashed: list[str] = []
+
+    def counted(self: BasePasswordHasher, password: str, salt: str) -> str:
+        hashed.append(password)
+        return encode(self, password, salt)
+
+    monkeypatch.setattr(hasher, "encode", counted)
+
+    response = signup(Client(enforce_csrf_checks=True))
+
+    assert response.status_code == 401
+    assert hashed == [PASSWORD]
+    assert User.objects.count() == 1
 
 
 @pytest.mark.parametrize(

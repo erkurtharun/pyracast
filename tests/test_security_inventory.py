@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 from allauth.mfa.models import Authenticator
+from allauth.mfa.recovery_codes.internal.auth import RecoveryCodes
 from allauth.mfa.totp.internal import auth as totp_auth
 from allauth.mfa.totp.internal.auth import TOTP, generate_totp_secret
 from allauth.socialaccount.models import SocialAccount
@@ -18,11 +19,13 @@ from django.contrib.auth.models import User
 from django.core import mail
 from django.test import Client, override_settings
 
+from pyracast.accounts import audit
 from pyracast.accounts.audit import LINE_KEYS, logger, redacted_key, refusal_throttle
 from tests.support.admin_recovery_security import authenticated_account
 from tests.support.auth_lifecycle import PASSWORD, mailed_code, member, submit, totp_code
 from tests.support.company_registration import signup
 from tests.support.social_accounts import (
+    AUTH,
     CALLBACK,
     PROVIDERS,
     begin,
@@ -163,6 +166,18 @@ def administrator_without_authenticator_social_sign_in(
     return {"user_id": user.pk, "provider": "google", "reason": "mfa_not_provisioned"}
 
 
+def inactive_account_social_sign_in(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    user = member()
+    User.objects.filter(pk=user.pk).update(is_active=False)
+    SocialAccount.objects.create(user=user, provider="google", uid="google-identity")
+    with social_providers(monkeypatch):
+        client = Client()
+        response = complete(client, begin(client))
+    assert "error=" in response["Location"]
+    assert client.get("/api/session/").json()["user"] is None
+    return {"user_id": user.pk, "provider": "google", "reason": "inactive"}
+
+
 def provider_error(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     with social_providers(monkeypatch):
         client = Client()
@@ -237,7 +252,21 @@ def unreadable_authenticator(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     refused = submit(client, "auth/2fa/authenticate", {"code": "123456"})
     assert refused.status_code == 403
     assert refused.json()["code"] == "permission_denied"
-    return {"user_id": user.pk, "authenticator_type": "totp"}
+    return {"user_id": user.pk}
+
+
+def unreadable_recovery_codes(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    client, user, secret = authenticated_account(privileged=False)
+    RecoveryCodes.activate(user)
+    code = totp_code(secret, fixed_totp_clock(monkeypatch))
+    assert submit(client, "auth/2fa/reauthenticate", {"code": code}).status_code == 200
+    Authenticator.objects.filter(user=user, type=Authenticator.Type.RECOVERY_CODES).update(
+        data={"seed": "mfa:v1:unreadable", "used_mask": 0}
+    )
+    refused = client.get(AUTH + "account/authenticators/recovery-codes")
+    assert refused.status_code == 403
+    assert refused.json()["code"] == "permission_denied"
+    return {"user_id": user.pk}
 
 
 FLOWS: dict[str, dict[str, Flow]] = {
@@ -257,6 +286,7 @@ FLOWS: dict[str, dict[str, Flow]] = {
     "password_reset_code_rejected": {"wrong_code": rejected_reset_code},
     "social_login_refused": {
         "mfa_not_provisioned": administrator_without_authenticator_social_sign_in,
+        "inactive": inactive_account_social_sign_in,
         "provider_error": provider_error,
     },
     "reauthenticated": {
@@ -271,7 +301,10 @@ FLOWS: dict[str, dict[str, Flow]] = {
     },
     "email_code_rejected": {"wrong_code": rejected_email_code},
     "email_change_requested": {"new_address": email_change_request},
-    "mfa_secret_unreadable": {"totp": unreadable_authenticator},
+    "mfa_secret_unreadable": {
+        "totp": unreadable_authenticator,
+        "recovery_codes": unreadable_recovery_codes,
+    },
 }
 CASES = [(event, case) for event in REQUIRED_EVENTS for case in FLOWS[event]]
 
@@ -332,3 +365,77 @@ def test_the_first_verification_of_a_sign_up_records_no_address_change(
         "email_verified",
         "login_succeeded",
     ]
+
+
+class FailingHandler(logging.Handler):
+    def emit(self, record: logging.LogRecord) -> None:
+        raise RuntimeError("security sink unavailable")
+
+
+def failing_sink(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(logger, "handlers", [FailingHandler()])
+
+
+def failing_receiver(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(arguments: object) -> int:
+        raise RuntimeError("security receiver failed")
+
+    monkeypatch.setattr(audit, "_signal_user_id", fail)
+
+
+def sign_in_succeeds(user: User) -> None:
+    client = Client(enforce_csrf_checks=True)
+    credentials = {"email": user.email, "password": PASSWORD}
+    assert submit(client, "auth/login", credentials).status_code == 200
+    assert client.get("/api/session/").json()["user"] is not None
+
+
+def reset_request_is_answered(user: User) -> None:
+    client = Client(enforce_csrf_checks=True)
+    assert submit(client, "auth/password/request", {"email": user.email}).status_code == 401
+    assert len(mail.outbox) == 1
+
+
+def reauthentication_succeeds(user: User) -> None:
+    client = signed_in(user)
+    assert submit(client, "auth/reauthenticate", {"password": PASSWORD}).status_code == 200
+
+
+FAULTS: dict[str, Callable[[pytest.MonkeyPatch], None]] = {
+    "sink": failing_sink,
+    "receiver": failing_receiver,
+}
+OUTCOMES: dict[str, Callable[[User], None]] = {
+    "sign_in": sign_in_succeeds,
+    "password_reset_request": reset_request_is_answered,
+    "reauthentication": reauthentication_succeeds,
+}
+
+
+@pytest.mark.parametrize(
+    ("flow", "fault"),
+    [
+        ("sign_in", "sink"),
+        ("sign_in", "receiver"),
+        ("password_reset_request", "sink"),
+        ("reauthentication", "sink"),
+        ("reauthentication", "receiver"),
+    ],
+)
+def test_a_security_line_that_cannot_be_written_leaves_its_flow_unchanged(
+    flow: str, fault: str, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = member()
+    failures = logging.getLogger(audit.__name__)
+    monkeypatch.setattr(failures, "handlers", [caplog.handler])
+    FAULTS[fault](monkeypatch)
+
+    OUTCOMES[flow](user)
+
+    reports = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == failures.name and record.levelno == logging.ERROR
+    ]
+    assert reports
+    assert all(report.startswith("security_line_failed event=") for report in reports)

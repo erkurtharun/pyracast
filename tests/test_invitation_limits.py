@@ -1,5 +1,6 @@
 import json
 import logging
+from collections import OrderedDict
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -13,7 +14,7 @@ from django.db import close_old_connections, connections
 from django.test import Client, override_settings
 from django.utils import timezone
 
-from pyracast.accounts.audit import logger
+from pyracast.accounts.audit import logger, refusal_throttle
 from pyracast.accounts.models import Membership, Tenant, WorkspaceInvitation, WorkspaceRole
 from pyracast.accounts.operations import reassign_workspace_admin
 from tests.support.workspaces import invitation_token
@@ -264,3 +265,62 @@ def test_invitation_and_membership_changes_are_recorded_without_addresses(
     ]
     assert GUEST not in security_log.text
     assert "later@example.com" not in security_log.text
+
+
+def accept(user: User, token: str) -> Any:
+    client = Client(enforce_csrf_checks=True)
+    client.force_login(user)
+    csrf = client.get("/api/session/").json()["csrf_token"]
+    return client.post(
+        "/api/invitations/accept/",
+        {"token": token},
+        content_type="application/json",
+        HTTP_X_CSRFTOKEN=csrf,
+    )
+
+
+@pytest.mark.parametrize(
+    ("state", "status", "reason"),
+    [
+        ("expired", 400, "expired"),
+        ("accepted", 400, "accepted"),
+        ("other_address", 403, "email_unverified"),
+    ],
+)
+def test_a_refused_acceptance_is_recorded_once_a_minute_with_its_workspace_and_invitation(
+    state: str,
+    status: int,
+    reason: str,
+    security_log: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(refusal_throttle, "_seen", OrderedDict())
+    tenant, administrator = workspace("solar")
+    assert invite(administrator, tenant).status_code == 201
+    token = invitation_token()
+    invitation = WorkspaceInvitation.objects.get()
+    guest = User.objects.create_user(username="guest", email=GUEST)
+    address = "other@example.com" if state == "other_address" else GUEST
+    EmailAddress.objects.create(user=guest, email=address, primary=True, verified=True)
+    if state == "expired":
+        WorkspaceInvitation.objects.update(expires_at=timezone.now())
+    elif state == "accepted":
+        WorkspaceInvitation.objects.update(accepted_at=timezone.now())
+    security_log.clear()
+
+    statuses = [accept(guest, token).status_code for _ in range(2)]
+
+    assert statuses == [status, status]
+    denied = [line for line in security_lines(security_log) if line["event"] == "invitation_denied"]
+    assert denied == [
+        {
+            "event": "invitation_denied",
+            "user_id": guest.pk,
+            "client_ip": None,
+            "tenant_id": tenant.pk,
+            "target_id": invitation.pk,
+            "reason": reason,
+        }
+    ]
+    assert not Membership.objects.filter(user=guest).exists()
+    assert GUEST not in security_log.text
