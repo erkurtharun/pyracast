@@ -5,6 +5,7 @@ from typing import Any, cast
 from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.headless.account.inputs import SignupInput
 from allauth.headless.account.views import SignupView
+from allauth.headless.base.response import AuthenticationResponse
 from django.conf import settings
 from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import User
@@ -39,11 +40,17 @@ class CompanySignupInput(PasswordInput, SignupInput):
         return data
 
     def try_save(self, request: HttpRequest) -> tuple[User | None, HttpResponse | None]:
-        if self.account_already_exists:
-            # An address with an account gets no new account but the same password hashing, so
-            # both answers take as long.
-            make_password(self.cleaned_data.get("password"))
-        return cast(tuple[User | None, HttpResponse | None], super().try_save(request))
+        if not self.account_already_exists:
+            return cast(tuple[User | None, HttpResponse | None], super().try_save(request))
+        # An address with an account gets no new account but the same password hashing, so
+        # both answers take as long.
+        make_password(self.cleaned_data.get("password"))
+        try:
+            return cast(tuple[User | None, HttpResponse | None], super().try_save(request))
+        except ImmediateHttpResponse:
+            # allauth's `SignupView.post` drops a response raised by `complete_signup` for a new
+            # address and answers the pending sign-up; an address with an account answers alike.
+            return None, AuthenticationResponse(request)
 
     def save(self, request: HttpRequest) -> User:
         with transaction.atomic():
