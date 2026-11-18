@@ -89,6 +89,6 @@ def test_invitation_mail_has_private_action_and_escaped_workspace(language: str)
     assert f'<html lang="{language}">' in html
     assert '<img src=x onerror="unsafe">' not in html
     assert "&lt;img" in html
-    assert "/app/#token=" in html
+    assert "/app/invitation/#token=" in html
     assert "?token=" not in html
     assert ("Daveti incele" if language == "tr" else "Review invitation") in html

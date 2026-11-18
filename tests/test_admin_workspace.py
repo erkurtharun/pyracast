@@ -523,3 +523,12 @@ def test_approved_plant_with_an_unvalidated_key_has_no_unavailable_approval_inst
     assert b"This plant is approved" in response.content
     assert b"to enable approval" not in response.content
     assert b">Approve plant</button>" not in response.content
+
+
+def test_console_links_open_the_account_and_customer_workspace_routes() -> None:
+    client, _ = verified_admin()
+    response = client.get(reverse("admin:workspace_settings"))
+    assert response.status_code == 200
+    assert response.content.count(b'href="/app/account/"') == 2
+    assert response.content.count(b'href="/app/w/"') == 2
+    assert b"/app/?" not in response.content
