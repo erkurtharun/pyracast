@@ -1,11 +1,16 @@
 import http.client
+import json
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 
+from tests.support import browser
 from tests.support.browser import Gateway
 
 
@@ -138,3 +143,36 @@ def test_the_browser_gateway_answers_bad_gateway_while_an_upstream_is_down() -> 
 
     assert response.status == 502
     assert frontend.requests == []
+
+
+@pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+def test_the_browser_gateway_authenticates_against_the_live_database(live_server: Any) -> None:
+    accounts = browser.seed_accounts()
+    with browser.serving(live_server.url) as gateway, browser.live_settings(gateway.origin):
+        connection = http.client.HTTPConnection("127.0.0.1", gateway.server_port, timeout=5)
+        try:
+            connection.request("GET", "/api/session/")
+            session = connection.getresponse()
+            token = json.loads(session.read())["csrf_token"]
+            cookies = SimpleCookie()
+            cookies.load(session.headers["Set-Cookie"])
+            connection.request(
+                "POST",
+                "/api/auth/browser/v1/auth/login",
+                json.dumps({"email": accounts.system.member.email, "password": accounts.password}),
+                {
+                    "Content-Type": "application/json",
+                    "Cookie": cookies.output(header="", sep=";"),
+                    "X-CSRFToken": token,
+                },
+            )
+            response = connection.getresponse()
+            payload = json.loads(response.read())
+            assert response.status == 200, payload
+            assert payload["meta"]["is_authenticated"] is True
+        finally:
+            connection.close()
+
+
+def test_the_browser_backend_listens_on_the_gateway_ipv4_loopback(live_server: Any) -> None:
+    assert urlsplit(live_server.url).hostname == "127.0.0.1"

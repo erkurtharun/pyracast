@@ -112,6 +112,7 @@ addopts = [
     "-q",
     "--tb=short",
     "-ra",
+    "--liveserver=127.0.0.1",
     "-m",
     "not browser",
     "--cov",

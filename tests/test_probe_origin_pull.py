@@ -251,3 +251,16 @@ def test_an_entrypoint_that_refuses_the_connection_could_not_be_reached(
     assert probe_origin_pull.observe("127.0.0.1", 9, SITE, None, 1.0) == (
         "could not be reached (refused)"
     )
+
+
+def test_a_connection_timeout_reports_the_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def time_out(_address: tuple[str, int], *, timeout: float) -> socket.socket:
+        raise TimeoutError
+
+    monkeypatch.setattr(socket, "create_connection", time_out)
+
+    assert probe_origin_pull.observe("127.0.0.1", 443, SITE, None, 1.5) == (
+        "did not answer within 1.5 s"
+    )
