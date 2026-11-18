@@ -15,7 +15,7 @@ from pyracast.forecasts.models import (
 )
 from pyracast.metering.models import EpiasCollectionJob
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
-from pyracast.plants.models import CalibrationRun, Plant, ProductionObservation
+from pyracast.plants.models import CalibrationRun, Plant, PlantConfiguration, ProductionObservation
 from tests.support.capacity_normalization import normalize, scaled_system
 from tests.support.domain import NOW, System, make_system
 from tests.support.invariants import (
@@ -290,7 +290,7 @@ def _observation(
 ) -> ProductionObservation:
     return ProductionObservation.objects.create(
         plant=plant,
-        configuration_id=plant.current_configuration_id,
+        configuration=PlantConfiguration.objects.get(plant=plant),
         starts_at=start,
         ends_at=start + timedelta(hours=1),
         energy_mwh=1,
@@ -349,7 +349,7 @@ def test_provider_migration_refuses_accounts_and_bindings_no_writer_produces(
     system = make_system(approved=True)
     row = system.account if model is ProviderAccount else system.binding
     rows = model._default_manager.filter(pk=row.pk)
-    stored = rows.values().get()
+    stored: dict[str, object] = dict(rows.values().get())
     migrate(PREVIOUS["connections"])
     rows.update(**values)
     changed = rows.values().get()
