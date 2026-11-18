@@ -139,7 +139,16 @@ def test_prune_reports_an_image_it_cannot_remove_and_continues(host: Host) -> No
 
 @pytest.mark.parametrize(
     "content",
-    [None, "not json", "[]", '{"current": "serving"}', '{"current": "../x", "previous": null}'],
+    [
+        None,
+        "not json",
+        "[]",
+        '{"current": "serving"}',
+        '{"current": "../x", "previous": null}',
+        '{"current": null, "previous": null}',
+        '{"current": null, "previous": "old"}',
+        '{"current": "serving", "previous": 7}',
+    ],
 )
 def test_prune_without_a_valid_state_removes_nothing(host: Host, content: str | None) -> None:
     host.release("old", images("1"))

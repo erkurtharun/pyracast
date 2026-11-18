@@ -78,10 +78,9 @@ def gateway_environment() -> dict[str, str]:
     return environment
 
 
-def stop_groups(script: str, command: str) -> list[tuple[int, tuple[str, ...]]]:
-    pattern = re.compile(
-        rf'^\s*"\$\{{{command}\[@\]\}}" stop -t (\d+) ([a-z ]+?)(?: \|\| stopped=0)?$'
-    )
+def stop_groups(script: str, *, cleanup: bool) -> list[tuple[int, tuple[str, ...]]]:
+    suffix = r" \|\| stopped=0" if cleanup else ""
+    pattern = re.compile(rf'^\s*"\$\{{(?:old|compose)\[@\]\}}" stop -t (\d+) ([a-z ]+?){suffix}$')
     return [
         (int(match[1]), tuple(match[2].split()))
         for line in script.splitlines()
@@ -335,10 +334,10 @@ def test_smoke_sign_in_uses_a_verified_email_identity(tmp_path: Path) -> None:
 
 def test_release_drains_every_application_service_within_its_stop_grace_period() -> None:
     script = text(DEPLOY / "install-release.sh")
-    drain = stop_groups(script, "old")
+    drain = stop_groups(script, cleanup=False)
     services = compose_services()
 
-    assert stop_groups(script, "compose") == drain
+    assert stop_groups(script, cleanup=True) == drain
     assert sorted(name for _, group in drain for name in group) == sorted(
         long_running_services() - SUPPORT_SERVICES - EDGE_SERVICES
     )
@@ -661,7 +660,9 @@ def test_release_ships_the_watchdog_and_backup_units_and_the_host_keeps_its_own(
 def test_watchdog_unit_outlasts_its_deadline_and_runs_while_a_release_is_blocked() -> None:
     unit = shipped_unit("pyracast-watchdog.service")
     application = systemd_unit("pyracast.service")
-    drain = max(timeout for timeout, _ in stop_groups(text(DEPLOY / "install-release.sh"), "old"))
+    drain = max(
+        timeout for timeout, _ in stop_groups(text(DEPLOY / "install-release.sh"), cleanup=False)
+    )
 
     assert int(unit["TimeoutStartSec"][0]) >= watchdog.DEADLINE_SECONDS + 60
     assert unit["ConditionPathExists"] == ["/opt/pyracast/current/deploy/watchdog.py"]
@@ -737,7 +738,7 @@ def test_a_silent_watchdog_is_alerted() -> None:
 
 
 def test_release_drains_producers_and_workers_while_the_site_still_serves() -> None:
-    drain = stop_groups(text(DEPLOY / "install-release.sh"), "old")
+    drain = stop_groups(text(DEPLOY / "install-release.sh"), cleanup=False)
 
     assert [group for _, group in drain] == [
         ("dispatcher",),
@@ -747,7 +748,7 @@ def test_release_drains_producers_and_workers_while_the_site_still_serves() -> N
 
 
 def test_reset_tool_stops_the_application_in_the_installers_drain_order() -> None:
-    drain = stop_groups(text(DEPLOY / "install-release.sh"), "old")
+    drain = stop_groups(text(DEPLOY / "install-release.sh"), cleanup=False)
 
     assert [(int(timeout), group) for timeout, group in reset_database.STOP_ORDER] == drain
 
@@ -855,6 +856,31 @@ def test_each_release_reads_the_secrets_staged_for_it() -> None:
     assert "environment_files" not in script
 
 
+def test_the_new_gateway_answers_with_the_notice_before_api_and_web_stop() -> None:
+    script = installer()
+    edge = '"${compose[@]}" up -d --no-deps --wait --wait-timeout 180 maintenance gateway'
+    drain = script.index('  "${old[@]}" stop -t 660 worker notifications\n')
+    stop = script.index('  "${compose[@]}" stop -t 100 api web\n')
+    cleanup = script.index('"${compose[@]}" stop -t 100 api web || stopped=0')
+
+    assert drain < script.index(f"  {edge}\n") < stop
+    assert script.index(f"{edge} || noticed=0") < cleanup
+    assert '"${old[@]}" stop -t 100' not in script
+
+
+def test_a_rotated_runtime_password_restarts_the_serving_release_before_maintenance() -> None:
+    script = installer()
+    rotated = script.index('rotated=$(python3 "$release/deploy/bootstrap_database.py"')
+    refresh = script.index(
+        "python3 /opt/pyracast/current/deploy/runtime_secrets.py /etc/pyracast/host.json"
+    )
+    restart = script.index('"${old[@]}" up -d --wait --wait-timeout 180', refresh)
+
+    assert rotated < refresh < restart < script.index("\nbegin_maintenance\n")
+    assert "[[ $rotated == *pyracast_app* && -n $previous ]] && (( blocked_before == 0 ))" in script
+    assert "systemctl restart pyracast.service" in script
+
+
 def test_a_failure_before_migrate_resumes_the_previous_release() -> None:
     script = installer()
     migrate = script.index('"${compose[@]}" run --rm --no-deps migrate\n')
@@ -925,4 +951,5 @@ def test_smoke_proves_the_maintenance_notice_and_the_restricted_roles() -> None:
     assert "https://localhost:18443/api/session/) == 503 ]]" in smoke
     assert f"retry-after: {maintenance.RETRY_AFTER_SECONDS}" in smoke
     assert "INSERT INTO django_migrations" in smoke
+    assert "== '42501'" in smoke
     assert "no pg_hba.conf entry" in smoke

@@ -1,4 +1,5 @@
 import subprocess
+import sys
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -9,7 +10,7 @@ import pytest
 from django.conf import settings
 from psycopg import sql
 
-from deploy import bootstrap_database
+from deploy import bootstrap_database, reset_database
 
 ROOT = Path(__file__).resolve().parents[1]
 BOOTSTRAP = (ROOT / "deploy/bootstrap.sql").read_text()
@@ -73,6 +74,11 @@ def as_owner(database: str, statement: str) -> None:
         connection.execute(statement.encode())
 
 
+def role_check(database: str) -> None:
+    with psycopg.connect(**server_parameters(database), autocommit=True) as connection:
+        connection.execute(reset_database.ROLE_CHECK_SQL.encode())
+
+
 def privileges(database: str, role: str, table: str) -> dict[str, bool]:
     with psycopg.connect(**server_parameters(database)) as connection:
         return {
@@ -129,6 +135,23 @@ def test_provisioning_converges_and_a_second_run_changes_nothing(scratch_databas
         )
 
 
+def test_role_check_refuses_runtime_writes_to_the_ledger_until_provisioning_converges(
+    scratch_database: str,
+) -> None:
+    provision(scratch_database)
+    as_owner(
+        scratch_database,
+        "CREATE TABLE django_migrations (id bigserial PRIMARY KEY, app varchar(255), "
+        "name varchar(255), applied timestamptz)",
+    )
+    as_owner(scratch_database, "GRANT INSERT ON django_migrations TO pyracast_app")
+
+    with pytest.raises(psycopg.errors.RaiseException, match="migration ledger"):
+        role_check(scratch_database)
+    provision(scratch_database)
+    role_check(scratch_database)
+
+
 def test_scram_verifier_matches_the_one_postgresql_computes() -> None:
     role = f"pyracast_scram_{uuid.uuid4().hex[:12]}"
     with psycopg.connect(**server_parameters("postgres")) as connection:
@@ -178,10 +201,52 @@ def test_password_statements_set_only_the_roles_whose_verifier_differs() -> None
     )
 
 
-def test_password_statements_refuse_a_password_postgresql_would_normalize() -> None:
-    with pytest.raises(ValueError, match="printable ASCII") as error:
-        bootstrap_database.password_statements({}, {"pyracast_app": "paßword"})
-    assert "paßword" not in str(error.value)
+@pytest.mark.parametrize(
+    "password",
+    [
+        "owner password",
+        " tab\tand trailing ",
+        "control\x80",
+        *(
+            "".join(map(chr, points))
+            for points in (
+                (0x70, 0xDF),
+                (0xFF46, 0xFF55, 0xFF4C),
+                (0x61, 0xAD, 0x62),
+                (0x61, 0xA0, 0x62),
+                (0x627, 0x644, 0x639),
+                (0x627, 0x61),
+                (0x627, 0x31, 0x627),
+                (0x61, 0x221),
+                (0x200B,),
+                (0x61, 0x200B),
+                (0xAD,),
+                (0x65, 0x301),
+                (0x1100, 0x1161),
+                (0x61, 0xE000),
+                (0x61, 0x1F600),
+            )
+        ),
+    ],
+)
+def test_scram_verifier_matches_postgresql_for_every_password_it_accepts(password: str) -> None:
+    role = f"pyracast_scram_{uuid.uuid4().hex[:12]}"
+    with psycopg.connect(**server_parameters("postgres")) as connection:
+        connection.execute(
+            sql.SQL("CREATE ROLE {} PASSWORD {}").format(
+                sql.Identifier(role), sql.Literal(password)
+            )
+        )
+        (stored,) = connection.execute(
+            "SELECT rolpassword FROM pg_authid WHERE rolname = %s", (role,)
+        ).fetchone() or (None,)
+        connection.rollback()
+
+    assert bootstrap_database.scram_matches(stored, password)
+    statements = bootstrap_database.password_statements(
+        {"pyracast_app": stored}, {"pyracast_app": password}
+    )
+    assert statements == []
 
 
 class Psql:
@@ -215,8 +280,11 @@ def test_converge_applies_the_definition_in_one_transaction_without_plaintext(
     psql = Psql("pyracast_owner\npyracast_app\n")
     monkeypatch.setattr(subprocess, "run", psql)
 
-    bootstrap_database.converge_database(release(tmp_path / "release"), tmp_path / "secrets")
+    changed = bootstrap_database.converge_database(
+        release(tmp_path / "release"), tmp_path / "secrets"
+    )
 
+    assert changed == ["pyracast_app", "pyracast_owner"]
     (query, _), (apply, script) = psql.calls
     assert "pg_authid" in query[-1]
     assert "--single-transaction" in apply
@@ -239,8 +307,11 @@ def test_converge_changes_no_password_that_already_verifies(
     psql = Psql(stored)
     monkeypatch.setattr(subprocess, "run", psql)
 
-    bootstrap_database.converge_database(release(tmp_path / "release"), tmp_path / "secrets")
+    changed = bootstrap_database.converge_database(
+        release(tmp_path / "release"), tmp_path / "secrets"
+    )
 
+    assert changed == []
     assert psql.calls[-1][1] == BOOTSTRAP
 
 
@@ -264,3 +335,16 @@ def test_bootstrap_is_one_idempotent_definition_without_its_own_transaction() ->
     assert "COMMIT;" not in statements
     assert not any(line.startswith("CREATE ROLE ") for line in BOOTSTRAP.splitlines())
     assert "DATABASE pyracast" not in BOOTSTRAP
+
+
+def test_command_line_prints_each_role_whose_password_changed(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        bootstrap_database, "converge_database", lambda _release, _directory: ["pyracast_app"]
+    )
+    monkeypatch.setattr(sys, "argv", ["bootstrap_database.py", "release", "secrets"])
+
+    bootstrap_database.main()
+
+    assert capsys.readouterr().out == "pyracast_app\n"

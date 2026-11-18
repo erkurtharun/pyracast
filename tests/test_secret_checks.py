@@ -126,6 +126,20 @@ def test_check_secrets_on_a_database_without_the_tables_has_nothing_to_check(
     assert check() == (0, "No stored secrets: the tables do not exist yet.\n")
 
 
+@pytest.mark.parametrize("missing", ["connections_provideraccount", "mfa_authenticator"])
+def test_check_secrets_refuses_a_schema_that_holds_only_one_secret_table(
+    monkeypatch: pytest.MonkeyPatch, missing: str
+) -> None:
+    stored(OTHER_KEY)
+    present = [name for name in connection.introspection.table_names() if name != missing]
+    monkeypatch.setattr(connection.introspection, "table_names", lambda *args, **kwargs: present)
+
+    status, output = check()
+
+    assert status == 1
+    assert f"{missing} does not exist" in output
+
+
 @pytest.mark.parametrize(("kind", "data"), MALFORMED)
 def test_reencryption_of_a_malformed_shape_leaves_every_row_unchanged(kind: str, data: Any) -> None:
     system, _ = stored(OLD_KEY)

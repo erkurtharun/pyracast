@@ -1082,6 +1082,34 @@ def test_restore_brings_back_the_kept_archive_with_owners_and_starts_the_previou
     assert len(commands.calls) == calls
 
 
+def test_restore_converges_provisioning_over_the_privileges_the_archive_brought_back(
+    host: Host, commands: FakeCommands, uploads: dict[str, bytes]
+) -> None:
+    name = prepared(host, uploads)
+    reset_database.reset(host, name)
+    calls = len(commands.calls)
+
+    reset_database.restore(host, name)
+
+    later = commands.calls[calls:]
+    restored = next(
+        position
+        for position, call in enumerate(later)
+        if "pg_restore" in call and "--no-owner" not in call
+    )
+    checked = next(
+        position for position, call in enumerate(later) if call[-1] == reset_database.ROLE_CHECK_SQL
+    )
+    bootstrap = (ROOT / "deploy/bootstrap.sql").read_text()
+    converged = [
+        position
+        for position, call in enumerate(later[restored:checked], restored)
+        if call[-1] == bootstrap
+    ]
+    assert len(converged) == 1
+    assert "--single-transaction" in later[converged[0]]
+
+
 def test_restore_keeps_the_site_stopped_when_restored_counts_differ(
     host: Host, commands: FakeCommands, uploads: dict[str, bytes]
 ) -> None:
