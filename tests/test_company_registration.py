@@ -371,6 +371,18 @@ def test_concurrent_signups_sharing_a_mailbox_name_both_wait_for_verification(
     assert User.objects.count() == Tenant.objects.count() == 2
 
 
+def test_a_signup_whose_random_username_part_repeats_still_gets_a_unique_username(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    User.objects.create_user(username="info-0a1b")
+    monkeypatch.setattr("pyracast.accounts.adapters.secrets.token_hex", lambda size: "0a1b")
+
+    response = signup(Client(enforce_csrf_checks=True), {"email": "info@example.com"})
+
+    assert response.status_code == 401
+    assert User.objects.filter(email="info@example.com").exclude(username="info-0a1b").exists()
+
+
 @override_settings(
     MAILERS={"default": {"BACKEND": "django.core.mail.backends.locmem.EmailBackend"}}
 )

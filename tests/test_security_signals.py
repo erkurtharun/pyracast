@@ -1,6 +1,8 @@
+import ast
 import json
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +15,7 @@ from allauth.socialaccount import signals as social_signals
 from allauth.socialaccount.models import SocialAccount, SocialLogin
 from django.contrib.auth import signals as auth_signals
 from django.contrib.auth.models import User
+from django.db import transaction
 from django.dispatch import Signal
 from django.test import RequestFactory
 
@@ -23,10 +26,58 @@ from pyracast.accounts.audit import (
     SecurityEvent,
     connect_security_events,
     logger,
+    record_on_commit,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "src" / "pyracast"
+PINNED_LINE_KEYS = frozenset(
+    {"event", "user_id", "client_ip", "subject", "tenant_id", "target_id", "reason", "view"}
+)
+WRITERS = frozenset({"record_security_event", "record_on_commit", "record_refusal"})
+SIGNALLED = frozenset(
+    {
+        "login_succeeded",
+        "logout",
+        "login_failed",
+        "login_code_rejected",
+        "signup",
+        "email_verified",
+        "email_code_rejected",
+        "email_added",
+        "email_changed",
+        "email_removed",
+        "password_changed",
+        "password_set",
+        "password_reset",
+        "password_reset_code_rejected",
+        "mfa_added",
+        "mfa_removed",
+        "mfa_reset",
+        "mfa_succeeded",
+        "mfa_failed",
+        "social_account_connected",
+        "social_account_disconnected",
+    }
+)
+WRITTEN = frozenset(
+    {
+        "login_locked",
+        "password_change_failed",
+        "second_factor_locked",
+        "admin_mfa_provisioned",
+        "invalid_proxy_headers",
+        "authentication_request_throttled",
+        "authorization_denied",
+        "csrf_refused",
+        "invitation_sent",
+        "invitation_limited",
+        "invitation_revoked",
+        "invitation_accepted",
+        "workspace_member_removed",
+        "workspace_admin_reassigned",
+    }
+)
 ADDRESS = "Private.Person@Example.com"
 HIDDEN = "test-only-hidden-value"
 USER_ID = 4821
@@ -133,19 +184,49 @@ def test_every_signal_writes_one_redacted_line(
     assert "private-person" not in caplog.text
 
 
-def test_every_event_has_one_writer_and_every_writer_names_an_event() -> None:
-    written = {
-        name
-        for path in SOURCE.rglob("*.py")
-        if path.name != "audit.py"
-        for name in re.findall(r"SecurityEvent\.([A-Z_]+)", path.read_text(encoding="utf-8"))
-    }
-    signalled = {event.name for event in SIGNAL_EVENTS.values()}
+def writer_calls() -> list[tuple[str, ast.expr | None]]:
+    calls = []
+    for path in SOURCE.rglob("*.py"):
+        if path.name == "audit.py":
+            continue
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id in WRITERS
+            ):
+                calls.append(
+                    (f"{path.relative_to(SOURCE)}:{node.lineno}", next(iter(node.args), None))
+                )
+    return calls
 
-    assert written <= set(SecurityEvent.__members__)
-    assert not written & signalled
-    assert written | signalled == set(SecurityEvent.__members__)
-    assert len(signalled) == len(SIGNAL_EVENTS)
+
+def named_events(argument: ast.expr | None) -> set[str]:
+    if argument is None:
+        return set()
+    return {
+        node.attr
+        for node in ast.walk(argument)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "SecurityEvent"
+    }
+
+
+def test_the_vocabulary_and_line_schema_are_the_pinned_ones() -> None:
+    assert {event.value for event in SecurityEvent} == SIGNALLED | WRITTEN
+    assert {event.value for event in SIGNAL_EVENTS.values()} == SIGNALLED
+    assert len(SIGNAL_EVENTS) == len(SIGNALLED)
+    assert PINNED_LINE_KEYS == LINE_KEYS
+
+
+def test_every_written_event_has_a_writer_call_and_every_writer_call_names_one() -> None:
+    calls = writer_calls()
+    named = {location: named_events(argument) for location, argument in calls}
+
+    assert calls
+    assert [location for location, events in named.items() if not events] == []
+    assert {SecurityEvent[name].value for events in named.values() for name in events} == WRITTEN
 
 
 def test_failures_for_one_address_share_a_subject_that_is_not_the_address(
@@ -199,3 +280,36 @@ def test_the_refusal_throttle_admits_a_key_once_per_interval_and_forgets_the_old
     assert throttle.admit((2, "view", "code"))
     assert throttle.admit((3, "view", "code"))
     assert throttle.admit((1, "view", "code"))
+
+
+def test_the_refusal_throttle_admits_a_key_again_after_the_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [1000.0]
+    monkeypatch.setattr(time, "monotonic", lambda: now[0])
+    throttle = RefusalThrottle()
+
+    assert throttle.admit((1, "view", "code"))
+    now[0] += throttle.interval - 0.5
+    assert not throttle.admit((1, "view", "code"))
+    now[0] += 0.5
+    assert throttle.admit((1, "view", "code"))
+
+
+@pytest.mark.django_db(transaction=True)
+def test_a_line_bound_to_a_commit_is_written_only_when_the_transaction_commits(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def rolled_back() -> None:
+        with transaction.atomic():
+            record_on_commit(SecurityEvent.INVITATION_SENT, user_id=USER_ID, target_id=1)
+            raise RuntimeError
+
+    with pytest.raises(RuntimeError):
+        rolled_back()
+    with transaction.atomic():
+        record_on_commit(SecurityEvent.INVITATION_SENT, user_id=USER_ID, target_id=2)
+
+    assert lines(caplog) == [
+        {"event": "invitation_sent", "user_id": USER_ID, "client_ip": None, "target_id": 2}
+    ]

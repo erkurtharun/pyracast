@@ -364,6 +364,7 @@ def test_the_api_writes_its_security_lines_through_a_blocking_log_path() -> None
 
     assert logging["driver"] == "gcplogs"
     assert logging["options"]["mode"] == "blocking"
+    assert compose_environment()["PYRACAST_SECURITY_LOG_PATH"] == "/proc/1/fd/1"
 
 
 def test_origin_firewall_admits_exactly_the_gateway_trusted_ipv4_ranges() -> None:

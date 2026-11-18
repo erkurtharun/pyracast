@@ -107,6 +107,25 @@ def test_a_second_workspace_inviting_one_address_is_refused_with_a_real_wait() -
     assert not WorkspaceInvitation.objects.filter(tenant=second).exists()
 
 
+def test_the_cross_workspace_budget_frees_after_a_day_while_the_first_invitation_stays_open() -> (
+    None
+):
+    first, first_admin = workspace("first")
+    second, second_admin = workspace("second")
+    assert invite(first_admin, first).status_code == 201
+    WorkspaceInvitation.objects.filter(tenant=first).update(
+        created_at=timezone.now() - timedelta(hours=25)
+    )
+
+    assert invite(second_admin, second).status_code == 201
+    assert (
+        WorkspaceInvitation.objects.filter(
+            email=GUEST, accepted_at__isnull=True, expires_at__gt=timezone.now()
+        ).count()
+        == 2
+    )
+
+
 def test_two_workspaces_inviting_one_address_at_once_send_one_invitation() -> None:
     pairs = [workspace("first"), workspace("second")]
     start = Barrier(2)

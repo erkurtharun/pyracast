@@ -16,6 +16,7 @@ from pyracast.accounts import session_lock
 from pyracast.accounts.audit import connect_security_events, logger
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
 from pyracast.accounts.session_lock import serialize_session
+from tests.support.admin_recovery_security import AUTH, authenticated_account
 
 PASSWORD = "test-only-" + "harbor-lantern-58!"
 
@@ -195,6 +196,23 @@ def test_a_signed_in_csrf_refusal_is_recorded_for_api_and_authentication_views(
     assert [
         (line["event"], line["user_id"], line["reason"]) for line in security_lines(caplog)
     ] == [("csrf_refused", viewer.pk, "csrf_failed")] * 2
+
+
+@pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+def test_a_signed_in_refusal_from_an_authentication_view_is_recorded(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    client, administrator, _ = authenticated_account()
+    token = client.get("/api/session/").json()["csrf_token"]
+
+    response = client.delete(AUTH + "account/authenticators/totp", HTTP_X_CSRFTOKEN=token)
+
+    assert response.status_code == 403
+    assert response.json()["code"] == "permission_denied"
+    assert [
+        (line["event"], line["user_id"], line["reason"]) for line in security_lines(caplog)
+    ] == [("authorization_denied", administrator.pk, "permission_denied")]
+    assert administrator.email not in caplog.text
 
 
 @pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
