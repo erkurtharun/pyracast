@@ -210,8 +210,10 @@ class SolcastProvider(ProviderAdapter, HistoryAdapter):
                 if secret in response.text:
                     raise ProviderError("unsafe_provider_response")
                 payload = response.json()
-        except httpx.HTTPError, json.JSONDecodeError, UnicodeDecodeError:
+        except httpx.HTTPError:
             raise ProviderError("provider_request_failed") from None
+        except json.JSONDecodeError, UnicodeDecodeError:
+            raise ProviderError("invalid_provider_schema") from None
         if contains_secret(payload, secret):
             raise ProviderError("unsafe_provider_response")
         return normalize_payload(payload, endpoint, collected_at=self.clock())

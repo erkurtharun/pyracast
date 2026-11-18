@@ -29,6 +29,7 @@ class ProviderError(Exception):
         status_code: int | None = None,
     ) -> None:
         super().__init__(code)
+        self.code = code
         self.retryable = retryable
         self.retry_after_seconds = retry_after_seconds
         self.status_code = status_code

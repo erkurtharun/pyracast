@@ -1,5 +1,5 @@
 {% load i18n tz %}
-{% if form.errors %}<div class="notice notice--error" role="alert" data-error-summary tabindex="-1"><h2>{% translate "Review the file" %}</h2>{{ form.errors }}</div>{% endif %}
+{% if form.errors %}<div class="notice notice--error" role="alert" data-error-summary tabindex="-1"><h2>{% translate "Review the file" %}</h2>{% include "admin/workspace/form_errors.html" %}</div>{% endif %}
 {% if preview %}
   <section class="upload-preview" aria-labelledby="preview-title">
     <h2 id="preview-title">{% translate "File preview" %}</h2>

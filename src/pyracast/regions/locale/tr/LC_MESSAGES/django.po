@@ -1251,22 +1251,67 @@ msgstr "Santral konumu değişti. Santrali yeniden açıp tekrar deneyin."
 msgid "The production source changed; request a new calibration."
 msgstr "Üretim kaynağı değişti; yeni bir kalibrasyon isteyin."
 
-msgid "The provider has confirmed that this account can make requests again."
-msgstr "Sağlayıcı, bu hesabın yeniden istek gönderebildiğini doğruladı."
+msgid "The provider answered with an error. Try validating again later."
+msgstr ""
+"Sağlayıcı bir hatayla yanıt verdi. Doğrulamayı daha sonra tekrar deneyin."
+
+msgid ""
+"The provider could not be reached. Try validating again in a few minutes."
+msgstr ""
+"Sağlayıcıya ulaşılamadı. Birkaç dakika sonra doğrulamayı tekrar deneyin."
+
+msgid ""
+"The provider found no site with this resource ID for this API key. Check the "
+"resource ID and that the key belongs to the account that owns the site."
+msgstr ""
+"Sağlayıcı bu API anahtarıyla bu kaynak kimliğine sahip bir tesis bulamadı. "
+"Kaynak kimliğini ve anahtarın, tesisin sahibi olan hesaba ait olduğunu "
+"denetleyin."
+
+msgid "The provider has confirmed that this account can make requests again"
+msgstr "Sağlayıcı, bu hesabın yeniden istek gönderebildiğini doğruladı"
 
 msgid "The provider is limiting requests. Wait before validating again."
 msgstr "Sağlayıcı istekleri sınırlıyor. Yeniden doğrulamadan önce bekleyin."
+
+msgid ""
+"The provider refused the request. Check the resource ID and site settings, "
+"then validate again."
+msgstr ""
+"Sağlayıcı isteği kabul etmedi. Kaynak kimliğini ve tesis ayarlarını "
+"denetleyip yeniden doğrulayın."
+
+msgid ""
+"The provider rejected the API key. Enter the current key for this account, "
+"then validate again."
+msgstr ""
+"Sağlayıcı API anahtarını reddetti. Bu hesabın güncel anahtarını girip "
+"yeniden doğrulayın."
 
 msgid "The provider setup changed. Reload this page before saving."
 msgstr ""
 "Sağlayıcı kurulumu değişti. Kaydetmeden önce bu sayfayı yeniden yükleyin."
 
+msgid "The provider's answer could not be read. Try validating again later."
+msgstr ""
+"Sağlayıcının yanıtı okunamadı. Doğrulamayı daha sonra tekrar deneyin."
+
 msgid "The provider's request budget is unavailable. Try validation later."
 msgstr ""
 "Sağlayıcının istek bütçesi kullanılamıyor. Doğrulamayı daha sonra deneyin."
 
+msgid ""
+"The resource ID contains characters the provider does not use. Use only "
+"letters, digits, hyphens and underscores."
+msgstr ""
+"Kaynak kimliği sağlayıcının kullanmadığı karakterler içeriyor. Yalnızca "
+"harf, rakam, kısa çizgi ve alt çizgi kullanın."
+
 msgid "The review could not be applied. Reload and review the current plant."
 msgstr "İnceleme uygulanamadı. Yeniden yükleyip güncel santrali inceleyin."
+
+msgid "The saved API key cannot be read. Enter the key again, then validate."
+msgstr "Kayıtlı API anahtarı okunamıyor. Anahtarı yeniden girip doğrulayın."
 
 msgid ""
 "The selected account's key and daily quota are shared by every plant using "
@@ -1287,6 +1332,9 @@ msgid ""
 msgstr ""
 "Kurulum uygulanamadı. Değerleri denetleyin; santral veya hesap değiştiyse "
 "yeniden yükleyin."
+
+msgid "This account cannot be validated here. Select a Solcast account."
+msgstr "Bu hesap burada doğrulanamaz. Bir Solcast hesabı seçin."
 
 msgid "This decision is unavailable for the current review status."
 msgstr "Bu karar güncel inceleme durumu için kullanılamaz."

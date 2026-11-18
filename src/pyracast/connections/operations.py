@@ -1,3 +1,4 @@
+import logging
 import time
 from datetime import UTC, datetime, timedelta
 
@@ -31,6 +32,8 @@ from pyracast.forecasts.models import (
 )
 from pyracast.provider_retry import next_retry_at, rate_limit_retry_after
 from pyracast.regions.models import AuditAction, AuditEvent, Region, RegionStatus
+
+logger = logging.getLogger(__name__)
 
 
 class QuotaExceededError(Exception):
@@ -213,6 +216,13 @@ def validate_binding(
     try:
         adapter.validate(binding)
     except ProviderError as exc:
+        logger.warning(
+            "provider_validation_failed provider=%s binding_id=%s error_code=%s status_code=%s",
+            binding.provider_account.provider,
+            binding.pk,
+            exc.code,
+            exc.status_code,
+        )
         RequestAttempt.objects.filter(pk=attempt.pk).update(outcome=RequestOutcome.FAILED)
         SiteBinding.objects.filter(pk=binding.pk).update(health=BindingHealth.ERROR)
         record_provider_failure(
