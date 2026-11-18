@@ -1268,6 +1268,48 @@ export interface components {
          */
         MountingTypeEnum: "unknown" | "fixed" | "tracking";
         /**
+         * @description * `missed_schedule` - Missed schedule
+         *     * `delivery_deadline_exceeded` - Delivery deadline exceeded
+         *     * `cancelled_by_settings_change` - Cancelled by settings change
+         *     * `schedule_or_authority_changed` - Schedule or authority changed
+         *     * `no_recipients` - No recipients
+         *     * `invalid_recipient` - Invalid recipient
+         *     * `recipient_limit_exceeded` - Recipient limit exceeded
+         *     * `definition_trashed` - Definition trashed
+         *     * `interrupted_send` - Interrupted during sending
+         *     * `interrupted_connection` - Interrupted before sending
+         *     * `mail_not_sent` - Mail not sent
+         *     * `mail_configuration_invalid` - Mail configuration invalid
+         *     * `mail_credentials_rejected` - Mail credentials rejected
+         *     * `mail_authorization_revoked` - Mail authorization revoked
+         *     * `mail_rate_limited` - Mail rate limited
+         *     * `mail_rejected` - Mail rejected
+         *     * `mail_sender_forbidden` - Mail sender forbidden
+         *     * `mail_preparation_failed` - Mail preparation failed
+         *     * `mail_outcome_uncertain` - Mail outcome uncertain
+         * @enum {string}
+         */
+        NotificationDeliveryErrorEnum:
+            | "missed_schedule"
+            | "delivery_deadline_exceeded"
+            | "cancelled_by_settings_change"
+            | "schedule_or_authority_changed"
+            | "no_recipients"
+            | "invalid_recipient"
+            | "recipient_limit_exceeded"
+            | "definition_trashed"
+            | "interrupted_send"
+            | "interrupted_connection"
+            | "mail_not_sent"
+            | "mail_configuration_invalid"
+            | "mail_credentials_rejected"
+            | "mail_authorization_revoked"
+            | "mail_rate_limited"
+            | "mail_rejected"
+            | "mail_sender_forbidden"
+            | "mail_preparation_failed"
+            | "mail_outcome_uncertain";
+        /**
          * @description * `pending` - Pending
          *     * `retry` - Retry
          *     * `sending` - Sending
@@ -1656,6 +1698,21 @@ export interface components {
          */
         PowerBasisEnum: "ac" | "dc";
         /**
+         * @description * `xlsx` - Workbook
+         *     * `plain` - Plain text
+         * @enum {string}
+         */
+        PreparedMessageFormatEnum: "xlsx" | "plain";
+        /**
+         * @description * `current` - Current forecast
+         *     * `saved_complete` - Saved complete forecast
+         *     * `saved_partial` - Saved partial forecast
+         *     * `unavailable` - Unavailable
+         * @enum {string}
+         */
+        PreparedMessageKindEnum:
+            "current" | "saved_complete" | "saved_partial" | "unavailable";
+        /**
          * @description * `set` - Set
          *     * `revert` - Revert
          * @enum {string}
@@ -1863,8 +1920,15 @@ export interface components {
             /** Format: date-time */
             scheduled_for: string;
             status: components["schemas"]["NotificationDeliveryStatusEnum"];
-            last_error: string;
-            forecast_status: string | null;
+            last_error:
+                | components["schemas"]["NotificationDeliveryErrorEnum"]
+                | components["schemas"]["BlankEnum"];
+            forecast_status:
+                | (
+                      | components["schemas"]["PreparedMessageKindEnum"]
+                      | components["schemas"]["NullEnum"]
+                  )
+                | null;
             forecast_complete: boolean | null;
             /** Format: date-time */
             collected_at: string | null;

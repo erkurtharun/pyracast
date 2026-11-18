@@ -24,6 +24,7 @@ from pyracast.incidents.models import IncidentRevision, PlantIncident
 from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
 from pyracast.notifications.models import (
     NotificationDelivery,
+    NotificationDeliveryError,
     NotificationDeliveryStatus,
     ReminderSchedule,
 )
@@ -84,13 +85,13 @@ def trash_region(actor: User, tenant_id: int, region_id: int) -> Region:
             status__in=(NotificationDeliveryStatus.PENDING, NotificationDeliveryStatus.RETRY)
         ).update(
             status=NotificationDeliveryStatus.CANCELLED,
-            last_error="definition_trashed",
+            last_error=NotificationDeliveryError.DEFINITION_TRASHED,
             lease_token=None,
             lease_expires_at=None,
         )
         deliveries.filter(status=NotificationDeliveryStatus.SENDING).update(
             status=NotificationDeliveryStatus.UNCERTAIN,
-            last_error="definition_trashed",
+            last_error=NotificationDeliveryError.DEFINITION_TRASHED,
             lease_token=None,
             lease_expires_at=None,
         )

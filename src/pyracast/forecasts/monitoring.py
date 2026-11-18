@@ -16,7 +16,9 @@ from pyracast.metering.models import EpiasCollectionJob, EpiasJobStatus
 from pyracast.notifications.models import (
     PAUSED_DELIVERY_ERRORS,
     NotificationDelivery,
+    NotificationDeliveryError,
     NotificationDeliveryStatus,
+    PreparedMessageKind,
 )
 from pyracast.notifications.operations import invalid_reminder_recipient_count
 from pyracast.regions.models import Region
@@ -131,12 +133,18 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
             "pk",
             filter=Q(
                 status__in=(NotificationDeliveryStatus.SKIPPED, NotificationDeliveryStatus.FAILED),
-                last_error__in=("missed_schedule", "delivery_deadline_exceeded"),
+                last_error__in=(
+                    NotificationDeliveryError.MISSED_SCHEDULE,
+                    NotificationDeliveryError.DELIVERY_DEADLINE_EXCEEDED,
+                ),
                 scheduled_for__gte=recent,
             ),
         ),
         unavailable_forecasts=Count(
-            "pk", filter=Q(prepared_message__kind="unavailable", scheduled_for__gte=recent)
+            "pk",
+            filter=Q(
+                prepared_message__kind=PreparedMessageKind.UNAVAILABLE, scheduled_for__gte=recent
+            ),
         ),
         partial_forecasts=Count(
             "pk", filter=Q(prepared_message__tomorrow_complete=False, scheduled_for__gte=recent)
@@ -147,7 +155,10 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
         saved_forecast_notifications=Count(
             "pk",
             filter=Q(
-                prepared_message__kind__in=("saved_complete", "saved_partial"),
+                prepared_message__kind__in=(
+                    PreparedMessageKind.SAVED_COMPLETE,
+                    PreparedMessageKind.SAVED_PARTIAL,
+                ),
                 scheduled_for__gte=recent,
             ),
         ),

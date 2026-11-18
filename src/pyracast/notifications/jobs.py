@@ -24,7 +24,11 @@ from pyracast.mail.errors import (
 from pyracast.mail.send import send
 from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.mail import build_message, build_unavailable_message
-from pyracast.notifications.models import NotificationDelivery, NotificationDeliveryStatus
+from pyracast.notifications.models import (
+    NotificationDelivery,
+    NotificationDeliveryError,
+    NotificationDeliveryStatus,
+)
 from pyracast.notifications.operations import recipient_limit
 from pyracast.notifications.preparation import prepare_delivery
 from pyracast.notifications.recipients import permitted_recipients
@@ -39,18 +43,18 @@ def _skip_reason(delivery: NotificationDelivery, limit: int) -> str | None:
     schedule = delivery.schedule
     clock = delivery.scheduled_for.astimezone(ZoneInfo(schedule.region.timezone)).strftime("%H:%M")
     if not schedule.enabled or clock not in schedule.times:
-        return "cancelled_by_settings_change"
+        return NotificationDeliveryError.CANCELLED_BY_SETTINGS_CHANGE
     if reason := slot_recipients(schedule, limit)[1]:
         return reason
     delivery.recipients = permitted_recipients(delivery)
     if not delivery.recipients:
-        return "no_recipients"
+        return NotificationDeliveryError.NO_RECIPIENTS
     if (
         schedule.region_id != delivery.binding.region_id
         or clock not in schedule.times[: delivery.binding.provider_account.daily_quota]
         or not binding_can_notify(delivery.binding)
     ):
-        return "schedule_or_authority_changed"
+        return NotificationDeliveryError.SCHEDULE_OR_AUTHORITY_CHANGED
     return None
 
 
@@ -58,7 +62,7 @@ def _recover_interrupted(delivery: NotificationDelivery, now: datetime) -> None:
     if delivery.transmit_started_at is not None:
         delivery.status, delivery.last_error = (
             NotificationDeliveryStatus.UNCERTAIN,
-            "interrupted_send",
+            NotificationDeliveryError.INTERRUPTED_SEND,
         )
     else:
         delivery.status = (
@@ -66,7 +70,7 @@ def _recover_interrupted(delivery: NotificationDelivery, now: datetime) -> None:
             if delivery.attempts < 8 and now < delivery.scheduled_for + MAX_LATENESS
             else NotificationDeliveryStatus.FAILED
         )
-        delivery.last_error = "interrupted_connection"
+        delivery.last_error = NotificationDeliveryError.INTERRUPTED_CONNECTION
         delivery.available_at = now
         delivery.lease_token = None
         delivery.lease_expires_at = None
@@ -117,7 +121,7 @@ def _mark_transmit(
             return False
         if reason is not None or now - delivery.scheduled_for > MAX_LATENESS:
             delivery.status = NotificationDeliveryStatus.SKIPPED
-            delivery.last_error = reason or "delivery_deadline_exceeded"
+            delivery.last_error = reason or NotificationDeliveryError.DELIVERY_DEADLINE_EXCEEDED
             delivery.lease_token = None
             delivery.lease_expires_at = None
             delivery.save()
@@ -162,7 +166,7 @@ def process_notification(
         if now - delivery.scheduled_for > MAX_LATENESS:
             delivery.status, delivery.last_error = (
                 NotificationDeliveryStatus.SKIPPED,
-                "missed_schedule",
+                NotificationDeliveryError.MISSED_SCHEDULE,
             )
             delivery.save()
             return False
@@ -189,7 +193,7 @@ def process_notification(
                 )
             message, delivery.prepared_message = build_unavailable_message(delivery, prepared_at)
         token = uuid.uuid4()
-        delivery.status, delivery.lease_token = "sending", token
+        delivery.status, delivery.lease_token = NotificationDeliveryStatus.SENDING, token
         delivery.lease_expires_at = now + LEASE_DURATION
         delivery.transmit_started_at = None
         delivery.attempts += 1

@@ -14,7 +14,7 @@ from pyracast.forecasts.models import (
 from pyracast.forecasts.projections import saved_day_payload
 from pyracast.forecasts.timing import effective_forecast_schedule, latest_forecast_slot
 from pyracast.notifications.mail import build_message, message_payload
-from pyracast.notifications.models import NotificationDelivery
+from pyracast.notifications.models import NotificationDelivery, PreparedMessageKind
 from pyracast.notifications.presentation import report_summary
 from pyracast.notifications.report_data import saved_report_context
 from pyracast.notifications.sources import eligible_saved_forecasts, saved_report_results
@@ -92,13 +92,13 @@ def prepare_delivery(delivery: NotificationDelivery, now: datetime) -> bool:
     delivery.snapshot = snapshot or partial
     results = saved_report_results(delivery, cutoff)
     kind = (
-        "current"
+        PreparedMessageKind.CURRENT
         if snapshot and snapshot.job_id == getattr(job, "pk", None)
-        else "saved_complete"
+        else PreparedMessageKind.SAVED_COMPLETE
         if snapshot
-        else "saved_partial"
+        else PreparedMessageKind.SAVED_PARTIAL
         if partial
-        else "unavailable"
+        else PreparedMessageKind.UNAVAILABLE
     )
     _freeze(delivery, results, now, kind)
     return True

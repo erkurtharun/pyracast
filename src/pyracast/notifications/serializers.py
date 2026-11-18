@@ -2,7 +2,11 @@ from rest_framework import serializers
 
 from pyracast.accounts.models import Language
 from pyracast.api.serializers import InputSerializer
-from pyracast.notifications.models import NotificationDeliveryStatus
+from pyracast.notifications.models import (
+    NotificationDeliveryError,
+    NotificationDeliveryStatus,
+    PreparedMessageKind,
+)
 from pyracast.notifications.operations import RECIPIENT_MAX_LENGTH
 
 
@@ -28,8 +32,10 @@ class ReminderDeliveryOutput(serializers.Serializer[dict[str, object]]):
     recipients = serializers.ListField(child=serializers.EmailField())
     scheduled_for = serializers.DateTimeField()
     status = serializers.ChoiceField(choices=NotificationDeliveryStatus.choices)
-    last_error = serializers.CharField(allow_blank=True)
-    forecast_status = serializers.CharField(allow_null=True)
+    last_error = serializers.ChoiceField(
+        choices=NotificationDeliveryError.choices, allow_blank=True
+    )
+    forecast_status = serializers.ChoiceField(choices=PreparedMessageKind.choices, allow_null=True)
     forecast_complete = serializers.BooleanField(allow_null=True)
     collected_at = serializers.DateTimeField(allow_null=True)
     late = serializers.BooleanField(allow_null=True)

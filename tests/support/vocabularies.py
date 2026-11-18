@@ -31,7 +31,12 @@ from pyracast.incidents.api import IncidentInput
 from pyracast.incidents.models import PlantIncident
 from pyracast.incidents.operations import save_incident
 from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
-from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
+from pyracast.notifications.models import (
+    NotificationDelivery,
+    PreparedMessageFormat,
+    PreparedMessageKind,
+    ReminderSchedule,
+)
 from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.serializers import ReminderInput
 from pyracast.plants.models import (
@@ -83,14 +88,34 @@ class StoredVocabulary:
     row: Row
     retired: tuple[str, ...] = ()
     published: bool = True
+    # A vocabulary stored under a key of a JSON column names its enumeration explicitly.
+    key: str = ""
+    enumeration: type[models.TextChoices] | None = None
 
     @property
     def id(self) -> str:
-        return f"{self.model._meta.label}.{self.field}"
+        return f"{self.model._meta.label}.{self.field}" + (f".{self.key}" if self.key else "")
+
+    @property
+    def lookup(self) -> str:
+        return f"{self.field}__{self.key}" if self.key else self.field
 
     @property
     def choices(self) -> list[tuple[str, Any]]:
+        if self.enumeration is not None:
+            return list(self.enumeration.choices)
         return list(getattr(self.model._meta.get_field(self.field), "choices", None) or ())
+
+    @property
+    def blank(self) -> bool:
+        return not self.key and bool(
+            getattr(self.model._meta.get_field(self.field), "blank", False)
+        )
+
+    def assignment(self, row: models.Model, value: str) -> dict[str, object]:
+        if not self.key:
+            return {self.field: value}
+        return {self.field: {**getattr(row, self.field), self.key: value}}
 
     @property
     def rejected(self) -> tuple[str, ...]:
@@ -111,9 +136,9 @@ class InputVocabulary:
 
 def derived_check(vocabulary: StoredVocabulary) -> models.CheckConstraint | None:
     values = [value for value, _ in vocabulary.choices]
-    if vocabulary.model._meta.get_field(vocabulary.field).blank:
+    if vocabulary.blank:
         values = ["", *values]
-    expected = models.Q(**{f"{vocabulary.field}__in": values})
+    expected = models.Q(**{f"{vocabulary.lookup}__in": values})
     return next(
         (
             constraint
@@ -124,9 +149,9 @@ def derived_check(vocabulary: StoredVocabulary) -> models.CheckConstraint | None
     )
 
 
-def assert_database_rejects(row: models.Model, field: str, value: str) -> None:
+def assert_database_rejects(row: models.Model, values: dict[str, object]) -> None:
     with pytest.raises(IntegrityError) as raised, transaction.atomic():
-        type(row)._default_manager.filter(pk=row.pk).update(**{field: value})
+        type(row)._default_manager.filter(pk=row.pk).update(**values)
     assert isinstance(raised.value.__cause__, CheckViolation)
 
 
@@ -307,6 +332,19 @@ def _notification_delivery(monkeypatch: pytest.MonkeyPatch) -> models.Model:
     return ready()
 
 
+def _prepared_delivery(monkeypatch: pytest.MonkeyPatch) -> models.Model:
+    delivery = ready()
+    delivery.prepared_message = {
+        "format": PreparedMessageFormat.PLAIN,
+        "kind": PreparedMessageKind.UNAVAILABLE,
+        "subject": "Pyracast forecast unavailable",
+        "body": "Tomorrow's saved forecast could not be prepared.",
+        "prepared_at": NOW.isoformat(),
+    }
+    delivery.save(update_fields=("prepared_message",))
+    return delivery
+
+
 STORED_VOCABULARIES = (
     StoredVocabulary(Membership, "role", _membership),
     StoredVocabulary(WorkspaceInvitation, "delivery_status", _invitation, retired=("accepted",)),
@@ -349,6 +387,23 @@ STORED_VOCABULARIES = (
     StoredVocabulary(ReminderSchedule, "language", _reminder_schedule),
     StoredVocabulary(NotificationDelivery, "status", _notification_delivery),
     StoredVocabulary(NotificationDelivery, "language", _notification_delivery),
+    StoredVocabulary(
+        NotificationDelivery, "last_error", _notification_delivery, retired=("smtp_failure",)
+    ),
+    StoredVocabulary(
+        NotificationDelivery,
+        "prepared_message",
+        _prepared_delivery,
+        key="format",
+        enumeration=PreparedMessageFormat,
+    ),
+    StoredVocabulary(
+        NotificationDelivery,
+        "prepared_message",
+        _prepared_delivery,
+        key="kind",
+        enumeration=PreparedMessageKind,
+    ),
 )
 
 
@@ -703,6 +758,5 @@ FAILURE_CODES = frozenset(
         ("forecasts.ForecastSnapshot", "weather_error"),
         ("metering.EpiasCollectionJob", "last_error"),
         ("plants.CalibrationRun", "last_error"),
-        ("notifications.NotificationDelivery", "last_error"),
     }
 )

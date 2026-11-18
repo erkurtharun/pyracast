@@ -4050,6 +4050,31 @@
                 "type": "string",
                 "description": "* `unknown` - Unknown\n* `fixed` - Fixed\n* `tracking` - Tracking"
             },
+            "NotificationDeliveryErrorEnum": {
+                "enum": [
+                    "missed_schedule",
+                    "delivery_deadline_exceeded",
+                    "cancelled_by_settings_change",
+                    "schedule_or_authority_changed",
+                    "no_recipients",
+                    "invalid_recipient",
+                    "recipient_limit_exceeded",
+                    "definition_trashed",
+                    "interrupted_send",
+                    "interrupted_connection",
+                    "mail_not_sent",
+                    "mail_configuration_invalid",
+                    "mail_credentials_rejected",
+                    "mail_authorization_revoked",
+                    "mail_rate_limited",
+                    "mail_rejected",
+                    "mail_sender_forbidden",
+                    "mail_preparation_failed",
+                    "mail_outcome_uncertain"
+                ],
+                "type": "string",
+                "description": "* `missed_schedule` - Missed schedule\n* `delivery_deadline_exceeded` - Delivery deadline exceeded\n* `cancelled_by_settings_change` - Cancelled by settings change\n* `schedule_or_authority_changed` - Schedule or authority changed\n* `no_recipients` - No recipients\n* `invalid_recipient` - Invalid recipient\n* `recipient_limit_exceeded` - Recipient limit exceeded\n* `definition_trashed` - Definition trashed\n* `interrupted_send` - Interrupted during sending\n* `interrupted_connection` - Interrupted before sending\n* `mail_not_sent` - Mail not sent\n* `mail_configuration_invalid` - Mail configuration invalid\n* `mail_credentials_rejected` - Mail credentials rejected\n* `mail_authorization_revoked` - Mail authorization revoked\n* `mail_rate_limited` - Mail rate limited\n* `mail_rejected` - Mail rejected\n* `mail_sender_forbidden` - Mail sender forbidden\n* `mail_preparation_failed` - Mail preparation failed\n* `mail_outcome_uncertain` - Mail outcome uncertain"
+            },
             "NotificationDeliveryStatusEnum": {
                 "enum": [
                     "pending",
@@ -5015,6 +5040,21 @@
                 "type": "string",
                 "description": "* `ac` - AC\n* `dc` - DC"
             },
+            "PreparedMessageFormatEnum": {
+                "enum": ["xlsx", "plain"],
+                "type": "string",
+                "description": "* `xlsx` - Workbook\n* `plain` - Plain text"
+            },
+            "PreparedMessageKindEnum": {
+                "enum": [
+                    "current",
+                    "saved_complete",
+                    "saved_partial",
+                    "unavailable"
+                ],
+                "type": "string",
+                "description": "* `current` - Current forecast\n* `saved_complete` - Saved complete forecast\n* `saved_partial` - Saved partial forecast\n* `unavailable` - Unavailable"
+            },
             "ProductionChangeActionEnum": {
                 "enum": ["set", "revert"],
                 "type": "string",
@@ -5746,11 +5786,25 @@
                         "$ref": "#/components/schemas/NotificationDeliveryStatusEnum"
                     },
                     "last_error": {
-                        "type": "string"
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/NotificationDeliveryErrorEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/BlankEnum"
+                            }
+                        ]
                     },
                     "forecast_status": {
-                        "type": "string",
-                        "nullable": true
+                        "nullable": true,
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/PreparedMessageKindEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/NullEnum"
+                            }
+                        ]
                     },
                     "forecast_complete": {
                         "type": "boolean",

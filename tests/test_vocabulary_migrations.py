@@ -7,6 +7,7 @@ from django.db.migrations.executor import MigrationExecutor
 
 from pyracast.change_requests.models import IncidentChange, ProductionChangeItem
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
+from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.plants.models import PlantEvent
 from tests.support.change_request_boundaries import (
     RequestCase,
@@ -39,6 +40,22 @@ NEW_CHECKS = {
         "baseline_source_kind",
     ): "productionchangeitem_baseline_source_kind_chk",
     ("change_requests_incidentchange", "kind"): "incidentchange_kind_chk",
+    ("notifications_notificationdelivery", "last_error"): "notificationdelivery_last_error_chk",
+    (
+        "notifications_notificationdelivery",
+        "prepared_message__format",
+    ): "notificationdelivery_prepared_format_chk",
+    (
+        "notifications_notificationdelivery",
+        "prepared_message__kind",
+    ): "notificationdelivery_prepared_kind_chk",
+}
+UNAVAILABLE_MESSAGE = {
+    "format": "plain",
+    "kind": "unavailable",
+    "subject": "Pyracast forecast unavailable",
+    "body": "Tomorrow's saved forecast could not be prepared.",
+    "prepared_at": NOW.isoformat(),
 }
 
 
@@ -114,6 +131,23 @@ def _incident_change(monkeypatch: pytest.MonkeyPatch) -> IncidentChange:
     return _cancelled_incident_change(make_request_case(monkeypatch))
 
 
+def _failed_delivery(system: System) -> NotificationDelivery:
+    return NotificationDelivery.objects.create(
+        schedule=ReminderSchedule.objects.create(region=system.region, effective_from=SLOT),
+        scheduled_for=SLOT,
+        available_at=SLOT,
+        binding=system.binding,
+        preparation_deadline=SLOT,
+        status="failed",
+        last_error="mail_rejected",
+        prepared_message=UNAVAILABLE_MESSAGE,
+    )
+
+
+def _delivery(monkeypatch: pytest.MonkeyPatch) -> NotificationDelivery:
+    return _failed_delivery(make_system())
+
+
 @pytest.mark.usefixtures("leaf")
 def test_vocabulary_migrations_keep_conforming_rows_and_reverse(
     monkeypatch: pytest.MonkeyPatch,
@@ -124,6 +158,7 @@ def test_vocabulary_migrations_keep_conforming_rows_and_reverse(
     item = ProductionChangeItem.objects.get(request=production_request(case))
     created = IncidentChange.objects.get(request=incident_request(case))
     cancelled = _cancelled_incident_change(case)
+    delivery = _failed_delivery(case.system)
     _migrate(*INITIAL.values())
     assert not _installed()
 
@@ -138,6 +173,11 @@ def test_vocabulary_migrations_keep_conforming_rows_and_reverse(
     )
     assert IncidentChange.objects.get(pk=created.pk).kind == "inverter"
     assert IncidentChange.objects.get(pk=cancelled.pk).kind == ""
+    delivery.refresh_from_db()
+    assert (delivery.last_error, delivery.prepared_message) == (
+        "mail_rejected",
+        UNAVAILABLE_MESSAGE,
+    )
     _migrate(*INITIAL.values())
     assert not _installed()
 
@@ -151,6 +191,7 @@ def test_vocabulary_migrations_keep_conforming_rows_and_reverse(
         (_plant_event, "action", "legacy_action", INITIAL["plants"]),
         (_production_item, "baseline_source_kind", "provider", INITIAL["change_requests"]),
         (_incident_change, "kind", "legacy_kind", INITIAL["change_requests"]),
+        (_delivery, "last_error", "smtp_failure", INITIAL["notifications"]),
     ],
 )
 def test_vocabulary_migration_refuses_stored_values_outside_the_vocabulary(
@@ -175,3 +216,25 @@ def test_vocabulary_migration_refuses_stored_values_outside_the_vocabulary(
     model._default_manager.filter(pk=stored.pk).update(**{field: allowed})
     _forward()
     assert NEW_CHECKS[table, field] in _checks(table)
+
+
+@pytest.mark.usefixtures("leaf")
+@pytest.mark.parametrize(("key", "value"), [("format", "html"), ("kind", "legacy_kind")])
+def test_vocabulary_migration_refuses_prepared_messages_outside_the_vocabulary(
+    key: str, value: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    delivery = _delivery(monkeypatch)
+    table, lookup = NotificationDelivery._meta.db_table, f"prepared_message__{key}"
+    _migrate(INITIAL["notifications"])
+    stored = NotificationDelivery.objects.filter(pk=delivery.pk)
+    stored.update(prepared_message={**UNAVAILABLE_MESSAGE, key: value})
+
+    with pytest.raises(ValueError, match=rf"{table}\.{lookup} holds values outside") as refused:
+        _forward()
+
+    assert repr(value) in str(refused.value)
+    assert NEW_CHECKS[table, lookup] not in _checks(table)
+    assert stored.get().prepared_message == {**UNAVAILABLE_MESSAGE, key: value}
+    stored.update(prepared_message=UNAVAILABLE_MESSAGE)
+    _forward()
+    assert NEW_CHECKS[table, lookup] in _checks(table)

@@ -11,6 +11,8 @@ from drf_spectacular.plumbing import deep_import_string
 
 from pyracast.accounts.language import Language
 from pyracast.accounts.models import UserLanguagePreference
+from pyracast.mail.errors import MailFailure
+from pyracast.notifications.models import PAUSED_DELIVERY_ERRORS, NotificationDeliveryError
 from tests.support.vocabularies import (
     COVERED_APPS,
     FAILURE_CODES,
@@ -73,7 +75,11 @@ def test_every_vocabulary_column_of_the_covered_apps_is_registered() -> None:
         for field in model._meta.concrete_fields
         if field.choices
     }
-    assert declared == {(vocabulary.model, vocabulary.field) for vocabulary in STORED_VOCABULARIES}
+    assert declared == {
+        (vocabulary.model, vocabulary.field)
+        for vocabulary in STORED_VOCABULARIES
+        if not vocabulary.key
+    }
 
 
 def test_every_text_column_without_an_enumeration_of_the_covered_apps_is_classified() -> None:
@@ -136,7 +142,8 @@ def test_collection_jobs_are_described_by_their_enumerations() -> None:
 def test_database_rejects_values_outside_the_vocabulary(
     vocabulary: StoredVocabulary, value: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert_database_rejects(vocabulary.row(monkeypatch), vocabulary.field, value)
+    row = vocabulary.row(monkeypatch)
+    assert_database_rejects(row, vocabulary.assignment(row, value))
 
 
 @pytest.mark.parametrize(("case", "value"), _input_values(serialized=True))
@@ -151,6 +158,11 @@ def test_operation_rejects_values_outside_the_vocabulary(
     case: InputVocabulary, value: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     assert_operation_rejects(case, case.operation(monkeypatch), value)
+
+
+def test_every_mail_failure_can_be_stored_on_a_reminder_delivery() -> None:
+    assert set(MailFailure) <= set(NotificationDeliveryError)
+    assert set(PAUSED_DELIVERY_ERRORS) <= set(NotificationDeliveryError)
 
 
 def test_supported_languages_have_one_value_set() -> None:

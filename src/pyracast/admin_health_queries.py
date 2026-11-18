@@ -9,7 +9,9 @@ from pyracast.metering.models import EpiasCollectionJob, EpiasJobStatus
 from pyracast.notifications.models import (
     PAUSED_DELIVERY_ERRORS,
     NotificationDelivery,
+    NotificationDeliveryError,
     NotificationDeliveryStatus,
+    PreparedMessageKind,
     ReminderSchedule,
 )
 from pyracast.notifications.operations import effective_recipients, validate_recipient
@@ -60,11 +62,16 @@ def notification_deliveries_for_issue(
     if issue == "missed_notifications":
         return deliveries.filter(
             status__in=(NotificationDeliveryStatus.SKIPPED, NotificationDeliveryStatus.FAILED),
-            last_error__in=("missed_schedule", "delivery_deadline_exceeded"),
+            last_error__in=(
+                NotificationDeliveryError.MISSED_SCHEDULE,
+                NotificationDeliveryError.DELIVERY_DEADLINE_EXCEEDED,
+            ),
             scheduled_for__gte=recent,
         )
     if issue == "unavailable_forecasts":
-        return deliveries.filter(prepared_message__kind="unavailable", scheduled_for__gte=recent)
+        return deliveries.filter(
+            prepared_message__kind=PreparedMessageKind.UNAVAILABLE, scheduled_for__gte=recent
+        )
     if issue == "partial_forecasts":
         return deliveries.filter(
             prepared_message__tomorrow_complete=False, scheduled_for__gte=recent

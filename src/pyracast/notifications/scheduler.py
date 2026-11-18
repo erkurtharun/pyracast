@@ -10,6 +10,7 @@ from pyracast.forecasts.models import CollectionJobStatus, ForecastSnapshot
 from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.models import (
     NotificationDelivery,
+    NotificationDeliveryError,
     NotificationDeliveryStatus,
     ReminderSchedule,
 )
@@ -64,11 +65,11 @@ def slot_recipients(schedule: ReminderSchedule, limit: int) -> tuple[list[str], 
         for address in recipients:
             validate_recipient(address)
     except ValidationError, TypeError:
-        return [], "invalid_recipient"
+        return [], NotificationDeliveryError.INVALID_RECIPIENT
     if not recipients:
-        return [], "no_recipients"
+        return [], NotificationDeliveryError.NO_RECIPIENTS
     if len(recipients) > limit:
-        return [], "recipient_limit_exceeded"
+        return [], NotificationDeliveryError.RECIPIENT_LIMIT_EXCEEDED
     return recipients, ""
 
 
@@ -149,7 +150,9 @@ def _enqueue_schedule(schedule: ReminderSchedule, now: datetime) -> list[int]:
                     status=NotificationDeliveryStatus.SKIPPED
                     if now - slot > MAX_LATENESS
                     else NotificationDeliveryStatus.PENDING,
-                    last_error="missed_schedule" if now - slot > MAX_LATENESS else "",
+                    last_error=NotificationDeliveryError.MISSED_SCHEDULE
+                    if now - slot > MAX_LATENESS
+                    else "",
                 )
                 ids.append(delivery.pk)
     return ids

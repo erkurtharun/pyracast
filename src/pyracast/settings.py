@@ -255,6 +255,9 @@ SPECTACULAR_SETTINGS = {
         "NotificationDeliveryStatusEnum": (
             "pyracast.notifications.models.NotificationDeliveryStatus"
         ),
+        "NotificationDeliveryErrorEnum": "pyracast.notifications.models.NotificationDeliveryError",
+        "PreparedMessageFormatEnum": "pyracast.notifications.models.PreparedMessageFormat",
+        "PreparedMessageKindEnum": "pyracast.notifications.models.PreparedMessageKind",
     },
 }
 LANGUAGE_CODE = "en"

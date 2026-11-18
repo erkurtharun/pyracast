@@ -56,7 +56,49 @@ class ReminderSchedule(models.Model):
         )
 
 
-PAUSED_DELIVERY_ERRORS = ("recipient_limit_exceeded", "no_recipients", "invalid_recipient")
+class NotificationDeliveryError(models.TextChoices):
+    MISSED_SCHEDULE = "missed_schedule", "Missed schedule"
+    DELIVERY_DEADLINE_EXCEEDED = "delivery_deadline_exceeded", "Delivery deadline exceeded"
+    CANCELLED_BY_SETTINGS_CHANGE = "cancelled_by_settings_change", "Cancelled by settings change"
+    SCHEDULE_OR_AUTHORITY_CHANGED = (
+        "schedule_or_authority_changed",
+        "Schedule or authority changed",
+    )
+    NO_RECIPIENTS = "no_recipients", "No recipients"
+    INVALID_RECIPIENT = "invalid_recipient", "Invalid recipient"
+    RECIPIENT_LIMIT_EXCEEDED = "recipient_limit_exceeded", "Recipient limit exceeded"
+    DEFINITION_TRASHED = "definition_trashed", "Definition trashed"
+    INTERRUPTED_SEND = "interrupted_send", "Interrupted during sending"
+    INTERRUPTED_CONNECTION = "interrupted_connection", "Interrupted before sending"
+    # Every MailFailure code is a member: send failures store error.code here.
+    MAIL_NOT_SENT = "mail_not_sent", "Mail not sent"
+    MAIL_CONFIGURATION_INVALID = "mail_configuration_invalid", "Mail configuration invalid"
+    MAIL_CREDENTIALS_REJECTED = "mail_credentials_rejected", "Mail credentials rejected"
+    MAIL_AUTHORIZATION_REVOKED = "mail_authorization_revoked", "Mail authorization revoked"
+    MAIL_RATE_LIMITED = "mail_rate_limited", "Mail rate limited"
+    MAIL_REJECTED = "mail_rejected", "Mail rejected"
+    MAIL_SENDER_FORBIDDEN = "mail_sender_forbidden", "Mail sender forbidden"
+    MAIL_PREPARATION_FAILED = "mail_preparation_failed", "Mail preparation failed"
+    MAIL_OUTCOME_UNCERTAIN = "mail_outcome_uncertain", "Mail outcome uncertain"
+
+
+PAUSED_DELIVERY_ERRORS = (
+    NotificationDeliveryError.RECIPIENT_LIMIT_EXCEEDED,
+    NotificationDeliveryError.NO_RECIPIENTS,
+    NotificationDeliveryError.INVALID_RECIPIENT,
+)
+
+
+class PreparedMessageFormat(models.TextChoices):
+    XLSX = "xlsx", "Workbook"
+    PLAIN = "plain", "Plain text"
+
+
+class PreparedMessageKind(models.TextChoices):
+    CURRENT = "current", "Current forecast"
+    SAVED_COMPLETE = "saved_complete", "Saved complete forecast"
+    SAVED_PARTIAL = "saved_partial", "Saved partial forecast"
+    UNAVAILABLE = "unavailable", "Unavailable"
 
 
 class NotificationDeliveryStatus(models.TextChoices):
@@ -93,7 +135,9 @@ class NotificationDelivery(models.Model):
     prepared_message = models.JSONField(null=True)
     transmit_started_at = models.DateTimeField(null=True)
     sent_at = models.DateTimeField(null=True)
-    last_error = models.CharField(max_length=40, default="")
+    last_error = models.CharField(
+        max_length=40, choices=NotificationDeliveryError, blank=True, default=""
+    )
     message_token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
 
     class Meta:
@@ -104,6 +148,18 @@ class NotificationDelivery(models.Model):
             choices_check("language", Language, name="notification_delivery_language_valid"),
             choices_check(
                 "status", NotificationDeliveryStatus, name="notification_delivery_status_valid"
+            ),
+            choices_check("last_error", NotificationDeliveryError, blank=True),
+            # A NULL message or a missing key passes: PostgreSQL treats the unknown result as true.
+            choices_check(
+                "prepared_message__format",
+                PreparedMessageFormat,
+                name="notificationdelivery_prepared_format_chk",
+            ),
+            choices_check(
+                "prepared_message__kind",
+                PreparedMessageKind,
+                name="notificationdelivery_prepared_kind_chk",
             ),
             models.CheckConstraint(
                 condition=~models.Q(status=NotificationDeliveryStatus.SENDING)
