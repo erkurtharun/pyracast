@@ -897,8 +897,8 @@ def test_preflight_changes_nothing_the_serving_release_reads() -> None:
     assert '"${old[@]}"' not in body
     assert "switch_runtime" not in body
     assert "switch-runtime" not in body
+    assert "/opt/pyracast/current/deploy/runtime_secrets.py" not in body
     assert 'python3 "$release/deploy/bootstrap_database.py" converge "$release" "$secrets"' in body
-    assert "/opt/pyracast/current/deploy/runtime_secrets.py" not in installer()
 
 
 def test_staged_secrets_that_cannot_read_the_stored_secrets_refuse_before_maintenance() -> None:
@@ -908,69 +908,57 @@ def test_staged_secrets_that_cannot_read_the_stored_secrets_refuse_before_mainte
     assert check in body
     refusal = body[body.index(check) : body.index("\n}\n", body.index(check))]
     assert "status=$?" in refusal
-    assert "cannot read every stored secret" in refusal
-    assert "unchanged" in refusal
     assert 'exit "$status"' in refusal
     assert "api pyracast check_secrets" not in installer()
 
 
-def test_the_runtime_role_switches_only_after_the_serving_release_stopped() -> None:
+def failure_path() -> str:
     script = installer()
-    body = script[script.index("\nbegin_maintenance\n") :]
-    switch = body.index("\nswitch_runtime\nprobe_database api\n")
-
-    assert body.index("resumable=1") < switch
-    assert body.index('  "${compose[@]}" stop -t 100 api web\n') < switch
-    assert switch < body.index("--kind prerelease")
-    assert 'switch-runtime "$release" "$secrets" "$verifier"' in function_body(
-        script, "switch_runtime"
-    )
-    assert 'verifier="$session/runtime-verifier"' in script
-
-
-def test_a_resume_gives_the_runtime_role_its_previous_password_before_the_release_starts() -> None:
-    script = installer()
-    resume = function_body(script, "resume_previous")
-    postgres = resume.index('"${old[@]}" up -d --wait --wait-timeout 180 postgres')
-    revert = resume.index('revert-runtime "$release" "$verifier"')
-
-    assert "if [[ -e $verifier ]]; then" in resume
-    assert postgres < revert < resume.index('"${old[@]}" up -d --wait --wait-timeout 180 && ready')
-    assert "restarting pyracast.service" in script
-
-
-def test_a_stopped_release_leaves_the_runtime_role_on_the_secret_that_recovery_renders() -> None:
-    script = installer()
-    stop_path = script[
+    return script[
         script.index("elif (( maintenance_started == 1 )); then") : script.index(
             "trap cleanup EXIT"
         )
     ]
 
-    assert "switch_runtime || switched=0" in stop_path
-    assert "switch-runtime $release $secrets $secrets/runtime-verifier" in stop_path
 
-
-def test_the_deployment_guide_states_what_the_installer_does_with_secrets_and_failures() -> None:
-    guide = " ".join(text(ROOT / "docs" / "DEPLOYMENT.md").split())
+def test_the_normal_path_switches_the_runtime_role_once_the_serving_api_and_web_stopped() -> None:
     script = installer()
-    body = preflight()
+    body = script[script.index("\nbegin_maintenance\n") :]
+    switch = body.index("\nswitch_runtime\nswitched=1\nprobe_database api\n")
 
-    assert "restarts with it at once" not in guide
-    assert "the serving release then restarted" not in guide
-    assert "check_secrets" in body
-    assert "with the release's staged secrets" in guide
-    assert "nothing the serving release reads changes before maintenance" in guide
-    assert "switch_runtime\nprobe_database api" in script
-    assert "the runtime role's password changes only after" in guide
-    assert "revert-runtime" in function_body(script, "resume_previous")
-    assert "writes the runtime role's previous password back" in guide
-    assert "restarting pyracast.service" in script
-    assert "release again instead of restarting `pyracast.service`" in guide
-    assert "The gateway is stopped too" in script
-    assert "predates the maintenance notice" in guide
-    assert "No release served before this one" in script
-    assert "A first installation names no helper" in guide
+    assert body.index('  "${compose[@]}" stop -t 100 api web\n') < switch
+    assert switch < body.index("--kind prerelease")
+    assert script.count("\nswitch_runtime\n") == 1
+    assert function_body(script, "switch_runtime").endswith('switch-runtime "$release" "$secrets"')
+
+
+def test_the_failure_path_switches_and_resumes_only_after_every_stop_succeeded() -> None:
+    path = failure_path()
+    stops = path.index("stop_application\n")
+    switch = path.index("(( switched == 0 && stopped == 1 )) && switch_runtime")
+    decided = path.index(
+        "if (( resumable == 1 && migrating == 0 && stopped == 1 && switched == 1 )); then resume=1"
+    )
+    resume = path.index("(( resume == 1 )) && resume_previous")
+
+    assert stops < switch < decided < resume
+    assert path.count("switch_runtime") == 1
+    assert "stopped=0" not in path
+    # A resume that did not serve is stopped again before the report.
+    assert path.index("stop_application\n", resume) < path.index("if (( stopped == 1 )); then")
+
+
+def test_a_resume_starts_the_previous_release_as_pyracast_service_starts_it() -> None:
+    resume = function_body(installer(), "resume_previous")
+    unit = systemd_unit("pyracast.service")
+    render = unit["ExecStartPre"].removeprefix("/usr/bin/")
+    start = '"${old[@]}" up -d --wait --wait-timeout 180'
+
+    assert (
+        render == "python3 /opt/pyracast/current/deploy/runtime_secrets.py /etc/pyracast/host.json"
+    )
+    assert unit["ExecStart"].endswith("up --detach --wait --wait-timeout 180")
+    assert resume.index(render) < resume.index(start) < resume.index("rm -f")
 
 
 def test_a_failure_before_migrate_resumes_the_previous_release() -> None:
@@ -978,8 +966,7 @@ def test_a_failure_before_migrate_resumes_the_previous_release() -> None:
     migrate = script.index('"${compose[@]}" run --rm --no-deps migrate\n')
 
     assert script.index("resumable=1") < script.index("--kind prerelease") < migrate
-    assert script.rindex("resumable=0", 0, migrate) > script.index('"${compose[@]}" up -d rabbitmq')
-    assert '"${old[@]}" up -d --wait --wait-timeout 180' in script
+    assert script.rindex("migrating=1", 0, migrate) > script.index('"${compose[@]}" up -d rabbitmq')
     assert "if [[ -e /var/lib/pyracast/release-blocked ]]; then blocked_before=1; fi" in script
 
 
@@ -1046,12 +1033,12 @@ def test_smoke_proves_the_maintenance_notice_and_the_restricted_roles() -> None:
     turkish = '"message": "Pyracast g\\u00fcncelleniyor.'
     assert turkish in maintenance.api_body("tr").decode()
     assert f"*'{turkish}'*" in smoke
-    switched = smoke.index('"${bootstrap[@]}" switch-runtime "$temporary" "$temporary/rotated"')
+    logged = smoke.index("ALTER SYSTEM SET log_statement = 'all'")
+    switched = smoke.index('"${bootstrap[@]}" switch-runtime "$temporary" "$temporary/rotated"\n')
     refused = smoke.index("if runtime_connects; then exit 1; fi", switched)
-    reverted = smoke.index('"${bootstrap[@]}" revert-runtime "$temporary"', refused)
-    assert smoke.index("\nruntime_connects\n", reverted) < smoke.index(
-        "run --rm --no-deps migrate\n"
-    )
+    back = smoke.index('"${bootstrap[@]}" switch-runtime "$temporary" "$temporary"\n', refused)
+    assert logged < switched
+    assert smoke.index("\nruntime_connects\n", back) < smoke.index("run --rm --no-deps migrate\n")
     assert "INSERT INTO django_migrations" in smoke
     assert "== '42501'" in smoke
     assert "no pg_hba.conf entry" in smoke

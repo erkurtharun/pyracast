@@ -104,20 +104,30 @@ cp "$root/deploy/bootstrap.sql" "$temporary/deploy/bootstrap.sql"
 bootstrap=(uv run --no-project --python 3.15.2 python "$root/deploy/bootstrap_database.py")
 "${bootstrap[@]}" converge "$temporary" "$temporary"
 "${bootstrap[@]}" converge "$temporary" "$temporary"
-"${bootstrap[@]}" switch-runtime "$temporary" "$temporary" "$temporary/runtime-verifier"
+"${bootstrap[@]}" switch-runtime "$temporary" "$temporary"
 runtime_connects() {
   "${compose[@]}" run --rm --no-deps api python -c \
     'import django; django.setup(); from django.db import connection; connection.ensure_connection()'
 }
 runtime_connects
-# A release that switched the runtime password and failed before migrate gives the previous one back.
+# Switches log no statement text even while the server logs every statement.
+superuser=("${compose[@]}" exec -T postgres psql -X -v ON_ERROR_STOP=1 -U postgres -d pyracast)
+"${superuser[@]}" -c "ALTER SYSTEM SET log_statement = 'all'" -c 'SELECT pg_reload_conf()'
+for attempt in {1..10}; do
+  if [[ $("${superuser[@]}" -Atc 'SHOW log_statement') == all ]]; then break; fi
+  (( attempt < 10 )) && sleep 1
+done
 mkdir "$temporary/rotated"
 printf 'PGUSER=pyracast_app\nPGPASSWORD=smoke-rotated\n' > "$temporary/rotated/runtime.env"
-"${bootstrap[@]}" switch-runtime "$temporary" "$temporary/rotated" "$temporary/rotated/verifier"
+"${bootstrap[@]}" switch-runtime "$temporary" "$temporary/rotated"
 if runtime_connects; then exit 1; fi
-"${bootstrap[@]}" revert-runtime "$temporary" "$temporary/rotated/verifier"
-test ! -e "$temporary/rotated/verifier"
+"${bootstrap[@]}" switch-runtime "$temporary" "$temporary"
+"${superuser[@]}" -c 'ALTER SYSTEM RESET log_statement' -c 'SELECT pg_reload_conf()'
 runtime_connects
+database_log=$("${compose[@]}" logs --no-log-prefix postgres)
+[[ $database_log == *'FROM pg_authid'* ]]
+[[ $database_log != *SCRAM-SHA-256* && $database_log != *smoke-rotated* ]]
+[[ $database_log != *'ALTER ROLE pyracast_app'* ]]
 "${compose[@]}" run --rm --no-deps migrate
 "${bootstrap[@]}" converge "$temporary" "$temporary"
 "${compose[@]}" run --rm --no-deps migrate pyracast check --deploy --fail-level WARNING

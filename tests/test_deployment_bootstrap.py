@@ -391,62 +391,74 @@ def runtime_role(scratch_database: str) -> Iterator[str]:
             set_runtime_verifier(scratch_database, original)
 
 
-def test_the_runtime_password_switches_once_and_reverts_to_the_identical_verifier(
-    runtime_role: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("previous", [None, "previous-runtime-password"])
+def test_the_runtime_password_switch_sets_the_secret_once_and_keeps_nothing_else(
+    runtime_role: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, previous: str | None
 ) -> None:
-    previous = bootstrap_database.scram_verifier("previous-runtime-password", SALT)
-    set_runtime_verifier(runtime_role, previous)
+    set_runtime_verifier(
+        runtime_role, previous and bootstrap_database.scram_verifier(previous, SALT)
+    )
     environment(tmp_path / "secrets")
-    saved = tmp_path / "session" / "runtime-verifier"
-    saved.parent.mkdir()
     psql = ServerPsql(runtime_role)
     monkeypatch.setattr(subprocess, "run", psql)
     target = release(tmp_path / "release")
+    before = sorted(tmp_path.rglob("*"))
 
-    assert bootstrap_database.switch_runtime(target, tmp_path / "secrets", saved)
+    assert bootstrap_database.switch_runtime(target, tmp_path / "secrets")
     switched = runtime_verifier(runtime_role)
     assert bootstrap_database.scram_matches(switched, "app-secret")
-    assert not bootstrap_database.scram_matches(switched, "previous-runtime-password")
-    assert saved.read_text() == previous
-    assert not bootstrap_database.switch_runtime(target, tmp_path / "secrets", saved)
-    assert saved.read_text() == previous
-
-    assert bootstrap_database.revert_runtime(target, saved)
-    assert runtime_verifier(runtime_role) == previous
-    assert not saved.exists()
-    assert not bootstrap_database.revert_runtime(target, saved)
-    assert runtime_verifier(runtime_role) == previous
+    assert not bootstrap_database.switch_runtime(target, tmp_path / "secrets")
+    assert runtime_verifier(runtime_role) == switched
+    assert sorted(tmp_path.rglob("*")) == before
     assert not any("app-secret" in script for script in psql.scripts)
 
 
-def test_a_switch_from_a_role_without_password_reverts_to_none(
-    runtime_role: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def session_logging(database: str, script: str) -> dict[str, str]:
+    names = (
+        "log_statement",
+        "log_min_error_statement",
+        "log_min_duration_statement",
+        "log_min_duration_sample",
+        "log_transaction_sample_rate",
+    )
+    with psycopg.connect(**server_parameters(database)) as connection:
+        connection.execute(script[: script.index("ALTER ROLE")].encode())
+        return {
+            name: str(row[0])
+            for name in names
+            if (
+                row := connection.execute(
+                    sql.SQL("SHOW {}").format(sql.Identifier(name))
+                ).fetchone()
+            )
+        }
+
+
+@pytest.mark.parametrize("step", ["converge", "switch"])
+def test_password_changes_run_in_a_session_whose_statements_postgresql_never_logs(
+    scratch_database: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, step: str
 ) -> None:
-    set_runtime_verifier(runtime_role, None)
     environment(tmp_path / "secrets")
-    saved = tmp_path / "runtime-verifier"
-    monkeypatch.setattr(subprocess, "run", ServerPsql(runtime_role))
+    psql = Psql("pyracast_owner\npyracast_app\n")
+    monkeypatch.setattr(subprocess, "run", psql)
     target = release(tmp_path / "release")
 
-    assert bootstrap_database.switch_runtime(target, tmp_path / "secrets", saved)
-    assert bootstrap_database.revert_runtime(target, saved)
+    if step == "converge":
+        bootstrap_database.converge_database(target, tmp_path / "secrets")
+    else:
+        bootstrap_database.switch_runtime(target, tmp_path / "secrets")
 
-    assert runtime_verifier(runtime_role) is None
-
-
-@pytest.mark.parametrize("saved", ["x'; DROP ROLE pyracast_owner; --", "SCRAM-SHA-256$4096:x"])
-def test_revert_refuses_a_saved_value_that_is_not_a_verifier(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, saved: str
-) -> None:
-    path = tmp_path / "runtime-verifier"
-    path.write_text(saved)
-    psql = Psql("")
-    monkeypatch.setattr(subprocess, "run", psql)
-
-    with pytest.raises(ValueError, match="verifier"):
-        bootstrap_database.revert_runtime(release(tmp_path / "release"), path)
-    assert psql.calls == []
-    assert path.exists()
+    script = psql.calls[-1][1]
+    assert script is not None
+    assert "ALTER ROLE" in script
+    assert session_logging(scratch_database, script) == {
+        "log_statement": "none",
+        "log_min_error_statement": "panic",
+        "log_min_duration_statement": "-1",
+        "log_min_duration_sample": "-1",
+        "log_transaction_sample_rate": "0",
+    }
+    assert not any("SCRAM" in argument for command, _ in psql.calls for argument in command)
 
 
 def test_switch_refuses_a_runtime_role_outside_the_definition(
@@ -457,25 +469,15 @@ def test_switch_refuses_a_runtime_role_outside_the_definition(
     monkeypatch.setattr(subprocess, "run", psql)
 
     with pytest.raises(ValueError, match="role names"):
-        bootstrap_database.switch_runtime(
-            release(tmp_path / "release"), tmp_path / "secrets", tmp_path / "saved"
-        )
+        bootstrap_database.switch_runtime(release(tmp_path / "release"), tmp_path / "secrets")
     assert psql.calls == []
 
 
 @pytest.mark.parametrize(
-    ("arguments", "call"),
-    [
-        (["converge", "release", "secrets"], ("converge_database", "release", "secrets")),
-        (
-            ["switch-runtime", "release", "secrets", "saved"],
-            ("switch_runtime", "release", "secrets", "saved"),
-        ),
-        (["revert-runtime", "release", "saved"], ("revert_runtime", "release", "saved")),
-    ],
+    ("step", "function"), [("converge", "converge_database"), ("switch-runtime", "switch_runtime")]
 )
 def test_command_line_runs_each_step(
-    monkeypatch: pytest.MonkeyPatch, arguments: list[str], call: tuple[str, ...]
+    monkeypatch: pytest.MonkeyPatch, step: str, function: str
 ) -> None:
     calls: list[tuple[str, ...]] = []
 
@@ -486,10 +488,10 @@ def test_command_line_runs_each_step(
 
         return record
 
-    for name in ("converge_database", "switch_runtime", "revert_runtime"):
+    for name in ("converge_database", "switch_runtime"):
         monkeypatch.setattr(bootstrap_database, name, recorder(name))
-    monkeypatch.setattr(sys, "argv", ["bootstrap_database.py", *arguments])
+    monkeypatch.setattr(sys, "argv", ["bootstrap_database.py", step, "release", "secrets"])
 
     bootstrap_database.main()
 
-    assert calls == [call]
+    assert calls == [(function, "release", "secrets")]
