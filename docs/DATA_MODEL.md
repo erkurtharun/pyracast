@@ -583,7 +583,7 @@ erDiagram
 - `normalization_snapshot_binding_fk`: `FOREIGN KEY (snapshot_id, target_binding_id) REFERENCES forecasts_forecastsnapshot (id, binding_id) DEFERRABLE INITIALLY DEFERRED`
 - `normalization_source_capacity`: `CHECK (("source_capacity_kw" > 0.0 AND "source_capacity_kw" < 'Infinity'::float8))`
 - `normalization_target_capacity`: `CHECK (("target_capacity_kw" > 0.0 AND "target_capacity_kw" < 'Infinity'::float8))`
-- `referencecapacitynormalization_factor_chk`: `CHECK (ABS((("factor" * "source_capacity_kw") - "target_capacity_kw")) <= ("target_capacity_kw" * 1e-09))`
+- `referencecapacitynormalization_factor_chk`: `CHECK ("factor" = ("target_capacity_kw" / "source_capacity_kw"))`
 - `unique_reference_capacity_normalization`: `UNIQUE ("source_snapshot_id", "target_binding_id")`
 
 #### `forecasts_requestattempt`
