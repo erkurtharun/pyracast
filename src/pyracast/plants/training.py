@@ -21,10 +21,13 @@ from pyracast.plants.forecasting import power_limit
 from pyracast.plants.incident_policy import incidents_unchanged
 from pyracast.plants.measurements import production_identity_current
 from pyracast.plants.models import (
+    CalibrationError,
     CalibrationRun,
+    CalibrationStatus,
     Plant,
     PlantConfiguration,
     PlantEvent,
+    PlantEventAction,
 )
 from pyracast.plants.numerics import (
     FitResult,
@@ -67,10 +70,10 @@ def _claim(run_id: int, now: datetime) -> _Lease | None:
         plant = Plant.objects.select_for_update().get(pk=identity.plant_id)
         run = CalibrationRun.objects.select_for_update().get(pk=run_id)
         now += timedelta(seconds=time.monotonic() - started)
-        if run.status not in {"pending", "running"}:
+        if run.status not in {CalibrationStatus.PENDING, CalibrationStatus.RUNNING}:
             return None
         if (
-            run.status == "running"
+            run.status == CalibrationStatus.RUNNING
             and run.lease_expires_at is not None
             and run.lease_expires_at > now
         ):
@@ -84,14 +87,18 @@ def _claim(run_id: int, now: datetime) -> _Lease | None:
             or not production_identity_current(run)
             or not incidents_unchanged(run, now)
         ):
-            run.status = "superseded"
+            run.status = CalibrationStatus.SUPERSEDED
         elif run.attempts >= MAX_ATTEMPTS or run.cutoff_at > now:
-            run.status = "failed"
-            run.last_error = "attempt_limit" if run.attempts >= MAX_ATTEMPTS else "invalid_cutoff"
+            run.status = CalibrationStatus.FAILED
+            run.last_error = (
+                CalibrationError.ATTEMPT_LIMIT
+                if run.attempts >= MAX_ATTEMPTS
+                else CalibrationError.INVALID_CUTOFF
+            )
             logger.warning("calibration_run_failed run=%s reason=%s", run.pk, run.last_error)
         else:
             token = uuid.uuid4()
-            run.status = "running"
+            run.status = CalibrationStatus.RUNNING
             run.attempts += 1
             run.lease_token = token
             run.lease_expires_at = now + LEASE_DURATION
@@ -130,7 +137,7 @@ def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now:
         )
         now += timedelta(seconds=time.monotonic() - started)
         if (
-            run.status != "running"
+            run.status != CalibrationStatus.RUNNING
             or run.lease_token != lease.token
             or run.lease_expires_at is None
             or run.lease_expires_at <= now
@@ -146,7 +153,7 @@ def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now:
             or not production_identity_current(run)
             or not incidents_unchanged(run, now)
         ):
-            run.status = "superseded"
+            run.status = CalibrationStatus.SUPERSEDED
         else:
             run.status, run.factor, run.assessment = result.status, result.factor, result.assessment
             run.result = result.report
@@ -164,7 +171,7 @@ def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now:
         PlantEvent.objects.create(
             plant_id=run.plant_id,
             actor=None,
-            action="calibration_completed",
+            action=PlantEventAction.CALIBRATION_COMPLETED,
             details={
                 "calibration_id": run.pk,
                 "status": run.status,
@@ -172,7 +179,7 @@ def _publish(lease: _Lease, result: FitResult, manifest: dict[str, object], now:
             },
         )
         _prepare_followup(plant, run, now)
-        return run.status != "superseded"
+        return run.status != CalibrationStatus.SUPERSEDED
 
 
 def _fail(lease: _Lease, now: datetime) -> None:
@@ -181,16 +188,18 @@ def _fail(lease: _Lease, now: datetime) -> None:
         plant, run = _lock_calibration_records(lease)
         now += timedelta(seconds=time.monotonic() - started)
         if (
-            run.status != "running"
+            run.status != CalibrationStatus.RUNNING
             or run.lease_token != lease.token
             or run.lease_expires_at is None
             or run.lease_expires_at <= now
         ):
             logger.warning("calibration_lease_lost run=%s", run.pk)
             return
-        run.status = "failed" if run.attempts >= MAX_ATTEMPTS else "pending"
-        run.completed_at = now if run.status == "failed" else None
-        run.last_error = "invalid_calibration_data"
+        run.status = (
+            CalibrationStatus.FAILED if run.attempts >= MAX_ATTEMPTS else CalibrationStatus.PENDING
+        )
+        run.completed_at = now if run.status == CalibrationStatus.FAILED else None
+        run.last_error = CalibrationError.INVALID_CALIBRATION_DATA
         run.lease_token = None
         run.lease_expires_at = None
         run.save(
@@ -202,7 +211,7 @@ def _fail(lease: _Lease, now: datetime) -> None:
                 "lease_expires_at",
             )
         )
-        if run.status == "failed":
+        if run.status == CalibrationStatus.FAILED:
             _prepare_followup(plant, run, now)
 
 
@@ -270,9 +279,9 @@ def pending_calibration_ids(now: datetime, limit: int = 100) -> list[int]:
         raise ValidationError("Use an aware timestamp and a limit between 1 and 1000.")
     return list(
         CalibrationRun.objects.filter(
-            Q(status="pending")
-            | Q(status="running", lease_expires_at__lte=now)
-            | Q(status="running", lease_expires_at__isnull=True),
+            Q(status=CalibrationStatus.PENDING)
+            | Q(status=CalibrationStatus.RUNNING, lease_expires_at__lte=now)
+            | Q(status=CalibrationStatus.RUNNING, lease_expires_at__isnull=True),
             plant__region__deleted_at__isnull=True,
         )
         .order_by("created_at", "pk")

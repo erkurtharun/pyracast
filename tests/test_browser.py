@@ -165,7 +165,7 @@ def test_browser_against_live_django(
         preparation_deadline=now + timedelta(minutes=10),
         available_at=now,
         attempts=1,
-        last_error="smtp_uncertain",
+        last_error="mail_outcome_uncertain",
     )
     env = os.environ | {
         "DJANGO_API_ORIGIN": live_server.url,

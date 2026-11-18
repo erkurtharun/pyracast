@@ -12,7 +12,7 @@ from pyracast.forecasts.actuals import (
 )
 from pyracast.forecasts.capacity_normalization import normalization_provenance
 from pyracast.forecasts.history import HISTORY_SELECTION_POLICY, select_actual_snapshot
-from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.forecasts.models import CollectionEndpoint, ForecastSnapshot
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.availability import actual_power_intervals
 from pyracast.plants.forecasting import power_limit
@@ -113,7 +113,8 @@ def _reference_manifest(snapshot: ForecastSnapshot) -> dict[str, object]:
         )
         if imported is not None
         else "rooftop_pv_power"
-        if original.job.endpoint == "estimated_actuals" and original.job.reference_import_id is None
+        if original.job.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
+        and original.job.reference_import_id is None
         else "unknown",
         "capacity_normalization": normalization,
         "reference_import": {

@@ -11,6 +11,7 @@ from pyracast.connections.operations import rotate_secret, validate_binding
 from pyracast.forecasts.models import (
     CollectionJob,
     CollectionSchedule,
+    DispatcherPhase,
     DispatcherStatus,
     ForecastSnapshot,
 )
@@ -28,7 +29,7 @@ from tests.support.metering import connected
 def test_health_report_keeps_a_bounded_query_budget(delivery_count: int) -> None:
     system = make_system(approved=True)
     recent_forecast(system)
-    for phase in DispatcherStatus.Phase.values:
+    for phase in DispatcherPhase.values:
         record_dispatch_phase(phase, NOW)
     schedule = ReminderSchedule.objects.create(
         region=system.region,
@@ -57,9 +58,9 @@ def test_health_report_keeps_a_bounded_query_budget(delivery_count: int) -> None
 @pytest.mark.django_db
 def test_missing_failed_and_stale_dispatch_phases_are_reported() -> None:
     assert delivery_health(NOW, timedelta(minutes=5))["unhealthy_dispatch_phases"] == list(
-        DispatcherStatus.Phase.values
+        DispatcherPhase.values
     )
-    for name in DispatcherStatus.Phase.values:
+    for name in DispatcherPhase.values:
         record_dispatch_phase(name, NOW - timedelta(minutes=1))
     record_dispatch_phase("collection", NOW, "ConnectionError")
     record_dispatch_phase("metering", NOW - timedelta(minutes=6))
@@ -115,7 +116,7 @@ def test_delivery_health_reports_waiting_work_and_blocked_credentials_without_se
 @pytest.mark.django_db(transaction=True)
 def test_incomplete_and_interrupted_deliveries_remain_visible_to_monitoring() -> None:
     system = make_system(approved=True)
-    for name in DispatcherStatus.Phase.values:
+    for name in DispatcherPhase.values:
         record_dispatch_phase(name, NOW)
     recent_forecast(system)
     schedule = ReminderSchedule.objects.create(
@@ -157,7 +158,7 @@ def test_incomplete_and_interrupted_deliveries_remain_visible_to_monitoring() ->
 @pytest.mark.django_db(transaction=True)
 def test_long_cooldown_stale_forecasts_and_missed_delivery_are_not_healthy() -> None:
     system = make_system(approved=True)
-    for name in DispatcherStatus.Phase.values:
+    for name in DispatcherPhase.values:
         record_dispatch_phase(name, NOW)
     snapshot = recent_forecast(system)
     system.account.request_blocked_until = NOW + timedelta(days=2)
@@ -215,7 +216,7 @@ def paused_deliveries(system: System, scheduled_for: datetime = NOW) -> None:
 def test_paused_notifications_are_reported_without_turning_health_red() -> None:
     system = make_system(approved=True)
     recent_forecast(system)
-    for phase in DispatcherStatus.Phase.values:
+    for phase in DispatcherPhase.values:
         record_dispatch_phase(phase, NOW)
     paused_deliveries(system)
     paused_deliveries(system, NOW - timedelta(days=2))
@@ -241,7 +242,7 @@ def test_health_command_emits_json_and_nonzero_for_degraded_work(
     with pytest.raises(CommandError, match="needs attention"):
         call_command("check_delivery_health", stdout=output)
     assert json.loads(output.getvalue())["healthy"] is False
-    for name in DispatcherStatus.Phase.values:
+    for name in DispatcherPhase.values:
         record_dispatch_phase(name, NOW)
     output = io.StringIO()
     call_command("check_delivery_health", stdout=output)
@@ -276,7 +277,7 @@ def test_interrupted_metering_is_unhealthy_even_with_recent_forecasts_and_health
 ) -> None:
     system, plant, _ = connected(monkeypatch)
     recent_forecast(system)
-    for phase in DispatcherStatus.Phase.values:
+    for phase in DispatcherPhase.values:
         record_dispatch_phase(phase, NOW)
     EpiasCollectionJob.objects.update(next_attempt_at=NOW + timedelta(hours=1))
     assert delivery_health(NOW, timedelta(minutes=5))["healthy"] is True
@@ -301,7 +302,7 @@ def test_interrupted_metering_is_unhealthy_even_with_recent_forecasts_and_health
 def test_credential_rotation_requires_validation_before_health_recovers() -> None:
     system = make_system(approved=True)
     recent_forecast(system)
-    for phase in DispatcherStatus.Phase.values:
+    for phase in DispatcherPhase.values:
         record_dispatch_phase(phase, NOW)
     assert delivery_health(NOW, timedelta(minutes=5))["healthy"] is True
     rotate_secret(system.admin, system.account.pk, "test-only-rotated-health-key")
@@ -319,7 +320,7 @@ def test_credential_rotation_requires_validation_before_health_recovers() -> Non
 def test_invalid_saved_recipient_is_an_explicit_health_failure_without_disclosure() -> None:
     system = make_system(approved=True)
     recent_forecast(system)
-    for phase in DispatcherStatus.Phase.values:
+    for phase in DispatcherPhase.values:
         record_dispatch_phase(phase, NOW)
     schedule = ReminderSchedule.objects.create(
         configured_by=system.member,

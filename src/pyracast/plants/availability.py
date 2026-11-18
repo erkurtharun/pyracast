@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from django.db.models import Max, Min, Q
 
 from pyracast.forecasts.actuals import select_archived_actual_source
-from pyracast.forecasts.models import ForecastSnapshot
+from pyracast.forecasts.models import CollectionJobStatus, ForecastSnapshot
 from pyracast.plants.models import PlantConfiguration
 from pyracast.plants.numerics import PowerInterval
 from pyracast.plants.transfer import reference_power_mw
@@ -73,7 +73,7 @@ def available_date_bounds(
     bounds = (
         ForecastSnapshot.objects.filter(
             job__binding_id=configuration.binding_id,
-            job__status="succeeded",
+            job__status=CollectionJobStatus.SUCCEEDED,
             source_kind="estimated_actuals",
             collected_at__lte=as_of,
             available_at__lte=as_of,

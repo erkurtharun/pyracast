@@ -3,7 +3,11 @@ from itertools import chain
 from allauth.account.models import EmailAddress
 
 from pyracast.accounts.models import Membership
-from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
+from pyracast.notifications.models import (
+    NotificationDelivery,
+    NotificationDeliveryStatus,
+    ReminderSchedule,
+)
 from pyracast.regions.models import Region
 
 
@@ -154,7 +158,12 @@ def remove_member_recipients(tenant_id: int, membership_id: int, emails: set[str
         schedule.save(update_fields=("recipients", "recipient_memberships"))
     for delivery in NotificationDelivery.objects.select_for_update().filter(
         schedule__region__tenant_id=tenant_id,
-        status__in=("pending", "retry", "sending", "uncertain"),
+        status__in=(
+            NotificationDeliveryStatus.PENDING,
+            NotificationDeliveryStatus.RETRY,
+            NotificationDeliveryStatus.SENDING,
+            NotificationDeliveryStatus.UNCERTAIN,
+        ),
     ):
         revoked = set(delivery.revoked_recipients) | {
             address.casefold()

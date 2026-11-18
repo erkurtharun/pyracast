@@ -8,7 +8,11 @@ from django.core.mail import EmailMultiAlternatives
 from django.utils import translation
 from django.utils.translation import gettext as _
 
-from pyracast.notifications.models import NotificationDelivery
+from pyracast.notifications.models import (
+    NotificationDelivery,
+    PreparedMessageFormat,
+    PreparedMessageKind,
+)
 from pyracast.notifications.rendering import render_forecast
 
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -27,7 +31,7 @@ def build_message(
     report_context: dict[str, object] | None = None,
 ) -> EmailMultiAlternatives:
     if delivery.prepared_message is not None:
-        if delivery.prepared_message.get("format") == "plain":
+        if delivery.prepared_message.get("format") == PreparedMessageFormat.PLAIN:
             return build_unavailable_message(delivery, prepared_at or delivery.scheduled_for)[0]
         return _restore_message(delivery, cast(dict[str, str], delivery.prepared_message))
     with translation.override(delivery.language):
@@ -49,9 +53,9 @@ def build_unavailable_message(
     with translation.override(delivery.language):
         payload = (
             existing
-            if isinstance(existing, dict) and existing.get("format") == "plain"
+            if isinstance(existing, dict) and existing.get("format") == PreparedMessageFormat.PLAIN
             else {
-                "format": "plain",
+                "format": PreparedMessageFormat.PLAIN,
                 "subject": _("Pyracast forecast unavailable"),
                 "body": _(
                     "Tomorrow's saved forecast could not be prepared. "
@@ -60,7 +64,7 @@ def build_unavailable_message(
                     "Please check the plant page for collection status."
                 )
                 % {"scheduled": delivery.scheduled_for.isoformat()},
-                "kind": "unavailable",
+                "kind": PreparedMessageKind.UNAVAILABLE,
                 "prepared_at": prepared_at.isoformat(),
             }
         )
@@ -97,7 +101,7 @@ def message_payload(message: EmailMultiAlternatives) -> dict[str, str]:
         "subject": str(message.subject),
         "body": str(message.body),
         "html": cast(str, message.alternatives[0][0]),
-        "format": "xlsx",
+        "format": PreparedMessageFormat.XLSX,
         "attachment_name": cast(str, message.attachments[0][0]),
         "attachment_base64": b64encode(cast(bytes, message.attachments[0][1])).decode("ascii"),
     }

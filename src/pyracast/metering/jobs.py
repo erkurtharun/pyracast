@@ -17,7 +17,14 @@ from pyracast.collection_window import NIGHT_RETRY_DELAY
 from pyracast.epias import TIMEZONE, EpiasDay, EpiasError, EpiasPlant
 from pyracast.forecasts.models import CollectionSchedule
 from pyracast.metering.client import get_epias_client
-from pyracast.metering.models import EpiasCollectionJob, EpiasConnection, EpiasSnapshot
+from pyracast.metering.models import (
+    EpiasCollectionJob,
+    EpiasConnection,
+    EpiasJobError,
+    EpiasJobStatus,
+    EpiasSnapshot,
+    EpiasSourceKind,
+)
 from pyracast.plants.models import Plant
 from pyracast.plants.operations import configuration_is_current
 from pyracast.provider_retry import next_retry_at
@@ -62,12 +69,12 @@ def _current(job: EpiasCollectionJob) -> bool:
     return (
         connection.enabled
         and connection.revision == job.connection_revision
-        and job.source_kind in {"realtime_generation", "settlement_injection"}
+        and job.source_kind in EpiasSourceKind.values
         and job.provider_plant.get("eic") == connection.eic
         and job.provider_plant.get("id")
         == (
             connection.settlement_plant_id
-            if job.source_kind == "settlement_injection"
+            if job.source_kind == EpiasSourceKind.SETTLEMENT_INJECTION
             else connection.provider_plant_id
         )
         and connection.plant.current_configuration_id == job.configuration_id
@@ -84,7 +91,7 @@ def _current(job: EpiasCollectionJob) -> bool:
 def _nightly_retry(job: EpiasCollectionJob) -> bool:
     return (
         job.retry_until is not None
-        and job.source_kind == "realtime_generation"
+        and job.source_kind == EpiasSourceKind.REALTIME_GENERATION
         and job.target_day == job.scheduled_for.astimezone(TIMEZONE).date() - timedelta(days=1)
     )
 
@@ -96,20 +103,28 @@ def claim_epias_job(job_id: int, now: datetime) -> EpiasLease | None:
     with transaction.atomic():
         job = _locked_job(job_id)
         now += timedelta(seconds=time.monotonic() - started)
-        if job is None or job.status not in {"pending", "running"} or job.next_attempt_at > now:
+        if (
+            job is None
+            or job.status not in {EpiasJobStatus.PENDING, EpiasJobStatus.RUNNING}
+            or job.next_attempt_at > now
+        ):
             return None
-        if job.status == "running" and job.lease_expires_at and job.lease_expires_at > now:
+        if (
+            job.status == EpiasJobStatus.RUNNING
+            and job.lease_expires_at
+            and job.lease_expires_at > now
+        ):
             return None
         if not _current(job):
-            job.status = "superseded"
+            job.status = EpiasJobStatus.SUPERSEDED
         elif job.retry_until is not None and now >= job.retry_until:
-            job.status = "failed"
-            job.last_error = "retry_window_expired"
+            job.status = EpiasJobStatus.FAILED
+            job.last_error = EpiasJobError.RETRY_WINDOW_EXPIRED
         elif not _nightly_retry(job) and job.attempts >= 3:
-            job.status = "failed"
-            job.last_error = "attempts_exhausted"
+            job.status = EpiasJobStatus.FAILED
+            job.last_error = EpiasJobError.ATTEMPTS_EXHAUSTED
         else:
-            job.status = "running"
+            job.status = EpiasJobStatus.RUNNING
             job.attempts += 1
             job.lease_token = uuid.uuid4()
             job.lease_expires_at = now + LEASE_DURATION
@@ -125,7 +140,7 @@ def claim_epias_job(job_id: int, now: datetime) -> EpiasLease | None:
 
 def _owns(job: EpiasCollectionJob, lease: EpiasLease, now: datetime) -> bool:
     return (
-        job.status == "running"
+        job.status == EpiasJobStatus.RUNNING
         and job.lease_token == lease.token
         and job.lease_expires_at is not None
         and job.lease_expires_at > now
@@ -137,7 +152,7 @@ def _finish_failure(
     now: datetime,
     retry_after: int | None,
     *,
-    error: str = "epias_provider_failure",
+    error: EpiasJobError = EpiasJobError.PROVIDER_FAILURE,
     retryable: bool = True,
 ) -> None:
     started = time.monotonic()
@@ -148,7 +163,7 @@ def _finish_failure(
             return
         job.last_error = error
         if not retryable:
-            job.status = "failed"
+            job.status = EpiasJobStatus.FAILED
         elif job.retry_until is not None:
             retry_at = next_retry_at(
                 now,
@@ -158,10 +173,10 @@ def _finish_failure(
             )
             _schedule_retry(job, now, retry_at - now)
         else:
-            job.status = "pending" if job.attempts < 3 else "failed"
+            job.status = EpiasJobStatus.PENDING if job.attempts < 3 else EpiasJobStatus.FAILED
             job.next_attempt_at = next_retry_at(now, job.attempts, retry_after)
         if not _current(job):
-            job.status = "superseded"
+            job.status = EpiasJobStatus.SUPERSEDED
         job.lease_token = None
         job.lease_expires_at = None
         job.save()
@@ -169,11 +184,11 @@ def _finish_failure(
 
 def _schedule_retry(job: EpiasCollectionJob, now: datetime, delay: timedelta) -> None:
     job.next_attempt_at = now + delay
-    job.status = "pending"
+    job.status = EpiasJobStatus.PENDING
     if (job.retry_until is not None and job.next_attempt_at >= job.retry_until) or (
         not _nightly_retry(job) and job.attempts >= 3
     ):
-        job.status = "failed"
+        job.status = EpiasJobStatus.FAILED
 
 
 def _publish(lease: EpiasLease, data: EpiasDay, now: datetime) -> bool:
@@ -185,7 +200,7 @@ def _publish(lease: EpiasLease, data: EpiasDay, now: datetime) -> bool:
         target_day = lease.job.target_day + timedelta(days=offset)
         rows = [row for row in data.readings if row.timestamp.date() == target_day]
         day_raw = raw
-        if lease.job.source_kind == "settlement_injection":
+        if lease.job.source_kind == EpiasSourceKind.SETTLEMENT_INJECTION:
             day_raw = {
                 "items": [
                     item
@@ -219,7 +234,7 @@ def _publish(lease: EpiasLease, data: EpiasDay, now: datetime) -> bool:
         if job is None or not _owns(job, lease, now):
             return False
         if not _current(job):
-            job.status = "superseded"
+            job.status = EpiasJobStatus.SUPERSEDED
         else:
             for target_day, day_raw, readings, day_complete in daily:
                 digest = hashlib.sha256(
@@ -244,26 +259,32 @@ def _publish(lease: EpiasLease, data: EpiasDay, now: datetime) -> bool:
                     },
                 )
             if complete:
-                job.status = "succeeded"
+                job.status = EpiasJobStatus.SUCCEEDED
                 job.last_error = ""
-            elif job.source_kind == "settlement_injection":
-                job.status = "awaiting_publication"
-                job.last_error = "unpublished_data" if not data.readings else "partial_data"
+            elif job.source_kind == EpiasSourceKind.SETTLEMENT_INJECTION:
+                job.status = EpiasJobStatus.AWAITING_PUBLICATION
+                job.last_error = (
+                    EpiasJobError.UNPUBLISHED_DATA
+                    if not data.readings
+                    else EpiasJobError.PARTIAL_DATA
+                )
             else:
-                job.last_error = "partial_data"
+                job.last_error = EpiasJobError.PARTIAL_DATA
                 if job.retry_until is not None:
                     _schedule_retry(job, now, NIGHT_RETRY_DELAY)
                 else:
-                    job.status = "pending" if job.attempts < 3 else "failed"
+                    job.status = (
+                        EpiasJobStatus.PENDING if job.attempts < 3 else EpiasJobStatus.FAILED
+                    )
                     job.next_attempt_at = now + timedelta(minutes=30 * 2 ** (job.attempts - 1))
         job.lease_token = None
         job.lease_expires_at = None
         job.save()
-        if job.status != "superseded":
+        if job.status != EpiasJobStatus.SUPERSEDED:
             from pyracast.plants.preparation import prepare_calibration
 
             prepare_calibration(job.connection.plant_id)
-        return job.status == "succeeded"
+        return job.status == EpiasJobStatus.SUCCEEDED
 
 
 def run_epias_job(
@@ -277,12 +298,12 @@ def run_epias_job(
     try:
         request_at = now + timedelta(seconds=time.monotonic() - started)
         if lease.job.retry_until is not None and request_at >= lease.job.retry_until:
-            _finish_failure(lease, request_at, None, error="retry_window_expired")
+            _finish_failure(lease, request_at, None, error=EpiasJobError.RETRY_WINDOW_EXPIRED)
             return False
         plant = EpiasPlant(**lease.job.provider_plant)
         if fetch is not None:
             data = fetch(plant, lease.job.target_day)
-        elif lease.job.source_kind == "settlement_injection":
+        elif lease.job.source_kind == EpiasSourceKind.SETTLEMENT_INJECTION:
             data = get_epias_client().fetch_settlement(
                 plant, lease.job.target_day, lease.job.period_end_day or lease.job.target_day
             )
@@ -310,9 +331,14 @@ def run_epias_job(
 
 
 def pending_epias_ids(now: datetime, *, limit: int = 100) -> list[int]:
-    eligible = Q(status="pending") | Q(status="running", lease_expires_at__lte=now)
+    eligible = Q(status=EpiasJobStatus.PENDING) | Q(
+        status=EpiasJobStatus.RUNNING, lease_expires_at__lte=now
+    )
     EpiasCollectionJob.objects.filter(eligible, retry_until__lte=now).update(
-        status="failed", last_error="retry_window_expired", lease_token=None, lease_expires_at=None
+        status=EpiasJobStatus.FAILED,
+        last_error=EpiasJobError.RETRY_WINDOW_EXPIRED,
+        lease_token=None,
+        lease_expires_at=None,
     )
     return list(
         EpiasCollectionJob.objects.filter(

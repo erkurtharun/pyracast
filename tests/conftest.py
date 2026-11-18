@@ -67,7 +67,7 @@ SUBPROCESS = frozenset(
         "test_test_settings",
     }
 )
-MIGRATION = frozenset[str]()
+MIGRATION = frozenset({"test_vocabulary_migrations"})
 SELECTION_SETS = {
     "tooling": TOOLING,
     "subprocess": SUBPROCESS,

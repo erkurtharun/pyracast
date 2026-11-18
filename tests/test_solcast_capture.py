@@ -15,7 +15,7 @@ from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import QuotaExceededError, reserve_account_request
 from pyracast.connections.secrets import encrypt_secret
-from pyracast.forecasts.models import RequestAttempt
+from pyracast.forecasts.models import RequestAttempt, RequestPurpose
 from pyracast.providers import normalize_payload
 from pyracast.regions.models import Region
 from scripts import check_solcast
@@ -380,7 +380,9 @@ def test_capture_persists_budget_before_http_and_saves_sanitized_output(
 def test_capture_shares_account_budget_and_prevents_duplicate_daily_kind(
     capture_binding: SiteBinding, tmp_path: Path
 ) -> None:
-    reserve_account_request(capture_binding.provider_account, timezone.now(), purpose="validation")
+    reserve_account_request(
+        capture_binding.provider_account, timezone.now(), purpose=RequestPurpose.VALIDATION
+    )
 
     def handle(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/rooftop_sites":
@@ -401,7 +403,7 @@ def test_capture_shares_account_budget_and_prevents_duplicate_daily_kind(
     ]
     with pytest.raises(QuotaExceededError):
         reserve_account_request(
-            capture_binding.provider_account, timezone.now(), purpose="collection"
+            capture_binding.provider_account, timezone.now(), purpose=RequestPurpose.FORECAST
         )
 
 

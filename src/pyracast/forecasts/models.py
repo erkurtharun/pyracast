@@ -4,18 +4,92 @@ from django.conf import settings
 from django.db import models
 
 from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.db import choices_check
 from pyracast.regions.models import Region
 
 
-class DispatcherStatus(models.Model):
-    class Phase(models.TextChoices):
-        COLLECTION = "collection"
-        NOTIFICATIONS = "notifications"
-        CALIBRATION = "calibration"
-        RETENTION = "retention"
-        METERING = "metering"
+class DispatcherPhase(models.TextChoices):
+    COLLECTION = "collection", "Collection"
+    NOTIFICATIONS = "notifications", "Notifications"
+    CALIBRATION = "calibration", "Calibration"
+    RETENTION = "retention", "Retention"
+    METERING = "metering", "Metering"
 
-    phase = models.CharField(max_length=20, primary_key=True, choices=Phase)
+
+class CollectionEndpoint(models.TextChoices):
+    FORECASTS = "forecasts", "Forecasts"
+    ESTIMATED_ACTUALS = "estimated_actuals", "Estimated actuals"
+    HISTORICAL_IMPORT = "historical_import", "Historical import"
+    SCALED_FORECASTS = "scaled_forecasts", "Scaled forecasts"
+    SCALED_ESTIMATED_ACTUALS = "scaled_estimated_actuals", "Scaled estimated actuals"
+
+
+class CollectionJobStatus(models.TextChoices):
+    PENDING = "pending", "Pending"
+    RUNNING = "running", "Running"
+    RETRY = "retry", "Retry"
+    SUCCEEDED = "succeeded", "Succeeded"
+    FAILED = "failed", "Failed"
+    STALE = "stale", "Stale"
+
+
+class RequestPurpose(models.TextChoices):
+    FORECAST = "forecast", "Forecast"
+    ESTIMATED_ACTUALS = "estimated_actuals", "Estimated actuals"
+    VALIDATION = "validation", "Validation"
+    INSPECT_SETTINGS = "inspect_settings", "Site settings check"
+    INSPECT_FORECAST = "inspect_forecast", "Forecast check"
+
+
+class RequestOutcome(models.TextChoices):
+    UNCERTAIN = "uncertain", "Uncertain"
+    SUCCEEDED = "succeeded", "Succeeded"
+    FAILED = "failed", "Failed"
+
+
+class SnapshotSourceKind(models.TextChoices):
+    FORECAST = "forecast", "Forecast"
+    ESTIMATED_ACTUALS = "estimated_actuals", "Estimated actuals"
+
+
+class CollectionJobError(models.TextChoices):
+    HISTORY_WINDOW_CLOSED = "history_window_closed", "History window closed"
+    ATTEMPTS_EXHAUSTED = "attempts_exhausted", "Attempts exhausted"
+    FORECAST_SUPERSEDED = "forecast_superseded", "Forecast superseded"
+    HISTORY_INCOMPLETE = "history_incomplete", "History incomplete"
+    HISTORY_ALREADY_ARCHIVED = "history_already_archived", "History already archived"
+    PROVIDER_AUTHENTICATION_FAILED = (
+        "provider_authentication_failed",
+        "Provider authentication failed",
+    )
+    PROVIDER_THROTTLED = "provider_throttled", "Provider throttled"
+    HISTORY_BUDGET_RESERVED = "history_budget_reserved", "History budget reserved"
+    QUOTA_EXHAUSTED = "quota_exhausted", "Quota exhausted"
+    PROVIDER_FAILURE = "provider_failure", "Provider failure"
+    PROVIDER_UNEXPECTED_FAILURE = "provider_unexpected_failure", "Provider unexpected failure"
+    INVALID_SOURCE_KIND = "invalid_source_kind", "Invalid source kind"
+    CALCULATION_FAILURE = "calculation_failure", "Calculation failure"
+
+
+class SnapshotWeatherError(models.TextChoices):
+    # Every WeatherFailure code is a member: weather collection stores WeatherError.code here.
+    INVALID_NUMBER = "invalid_weather_number", "Invalid weather number"
+    INVALID_COORDINATES = "invalid_weather_coordinates", "Invalid weather coordinates"
+    INVALID_SCHEMA = "invalid_weather_schema", "Invalid weather schema"
+    INVALID_TIMEZONE = "invalid_weather_timezone", "Invalid weather timezone"
+    INVALID_UNITS = "invalid_weather_units", "Invalid weather units"
+    EMPTY_RESPONSE = "empty_weather_response", "Empty weather response"
+    INVALID_INTERVAL = "invalid_weather_interval", "Invalid weather interval"
+    INVALID_WINDOW = "invalid_weather_window", "Invalid weather window"
+    UNSAFE_RESPONSE = "unsafe_weather_response", "Unsafe weather response"
+    INVALID_COLLECTION_TIME = "invalid_weather_collection_time", "Invalid weather collection time"
+    REQUEST_FAILED = "weather_request_failed", "Weather request failed"
+    ACQUISITION_FAILED = "weather_acquisition_failed", "Weather acquisition failed"
+    ACQUISITION_INTERRUPTED = "weather_acquisition_interrupted", "Weather acquisition interrupted"
+
+
+class DispatcherStatus(models.Model):
+    phase = models.CharField(max_length=20, primary_key=True, choices=DispatcherPhase)
     attempted_at = models.DateTimeField()
     succeeded_at = models.DateTimeField(null=True)
     last_error = models.CharField(max_length=100, blank=True, default="")
@@ -23,20 +97,7 @@ class DispatcherStatus(models.Model):
     published = models.PositiveIntegerField(null=True)
 
     class Meta:
-        constraints = (
-            models.CheckConstraint(
-                condition=models.Q(
-                    phase__in=(
-                        "collection",
-                        "notifications",
-                        "calibration",
-                        "retention",
-                        "metering",
-                    )
-                ),
-                name="dispatcher_phase_valid",
-            ),
-        )
+        constraints = (choices_check("phase", DispatcherPhase, name="dispatcher_phase_valid"),)
 
 
 class CollectionSchedule(models.Model):
@@ -71,23 +132,33 @@ class CollectionJob(models.Model):
     reference_import = models.ForeignKey(
         HistoricalReferenceImport, on_delete=models.PROTECT, null=True
     )
-    endpoint = models.CharField(max_length=30, default="forecasts")
+    endpoint = models.CharField(
+        max_length=30, choices=CollectionEndpoint, default=CollectionEndpoint.FORECASTS
+    )
     scheduled_slot = models.DateTimeField()
     target_date = models.DateField()
-    status = models.CharField(max_length=20, default="pending")
+    status = models.CharField(
+        max_length=20, choices=CollectionJobStatus, default=CollectionJobStatus.PENDING
+    )
     available_at = models.DateTimeField()
     retry_until = models.DateTimeField(null=True)
     lease_token = models.UUIDField(null=True)
     lease_expires_at = models.DateTimeField(null=True)
     attempts = models.PositiveIntegerField(default=0)
-    last_error = models.CharField(max_length=40, default="")
+    last_error = models.CharField(max_length=40, choices=CollectionJobError, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         indexes = (
             models.Index(
                 fields=("available_at", "id"),
-                condition=models.Q(status__in=("pending", "retry", "running")),
+                condition=models.Q(
+                    status__in=(
+                        CollectionJobStatus.PENDING,
+                        CollectionJobStatus.RETRY,
+                        CollectionJobStatus.RUNNING,
+                    )
+                ),
                 name="collection_dispatch_due",
             ),
         )
@@ -95,12 +166,9 @@ class CollectionJob(models.Model):
             models.UniqueConstraint(
                 fields=("id", "binding"), name="collection_job_binding_identity"
             ),
-            models.CheckConstraint(
-                condition=models.Q(
-                    status__in=("pending", "running", "retry", "succeeded", "failed", "stale")
-                ),
-                name="collection_job_status",
-            ),
+            choices_check("endpoint", CollectionEndpoint),
+            choices_check("status", CollectionJobStatus, name="collection_job_status"),
+            choices_check("last_error", CollectionJobError, blank=True),
             models.UniqueConstraint(
                 fields=("binding", "endpoint", "scheduled_slot"),
                 condition=models.Q(reference_import__isnull=True),
@@ -118,8 +186,10 @@ class RequestAttempt(models.Model):
     job = models.ForeignKey(CollectionJob, on_delete=models.PROTECT, null=True)
     utc_day = models.DateField()
     created_at = models.DateTimeField()
-    purpose = models.CharField(max_length=20)
-    outcome = models.CharField(max_length=20, default="uncertain")
+    purpose = models.CharField(max_length=20, choices=RequestPurpose)
+    outcome = models.CharField(
+        max_length=20, choices=RequestOutcome, default=RequestOutcome.UNCERTAIN
+    )
     correlation_id = models.UUIDField(default=uuid.uuid4, unique=True)
 
     class Meta:
@@ -128,10 +198,8 @@ class RequestAttempt(models.Model):
                 condition=models.Q(job__isnull=True) | models.Q(binding__isnull=False),
                 name="request_job_requires_binding",
             ),
-            models.CheckConstraint(
-                condition=models.Q(outcome__in=("uncertain", "succeeded", "failed")),
-                name="request_attempt_outcome",
-            ),
+            choices_check("purpose", RequestPurpose),
+            choices_check("outcome", RequestOutcome, name="request_attempt_outcome"),
         )
         indexes = (
             models.Index(fields=("provider_account", "utc_day"), name="request_account_day"),
@@ -145,12 +213,14 @@ class ForecastSnapshot(models.Model):
     normalized_intervals = models.JSONField()
     collected_at = models.DateTimeField()
     issued_at = models.DateTimeField(null=True)
-    source_kind = models.CharField(max_length=20)
+    source_kind = models.CharField(max_length=20, choices=SnapshotSourceKind)
     coverage_start = models.DateTimeField(null=True, db_index=True)
     coverage_end = models.DateTimeField(null=True, db_index=True)
     available_at = models.DateTimeField(null=True)
     weather_payload = models.JSONField(null=True)
-    weather_error = models.CharField(max_length=64, default="")
+    weather_error = models.CharField(
+        max_length=64, choices=SnapshotWeatherError, blank=True, default=""
+    )
 
     class Meta:
         indexes = (
@@ -172,10 +242,8 @@ class ForecastSnapshot(models.Model):
                 ),
                 name="snapshot_coverage_bounds",
             ),
-            models.CheckConstraint(
-                condition=models.Q(source_kind__in=("forecast", "estimated_actuals")),
-                name="snapshot_source_kind",
-            ),
+            choices_check("source_kind", SnapshotSourceKind, name="snapshot_source_kind"),
+            choices_check("weather_error", SnapshotWeatherError, blank=True),
         )
 
 

@@ -12,7 +12,7 @@ from django.utils.translation import gettext_lazy as _
 from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import WorkspaceRole
 from pyracast.errors import ConflictError, DomainError, ErrorCode
-from pyracast.incidents.models import IncidentRevision, PlantIncident
+from pyracast.incidents.models import IncidentKind, IncidentRevision, PlantIncident
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.regions.models import Region
 
@@ -144,7 +144,7 @@ def _validate(values: dict[str, Any], configuration: PlantConfiguration, now: da
         raise DomainError(ErrorCode.INCIDENT_STARTS_IN_FUTURE, field="starts_at")
     if end is not None:
         _validate_end(start, end, now)
-    if values["kind"] not in {"inverter", "panels", "grid", "other", "multiple"}:
+    if values["kind"] not in IncidentKind.values:
         raise DomainError(ErrorCode.INVALID_REQUEST, _("Unsupported outage kind."), field="kind")
     title, notes = values["title"], values["notes"]
     if not isinstance(title, str) or not title.strip() or len(title) > 200:

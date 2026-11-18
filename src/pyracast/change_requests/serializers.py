@@ -4,12 +4,14 @@ from rest_framework import serializers
 
 from pyracast.api.serializers import InputSerializer
 from pyracast.change_requests.models import (
+    BaselineSourceKind,
     ChangeRequestKind,
     ChangeRequestStatus,
     IncidentChangeAction,
     ProductionChangeAction,
 )
 from pyracast.incidents.api import IncidentInput
+from pyracast.plants.models import ObservationQuality
 from pyracast.plants.serializers import (
     AwareDateTime,
     ProductionChangeRow,
@@ -80,14 +82,16 @@ class ProductionItemOutput(serializers.Serializer[dict[str, Any]]):
     action = serializers.ChoiceField(choices=ProductionChangeAction.choices)
     expected_revision_id = serializers.IntegerField(allow_null=True)
     baseline_energy_mwh = serializers.FloatField(allow_null=True)
-    baseline_source_kind = serializers.CharField(allow_blank=True)
+    baseline_source_kind = serializers.ChoiceField(
+        choices=BaselineSourceKind.choices, allow_blank=True
+    )
     current = ProductionValueOutput(allow_null=True)
     automatic = ProductionValueOutput(allow_null=True)
     provider_intervals = ProviderIntervalOutput(many=True)
     warnings = ProductionWarningOutput(many=True)
     proposed = ProductionValueOutput(allow_null=True)
     energy_mwh = serializers.FloatField(allow_null=True)
-    quality = serializers.CharField()
+    quality = serializers.ChoiceField(choices=ObservationQuality.choices)
     source = serializers.CharField()  # type: ignore[assignment]
     applied_observation_id = serializers.IntegerField(allow_null=True)
 

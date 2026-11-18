@@ -17,7 +17,7 @@ from pyracast.connections.operations import (
     rotate_secret,
     validate_binding,
 )
-from pyracast.forecasts.models import CollectionJob, RequestAttempt
+from pyracast.forecasts.models import CollectionJob, RequestAttempt, RequestPurpose
 from pyracast.regions.models import AuditEvent, Region
 from pyracast.regions.operations import (
     approve_region,
@@ -228,19 +228,20 @@ def test_an_approved_region_keeps_its_binding_in_the_database() -> None:
 def test_utc_quota_is_conservative_and_resets_on_utc_midnight() -> None:
     system = make_system()
     ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=1)
-    first = reserve_request(system.binding, NOW, purpose="validation")
+    first = reserve_request(system.binding, NOW, purpose=RequestPurpose.VALIDATION)
     assert first.utc_day == NOW.date()
     assert first.outcome == "uncertain"
     with pytest.raises(QuotaExceededError):
-        reserve_request(system.binding, NOW, purpose="forecast")
+        reserve_request(system.binding, NOW, purpose=RequestPurpose.FORECAST)
     assert (
-        reserve_request(system.binding, NOW + timedelta(days=1), purpose="forecast").pk != first.pk
+        reserve_request(system.binding, NOW + timedelta(days=1), purpose=RequestPurpose.FORECAST).pk
+        != first.pk
     )
     ProviderAccount.objects.filter(pk=system.account.pk).update(enabled=False)
     with pytest.raises(QuotaExceededError):
-        reserve_request(system.binding, NOW + timedelta(days=2), purpose="forecast")
+        reserve_request(system.binding, NOW + timedelta(days=2), purpose=RequestPurpose.FORECAST)
     with pytest.raises(ValidationError):
-        reserve_request(system.binding, NOW.replace(tzinfo=None), purpose="forecast")
+        reserve_request(system.binding, NOW.replace(tzinfo=None), purpose=RequestPurpose.FORECAST)
 
 
 def test_database_rejects_duplicate_canonical_account_and_membership() -> None:
@@ -343,7 +344,7 @@ def test_live_account_requires_recorded_service_authorization() -> None:
     assert live.authorized_at is not None
     ProviderAccount.objects.filter(pk=system.account.pk).update(authorized_at=None)
     with pytest.raises(QuotaExceededError):
-        reserve_request(system.binding, NOW, purpose="validation")
+        reserve_request(system.binding, NOW, purpose=RequestPurpose.VALIDATION)
 
 
 def test_live_binding_requires_explicit_operator_settings_attestation() -> None:

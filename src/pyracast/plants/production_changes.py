@@ -13,7 +13,14 @@ from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import WorkspaceRole
 from pyracast.errors import ConflictError, ErrorCode
 from pyracast.plants.measurements import select_measurements, select_provider_measurements
-from pyracast.plants.models import Plant, PlantConfiguration, PlantEvent, ProductionObservation
+from pyracast.plants.models import (
+    ObservationQuality,
+    Plant,
+    PlantConfiguration,
+    PlantEvent,
+    PlantEventAction,
+    ProductionObservation,
+)
 from pyracast.plants.observations import observation_heads
 from pyracast.plants.operations import (
     ObservationImportResult,
@@ -32,7 +39,7 @@ class ProductionChange:
     expected_revision_id: int | None
     action: str
     energy: float = 0
-    quality: str = "valid"
+    quality: str = ObservationQuality.VALID
     source: str = "operator"
 
 
@@ -195,7 +202,7 @@ def change_production(
             PlantEvent.objects.create(
                 plant_id=plant_id,
                 actor=actor,
-                action="production_changed",
+                action=PlantEventAction.PRODUCTION_CHANGED,
                 details={"configuration_id": configuration_id, "ids": ids},
             )
             prepare_calibration(plant_id)

@@ -28,9 +28,17 @@ from pyracast.admin_health_queries import (
     regions_for_issue,
 )
 from pyracast.connections.models import SiteBinding
-from pyracast.forecasts.models import DispatcherStatus, ForecastSnapshot
+from pyracast.forecasts.models import (
+    CollectionEndpoint,
+    CollectionJobStatus,
+    DispatcherPhase,
+    DispatcherStatus,
+    ForecastSnapshot,
+    SnapshotSourceKind,
+)
 from pyracast.forecasts.monitoring import delivery_health
-from pyracast.notifications.models import NotificationSettings
+from pyracast.metering.models import EpiasJobError, EpiasJobStatus
+from pyracast.notifications.models import NotificationSettings, PreparedMessageKind
 from pyracast.notifications.operations import recipient_limit
 from pyracast.plants.models import Plant
 from pyracast.regions.models import (
@@ -84,8 +92,8 @@ def workspace_regions() -> QuerySet[WithAnnotations[Region, WorkspaceAnnotations
     ).order_by("-created_at", "-pk")
     snapshot = ForecastSnapshot.objects.filter(
         binding_id=OuterRef("approved_binding_id"),
-        source_kind="forecast",
-        job__status="succeeded",
+        source_kind=SnapshotSourceKind.FORECAST,
+        job__status=CollectionJobStatus.SUCCEEDED,
         forecastresult__isnull=False,
     ).order_by("-collected_at", "-pk")
     return (
@@ -281,7 +289,9 @@ def recent_work_context(
             "plant_name": row.display_plant_name,
             "company": row.binding.region.tenant.name,
             "status": row.status,
-            "kind": _("Forecast") if row.endpoint == "forecasts" else _("Past estimates"),
+            "kind": _("Forecast")
+            if row.endpoint == CollectionEndpoint.FORECASTS
+            else _("Past estimates"),
             "target_date": row.target_date,
             "status_label": row.status.replace("_", " ").capitalize(),
             "scheduled_for": row.scheduled_slot,
@@ -313,7 +323,7 @@ def recent_work_context(
             "review_url": reverse("admin:workspace_plant", args=(row.schedule.region_id,)),
             "forecast_status": (
                 _("Forecast unavailable")
-                if (row.prepared_message or {}).get("kind") == "unavailable"
+                if (row.prepared_message or {}).get("kind") == PreparedMessageKind.UNAVAILABLE
                 else _("Partial forecast")
                 if (row.prepared_message or {}).get("tomorrow_complete") is False
                 else ""
@@ -340,12 +350,13 @@ def recent_work_context(
             "status": row.status,
             "status_label": (
                 _("Waiting for provider publication")
-                if row.status == "awaiting_publication"
+                if row.status == EpiasJobStatus.AWAITING_PUBLICATION
                 else row.status.replace("_", " ").capitalize()
             ),
             "error_label": (
                 ""
-                if row.status == "awaiting_publication" and row.last_error == "unpublished_data"
+                if row.status == EpiasJobStatus.AWAITING_PUBLICATION
+                and row.last_error == EpiasJobError.UNPUBLISHED_DATA
                 else row.last_error.replace("_", " ").capitalize()
             ),
             "review_url": reverse("admin:workspace_plant", args=(row.plant.region_id,))
@@ -385,7 +396,7 @@ def operations_context(issue: str = "") -> dict[str, Any]:
                 "unhealthy": name in unhealthy_phases,
                 "state_label": _("Needs attention") if name in unhealthy_phases else _("Current"),
             }
-            for name, label in DispatcherStatus.Phase.choices
+            for name, label in DispatcherPhase.choices
         ],
         **recent_work_context(issue=issue, now=now),
     }
