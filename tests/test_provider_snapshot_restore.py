@@ -1,5 +1,6 @@
 import gzip
 import io
+import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
@@ -12,7 +13,6 @@ from typing import Any
 import pytest
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.management import call_command
-from django.core.management.base import CommandError
 from django.db import close_old_connections, connection
 
 from pyracast.accounts.models import Tenant
@@ -22,6 +22,7 @@ from pyracast.forecasts.actuals import select_archived_actual_source
 from pyracast.forecasts.coverage import intervals_cover_day
 from pyracast.forecasts.intraday import native_actual_snapshots
 from pyracast.forecasts.jobs import claim
+from pyracast.forecasts.management.commands.restore_provider_snapshots import Command
 from pyracast.forecasts.models import (
     CollectionJob,
     CollectionSchedule,
@@ -975,7 +976,9 @@ def test_concurrent_restores_store_each_snapshot_once(monkeypatch: pytest.Monkey
     assert restored_count(system) == 8
 
 
-def command_arguments(system: System, export: str, *, username: str = "admin") -> list[str]:
+def command_arguments(
+    system: System, export: str, *, username: str = "admin", binding_id: int | None = None
+) -> list[str]:
     return [
         "--username",
         username,
@@ -984,10 +987,21 @@ def command_arguments(system: System, export: str, *, username: str = "admin") -
         "--region-id",
         str(system.region.pk),
         "--binding-id",
-        str(system.binding.pk),
+        str(system.binding.pk if binding_id is None else binding_id),
         "--export",
         export,
     ]
+
+
+def run_command(*arguments: str) -> str | int | None:
+    """Run the command as the `pyracast` executable does, printing to the real streams."""
+    try:
+        Command().run_from_argv(
+            ["pyracast", "restore_provider_snapshots", "--skip-checks", *arguments]
+        )
+    except SystemExit as exited:
+        return exited.code
+    return 0
 
 
 def test_command_restores_from_standard_input_and_prints_no_site_or_secret(
@@ -1080,57 +1094,106 @@ def test_command_reports_forecasts_alone_without_a_day_report(
     ]
 
 
-def test_command_reports_refusals_without_writing(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, pyracast_logs: pytest.LogCaptureFixture
+def test_command_prints_a_fixed_sentence_per_refusal_and_no_export_value_or_path(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    pyracast_logs: pytest.LogCaptureFixture,
 ) -> None:
     system = restore_system(monkeypatch)
     before = collections_before_reset(system)
-    path = tmp_path / "export.jsonl.gz"
+    folder = tmp_path / SITE
+    folder.mkdir()
+    path = folder / f"{SITE}.solcast.jsonl.gz"
     path.write_bytes(before.content)
-    arguments = command_arguments(system, str(path))
-    with pytest.raises(CommandError, match="Provider snapshot restore failed"):
-        call_command("restore_provider_snapshots", *command_arguments(system, str(tmp_path / "x")))
-    for username in ("unknown", system.member.username):
-        with pytest.raises(CommandError, match="Provider snapshot restore failed"):
-            call_command(
-                "restore_provider_snapshots",
-                *command_arguments(system, str(path), username=username),
-            )
+    foreign = binding_before_reset(system)
+    capsys.readouterr()
+
+    assert run_command(*command_arguments(system, str(path)), "--dry-run") == 0
+    printed = capsys.readouterr()
+    assert printed.err == ""
+    assert printed.out.splitlines()[-1] == "Dry run: nothing was written."
+    assert SITE not in printed.out
+
     rows = export_rows(before.content)
     rows[0]["binding"]["capacity_kw"] = 5
     path.write_bytes(encode_rows(rows))
-    with pytest.raises(CommandError, match="differs from the binding in: capacity_kw") as refused:
-        call_command("restore_provider_snapshots", *arguments)
-    assert SITE not in str(refused.value)
+    refusals = [
+        (command_arguments(system, str(folder / "missing.jsonl.gz")), "The export cannot be read."),
+        (command_arguments(system, str(path), username="unknown"), "The user does not exist."),
+        (
+            command_arguments(system, str(path), username=system.member.username),
+            "The user is not a platform administrator.",
+        ),
+        (
+            command_arguments(system, str(path), binding_id=foreign.pk),
+            "The region or binding does not exist in that tenant.",
+        ),
+        (
+            command_arguments(system, str(path)),
+            "The export's provider site differs from the binding in: capacity_kw.",
+        ),
+    ]
+    for arguments, sentence in refusals:
+        assert run_command(*arguments) == 1
+        assert capsys.readouterr() == (
+            "",
+            f"CommandError: Provider snapshot restore failed: {sentence}\n",
+        )
+
     assert restored_count(system) == 0
     assert [
         record.getMessage() for record in pyracast_logs.records if record.name == COMMAND_LOGGER
     ] == [
-        f"provider_snapshot_restore_refused binding_id={system.binding.pk} error_type={name}"
-        for name in ("FileNotFoundError", "DoesNotExist", "ForbiddenError", "ValidationError")
+        f"provider_snapshot_restore_finished binding_id={system.binding.pk} dry_run=True "
+        f"restored=8 skipped=2 export_sha256={sha256(before.content).hexdigest()}",
+        *(
+            f"provider_snapshot_restore_refused binding_id={binding_id} error_type={name}"
+            for binding_id, name in (
+                (system.binding.pk, "FileNotFoundError"),
+                (system.binding.pk, "DoesNotExist"),
+                (system.binding.pk, "ForbiddenError"),
+                (foreign.pk, "DoesNotExist"),
+                (system.binding.pk, "RestoreRefusedError"),
+            )
+        ),
     ]
+    assert SITE not in pyracast_logs.text
 
 
-def test_command_logs_an_unexpected_failure_by_type_and_origin(
-    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+def test_command_prints_an_unexpected_failure_by_type_and_origin_only(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    pyracast_logs: pytest.LogCaptureFixture,
 ) -> None:
     system = restore_system(monkeypatch)
-    content = collections_before_reset(system).content
-    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(content)))
+    path = tmp_path / f"{SITE}.solcast.jsonl.gz"
+    path.write_bytes(collections_before_reset(system).content)
 
     def fail(*args: object, **kwargs: object) -> None:
-        raise RuntimeError(SITE)
+        raise RuntimeError(f"{SITE} in {path}")
 
     monkeypatch.setattr(f"{COMMAND_LOGGER}.restore_provider_snapshots", fail)
+    capsys.readouterr()
 
-    with pytest.raises(RuntimeError):
-        call_command("restore_provider_snapshots", *command_arguments(system, "-"))
+    assert run_command(*command_arguments(system, str(path))) == 1
 
+    printed = capsys.readouterr()
+    origin = re.escape(COMMAND_LOGGER) + r":\d+:handle"
+    assert printed.out == ""
+    assert re.fullmatch(
+        "CommandError: Provider snapshot restore failed unexpectedly: "
+        rf"RuntimeError at {origin}\.\n",
+        printed.err,
+    )
     [message] = [
         record.getMessage() for record in pyracast_logs.records if record.name == COMMAND_LOGGER
     ]
-    assert message.startswith(
+    assert re.fullmatch(
         f"provider_snapshot_restore_failed binding_id={system.binding.pk} "
-        f"error_type=RuntimeError origin={COMMAND_LOGGER}:"
+        rf"error_type=RuntimeError origin={origin}",
+        message,
     )
-    assert SITE not in pyracast_logs.text
+    assert SITE not in printed.err + pyracast_logs.text
+    assert str(tmp_path) not in printed.err + pyracast_logs.text
