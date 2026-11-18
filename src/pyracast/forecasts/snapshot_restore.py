@@ -63,6 +63,10 @@ SETTINGS = (
     "longitude",
     "timezone",
 )
+# Copies of the provider site's own settings that no calculation reads, so an operator may
+# accept a value the recreated binding recorded differently.
+RECORDED_SETTINGS = ("installation_date",)
+ACCEPTED_KEY = "accepted_differences"
 SOURCE_LABELS: dict[str, str] = {
     CollectionEndpoint.ESTIMATED_ACTUALS: "native",
     CollectionEndpoint.HISTORICAL_IMPORT: "historical import",
@@ -128,6 +132,14 @@ class EndpointSummary:
 
 
 @dataclass(frozen=True)
+class AcceptedDifference:
+    # Values are JSON text: a string keeps its quotes, a missing value reads null.
+    name: str
+    exported: tuple[str, ...]
+    binding: str
+
+
+@dataclass(frozen=True)
 class RestoreSummary:
     binding_id: int
     export_sha256: str
@@ -136,6 +148,7 @@ class RestoreSummary:
     timezone: str
     endpoints: tuple[EndpointSummary, ...]
     days: tuple[tuple[date, str], ...]
+    accepted: tuple[AcceptedDifference, ...]
 
     @property
     def restored(self) -> int:
@@ -349,6 +362,30 @@ def _differing_settings(binding: SiteBinding, rows: Iterable[ExportRow]) -> list
     )
 
 
+def _accepted_differences(
+    binding: SiteBinding, rows: list[ExportRow], accepted: frozenset[str]
+) -> tuple[AcceptedDifference, ...]:
+    differing = _differing_settings(binding, rows)
+    refused = [name for name in differing if name not in accepted]
+    if refused:
+        raise RestoreRefusedError(
+            f"The export's provider site differs from the binding in: {', '.join(refused)}."
+        )
+    unused = sorted(accepted.difference(differing))
+    if unused:
+        raise RestoreRefusedError(
+            f"The export's provider site does not differ from the binding in: {', '.join(unused)}."
+        )
+    return tuple(
+        AcceptedDifference(
+            name,
+            tuple(sorted({json.dumps(row.binding.get(name)) for row in rows})),
+            json.dumps(_setting(binding, name)),
+        )
+        for name in differing
+    )
+
+
 def _publish_forecast(
     snapshot: ForecastSnapshot, binding: SiteBinding, line: int, published_at: datetime
 ) -> None:
@@ -369,7 +406,12 @@ def _publish_forecast(
     )
 
 
-def _store(acquisition: Acquisition, binding: SiteBinding, provenance: dict[str, object]) -> None:
+def _store(
+    acquisition: Acquisition,
+    binding: SiteBinding,
+    provenance: dict[str, object],
+    accepted: tuple[AcceptedDifference, ...],
+) -> None:
     row, exported = acquisition.row, acquisition.job
     job = CollectionJob.objects.create(
         binding=binding,
@@ -384,6 +426,14 @@ def _store(acquisition: Acquisition, binding: SiteBinding, provenance: dict[str,
     )
     coverage_start, coverage_end = acquisition.coverage or (None, None)
     record = {**provenance, "snapshot_id": row.snapshot_id}
+    if accepted:
+        record[ACCEPTED_KEY] = {
+            item.name: {
+                "export": row.binding.get(item.name),
+                "binding": _setting(binding, item.name),
+            }
+            for item in accepted
+        }
     if PROVENANCE_KEY in acquisition.raw_payload:
         record["previous"] = acquisition.raw_payload[PROVENANCE_KEY]
     snapshot = ForecastSnapshot.objects.create(
@@ -445,6 +495,7 @@ def _restore_rows(
     moment: datetime,
     *,
     dry_run: bool,
+    accepted: frozenset[str],
 ) -> RestoreSummary:
     outcomes: defaultdict[str, Counter[Outcome]] = defaultdict(Counter)
     matching = []
@@ -454,11 +505,7 @@ def _restore_rows(
             matching.append(row)
         else:
             outcomes[row.endpoint][skipped] += 1
-    differing = _differing_settings(binding, matching)
-    if differing:
-        raise RestoreRefusedError(
-            f"The export's provider site differs from the binding in: {', '.join(differing)}."
-        )
+    differences = _accepted_differences(binding, matching, accepted)
     acquisitions = sorted(
         (_acquisition(row, moment) for row in matching),
         key=lambda item: (item.collected_at, item.row.snapshot_id),
@@ -508,7 +555,7 @@ def _restore_rows(
         elif key in taken:
             outcome = Outcome.SLOT_TAKEN
         else:
-            _store(item, binding, provenance)
+            _store(item, binding, provenance, differences)
             restored.add(key)
             taken.add(key)
             outcome = Outcome.RESTORED
@@ -532,6 +579,7 @@ def _restore_rows(
             for endpoint, counts in sorted(outcomes.items())
         ),
         _day_states(binding, periods[CollectionEndpoint.ESTIMATED_ACTUALS], moment),
+        differences,
     )
 
 
@@ -543,10 +591,18 @@ def restore_provider_snapshots(
     content: bytes,
     *,
     dry_run: bool = False,
+    accepted: Iterable[str] = (),
 ) -> RestoreSummary:
     """Store the live collections of a reset export (`deploy/reset_database.py`) as native
-    collections of the binding that now holds the same provider site; a dry run rolls back."""
+    collections of the binding that now holds the same provider site; a dry run rolls back.
+    `accepted` names recorded settings whose differing value the operator accepts."""
     require_platform_admin(actor)
+    names = frozenset(accepted)
+    unrecorded = sorted(names.difference(RECORDED_SETTINGS))
+    if unrecorded:
+        raise RestoreRefusedError(
+            f"Only a recorded setting can be accepted, not: {', '.join(unrecorded)}."
+        )
     moment = timezone.now()
     rows = _read_export(content)
     with transaction.atomic():
@@ -570,6 +626,7 @@ def restore_provider_snapshots(
             hashlib.sha256(content).hexdigest(),
             moment,
             dry_run=dry_run,
+            accepted=names,
         )
         if dry_run:
             transaction.set_rollback(True)
