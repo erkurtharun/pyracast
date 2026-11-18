@@ -1,7 +1,8 @@
 import subprocess
 import sys
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -60,10 +61,19 @@ def scratch_database() -> Iterator[str]:
             server.execute(sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name)))
 
 
+@contextmanager
+def cluster_roles() -> Iterator[None]:
+    # Roles belong to the cluster, advisory locks to one database: lock in a shared database.
+    with psycopg.connect(**server_parameters("postgres"), autocommit=True) as lock:
+        lock.execute("SELECT pg_advisory_lock(hashtext('pyracast-bootstrap'))")
+        try:
+            yield
+        finally:
+            lock.execute("SELECT pg_advisory_unlock(hashtext('pyracast-bootstrap'))")
+
+
 def provision(database: str) -> list[str]:
-    with psycopg.connect(**server_parameters(database)) as connection:
-        # Roles belong to the cluster; concurrent test databases must not create them at once.
-        connection.execute("SELECT pg_advisory_xact_lock(hashtext('pyracast-bootstrap'))")
+    with cluster_roles(), psycopg.connect(**server_parameters(database)) as connection:
         connection.execute(BOOTSTRAP.encode())
         return [row[0] for row in connection.execute(CATALOG_SQL)]
 
@@ -372,16 +382,13 @@ def set_runtime_verifier(database: str, verifier: str | None) -> None:
 
 @pytest.fixture
 def runtime_role(scratch_database: str) -> Iterator[str]:
-    with psycopg.connect(**server_parameters(scratch_database)) as connection:
-        # The role belongs to the cluster: hold its password still for the other test databases.
-        connection.execute("SELECT pg_advisory_lock(hashtext('pyracast-runtime-role'))")
-        provision(scratch_database)
+    provision(scratch_database)
+    with cluster_roles():
         original = runtime_verifier(scratch_database)
         try:
             yield scratch_database
         finally:
             set_runtime_verifier(scratch_database, original)
-            connection.execute("SELECT pg_advisory_unlock(hashtext('pyracast-runtime-role'))")
 
 
 def test_the_runtime_password_switches_once_and_reverts_to_the_identical_verifier(
@@ -471,12 +478,16 @@ def test_command_line_runs_each_step(
     monkeypatch: pytest.MonkeyPatch, arguments: list[str], call: tuple[str, ...]
 ) -> None:
     calls: list[tuple[str, ...]] = []
+
+    def recorder(name: str) -> Callable[..., list[str]]:
+        def record(*paths: Path) -> list[str]:
+            calls.append((name, *map(str, paths)))
+            return []
+
+        return record
+
     for name in ("converge_database", "switch_runtime", "revert_runtime"):
-        monkeypatch.setattr(
-            bootstrap_database,
-            name,
-            lambda *paths, name=name: calls.append((name, *map(str, paths))) or [],
-        )
+        monkeypatch.setattr(bootstrap_database, name, recorder(name))
     monkeypatch.setattr(sys, "argv", ["bootstrap_database.py", *arguments])
 
     bootstrap_database.main()
