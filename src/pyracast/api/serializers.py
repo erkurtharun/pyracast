@@ -12,6 +12,14 @@ from pyracast.regions.models import (
 
 
 class InputSerializer(serializers.Serializer[dict[str, Any]]):
+    def run_validation(self, data: Any = serializers.empty) -> Any:
+        if data is None:
+            # DRF's own refusal of a null body is an untranslated literal.
+            raise serializers.ValidationError(
+                {"non_field_errors": [gettext("Send the request body as a JSON object.")]}
+            )
+        return super().run_validation(data)
+
     def to_internal_value(self, data: Any) -> dict[str, Any]:
         if isinstance(data, dict) and data.keys() - self.fields.keys():
             raise serializers.ValidationError(

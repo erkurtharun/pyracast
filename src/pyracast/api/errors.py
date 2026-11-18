@@ -301,6 +301,23 @@ def _status_error(
     )
 
 
+def _write_body(response: HttpResponse, body: Mapping[str, object]) -> None:
+    response.content = json.dumps(body).encode()
+    response["Content-Type"] = "application/json"
+    if response.has_header("Content-Length"):
+        response["Content-Length"] = str(len(response.content))
+
+
+def refuse_in_place(request: HttpRequest, response: HttpResponse, code: ErrorCode) -> HttpResponse:
+    """Give a body-less framework refusal the contract body, keeping its status and metadata."""
+    with translation.override(_language(request)):
+        error = coded(code, response.status_code)
+    _write_body(response, error.body())
+    for header, value in error.headers().items():
+        response[header] = value
+    return response
+
+
 def with_error_contract(request: HttpRequest, response: HttpResponse) -> HttpResponse:
     """Add the contract keys to a JSON error body that lacks them, keeping its own keys."""
     content_type = response.get("Content-Type", "").partition(";")[0].strip()
@@ -316,7 +333,5 @@ def with_error_contract(request: HttpRequest, response: HttpResponse) -> HttpRes
         return response
     with translation.override(_language(request)):
         error = _status_error(request, response.status_code, body, response.get("Retry-After"))
-    response.content = json.dumps({**body, **error.body()}).encode()
-    if response.has_header("Content-Length"):
-        response["Content-Length"] = str(len(response.content))
+    _write_body(response, {**body, **error.body()})
     return response
