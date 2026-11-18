@@ -318,8 +318,6 @@ def refuse_in_place(request: HttpRequest, response: HttpResponse, code: ErrorCod
     with translation.override(_language(request)):
         error = coded(code, response.status_code)
     _write_body(response, error.body())
-    for header, value in error.headers().items():
-        response[header] = value
     return response
 
 
