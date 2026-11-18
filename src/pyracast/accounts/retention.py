@@ -63,16 +63,20 @@ def _lock[M: Model](rows: QuerySet[M]) -> list[Any]:
 
 
 def reclaim_signup(user_id: int, cutoff: datetime) -> bool:
+    abandoned = _abandoned(cutoff).filter(pk=user_id)
     with transaction.atomic():
         # One order with the requests that start or complete account processes (addresses,
         # provider identities, account) and workspace operations (the workspace before its
         # invitations and members); a new statement after these locks sees what committed while
-        # it waited.
+        # it waited. An account that signed in meanwhile is kept before its workspaces are locked:
+        # its own workspace operations hold the workspace while they reference the account row.
         _lock(EmailAddress.objects.filter(user_id=user_id))
         _lock(SocialAccount.objects.filter(user_id=user_id))
         _lock(User.objects.filter(pk=user_id))
+        if not abandoned.exists():
+            return False
         tenants = _lock(Tenant.objects.filter(membership__user_id=user_id))
-        if not _abandoned(cutoff).filter(pk=user_id).exists():
+        if not abandoned.exists():
             return False
         try:
             with transaction.atomic():
