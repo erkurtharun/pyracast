@@ -2,8 +2,7 @@ from collections.abc import Callable, Iterator
 from datetime import timedelta
 
 import pytest
-from django.db import connection, models
-from django.db.migrations.executor import MigrationExecutor
+from django.db import models
 
 from pyracast.change_requests.models import IncidentChange, ProductionChangeItem
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
@@ -17,6 +16,7 @@ from tests.support.change_request_boundaries import (
 )
 from tests.support.domain import NOW, System, make_system
 from tests.support.incident_calibration import incident
+from tests.support.migrations import checks, forward, leaf_nodes, migrate
 from tests.support.plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -62,29 +62,15 @@ UNAVAILABLE_MESSAGE = {
 
 @pytest.fixture
 def leaf() -> Iterator[None]:
-    targets = MigrationExecutor(connection).loader.graph.leaf_nodes()
+    targets = leaf_nodes()
     try:
         yield
     finally:
-        MigrationExecutor(connection).migrate(targets)
-
-
-def _migrate(*targets: tuple[str, str]) -> None:
-    MigrationExecutor(connection).migrate(list(targets))
-
-
-def _forward() -> None:
-    _migrate(*MigrationExecutor(connection).loader.graph.leaf_nodes())
-
-
-def _checks(table: str) -> set[str]:
-    with connection.cursor() as cursor:
-        constraints = connection.introspection.get_constraints(cursor, table)
-    return {name for name, details in constraints.items() if details["check"]}
+        migrate(*targets)
 
 
 def _installed() -> set[str]:
-    return {name for (table, _), name in NEW_CHECKS.items() if name in _checks(table)}
+    return {name for (table, _), name in NEW_CHECKS.items() if name in checks(table)}
 
 
 def _job_and_attempt(system: System) -> tuple[CollectionJob, RequestAttempt]:
@@ -175,10 +161,10 @@ def test_vocabulary_migrations_keep_conforming_rows_and_reverse(
     created = IncidentChange.objects.get(request=incident_request(case))
     cancelled = _cancelled_incident_change(case)
     delivery = _failed_delivery(case.system)
-    _migrate(*INITIAL.values())
+    migrate(*INITIAL.values())
     assert not _installed()
 
-    _forward()
+    forward()
 
     assert _installed() == set(NEW_CHECKS.values())
     assert CollectionJob.objects.get(pk=job.pk).endpoint == "forecasts"
@@ -194,7 +180,7 @@ def test_vocabulary_migrations_keep_conforming_rows_and_reverse(
         "mail_rejected",
         UNAVAILABLE_MESSAGE,
     )
-    _migrate(*INITIAL.values())
+    migrate(*INITIAL.values())
     assert not _installed()
 
 
@@ -221,18 +207,18 @@ def test_vocabulary_migration_refuses_stored_values_outside_the_vocabulary(
     stored = row(monkeypatch)
     model, allowed = type(stored), getattr(stored, field)
     table = model._meta.db_table
-    _migrate(target)
+    migrate(target)
     model._default_manager.filter(pk=stored.pk).update(**{field: value})
 
     with pytest.raises(ValueError, match=rf"{table}\.{field} holds values outside") as refused:
-        _forward()
+        forward()
 
     assert repr(value) in str(refused.value)
-    assert NEW_CHECKS[table, field] not in _checks(table)
+    assert NEW_CHECKS[table, field] not in checks(table)
     assert model._default_manager.filter(pk=stored.pk, **{field: value}).exists()
     model._default_manager.filter(pk=stored.pk).update(**{field: allowed})
-    _forward()
-    assert NEW_CHECKS[table, field] in _checks(table)
+    forward()
+    assert NEW_CHECKS[table, field] in checks(table)
 
 
 @pytest.mark.usefixtures("leaf")
@@ -242,16 +228,16 @@ def test_vocabulary_migration_refuses_prepared_messages_outside_the_vocabulary(
 ) -> None:
     delivery = _delivery(monkeypatch)
     table, lookup = NotificationDelivery._meta.db_table, f"prepared_message__{key}"
-    _migrate(INITIAL["notifications"])
+    migrate(INITIAL["notifications"])
     stored = NotificationDelivery.objects.filter(pk=delivery.pk)
     stored.update(prepared_message={**UNAVAILABLE_MESSAGE, key: value})
 
     with pytest.raises(ValueError, match=rf"{table}\.{lookup} holds values outside") as refused:
-        _forward()
+        forward()
 
     assert repr(value) in str(refused.value)
-    assert NEW_CHECKS[table, lookup] not in _checks(table)
+    assert NEW_CHECKS[table, lookup] not in checks(table)
     assert stored.get().prepared_message == {**UNAVAILABLE_MESSAGE, key: value}
     stored.update(prepared_message=UNAVAILABLE_MESSAGE)
-    _forward()
-    assert NEW_CHECKS[table, lookup] in _checks(table)
+    forward()
+    assert NEW_CHECKS[table, lookup] in checks(table)
