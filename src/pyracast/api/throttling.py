@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from threading import Lock
 from typing import TYPE_CHECKING, cast
 
@@ -9,18 +8,16 @@ from django.core.cache import caches
 from rest_framework.request import Request
 from rest_framework.throttling import SimpleRateThrottle
 
+from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.api.permissions import route_policy
 
 if TYPE_CHECKING:
     from rest_framework.views import APIView
 
-logger = logging.getLogger("pyracast.api")
 _budget_lock = Lock()
 
 
 class RouteThrottle(SimpleRateThrottle):
-    """Counts each signed-in user's requests per throttle scope of the route policy table."""
-
     def __init__(self) -> None:
         # The scope and its rate come from the route of each request, not from the class.
         pass
@@ -37,7 +34,12 @@ class RouteThrottle(SimpleRateThrottle):
         with _budget_lock:
             if super().allow_request(request, view):
                 return True
-        logger.warning("api_throttled scope=%s user=%s", self.scope, request.user.pk)
+        record_security_event(
+            SecurityEvent.API_REQUEST_THROTTLED,
+            request=request._request,
+            user_id=request.user.pk,
+            scope=self.scope,
+        )
         return False
 
     def get_cache_key(self, request: Request, view: APIView) -> str:

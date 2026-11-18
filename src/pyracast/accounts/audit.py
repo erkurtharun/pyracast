@@ -64,6 +64,7 @@ class SecurityEvent(StrEnum):
     ADMIN_MFA_PROVISIONED = "admin_mfa_provisioned"
     INVALID_PROXY_HEADERS = "invalid_proxy_headers"
     AUTHENTICATION_REQUEST_THROTTLED = "authentication_request_throttled"
+    API_REQUEST_THROTTLED = "api_throttled"
     AUTHORIZATION_DENIED = "authorization_denied"
     CSRF_REFUSED = "csrf_refused"
     INVITATION_SENT = "invitation_sent"
@@ -114,6 +115,7 @@ LINE_KINDS: Mapping[str, Kind] = {
     "method": TEXT,
     "authenticator_type": TEXT,
     "provider": TEXT,
+    "scope": TEXT,
 }
 LINE_KEYS = frozenset({"event", *LINE_KINDS})
 # The details each event may carry beside event, user and client IP; a line with any other
@@ -137,6 +139,7 @@ SECURITY_EVENT_DETAILS: Mapping[SecurityEvent, frozenset[str]] = {
     SecurityEvent.ADMIN_MFA_PROVISIONED: frozenset(),
     SecurityEvent.INVALID_PROXY_HEADERS: frozenset(),
     SecurityEvent.AUTHENTICATION_REQUEST_THROTTLED: frozenset(),
+    SecurityEvent.API_REQUEST_THROTTLED: frozenset({"scope"}),
     SecurityEvent.AUTHORIZATION_DENIED: REFUSAL_DETAILS,
     SecurityEvent.CSRF_REFUSED: REFUSAL_DETAILS,
     SecurityEvent.INVITATION_SENT: WORKSPACE_DETAILS | {"subject"},
@@ -188,6 +191,7 @@ def record_security_event(
     method: str | None = None,
     authenticator_type: str | None = None,
     provider: str | None = None,
+    scope: str | None = None,
 ) -> None:
     with _contained(event):
         details = {
@@ -199,6 +203,7 @@ def record_security_event(
             "method": method,
             "authenticator_type": authenticator_type,
             "provider": provider,
+            "scope": scope,
         }
         carried = {key: value for key, value in details.items() if value is not None}
         if undeclared := carried.keys() - SECURITY_EVENT_DETAILS[event]:
