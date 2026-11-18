@@ -71,12 +71,17 @@ line-length = 100
 "deploy/host.py" = "py312"
 "deploy/operations_log.py" = "py312"
 "deploy/pin_release_images.py" = "py312"
+"deploy/probe_origin.py" = "py312"
+"deploy/release_authorization.py" = "py312"
+"deploy/release_environment.py" = "py312"
 "deploy/release_record.py" = "py312"
 "deploy/release_scope.py" = "py312"
 "deploy/release_state.py" = "py312"
+"deploy/release_unit.py" = "py312"
 "deploy/reset_database.py" = "py312"
 "deploy/runtime_secrets.py" = "py312"
 "deploy/watchdog.py" = "py312"
+"scripts/ci_result.py" = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "S", "PT", "RUF", "N", "ERA"]

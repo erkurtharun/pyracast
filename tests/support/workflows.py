@@ -64,7 +64,8 @@ def ci_job_names(jobs: dict[str, Any]) -> set[str]:
 
 
 def step(job: dict[str, Any], name: str) -> dict[str, Any]:
-    (found,) = [candidate for candidate in job["steps"] if candidate.get("name") == name]
+    steps: list[dict[str, Any]] = job["steps"]
+    (found,) = [candidate for candidate in steps if candidate.get("name") == name]
     return found
 
 

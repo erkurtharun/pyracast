@@ -382,7 +382,7 @@ def test_certificate_warning_when_less_than_a_quarter_of_its_lifetime_remains(
 
     monkeypatch.setattr(watchdog, "certificate_validity", validity)
     watchdog.main()
-    assert probes == [("example.com", ("127.0.0.1", 443))]
+    assert probes == [("example.com", ("127.0.0.1", host.LOCAL_HTTPS_PORT))]
     expected = [{"days_remaining": float(remaining_days)}] if warns else []
     assert watched.details("pyracast_certificate_expiring") == expected
 

@@ -108,3 +108,24 @@ def test_a_batch_logs_at_most_its_bounded_number_of_violations(logged: Logged) -
 
 def test_only_posted_reports_are_accepted() -> None:
     assert Client().get(URL).status_code == 405
+
+
+@pytest.mark.parametrize(
+    ("blocked", "logged_as"),
+    [("data:image/png;base64,c2VjcmV0", "data"), ("eval", "eval"), ("x" * 40, "x" * 32)],
+)
+def test_a_blocked_resource_without_an_origin_is_logged_by_its_scheme_or_keyword(
+    logged: Logged, blocked: str, logged_as: str
+) -> None:
+    report = {"csp-report": {"effective-directive": "img-src", "blocked-uri": blocked}}
+
+    assert post(report) == 204
+    assert [entry["blocked"] for entry in logged()] == [logged_as]
+
+
+def test_a_report_needs_no_csrf_token_because_browsers_send_none() -> None:
+    client = Client(enforce_csrf_checks=True)
+
+    response = client.post(URL, b"{}", content_type="application/csp-report")
+
+    assert response.status_code == 204

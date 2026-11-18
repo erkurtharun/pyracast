@@ -156,12 +156,20 @@ class NoticeResponse:
 
 
 def maintenance_notice(monkeypatch: pytest.MonkeyPatch, accept: str) -> Any:
+    return gateway_answer("/api", accept)
+
+
+def oversized_body_refusal(monkeypatch: pytest.MonkeyPatch, accept: str) -> Any:
+    return gateway_answer("/api/413", accept)
+
+
+def gateway_answer(path: str, accept: str) -> Any:
     server = maintenance.server("127.0.0.1", 0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     connection = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=5)
     try:
-        connection.request("GET", "/api", headers={"Accept": "*/*", **language(accept)})
+        connection.request("GET", path, headers={"Accept": "*/*", **language(accept)})
         answer = connection.getresponse()
         return NoticeResponse(answer.status, answer.headers, answer.read())
     finally:
@@ -406,6 +414,12 @@ CASES: dict[str, Case] = {
         "Pyracast güncelleniyor. Bir dakika sonra yeniden deneyin; verileriniz güvende.",
         maintenance_notice,
         retry_after=60,
+    ),
+    "request_too_large": Case(
+        413,
+        "The request is too large to be accepted.",
+        "İstek kabul edilemeyecek kadar büyük.",
+        oversized_body_refusal,
     ),
     "forecast_sources_changed": Case(
         503,
@@ -780,6 +794,8 @@ def test_csrf_refusal_outside_the_api_keeps_the_html_page() -> None:
     assert response["Content-Type"].startswith("text/html")
 
 
+# Browsers send CSP violation reports without a CSRF token.
+REPORT_ROUTES = ("/api/csp-reports/",)
 NAVIGATION_ROUTES = (
     f"{ALLAUTH}auth/provider/redirect",
     "/api/accounts/google/login/callback/",
@@ -805,7 +821,7 @@ def test_csrf_refusal_on_every_other_api_route_is_the_coded_body(mode: str) -> N
     client = Client(enforce_csrf_checks=True)
     client.force_login(User.objects.create_user(username="person"))
     refusals = {}
-    for path in sorted(set(api_routes()) - set(NAVIGATION_ROUTES)):
+    for path in sorted(set(api_routes()) - set(NAVIGATION_ROUTES) - set(REPORT_ROUTES)):
         response = client.post(
             path,
             {},

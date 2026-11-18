@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -50,7 +51,7 @@ def host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Host:
     stage.mkdir()
     fake = Host(stage)
     monkeypatch.setattr(subprocess, "run", fake.run)
-    monkeypatch.setattr(release_unit.time, "sleep", fake.sleep)
+    monkeypatch.setattr(time, "sleep", fake.sleep)
     return fake
 
 
@@ -181,16 +182,18 @@ def test_main_dispatches_each_subcommand(
     host: Host, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     calls: list[tuple[str, Path, list[str]]] = []
+
+    def recorder(name: str, status: int) -> Any:
+        def record(stage: Path, values: list[str] | None = None) -> int:
+            calls.append((name, stage, values or []))
+            return status
+
+        return record
+
     monkeypatch.setattr(release_unit, "stage_directory", lambda value: Path(value))
-    monkeypatch.setattr(
-        release_unit, "start", lambda stage, values: calls.append(("start", stage, values)) or 3
-    )
-    monkeypatch.setattr(
-        release_unit, "run", lambda stage, values: calls.append(("run", stage, values)) or 4
-    )
-    monkeypatch.setattr(
-        release_unit, "follow", lambda stage: calls.append(("follow", stage, [])) or 5
-    )
+    monkeypatch.setattr(release_unit, "start", recorder("start", 3))
+    monkeypatch.setattr(release_unit, "run", recorder("run", 4))
+    monkeypatch.setattr(release_unit, "follow", recorder("follow", 5))
     stage = str(host.stage)
 
     assert release_unit.main(["start", stage, SHA, *IMAGES]) == 3

@@ -13,7 +13,7 @@ cleanup() {
   exit "$result"
 }
 export SITE_ADDRESS=localhost ACME_EMAIL=smoke@example.com
-export HTTP_BIND=127.0.0.1:18080 HTTPS_BIND=127.0.0.1:18443
+export HTTP_BIND=127.0.0.1:18080 HTTPS_BIND=127.0.0.1:18443 LOCAL_HTTPS_BIND=127.0.0.1:18444
 export RUNTIME_ENV_FILE="$temporary/runtime.env" BROKER_ENV_FILE="$temporary/broker.env"
 export MIGRATION_ENV_FILE="$temporary/migration.env" DATABASE_ENV_FILE="$temporary/database.env"
 cat > "$RUNTIME_ENV_FILE" <<'ENV'
@@ -151,6 +151,7 @@ curl --silent --ssl-revoke-best-effort --output /dev/null https://localhost:1844
 [[ $untrusted_status == 60 ]]
 "${secure_curl[@]}" https://localhost:18443/static/admin/css/base.css >/dev/null
 [[ $("${secure_curl[@]}" https://localhost:18443/health/ready/) == ok ]]
+[[ $("${secure_curl[@]}" https://localhost:18444/health/ready/) == ok ]]
 # The gateway owns the transport headers; each appears once with exactly this value.
 exact_headers() {
   local headers expected
@@ -567,6 +568,8 @@ refused=0
 [[ $refused != 0 ]]
 [[ $("${secure_curl[@]}" --cert "$temporary/edge-certificate.pem" --key "$temporary/edge-key.pem" \
   https://localhost:18443/health/ready/) == ok ]]
+# Host-local probes keep working without the edge's certificate on the loopback entrypoint.
+[[ $("${secure_curl[@]}" https://localhost:18444/health/ready/) == ok ]]
 "${compose[@]}" up -d --no-deps --wait --wait-timeout 120 gateway
 ready
 echo 'Production containers, TLS routing, exact gateway headers, body and rate limits, static assets, Turkish catalogs, session and sign-in API, workspace app shell, database roles and access rules, fixture queue publication, graceful idle shutdown, the maintenance notice, database reset and restore, and Authenticated Origin Pulls passed.'

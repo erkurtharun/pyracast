@@ -43,11 +43,17 @@ begin_maintenance() {
   touch /var/lib/pyracast/release-blocked && sync -f /var/lib/pyracast/release-blocked \
     && sync -f /var/lib/pyracast
 }
+# Probes the release in $1 through its gateway; one with the loopback entrypoint is probed there,
+# where the edge's client certificate is never required.
 ready() {
-  local response
+  local response port=443 url=https://$site_address/health/ready/
+  if grep -qs '^      TRAEFIK_ENTRYPOINTS_LOCAL_ADDRESS: :8444$' "$1/deploy/compose.yaml"; then
+    port=8443
+    url=https://$site_address:8443/health/ready/
+  fi
   response=$(curl --fail --silent --show-error --noproxy '*' \
     --connect-timeout 5 --max-time 10 --retry 18 --retry-delay 5 --retry-max-time 180 \
-    --retry-all-errors --resolve "$site_address:443:127.0.0.1" "https://$site_address/health/ready/") || return $?
+    --retry-all-errors --resolve "$site_address:$port:127.0.0.1" "$url") || return $?
   [[ $response == ok ]]
 }
 # Sets the runtime role's password to the release's staged runtime secret, the version host.json
@@ -59,7 +65,7 @@ switch_runtime() {
 # restart or reboot reproduces what runs. Before migrate the database still fits that release.
 resume_previous() {
   python3 /opt/pyracast/current/deploy/runtime_secrets.py /etc/pyracast/host.json \
-    && "${old[@]}" up -d --wait --wait-timeout 180 && ready \
+    && "${old[@]}" up -d --wait --wait-timeout 180 && ready /opt/pyracast/current \
     && rm -f /var/lib/pyracast/release-blocked && sync -f /var/lib/pyracast
 }
 # The printed recovery commands run the helper of the release in /opt/pyracast/current; one that
@@ -149,26 +155,7 @@ mkdir -p "$release"
 cp -a "$bundle/deploy" "$release/"
 chown -R root:root "$release"
 chmod -R go-w "$release"
-python3 - "$release/deploy/release.env" "$secrets" "$backend" "$web" "$gateway" "$postgres" <<'PY'
-import json
-import pathlib
-import re
-import sys
-config = json.loads(pathlib.Path('/etc/pyracast/host.json').read_text())
-secrets = sys.argv[2]
-values = {
-    'BACKEND_IMAGE': sys.argv[3], 'WEB_IMAGE': sys.argv[4],
-    'GATEWAY_IMAGE': sys.argv[5], 'POSTGRES_IMAGE': sys.argv[6],
-    'SITE_ADDRESS': config['domain'], 'ACME_EMAIL': config['acme_email'],
-    'RUNTIME_ENV_FILE': f'{secrets}/runtime.env',
-    'BROKER_ENV_FILE': f'{secrets}/broker.env',
-    'DATABASE_ENV_FILE': f'{secrets}/database.env',
-    'MIGRATION_ENV_FILE': f'{secrets}/migration.env',
-}
-if any(not re.fullmatch(r'[a-zA-Z0-9@.:/_+%-]+', value) for value in values.values()):
-    raise SystemExit('Invalid nonsecret deployment configuration.')
-pathlib.Path(sys.argv[1]).write_text(''.join(f'{key}={value}\n' for key, value in values.items()))
-PY
+python3 "$release/deploy/release_environment.py" /etc/pyracast/host.json "$release/deploy/release.env" "$secrets" "$backend" "$web" "$gateway" "$postgres"
 site_address=$(sed -n 's/^SITE_ADDRESS=//p' "$release/deploy/release.env")
 bash "$release/deploy/install-units.sh" verify "$release"
 python3 "$release/deploy/runtime_secrets.py" /etc/pyracast/host.json
@@ -230,7 +217,7 @@ switched=1
 probe_database api
 # Back up the running database before a new support image can modify its data directory.
 rm -f "$release/prerelease-backup.json"
-python3 "$release/deploy/backup.py" /etc/pyracast/host.json --release-dir "$release" --kind prerelease
+python3 "$release/deploy/backup.py" /etc/pyracast/host.json --release-dir "$release" --lock-fd 9 --kind prerelease
 sync -f "$release"
 "${compose[@]}" up -d postgres
 wait_for_database
@@ -248,7 +235,7 @@ python3 "$release/deploy/bootstrap_database.py" converge "$release" "$secrets"
 rm -f "$secrets/migration.env"
 
 "${compose[@]}" up -d --wait --wait-timeout 180
-ready
+ready "$release"
 # A mail failure must not undo a healthy release; the warning reaches the release log.
 if ! "${compose[@]}" exec -T api pyracast check_mail; then
   echo "WARNING: the mail probe failed; run pyracast check_mail and fix mail before customers need it." >&2

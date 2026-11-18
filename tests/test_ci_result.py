@@ -4,11 +4,13 @@ import pytest
 
 from scripts import ci_result
 
-PASSED = {"result": "success", "outputs": {}}
+PASSED: dict[str, object] = {"result": "success", "outputs": {}}
 
 
 def needs(**results: str) -> dict[str, dict[str, object]]:
-    value = {name: dict(PASSED) for name in ("deployment", "verify_ubuntu", "sonar")}
+    value: dict[str, dict[str, object]] = {
+        name: dict(PASSED) for name in ("deployment", "verify_ubuntu", "sonar")
+    }
     for name, result in results.items():
         value[name] = {"result": result, "outputs": {}}
     return value

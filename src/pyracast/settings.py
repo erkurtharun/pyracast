@@ -52,7 +52,7 @@ INSTALLED_APPS = [
     "pyracast.change_requests",
 ]
 MIDDLEWARE = [
-    "pyracast.accounts.middleware.TrustedProxyHeaders",
+    "pyracast.proxy.TrustedProxyHeaders",
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.csp.ContentSecurityPolicyMiddleware",
     "pyracast.api.middleware.PrivateAPIResponses",
@@ -306,16 +306,19 @@ SECURE_CSP = {
     "base-uri": [CSP.NONE],
     "frame-ancestors": [CSP.NONE],
     "form-action": [CSP.SELF],
+    "report-uri": ["/api/csp-reports/"],
 }
 SECURE_SSL_REDIRECT = not DEBUG
 SECURE_REDIRECT_EXEMPT = [r"^health/(live|ready)/$"]
 PYRACAST_TRUST_PROXY = os.environ.get("PYRACAST_TRUST_PROXY") == "1"
-PYRACAST_TRUSTED_PROXY_CIDRS = os.environ.get("PYRACAST_TRUSTED_PROXY_CIDRS", "").split()
+PYRACAST_TRUSTED_PROXY_CIDRS = (
+    os.environ.get("PYRACAST_TRUSTED_PROXY_CIDRS", "").replace(",", " ").split()
+)
 PYRACAST_TRUSTED_UPSTREAM_PROXY_CIDRS = (
     os.environ.get("PYRACAST_TRUSTED_UPSTREAM_PROXY_CIDRS", "").replace(",", " ").split()
 )
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https") if PYRACAST_TRUST_PROXY else None
-ALLAUTH_TRUSTED_CLIENT_IP_HEADER = "X-Real-IP" if PYRACAST_TRUST_PROXY else None
+ALLAUTH_TRUSTED_CLIENT_IP_HEADER = "X-Pyracast-Client-IP" if PYRACAST_TRUST_PROXY else None
 SECURE_HSTS_SECONDS = 31536000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True

@@ -3,9 +3,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from deploy.release_authorization import Authorized, Refused, Superseded, decide
 
 from deploy import release_authorization
+from deploy.release_authorization import Authorized, RefusedError, Superseded, decide
 
 MAIN = "a" * 40
 OLDER = "b" * 40
@@ -13,7 +13,7 @@ REPOSITORY = "owner/pyracast"
 WORKFLOW = 41
 
 
-def facts(run: dict[str, Any] | None = None, **changes: Any) -> dict[str, Any]:
+def facts(run_changes: dict[str, Any] | None = None, **changes: Any) -> dict[str, Any]:
     value: dict[str, Any] = {
         "event": "workflow_run",
         "event_sha": MAIN,
@@ -32,7 +32,7 @@ def facts(run: dict[str, Any] | None = None, **changes: Any) -> dict[str, Any]:
             "head_sha": MAIN,
             "status": "completed",
             "conclusion": "success",
-            **(run or {}),
+            **(run_changes or {}),
         },
         "jobs": [
             {"name": "Verify (ubuntu-latest)", "conclusion": "success"},
@@ -95,7 +95,7 @@ def test_a_run_for_a_commit_that_is_no_longer_main_is_superseded(
 def test_a_run_that_is_not_successful_repository_ci_on_main_is_refused(
     run: dict[str, Any], changes: dict[str, Any]
 ) -> None:
-    with pytest.raises(Refused, match="successful repository CI"):
+    with pytest.raises(RefusedError, match="successful repository CI"):
         decide(facts(run, **changes))
 
 
@@ -113,7 +113,7 @@ def test_a_run_that_is_not_successful_repository_ci_on_main_is_refused(
     ],
 )
 def test_only_a_single_passing_ci_result_job_authorizes(jobs: list[dict[str, str]]) -> None:
-    with pytest.raises(Refused, match="CI result"):
+    with pytest.raises(RefusedError, match="CI result"):
         decide(facts(jobs=jobs))
 
 
@@ -133,13 +133,13 @@ def test_only_a_single_passing_ci_result_job_authorizes(jobs: list[dict[str, str
 def test_exactly_one_unexpired_image_artifact_of_the_run_attempt_is_required(
     artifacts: list[dict[str, Any]],
 ) -> None:
-    with pytest.raises(Refused, match="unexpired image artifact"):
+    with pytest.raises(RefusedError, match="unexpired image artifact"):
         decide(facts(artifacts=artifacts))
 
 
 @pytest.mark.parametrize("main", ["", "A" * 40, "a" * 39, None])
 def test_an_unreadable_main_commit_is_refused(main: str | None) -> None:
-    with pytest.raises(Refused, match="main commit"):
+    with pytest.raises(RefusedError, match="main commit"):
         decide(facts({"head_sha": main}, main_sha=main, event_sha=main))
 
 
@@ -151,7 +151,7 @@ def run_command(tmp_path: Path, *arguments: str) -> tuple[int, dict[str, str], s
     )
     lines = output.read_text(encoding="utf-8").splitlines() if output.exists() else []
     written = dict(line.split("=", 1) for line in lines)
-    return status, written, summary.read_text(encoding="utf-8")
+    return status, written, summary.read_text(encoding="utf-8") if summary.exists() else ""
 
 
 def run_main(tmp_path: Path, value: dict[str, Any]) -> tuple[int, dict[str, str], str]:

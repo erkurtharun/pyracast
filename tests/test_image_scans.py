@@ -3,10 +3,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from deploy.check_image_scans import SERVICES
-from deploy.check_image_scans import check_image_scans as check
 
 from deploy import check_image_scans
+from deploy.check_image_scans import SERVICES
+from deploy.check_image_scans import check_image_scans as check
 
 FINDING = {
     "VulnerabilityID": "CVE-2026-116587",

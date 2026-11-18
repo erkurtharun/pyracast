@@ -1,17 +1,35 @@
 http:
   routers:
     # Inherit TLS and the ACME resolver from websecure; tls: {} would discard its resolver.
-    backend:
-      rule: 'Host(`{{ env "SITE_ADDRESS" }}`) && (Path(`/api`) || PathPrefix(`/api/`) || Path(`/admin`) || PathPrefix(`/admin/`) || PathPrefix(`/static/`) || PathPrefix(`/health/`))'
-      entryPoints: [websecure]
+    api:
+      rule: 'Host(`{{ env "SITE_ADDRESS" }}`) && (Path(`/api`) || PathPrefix(`/api/`))'
+      entryPoints: [websecure, local]
       priority: 100
-      middlewares: [security, maintenance-api, body-limit, compression]
+      middlewares: [security, api-refusals, client-rate, client-in-flight, api-body-limit, maintenance-api, compression]
+      service: backend
+    authentication:
+      rule: 'Host(`{{ env "SITE_ADDRESS" }}`) && PathPrefix(`/api/auth/`)'
+      entryPoints: [websecure, local]
+      priority: 110
+      middlewares: [security, api-refusals, authentication-rate, client-rate, client-in-flight, api-body-limit, maintenance-api, compression]
+      service: backend
+    admin:
+      rule: 'Host(`{{ env "SITE_ADDRESS" }}`) && (Path(`/admin`) || PathPrefix(`/admin/`))'
+      entryPoints: [websecure, local]
+      priority: 100
+      middlewares: [security, client-rate, client-in-flight, admin-body-limit, maintenance-api, compression]
+      service: backend
+    backend:
+      rule: 'Host(`{{ env "SITE_ADDRESS" }}`) && (PathPrefix(`/static/`) || PathPrefix(`/health/`))'
+      entryPoints: [websecure, local]
+      priority: 100
+      middlewares: [security, client-rate, client-in-flight, page-body-limit, maintenance-api, compression]
       service: backend
     frontend:
       rule: 'Host(`{{ env "SITE_ADDRESS" }}`)'
-      entryPoints: [websecure]
+      entryPoints: [websecure, local]
       priority: 10
-      middlewares: [security, maintenance-page, body-limit, compression]
+      middlewares: [security, client-rate, client-in-flight, page-body-limit, maintenance-page, compression]
       service: frontend
   services:
     backend:
@@ -24,24 +42,55 @@ http:
       loadBalancer:
         servers: [{url: "http://maintenance:8080"}]
   middlewares:
+    # The applications own CSP, Referrer-Policy and cache control; these headers are the gateway's.
     security:
       headers:
         customRequestHeaders:
           Forwarded: ""
           X-Forwarded-Proto: https
+          X-Pyracast-Client-Ip: ""
         customResponseHeaders:
           Server: ""
+          Cross-Origin-Opener-Policy: same-origin
         stsSeconds: 31536000
         contentTypeNosniff: true
-        referrerPolicy: same-origin
+        permissionsPolicy: camera=(), microphone=(), geolocation=()
+    # Cloudflare appends the visitor to X-Forwarded-For, so depth 1 is the client the edge saw.
+    client-rate:
+      rateLimit:
+        average: 20
+        burst: 100
+        sourceCriterion: {ipStrategy: {depth: 1, ipv6Subnet: 64}}
+    authentication-rate:
+      rateLimit:
+        average: 30
+        period: 1m
+        burst: 20
+        sourceCriterion: {ipStrategy: {depth: 1, ipv6Subnet: 64}}
+    client-in-flight:
+      inFlightReq:
+        amount: 32
+        sourceCriterion: {ipStrategy: {depth: 1, ipv6Subnet: 64}}
+    # The application never answers 413, so every 413 here is a body over the gateway's limit.
+    api-refusals:
+      errors: {status: ["413"], service: maintenance, query: /api/413}
     # Traefik answers 502 only when api or web is unreachable; the application never does.
     maintenance-api:
       errors: {status: ["502"], statusRewrites: {"502": 503}, service: maintenance, query: /api}
     maintenance-page:
       errors: {status: ["502"], statusRewrites: {"502": 503}, service: maintenance, query: /page}
-    body-limit:
+    # The API limit is Django's DATA_UPLOAD_MAX_MEMORY_SIZE; admin uploads reach 7 MiB.
+    api-body-limit:
+      buffering:
+        maxRequestBodyBytes: 2621440
+        memRequestBodyBytes: 1048576
+    admin-body-limit:
       buffering:
         maxRequestBodyBytes: 8388608
+        memRequestBodyBytes: 1048576
+    page-body-limit:
+      buffering:
+        maxRequestBodyBytes: 1048576
         memRequestBodyBytes: 1048576
     compression:
       compress: {}
@@ -51,3 +100,11 @@ tls:
     default:
       minVersion: VersionTLS12
       sniStrict: true
+    # websecure, the edge's entrypoint, uses these; ORIGIN_PULL is "required" only when the host
+    # names the edge's authority (origin_pull_ca).
+    edge:
+      minVersion: VersionTLS12
+      sniStrict: true
+      clientAuth:
+        caFiles: [/etc/traefik/origin-pull-ca.pem]
+        clientAuthType: '{{ if eq (env "ORIGIN_PULL") "required" }}RequireAndVerifyClientCert{{ else }}NoClientCert{{ end }}'

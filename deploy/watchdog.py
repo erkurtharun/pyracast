@@ -215,7 +215,7 @@ def check_certificate(release: Path) -> None:
         for line in (release / "deploy/release.env").read_text().splitlines()
         if line.startswith("SITE_ADDRESS=")
     )
-    remaining, lifetime = certificate_validity(site, ("127.0.0.1", 443))
+    remaining, lifetime = certificate_validity(site, ("127.0.0.1", host.LOCAL_HTTPS_PORT))
     if remaining < lifetime * CERTIFICATE_WARNING_FRACTION:
         report(
             "pyracast_certificate_expiring", "WARNING", days_remaining=round(remaining / 86400, 1)

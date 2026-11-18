@@ -1,4 +1,5 @@
 import json
+import time
 from collections.abc import Callable
 
 import pytest
@@ -121,7 +122,7 @@ def test_main_fails_a_broken_origin(
     answers = healthy()
     answers["https://pyracast.example/app/"] = [(500, b"")]
     monkeypatch.setattr(probe_origin, "fetch", site(answers))
-    monkeypatch.setattr(probe_origin.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
 
     assert probe_origin.main(["https://pyracast.example"]) == 1
     assert capsys.readouterr().err == "The public origin failed its probe: /app/ answered 500\n"

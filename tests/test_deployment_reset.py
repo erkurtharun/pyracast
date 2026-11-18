@@ -315,8 +315,8 @@ def test_prepare_blocks_drains_dumps_uploads_verifies_and_keeps_the_archive(
     assert listed[-6:] == ["--status", "running", "--status", "restarting", "--status", "paused"]
     probe = commands.calls[0]
     assert "--resolve" in probe
-    assert "example.com:443:127.0.0.1" in probe
-    assert probe[-1] == "https://example.com/health/ready/"
+    assert "example.com:8443:127.0.0.1" in probe
+    assert probe[-1] == "https://example.com:8443/health/ready/"
     for expected in (
         f"gs://private-backups/{name}",
         digest,

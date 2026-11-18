@@ -491,8 +491,13 @@ def test_each_router_admits_its_largest_body_and_the_smoke_probes_one_byte_over(
     assert body_limit("admin") > MAX_UPLOAD_BYTES
     assert body_limit("api") == body_limit("authentication") == settings.DATA_UPLOAD_MAX_MEMORY_SIZE
     assert body_limit("backend") == body_limit("frontend") < body_limit("api")
-    for router in ("api", "admin", "backend", "frontend"):
-        assert f"head -c {body_limit(router) + 1} /dev/zero" in smoke, router
+    probed = {
+        (routed_router(path), int(size))
+        for size, path in re.findall(r"\$\(too_large (\d+) (\S+)\)", smoke)
+    }
+    assert probed == {(router, body_limit(router) + 1) for router in routers()} - {
+        ("authentication", body_limit("authentication") + 1)
+    }
 
 
 def test_ci_job_names_apply_matrix_include_and_exclude() -> None:
@@ -1199,7 +1204,7 @@ def test_the_gateway_owns_the_transport_headers_and_the_applications_the_rest() 
 
 
 def test_the_origin_requires_the_edge_certificate_only_once_the_host_names_its_authority() -> None:
-    client_auth = routes()["tls"]["options"]["default"]["clientAuth"]
+    client_auth = routes()["tls"]["options"]["edge"]["clientAuth"]
     gateway = compose_services()["gateway"]
     placeholder = text(DEPLOY / "origin-pull-off.pem")
     variables = text(TERRAFORM / "variables.tf")
@@ -1216,10 +1221,9 @@ def test_the_origin_requires_the_edge_certificate_only_once_the_host_names_its_a
         "RequireAndVerifyClientCert{{ else }}NoClientCert{{ end }}",
     }
     assert gateway["environment"]["ORIGIN_PULL"] == "${ORIGIN_PULL:-off}"
-    assert (
-        "${ORIGIN_PULL_CA:-./origin-pull-off.pem}:/etc/traefik/origin-pull-ca.pem:ro"
-        in gateway["volumes"]
-    )
+    mount = "${ORIGIN_PULL_CA:-./origin-pull-off.pem}:/etc/traefik/origin-pull-ca.pem:ro"
+    assert mount in gateway["volumes"]
+    assert f"      - {mount}\n" in text(DEPLOY / "compose.smoke.yaml")
     assert placeholder.startswith("-----BEGIN CERTIFICATE-----\n")
     assert placeholder.count("-----BEGIN") == 1
     assert host_config
@@ -1237,3 +1241,26 @@ def test_the_prerelease_backup_proves_it_runs_under_the_installers_lock() -> Non
         'python3 "$release/deploy/backup.py" /etc/pyracast/host.json --release-dir "$release" '
         "--lock-fd 9 --kind prerelease\n"
     ) in script
+
+
+def test_host_local_probes_use_the_loopback_entrypoint_without_the_edge_certificate() -> None:
+    gateway = compose_services()["gateway"]
+    environment = gateway["environment"]
+    options = routes()["tls"]["options"]
+    script = installer()
+    smoke = text(DEPLOY / "smoke.sh")
+
+    assert "${LOCAL_HTTPS_BIND:-127.0.0.1:8443}:8444" in gateway["ports"]
+    assert environment["TRAEFIK_ENTRYPOINTS_LOCAL_ADDRESS"] == ":8444"
+    assert environment["TRAEFIK_ENTRYPOINTS_WEBSECURE_HTTP_TLS_OPTIONS"] == "edge@file"
+    assert "TRAEFIK_ENTRYPOINTS_LOCAL_HTTP_TLS_OPTIONS" not in environment
+    assert options["default"] == {"minVersion": "VersionTLS12", "sniStrict": True}
+    assert {name: router["entryPoints"] for name, router in routers().items()} == {
+        name: ["websecure", "local"] for name in routers()
+    }
+    assert host.LOCAL_HTTPS_PORT == 8443
+    assert f"url=https://$site_address:{host.LOCAL_HTTPS_PORT}/health/ready/" in script
+    assert "&& ready /opt/pyracast/current" in script
+    assert '\nready "$release"\n' in script
+    assert "LOCAL_HTTPS_BIND=127.0.0.1:18444" in smoke
+    assert "https://localhost:18444/health/ready/" in smoke

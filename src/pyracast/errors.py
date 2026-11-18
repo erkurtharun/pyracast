@@ -39,6 +39,7 @@ class ErrorCode(models.TextChoices):
     REQUEST_TIMEOUT = "request_timeout"
     PROVIDER_AUTHENTICATION_FAILED = "provider_authentication_failed"
     MAINTENANCE = "maintenance"
+    REQUEST_TOO_LARGE = "request_too_large"
     FORECAST_SOURCES_CHANGED = "forecast_sources_changed"
     CONFIGURATION_UNAVAILABLE = "configuration_unavailable"
     LOCATION_ALREADY_HAS_PLANT = "location_already_has_plant"
@@ -113,6 +114,7 @@ MESSAGES: Mapping[ErrorCode, StrPromise] = {
     ErrorCode.MAINTENANCE: _(
         "Pyracast is being updated. Try again in a minute; your data is safe."
     ),
+    ErrorCode.REQUEST_TOO_LARGE: _("The request is too large to be accepted."),
     ErrorCode.FORECAST_SOURCES_CHANGED: _("The forecast sources changed while loading. Try again."),
     ErrorCode.CONFIGURATION_UNAVAILABLE: _(
         "Plant configuration is unavailable. Complete setup and wait for administrator approval."

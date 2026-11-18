@@ -8,19 +8,19 @@ from django.conf import LazySettings
 from django.core.exceptions import ImproperlyConfigured, PermissionDenied
 from django.http import HttpRequest, HttpResponse
 from django.test import Client, RequestFactory
-from pyracast.proxy import (
-    CLIENT_IP_HEADER,
-    ForwardedIdentity,
-    InvalidPeer,
-    TrustedProxyHeaders,
-    UnverifiedProxyHeaders,
-    parse_networks,
-    resolve_forwarded_identity,
-)
 
 from pyracast import proxy
 from pyracast import settings as project_settings
 from pyracast.accounts.checks import check_authentication_origin
+from pyracast.proxy import (
+    CLIENT_IP_HEADER,
+    ForwardedIdentity,
+    InvalidPeerError,
+    TrustedProxyHeaders,
+    UnverifiedProxyHeadersError,
+    parse_networks,
+    resolve_forwarded_identity,
+)
 
 GATEWAY = "172.30.80.2"
 GATEWAYS = (ip_network("172.30.80.2/32"),)
@@ -122,9 +122,9 @@ def test_the_resolver_decides_the_identity_from_the_trusted_chain(
 
 @pytest.mark.parametrize("peer", ["", "invalid", "192.0.2.1, 192.0.2.2", "10.0.0.1/24"])
 def test_an_unreadable_socket_peer_is_refused(peer: str) -> None:
-    with pytest.raises(InvalidPeer):
+    with pytest.raises(InvalidPeerError):
         resolve_forwarded_identity(meta(peer), GATEWAYS, EDGES)
-    with pytest.raises(InvalidPeer):
+    with pytest.raises(InvalidPeerError):
         resolve_forwarded_identity({}, GATEWAYS, EDGES)
 
 
@@ -149,7 +149,7 @@ def test_an_unreadable_socket_peer_is_refused(peer: str) -> None:
 def test_a_trusted_gateway_with_unverifiable_headers_is_refused(
     headers: dict[str, str], edges: tuple[proxy.Network, ...]
 ) -> None:
-    with pytest.raises(UnverifiedProxyHeaders) as refused:
+    with pytest.raises(UnverifiedProxyHeadersError) as refused:
         resolve_forwarded_identity(meta(**headers), GATEWAYS, edges)
     assert refused.value.peer == GATEWAY
 

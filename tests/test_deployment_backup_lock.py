@@ -219,7 +219,7 @@ def test_prerelease_backup_never_waits_for_the_lock_its_installer_holds(
 def test_prerelease_backup_refuses_unless_its_caller_holds_the_release_lock(
     backup_host: BackupHost, descriptor: int | None
 ) -> None:
-    with pytest.raises(backup.ReleaseLockNotHeld):
+    with pytest.raises(backup.ReleaseLockNotHeldError):
         backup.create_backup(
             backup_host.release, "private-backups", "prerelease", backup_host.directory, descriptor
         )

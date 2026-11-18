@@ -250,6 +250,7 @@ resource "google_compute_instance" "application" {
         backup_bucket           = google_storage_bucket.backup.name
         domain                  = var.domain
         acme_email              = var.acme_email
+        origin_pull_ca          = var.origin_pull_ca
       }))
     })
   }

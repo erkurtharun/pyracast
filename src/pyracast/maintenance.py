@@ -8,10 +8,16 @@ from pyracast.languages import LANGUAGE_COOKIE, Language, negotiated_language
 PORT = 8080
 RETRY_AFTER_SECONDS = 60
 CODE = "maintenance"
+TOO_LARGE_CODE = "request_too_large"
 # The API catalog carries the same texts for ErrorCode.MAINTENANCE; a test keeps them equal.
 MESSAGES: dict[Language, str] = {
     "en": "Pyracast is being updated. Try again in a minute; your data is safe.",
     "tr": "Pyracast güncelleniyor. Bir dakika sonra yeniden deneyin; verileriniz güvende.",
+}
+# The gateway's refusal of a body over its limit, catalogued as ErrorCode.REQUEST_TOO_LARGE.
+TOO_LARGE_MESSAGES: dict[Language, str] = {
+    "en": "The request is too large to be accepted.",
+    "tr": "İstek kabul edilemeyecek kadar büyük.",
 }
 PAGE = f"""<!doctype html>
 <html lang="en">
@@ -49,6 +55,10 @@ def api_body(language: Language) -> bytes:
     ).encode()
 
 
+def too_large_body(language: Language) -> bytes:
+    return json.dumps({"code": TOO_LARGE_CODE, "message": TOO_LARGE_MESSAGES[language]}).encode()
+
+
 def cookie_language(header: str) -> str | None:
     # Django's parse_cookie: every ;-separated pair counts, the last of a name wins, values are
     # unquoted alike.
@@ -71,17 +81,22 @@ class Notice(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    # Traefik's errors middleware always asks with GET: /page for frontend, /api for backend routes.
+    def language(self) -> Language:
+        return negotiated_language(
+            cookie_language(self.headers.get("Cookie", "")),
+            self.headers.get("Accept-Language", ""),
+            self.headers.get("CF-IPCountry"),
+        )
+
+    # Traefik's errors middleware always asks with GET: /page for frontend, /api for backend
+    # routes, /api/413 for an API body over the gateway's limit.
     def do_GET(self) -> None:
         if self.path == "/health":
             self.answer(200, "text/plain", b"ok")
+        elif self.path == "/api/413":
+            self.answer(413, "application/json", too_large_body(self.language()))
         elif self.path == "/api" and "text/html" not in self.headers.get("Accept", ""):
-            language = negotiated_language(
-                cookie_language(self.headers.get("Cookie", "")),
-                self.headers.get("Accept-Language", ""),
-                self.headers.get("CF-IPCountry"),
-            )
-            self.answer(503, "application/json", api_body(language))
+            self.answer(503, "application/json", api_body(self.language()))
         else:
             self.answer(503, "text/html; charset=utf-8", PAGE)
 
