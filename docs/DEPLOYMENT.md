@@ -318,7 +318,8 @@ successful `main` CI runs trigger it automatically. The workflow:
    serves, starts the new gateway with its maintenance notice, stops the API and web
    servers, gives the runtime role the release's password and probes it, takes a
    database dump and waits for its off-host upload before upgrading
-   PostgreSQL/RabbitMQ, migrates with the schema owner, and starts the tested
+   PostgreSQL/RabbitMQ, records the maintenance's recovery point, migrates with the
+   schema owner, and starts the tested
    revision; "A release that fails during maintenance" below covers failures. The
    plan step refuses a database whose migration ledger names Pyracast migrations that
    are no longer in the release (a database from before the migration baseline); the
@@ -485,16 +486,19 @@ inside `tmux` so that a dropped IAP session does not interrupt them.
 records it in `/var/lib/pyracast/reset/session.json` with the verified object. The
 session belongs to that maintenance only: the installer keeps the marker's content
 and removes the marker after a successful release, so a later maintenance starts
-without one. `reset` runs only on the object of the current session; once it has
-replaced the database, `abort`, `prepare` and a `restore` of any other object refuse
-and name the `restore` command for that object.
+without one. Whoever changes the database during a maintenance first marks the
+session replaced, naming the object that holds the data the previous release served:
+`reset` and `restore` do, and so does a release before its `migrate` ("A release that
+fails during maintenance"). `reset` runs only on the object of the current session;
+once the session is replaced, `abort`, `prepare` and a `restore` of any other object
+refuse and name the `restore` command for that object.
 
 | Subcommand | Requires | Does |
 | --- | --- | --- |
 | `prepare` | the release lock is free, no `release-blocked` marker, the site answers `/health/ready/` | writes the marker, stops the application in the installer's order (PostgreSQL, RabbitMQ and the gateway with its maintenance notice stay up), dumps the database into `/var/lib/pyracast/reset/`, uploads it as `postgres/<stamp>-prereset-<uuid>.dump`, restores it into a throwaway PostgreSQL without network, compares every table's row count with the live database, exports the Solcast forecast snapshots with their site parameters as `<archive>.solcast.jsonl.gz`, checks it against the database's count and uploads it too; records both objects' SHA-256 and the counts and opens the session; prints them with the release commit, its image digests, the runtime secret version and any earlier archives kept on the host |
-| `abort` | the marker; `reset` has not replaced the database in this maintenance; `migrate --check` of the release in `/opt/pyracast/current` passes on the database | writes the runtime secrets with that release, starts it with `docker compose --env-file deploy/release.env -f deploy/compose.yaml up --detach --wait`, probes `/health/ready/` and removes the marker and the session |
+| `abort` | the marker; the session does not say the database changed in this maintenance; `migrate --check` of the release in `/opt/pyracast/current` passes on the database | writes the runtime secrets with that release, starts it with `docker compose --env-file deploy/release.env -f deploy/compose.yaml up --detach --wait`, probes `/health/ready/` and removes the marker and the session |
 | `reset --confirm OBJECT` | the marker, no running, restarting or paused application container, `OBJECT` is the session's archive and its file and Solcast export still have the recorded SHA-256, both database roles | writes the runtime secrets; purges every RabbitMQ queue, dead-letter queues included, and checks that none holds a message; marks the session replaced and syncs it; runs `DROP DATABASE pyracast WITH (FORCE)` and `CREATE DATABASE pyracast`; applies `deploy/bootstrap.sql`; checks that the owner can create a table, that the runtime role can connect and read but cannot write the migration ledger, and that the owner lost database `CREATE`. The marker stays |
-| `restore --confirm OBJECT` | the marker, no application container, `OBJECT` is the session's archive once `reset` replaced the database, a pre-reset archive's Solcast export still has the recorded SHA-256, the archive has applied migrations, both database roles | writes the runtime secrets; uses the archive `prepare` kept, or downloads `OBJECT` (a pre-reset archive with its Solcast export) from the backup bucket, checks each against the bucket's MD5 and size and verifies them in a throwaway PostgreSQL first; then purges the queues, recreates the database as `reset` does, restores the archive with its owners and privileges, applies `deploy/bootstrap.sql` again over the archive's privileges, compares every table's row count with the record, checks both roles and `migrate --check`, starts the release in `/opt/pyracast/current`, probes readiness and removes the marker and the session |
+| `restore --confirm OBJECT` | the marker, no application container, `OBJECT` is the session's object once the database changed in this maintenance, a pre-reset archive's Solcast export still has the recorded SHA-256, the archive has applied migrations, both database roles | writes the runtime secrets; uses the archive `prepare` kept, or downloads `OBJECT` (a pre-reset archive with its Solcast export) from the backup bucket, checks each against the bucket's MD5 and size and verifies them in a throwaway PostgreSQL first; then purges the queues, recreates the database as `reset` does, restores the archive with its owners and privileges, applies `deploy/bootstrap.sql` again over the archive's privileges, compares every table's row count with the record, checks both roles and `migrate --check`, starts the release in `/opt/pyracast/current`, probes readiness and removes the marker and the session |
 
 When the start, readiness or the service unit fails or is interrupted, `abort` and
 `restore` write the marker back and send each stop command of the installer's
@@ -629,23 +633,30 @@ order. The gateway keeps the maintenance notice, unless the helper in
 `/opt/pyracast/current` predates the notice (the first upgrade to it): that helper's
 `restore` refuses beside the gateway, so the gateway and the notice stop too and the
 site is unreachable until recovery. Only if every stop succeeded does the runtime role
-get `host.json`'s secret. Before `migrate`, in an upgrade that began without the
-marker, the installer then starts the previous release as `pyracast.service` does,
+get `host.json`'s secret. Before its record (below), in an upgrade that began without
+the marker, the installer then starts the previous release as `pyracast.service` does,
 probes readiness and removes the marker; a start that does not serve is stopped
-again. The log names the state and prints its recovery:
+again.
+
+Right before `migrate`, an upgrade records the maintenance's one recovery point in the
+helper's session (`/var/lib/pyracast/reset/session.json`): a session that holds the
+marker stays, a prepared reset's now marked replaced; without one, the database is
+unchanged in this maintenance and the session names this run's pre-release dump. A
+failure to record exits before `migrate`. Every later run of the maintenance keeps that
+session. The log names the state and prints its recovery, read from the session:
 
 | State | Marker | `current` | Runtime password | Running | Recovery |
 | --- | --- | --- | --- | --- | --- |
 | Refused before the lock, or the lock timed out | unchanged | unchanged | unchanged | unchanged | none |
 | Preflight (staging, images, checks, provisioning, plan, `check_secrets`), or a first installation before its marker | none added | unchanged | unchanged | unchanged: the previous release, nothing on a first installation, or what an earlier maintenance left | fix the cause and release again; an earlier maintenance's recovery still applies |
-| Before `migrate`, resumed | removed | previous | `host.json`'s | previous release | fix the cause and release again |
-| Before `migrate`, otherwise | yes | previous | `host.json`'s | PostgreSQL, RabbitMQ, the notice | `abort` |
-| In or after `migrate` | yes | previous | `host.json`'s | PostgreSQL, RabbitMQ, the notice | a forward fix, or `restore --confirm` this run's pre-release dump |
-| A reset replaced the database in this maintenance | session identity | previous | `host.json`'s | PostgreSQL, RabbitMQ, the notice | `restore --confirm` the reset's archive (step 6 above) |
-| A stop or the password change failed, at any stage: this row applies before the rows above | yes | previous | as the run left it | what `docker compose ... ps` lists | stop it, run the password command below, then the recovery of the stage's row |
+| Before the record, resumed | removed | previous | `host.json`'s | previous release | fix the cause and release again |
+| The session does not say the database changed in this maintenance | yes | previous | `host.json`'s | PostgreSQL, RabbitMQ, the notice | `abort` |
+| The session says the database changed: a release reached `migrate`, or a `reset` or `restore` ran | session identity | previous | `host.json`'s | PostgreSQL, RabbitMQ, the notice | a forward fix, or `restore --confirm` the session's object |
+| The session file cannot be read | yes | previous | `host.json`'s | PostgreSQL, RabbitMQ, the notice | none the helper accepts; the log names the file |
+| A stop or the password change failed, at any stage: this row applies before the rows above | yes | previous | as the run left it | what `docker compose ... ps` lists | stop it, run the password command below, then the recovery of the session's row |
 | First installation, after its marker | yes | none | `host.json`'s, or not set yet | PostgreSQL, the notice | fix the cause and release again |
 | After promotion | removed | new | `host.json`'s | new release | the printed command that finishes the release |
-| Killed or rebooted after the marker, before promotion | yes | previous | `host.json`'s once the run changed it | after a reboot PostgreSQL and RabbitMQ | release again; or stop the application, run the password command, then `abort` or `restore` |
+| Killed or rebooted after the marker, before promotion | yes | previous | `host.json`'s once the run changed it | after a reboot PostgreSQL and RabbitMQ | release again; or stop the application, run the password command, then the recovery `python3 /opt/pyracast/releases/<release>/deploy/release_record.py /etc/pyracast/host.json recovery` prints |
 | Killed after `current` moved | yes | new | `host.json`'s | the new release, or after a reboot support only | `bash /opt/pyracast/current/deploy/install-units.sh install /opt/pyracast/current && rm /var/lib/pyracast/release-blocked && systemctl start pyracast.service` |
 
 A preflight refusal changes nothing the serving release reads; provisioning may have
@@ -668,12 +679,12 @@ python3 /opt/pyracast/releases/<release>/deploy/runtime_secrets.py /etc/pyracast
 ```
 
 `abort` and `restore` run `python3 /opt/pyracast/current/deploy/reset_database.py
-/etc/pyracast/host.json`. `abort` starts the release in `current`; it refuses when that
-release's `migrate --check` fails on the database or a reset replaced it. `restore
---confirm` takes the pre-release dump that this run recorded before `migrate` in
-`/opt/pyracast/releases/<sha>-<hash>/prerelease-backup.json` (the log prints it as
-"Pre-release record"; a rerun of the same release replaces it, so note the object
-first) and downloads and verifies it before it drops anything. Both start PostgreSQL
+/etc/pyracast/host.json`. `abort` starts the release in `current`; it refuses when the
+session says the database changed or that release's `migrate --check` fails on it.
+`restore --confirm` accepts only the session's object once the database changed. A
+pre-release dump exists only in the backup bucket, which deletes objects after seven
+days: `restore` downloads it, checks the bucket's MD5 and size and counts its rows in a
+throwaway PostgreSQL before it drops anything. Both start PostgreSQL
 and RabbitMQ from the previous release's Compose file and refuse without the marker;
 `restore` also refuses while an application container runs. After promotion the new
 release serves the migrated database: `restore` refuses without the marker, and the
@@ -707,10 +718,13 @@ secret each release starts with and which one the runtime role's password matche
 proves that a failure before `migrate` starts the previous release with the secret
 `host.json` names, that no password change happens while API or web run or after a
 failed stop, that the printed password command works after `/run` is emptied, that a
-reset session keeps its marker and is recovered with its own archive, and that pruning
-keeps the previous release. `tests/test_deployment_previous_helper.py` runs each
-recovery the installer prints through the current helper and the one on `main` before
-the maintenance notice.
+reset session keeps its marker and is recovered with its own archive, that a second
+release in the same maintenance and a kill during `migrate` keep the first recovery
+point, and that pruning keeps the previous release.
+`tests/test_deployment_previous_helper.py` runs each recovery the installer prints
+through the current helper and the one on `main` before the maintenance notice,
+against a model of the database, and counts it only when the previous release serves
+again.
 `tests/test_operations_contracts.py` keeps the values that `deploy/`,
 `infra/terraform` and the workflows restate in agreement: worker queues, the
 watchdog and drain service lists, the shipped units and host paths, stop grace
