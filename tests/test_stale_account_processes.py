@@ -13,6 +13,7 @@ from allauth.account.internal.flows.email_verification_by_code import EmailVerif
 from allauth.account.internal.flows.password_reset_by_code import (
     PasswordResetVerificationProcess,
 )
+from allauth.account.managers import EmailAddressManager
 from allauth.account.models import EmailAddress
 from allauth.core.internal import ratelimit
 from allauth.headless.account.inputs import VerifyEmailInput
@@ -525,11 +526,15 @@ def test_resend_during_account_deletion_answers_like_a_serial_order(
     assert not User.objects.filter(pk=owner.pk).exists()
 
 
-def test_reset_during_account_deletion_answers_like_a_serial_order() -> None:
+def pending_unverified_reset() -> tuple[User, Client, dict[str, str]]:
     owner = account("unverified@example.com", "unverified", verified=False)
     client = browser()
     assert submit(client, "auth/password/request", {"email": owner.email}).status_code == 401
-    reset = {"key": mailed_code(), "password": PASSWORD + "reset"}
+    return owner, client, {"key": mailed_code(), "password": PASSWORD + "reset"}
+
+
+def test_reset_during_account_deletion_answers_like_a_serial_order() -> None:
+    owner, client, reset = pending_unverified_reset()
 
     response = during_deletion(owner, lambda: submit(client, "auth/password/reset", reset))
 
@@ -560,6 +565,106 @@ def test_verification_never_writes_over_an_address_reassigned_before_completion(
     assert EmailAddress.objects.filter(
         email="owner@example.com", user=other, verified=True
     ).exists()
+
+
+def test_verification_never_writes_back_an_address_edited_before_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, code = pending_signup()
+    after(
+        monkeypatch,
+        VerifyEmailInput,
+        "clean_key",
+        lambda: EmailAddress.objects.filter(email="owner@example.com").update(
+            email="edited@example.com"
+        ),
+    )
+
+    response = verify(client, code)
+
+    assert answer(response) == answer(verify(browser(), code))
+    assert mail.outbox == []
+    assert_signed_out_without_pending_verification(client)
+    rows = EmailAddress.objects.values_list("email", "primary", "verified")
+    assert list(rows) == [("edited@example.com", True, False)]
+
+
+def test_change_answers_conflict_when_the_address_is_stored_before_completion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user = member()
+    client, code = change_pending(user)
+    expected = answer(submit(signed_in(user), "auth/email/verify", {"key": code}))
+    before(
+        monkeypatch,
+        EmailVerificationProcess,
+        "finish",
+        lambda: EmailAddress.objects.create(user=user, email="new@example.com"),
+    )
+
+    response = submit(client, "auth/email/verify", {"key": code})
+
+    assert answer(response) == expected
+    assert mail.outbox == []
+    stored = [("member@example.com", True, True), ("new@example.com", False, False)]
+    assert sorted(addresses(user)) == stored
+    assert answer(submit(client, "auth/email/verify", {"key": code})) == expected
+
+
+def verified_reset_address() -> None:
+    EmailAddress.objects.filter(email="unverified@example.com").update(verified=True)
+
+
+def reassigned_reset_address() -> None:
+    EmailAddress.objects.filter(email="unverified@example.com").update(
+        user=User.objects.get(username="member"), primary=False, verified=True
+    )
+
+
+@pytest.mark.parametrize(
+    ("competitor", "holder"),
+    [(verified_reset_address, "unverified"), (reassigned_reset_address, "member")],
+    ids=["verified", "reassigned"],
+)
+def test_reset_never_writes_over_an_address_changed_before_completion(
+    competitor: Callable[[], None], holder: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    member()
+    owner, client, reset = pending_unverified_reset()
+    nothing_pending = answer(submit(browser(), "auth/password/reset", reset))
+    after(monkeypatch, EmailAddressManager, "get_for_user", competitor)
+
+    response = submit(client, "auth/password/reset", reset)
+
+    assert answer(response) == nothing_pending
+    assert mail.outbox == []
+    owner.refresh_from_db()
+    assert owner.check_password(PASSWORD)
+    address = EmailAddress.objects.select_related("user").get(email="unverified@example.com")
+    assert (address.user.username, address.verified) == (holder, True)
+    assert answer(submit(client, "auth/password/reset", reset)) == nothing_pending
+
+
+def test_reset_of_an_address_replaced_before_completion_changes_only_the_password(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owner, client, reset = pending_unverified_reset()
+
+    def replaced() -> None:
+        EmailAddress.objects.filter(user=owner).delete()
+        EmailAddress.objects.create(
+            user=owner, email="changed@example.com", primary=True, verified=True
+        )
+
+    before(monkeypatch, ResetPasswordInput, "clean", replaced)
+
+    response = submit(client, "auth/password/reset", reset)
+
+    assert response.status_code == 401
+    assert sent() == [("account/email/password_reset", ["changed@example.com"])]
+    owner.refresh_from_db()
+    assert owner.check_password(PASSWORD + "reset")
+    assert addresses(owner) == [("changed@example.com", True, True)]
 
 
 def deadlock() -> None:
