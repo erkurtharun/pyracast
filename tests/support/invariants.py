@@ -38,7 +38,11 @@ PROVIDER_ACCOUNT_RULE = (
     " AND (authentication_failed_revision IS NULL"
     " OR authentication_failed_revision BETWEEN 1 AND credential_revision)"
 )
-SITE_BINDING_RULE = "(validated_at IS NULL) = (validated_credential_revision IS NULL)"
+SITE_BINDING_RULE = """
+(validated_at IS NULL AND validated_credential_revision IS NULL)
+OR (validated_at IS NOT NULL AND validated_credential_revision IS NOT NULL
+    AND validated_credential_revision >= 1)
+"""
 CALIBRATION_RUN_RULE = (
     f"(status IN ('{CalibrationStatus.PENDING}', '{CalibrationStatus.RUNNING}')"
     " OR completed_at IS NOT NULL)"

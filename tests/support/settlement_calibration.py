@@ -17,7 +17,7 @@ def settlement(
 ) -> EpiasSnapshot:
     start, end = local_day_bounds(day, configuration.binding.timezone)
     stamp = end + timedelta(hours=2, minutes=minute)
-    identity = identity or {"id": 77, "eic": "EIC", "name": "Plant"}
+    identity = identity if identity is not None else {"id": 77, "eic": "EIC", "name": "Plant"}
     job = EpiasCollectionJob.objects.create(
         plant_id=connection.plant_id,
         connection=connection,

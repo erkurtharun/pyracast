@@ -127,7 +127,11 @@ class SiteBinding(models.Model):
                 condition=models.Q(
                     validated_at__isnull=True, validated_credential_revision__isnull=True
                 )
-                | models.Q(validated_at__isnull=False, validated_credential_revision__isnull=False),
+                | models.Q(
+                    validated_at__isnull=False,
+                    validated_credential_revision__isnull=False,
+                    validated_credential_revision__gte=1,
+                ),
                 name="%(class)s_validated_chk",
             ),
             models.UniqueConstraint(

@@ -23,9 +23,11 @@ def failure_outside_revisions(model: type[models.Model]) -> models.Q:
     )
 
 
-def half_validation(model: type[models.Model]) -> models.Q:
-    return models.Q(validated_at__isnull=True, validated_credential_revision__isnull=False) | (
-        models.Q(validated_at__isnull=False, validated_credential_revision__isnull=True)
+def invalid_validation(model: type[models.Model]) -> models.Q:
+    return (
+        models.Q(validated_at__isnull=True, validated_credential_revision__isnull=False)
+        | models.Q(validated_at__isnull=False, validated_credential_revision__isnull=True)
+        | models.Q(validated_credential_revision__lt=1)
     )
 
 
@@ -86,8 +88,8 @@ class Migration(migrations.Migration):
         ),
         refuse_rows(
             "connections.sitebinding",
-            half_validation,
-            "a validation stores its moment with its credential revision",
+            invalid_validation,
+            "a validation stores its moment with a credential revision from 1",
         ),
         migrations.AddConstraint(
             model_name="sitebinding",
@@ -99,6 +101,7 @@ class Migration(migrations.Migration):
                     ),
                     models.Q(
                         ("validated_at__isnull", False),
+                        ("validated_credential_revision__gte", 1),
                         ("validated_credential_revision__isnull", False),
                     ),
                     _connector="OR",

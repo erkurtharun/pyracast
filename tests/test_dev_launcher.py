@@ -8,9 +8,11 @@ import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, suppress
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
+from uuid import uuid4
 
 import psutil
 import pytest
@@ -234,18 +236,23 @@ def test_worker_drain_waits_for_active_notification(monkeypatch: pytest.MonkeyPa
 
     delivery = ready()
     delivery.status, delivery.prepared_message = "sending", {"kind": "current"}
-    delivery.save(update_fields=["status", "prepared_message"])
+    delivery.lease_token = uuid4()
+    delivery.lease_expires_at = delivery.scheduled_for + timedelta(minutes=5)
+    delivery.save(update_fields=["status", "prepared_message", "lease_token", "lease_expires_at"])
 
     def finish_send(_: float) -> None:
         delivery.status = "sent"
-        delivery.save(update_fields=["status"])
+        delivery.lease_token = None
+        delivery.lease_expires_at = None
+        delivery.save(update_fields=["status", "lease_token", "lease_expires_at"])
 
     monkeypatch.setattr(time, "sleep", finish_send)
 
     launcher.wait_for_jobs()
 
-    delivery.refresh_from_db()
+    delivery = type(delivery).objects.get(pk=delivery.pk)
     assert delivery.status == "sent"
+    assert (delivery.lease_token, delivery.lease_expires_at) == (None, None)
 
 
 @pytest.mark.django_db(transaction=True)
@@ -254,13 +261,16 @@ def test_worker_drain_timeout_preserves_active_notification() -> None:
 
     delivery = ready()
     delivery.status, delivery.prepared_message = "sending", {"kind": "current"}
-    delivery.save(update_fields=["status", "prepared_message"])
+    token, expires = uuid4(), delivery.scheduled_for + timedelta(minutes=5)
+    delivery.lease_token, delivery.lease_expires_at = token, expires
+    delivery.save(update_fields=["status", "prepared_message", "lease_token", "lease_expires_at"])
 
     with pytest.raises(RuntimeError, match="worker was left running"):
         launcher.wait_for_jobs(timeout=0)
 
     delivery.refresh_from_db()
     assert delivery.status == "sending"
+    assert (delivery.lease_token, delivery.lease_expires_at) == (token, expires)
 
 
 @pytest.mark.django_db(transaction=True)

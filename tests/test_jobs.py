@@ -315,7 +315,7 @@ def test_scheduler_deduplicates_local_cutoff_and_recovers_missed_slot() -> None:
     assert CollectionJob.objects.get(pk=next_day[0]).target_date.isoformat() == "2026-11-11"
 
 
-def test_scheduler_ignores_unvalidated_or_not_yet_valid_slots() -> None:
+def test_scheduler_ignores_unvalidated_bindings_and_future_first_slots() -> None:
     system = make_system()
     Region.objects.filter(pk=system.region.pk).update(approved_binding=system.binding)
     assert enqueue_due(NOW) == []
@@ -324,7 +324,17 @@ def test_scheduler_ignores_unvalidated_or_not_yet_valid_slots() -> None:
     SiteBinding.objects.filter(pk=system.binding.pk).update(
         validated_at=NOW + timedelta(seconds=1), validated_credential_revision=1
     )
+    first_slot = NOW + timedelta(days=1)
+    first = CollectionJob.objects.create(
+        binding=system.binding,
+        target_date=first_slot.date() + timedelta(days=1),
+        scheduled_slot=first_slot,
+        available_at=first_slot,
+    )
     assert enqueue_due(NOW) == []
+    due = enqueue_due(first_slot)
+    assert len(due) == 2
+    assert due[0] == first.pk
     with pytest.raises(ValidationError):
         enqueue_due(NOW.replace(tzinfo=None))
     with pytest.raises(ValidationError):

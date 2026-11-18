@@ -76,6 +76,8 @@ MIGRATION = frozenset({"test_invariant_migrations", "test_vocabulary_migrations"
 INVARIANT_AUDIT = frozenset(
     {
         "test_account_rotation",
+        "test_admin_health_queries",
+        "test_admin_health_views",
         "test_admin_setup",
         "test_archive_invariants",
         "test_calibration_automation",
