@@ -188,6 +188,21 @@ def test_finite_source_power_cannot_overflow_when_scaling() -> None:
         _scaled_intervals([{"power_kw": 1e308}], 1000)
 
 
+def test_a_scale_at_the_float_limits_is_stored_as_the_quotient_of_its_capacities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, target = scaled_system(monkeypatch)
+    SiteBinding.objects.filter(pk=system.binding.pk).update(capacity_kw=1e308, dc_capacity_kw=1e308)
+    SiteBinding.objects.filter(pk=target.pk).update(capacity_kw=1e-10, dc_capacity_kw=1e-10)
+    actual_snapshot_for(system, date(2026, 11, 7))
+
+    assert len(normalize(system, target)) == 1
+
+    stored = ReferenceCapacityNormalization.objects.get()
+    assert (stored.source_capacity_kw, stored.target_capacity_kw) == (1e308, 1e-10)
+    assert stored.factor == 1e-10 / 1e308
+
+
 def test_live_native_history_takes_precedence_over_scaled_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

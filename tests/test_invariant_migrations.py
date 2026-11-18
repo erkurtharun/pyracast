@@ -1,3 +1,5 @@
+import math
+import sys
 import uuid
 from collections.abc import Callable, Iterator
 from datetime import date, datetime, timedelta
@@ -549,6 +551,57 @@ def test_normalization_migration_refuses_a_factor_that_disagrees_with_its_capaci
         forward()
 
     ReferenceCapacityNormalization.objects.update(factor=F("factor") / 2)
+    forward()
+    assert "referencecapacitynormalization_factor_chk" in checks(
+        "forecasts_referencecapacitynormalization"
+    )
+
+
+LARGEST = sys.float_info.max
+SMALLEST = math.ulp(0.0)
+# (source, target, factor) at the edges of float8: subnormal and overflowing quotients, and
+# products or tolerances that leave float8 although the quotient is representable.
+FLOAT_LIMITS = (
+    (1e308, 1e-10, 1e-10 / 1e308),
+    (1e308, 1e-10, math.nextafter(1e-10 / 1e308, 1)),
+    (1e308, sys.float_info.min, SMALLEST),
+    (4.0, SMALLEST, SMALLEST),
+    (1.5, SMALLEST, SMALLEST / 1.5),
+    (1.0, 1e-320, 1e-320),
+    (3.0, LARGEST, LARGEST / 3),
+    (0.5, 6e307, 6e307 / 0.5),
+    (math.nextafter(1.0, 0), LARGEST, LARGEST),
+    (0.5, LARGEST, 1.0),
+    (1e-10, 1e300, 1.0),
+    (2.0, 3.0, 1.5),
+    (2.0, 3.0, math.nextafter(1.5, 2)),
+)
+
+
+@pytest.mark.usefixtures("leaf")
+def test_the_factor_count_is_the_exact_quotient_and_never_fails_at_the_float_limits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, target = scaled_system(monkeypatch)
+    actual_snapshot_for(system, date(2026, 11, 7))
+    normalize(system, target)
+    rows = ReferenceCapacityNormalization.objects.all()
+    migrate(PREVIOUS["forecasts"])
+
+    for source, capacity, factor in FLOAT_LIMITS:
+        rows.update(source_capacity_kw=source, target_capacity_kw=capacity, factor=factor)
+        expected = int(factor != capacity / source)
+        assert (
+            violations("forecasts_referencecapacitynormalization", NORMALIZATION_FACTOR_RULE)
+            == expected
+        ), (source, capacity, factor)
+
+    rows.update(source_capacity_kw=0.5, target_capacity_kw=LARGEST, factor=1.0)
+    with pytest.raises(
+        ValueError, match=r"forecasts_referencecapacitynormalization holds 1 row.*factor"
+    ):
+        forward()
+    rows.update(source_capacity_kw=1e308, target_capacity_kw=1e-10, factor=1e-10 / 1e308)
     forward()
     assert "referencecapacitynormalization_factor_chk" in checks(
         "forecasts_referencecapacitynormalization"
