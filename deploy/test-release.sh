@@ -39,7 +39,7 @@ elif [[ ${1:-} == */bootstrap_database.py || ${1:-} == */backup.py ]]; then
     touch /backup-complete
     release_dir=$(sed -n 's/.* --release-dir \([^ ]*\) .*/\1/p' <<<"$*")
     object=postgres/fixture-prerelease.dump
-    if [[ $MODE == record-invalid ]]; then object='postgres/x.dump; touch /record-injected'; fi
+    if [[ $MODE == *record-invalid ]]; then object='postgres/x.dump; touch /record-injected'; fi
     printf '{"object": "%s"}\n' "$object" >"$release_dir/prerelease-backup.json"
   fi
 else
@@ -206,7 +206,7 @@ units_installed() {
   grep -Fxq 'systemctl enable --now pyracast-backup.timer pyracast-watchdog.timer' /calls
 }
 
-for MODE in preflight deploy-check plan secrets units-invalid metadata check-secrets image live-artifact redeploy-preflight drain backup support-postgres support-rabbit resume-failed resume-unready maintenance-backup migration health tls response success prune first-success redeploy final-start first-backup killed-backup killed lock-wait lock-timeout maintenance-success maintenance-migration record-invalid; do
+for MODE in preflight deploy-check plan secrets units-invalid metadata check-secrets image live-artifact redeploy-preflight drain backup support-postgres support-rabbit resume-failed resume-unready maintenance-backup migration health tls response success prune first-success redeploy final-start first-backup killed-backup killed lock-wait lock-timeout maintenance-success maintenance-migration maintenance-record-invalid record-invalid; do
   export MODE
   rm -rf /opt/pyracast/current /opt/pyracast/current.next /opt/pyracast/releases/* /run/pyracast
   rm -f /var/lib/pyracast/release-blocked /var/lib/pyracast/release-state.json /migration-entered /backup-entered /backup-complete /support-changed /database-initialized
@@ -335,9 +335,14 @@ for MODE in preflight deploy-check plan secrets units-invalid metadata check-sec
         test ! -e /record-injected
         units_untouched
         ;;
-      first-backup|resume-failed|resume-unready|maintenance-backup|migration|maintenance-migration|health|tls|response)
+      first-backup|resume-failed|resume-unready|maintenance-backup|maintenance-record-invalid|migration|maintenance-migration|health|tls|response)
         case "$MODE" in
           first-backup|resume-failed|maintenance-backup) test "$result" == 45 ;;
+          maintenance-record-invalid)
+            test "$result" == 1
+            grep -Fq "$new_release/prerelease-backup.json is unreadable" /result
+            test ! -e /record-injected
+            ;;
           resume-unready) test "$result" == 42 ;;
           migration) test "$result" == 43 ;;
           maintenance-migration)
@@ -352,7 +357,7 @@ for MODE in preflight deploy-check plan secrets units-invalid metadata check-sec
         if grep -q 'serves again' /result; then exit 1; fi
         grep -Fq 'reset_database.py /etc/pyracast/host.json abort' /result
         case "$MODE" in
-          first-backup|resume-failed|maintenance-backup)
+          first-backup|resume-failed|maintenance-backup|maintenance-record-invalid)
             if grep -q 'restore --confirm' /result; then exit 1; fi
             ;;
           *) grep -Fq 'host.json restore --confirm postgres/fixture-prerelease.dump' /result ;;
