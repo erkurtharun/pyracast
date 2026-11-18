@@ -1119,6 +1119,7 @@ erDiagram
 #### `change_requests_incidentchange`
 
 - `incidentchange_action_chk`: `CHECK ("action" IN ('create', 'update', 'resolve', 'cancel'))`
+- `incidentchange_kind_chk`: `CHECK ("kind" IN ('', 'inverter', 'panels', 'grid', 'other', 'multiple'))`
 - `proposal_incident_dc_finite`: `CHECK (("available_dc_mw" IS NULL OR ("available_dc_mw" >= 0.0 AND "available_dc_mw" < 'Infinity'::float8)))`
 - `proposal_incident_end_required`: `CHECK ((NOT ("action" = 'resolve') OR "ends_at" IS NOT NULL))`
 - `proposal_incident_export_finite`: `CHECK (("available_export_mw" IS NULL OR ("available_export_mw" >= 0.0 AND "available_export_mw" < 'Infinity'::float8)))`
@@ -1129,6 +1130,7 @@ erDiagram
 
 #### `change_requests_productionchangeitem`
 
+- `productionchangeitem_baseline_source_kind_chk`: `CHECK ("baseline_source_kind" IN ('', 'manual', 'realtime_generation', 'settlement_injection'))`
 - `proposal_baseline_energy_finite`: `CHECK (("baseline_energy_mwh" IS NULL OR ("baseline_energy_mwh" >= 0.0 AND "baseline_energy_mwh" < 'Infinity'::float8)))`
 - `proposal_production_action_valid`: `CHECK ("action" IN ('set', 'revert'))`
 - `proposal_production_energy_finite`: `CHECK (("energy_mwh" >= 0.0 AND "energy_mwh" < 'Infinity'::float8))`

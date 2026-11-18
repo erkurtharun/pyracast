@@ -37,10 +37,11 @@ def refuse_values_outside(
 
 
 def choices_check(
-    field: str, choices: type[models.TextChoices], *, name: str = ""
+    field: str, choices: type[models.TextChoices], *, name: str = "", blank: bool = False
 ) -> models.CheckConstraint:
+    values = ["", *choices.values] if blank else choices.values
     return models.CheckConstraint(
-        condition=models.Q(**{f"{field}__in": choices.values}),
+        condition=models.Q(**{f"{field}__in": values}),
         name=name or f"%(class)s_{field}_chk",
     )
 

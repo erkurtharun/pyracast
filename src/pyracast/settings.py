@@ -236,6 +236,7 @@ SPECTACULAR_SETTINGS = {
         "ChangeRequestStatusEnum": "pyracast.change_requests.models.ChangeRequestStatus",
         "ProductionChangeActionEnum": "pyracast.change_requests.models.ProductionChangeAction",
         "IncidentChangeActionEnum": "pyracast.change_requests.models.IncidentChangeAction",
+        "BaselineSourceKindEnum": "pyracast.change_requests.models.BaselineSourceKind",
         "DispatcherPhaseEnum": "pyracast.forecasts.models.DispatcherPhase",
         "CollectionEndpointEnum": "pyracast.forecasts.models.CollectionEndpoint",
         "CollectionJobStatusEnum": "pyracast.forecasts.models.CollectionJobStatus",

@@ -17,7 +17,6 @@ from tests.support.vocabularies import (
     FREE_TEXT,
     INPUT_VOCABULARIES,
     STORED_VOCABULARIES,
-    UNCHECKED_VOCABULARIES,
     InputVocabulary,
     StoredVocabulary,
     assert_database_rejects,
@@ -85,7 +84,7 @@ def test_every_text_column_without_an_enumeration_of_the_covered_apps_is_classif
         for field in model._meta.concrete_fields
         if isinstance(field, models.CharField) and not field.choices
     }
-    assert undeclared == FREE_TEXT | FAILURE_CODES | UNCHECKED_VOCABULARIES
+    assert undeclared == FREE_TEXT | FAILURE_CODES
 
 
 @pytest.mark.parametrize("vocabulary", [_stored(vocabulary) for vocabulary in STORED_VOCABULARIES])

@@ -110,7 +110,10 @@ class InputVocabulary:
 
 
 def derived_check(vocabulary: StoredVocabulary) -> models.CheckConstraint | None:
-    expected = models.Q(**{f"{vocabulary.field}__in": [value for value, _ in vocabulary.choices]})
+    values = [value for value, _ in vocabulary.choices]
+    if vocabulary.model._meta.get_field(vocabulary.field).blank:
+        values = ["", *values]
+    expected = models.Q(**{f"{vocabulary.field}__in": values})
     return next(
         (
             constraint
@@ -322,7 +325,10 @@ STORED_VOCABULARIES = (
     StoredVocabulary(ChangeRequest, "kind", _production_request),
     StoredVocabulary(ChangeRequest, "status", _production_request),
     StoredVocabulary(ProductionChangeItem, "action", _production_item),
+    StoredVocabulary(ProductionChangeItem, "quality", _production_item),
+    StoredVocabulary(ProductionChangeItem, "baseline_source_kind", _production_item),
     StoredVocabulary(IncidentChange, "action", _incident_change),
+    StoredVocabulary(IncidentChange, "kind", _incident_change),
     StoredVocabulary(DispatcherStatus, "phase", _dispatcher_status),
     StoredVocabulary(CollectionJob, "endpoint", _collection_job),
     StoredVocabulary(CollectionJob, "status", _collection_job),
@@ -390,17 +396,38 @@ def _submit_incident(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]
     )
 
 
-def _submit_production(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
+def _submit_change(monkeypatch: pytest.MonkeyPatch) -> Callable[..., object]:
     case = make_request_case(monkeypatch)
     configuration = case.plant.current_configuration_id
     assert configuration is not None
-    return lambda action: submit_production(
+    return lambda **values: submit_production(
         *case.scope(case.proposer),
         configuration_id=configuration,
         unit="kWh",
-        changes=[ProductionChange(NOW - timedelta(hours=1), NOW, None, action, 1)],
+        changes=[ProductionChange(NOW - timedelta(hours=1), NOW, None, energy=1, **values)],
         reason="Verified meter reading",
         idempotency_key=uuid4(),
+    )
+
+
+def _submit_production(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
+    submit = _submit_change(monkeypatch)
+    return lambda action: submit(action=action)
+
+
+def _submit_production_quality(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
+    submit = _submit_change(monkeypatch)
+    return lambda quality: submit(action="set", quality=quality)
+
+
+def _submit_incident_kind(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
+    case = make_request_case(monkeypatch)
+    return lambda kind: submit_incident(
+        *case.scope(case.proposer),
+        action="create",
+        idempotency_key=uuid4(),
+        reason="Observed equipment outage",
+        values={**incident_values(), "kind": kind},
     )
 
 
@@ -546,6 +573,31 @@ INPUT_VOCABULARIES = (
         error="Unknown production action.",
     ),
     InputVocabulary(
+        "production_change_quality",
+        ProductionChangeRow,
+        {
+            "starts_at": "2026-11-09T12:00:00Z",
+            "ends_at": "2026-11-09T13:00:00Z",
+            "expected_revision_id": None,
+            "action": "set",
+            "energy": 1,
+            "quality": "valid",
+        },
+        "quality",
+        _submit_production_quality,
+        accepted="outage",
+        error="Unsupported observation quality.",
+    ),
+    InputVocabulary(
+        "incident_change_kind",
+        None,
+        {},
+        "kind",
+        _submit_incident_kind,
+        accepted="grid",
+        error="Unsupported incident kind.",
+    ),
+    InputVocabulary(
         "measurement_basis",
         PlantInput,
         PLANT_DATA,
@@ -652,13 +704,5 @@ FAILURE_CODES = frozenset(
         ("metering.EpiasCollectionJob", "last_error"),
         ("plants.CalibrationRun", "last_error"),
         ("notifications.NotificationDelivery", "last_error"),
-    }
-)
-# Vocabularies of change_requests models that are not yet derived from an enumeration.
-UNCHECKED_VOCABULARIES = frozenset(
-    {
-        ("change_requests.ProductionChangeItem", "quality"),
-        ("change_requests.ProductionChangeItem", "baseline_source_kind"),
-        ("change_requests.IncidentChange", "kind"),
     }
 )

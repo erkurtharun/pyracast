@@ -5,9 +5,17 @@ import pytest
 from django.db import connection, models
 from django.db.migrations.executor import MigrationExecutor
 
+from pyracast.change_requests.models import IncidentChange, ProductionChangeItem
 from pyracast.forecasts.models import CollectionJob, RequestAttempt
 from pyracast.plants.models import PlantEvent
+from tests.support.change_request_boundaries import (
+    RequestCase,
+    incident_request,
+    make_request_case,
+    production_request,
+)
 from tests.support.domain import NOW, System, make_system
+from tests.support.incident_calibration import incident
 from tests.support.plant_operations import make_plant
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -20,11 +28,17 @@ INITIAL = {
     "incidents": ("incidents", "0001_initial"),
     "metering": ("metering", "0001_initial"),
     "notifications": ("notifications", "0001_initial"),
+    "change_requests": ("change_requests", "0001_initial"),
 }
 NEW_CHECKS = {
-    "forecasts_collectionjob": "collectionjob_endpoint_chk",
-    "forecasts_requestattempt": "requestattempt_purpose_chk",
-    "plants_plantevent": "plantevent_action_chk",
+    ("forecasts_collectionjob", "endpoint"): "collectionjob_endpoint_chk",
+    ("forecasts_requestattempt", "purpose"): "requestattempt_purpose_chk",
+    ("plants_plantevent", "action"): "plantevent_action_chk",
+    (
+        "change_requests_productionchangeitem",
+        "baseline_source_kind",
+    ): "productionchangeitem_baseline_source_kind_chk",
+    ("change_requests_incidentchange", "kind"): "incidentchange_kind_chk",
 }
 
 
@@ -49,6 +63,10 @@ def _checks(table: str) -> set[str]:
     with connection.cursor() as cursor:
         constraints = connection.introspection.get_constraints(cursor, table)
     return {name for name, details in constraints.items() if details["check"]}
+
+
+def _installed() -> set[str]:
+    return {name for (table, _), name in NEW_CHECKS.items() if name in _checks(table)}
 
 
 def _job_and_attempt(system: System) -> tuple[CollectionJob, RequestAttempt]:
@@ -77,24 +95,51 @@ def _plant_event(monkeypatch: pytest.MonkeyPatch) -> PlantEvent:
     return PlantEvent.objects.filter(plant=make_plant(monkeypatch)[1]).earliest("pk")
 
 
+def _production_item(monkeypatch: pytest.MonkeyPatch) -> ProductionChangeItem:
+    return ProductionChangeItem.objects.get(
+        request=production_request(make_request_case(monkeypatch))
+    )
+
+
+def _cancelled_incident_change(case: RequestCase) -> IncidentChange:
+    request = incident_request(case)
+    target = incident(case.system, case.plant, NOW - timedelta(hours=2), None)
+    IncidentChange.objects.filter(request=request).update(
+        action="cancel", incident=target, expected_revision=1, kind="", title=""
+    )
+    return IncidentChange.objects.get(request=request)
+
+
+def _incident_change(monkeypatch: pytest.MonkeyPatch) -> IncidentChange:
+    return _cancelled_incident_change(make_request_case(monkeypatch))
+
+
 @pytest.mark.usefixtures("leaf")
 def test_vocabulary_migrations_keep_conforming_rows_and_reverse(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    system, plant = make_plant(monkeypatch)
-    job, attempt = _job_and_attempt(system)
-    event = PlantEvent.objects.filter(plant=plant).earliest("pk")
+    case = make_request_case(monkeypatch)
+    job, attempt = _job_and_attempt(case.system)
+    event = PlantEvent.objects.filter(plant=case.plant).earliest("pk")
+    item = ProductionChangeItem.objects.get(request=production_request(case))
+    created = IncidentChange.objects.get(request=incident_request(case))
+    cancelled = _cancelled_incident_change(case)
     _migrate(*INITIAL.values())
-    assert not any(name in _checks(table) for table, name in NEW_CHECKS.items())
+    assert not _installed()
 
     _forward()
 
-    assert all(name in _checks(table) for table, name in NEW_CHECKS.items())
+    assert _installed() == set(NEW_CHECKS.values())
     assert CollectionJob.objects.get(pk=job.pk).endpoint == "forecasts"
     assert RequestAttempt.objects.get(pk=attempt.pk).purpose == "validation"
     assert PlantEvent.objects.get(pk=event.pk).action == event.action
+    assert ProductionChangeItem.objects.get(pk=item.pk).baseline_source_kind == (
+        item.baseline_source_kind
+    )
+    assert IncidentChange.objects.get(pk=created.pk).kind == "inverter"
+    assert IncidentChange.objects.get(pk=cancelled.pk).kind == ""
     _migrate(*INITIAL.values())
-    assert not any(name in _checks(table) for table, name in NEW_CHECKS.items())
+    assert not _installed()
 
 
 @pytest.mark.usefixtures("leaf")
@@ -104,6 +149,8 @@ def test_vocabulary_migrations_keep_conforming_rows_and_reverse(
         (_job, "endpoint", "legacy_endpoint", INITIAL["forecasts"]),
         (_attempt, "purpose", "operator", INITIAL["forecasts"]),
         (_plant_event, "action", "legacy_action", INITIAL["plants"]),
+        (_production_item, "baseline_source_kind", "provider", INITIAL["change_requests"]),
+        (_incident_change, "kind", "legacy_kind", INITIAL["change_requests"]),
     ],
 )
 def test_vocabulary_migration_refuses_stored_values_outside_the_vocabulary(
@@ -123,8 +170,8 @@ def test_vocabulary_migration_refuses_stored_values_outside_the_vocabulary(
         _forward()
 
     assert repr(value) in str(refused.value)
-    assert NEW_CHECKS[table] not in _checks(table)
+    assert NEW_CHECKS[table, field] not in _checks(table)
     assert model._default_manager.filter(pk=stored.pk, **{field: value}).exists()
     model._default_manager.filter(pk=stored.pk).update(**{field: allowed})
     _forward()
-    assert NEW_CHECKS[table] in _checks(table)
+    assert NEW_CHECKS[table, field] in _checks(table)

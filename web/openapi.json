@@ -2631,10 +2631,22 @@
                 "type": "string",
                 "description": "* `activated` - activated\n* `skipped` - skipped"
             },
+            "BaselineSourceKindEnum": {
+                "enum": [
+                    "manual",
+                    "realtime_generation",
+                    "settlement_injection"
+                ],
+                "type": "string",
+                "description": "* `manual` - Manual\n* `realtime_generation` - Real-time generation\n* `settlement_injection` - Settlement injection"
+            },
             "BindingHealthEnum": {
                 "enum": ["unknown", "healthy", "error"],
                 "type": "string",
                 "description": "* `unknown` - Unknown\n* `healthy` - Healthy\n* `error` - Error"
+            },
+            "BlankEnum": {
+                "enum": [""]
             },
             "CalibrationAutomationOutput": {
                 "type": "object",
@@ -5337,7 +5349,14 @@
                         "nullable": true
                     },
                     "baseline_source_kind": {
-                        "type": "string"
+                        "oneOf": [
+                            {
+                                "$ref": "#/components/schemas/BaselineSourceKindEnum"
+                            },
+                            {
+                                "$ref": "#/components/schemas/BlankEnum"
+                            }
+                        ]
                     },
                     "current": {
                         "allOf": [
@@ -5381,7 +5400,7 @@
                         "nullable": true
                     },
                     "quality": {
-                        "type": "string"
+                        "$ref": "#/components/schemas/ObservationQualityEnum"
                     },
                     "source": {
                         "type": "string"

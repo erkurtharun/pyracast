@@ -729,12 +729,22 @@ export interface components {
          */
         AutomaticCalibrationAttemptOutputStatusEnum: "activated" | "skipped";
         /**
+         * @description * `manual` - Manual
+         *     * `realtime_generation` - Real-time generation
+         *     * `settlement_injection` - Settlement injection
+         * @enum {string}
+         */
+        BaselineSourceKindEnum:
+            "manual" | "realtime_generation" | "settlement_injection";
+        /**
          * @description * `unknown` - Unknown
          *     * `healthy` - Healthy
          *     * `error` - Error
          * @enum {string}
          */
         BindingHealthEnum: "unknown" | "healthy" | "error";
+        /** @enum {unknown} */
+        BlankEnum: "";
         CalibrationAutomationOutput: {
             enabled: boolean;
             authorized: boolean;
@@ -1738,7 +1748,9 @@ export interface components {
             expected_revision_id: number | null;
             /** Format: double */
             baseline_energy_mwh: number | null;
-            baseline_source_kind: string;
+            baseline_source_kind:
+                | components["schemas"]["BaselineSourceKindEnum"]
+                | components["schemas"]["BlankEnum"];
             current: components["schemas"]["ProductionValueOutput"] | null;
             automatic: components["schemas"]["ProductionValueOutput"] | null;
             provider_intervals: components["schemas"]["ProviderIntervalOutput"][];
@@ -1746,7 +1758,7 @@ export interface components {
             proposed: components["schemas"]["ProductionValueOutput"] | null;
             /** Format: double */
             energy_mwh: number | null;
-            quality: string;
+            quality: components["schemas"]["ObservationQualityEnum"];
             source: string;
             applied_observation_id: number | null;
         };
