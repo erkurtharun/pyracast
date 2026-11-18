@@ -344,7 +344,8 @@ def replacement_binding(system: System, *, approved_at: datetime = NOW) -> SiteB
 
 def collections_after_reset(system: System, tmp_path: Path) -> ForecastSnapshot:
     """The recreated binding's own data: the historical import up to 31 October 01:00 local
-    and its first live seven-day lookback."""
+    and its first live collection, the intraday estimated actuals at the default 16:00
+    clock of its approval (NOW), reaching seven days back."""
     start = local(date(2026, 10, 26))
     archive(
         system,
@@ -360,10 +361,4 @@ def collections_after_reset(system: System, tmp_path: Path) -> ForecastSnapshot:
             ],
         ),
     )
-    return acquisition(
-        system.binding,
-        "estimated_actuals",
-        datetime(2026, 11, 9, 10, tzinfo=UTC),
-        datetime(2026, 11, 2, 10, tzinfo=UTC),
-        datetime(2026, 11, 9, 10, tzinfo=UTC),
-    )
+    return acquisition(system.binding, "estimated_actuals", NOW, NOW - timedelta(days=7), NOW)

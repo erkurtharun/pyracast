@@ -110,34 +110,38 @@ def test_restored_export_serves_native_actuals_beside_the_historical_import(
 ) -> None:
     system = restore_system(monkeypatch)
     before = collections_before_reset(system)
+    approval = CollectionJob.objects.get(binding=system.binding)
     live = collections_after_reset(system, tmp_path)
+    assert approval.scheduled_slot <= live.job.scheduled_slot < live.collected_at
+    later = NOW + timedelta(hours=1)
+    monkeypatch.setattr(timezone, "now", lambda: later)
     binding = system.binding
-    gap = select_archived_actual_source(binding, date(2026, 10, 31), NOW)
+    gap = select_archived_actual_source(binding, date(2026, 10, 31), later)
     assert gap is not None
     assert gap.snapshot.job.endpoint == "historical_import"
     assert not intervals_cover_day(gap.intervals, date(2026, 10, 31), ZONE)
-    assert select_archived_actual_source(binding, date(2026, 11, 1), NOW) is None
+    assert select_archived_actual_source(binding, date(2026, 11, 1), later) is None
     stored = archived_rows()
 
     summary = restore(system, before.content)
 
     assert rewritten_archive_rows(stored, archived_rows()) == {}
     lookback = restored_copy(binding, before.lookback)
-    imported = select_archived_actual_source(binding, date(2026, 10, 28), NOW)
+    imported = select_archived_actual_source(binding, date(2026, 10, 28), later)
     assert imported is not None
     assert imported.snapshot.job.endpoint == "historical_import"
     for offset in range(9):
         day = date(2026, 10, 30) + timedelta(days=offset)
-        source = select_archived_actual_source(binding, day, NOW)
+        source = select_archived_actual_source(binding, day, later)
         assert source is not None
         assert {row.job.endpoint for row in source.snapshots} == {"estimated_actuals"}
         assert {row.job.reference_import_id for row in source.snapshots} == {None}
         assert intervals_cover_day(source.intervals, day, ZONE)
     for day in (date(2026, 10, 31), date(2026, 11, 1)):
-        selected = select_archived_actual_source(binding, day, NOW)
+        selected = select_archived_actual_source(binding, day, later)
         assert selected is not None
         assert selected.snapshot == lookback
-    composed = select_archived_actual_source(binding, date(2026, 11, 2), NOW)
+    composed = select_archived_actual_source(binding, date(2026, 11, 2), later)
     assert composed is not None
     assert composed.composition is not None
     assert set(composed.composition.snapshot_ids) == {lookback.pk, live.pk}
