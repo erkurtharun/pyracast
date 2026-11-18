@@ -78,20 +78,16 @@ def decide(facts: Mapping[str, Any]) -> Authorized | Superseded:
 def _newest_images(
     artifacts: Sequence[Mapping[str, Any]], sha: str, run_attempt: int
 ) -> tuple[int, int]:
-    # A partial re-run keeps the images of the attempt that built them; a rebuild replaces them.
+    # The newest build up to the authorizing attempt: a partial re-run keeps earlier images, and a
+    # later attempt never changes what this release deploys.
     built = [
         (int(match["attempt"]), artifact)
         for artifact in artifacts
         if (match := IMAGE_ARTIFACT.fullmatch(artifact["name"])) and match["sha"] == sha
     ]
-    attempt = max((built_in for built_in, _ in built), default=0)
+    attempt = max((built_in for built_in, _ in built if built_in <= run_attempt), default=0)
     newest = [artifact for built_in, artifact in built if built_in == attempt]
-    if (
-        not 1 <= attempt <= run_attempt
-        or len(newest) != 1
-        or newest[0]["expired"]
-        or newest[0]["head_sha"] != sha
-    ):
+    if len(newest) != 1 or newest[0]["expired"] or newest[0]["head_sha"] != sha:
         raise RefusedError("Run CI again to produce an unexpired image artifact")
     return attempt, int(newest[0]["id"])
 

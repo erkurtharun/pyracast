@@ -52,7 +52,8 @@ def artifact_references(job: dict[str, Any], download: dict[str, Any]) -> list[s
 
 def upload_behind(producer: dict[str, Any], key: str) -> dict[str, Any]:
     (identifier,) = [match["step"] for match in UPLOADED_ID.finditer(producer["outputs"][key])]
-    (upload,) = [candidate for candidate in producer["steps"] if candidate.get("id") == identifier]
+    steps: list[dict[str, Any]] = producer["steps"]
+    (upload,) = [candidate for candidate in steps if candidate.get("id") == identifier]
     assert uses(upload, UPLOAD)
     return upload
 
