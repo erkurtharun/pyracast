@@ -31,7 +31,10 @@ def logged(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) ->
 
 def send(body: object, content_type: str) -> Any:
     data = body if isinstance(body, bytes) else json.dumps(body).encode()
-    return Client(enforce_csrf_checks=True).post(URL, data, content_type=content_type)
+    # The test client drops the content type of an empty body unless it is sent as a header.
+    return Client(enforce_csrf_checks=True).post(
+        URL, data, content_type=content_type, headers={"Content-Type": content_type}
+    )
 
 
 def post(body: object, content_type: str = "application/csp-report") -> int:
@@ -50,6 +53,7 @@ def test_both_policies_report_their_violations_to_the_endpoint() -> None:
         "application/csp-report; charset=utf-8",
         "application/reports+json",
         "application/reports+json; charset=utf-8",
+        "Application/CSP-Report",
     ],
 )
 def test_reports_are_taken_in_each_browser_type_with_or_without_parameters(
@@ -60,27 +64,24 @@ def test_reports_are_taken_in_each_browser_type_with_or_without_parameters(
 
 
 @pytest.mark.parametrize(
-    ("body", "content_type", "status", "code"),
+    ("body", "content_type"),
     [
-        (REPORT, "application/json", 415, "unsupported_media_type"),
-        (REPORT, "text/plain", 415, "unsupported_media_type"),
-        (b"not json", "application/csp-report", 400, "bad_request"),
-        (b"\xff", "application/reports+json", 400, "bad_request"),
-        (
-            padded(REPORT, csp_reports.MAX_REPORT_BYTES + 1),
-            "application/csp-report",
-            413,
-            "request_too_large",
-        ),
+        (REPORT, "application/json"),
+        (REPORT, "text/plain"),
+        (b"", "application/json"),
+        (b"", "text/plain"),
+        (b"", ""),
+        (REPORT, "*/*"),
+        (REPORT, "application/*"),
     ],
 )
-def test_reports_the_endpoint_cannot_take_are_refused_through_the_error_contract(
-    logged: Logged, body: object, content_type: str, status: int, code: str
+def test_other_content_types_are_refused_through_the_error_contract(
+    logged: Logged, body: object, content_type: str
 ) -> None:
     response = send(body, content_type)
 
-    assert response.status_code == status
-    assert response.json()["code"] == code
+    assert response.status_code == 415
+    assert response.json()["code"] == "unsupported_media_type"
     assert logged() == []
 
 
@@ -192,11 +193,15 @@ def test_reporting_api_batches_log_only_their_csp_violations(logged: Logged) -> 
 @pytest.mark.parametrize(
     ("body", "content_type"),
     [
+        (b"", "application/csp-report"),
+        (b"not json", "application/csp-report"),
+        (b"\xff", "application/reports+json"),
         ({"csp-report": "x"}, "application/csp-report"),
         ([{"type": "csp-violation", "body": []}], "application/reports+json"),
+        (padded(REPORT, csp_reports.MAX_REPORT_BYTES + 1), "application/csp-report"),
     ],
 )
-def test_readable_reports_without_a_csp_violation_are_taken_and_not_logged(
+def test_unreadable_unexpected_or_oversized_reports_are_dropped(
     logged: Logged, body: object, content_type: str
 ) -> None:
     assert post(body, content_type) == 204
