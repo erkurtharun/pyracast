@@ -87,9 +87,12 @@ requires origin pulls is ready only when `deploy/probe_origin_pull.py` also sees
 `certificate_required`). Traefik closes that handshake instead when it rejects the TLS
 option and completes it when its routers are missing. The probe first runs right after
 the new gateway starts, so either outcome fails the release as a failure before
-`migrate` does: the previous release serves again. Check that the site
-still answers through Cloudflare and that, on the VM,
-`python3 /opt/pyracast/current/deploy/probe_origin_pull.py DOMAIN` reports that refusal.
+`migrate` does: the previous release serves again. The probe proves that the origin
+asks for a certificate, not that the edge's certificate is signed by this authority: a
+valid but wrong authority gives a successful release that Cloudflare cannot reach. So
+check at once that the site still answers through Cloudflare, and go back if it does
+not; on the VM,
+`python3 /opt/pyracast/current/deploy/probe_origin_pull.py DOMAIN` reports the refusal.
 To go back, set `origin_pull_ca = ""`, apply, refresh `host.json` and release; the
 edge certificate can stay.
 
