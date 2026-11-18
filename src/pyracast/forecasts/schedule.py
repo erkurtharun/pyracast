@@ -32,7 +32,7 @@ from pyracast.forecasts.timing import (
     next_forecast_slot,
 )
 from pyracast.regions.audit import record_audit
-from pyracast.regions.models import AuditAction, AuditEvent, Region
+from pyracast.regions.models import AuditAction, Region
 
 MAX_COLLECTION_TIMES = 1440
 
