@@ -1,7 +1,10 @@
+import json
 from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
+import pytest
+import requests
 from django.http import HttpResponse, HttpResponseBase
 from django.test import Client
 
@@ -77,3 +80,38 @@ def complete(client: Client, state: str, provider: str = "google") -> Any:
     return client.get(
         f"/api/accounts/{provider}/login/callback/", {"state": state, "code": "provider-code"}
     )
+
+
+def serve_provider_profile(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    profile: dict[str, Any] = {
+        "sub": "google-identity",
+        "email": "solar@gmail.com",
+        "email_verified": True,
+        "id": "microsoft-identity",
+        "mail": "solar@example.com",
+        "jobTitle": "Private profile detail",
+    }
+
+    def request(
+        self: requests.Session, method: str, url: str, *args: Any, **kwargs: Any
+    ) -> requests.Response:
+        response = requests.Response()
+        response.status_code = 200
+        response.headers["content-type"] = "application/json"
+        identity_keys = (
+            {"id", "mail", "userPrincipalName", "jobTitle"}
+            if "graph.microsoft.com" in url
+            else {"sub", "email", "email_verified", "hd", "jobTitle"}
+        )
+        before_profile = profile.get("_before_profile")
+        if not url.endswith("/token") and before_profile is not None:
+            before_profile()
+        response._content = json.dumps(
+            {"access_token": "test-access-token", "token_type": "Bearer", "expires_in": 3600}
+            if url.endswith("/token")
+            else {key: value for key, value in profile.items() if key in identity_keys}
+        ).encode()
+        return response
+
+    monkeypatch.setattr(requests.Session, "request", request)
+    return profile

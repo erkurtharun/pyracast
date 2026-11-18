@@ -32,7 +32,19 @@ from pyracast.accounts.audit import (
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "src" / "pyracast"
 PINNED_LINE_KEYS = frozenset(
-    {"event", "user_id", "client_ip", "subject", "tenant_id", "target_id", "reason", "view"}
+    {
+        "event",
+        "user_id",
+        "client_ip",
+        "subject",
+        "tenant_id",
+        "target_id",
+        "reason",
+        "view",
+        "method",
+        "authenticator_type",
+        "provider",
+    }
 )
 WRITERS = frozenset({"record_security_event", "record_on_commit", "record_refusal"})
 SIGNALLED = frozenset(
@@ -58,10 +70,18 @@ SIGNALLED = frozenset(
         "mfa_failed",
         "social_account_connected",
         "social_account_disconnected",
+        "reauthenticated",
+        "email_change_requested",
     }
 )
 WRITTEN = frozenset(
     {
+        "login_refused",
+        "session_expired",
+        "password_reset_requested",
+        "social_login_refused",
+        "reauthentication_failed",
+        "mfa_secret_unreadable",
         "login_locked",
         "password_change_failed",
         "second_factor_locked",
@@ -124,7 +144,7 @@ def arguments(signal: Signal) -> dict[str, Any]:
         account_signals.email_removed: with_address,
         account_signals.email_changed: {
             "user": user(),
-            "from_email_address": None,
+            "from_email_address": EmailAddress(user_id=USER_ID, email=f"old.{ADDRESS}"),
             "to_email_address": address(),
         },
         account_signals.password_changed: by_user,
@@ -133,6 +153,16 @@ def arguments(signal: Signal) -> dict[str, Any]:
         account_signals.login_code_rejected: rejected_code,
         account_signals.password_reset_code_rejected: rejected_code,
         account_signals.email_verification_code_rejected: rejected_code,
+        account_signals.authentication_step_completed: {
+            "user": user(),
+            "method": "password",
+            "email": ADDRESS,
+            "reauthenticated": True,
+        },
+        account_signals.email_confirmation_sent: {
+            "confirmation": EmailConfirmation(email_address=address(), key=HIDDEN),
+            "signup": False,
+        },
         mfa_signals.authenticator_added: with_factor,
         mfa_signals.authenticator_removed: with_factor,
         mfa_signals.authenticator_reset: with_factor,
@@ -182,6 +212,39 @@ def test_every_signal_writes_one_redacted_line(
     assert ADDRESS.lower() not in caplog.text.lower()
     assert HIDDEN not in caplog.text
     assert "private-person" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("signal", "kwargs"),
+    [
+        (
+            account_signals.email_changed,
+            {"user": user(), "from_email_address": None, "to_email_address": address()},
+        ),
+        (
+            account_signals.email_confirmation_sent,
+            {
+                "confirmation": EmailConfirmation(email_address=address(), key=HIDDEN),
+                "signup": True,
+            },
+        ),
+        (
+            account_signals.authentication_step_completed,
+            {"user": user(), "method": "password", "email": ADDRESS},
+        ),
+    ],
+    ids=["first_address", "signup_code", "sign_in_step"],
+)
+def test_signals_that_describe_no_security_change_write_nothing(
+    signal: Signal,
+    kwargs: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = RequestFactory().post("/api/auth/browser/v1/auth/login")
+    send_to_security_receivers(signal, monkeypatch, request=request, **kwargs)
+
+    assert lines(caplog) == []
 
 
 def writer_calls() -> list[tuple[str, ast.expr | None]]:
