@@ -1,3 +1,4 @@
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime, timedelta
 from threading import Barrier
@@ -40,6 +41,7 @@ from pyracast.notifications.scheduler import enqueue_due
 from pyracast.notifications.views import reminder_schedule_payload
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, System, make_system
+from tests.support.invariants import stored_again
 from tests.support.notifications import (
     SLOT,
     attached_sheet,
@@ -297,8 +299,9 @@ def test_worker_checks_resource_policy_independently_of_configurer(change: str) 
         )
         ReminderSchedule.objects.filter(pk=schedule.pk).update(region=region)
     else:
+        ReminderSchedule.objects.filter(pk=schedule.pk).update(times=["09:00", "10:00"])
         ProviderAccount.objects.filter(pk=snapshot.job.binding.provider_account_id).update(
-            daily_quota=0
+            daily_quota=1
         )
     delivered = process_notification(delivery.pk, SLOT)
     assert delivered is (change in {"inactive", "membership", "schedule"})
@@ -347,6 +350,7 @@ def test_interrupted_transmission_never_retries_ambiguous_delivery() -> None:
         status="sending",
         prepared_message={"kind": "unavailable"},
         transmit_started_at=SLOT,
+        lease_token=uuid.uuid4(),
         lease_expires_at=SLOT + LEASE_DURATION,
     )
     assert not process_notification(delivery.pk, SLOT)
@@ -355,16 +359,12 @@ def test_interrupted_transmission_never_retries_ambiguous_delivery() -> None:
     assert not process_notification(delivery.pk, SLOT + LEASE_DURATION)
     delivery.refresh_from_db()
     assert delivery.status == "uncertain"
-    NotificationDelivery.objects.filter(pk=delivery.pk).update(
-        status="sending", lease_expires_at=None
-    )
-    assert pending_notification_ids(SLOT) == [delivery.pk]
-    assert not process_notification(delivery.pk, SLOT)
 
 
 def test_a_delivery_is_sending_only_with_prepared_content_in_a_known_state() -> None:
     delivery = ready()
     rows = NotificationDelivery.objects.filter(pk=delivery.pk)
+    lease = {"lease_token": uuid.uuid4(), "lease_expires_at": SLOT}
     with (
         pytest.raises(IntegrityError, match="notification_delivery_status_valid"),
         transaction.atomic(),
@@ -374,8 +374,8 @@ def test_a_delivery_is_sending_only_with_prepared_content_in_a_known_state() -> 
         pytest.raises(IntegrityError, match="notification_delivery_sending_prepared"),
         transaction.atomic(),
     ):
-        rows.update(status="sending", prepared_message=None)
-    rows.update(status="sending", prepared_message={"kind": "unavailable"})
+        rows.update(status="sending", prepared_message=None, **lease)
+    rows.update(status="sending", prepared_message={"kind": "unavailable"}, **lease)
     assert rows.get().status == "sending"
 
 
@@ -409,7 +409,7 @@ def test_full_summary_preserves_units_and_escapes_html() -> None:
         for hour in range(48)
     ]
     snapshot.issued_at = NOW - timedelta(hours=1)
-    snapshot.save()
+    stored_again(snapshot)
     cache_saved_days(snapshot)
     delivery_id = enqueue_due(SLOT)[0]
     assert process_notification(delivery_id, SLOT)
@@ -514,10 +514,10 @@ def test_disabling_shared_schedule_and_lowering_plan_cap() -> None:
         language="en",
         enabled=True,
         recipients=[],
-        times=["10:00"],
+        times=["09:00", "10:00"],
         now=SLOT,
     )
-    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=0)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=1)
     assert not enqueue_due(SLOT)
 
 

@@ -1,3 +1,4 @@
+import uuid
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -51,6 +52,7 @@ def another_region(
         latitude=region.latitude,
         longitude=region.longitude,
         timezone=region.timezone,
+        validated_at=NOW,
         validated_credential_revision=1,
     )
     region.status = "approved"
@@ -74,6 +76,7 @@ def collection(
         target_date=NOW.date(),
         available_at=available,
         status=status,
+        lease_token=None if lease is None else uuid.uuid4(),
         lease_expires_at=lease,
     )
 
@@ -90,7 +93,6 @@ def test_collection_filters_match_counter_boundaries_and_find_failures_behind_ne
         "pending": collection(system.binding, "pending", available=NOW - LAG - BEFORE),
         "retry": collection(system.binding, "retry", available=NOW - LAG - BEFORE),
         "cutoff": collection(system.binding, "pending", available=NOW - LAG),
-        "null_lease": collection(system.binding, "running"),
         "expired_lease": collection(system.binding, "running", lease=NOW),
         "live_lease": collection(system.binding, "running", lease=NOW + BEFORE),
         "failed": collection(system.binding, "failed", scheduled=RECENT),
@@ -105,7 +107,7 @@ def test_collection_filters_match_counter_boundaries_and_find_failures_behind_ne
     collection(deleted_binding, "failed", scheduled=RECENT)
     expected = {
         "overdue_collections": {rows["pending"].pk, rows["retry"].pk},
-        "interrupted_collections": {rows["null_lease"].pk, rows["expired_lease"].pk},
+        "interrupted_collections": {rows["expired_lease"].pk},
         "failed_collections": {rows["failed"].pk, rows["future_failed"].pk},
     }[issue]
     matches = collection_jobs_for_issue(issue, NOW).order_by("-id")[:20]
@@ -146,6 +148,7 @@ def delivery(
         preparation_deadline=scheduled + PREPARATION_GRACE,
         available_at=available,
         status=status,
+        lease_token=None if lease is None else uuid.uuid4(),
         lease_expires_at=lease,
         last_error=error,
         prepared_message=message,
@@ -174,7 +177,6 @@ def test_notification_filters_match_counter_boundaries_across_schedules(
         "pending": delivery(schedule, "pending", available=NOW - LAG - BEFORE),
         "retry": delivery(schedule, "retry", available=NOW - LAG - BEFORE),
         "cutoff": delivery(schedule, "pending", available=NOW - LAG),
-        "null_lease": delivery(schedule, "sending", message=PREPARED),
         "expired_lease": delivery(schedule, "sending", lease=NOW, message=PREPARED),
         "live_lease": delivery(schedule, "sending", lease=NOW + BEFORE, message=PREPARED),
         "failed": delivery(schedule, "failed", scheduled=RECENT),
@@ -218,7 +220,7 @@ def test_notification_filters_match_counter_boundaries_across_schedules(
     delivery(deleted_schedule, "failed")
     names = {
         "overdue_notifications": ("pending", "retry"),
-        "interrupted_notifications": ("null_lease", "expired_lease"),
+        "interrupted_notifications": ("expired_lease",),
         "failed_notifications": ("failed", "uncertain", "deadline", "revoked"),
         "missed_notifications": ("missed", "deadline"),
         "unavailable_forecasts": ("missing",),
@@ -268,13 +270,13 @@ def test_metering_filters_match_counter_boundaries_and_find_failures_behind_new_
             scheduled_for=scheduled,
             next_attempt_at=available,
             status=status,
+            lease_token=None if lease is None else uuid.uuid4(),
             lease_expires_at=lease,
         )
 
     rows = {
         "pending": metering("pending", available=NOW - LAG - BEFORE),
         "cutoff": metering("pending", available=NOW - LAG),
-        "null_lease": metering("running"),
         "expired_lease": metering("running", lease=NOW),
         "live_lease": metering("running", lease=NOW + BEFORE),
         "failed": metering("failed", scheduled=RECENT),
@@ -285,7 +287,7 @@ def test_metering_filters_match_counter_boundaries_and_find_failures_behind_new_
         metering("succeeded")
     names = {
         "overdue_metering": ("pending",),
-        "interrupted_metering": ("null_lease", "expired_lease"),
+        "interrupted_metering": ("expired_lease",),
         "failed_metering": ("failed", "future_failed"),
     }[issue]
     assert set(
@@ -360,8 +362,8 @@ def test_unvalidated_region_filter_matches_revision_and_collection_scope() -> No
     system.account.credential_revision = 2
     system.account.save(update_fields=["credential_revision"])
     null_validation, binding = another_region(system, "Null validation")
-    binding.validated_credential_revision = None
-    binding.save(update_fields=["validated_credential_revision"])
+    binding.validated_at = binding.validated_credential_revision = None
+    binding.save(update_fields=["validated_at", "validated_credential_revision"])
     healthy, binding = another_region(system, "Validated")
     binding.validated_credential_revision = 2
     binding.save(update_fields=["validated_credential_revision"])

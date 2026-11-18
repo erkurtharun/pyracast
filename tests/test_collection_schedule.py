@@ -12,7 +12,7 @@ from rest_framework.test import APIClient
 
 from pyracast.accounts.models import Membership, Tenant
 from pyracast.connections.contracts import ProviderData, ProviderError
-from pyracast.connections.models import ProviderAccount, SiteBinding
+from pyracast.connections.models import MAX_DAILY_QUOTA, ProviderAccount, SiteBinding
 from pyracast.forecasts.jobs import claim, collect, persist_snapshot, retry
 from pyracast.forecasts.models import (
     CollectionJob,
@@ -581,15 +581,17 @@ def test_collection_api_rejects_unknown_fields_and_accepts_account_bound_schedul
     )
     assert response.status_code == 400
     assert not CollectionSchedule.objects.exists()
-    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=12)
-    times = [f"{hour:02}:00" for hour in range(10)]
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=MAX_DAILY_QUOTA)
+    times = [f"{hour:02}:00" for hour in range(MAX_DAILY_QUOTA - 1)]
     response = client.put(url, {"enabled": True, "times": times}, format="json")
     assert response.status_code == 200
     assert response.json()["times"] == times
-    assert response.json()["max_forecast_times"] == 11
+    assert response.json()["max_forecast_times"] == MAX_DAILY_QUOTA - 1
     assert (
         client.put(
-            url, {"enabled": True, "times": [f"{hour:02}:00" for hour in range(12)]}, format="json"
+            url,
+            {"enabled": True, "times": [f"{hour:02}:00" for hour in range(MAX_DAILY_QUOTA)]},
+            format="json",
         ).status_code
         == 400
     )

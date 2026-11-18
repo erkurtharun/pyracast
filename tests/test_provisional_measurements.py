@@ -5,7 +5,7 @@ import pytest
 from django.db import IntegrityError, transaction
 
 from pyracast.irradiance import local_day_bounds
-from pyracast.metering.models import EpiasConnection, EpiasSnapshot
+from pyracast.metering.models import EpiasConnection
 from pyracast.plants.measurements import (
     LEGACY_MEASUREMENT_POLICY,
     MEASUREMENT_POLICY,
@@ -16,7 +16,7 @@ from pyracast.plants.measurements import (
 )
 from pyracast.plants.models import CalibrationRun, PlantConfiguration, ProductionObservation
 from tests.support.domain import NOW
-from tests.support.provisional_measurements import DAY, acquisition
+from tests.support.provisional_measurements import DAY, acquisition, hourly_readings
 from tests.support.provisional_measurements import source as source
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -96,9 +96,8 @@ def test_provider_acquisition_cutoff_rejects_future_vintage(
 ) -> None:
     configuration, _ = source
     old = acquisition(source, values=["1"])
-    future = acquisition(source, minute=1, values=["2"])
-    setattr(future, field, NOW + timedelta(seconds=1))
-    future.save(update_fields=(field,))
+    future: dict[str, Any] = {field: NOW + timedelta(seconds=1)}
+    acquisition(source, minute=1, values=["2"], **future)
     start, end = local_day_bounds(DAY, configuration.binding.timezone)
     rows, ids = select_measurements(configuration, start, end, NOW)
     assert ids == [old.pk]
@@ -117,8 +116,7 @@ def test_provisional_rejects_wrong_identity_or_unknown_normalization(
     source: tuple[PlantConfiguration, EpiasConnection], changes: dict[str, Any]
 ) -> None:
     configuration, _ = source
-    snapshot = acquisition(source)
-    EpiasSnapshot.objects.filter(pk=snapshot.pk).update(**changes)
+    acquisition(source, **changes)
     start, end = local_day_bounds(DAY, configuration.binding.timezone)
     assert select_measurements(configuration, start, end, NOW) == ([], [])
 
@@ -127,16 +125,19 @@ def test_native_hours_and_missingness_are_preserved(
     source: tuple[PlantConfiguration, EpiasConnection],
 ) -> None:
     configuration, _ = source
-    snapshot = acquisition(source, values=["0", "NaN", "Infinity", "-1", None])
-    valid = snapshot.readings[0]
-    snapshot.readings += [
-        None,
-        {**valid, "reported": False, "total_mwh": "90"},
-        {**valid, "period_start": "2026-11-01T00:00:00"},
-        {**valid, "period_start": "2026-11-01T00:30:00+03:00"},
-        {**valid, "period_start": "bad"},
-    ]
-    snapshot.save(update_fields=("readings",))
+    readings = hourly_readings(["0", "NaN", "Infinity", "-1", None])
+    valid = readings[0]
+    snapshot = acquisition(
+        source,
+        readings=[
+            *readings,
+            None,
+            {**valid, "reported": False, "total_mwh": "90"},
+            {**valid, "period_start": "2026-11-01T00:00:00"},
+            {**valid, "period_start": "2026-11-01T00:30:00+03:00"},
+            {**valid, "period_start": "bad"},
+        ],
+    )
     start, end = local_day_bounds(DAY, configuration.binding.timezone)
     rows, ids = select_measurements(configuration, start, end, NOW)
     assert ids == [snapshot.pk]
@@ -205,8 +206,8 @@ def test_provisional_identity_guard_checks_service_specific_identity(
         snapshot.job.source_kind = "settlement_injection"
         snapshot.job.save(update_fields=("source_kind",))
     else:
-        snapshot.normalization_policy = "unknown"
-        snapshot.save(update_fields=("normalization_policy",))
+        unknown = acquisition(source, minute=1, normalization_policy="unknown")
+        run.production_snapshot_ids = [unknown.pk]
     assert not production_identity_current(run)
     run.production_snapshot_ids = []
     assert production_identity_current(run)

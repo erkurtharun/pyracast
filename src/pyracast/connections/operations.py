@@ -11,7 +11,13 @@ from django.views.decorators.debug import sensitive_variables
 from pyracast.accounts.authorization import require_platform_admin
 from pyracast.connections.contracts import ProviderAdapter, ProviderError
 from pyracast.connections.identity import canonical_account_identity
-from pyracast.connections.models import BindingHealth, Provider, ProviderAccount, SiteBinding
+from pyracast.connections.models import (
+    MAX_DAILY_QUOTA,
+    BindingHealth,
+    Provider,
+    ProviderAccount,
+    SiteBinding,
+)
 from pyracast.connections.secrets import encrypt_secret
 from pyracast.forecasts.budget import remaining_forecast_requests
 from pyracast.forecasts.models import (
@@ -52,7 +58,7 @@ def create_account(
     provider: str,
     external_account_id: str,
     api_key: str = "",
-    daily_quota: int = 10,
+    daily_quota: int = MAX_DAILY_QUOTA,
     authorization_reference: str = "",
     require_new: bool = False,
 ) -> ProviderAccount:
@@ -64,7 +70,7 @@ def create_account(
     if provider == Provider.SOLCAST and not api_key:
         raise ValidationError({"api_key": "An API key is required for a Solcast account."})
     encrypted_api_key = encrypt_secret(api_key) if api_key else ""
-    if daily_quota < 1 or daily_quota > 10:
+    if not 1 <= daily_quota <= MAX_DAILY_QUOTA:
         raise ValidationError("Account quota must be between 1 and 10.")
     authorization_reference = authorization_reference.strip()
     if (provider == Provider.SOLCAST and not authorization_reference) or (

@@ -278,11 +278,7 @@ def configure_binding(
             "longitude": region.longitude,
             "timezone": region.timezone,
         }
-        current = (
-            SiteBinding.objects.filter(region=region, region_revision=region.revision)
-            .order_by("-created_at", "-pk")
-            .first()
-        )
+        current = SiteBinding.objects.filter(region=region, region_revision=region.revision).first()
         if current is not None:
             # `values` holds every setup column, so a match on all of them is a no-op.
             if SiteBinding.objects.filter(pk=current.pk, **values).exists():

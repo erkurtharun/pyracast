@@ -29,6 +29,7 @@ from pyracast.regions.models import AuditEvent, Region
 from pyracast.trash import RETENTION, purge_expired, trash_region
 from tests.support.capacity_normalization import normalize, scaled_system
 from tests.support.domain import NOW
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import publish_snapshot, snapshot_for
 from tests.support.plant_training import actual_snapshot_for
 
@@ -43,7 +44,7 @@ def test_unknown_or_future_publication_does_not_unlock_a_legacy_forecast(
     system, target = scaled_system(monkeypatch)
     source = publish_snapshot(snapshot_for(system, date(2026, 11, 9)))
     source.available_at = None
-    source.save()
+    stored_again(source)
     result = source.forecastresult
     if publication == "missing":
         result.delete()
@@ -68,6 +69,7 @@ def test_historical_exports_cannot_be_reclassified_as_native_by_normalization(
         imported_at=NOW,
         interval_count=48,
     )
+    source.job.endpoint = "historical_import"
     source.job.save()
     assert normalize(system, target) == ()
 
@@ -79,9 +81,11 @@ def test_scaled_copies_cannot_be_normalized_again(monkeypatch: pytest.MonkeyPatc
     next_target = SiteBinding.objects.get(pk=target.pk)
     next_target.pk = None
     next_target.capacity_kw = next_target.dc_capacity_kw = 1_000_000
+    next_target.region_revision += 1
     next_target.save()
     system.region.approved_binding = next_target
-    system.region.save(update_fields=["approved_binding"])
+    system.region.revision = next_target.region_revision
+    system.region.save(update_fields=["approved_binding", "revision"])
     assert normalize(replace(system, binding=target), next_target) == ()
     assert ReferenceCapacityNormalization.objects.count() == 1
 
@@ -172,7 +176,7 @@ def test_invalid_power_rolls_back_the_entire_normalization(
     actual_snapshot_for(system, date(2026, 11, 6))
     invalid = actual_snapshot_for(system, date(2026, 11, 7))
     invalid.normalized_intervals[0]["power_kw"] = power
-    invalid.save()
+    stored_again(invalid)
     with pytest.raises(ValidationError):
         normalize(system, target)
     assert not ForecastSnapshot.objects.filter(job__binding=target).exists()
@@ -185,6 +189,21 @@ def test_finite_source_power_cannot_overflow_when_scaling() -> None:
         _scaled_intervals([{"power_kw": 1e308}], 1000)
 
 
+def test_a_scale_at_the_float_limits_is_stored_as_the_quotient_of_its_capacities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system, target = scaled_system(monkeypatch)
+    SiteBinding.objects.filter(pk=system.binding.pk).update(capacity_kw=1e308, dc_capacity_kw=1e308)
+    SiteBinding.objects.filter(pk=target.pk).update(capacity_kw=1e-10, dc_capacity_kw=1e-10)
+    actual_snapshot_for(system, date(2026, 11, 7))
+
+    assert len(normalize(system, target)) == 1
+
+    stored = ReferenceCapacityNormalization.objects.get()
+    assert (stored.source_capacity_kw, stored.target_capacity_kw) == (1e308, 1e-10)
+    assert stored.factor == 1e-10 / 1e308
+
+
 def test_live_native_history_takes_precedence_over_scaled_history(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -195,7 +214,7 @@ def test_live_native_history_takes_precedence_over_scaled_history(
     native = actual_snapshot_for(replace(system, binding=target), day, power_kw=500)
     assert select_actual_snapshot(target, day, NOW) == native
     native.normalized_intervals.pop()
-    native.save()
+    stored_again(native)
     selected = select_actual_snapshot(target, day, NOW)
     assert selected is not None
     assert selected.pk == ids[0]

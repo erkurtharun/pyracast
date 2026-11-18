@@ -35,6 +35,7 @@ from tests.support.historical_reference_import import (
     source_settings,
     system_for_import,
 )
+from tests.support.invariants import stored_again
 from tests.support.plant_training import actual_snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -134,7 +135,7 @@ def test_import_supplements_native_history_without_downgrading_complete_current_
     native = actual_snapshot_for(system, day, power_kw=0.4, collected_at=NOW - timedelta(hours=2))
     if not native_complete:
         native.normalized_intervals = native.normalized_intervals[6:]
-        native.save()
+        stored_again(native)
     start, _ = local_day_bounds(day, system.binding.timezone)
     rows = [
         {
@@ -175,7 +176,7 @@ def test_current_native_vintages_keep_latest_available_complete_acquisition_and_
     assert select_actual_snapshot(system.binding, day, NOW) == second
     assert select_actual_snapshot(system.binding, day, NOW - timedelta(minutes=90)) == first
     second.normalized_intervals = second.normalized_intervals[6:]
-    second.save()
+    stored_again(second)
     assert select_actual_snapshot(system.binding, day, NOW) == first
 
 
@@ -258,7 +259,7 @@ def test_import_never_rescales_mismatched_source(
         ("account", {"authorization_reference": ""}),
         ("account", {"provider": "fixture"}),
         ("account", {"credential_revision": 2}),
-        ("binding", {"validated_at": None}),
+        ("binding", {"validated_at": None, "validated_credential_revision": None}),
         ("binding", {"capacity_semantics_verified": False}),
         ("binding", {"settings_verification_reference": ""}),
         ("region", {"status": "suspended"}),

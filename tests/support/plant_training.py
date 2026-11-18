@@ -16,14 +16,16 @@ from tests.support.plant_operations import snapshot_for
 def actual_snapshot_for(
     system: System, day: date, *, power_kw: float = 0.4, collected_at: datetime | None = None
 ) -> ForecastSnapshot:
-    start, end = local_day_bounds(day, system.binding.timezone)
+    _, end = local_day_bounds(day, system.binding.timezone)
     acquired = end + timedelta(hours=1) if collected_at is None else collected_at
     source = snapshot_for(
-        system, day, power_kw=power_kw, collected_at=acquired, source_kind="estimated_actuals"
+        system,
+        day,
+        power_kw=power_kw,
+        collected_at=acquired,
+        source_kind="estimated_actuals",
+        available_at=acquired,
     )
-    source.available_at = acquired
-    source.coverage_start, source.coverage_end = start, end
-    source.save()
     source.job.endpoint, source.job.status = "estimated_actuals", "succeeded"
     source.job.save()
     return source

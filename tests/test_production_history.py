@@ -28,6 +28,7 @@ from pyracast.plants.production import production_history
 from pyracast.regions.models import Region
 from tests.support.domain import NOW, System
 from tests.support.errors import raises_code
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, saved_actuals, snapshot_for
 from tests.support.production_history import upload
 
@@ -105,7 +106,7 @@ def test_reference_holes_disable_only_affected_slots(
     system, plant = make_plant(monkeypatch)
     source = saved_actuals(system, DAY)
     source.normalized_intervals[1]["power_kw"] = power
-    source.save()
+    stored_again(source)
     result = production_history(plant, start_date=DAY, end_date=DAY)
     assert not result["intervals"][0]["can_enter"]
     assert result["intervals"][1]["can_enter"]
@@ -123,7 +124,7 @@ def test_partial_oldest_day_and_missing_interval_are_unavailable(
     system, plant = make_plant(monkeypatch)
     source = saved_actuals(system, DAY)
     source.normalized_intervals = source.normalized_intervals[1:]
-    source.save()
+    stored_again(source)
     rows = production_history(plant, start_date=DAY, end_date=DAY)["intervals"]
     assert not rows[0]["can_enter"]
     assert rows[1]["can_enter"]
@@ -138,7 +139,7 @@ def test_mixed_resolution_preserves_observations_after_revision_and_reference_lo
     row = ObservationInput(start, start + timedelta(minutes=30), 0)
     assert upload(system, plant, [row])["created"] == 1
     source.source_kind = "forecast"
-    source.save()
+    stored_again(source)
     assert upload(system, plant, [row])["existing"] == 1
     original_id = plant.current_configuration_id
     revise_plant(
@@ -176,11 +177,11 @@ def test_forecasts_future_publication_and_wrong_binding_never_enable_entry(
     assert not any(row["can_enter"] for row in result["intervals"])
     source = saved_actuals(system, DAY)
     source.available_at = NOW + timedelta(seconds=1)
-    source.save()
+    stored_again(source)
     result = production_history(plant, start_date=DAY, end_date=DAY)
     assert not any(row["can_enter"] for row in result["intervals"])
     source.available_at = NOW
-    source.save()
+    stored_again(source)
     Region.objects.filter(pk=system.region.pk).update(status="suspended")
     result = production_history(plant, start_date=DAY, end_date=DAY)
     assert all(
@@ -252,7 +253,7 @@ def test_configless_history_and_source_interval_validation(monkeypatch: pytest.M
     assert reference_intervals(configuration, DAY, NOW) == ()
     source = saved_actuals(system, DAY)
     source.normalized_intervals[0]["start"] = "2026-11-07T21:00:00"
-    source.save()
+    stored_again(source)
     assert len(reference_intervals(configuration, DAY, NOW)) == 47
     monkeypatch.setattr(timezone, "now", lambda: NOW)
 
@@ -275,7 +276,7 @@ def test_invalid_actual_bounds_keep_missingness_and_replay_provenance(
         first["end"] = original_start
     else:
         first["end"] = (datetime.fromisoformat(original_start) - timedelta(minutes=30)).isoformat()
-    latest.save(update_fields=("normalized_intervals",))
+    stored_again(latest)
 
     source = select_archived_actual_source(system.binding, DAY, NOW)
     assert source is not None
@@ -340,5 +341,5 @@ def test_current_incomplete_day_does_not_become_available(monkeypatch: pytest.Mo
     configuration = plant.configurations.get()
     source = saved_actuals(system, NOW.date())
     source.collected_at = source.available_at = NOW
-    source.save()
+    stored_again(source)
     assert available_date_bounds(configuration, NOW) == (None, None)

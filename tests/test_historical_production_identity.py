@@ -13,6 +13,7 @@ from pyracast.plants.operations import activate_calibration
 from pyracast.regions.models import Region
 from tests.support.domain import NOW
 from tests.support.historical_production_identity import record_identity
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
 from tests.support.provisional_measurements import acquisition
 
@@ -181,11 +182,9 @@ def test_pinned_source_identity_and_service_must_be_valid(
 ) -> None:
     run, _, snapshot, cutoff = historical_source(monkeypatch)
     for identifier in (None, True, 0):
-        snapshot.provider_plant = {"id": identifier, "eic": "EIC"}
-        snapshot.save(update_fields=("provider_plant",))
+        snapshot = stored_again(snapshot, provider_plant={"id": identifier, "eic": "EIC"})
         assert not production_identity_at(run, cutoff)
-    snapshot.provider_plant = {"id": 2, "eic": "EIC"}
-    snapshot.save(update_fields=("provider_plant",))
+    snapshot = stored_again(snapshot, provider_plant={"id": 2, "eic": "EIC"})
     snapshot.job.source_kind = "settlement_injection"
     snapshot.job.save(update_fields=("source_kind",))
     assert not production_identity_at(run, cutoff)
@@ -201,11 +200,9 @@ def test_historical_identity_rejects_missing_or_mismatched_evidence(
     elif change == "source":
         run.production_snapshot_ids = [snapshot.pk + 1000]
     elif change == "publication":
-        snapshot.available_at = cutoff + timedelta(seconds=1)
-        snapshot.save(update_fields=("available_at",))
+        stored_again(snapshot, available_at=cutoff + timedelta(seconds=1))
     elif change == "policy":
-        snapshot.normalization_policy = "unknown"
-        snapshot.save(update_fields=("normalization_policy",))
+        stored_again(snapshot, normalization_policy="unknown")
     else:
         PlantEvent.objects.filter(plant_id=run.plant_id, action="epias_connected").update(
             details={}

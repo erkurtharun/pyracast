@@ -428,7 +428,9 @@ def test_authorization_confirmation_current_configuration_and_binding_are_rechec
     with pytest.raises(ValidationError, match="configuration changed"):
         upload(system, expected_configuration_ids=())
     assert upload(system, expected_configuration_ids=((plant.pk, None),))
-    SiteBinding.objects.filter(pk=system.binding.pk).update(validated_at=None)
+    SiteBinding.objects.filter(pk=system.binding.pk).update(
+        validated_at=None, validated_credential_revision=None
+    )
     with pytest.raises(ValidationError, match="current authorized"):
         upload(system)
 

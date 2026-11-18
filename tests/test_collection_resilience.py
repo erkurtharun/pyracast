@@ -83,7 +83,10 @@ def test_repeated_worker_interruptions_cannot_exceed_forecast_attempt_budget() -
 def test_quota_waits_do_not_consume_forecast_execution_attempts() -> None:
     system = make_system(approved=True)
     job = CollectionJob.objects.get()
-    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=0)
+    ProviderAccount.objects.filter(pk=system.account.pk).update(daily_quota=1)
+    assert RequestAttempt.objects.filter(
+        provider_account=system.account, utc_day=NOW.date()
+    ).exists()
     for _ in range(4):
         CollectionJob.objects.filter(pk=job.pk).update(available_at=NOW)
         assert not collect(job.pk, FakeAdapter(), calculate, NOW)

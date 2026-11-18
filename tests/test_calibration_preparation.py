@@ -30,6 +30,7 @@ from pyracast.plants.preparation import prepare_calibration
 from pyracast.regions.models import Region
 from tests.support.calibration_preparation import add_days
 from tests.support.domain import NOW
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, ready_run
 from tests.support.plant_training import actual_snapshot_for
 
@@ -128,17 +129,17 @@ def test_preparation_pins_reset_and_refits_once_after_comparator_change(
     add_days(system, plant, 1, 7)
     run = CalibrationRun.objects.exclude(pk=incumbent.pk).get()
     assert run.comparison_activation_id == active.pk
-    run.status = "rejected"
+    run.status, run.completed_at = "rejected", NOW
     run.result = {"policy_version": POLICY_VERSION}
-    run.save(update_fields=("status", "result"))
+    run.save(update_fields=("status", "completed_at", "result"))
     assert prepare_calibration(plant.pk) is None
     reset = reset_calibration(system.member, system.tenant.pk, system.region.pk, plant.pk)
     next_run = prepare_calibration(plant.pk)
     assert next_run is not None
     assert next_run.comparison_activation_id == reset.pk
-    next_run.status = "rejected"
+    next_run.status, next_run.completed_at = "rejected", NOW
     next_run.result = {"policy_version": POLICY_VERSION}
-    next_run.save(update_fields=("status", "result"))
+    next_run.save(update_fields=("status", "completed_at", "result"))
     assert prepare_calibration(plant.pk) is None
 
 
@@ -159,9 +160,9 @@ def test_legacy_policy_does_not_block_one_current_policy_fit(
     system, plant = make_plant(monkeypatch)
     add_days(system, plant, 1, 7)
     old = CalibrationRun.objects.get()
-    old.status = old_status
+    old.status, old.completed_at = old_status, NOW
     old.result = {"policy_version": "regularized-huber-v2"}
-    old.save(update_fields=("status", "result"))
+    old.save(update_fields=("status", "completed_at", "result"))
     current = prepare_calibration(plant.pk)
     assert current is not None
     assert current.pk != old.pk
@@ -180,9 +181,9 @@ def test_current_policy_terminal_run_does_not_repeat_unchanged_data(
     system, plant = make_plant(monkeypatch)
     add_days(system, plant, 1, 7)
     run = CalibrationRun.objects.get()
-    run.status = status
+    run.status, run.completed_at = status, NOW
     run.result = {} if status == "failed" else {"policy_version": POLICY_VERSION}
-    run.save(update_fields=("status", "result"))
+    run.save(update_fields=("status", "completed_at", "result"))
     assert prepare_calibration(plant.pk) is None
     assert CalibrationRun.objects.count() == 1
 
@@ -198,7 +199,7 @@ def test_current_source_transition_refits_once_but_identical_native_reacquisitio
     target = date(2026, 11, 7)
     old_snapshot = ForecastSnapshot.objects.get(job__target_date=target)
     old_snapshot.collected_at = old_snapshot.available_at = NOW - timedelta(minutes=5)
-    old_snapshot.save()
+    stored_again(old_snapshot)
     if old_source == "historical_import":
         old_snapshot.job.reference_import = HistoricalReferenceImport.objects.create(
             binding=system.binding,
@@ -213,7 +214,7 @@ def test_current_source_transition_refits_once_but_identical_native_reacquisitio
     old_snapshot.job.save()
     historical_run = prepare_calibration(plant.pk)
     assert historical_run is not None
-    historical_run.status = "rejected"
+    historical_run.status, historical_run.completed_at = "rejected", NOW
     historical_run.result = {"policy_version": POLICY_VERSION}
     historical_run.save()
     native = actual_snapshot_for(system, target, collected_at=NOW - timedelta(minutes=4))
@@ -223,7 +224,7 @@ def test_current_source_transition_refits_once_but_identical_native_reacquisitio
     assert current_run.input_fingerprint != historical_run.input_fingerprint
     assert current_run.reference_snapshot_ids is not None
     assert current_run.reference_snapshot_ids[target.isoformat()] == native.pk
-    current_run.status = "rejected"
+    current_run.status, current_run.completed_at = "rejected", NOW
     current_run.result = {"policy_version": POLICY_VERSION}
     current_run.save()
     reacquired = actual_snapshot_for(system, target, collected_at=NOW - timedelta(minutes=3))
@@ -243,7 +244,7 @@ def test_reference_selection_policy_upgrade_refits_unchanged_values_once(
     )
     add_days(system, plant, 1, 7)
     previous = CalibrationRun.objects.get()
-    previous.status = "rejected"
+    previous.status, previous.completed_at = "rejected", NOW
     previous.result = {"policy_version": POLICY_VERSION}
     previous.save()
     monkeypatch.setattr(measurements, "HISTORY_SELECTION_POLICY", HISTORY_SELECTION_POLICY)
@@ -251,7 +252,7 @@ def test_reference_selection_policy_upgrade_refits_unchanged_values_once(
     assert current is not None
     assert current.input_fingerprint != previous.input_fingerprint
     assert current.reference_snapshot_ids == previous.reference_snapshot_ids
-    current.status = "rejected"
+    current.status, current.completed_at = "rejected", NOW
     current.result = {"policy_version": POLICY_VERSION}
     current.save()
     assert prepare_calibration(plant.pk) is None
@@ -280,7 +281,7 @@ def test_missing_actual_history_does_not_count_as_a_matched_day(
     CalibrationRun.objects.all().delete()
     source = ForecastSnapshot.objects.order_by("pk").first()
     assert source is not None
-    ForecastSnapshot.objects.filter(pk=source.pk).update(source_kind="forecast")
+    stored_again(ForecastSnapshot.objects.get(pk=source.pk), source_kind="forecast")
     run = prepare_calibration(plant.pk)
     assert run is not None
     assert (run.window_start, run.window_end) == (date(2026, 11, 2), date(2026, 11, 7))
@@ -404,9 +405,10 @@ def test_legacy_run_without_watermark_preserves_timestamp_cutoff(
     assert first_new is not None
     assert last_new is not None
     assert first_new.recorded_at == run.cutoff_at
-    ProductionObservation.objects.filter(pk=last_new.pk).update(
-        recorded_at=run.cutoff_at + timedelta(seconds=1)
-    )
+    last_new.delete()
+    monkeypatch.setattr(timezone, "now", lambda: run.cutoff_at + timedelta(seconds=1))
+    last_new.save()
+    monkeypatch.setattr(timezone, "now", lambda: NOW)
     lease = training._claim(run.pk, NOW)
     assert lease is not None
     dataset = build_calibration_dataset(lease.run, lease.configuration)

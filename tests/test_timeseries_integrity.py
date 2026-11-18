@@ -70,6 +70,7 @@ def calibration(configuration: PlantConfiguration) -> CalibrationRun:
         window_end=NOW.date(),
         cutoff_at=NOW,
         status="ready",
+        completed_at=NOW,
     )
 
 
@@ -117,7 +118,9 @@ def test_configuration_owner_keys_protect_parent_updates(
             )
             Plant.objects.filter(pk=first.plant_id).update(region=empty)
         else:
-            SiteBinding.objects.filter(pk=first.binding_id).update(region=second.region)
+            SiteBinding.objects.filter(pk=first.binding_id).update(
+                region=second.region, region_revision=second.binding.region_revision + 1
+            )
 
 
 @pytest.mark.parametrize(

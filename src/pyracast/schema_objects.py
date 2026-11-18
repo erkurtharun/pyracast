@@ -116,6 +116,58 @@ _ISSUANCE_GUARD = """
             END;
             """
 
+# DELETE stays unguarded on every archive table for the trash purge.
+_OBSERVATION_GUARD = """
+            BEGIN
+                IF TG_OP = 'UPDATE' THEN
+                    IF NOT (OLD.is_current AND NOT NEW.is_current)
+                        OR to_jsonb(NEW) - 'is_current' <> to_jsonb(OLD) - 'is_current' THEN
+                        RAISE EXCEPTION 'Production observation revisions are immutable'
+                            USING ERRCODE = '23514';
+                    END IF;
+                ELSIF NEW.supersedes_id IS NOT NULL AND NOT EXISTS (
+                    SELECT 1
+                    FROM plants_productionobservation AS previous
+                    WHERE previous.id = NEW.supersedes_id
+                      AND previous.plant_id = NEW.plant_id
+                      AND previous.starts_at = NEW.starts_at
+                      AND previous.ends_at = NEW.ends_at
+                ) THEN
+                    RAISE EXCEPTION 'A production revision supersedes the same plant and interval'
+                        USING ERRCODE = '23514';
+                END IF;
+                RETURN NEW;
+            END;
+            """
+
+
+# The collection stores a snapshot, then attaches its weather and publishes it by setting
+# available_at (forecasts/jobs.py); every other column is the acquisition and never changes.
+_SNAPSHOT_GUARD = """
+            BEGIN
+                IF OLD.available_at IS NOT NULL
+                    OR to_jsonb(NEW) - 'available_at' - 'weather_payload' - 'weather_error'
+                        <> to_jsonb(OLD) - 'available_at' - 'weather_payload' - 'weather_error' THEN
+                    RAISE EXCEPTION 'Forecast snapshot acquisitions are immutable'
+                        USING ERRCODE = '23514';
+                END IF;
+                RETURN NEW;
+            END;
+            """
+
+
+def _immutable(table: str, rows: str, migration: MigrationKey) -> RowTrigger:
+    short = table.split("_", 1)[1]
+    body = f"""
+            BEGIN
+                RAISE EXCEPTION '{rows} are immutable' USING ERRCODE = '23514';
+            END;
+            """
+    return RowTrigger(
+        f"{short}_immutable", table, "BEFORE UPDATE", f"refuse_{short}_update", body, migration
+    )
+
+
 # Raw database objects that Django models cannot declare. Each names the migration that
 # creates it; an object added later belongs to the new migration that creates it, never to an
 # applied one. The catalog test compares this list with the built schema.
@@ -307,6 +359,32 @@ SCHEMA_OBJECTS: tuple[SchemaObject, ...] = (
         "plants_plantconfiguration",
         ("id", "plant_id"),
         "change_requests",
+    ),
+    _immutable(
+        "forecasts_historicalreferenceimport",
+        "Stored historical reference imports",
+        ("forecasts", "0003_lease_import_and_archive_checks"),
+    ),
+    RowTrigger(
+        "forecastsnapshot_publication_guard",
+        "forecasts_forecastsnapshot",
+        "BEFORE UPDATE",
+        "guard_forecastsnapshot_publication",
+        _SNAPSHOT_GUARD,
+        ("forecasts", "0003_lease_import_and_archive_checks"),
+    ),
+    _immutable(
+        "metering_epiassnapshot",
+        "Stored EPIAS snapshots",
+        ("metering", "0003_lease_check_and_snapshot_trigger"),
+    ),
+    RowTrigger(
+        "productionobservation_revision_guard",
+        "plants_productionobservation",
+        "BEFORE INSERT OR UPDATE",
+        "guard_productionobservation_revision",
+        _OBSERVATION_GUARD,
+        ("plants", "0003_lease_check_and_observation_trigger"),
     ),
 )
 

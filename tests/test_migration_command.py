@@ -58,21 +58,28 @@ def test_project_migrations_start_from_one_initial_migration_per_app() -> None:
         for app in project
     } == baseline
     forward = {
-        "change_requests": "0002_change_vocabulary_checks",
-        "forecasts": "0002_collection_endpoint_and_request_purpose_checks",
-        "incidents": "0002_incident_kind_choices",
-        "metering": "0002_epias_vocabulary_choices",
-        "notifications": "0002_delivery_vocabulary_checks",
-        "plants": "0002_plant_event_action_and_calibration_error_checks",
+        "change_requests": ("0002_change_vocabulary_checks",),
+        "connections": ("0003_provider_account_and_binding_checks",),
+        "forecasts": (
+            "0002_collection_endpoint_and_request_purpose_checks",
+            "0003_lease_import_and_archive_checks",
+        ),
+        "incidents": ("0002_incident_kind_choices",),
+        "metering": ("0002_epias_vocabulary_choices", "0003_lease_check_and_snapshot_trigger"),
+        "notifications": ("0002_delivery_vocabulary_checks", "0003_delivery_lease_check"),
+        "plants": (
+            "0002_plant_event_action_and_calibration_error_checks",
+            "0003_lease_check_and_observation_trigger",
+        ),
     }
-    expected = {
-        app: names | ({forward[app]} if app in forward else set())
-        for app, names in baseline.items()
-    }
+    expected = {app: names | set(forward.get(app, ())) for app, names in baseline.items()}
     assert {app: {name for label, name in disk if label == app} for app in project} == expected
-    for app, name in forward.items():
-        assert (app, "0001_initial") in disk[app, name].dependencies
-        assert loader.graph.leaf_nodes(app) == [(app, name)]
+    for app, names in forward.items():
+        previous = "0002_initial" if app == "connections" else "0001_initial"
+        for name in names:
+            assert (app, previous) in disk[app, name].dependencies
+            previous = name
+        assert loader.graph.leaf_nodes(app) == [(app, previous)]
 
 
 @contextmanager

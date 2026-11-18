@@ -220,7 +220,9 @@ def claim(job_id: int, now: datetime) -> Lease | None:
             )
         ):
             job.status = CollectionJobStatus.STALE
-            job.save(update_fields=("status",))
+            job.lease_token = None
+            job.lease_expires_at = None
+            job.save(update_fields=("status", "lease_token", "lease_expires_at"))
             return None
         token = uuid.uuid4()
         job.status = CollectionJobStatus.RUNNING
@@ -475,7 +477,7 @@ def _attach_weather(lease: Lease, data: ProviderData, provider: OpenMeteoProvide
     try:
         weather = provider.fetch(lease.binding.latitude, lease.binding.longitude, start, end)
     except WeatherError as exc:
-        return replace(data, weather=None, weather_error=exc.code)
+        return replace(data, weather=None, weather_error=SnapshotWeatherError(exc.code))
     except Exception as exc:
         logger.warning("Weather acquisition failed error_type=%s", type(exc).__name__)
         return replace(data, weather=None, weather_error=SnapshotWeatherError.ACQUISITION_FAILED)

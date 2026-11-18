@@ -2,9 +2,10 @@ import uuid
 
 from django.conf import settings
 from django.db import models
+from django.db.models import F
 
 from pyracast.connections.models import ProviderAccount, SiteBinding
-from pyracast.db import choices_check
+from pyracast.db import choices_check, lease_check
 from pyracast.regions.models import Region
 
 
@@ -169,10 +170,33 @@ class CollectionJob(models.Model):
             choices_check("endpoint", CollectionEndpoint),
             choices_check("status", CollectionJobStatus, name="collection_job_status"),
             choices_check("last_error", CollectionJobError, blank=True),
+            lease_check((CollectionJobStatus.RUNNING,)),
+            models.CheckConstraint(
+                condition=models.Q(
+                    endpoint=CollectionEndpoint.HISTORICAL_IMPORT, reference_import__isnull=False
+                )
+                | (
+                    ~models.Q(endpoint=CollectionEndpoint.HISTORICAL_IMPORT)
+                    & models.Q(reference_import__isnull=True)
+                ),
+                name="%(class)s_reference_import_chk",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(reference_import__isnull=True)
+                | models.Q(status=CollectionJobStatus.SUCCEEDED),
+                name="%(class)s_import_status_chk",
+            ),
+            # Imports and scaled copies take their slot from their source, so only native
+            # acquisitions own one slot per binding and endpoint.
             models.UniqueConstraint(
                 fields=("binding", "endpoint", "scheduled_slot"),
-                condition=models.Q(reference_import__isnull=True),
-                name="unique_collection_slot",
+                condition=models.Q(
+                    endpoint__in=(
+                        CollectionEndpoint.FORECASTS,
+                        CollectionEndpoint.ESTIMATED_ACTUALS,
+                    )
+                ),
+                name="%(class)s_binding_endpoint_scheduled_slot_uniq",
             ),
             models.UniqueConstraint(
                 fields=("reference_import", "target_date"), name="unique_import_reference_day"
@@ -290,5 +314,11 @@ class ReferenceCapacityNormalization(models.Model):
             models.CheckConstraint(
                 condition=models.Q(factor__gt=0, factor__lt=float("inf")),
                 name="finite_positive_reference_scale",
+            ),
+            # The writer stores target / source; Python and PostgreSQL divide float8 identically
+            # (IEEE 754), so the stored factor is the exact quotient at every capacity.
+            models.CheckConstraint(
+                condition=models.Q(factor=F("target_capacity_kw") / F("source_capacity_kw")),
+                name="%(class)s_factor_chk",
             ),
         )

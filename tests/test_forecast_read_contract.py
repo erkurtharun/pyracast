@@ -14,6 +14,7 @@ from pyracast.regions.models import Region
 from pyracast.regions.operations import submit_region
 from pyracast.weather import serialize_weather
 from tests.support.domain import NOW, System
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, publish_snapshot, snapshot_for
 from tests.support.weather_collection import WeatherFixture
 
@@ -163,7 +164,7 @@ def test_region_reads_explicit_estimated_actuals_for_today(
     forecast.weather_payload = serialize_weather(
         WeatherFixture().fetch(40, 29, start, start + timedelta(days=1))
     )
-    forecast.save(update_fields=("weather_payload",))
+    stored_again(forecast)
     actual = snapshot_for(
         system,
         DAY,

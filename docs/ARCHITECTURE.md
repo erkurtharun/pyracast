@@ -292,7 +292,7 @@ operation limits; business deadlines are checked separately after database waits
 
 `DispatcherStatus` records each phase's last attempt, success, safe error code, duration and published count.
 `check_delivery_health --max-lag-minutes 5` emits JSON and fails for missing, stale
-or failed phases, overdue ready jobs, expired or missing active leases, recent
+or failed phases, overdue ready jobs, expired active leases, recent
 failed/uncertain/unavailable or incomplete tomorrow deliveries, missed delivery
 deadlines, EPİAŞ failures, credential blocks, account cooldowns and mail
 authentication failures. Enabled approved regions without a successful forecast

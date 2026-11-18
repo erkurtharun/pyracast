@@ -7,6 +7,7 @@ from pyracast.connections.operations import reserve_request
 from pyracast.forecasts.models import (
     CollectionJob,
     ForecastSnapshot,
+    HistoricalReferenceImport,
     RequestAttempt,
     RequestPurpose,
 )
@@ -115,8 +116,22 @@ def test_last_success_reports_native_collection_independently_of_operator_import
             collected_at=NOW,
             source_kind="forecast",
         )
+    reference = (
+        HistoricalReferenceImport.objects.create(
+            binding=system.binding,
+            sha256="a" * 64,
+            source_name="authorized-export.json",
+            source_settings={},
+            imported_by=system.admin,
+            imported_at=NOW,
+            interval_count=1,
+        )
+        if endpoint == "historical_import"
+        else None
+    )
     imported = CollectionJob.objects.create(
         binding=system.binding,
+        reference_import=reference,
         endpoint=endpoint,
         target_date=NOW.date(),
         scheduled_slot=NOW + timedelta(hours=1),

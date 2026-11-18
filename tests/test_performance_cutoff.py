@@ -8,7 +8,7 @@ from django.test import Client
 from pyracast.connections.models import SiteBinding
 from pyracast.irradiance import local_day_bounds
 from pyracast.metering.models import EpiasConnection
-from pyracast.plants.models import CalibrationRun, PlantConfiguration, ProductionObservation
+from pyracast.plants.models import CalibrationRun, PlantConfiguration
 from pyracast.plants.performance import forecast_performance
 from tests.support.forecast_performance import DAY, measurements, publish, selected_factor
 from tests.support.incident_calibration import incident
@@ -212,8 +212,7 @@ def test_coverage_distinguishes_missing_input_from_excluded_observations(
     assert configuration is not None
     source = snapshot_for(system, DAY)
     publish(source)
-    measurements(system, configuration, 52)
-    ProductionObservation.objects.filter(plant=plant).update(quality="curtailed")
+    measurements(system, configuration, 52, quality="curtailed")
     result = forecast_performance(plant, start_date=DAY - timedelta(days=1), end_date=DAY)
     assert result["matched_days"] == 0
     assert result["missing_days"] == result["excluded_days"] == 1

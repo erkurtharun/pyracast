@@ -18,6 +18,7 @@ from pyracast.forecasts.models import (
     ForecastResult,
     ForecastSnapshot,
     RequestAttempt,
+    SnapshotWeatherError,
 )
 from pyracast.forecasts.sources import snapshot_data
 from pyracast.providers import FixtureProvider
@@ -74,7 +75,7 @@ def test_oversized_json_integer_does_not_prevent_hobby_publication() -> None:
     assert ForecastResult.objects.get().payload["weather_reference"]["status"] == "unavailable"
 
 
-@pytest.mark.parametrize("interruption", ["expired", "missing_lease", "reclaimed"])
+@pytest.mark.parametrize("interruption", ["expired", "reclaimed"])
 def test_interrupted_weather_preserves_hobby_acquisition_and_rejects_stale_attachment(
     monkeypatch: pytest.MonkeyPatch, interruption: str
 ) -> None:
@@ -91,8 +92,6 @@ def test_interrupted_weather_preserves_hobby_acquisition_and_rejects_stale_attac
         assert ForecastSnapshot.objects.get().raw_payload == {"fixture": True}
         result = original(latitude, longitude, start, end)
         elapsed = LEASE_DURATION.total_seconds() + 1
-        if interruption == "missing_lease":
-            CollectionJob.objects.filter(pk=job.pk).update(lease_expires_at=None)
         if interruption == "reclaimed":
             assert collect(job.pk, FakeAdapter(), calculate, recovery_at, weather_provider=weather)
         return result
@@ -160,7 +159,18 @@ def test_invalid_saved_weather_does_not_remove_the_primary_source(payload: objec
     data = snapshot_data(source)
     assert data.raw_payload == {"original": True}
     assert data.weather is None
-    assert data.weather_error == "invalid_weather_schema"
+    assert data.weather_error is SnapshotWeatherError.INVALID_SCHEMA
+
+
+def test_a_stored_weather_error_is_read_back_as_its_member() -> None:
+    source = ForecastSnapshot(
+        raw_payload={},
+        normalized_intervals=[],
+        source_kind="forecast",
+        collected_at=NOW,
+        weather_error="weather_request_failed",
+    )
+    assert snapshot_data(source).weather_error is SnapshotWeatherError.REQUEST_FAILED
 
 
 class HistoricalFixture(FakeAdapter):

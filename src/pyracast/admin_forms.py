@@ -9,7 +9,13 @@ from django.utils.translation import gettext_lazy
 from django.views.decorators.debug import sensitive_variables
 
 from pyracast.api.serializers import BindingInput
-from pyracast.connections.models import PowerBasis, Provider, ProviderAccount, SiteBinding
+from pyracast.connections.models import (
+    MAX_DAILY_QUOTA,
+    PowerBasis,
+    Provider,
+    ProviderAccount,
+    SiteBinding,
+)
 from pyracast.connections.operations import create_account, rotate_secret
 from pyracast.regions.models import Region
 from pyracast.regions.operations import configure_binding
@@ -69,8 +75,8 @@ class ProviderSetupForm(forms.Form):
     daily_quota = forms.IntegerField(
         required=False,
         min_value=1,
-        max_value=10,
-        initial=10,
+        max_value=MAX_DAILY_QUOTA,
+        initial=MAX_DAILY_QUOTA,
         label=gettext_lazy("New account daily request limit"),
         help_text=gettext_lazy("Existing accounts retain their shared limit."),
     )
@@ -154,7 +160,6 @@ class ProviderSetupForm(forms.Form):
                 raise ValidationError(_("The plant changed. Reload this page before saving."))
             current_binding_id = (
                 SiteBinding.objects.filter(region=current, region_revision=current.revision)
-                .order_by("-created_at", "-pk")
                 .values_list("pk", flat=True)
                 .first()
             )

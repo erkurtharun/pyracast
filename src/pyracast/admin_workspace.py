@@ -89,7 +89,7 @@ class WorkspaceAnnotations(TypedDict):
 def workspace_regions() -> QuerySet[WithAnnotations[Region, WorkspaceAnnotations]]:
     binding = SiteBinding.objects.filter(
         region_id=OuterRef("pk"), region_revision=OuterRef("revision")
-    ).order_by("-created_at", "-pk")
+    )
     snapshot = ForecastSnapshot.objects.filter(
         binding_id=OuterRef("approved_binding_id"),
         source_kind=SnapshotSourceKind.FORECAST,

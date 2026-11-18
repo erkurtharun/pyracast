@@ -13,6 +13,7 @@ from pyracast.plants.performance import forecast_performance
 from pyracast.solar import Daylight
 from tests.support.domain import NOW
 from tests.support.forecast_performance import selected_factor
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant
 from tests.support.plant_training import actual_snapshot_for
 from tests.support.provisional_measurements import DAY, acquisition
@@ -40,7 +41,7 @@ def test_historical_daylight_comparison_retains_whole_boundary_hours_and_native_
     native_mw = {14: 80, 15: 120, 16: 140, 17: 40}
     for index, interval in enumerate(reference.normalized_intervals):
         interval["power_kw"] = native_mw[index] / 130 if index in native_mw else None
-    reference.save(update_fields=("normalized_intervals",))
+    stored_again(reference)
     observations = [
         ProductionObservation.objects.create(
             plant=plant,
@@ -164,7 +165,7 @@ def test_historical_comparison_excludes_future_reference_publication(
     system, plant = make_plant(monkeypatch)
     source = actual_snapshot_for(system, DAY)
     setattr(source, field, NOW + timedelta(seconds=1))
-    source.save(update_fields=(field,))
+    stored_again(source)
     result = forecast_performance(
         plant, start_date=DAY, end_date=DAY, comparison="historical_model"
     )

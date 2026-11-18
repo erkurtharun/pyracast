@@ -700,8 +700,8 @@ def test_enable_waits_for_pending_work_and_handles_explicit_baseline_selection(
     CalibrationRun.objects.filter(pk=pending.pk).update(created_at=NOW - timedelta(minutes=1))
     set_calibration_automation(*scope, enabled=True)
     assert CalibrationActivation.objects.latest("pk").pk == baseline.pk
-    pending.status = "failed"
-    pending.save(update_fields=("status",))
+    pending.status, pending.completed_at = "failed", NOW
+    pending.save(update_fields=("status", "completed_at"))
     set_calibration_automation(*scope, enabled=True)
     assert CalibrationActivation.objects.latest("pk").calibration_id == candidate.pk
 

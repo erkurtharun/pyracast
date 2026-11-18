@@ -12,17 +12,19 @@ def settlement(
     *,
     value: int = 26,
     minute: int = 0,
+    source_kind: str = "settlement_injection",
+    identity: dict[str, object] | None = None,
 ) -> EpiasSnapshot:
     start, end = local_day_bounds(day, configuration.binding.timezone)
     stamp = end + timedelta(hours=2, minutes=minute)
-    identity = {"id": 77, "eic": "EIC", "name": "Plant"}
+    identity = identity if identity is not None else {"id": 77, "eic": "EIC", "name": "Plant"}
     job = EpiasCollectionJob.objects.create(
         plant_id=connection.plant_id,
         connection=connection,
         configuration=configuration,
         connection_revision=connection.revision,
         provider_plant=identity,
-        source_kind="settlement_injection",
+        source_kind=source_kind,
         target_day=day,
         scheduled_for=stamp,
         next_attempt_at=stamp,
@@ -42,7 +44,7 @@ def settlement(
         connection=connection,
         configuration=configuration,
         target_day=day,
-        source_kind="settlement_injection",
+        source_kind=source_kind,
         provider_plant=identity,
         collected_at=stamp,
         available_at=stamp,

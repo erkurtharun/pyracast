@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from typing import Any
 
 import pytest
 
@@ -32,9 +33,10 @@ def acquisition(
     *,
     minute: int = 0,
     values: list[str | None] | None = None,
+    **stored: Any,
 ) -> EpiasSnapshot:
     configuration, connection = source
-    start, end = local_day_bounds(DAY, "Europe/Istanbul")
+    _, end = local_day_bounds(DAY, "Europe/Istanbul")
     stamp = end + timedelta(hours=2, minutes=minute)
     identity = {
         "id": 77 if kind == "settlement_injection" else 2,
@@ -53,25 +55,32 @@ def acquisition(
         next_attempt_at=stamp,
         status="succeeded",
     )
-    readings = [
+    return EpiasSnapshot.objects.create(
+        **{
+            "job": job,
+            "attempt": 1,
+            "connection": connection,
+            "configuration": configuration,
+            "target_day": DAY,
+            "source_kind": kind,
+            "provider_plant": identity,
+            "collected_at": stamp,
+            "available_at": stamp,
+            "readings": hourly_readings(values if values is not None else ["26"] * 24),
+            "raw_payload": {},
+            "content_sha256": "a" * 64,
+        }
+        | stored
+    )
+
+
+def hourly_readings(values: list[str | None]) -> list[dict[str, object]]:
+    start, _ = local_day_bounds(DAY, "Europe/Istanbul")
+    return [
         {
             "period_start": (start + timedelta(hours=hour)).isoformat(),
             "period_end": (start + timedelta(hours=hour + 1)).isoformat(),
             "total_mwh": value,
         }
-        for hour, value in enumerate(values if values is not None else ["26"] * 24)
+        for hour, value in enumerate(values)
     ]
-    return EpiasSnapshot.objects.create(
-        job=job,
-        attempt=1,
-        connection=connection,
-        configuration=configuration,
-        target_day=DAY,
-        source_kind=kind,
-        provider_plant=identity,
-        collected_at=stamp,
-        available_at=stamp,
-        readings=readings,
-        raw_payload={},
-        content_sha256="a" * 64,
-    )

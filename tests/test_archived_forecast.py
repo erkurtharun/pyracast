@@ -20,6 +20,7 @@ from pyracast.plants.models import (
 from pyracast.plants.operations import activate_calibration, reset_calibration
 from tests.support.domain import NOW
 from tests.support.errors import raises_code
+from tests.support.invariants import stored_again
 from tests.support.plant_operations import make_plant, publish_snapshot, ready_run, snapshot_for
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -34,6 +35,7 @@ def test_archive_replays_previous_binding_without_writing_cache(
     snapshot = publish_snapshot(snapshot_for(system, DAY))
     binding = SiteBinding.objects.get(pk=system.binding.pk)
     binding.pk = None
+    binding.region_revision += 1
     binding.site_id = "new-site"
     binding.capacity_kw = 1000
     binding.save()
@@ -157,7 +159,7 @@ def test_archive_uses_frozen_output_after_raw_source_changes(
     snapshot = publish_snapshot(snapshot_for(system, DAY))
     original = archived_forecast(plant, DAY, 30, NOW)
     snapshot.normalized_intervals[0]["power_kw"] = -1
-    snapshot.save(update_fields=["normalized_intervals"])
+    stored_again(snapshot)
     replay = archived_forecast(plant, DAY, 30, NOW)
     assert replay["result"] == original["result"]
     assert replay["calibration_id"] == original["calibration_id"]
@@ -280,7 +282,7 @@ def test_archive_irradiance_uses_target_day_instead_of_collection_job_day(
     source.normalized_intervals.extend(next_source.normalized_intervals)
     source.job.target_date = next_day
     source.job.save(update_fields=["target_date"])
-    source.save(update_fields=["normalized_intervals"])
+    stored_again(source)
     publish_snapshot(source)
     published = ForecastResult.objects.get(snapshot=source)
     assert published.payload["energy_kwh_m2"] == pytest.approx(9.6)
@@ -322,7 +324,7 @@ def test_archive_returns_outage_scenario_saved_at_collection_time(
     assert scenario["incidents"][0]["id"] == incident.pk
     assert scenario["result"]["energy_mwh"] == pytest.approx(624)
     source.normalized_intervals[0]["power_kw"] = -1
-    source.save(update_fields=["normalized_intervals"])
+    stored_again(source)
     replay = plant_outlook(
         system.member,
         system.tenant.pk,

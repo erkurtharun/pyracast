@@ -13,6 +13,7 @@ from pyracast.plants.models import (
     ProductionObservation,
 )
 from tests.support.domain import System
+from tests.support.invariants import stored_again
 
 DAY = date(2026, 11, 8)
 
@@ -20,7 +21,7 @@ DAY = date(2026, 11, 8)
 def publish(source: ForecastSnapshot, *, published_at: datetime | None = None) -> None:
     published_at = source.collected_at if published_at is None else published_at
     source.available_at = published_at
-    source.save()
+    stored_again(source)
     source.job.status = "succeeded"
     source.job.save()
     with transaction.atomic():
@@ -30,7 +31,9 @@ def publish(source: ForecastSnapshot, *, published_at: datetime | None = None) -
         )
 
 
-def measurements(system: System, configuration: PlantConfiguration, energy: float) -> None:
+def measurements(
+    system: System, configuration: PlantConfiguration, energy: float, *, quality: str = "valid"
+) -> None:
     start, end = local_day_bounds(DAY, system.binding.timezone)
     while start < end:
         ProductionObservation.objects.create(
@@ -41,6 +44,7 @@ def measurements(system: System, configuration: PlantConfiguration, energy: floa
             energy_mwh=energy,
             recorded_by=system.member,
             source="meter",
+            quality=quality,
         )
         start += timedelta(hours=1)
 

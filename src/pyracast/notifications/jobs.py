@@ -273,7 +273,6 @@ def pending_notification_ids(now: datetime, limit: int = 100) -> list[int]:
         .filter(
             Q(status__in=(NotificationDeliveryStatus.PENDING, NotificationDeliveryStatus.RETRY))
             | Q(status=NotificationDeliveryStatus.SENDING, lease_expires_at__lte=now)
-            | Q(status=NotificationDeliveryStatus.SENDING, lease_expires_at__isnull=True)
         )
         .order_by("available_at", "pk")
         .values_list("pk", flat=True)[:limit]
