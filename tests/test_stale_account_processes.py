@@ -282,7 +282,7 @@ def test_signup_code_answers_like_nothing_pending_when_verified_before_completio
 ) -> None:
     client, code = pending_signup()
     expected = answer(submit(browser(), "auth/email/verify", {"key": code}))
-    before(monkeypatch, VerifyEmailInput, "clean_key", verified_signup_address)
+    after(monkeypatch, VerifyEmailInput, "clean_key", verified_signup_address)
 
     response = submit(client, "auth/email/verify", {"key": code})
 
@@ -299,7 +299,7 @@ def test_change_code_answers_like_nothing_pending_when_verified_before_completio
     client, code = change_pending(user)
     methods = client.get(AUTH + "auth/session").json()["data"]["methods"]
     expected = answer(submit(signed_in(user), "auth/email/verify", {"key": code}))
-    before(monkeypatch, VerifyEmailInput, "clean_key", verified_change_address(user))
+    after(monkeypatch, VerifyEmailInput, "clean_key", verified_change_address(user))
 
     response = submit(client, "auth/email/verify", {"key": code})
 
