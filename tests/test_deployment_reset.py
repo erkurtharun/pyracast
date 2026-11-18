@@ -783,7 +783,7 @@ def test_runtime_table_privilege_check_uses_each_tables_schema(role: str, readab
 
 
 @pytest.mark.django_db
-def test_solcast_export_copies_each_solcast_snapshot_with_its_binding_and_plants() -> None:
+def test_solcast_export_copies_each_solcast_snapshot_with_its_job_binding_and_plants() -> None:
     creator = User.objects.create(username="exporter")
     tenant = Tenant.objects.create(name="Export tenant")
     collected = datetime(2026, 11, 9, 13, tzinfo=UTC)
@@ -860,6 +860,16 @@ def test_solcast_export_copies_each_solcast_snapshot_with_its_binding_and_plants
     rows = [json.loads(line) for line in output.split(b"\n")[:-1]]
     assert output.count(b"\n") == 2
     sites = [row.pop("binding") for row in rows]
+    jobs = [row.pop("job") for row in rows]
+    columns = {field.attname for field in CollectionJob._meta.concrete_fields}
+    for job, snapshot in zip(jobs, snapshots, strict=True):
+        assert set(job) == columns
+        assert job["id"] == snapshot.job_id
+        assert {key: job[key] for key in ("scheduled_slot", "target_date", "status")} == {
+            "scheduled_slot": "2026-11-09T13:00:00+00:00",
+            "target_date": "2026-11-09",
+            "status": "pending",
+        }
     assert rows == [
         {
             "id": snapshots[0].pk,

@@ -16,9 +16,11 @@ from django.core.management.base import CommandError
 from django.db import close_old_connections, connection
 
 from pyracast.accounts.models import Tenant
+from pyracast.collection_window import INTRADAY_HISTORY_WINDOW
 from pyracast.connections.models import SiteBinding
 from pyracast.forecasts.actuals import select_archived_actual_source
 from pyracast.forecasts.coverage import intervals_cover_day
+from pyracast.forecasts.intraday import native_actual_snapshots
 from pyracast.forecasts.models import (
     CollectionJob,
     ForecastResult,
@@ -37,7 +39,6 @@ from tests.support.provider_snapshot_restore import (
     SETTINGS,
     SITE,
     ZONE,
-    BeforeReset,
     acquisition,
     binding_after_second_reset,
     binding_before_reset,
@@ -46,6 +47,7 @@ from tests.support.provider_snapshot_restore import (
     encode_rows,
     export_content,
     export_rows,
+    job_fields,
     local,
     restore_system,
 )
@@ -54,6 +56,7 @@ pytestmark = pytest.mark.django_db(transaction=True)
 
 KEY = "test-only-solcast-key"
 COMMAND_LOGGER = "pyracast.forecasts.management.commands.restore_provider_snapshots"
+DROP = object()
 
 
 def restore(system: System, content: bytes, *, dry_run: bool = False) -> RestoreSummary:
@@ -81,14 +84,6 @@ def restored_count(system: System) -> int:
     return ForecastSnapshot.objects.filter(
         binding=system.binding, raw_payload__has_key="snapshot_restore"
     ).count()
-
-
-def live_ids(before: BeforeReset) -> set[int]:
-    return {
-        before.lookback.pk,
-        *(night.pk for night in before.nights),
-        *(forecast.pk for forecast in before.forecasts),
-    }
 
 
 def test_restored_export_serves_native_actuals_beside_the_historical_import(
@@ -168,45 +163,9 @@ def test_restored_rows_keep_the_acquisition_and_take_the_live_job_shape(
         assert getattr(copy, name) == getattr(original, name)
     assert copy.available_at == original.collected_at
     assert copy.weather_error == ""
-    job = copy.job
-    assert (
-        job.endpoint,
-        job.status,
-        job.scheduled_slot,
-        job.target_date,
-        job.retry_until,
-        job.available_at,
-        job.attempts,
-        job.last_error,
-        job.reference_import_id,
-        job.lease_token,
-        job.lease_expires_at,
-    ) == (
-        "estimated_actuals",
-        "succeeded",
-        original.collected_at,
-        date(2026, 11, 5),
-        original.collected_at + timedelta(minutes=15),
-        original.collected_at,
-        1,
-        "",
-        None,
-        None,
-        None,
-    )
-    night = restored_copy(system.binding, before.nights[0]).job
-    assert (night.scheduled_slot, night.target_date, night.retry_until) == (
-        datetime(2026, 11, 5, 21, 30, tzinfo=UTC),
-        date(2026, 11, 5),
-        local(date(2026, 11, 6), 9),
-    )
     forecast = restored_copy(system.binding, before.forecasts[0])
     assert forecast.weather_payload == {"source": "open-meteo"}
-    assert (forecast.job.endpoint, forecast.job.target_date, forecast.job.retry_until) == (
-        "forecasts",
-        date(2026, 11, 6),
-        None,
-    )
+    assert forecast.job.target_date == date(2026, 11, 6)
     result = ForecastResult.objects.get(snapshot=forecast)
     assert result.published_at == forecast.collected_at == forecast.available_at
     assert result.payload["local_date"] == "2026-11-06"
@@ -218,9 +177,66 @@ def test_restored_rows_keep_the_acquisition_and_take_the_live_job_shape(
         "binding_revision": f"{system.binding.pk}:{system.binding.region_revision}",
     }
     assert set(result.daily_payloads) == {"2026-11-05", "2026-11-06", "2026-11-07"}
-    assert ForecastResult.objects.filter(snapshot__source_kind="forecast").count() == 2
+    assert ForecastResult.objects.filter(snapshot__source_kind="forecast").count() == 3
     assert not ForecastResult.objects.filter(snapshot__source_kind="estimated_actuals").exists()
     assert RequestAttempt.objects.count() == attempts
+
+
+def test_restored_jobs_hold_the_exported_job_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    system = restore_system(monkeypatch)
+    before = collections_before_reset(system)
+    exported = {row["id"]: row["job"] for row in export_rows(before.content)}
+
+    restore(system, before.content)
+
+    assert {name for job in exported.values() for name in job} == {
+        field.attname for field in CollectionJob._meta.concrete_fields
+    }
+    for original in before.live:
+        copy = restored_copy(system.binding, original).job
+        assert exported[original.pk]["id"] == original.job_id
+        assert job_fields(copy) == job_fields(original.job)
+        assert copy.binding_id == system.binding.pk
+        assert copy.created_at == NOW
+
+
+def test_restored_actuals_are_admitted_at_their_slot_as_the_exported_ones(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = restore_system(monkeypatch)
+    before = collections_before_reset(system)
+    source = before.lookback.binding
+
+    restore(system, before.content)
+
+    admitted = []
+    for original in before.actuals:
+        copy = restored_copy(system.binding, original)
+        slot = original.job.scheduled_slot
+        for grace in (None, slot + INTRADAY_HISTORY_WINDOW):
+            exported = native_actual_snapshots(
+                source,
+                original.coverage_start,
+                original.coverage_end,
+                slot,
+                actuals_grace_until=grace,
+            )
+            held = native_actual_snapshots(
+                system.binding,
+                original.coverage_start,
+                original.coverage_end,
+                slot,
+                actuals_grace_until=grace,
+            )
+            assert (original in exported) == (copy in held)
+            if copy in held:
+                admitted.append((original, grace is not None))
+    assert admitted == [
+        (before.lookback, True),
+        (before.intraday, True),
+        (before.nights[0], True),
+        (before.nights[2], True),
+    ]
 
 
 def test_a_second_run_with_the_same_export_adds_nothing_and_says_so(
@@ -233,15 +249,17 @@ def test_a_second_run_with_the_same_export_adds_nothing_and_says_so(
     stored = archived_rows()
 
     second = restore(system, before.content)
+    reencoded = restore(system, gzip.decompress(before.content))
 
-    assert first.restored == 6
-    assert second.restored == 0
-    assert outcomes(second)["estimated_actuals"] == {"already_restored": 4}
-    assert outcomes(second)["forecasts"] == {"already_restored": 2}
+    assert first.restored == 8
+    assert second.restored == reencoded.restored == 0
+    assert outcomes(second) == outcomes(reencoded)
+    assert outcomes(second)["estimated_actuals"] == {"already_restored": 5}
+    assert outcomes(second)["forecasts"] == {"already_restored": 3}
     assert second.days == first.days
     assert CollectionJob.objects.count() == jobs
     assert rewritten_archive_rows(stored, archived_rows()) == {}
-    assert restored_count(system) == 6
+    assert restored_count(system) == 8
 
 
 def test_dry_run_reports_the_restore_and_writes_nothing(
@@ -262,7 +280,7 @@ def test_dry_run_reports_the_restore_and_writes_nothing(
     assert not applied.dry_run
     assert outcomes(planned) == outcomes(applied)
     assert planned.days == applied.days
-    assert planned.restored == applied.restored == 6
+    assert planned.restored == applied.restored == 8
 
 
 def test_rows_that_are_no_live_collection_of_the_provider_are_skipped_and_named(
@@ -276,10 +294,10 @@ def test_rows_that_are_no_live_collection_of_the_provider_are_skipped_and_named(
 
     summary = restore(system, encode_rows(rows))
 
-    assert summary.rows == 9
+    assert summary.rows == 11
     assert outcomes(summary) == {
-        "estimated_actuals": {"restored": 4, "other_provider": 1},
-        "forecasts": {"restored": 2},
+        "estimated_actuals": {"restored": 5, "other_provider": 1},
+        "forecasts": {"restored": 3},
         "historical_import": {"not_live": 1},
         "scaled_estimated_actuals": {"not_live": 1},
     }
@@ -296,7 +314,7 @@ def test_rows_that_are_no_live_collection_of_the_provider_are_skipped_and_named(
         "historical_import": None,
         "scaled_estimated_actuals": None,
     }
-    assert restored_count(system) == 6
+    assert restored_count(system) == 8
 
 
 def test_a_slot_that_holds_a_native_collection_is_skipped_and_kept(
@@ -304,7 +322,7 @@ def test_a_slot_that_holds_a_native_collection_is_skipped_and_kept(
 ) -> None:
     system = restore_system(monkeypatch)
     before = collections_before_reset(system)
-    slot = before.forecasts[0].collected_at
+    slot = before.forecasts[0].job.scheduled_slot
     held = CollectionJob.objects.create(
         binding=system.binding,
         endpoint="forecasts",
@@ -315,10 +333,13 @@ def test_a_slot_that_holds_a_native_collection_is_skipped_and_kept(
 
     summary = restore(system, before.content)
 
-    assert outcomes(summary)["forecasts"] == {"restored": 1, "slot_taken": 1}
+    assert outcomes(summary)["forecasts"] == {"restored": 2, "slot_taken": 1}
     held.refresh_from_db()
     assert held.status == "pending"
     assert not ForecastSnapshot.objects.filter(job=held).exists()
+    assert not ForecastSnapshot.objects.filter(
+        binding=system.binding, collected_at=before.forecasts[0].collected_at
+    ).exists()
     assert (
         CollectionJob.objects.filter(
             binding=system.binding, endpoint="forecasts", scheduled_slot=slot
@@ -327,33 +348,33 @@ def test_a_slot_that_holds_a_native_collection_is_skipped_and_kept(
     )
 
 
-def test_an_acquisition_the_binding_already_holds_is_skipped_and_kept(
+def test_an_acquisition_the_binding_already_holds_at_the_slot_is_skipped_and_kept(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system = restore_system(monkeypatch)
     before = collections_before_reset(system)
     original = before.forecasts[0]
+    slot = original.job.scheduled_slot
     held = acquisition(
         system.binding,
         "forecasts",
-        original.collected_at,
+        slot,
         datetime(2026, 11, 4, 21, tzinfo=UTC),
         datetime(2026, 11, 7, 21, tzinfo=UTC),
-    )
-    assert held.job.scheduled_slot < held.collected_at
-    assert (held.coverage_start, held.coverage_end) == (
-        original.coverage_start,
-        original.coverage_end,
+        collected_at=slot + timedelta(minutes=7),
     )
 
     summary = restore(system, before.content)
 
-    assert outcomes(summary)["forecasts"] == {"restored": 1, "slot_taken": 1}
+    assert outcomes(summary)["forecasts"] == {"restored": 2, "slot_taken": 1}
     assert list(
         ForecastSnapshot.objects.filter(
-            binding=system.binding, collected_at=original.collected_at
+            binding=system.binding, job__endpoint="forecasts", job__scheduled_slot=slot
         ).values_list("pk", flat=True)
     ) == [held.pk]
+    assert not ForecastSnapshot.objects.filter(
+        binding=system.binding, collected_at=original.collected_at
+    ).exists()
 
 
 def test_a_reused_snapshot_id_of_another_export_is_restored(
@@ -365,6 +386,9 @@ def test_a_reused_snapshot_id_of_another_export_is_restored(
     original = before.forecasts[0]
     reused = next(row for row in export_rows(before.content) if row["id"] == original.pk)
     reused["collected_at"] = (original.collected_at + timedelta(hours=12)).isoformat()
+    reused["job"]["scheduled_slot"] = (
+        original.job.scheduled_slot + timedelta(hours=12)
+    ).isoformat()
 
     summary = restore(system, encode_rows([reused]))
 
@@ -392,14 +416,15 @@ def test_rows_restored_before_a_later_reset_are_restored_again_with_their_lineag
     )
 
     assert outcomes(summary) == {
-        "estimated_actuals": {"restored": 4},
-        "forecasts": {"restored": 2},
+        "estimated_actuals": {"restored": 5},
+        "forecasts": {"restored": 3},
     }
-    for original in (before.lookback, *before.nights, *before.forecasts):
+    for original in before.live:
         first = restored_copy(system.binding, original)
-        second = ForecastSnapshot.objects.get(
+        second = ForecastSnapshot.objects.select_related("job").get(
             binding=fresh, raw_payload__snapshot_restore__snapshot_id=first.pk
         )
+        assert job_fields(second.job) == job_fields(original.job)
         assert second.raw_payload == {
             **original.raw_payload,
             "snapshot_restore": {
@@ -651,6 +676,55 @@ def test_an_invalid_live_acquisition_refuses_the_run(
     assert restored_count(system) == 0
 
 
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("job", DROP),
+        ("job", None),
+        ("job", []),
+        ("endpoint", "forecasts"),
+        ("status", "pending"),
+        ("reference_import_id", 1),
+        ("scheduled_slot", DROP),
+        ("scheduled_slot", "2026-11-05T07:00:05+00:00"),
+        ("scheduled_slot", "2026-11-05T07:00:00"),
+        ("target_date", "2026-11-31"),
+        ("target_date", 20261105),
+        ("available_at", None),
+        ("retry_until", "soon"),
+        ("attempts", -1),
+        ("attempts", True),
+        ("attempts", 1.0),
+        ("last_error", "unknown"),
+        ("last_error", None),
+        ("lease_token", "00000000-0000-0000-0000-000000000001"),
+        ("lease_expires_at", "2026-11-05T07:05:00+00:00"),
+    ],
+)
+def test_a_row_without_a_succeeded_live_job_refuses_the_run_by_field_name(
+    monkeypatch: pytest.MonkeyPatch, key: str, value: object
+) -> None:
+    system = restore_system(monkeypatch)
+    before = collections_before_reset(system)
+    rows = export_rows(before.content)
+    line = next(number for number, row in enumerate(rows, 1) if row["id"] == before.lookback.pk)
+    holder, field = (
+        (rows[line - 1], "job") if key == "job" else (rows[line - 1]["job"], f"job.{key}")
+    )
+    if value is DROP:
+        del holder[key]
+    else:
+        holder[key] = value
+
+    with pytest.raises(ValidationError) as refused:
+        restore(system, encode_rows(rows))
+
+    assert refused.value.messages == [
+        f"Export line {line} does not hold a succeeded live job: {field}."
+    ]
+    assert restored_count(system) == 0
+
+
 def test_a_forecast_that_cannot_be_calculated_refuses_the_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -747,7 +821,7 @@ def test_a_declared_installation_date_matches_the_same_exported_date(
         "2025-03-01"
     }
 
-    assert restore(system, before.content).restored == 6
+    assert restore(system, before.content).restored == 8
 
 
 def test_restored_actuals_request_calibration_preparation_after_commit(
@@ -762,7 +836,7 @@ def test_restored_actuals_request_calibration_preparation_after_commit(
 
     def prepare(plant_id: int) -> None:
         assert not connection.in_atomic_block
-        assert restored_count(system) == 6
+        assert restored_count(system) == 8
         observed.append(plant_id)
 
     monkeypatch.setattr("pyracast.plants.preparation.prepare_calibration", prepare)
@@ -794,8 +868,8 @@ def test_concurrent_restores_store_each_snapshot_once(monkeypatch: pytest.Monkey
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = sorted(executor.map(lambda _: run(), range(2)))
 
-    assert results == [0, 6]
-    assert restored_count(system) == 6
+    assert results == [0, 8]
+    assert restored_count(system) == 8
 
 
 def command_arguments(system: System, export: str, *, username: str = "admin") -> list[str]:
@@ -828,11 +902,11 @@ def test_command_restores_from_standard_input_and_prints_no_site_or_secret(
 
     def report(verb: str, outcome: str) -> list[str]:
         return [
-            f"Provider snapshot restore for binding {system.binding.pk}: 8 export rows, "
+            f"Provider snapshot restore for binding {system.binding.pk}: 10 export rows, "
             f"SHA-256 {digest}.",
-            f"estimated_actuals: 4 {verb}; covers "
+            f"estimated_actuals: 5 {verb}; covers "
             "2026-10-29T07:00:00+00:00 to 2026-11-07T21:00:00+00:00.",
-            f"forecasts: 2 {verb}; covers 2026-11-04T21:00:00+00:00 to 2026-11-08T21:00:00+00:00.",
+            f"forecasts: 3 {verb}; covers 2026-11-04T21:00:00+00:00 to 2026-11-08T21:00:00+00:00.",
             "historical_import: 1 skipped, not a live collection (import its source file again).",
             "scaled_estimated_actuals: 1 skipped, not a live collection "
             "(normalize the reference capacity again).",
@@ -855,14 +929,14 @@ def test_command_restores_from_standard_input_and_prints_no_site_or_secret(
     path.write_bytes(before.content)
     output = StringIO()
     call_command("restore_provider_snapshots", *command_arguments(system, str(path)), stdout=output)
-    assert output.getvalue().splitlines() == report("restored", "Restored 6 snapshots.")
+    assert output.getvalue().splitlines() == report("restored", "Restored 8 snapshots.")
 
     output = StringIO()
     call_command("restore_provider_snapshots", *command_arguments(system, str(path)), stdout=output)
     assert output.getvalue().splitlines()[1:3] == [
-        "estimated_actuals: 4 already restored; covers "
+        "estimated_actuals: 5 already restored; covers "
         "2026-10-29T07:00:00+00:00 to 2026-11-07T21:00:00+00:00.",
-        "forecasts: 2 already restored; covers "
+        "forecasts: 3 already restored; covers "
         "2026-11-04T21:00:00+00:00 to 2026-11-08T21:00:00+00:00.",
     ]
     assert output.getvalue().splitlines()[-1] == "Nothing to restore."
@@ -873,7 +947,7 @@ def test_command_restores_from_standard_input_and_prints_no_site_or_secret(
     assert messages == [
         f"provider_snapshot_restore_finished binding_id={system.binding.pk} dry_run={dry_run} "
         f"restored={restored} skipped={skipped} export_sha256={digest}"
-        for dry_run, restored, skipped in ((True, 6, 2), (False, 6, 2), (False, 0, 8))
+        for dry_run, restored, skipped in ((True, 8, 2), (False, 8, 2), (False, 0, 10))
     ]
     assert SITE not in pyracast_logs.text
     assert KEY not in pyracast_logs.text
@@ -898,7 +972,7 @@ def test_command_reports_forecasts_alone_without_a_day_report(
     )
 
     assert output.getvalue().splitlines()[1:] == [
-        "forecasts: 2 to restore; covers 2026-11-04T21:00:00+00:00 to 2026-11-08T21:00:00+00:00.",
+        "forecasts: 3 to restore; covers 2026-11-04T21:00:00+00:00 to 2026-11-08T21:00:00+00:00.",
         "Dry run: nothing was written.",
     ]
 
