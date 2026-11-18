@@ -12,6 +12,7 @@ from typing import Any
 
 from allauth.account import signals as account_signals
 from allauth.account.adapter import get_adapter
+from allauth.account.internal.flows.login import get_authentication_records
 from allauth.mfa import signals as mfa_signals
 from allauth.socialaccount import signals as social_signals
 from django.contrib.auth import signals as auth_signals
@@ -28,16 +29,22 @@ class SecurityEvent(StrEnum):
     LOGIN_SUCCEEDED = "login_succeeded"
     LOGOUT = "logout"
     LOGIN_FAILED = "login_failed"
+    LOGIN_REFUSED = "login_refused"
     LOGIN_LOCKED = "login_locked"
     LOGIN_CODE_REJECTED = "login_code_rejected"
+    SESSION_EXPIRED = "session_expired"
+    REAUTHENTICATED = "reauthenticated"
+    REAUTHENTICATION_FAILED = "reauthentication_failed"
     SIGNUP = "signup"
     EMAIL_VERIFIED = "email_verified"
     EMAIL_CODE_REJECTED = "email_code_rejected"
     EMAIL_ADDED = "email_added"
+    EMAIL_CHANGE_REQUESTED = "email_change_requested"
     EMAIL_CHANGED = "email_changed"
     EMAIL_REMOVED = "email_removed"
     CREDENTIAL_CHANGED = "password_changed"
     CREDENTIAL_SET = "password_set"
+    RESET_REQUESTED = "password_reset_requested"
     CREDENTIAL_RESET = "password_reset"
     RESET_CODE_REJECTED = "password_reset_code_rejected"
     CURRENT_CREDENTIAL_REFUSED = "password_change_failed"
@@ -46,7 +53,9 @@ class SecurityEvent(StrEnum):
     MFA_RESET = "mfa_reset"
     MFA_SUCCEEDED = "mfa_succeeded"
     MFA_FAILED = "mfa_failed"
+    AUTHENTICATOR_UNREADABLE = "mfa_secret_unreadable"
     SECOND_FACTOR_LOCKED = "second_factor_locked"
+    SOCIAL_LOGIN_REFUSED = "social_login_refused"
     SOCIAL_ACCOUNT_CONNECTED = "social_account_connected"
     SOCIAL_ACCOUNT_DISCONNECTED = "social_account_disconnected"
     ADMIN_MFA_PROVISIONED = "admin_mfa_provisioned"
@@ -77,6 +86,8 @@ SIGNAL_EVENTS: Mapping[Signal, SecurityEvent] = {
     account_signals.login_code_rejected: SecurityEvent.LOGIN_CODE_REJECTED,
     account_signals.password_reset_code_rejected: SecurityEvent.RESET_CODE_REJECTED,
     account_signals.email_verification_code_rejected: SecurityEvent.EMAIL_CODE_REJECTED,
+    account_signals.authentication_step_completed: SecurityEvent.REAUTHENTICATED,
+    account_signals.email_confirmation_sent: SecurityEvent.EMAIL_CHANGE_REQUESTED,
     mfa_signals.authenticator_added: SecurityEvent.MFA_ADDED,
     mfa_signals.authenticator_removed: SecurityEvent.MFA_REMOVED,
     mfa_signals.authenticator_reset: SecurityEvent.MFA_RESET,
@@ -87,8 +98,21 @@ SIGNAL_EVENTS: Mapping[Signal, SecurityEvent] = {
 }
 
 # A line never carries an address, name, token, code or password: an address becomes `subject`.
+# `method` is allauth's step (password, code, mfa, socialaccount); `provider` a provider id.
 LINE_KEYS = frozenset(
-    {"event", "user_id", "client_ip", "subject", "tenant_id", "target_id", "reason", "view"}
+    {
+        "event",
+        "user_id",
+        "client_ip",
+        "subject",
+        "tenant_id",
+        "target_id",
+        "reason",
+        "view",
+        "method",
+        "authenticator_type",
+        "provider",
+    }
 )
 
 
@@ -116,6 +140,9 @@ def record_security_event(
     target_id: int | None = None,
     reason: str | None = None,
     view: str | None = None,
+    method: str | None = None,
+    authenticator_type: str | None = None,
+    provider: str | None = None,
 ) -> None:
     details = {
         "subject": None if address is None else redacted_key(address),
@@ -123,6 +150,9 @@ def record_security_event(
         "target_id": target_id,
         "reason": reason,
         "view": view,
+        "method": method,
+        "authenticator_type": authenticator_type,
+        "provider": provider,
     }
     line = {"event": event.value, "user_id": user_id, "client_ip": _client_ip(request, client_ip)}
     line |= {key: value for key, value in details.items() if value is not None}
@@ -181,6 +211,10 @@ def _signal_user_id(arguments: Mapping[str, Any]) -> int | None:
             return int(record.user_id)
     if (login := arguments.get("sociallogin")) is not None:
         return int(login.account.user_id)
+    if (confirmation := arguments.get("confirmation")) is not None:
+        # A code verification process names its user; a link confirmation names the address.
+        owner = getattr(confirmation, "user", None)
+        return int(owner.pk if owner is not None else confirmation.email_address.user_id)
     return None
 
 
@@ -190,12 +224,68 @@ def _signal_address(arguments: Mapping[str, Any]) -> str | None:
     return identifier if isinstance(identifier, str) else None
 
 
-def _receive(event: SecurityEvent, *, request: HttpRequest | None = None, **arguments: Any) -> None:
+def _signal_provider(arguments: Mapping[str, Any]) -> str | None:
+    if (account := arguments.get("socialaccount")) is not None:
+        return str(account.provider)
+    if (login := arguments.get("sociallogin")) is not None:
+        return str(login.account.provider)
+    return None
+
+
+def _text(value: object) -> str | None:
+    return str(value) if isinstance(value, str) else None
+
+
+def _routed(
+    event: SecurityEvent, request: HttpRequest | None, arguments: Mapping[str, Any]
+) -> SecurityEvent | None:
+    if event is SecurityEvent.REAUTHENTICATED and not arguments.get("reauthenticated"):
+        return None
+    if event is SecurityEvent.EMAIL_CHANGE_REQUESTED and arguments.get("signup"):
+        return None
+    if event is SecurityEvent.EMAIL_CHANGED and arguments.get("from_email_address") is None:
+        # The first verification of a sign-up address is already `email_verified`.
+        return None
+    if event is SecurityEvent.MFA_FAILED and arguments.get("reauthentication"):
+        return SecurityEvent.REAUTHENTICATION_FAILED
+    # allauth sends `login_code_rejected` for sign-in codes and for reauthentication codes; only
+    # the latter come from a signed-in session.
+    user = getattr(request, "user", None)
+    if event is SecurityEvent.LOGIN_CODE_REJECTED and user is not None and user.is_authenticated:
+        return SecurityEvent.REAUTHENTICATION_FAILED
+    return event
+
+
+def _last_step(request: HttpRequest | None, user: Any) -> Mapping[str, Any]:
+    if request is None or user is None or not hasattr(request, "session"):
+        return {}
+    records = get_authentication_records(request, user)
+    return records[-1] if records else {}
+
+
+def _receive(
+    signal_event: SecurityEvent, *, request: HttpRequest | None = None, **arguments: Any
+) -> None:
+    event = _routed(signal_event, request, arguments)
+    if event is None:
+        return
+    authenticator = arguments.get("authenticator")
+    step = (
+        _last_step(request, arguments.get("user"))
+        if event is SecurityEvent.LOGIN_SUCCEEDED
+        else arguments
+    )
+    method = _text(step.get("method"))
+    if event is SecurityEvent.REAUTHENTICATION_FAILED:
+        method = "mfa" if authenticator is not None else "code"
     record_security_event(
         event,
         request=request,
         user_id=_signal_user_id(arguments),
         address=_signal_address(arguments),
+        method=method,
+        authenticator_type=_text(step.get("type") if authenticator is None else authenticator.type),
+        provider=_signal_provider(arguments) or _text(step.get("provider")),
     )
 
 

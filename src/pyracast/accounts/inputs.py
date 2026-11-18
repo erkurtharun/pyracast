@@ -29,7 +29,9 @@ from allauth.mfa.models import Authenticator
 from allauth.mfa.totp.internal import auth as totp_auth
 from django import forms
 from django.contrib.auth.models import User
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.core.validators import MaxLengthValidator
+from django.http import HttpRequest
 
 from pyracast.accounts.audit import SecurityEvent, record_security_event
 from pyracast.accounts.authentication import email_identity
@@ -60,6 +62,16 @@ class RequestPasswordResetInput(AllauthRequestPasswordResetInput):
         self.users = [user] if user is not None and user.is_active else []
         return email
 
+    def save(self, request: HttpRequest, **kwargs: Any) -> str:
+        email: str = super().save(request, **kwargs)
+        record_security_event(
+            SecurityEvent.RESET_REQUESTED,
+            request=request,
+            user_id=self.users[0].pk if self.users else None,
+            address=email,
+        )
+        return email
+
 
 class ResetPasswordInput(PasswordInput, AllauthResetPasswordInput):
     pass
@@ -81,7 +93,20 @@ class ChangePasswordInput(PasswordInput, AllauthChangePasswordInput):
 
 
 class ReauthenticateInput(PasswordInput, AllauthReauthenticateInput):
-    pass
+    user: User
+
+    def clean_password(self) -> str:
+        try:
+            password: str = super().clean_password()
+        except ValidationError:
+            record_security_event(
+                SecurityEvent.REAUTHENTICATION_FAILED,
+                request=context.request,
+                user_id=self.user.pk,
+                method="password",
+            )
+            raise
+        return password
 
 
 class ResendEmailVerificationInput(AllauthResendEmailVerificationInput):
@@ -107,7 +132,17 @@ class SecondFactorCode(BaseAuthenticateForm):
         ):
             if not main or authenticator.type == Authenticator.Type.TOTP:
                 main = authenticator
-            if authenticator.wrap().validate_code(code):
+            try:
+                valid = authenticator.wrap().validate_code(code)
+            except PermissionDenied:
+                record_security_event(
+                    SecurityEvent.AUTHENTICATOR_UNREADABLE,
+                    request=context.request,
+                    user_id=self.user.pk,
+                    authenticator_type=authenticator.type,
+                )
+                raise
+            if valid:
                 authenticator.user = self.user
                 self.authenticator = authenticator
                 return code
