@@ -846,6 +846,32 @@ def test_malformed_or_non_object_json_is_a_localized_refusal(
         assert body == {"code": "bad_request", "message": getattr(CASES["bad_request"], accept)}
 
 
+@pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
+@pytest.mark.parametrize(
+    ("method", "path", "content", "status"),
+    [
+        ("GET", f"{ALLAUTH}auth/email/verify", b"", 405),
+        ("POST", f"{ALLAUTH}account/email", b"{", 400),
+    ],
+)
+def test_replaced_framework_refusals_keep_the_response_metadata(
+    method: str, path: str, content: bytes, status: int
+) -> None:
+    from pyracast.accounts.language import LANGUAGE_COOKIE, save_user_language
+
+    user = User.objects.create_user(username="person", email="person@example.com")
+    save_user_language(user, "tr")
+    client = Client()
+    client.force_login(user)
+    response = client.generic(method, path, content, content_type="application/json")
+    assert response.status_code == status
+    assert response["Content-Type"] == "application/json"
+    assert response.json()["message"] == CASES[response.json()["code"]].tr
+    assert response["Content-Language"] == "tr"
+    assert {"Accept-Language", "Cookie"} <= {value.strip() for value in response["Vary"].split(",")}
+    assert response.cookies[LANGUAGE_COOKIE].value == "tr"
+
+
 def carries_the_contract(body: Any) -> bool:
     if not isinstance(body, dict) or body.get("code") not in CASES:
         return False
