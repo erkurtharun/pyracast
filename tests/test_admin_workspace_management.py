@@ -584,8 +584,8 @@ def test_workspace_console_pages_render_in_turkish_without_mail_or_provider_call
         assert html.count("<h1") == 1, path
 
     page = client.get(base, HTTP_ACCEPT_LANGUAGE="tr").content.decode()
-    assert '<th scope="col">İnceleme</th>' in page
-    assert '<th scope="col">Gönderim</th>' in page
+    assert ">İnceleme</th>" in page
+    assert ">Gönderim</th>" in page
     assert "Hiç oturum açmad\u0131" in page
     assert "Teslimat" not in page
     for path, header in (

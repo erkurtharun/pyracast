@@ -36,7 +36,7 @@
           <thead>
             <tr>
               <th scope="col">{% translate "Plant" %}</th>
-              <th scope="col">{% translate "Review" %}</th>
+              <th scope="col">{% translate "Review" context "review status" %}</th>
               <th scope="col">{% translate "Connection" %}</th>
               <th scope="col">{% translate "Last saved forecast" %}</th>
               <th scope="col">{% translate "Location" %}</th>
@@ -52,7 +52,7 @@
                     <span class="row-meta">{{ plant.company }}{% if plant.name != plant.plant_name %} · {{ plant.name }}{% endif %}</span>
                   </span>
                 </th>
-                <td data-label="{% translate "Review" %}">
+                <td data-label="{% translate "Review" context "review status" %}">
                   <span class="cell">
                     <span class="badge badge--{{ plant.status|slugify }}">{% if plant.status == "pending" %}{% translate "Awaiting approval" %}{% else %}{{ plant.status|capfirst }}{% endif %}</span>
                     <span class="row-meta">{% translate "Revision" %} {{ plant.revision }}</span>

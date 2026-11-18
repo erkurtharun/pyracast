@@ -39,7 +39,7 @@ test("a platform administrator creates a workspace, adds a plant and manages mem
     ).toBeVisible();
     await expect(
         page.getByRole("status").filter({
-            hasText: "Invitation sent to browser-owner@example.test.",
+            hasText: "The invitation to browser-owner@example.test was sent.",
         }),
     ).toBeVisible();
     await checkPage(page, testInfo, "console-workspace-desktop");
@@ -48,6 +48,9 @@ test("a platform administrator creates a workspace, adds a plant and manages mem
 
     await page.getByRole("link", { name: "Add plant" }).first().click();
     await page.getByLabel(/^Plant name/).fill("Browser console plant");
+    await expect(
+        page.getByText("Paste a pair such as 41.0082, 28.9784 into Latitude"),
+    ).toBeVisible();
     const latitude = page.getByLabel(/^Latitude/);
     await latitude.evaluate((element) => {
         const data = new DataTransfer();
@@ -90,7 +93,7 @@ test("a platform administrator creates a workspace, adds a plant and manages mem
     await page.getByRole("button", { name: "Send invitation" }).click();
     await expect(
         page.getByRole("status").filter({
-            hasText: "Invitation sent to browser-viewer@example.test.",
+            hasText: "The invitation to browser-viewer@example.test was sent.",
         }),
     ).toBeVisible();
     const member = process.env.BROWSER_REMOVABLE_MEMBER!;

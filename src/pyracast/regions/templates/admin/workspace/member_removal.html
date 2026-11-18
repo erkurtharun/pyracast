@@ -3,7 +3,12 @@
 {% block title %}{{ title }}{% endblock %}
 {% block heading %}{{ title }}{% endblock %}
 {% block backlink %}<a class="back-link" href="{% url 'admin:workspace_tenant' tenant.pk %}">{{ tenant.name }}</a>{% endblock %}
-{% block lead %}{% if not is_administrator %}<p class="lead">{% blocktranslate with workspace=tenant.name %}Remove {{ member }} from {{ workspace }}.{% endblocktranslate %}</p>{% endif %}{% endblock %}
+{% block lead %}
+  <dl class="state-strip">
+    <div><dt>{% translate "Member" %}</dt><dd>{{ member }}</dd></div>
+    <div><dt>{% translate "Workspace" %}</dt><dd>{{ tenant.name }}</dd></div>
+  </dl>
+{% endblock %}
 {% block content %}
   {% if errors %}
     <section class="notice notice--error" role="alert" tabindex="-1" data-error-summary aria-labelledby="errors-title">

@@ -50,6 +50,12 @@ document.querySelectorAll("[data-coordinate-pair]").forEach((latitude) => {
   if (!(latitude instanceof HTMLInputElement) || !latitude.form) return;
   const longitude = latitude.form.elements.namedItem(latitude.dataset.coordinatePair);
   if (!(longitude instanceof HTMLInputElement)) return;
+  const hint = latitude.form.querySelector("[data-coordinate-hint]");
+  if (hint instanceof HTMLElement) {
+    hint.hidden = false;
+    const described = latitude.getAttribute("aria-describedby");
+    latitude.setAttribute("aria-describedby", described ? `${described} ${hint.id}` : hint.id);
+  }
   latitude.addEventListener("paste", (event) => {
     const pair = coordinatePair.exec(event.clipboardData?.getData("text") ?? "");
     if (!pair) return;

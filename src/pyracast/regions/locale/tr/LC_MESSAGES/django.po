@@ -2122,7 +2122,7 @@ msgid "Provider request pause cleared"
 msgstr "Sağlayıcı istek beklemesi kaldırıldı"
 
 msgid "Review the form"
-msgstr "Formu gözden geçirin"
+msgstr "Formu kontrol edin"
 
 msgid "Reload this page"
 msgstr "Bu sayfayı yeniden yükleyin"
@@ -2167,7 +2167,7 @@ msgid "The member was not removed"
 msgstr "Üye çıkarılmadı"
 
 msgid "What happens"
-msgstr "Ne olur"
+msgstr "Ne olacak"
 
 msgid ""
 "The administrator cannot be removed. Make another member the administrator "
@@ -2189,9 +2189,6 @@ msgstr "Hesabı, santraller ve kaydedilmiş veriler korunur."
 msgid "Remove member"
 msgstr "Üyeyi çıkar"
 
-msgid "Remove %(member)s from %(workspace)s."
-msgstr "%(member)s, %(workspace)s çalışma alanından çıkarılacak."
-
 msgid ""
 "A location request is waiting for review. Approve or reject it before "
 "correcting the location."
@@ -2212,8 +2209,8 @@ msgid ""
 "The plant starts in review. After saving, set up its provider connection, "
 "then validate and approve it."
 msgstr ""
-"Santral incelemede başlar. Kaydettikten sonra sağlayıcı bağlantısını kurun, "
-"ardından doğrulayıp onaylayın."
+"Santral önce incelemeye alınır. Kaydettikten sonra sağlayıcı bağlantısını "
+"kurun, ardından doğrulayıp onaylayın."
 
 msgid "Add plant"
 msgstr "Santral ekle"
@@ -2301,6 +2298,19 @@ msgstr "Çıkar"
 msgid "No members yet. Invite the customer's administrator first."
 msgstr "Henüz üye yok. Önce müşterinin yöneticisini davet edin."
 
+msgid ""
+"No members yet. The administrator appears here after accepting the "
+"invitation."
+msgstr "Henüz üye yok. Yönetici, daveti kabul edince burada görünür."
+
+msgctxt "last sign-in"
+msgid "Never"
+msgstr "Hiç oturum açmadı"
+
+msgctxt "review status"
+msgid "Review"
+msgstr "İnceleme"
+
 msgid "Invitations"
 msgstr "Davetler"
 
@@ -2308,7 +2318,7 @@ msgid "Email address"
 msgstr "E-posta adresi"
 
 msgid "Delivery"
-msgstr "Teslimat"
+msgstr "Gönderim"
 
 msgid "Expires"
 msgstr "Son geçerlilik"
@@ -2319,11 +2329,22 @@ msgstr "Yeniden gönder"
 msgid "Revoke"
 msgstr "İptal et"
 
-msgid "No pending invitations."
-msgstr "Bekleyen davet yok."
+msgid "No pending invitations. Invite people under Members."
+msgstr "Bekleyen davet yok. Kişileri Üyeler bölümünden davet edin."
 
 msgid "Rename workspace"
 msgstr "Çalışma alanını yeniden adlandır"
+
+msgid "Rename"
+msgstr "Yeniden adlandır"
+
+msgid "This workspace has no administrator. Invite the administrator first."
+msgstr "Bu çalışma alanının yöneticisi yok. Önce yöneticiyi davet edin."
+
+msgid "Paste a pair such as 41.0082, 28.9784 into Latitude to fill both."
+msgstr ""
+"41.0082, 28.9784 gibi bir çifti Enlem alanına yapıştırırsanız iki alan "
+"birlikte dolar."
 
 msgid "Plant details"
 msgstr "Santral bilgileri"
@@ -2338,7 +2359,7 @@ msgid "Sent"
 msgstr "Gönderildi"
 
 msgid "Delivery unknown"
-msgstr "Teslimat bilinmiyor"
+msgstr "Gönderim belirsiz"
 
 msgid "Administrator email (optional)"
 msgstr "Yönetici e-postası (isteğe bağlı)"
@@ -2370,8 +2391,8 @@ msgstr "Yönetici: santralleri, üyeleri ve ayarları yönetir"
 msgid "Offered while the workspace has no administrator."
 msgstr "Çalışma alanının yöneticisi yokken sunulur."
 
-msgid "Invitation sent to %(email)s."
-msgstr "Davet %(email)s adresine gönderildi."
+msgid "The invitation to %(email)s was sent."
+msgstr "%(email)s adresine davet gönderildi."
 
 msgid ""
 "The invitation to %(email)s could not be sent. Check the mail service, then "
@@ -2390,8 +2411,8 @@ msgstr ""
 msgid "Workspace %(name)s created."
 msgstr "%(name)s çalışma alanı oluşturuldu."
 
-msgid "Workspace renamed to %(name)s."
-msgstr "Çalışma alanının yeni adı: %(name)s."
+msgid "%(name)s is the new workspace name."
+msgstr "Çalışma alanının adı %(name)s olarak değiştirildi."
 
 msgid "Invitation to %(email)s revoked."
 msgstr "%(email)s adresine gönderilen davet iptal edildi."
@@ -2449,8 +2470,8 @@ msgid ""
 "Plant %(name)s created. Next, set up its provider connection, then validate "
 "and approve it."
 msgstr ""
-"%(name)s santrali oluşturuldu. Sırada sağlayıcı bağlantısını kurmak, "
-"ardından doğrulayıp onaylamak var."
+"%(name)s santrali oluşturuldu. Şimdi sağlayıcı bağlantısını kurun, ardından "
+"doğrulayıp onaylayın."
 
 msgid ""
 "Plant details saved. The plant is back in review with its corrected "

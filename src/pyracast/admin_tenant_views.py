@@ -23,6 +23,7 @@ from pyracast.admin_tenants import (
     WorkspaceForm,
     WorkspaceRenameForm,
     member_label,
+    pending_invitations,
     report_invitation,
     tenant_list_context,
     workspace_context,
@@ -85,7 +86,7 @@ def workspace_name(
     def rename() -> HttpResponse:
         if form.apply(_actor(request)):
             name = form.cleaned_data["name"]
-            messages.success(request, _("Workspace renamed to %(name)s.") % {"name": name})
+            messages.success(request, _("%(name)s is the new workspace name.") % {"name": name})
         else:
             messages.info(request, _("Nothing changed."))
         return redirect("admin:workspace_tenant", tenant_id=tenant.pk)
@@ -129,13 +130,16 @@ def new_invitation(
     request: HttpRequest, tenant_id: int, *, site: PlatformAdminSite
 ) -> HttpResponse:
     tenant = get_object_or_404(Tenant, pk=tenant_id)
+    offers_administrator = not has_workspace_admin(tenant.pk)
+    needs_administrator = (
+        offers_administrator
+        and not pending_invitations(tenant.pk).filter(role=WorkspaceRole.ADMIN).exists()
+    )
     role = request.GET.get("role")
+    if role not in WorkspaceRole.values:
+        role = WorkspaceRole.ADMIN if needs_administrator else WorkspaceRole.VIEWER
     form = InvitationForm(
-        form_data(request),
-        initial={
-            "role": role if role in WorkspaceRole.values else WorkspaceRole.VIEWER,
-            "language": request.LANGUAGE_CODE,
-        },
+        form_data(request), initial={"role": role, "language": request.LANGUAGE_CODE}
     )
 
     def invite() -> HttpResponse:
@@ -150,7 +154,8 @@ def new_invitation(
         {
             "tenant": tenant,
             "form": form,
-            "offers_administrator": not has_workspace_admin(tenant.pk),
+            "offers_administrator": offers_administrator,
+            "needs_administrator": needs_administrator,
         },
     )
 

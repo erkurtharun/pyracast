@@ -5,6 +5,7 @@
 <fieldset class="group">
   <legend>{% translate "Location" %}</legend>
   {% if location_request_pending %}<p class="callout callout--warn">{% translate "A location request is waiting for review. Approve or reject it before correcting the location." %} <a href="{% url 'admin:workspace_plant' region.pk %}#location-title">{% translate "Review the request" %}</a></p>{% endif %}
+  <p class="row-meta" id="coordinate-hint" data-coordinate-hint hidden>{% translate "Paste a pair such as 41.0082, 28.9784 into Latitude to fill both." %}</p>
   <div class="field-grid">
     {% include "admin/workspace/field.html" with field=form.latitude %}
     {% include "admin/workspace/field.html" with field=form.longitude %}

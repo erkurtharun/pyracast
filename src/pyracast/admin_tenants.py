@@ -226,7 +226,7 @@ class InvitationForm(forms.Form):
 def report_invitation(request: HttpRequest, invitation: WorkspaceInvitation) -> None:
     values = {"email": invitation.email}
     if invitation.delivery_status == InvitationDeliveryStatus.SENT:
-        messages.success(request, _("Invitation sent to %(email)s.") % values)
+        messages.success(request, _("The invitation to %(email)s was sent.") % values)
     elif invitation.delivery_status == InvitationDeliveryStatus.FAILED:
         messages.error(
             request,
@@ -285,8 +285,13 @@ def workspace_context(tenant: Tenant) -> dict[str, Any]:
     return {
         "tenant": tenant,
         "administrator": member_label(administrator) if administrator else "",
-        "administrator_invited": any(
-            invitation.role == WorkspaceRole.ADMIN for invitation in invitations
+        "administrator_invitation": next(
+            (
+                invitation.email
+                for invitation in invitations
+                if invitation.role == WorkspaceRole.ADMIN
+            ),
+            "",
         ),
         "members": [
             {"user": member.user, "label": member_label(member.user), "role": member.role}
