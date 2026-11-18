@@ -13,15 +13,12 @@ async function setup(page: Page) {
                 times: ["09:00", "10:00", "11:00"],
                 timezone: region.timezone,
                 effective_from: "2026-01-01T00:00:00Z",
-                daily_request_limit: 10,
-                used_today: 2,
-                remaining_today: 8,
+                last_success_at: "2026-01-08T03:00:00Z",
+                next_collection_at: null,
                 max_forecast_times: 9,
                 history_local_time: "03:00",
                 history_retry_until_local: "09:00",
                 history_retry_minutes: 30,
-                quota_utc_day: "2026-01-08",
-                requests_by_outcome: { succeeded: 2, failed: 0, uncertain: 0 },
                 recent_jobs: [],
             },
         }),
@@ -32,40 +29,6 @@ async function setup(page: Page) {
                 connected: false,
                 credentials_available: true,
                 archived_days: 1,
-            },
-        }),
-    );
-    await page.route("**/reported-production/**", (route) =>
-        route.fulfill({
-            json: {
-                timezone: region.timezone,
-                date: "2026-01-07",
-                source_kind: "mixed",
-                complete: false,
-                calibration_eligible: true,
-                calibration_blocker: null,
-                snapshot: {
-                    id: 1,
-                    collected_at: "2026-01-08T03:00:00Z",
-                    available_at: "2026-01-08T03:00:00Z",
-                    content_sha256: "synthetic",
-                    normalization_policy: "hour_start",
-                    complete: false,
-                },
-                readings: [1, null, 2].map((energy, index) => ({
-                    period_start: `2026-01-07T${String(index + 8).padStart(2, "0")}:00:00+03:00`,
-                    period_end: `2026-01-07T${String(index + 9).padStart(2, "0")}:00:00+03:00`,
-                    provider_timestamp:
-                        energy === null ? null : `hour-${index}`,
-                    energy_mwh: energy,
-                    source_kind:
-                        energy === null
-                            ? null
-                            : index === 0
-                              ? "settlement_injection"
-                              : "realtime_generation",
-                    snapshot_id: energy === null ? null : index === 0 ? 2 : 1,
-                })),
             },
         }),
     );
@@ -87,29 +50,19 @@ async function setup(page: Page) {
     await page.route("**/outages/", (route) =>
         route.fulfill({ json: paged([]) }),
     );
-    await page.route("**/trash/**", (route) => {
-        const isPlant = new URL(route.request().url()).pathname.endsWith(
-            "/plants/",
-        );
-        return route.fulfill({
-            json: paged([
-                {
-                    id: 91,
-                    name: isPlant ? "Archived plant" : "Archived region",
+    await page.route("**/trash/regions/", (route) =>
+        route.fulfill({
+            json: paged(
+                ["Archived region", "Archived plant"].map((name, index) => ({
+                    id: 91 + index,
+                    name,
                     deleted_at: "2026-01-07T10:00:00Z",
                     purge_after: "2026-02-06T10:00:00Z",
                     can_restore: true,
-                    ...(isPlant
-                        ? {
-                              region_id: region.id,
-                              region_name: region.name,
-                              parent_deleted: false,
-                          }
-                        : {}),
-                },
-            ]),
-        });
-    });
+                })),
+            ),
+        }),
+    );
     await page.route("**/forecast/**", (route) => {
         const target =
             new URL(route.request().url()).searchParams.get("date") ??

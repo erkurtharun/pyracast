@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 from typing import cast, get_args
 
@@ -95,7 +96,10 @@ def test_stored_vocabulary_is_checked_by_a_constraint_derived_from_its_enumerati
     assert derived_check(vocabulary) is not None
 
 
-@pytest.mark.parametrize("vocabulary", [_stored(vocabulary) for vocabulary in STORED_VOCABULARIES])
+@pytest.mark.parametrize(
+    "vocabulary",
+    [_stored(vocabulary) for vocabulary in STORED_VOCABULARIES if vocabulary.published],
+)
 def test_stored_vocabulary_is_exported_by_name_to_the_api_schema(
     vocabulary: StoredVocabulary,
 ) -> None:
@@ -103,16 +107,22 @@ def test_stored_vocabulary_is_exported_by_name_to_the_api_schema(
         name for name, choices in _exported().items() if choices.choices == vocabulary.choices
     ]
     assert len(exported) == 1
-    components = json.loads(OPENAPI.read_text(encoding="utf-8"))["components"]["schemas"]
-    declarations = " ".join(TYPESCRIPT.read_text("utf-8").split()).replace(": | ", ": ")
-    if not vocabulary.customer_api:
-        assert exported[0] not in components
-        assert f" {exported[0]}:" not in declarations
-        return
     values = [value for value, _ in vocabulary.choices]
+    components = json.loads(OPENAPI.read_text(encoding="utf-8"))["components"]["schemas"]
     assert components[exported[0]]["enum"] == values
-    union = " | ".join(json.dumps(value) for value in values)
-    assert f" {exported[0]}: {union};" in declarations
+    union = re.search(rf"\b{exported[0]}:([^;]+);", TYPESCRIPT.read_text(encoding="utf-8"))
+    assert union is not None
+    assert re.findall(r'"([^"]*)"', union[1]) == values
+
+
+@pytest.mark.parametrize(
+    "vocabulary",
+    [_stored(vocabulary) for vocabulary in STORED_VOCABULARIES if not vocabulary.published],
+)
+def test_operator_vocabulary_stays_out_of_the_customer_schema(
+    vocabulary: StoredVocabulary,
+) -> None:
+    assert all(choices.choices != vocabulary.choices for choices in _exported().values())
 
 
 def test_collection_jobs_are_described_by_their_enumerations() -> None:
@@ -141,7 +151,7 @@ def test_serializer_rejects_values_outside_the_vocabulary(
 def test_operation_rejects_values_outside_the_vocabulary(
     case: InputVocabulary, value: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    assert_operation_rejects(case.operation(monkeypatch), value)
+    assert_operation_rejects(case, case.operation(monkeypatch), value)
 
 
 def test_supported_languages_have_one_value_set() -> None:

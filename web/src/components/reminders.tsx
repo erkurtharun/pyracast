@@ -299,7 +299,12 @@ function ReminderSettings({
     const deliveryDetails: Record<string, string> = {
         mail_not_sent: t("mailNotSent"),
         mail_rejected: t("mailRejected"),
-        mail_authentication_failed: t("mailAuthenticationFailed"),
+        mail_credentials_rejected: t("mailCredentialsRejected"),
+        mail_authorization_revoked: t("mailAuthorizationRevoked"),
+        mail_sender_forbidden: t("mailSenderForbidden"),
+        mail_configuration_invalid: t("mailConfigurationInvalid"),
+        mail_rate_limited: t("mailRateLimited"),
+        mail_preparation_failed: t("mailPreparationFailed"),
         interrupted_connection: t("interruptedConnection"),
         authority_or_deadline_changed: t("authorityChanged"),
         mail_outcome_uncertain: t("outcomeUncertain"),

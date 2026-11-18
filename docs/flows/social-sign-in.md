@@ -105,7 +105,7 @@ sequenceDiagram
 | Existing identity whose user is deactivated | 302 `error=unknown`, no session (allauth `pre_login`; not covered by a test) |
 | Unverified email on existing identity, or TOTP present | Pending `verify_email` or `mfa_authenticate`, screen switches mode |
 | Another request of the same session holds the lock for 5 s | 429 `session_busy` JSON, shown raw when it hits the callback or the form post |
-| Signup GET or POST without pending signup (expired, disabled provider) | 409; the mount-time prefill GET swallows it silently (email stays empty), a POST shows the generic request error and has already consumed signup quota |
+| Signup GET or POST without pending signup (expired, disabled provider) | 409; the mount-time prefill GET swallows it silently (email stays empty), a POST shows the generic request error and consumes no signup quota |
 | Signup rate limit (`5/h/ip`, shared with password signup) | 429 JSON |
 | Missing company name without token; taken name; bad invitation; missing email | 400 field errors (`company_name`, `email`, non-field invitation message) |
 | Unique name race on insert | 400 `company_name`, transaction rolled back, pending signup restored; any other `IntegrityError` propagates (500) |

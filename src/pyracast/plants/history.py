@@ -7,7 +7,7 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.utils.translation import gettext
 
-from pyracast.accounts.operations import require_member
+from pyracast.accounts.authorization import tenant_membership
 from pyracast.db import read_snapshot
 from pyracast.forecasts.actuals import (
     ArchivedActualSource,
@@ -47,7 +47,7 @@ def plant_outlook(
     from pyracast.plants.production_diagnostics import production_diagnostic
 
     with read_snapshot():
-        require_member(actor, tenant_id)
+        tenant_membership(actor, tenant_id)
         region = Region.objects.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
         plant = Plant.objects.get(pk=plant_id, region=region)
         plant.region = region

@@ -459,6 +459,31 @@ test("uncertain acceptance explains the duplicate risk without exposing internal
     ).toHaveCount(0);
 });
 
+for (const [code, detail] of [
+    [
+        "mail_rate_limited",
+        "The mail service rate limit was reached. Retries are bounded by the sending window.",
+    ],
+    [
+        "mail_preparation_failed",
+        "Transmission permission could not be confirmed. Retries are bounded by the sending window.",
+    ],
+]) {
+    test(`${code} explains the retry reason without exposing internal codes`, async ({
+        page,
+    }) => {
+        await reminderApi(page, [], 5, true, {
+            status: "retry",
+            last_error: code,
+            sent_at: null,
+        });
+        await openReminders(page);
+        await page.getByText("Recent deliveries", { exact: true }).click();
+        await expect(page.getByText(detail, { exact: true })).toBeVisible();
+        await expect(page.getByText(code, { exact: true })).toHaveCount(0);
+    });
+}
+
 test("five recipients can be added, removed, saved and reloaded at 320px", async ({
     page,
 }) => {

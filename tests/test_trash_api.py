@@ -2,11 +2,10 @@ from datetime import datetime, timedelta
 
 import pytest
 from django.contrib.auth.models import User
-from django.test import Client, RequestFactory
+from django.test import Client
 from django.utils import timezone
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
-from pyracast.admin import RegionAdmin, site
 from pyracast.plants.models import Plant, PlantEvent
 from pyracast.regions.models import Region
 from tests.support.domain import NOW
@@ -26,10 +25,10 @@ def test_trash_restore_hides_all_location_and_plant_routes(
     detail = f"{region}plants/{plant.pk}/"
     assert client.delete(region).status_code == 204
     assert client.delete(region).status_code == 204
-    assert client.get(tenant + "regions/").json()["count"] == 0
-    for path in ("", "plants/", "collection-schedule/", "reminders/", "forecast/?date=2026-11-08"):
+    assert client.get(tenant + "sites/").json()["count"] == 0
+    for path in ("plants/", "collection-schedule/", "reminders/", "forecast/?date=2026-11-08"):
         assert client.get(region + path).status_code == 404
-    for path in ("", "observations/", "production/", "calibrations/", "forecast/?date=2026-11-08"):
+    for path in ("production/", "calibrations/", "forecast/?date=2026-11-08"):
         assert client.get(detail + path).status_code == 404
     entry = client.get(tenant + "trash/regions/").json()["results"][0]
     assert entry["can_restore"] is True
@@ -55,12 +54,13 @@ def test_a_plant_leaves_the_workspace_and_returns_only_with_its_location(
     assert client.get(tenant + "trash/plants/").status_code == 404
     assert client.get(region + "plants/").json()["count"] == 1
     assert client.delete(region).status_code == 204
-    assert client.get(detail).status_code == 404
+    assert client.get(region + "plants/").status_code == 404
     restored = client.post(region + "restore/", {}, content_type="application/json")
     assert restored.status_code == 200
-    assert client.get(detail).json()["current_configuration"]["id"] == (
-        plant.current_configuration_id
-    )
+    rows = client.get(region + "plants/").json()["results"]
+    assert [(row["id"], row["current_configuration"]["id"]) for row in rows] == [
+        (plant.pk, plant.current_configuration_id)
+    ]
     assert not PlantEvent.objects.filter(action__in=("plant_trashed", "plant_restored")).exists()
 
 
@@ -112,21 +112,3 @@ def test_trash_and_restore_keep_tenant_boundaries_and_session_csrf(
         == 400
     )
     assert Region.objects.get(pk=system.region.pk).deleted_at is None
-
-
-def test_operator_bulk_actions_skip_deleted_definitions(monkeypatch: pytest.MonkeyPatch) -> None:
-    system, _ = make_plant(monkeypatch)
-    client = Client()
-    client.force_login(system.member)
-    path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/"
-    assert client.delete(path).status_code == 204
-    request = RequestFactory().post("/admin/regions/region/")
-    request.user = system.admin
-    view = RegionAdmin(Region, site)
-    rows = Region.objects.filter(pk=system.region.pk)
-    view.approve(request, rows)
-    view.reject(request, rows)
-    view.suspend(request, rows)
-    system.region.refresh_from_db()
-    assert system.region.deleted_at == NOW
-    assert system.region.status == "approved"

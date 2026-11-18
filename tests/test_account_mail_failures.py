@@ -19,7 +19,7 @@ from django.core.mail.backends.base import BaseEmailBackend
 from django.test import Client, override_settings
 
 from pyracast.accounts.models import Membership, Tenant
-from pyracast.mail_delivery import NotSentError
+from pyracast.mail.errors import NotSentError
 from tests.support.admin_recovery_security import RECOVERY, authenticated_account
 from tests.support.admin_recovery_security import submit as submit_to
 from tests.support.auth_lifecycle import PASSWORD, member, submit

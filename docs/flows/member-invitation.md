@@ -6,7 +6,7 @@ A workspace administrator submits an email address on the Members screen. The ba
 
 - `web/src/components/dashboard.tsx` `Dashboard` renders `web/src/components/workspace-members.tsx` `WorkspaceMembers` only when the tenant role is `admin` and the view is `members`.
 - `GET|POST /api/tenants/{t}/invitations/` -> `pyracast.api.workspaces.WorkspaceInvitationsView`; `DELETE /api/tenants/{t}/invitations/{i}/` -> `WorkspaceInvitationView` (`src/pyracast/urls.py`). Actor: workspace administrator. They are the only callers of `pyracast.accounts.invitations.invite_workspace_member` and `revoke_workspace_invitation`.
-- Mail templates `src/pyracast/accounts/templates/mail/workspace_invitation.txt` and `.html`. No command, script or Dramatiq job: the mail is sent synchronously in the request through the configured backend (SMTP, or the Gmail API over HTTPS in `pyracast.gmail`), timeout 15 s.
+- Mail templates `src/pyracast/accounts/templates/mail/workspace_invitation.txt` and `.html`. No command, script or Dramatiq job: the mail is sent synchronously in the request through the configured backend (`pyracast.mail.send.send`, flow `email-transport`), timeout 15 s.
 
 ## Sequence
 
@@ -30,9 +30,10 @@ sequenceDiagram
         Op-->>V: "ValidationError or InvitationRateLimitError, rollback"
         V-->>UI: "400, or 429 with Retry-After 60"
     end
-    Op->>DB: "expire pending rows for the address, insert hashed invitation, COMMIT"
-    Op->>M: "on_commit deliver: send_mail in the admin language"
-    Op->>DB: "delivery_status = accepted if send_mail returned 1, else uncertain"
+    Op->>DB: "expire pending rows for the address, insert hashed invitation"
+    Op->>Op: "render the mail in the admin language, then COMMIT"
+    Op->>M: "on_commit deliver: send(message)"
+    Op->>DB: "delivery_status = accepted, failed if NotSentError, else uncertain"
     Op-->>V: "invitation"
     V-->>UI: "201 id, email, expires_at, delivery_status"
     UI->>V: "GET invitations/ (refetch after version bump)"
@@ -72,8 +73,8 @@ sequenceDiagram
 | Invalid email, or email already a member (`user.email`, case-insensitive, inactive users included) | 400 `http_400`, "This account already belongs to the workspace." for members |
 | 20 invitations in the last hour for the tenant, or same address within one minute (cancelled rows count) | 429 `http_429`, `Retry-After: 60` in both cases |
 | Tenant or invitation row lock not acquired within 5 s; same-session request still running after 5 s | 503 `workspace_busy` / 429 `session_busy`, both `Retry-After: 1` |
-| Mail backend raises or reports other than one sent | Still 201, `delivery_status = uncertain`, UI hint `deliveryUncertain` |
-| Mail template fails to render, or email of 255 to 320 characters passes both validators (both inferred) | 500; the first after commit, leaving the row `pending`; the second on the `varchar(254)` column |
+| Mail known not sent (`NotSentError`) / any other mail error | Still 201, `delivery_status` `failed` / `uncertain`, UI hint in `workspace-members.tsx` |
+| Mail template fails to render / email of 255 to 320 characters passes both validators (inferred) | 500 and the transaction rolls back, no row is left / 500 on the `varchar(254)` column |
 | Cancel with unknown id or id of another tenant | 400 "The invitation is invalid or expired." |
 | Cancel of an already expired or accepted row | 204; `expires_at` never moves later |
 
@@ -81,7 +82,7 @@ sequenceDiagram
 
 - Lock order: tenant row, then invitation row (revoke). The tenant lock serializes issuance per tenant, so the rate-limit count is race-free. Only the SHA-256 digest is stored; the plaintext token exists only in the mail, in a URL fragment. Reissue first expires every unaccepted, unexpired row for the same lower-cased address.
 - Expiry is the revocation mechanism: reissue, member removal and administrator transfer set `expires_at` to now, cancel to `min(expires_at, now)`. No code path deletes rows.
-- The mail runs in `transaction.on_commit`, so a rolled-back invitation sends nothing. `delivery_status` is `pending` until the callback ends, then `accepted` (the backend took the message, not the invitation) or `uncertain`.
+- The mail runs in `transaction.on_commit`, so a rolled-back invitation sends nothing. `delivery_status` is `pending` until the callback ends, then `accepted` (the backend took the message, not the invitation), `failed` or `uncertain`.
 - Mail language is the administrator's saved language, else the request language, not the invitee's. The role is always viewer; no role choice, no resend. Limits are literals in `invite_workspace_member`: 20 per hour per tenant, 1 per minute per address, 7 days. The templates repeat "seven days".
 
 ## Tests

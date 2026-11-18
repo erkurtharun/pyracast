@@ -9,8 +9,8 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from pyracast.accounts.authorization import require_platform_admin, tenant_membership
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
-from pyracast.accounts.operations import require_admin, require_workspace_admin
 from pyracast.irradiance import local_day_bounds
 from pyracast.plants.calibration_data import current_source_validation
 from pyracast.plants.models import (
@@ -113,7 +113,7 @@ def update_automation(plant: Plant, actor: User, *, enabled: bool, now: datetime
 
 @transaction.atomic
 def disable_workspace_automation(actor: User, tenant_id: int) -> None:
-    require_admin(actor)
+    require_platform_admin(actor)
     Tenant.objects.select_for_update().get(pk=tenant_id)
     region_ids = list(
         Region.objects.select_for_update()
@@ -135,7 +135,7 @@ def set_calibration_automation(
     actor: User, tenant_id: int, region_id: int, plant_id: int, *, enabled: bool
 ) -> Plant:
     with transaction.atomic():
-        require_workspace_admin(actor, tenant_id)
+        tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
         region = Region.objects.select_for_update().get(
             pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
         )

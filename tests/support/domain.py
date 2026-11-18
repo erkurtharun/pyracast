@@ -52,7 +52,7 @@ class System:
 
 def make_system(*, approved: bool = False) -> System:
     member = User.objects.create(username="member")
-    admin = User.objects.create(username="admin", is_superuser=True)
+    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
     tenant = Tenant.objects.create(name="Tenant")
     Membership.objects.create(user=member, tenant=tenant, role=WorkspaceRole.ADMIN)
     region = submit_region(

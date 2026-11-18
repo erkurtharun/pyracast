@@ -2,11 +2,12 @@ from datetime import timedelta
 from typing import Any
 
 import pytest
+from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 
-from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
-from pyracast.accounts.operations import require_admin, require_member
+from pyracast.accounts.authorization import require_platform_admin, tenant_membership
+from pyracast.accounts.models import Membership, Tenant
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.connections.operations import (
@@ -25,7 +26,6 @@ from pyracast.regions.operations import (
     review_location_change,
     submit_region,
     transition_region,
-    update_region,
     validate_location,
 )
 from tests.support.domain import NOW, FakeAdapter, make_system, provider_key
@@ -37,24 +37,15 @@ def test_tenant_and_platform_authorization() -> None:
     system = make_system()
     other = Tenant.objects.create(name="Other")
     with pytest.raises(PermissionDenied):
-        require_member(system.member, other.pk)
+        tenant_membership(system.member, other.pk)
     with pytest.raises(PermissionDenied):
-        require_admin(system.member)
+        require_platform_admin(system.member)
     system.admin.is_active = False
     with pytest.raises(PermissionDenied):
-        require_admin(system.admin)
-    system.member.is_active = False
+        require_platform_admin(system.admin)
+    User.objects.filter(pk=system.member.pk).update(is_active=False)
     with pytest.raises(PermissionDenied):
-        require_member(system.member, system.tenant.pk)
-    system.member.is_active = True
-    Membership.objects.create(user=system.member, tenant=other, role=WorkspaceRole.ADMIN)
-    with pytest.raises(Region.DoesNotExist):
-        update_region(
-            system.member,
-            system.region.pk,
-            other.pk,
-            name="Other",
-        )
+        tenant_membership(system.member, system.tenant.pk)
 
 
 @pytest.mark.parametrize(
@@ -79,13 +70,6 @@ def test_region_names_are_bounded(name: str) -> None:
     with pytest.raises(ValidationError):
         submit_region(
             system.member, system.tenant.pk, name=name, latitude=0, longitude=0, timezone="UTC"
-        )
-    with pytest.raises(ValidationError):
-        update_region(
-            system.member,
-            system.region.pk,
-            system.tenant.pk,
-            name=name,
         )
 
 

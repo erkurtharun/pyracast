@@ -120,7 +120,9 @@ def test_member_submission_and_withdrawal_are_narrow_api_write_exceptions(
     response = client.post(path, payload, content_type="application/json")
     assert response.status_code == 201, response.content
     proposal = ChangeRequest.objects.get()
-    response = client.post(case.detail_path(proposal) + "withdraw/")
+    response = client.post(
+        case.detail_path(proposal) + "withdraw/", content_type="application/json"
+    )
     assert response.status_code == 200, response.content
     proposal.refresh_from_db()
     assert proposal.status == "withdrawn"
@@ -140,7 +142,9 @@ def test_outcome_read_receipt_is_explicit_idempotent_and_separate_from_get(
     proposal.refresh_from_db()
     assert proposal.outcome_seen_at is None
     for _ in range(2):
-        response = client.post(case.detail_path(proposal) + "seen/")
+        response = client.post(
+            case.detail_path(proposal) + "seen/", content_type="application/json"
+        )
         assert response.status_code == 200, response.content
     proposal.refresh_from_db()
     assert proposal.outcome_seen_at == NOW
@@ -201,7 +205,12 @@ def test_removed_and_rejoined_proposer_cannot_recover_old_request_authority(
     rejoined = Membership.objects.create(user=case.proposer, tenant=case.system.tenant)
     assert rejoined.pk != proposal.proposer_membership_id
     assert client.get(case.detail_path(proposal)).status_code == 404
-    assert client.post(case.detail_path(proposal) + "withdraw/").status_code == 404
+    assert (
+        client.post(
+            case.detail_path(proposal) + "withdraw/", content_type="application/json"
+        ).status_code
+        == 404
+    )
     assert not inbox(case.proposer, case.system.tenant.pk, scope="mine").exists()
     assert inbox(case.system.member, case.system.tenant.pk).filter(pk=proposal.pk).exists()
     approve(case, proposal)
@@ -327,7 +336,9 @@ def test_another_workspace_member_cannot_access_the_proposers_request(
     client = Client()
     client.force_login(colleague)
     path = case.detail_path(proposal) + suffix
-    response = client.get(path) if not suffix else client.post(path)
+    response = (
+        client.get(path) if not suffix else client.post(path, content_type="application/json")
+    )
     assert response.status_code == 404, response.content
     assert not inbox(colleague, case.system.tenant.pk, scope="mine").exists()
     proposal.refresh_from_db()
@@ -410,7 +421,12 @@ def test_tenant_poll_counters_follow_live_roles_and_personal_read_receipts(
     assert tenant_summary(member, case.system.tenant.pk)["unread_outcome_count"] == 1
     assert member.get(case.detail_path(production)).status_code == 200
     assert tenant_summary(member, case.system.tenant.pk)["unread_outcome_count"] == 1
-    assert member.post(case.detail_path(production) + "seen/").status_code == 200
+    assert (
+        member.post(
+            case.detail_path(production) + "seen/", content_type="application/json"
+        ).status_code
+        == 200
+    )
     assert tenant_summary(member, case.system.tenant.pk)["unread_outcome_count"] == 0
     reassign_workspace_admin(
         case.system.admin,

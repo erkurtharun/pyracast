@@ -19,39 +19,11 @@ from pyracast.regions.operations import (
     configure_binding,
     request_location_change,
     review_location_change,
-    update_region,
 )
 from pyracast.trash import purge_expired, trash_region
-from tests.support.api import verified_admin
 from tests.support.domain import NOW, FakeAdapter, System, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
-
-
-def test_member_rename_preserves_approved_configuration_and_is_idempotent() -> None:
-    system = make_system(approved=True)
-    client = Client()
-    client.force_login(system.member)
-    path = f"/api/tenants/{system.tenant.pk}/regions/{system.region.pk}/"
-    response = client.patch(path, {"name": " New name "}, content_type="application/json")
-    assert response.status_code == 200
-    system.region.refresh_from_db()
-    assert system.region.name == "New name"
-    assert (system.region.revision, system.region.status, system.region.approved_binding_id) == (
-        1,
-        "approved",
-        system.binding.pk,
-    )
-    update_region(system.member, system.region.pk, system.tenant.pk, name="New name")
-    assert AuditEvent.objects.filter(action="region_renamed").count() == 1
-    for field, value in (("latitude", 0), ("timezone", "UTC"), ("surface", "tilted")):
-        response = client.patch(
-            path, {"name": "Unsafe", field: value}, content_type="application/json"
-        )
-        assert response.status_code == 400
-    assert client.put(path, {"name": "Changed"}, content_type="application/json").status_code == 200
-    system.region.refresh_from_db()
-    assert (system.region.latitude, system.region.timezone) == (40, "Europe/Istanbul")
 
 
 def test_location_request_api_tenant_boundary_validation_and_soft_deletion() -> None:
@@ -101,15 +73,8 @@ def test_location_request_api_tenant_boundary_validation_and_soft_deletion() -> 
     own_path = path.replace(f"tenants/{system.tenant.pk}", f"tenants/{other.pk}")
     assert client.get(own_path).status_code == 404
     assert client.post(own_path, data, content_type="application/json").status_code == 404
-    assert (
-        client.patch(base, {"name": "Forbidden"}, content_type="application/json").status_code
-        == 403
-    )
     client.force_login(system.member)
     trash_region(system.member, system.tenant.pk, system.region.pk)
-    assert (
-        client.patch(base, {"name": "Deleted"}, content_type="application/json").status_code == 404
-    )
     assert client.get(path).status_code == 404
     assert client.post(path, data, content_type="application/json").status_code == 404
     with pytest.raises(Region.DoesNotExist):
@@ -293,50 +258,6 @@ def test_request_operation_validation_permissions_and_rejection_keep_active_regi
         system.region.status,
         system.region.approved_binding_id,
     ) == (40, 1, "approved", system.binding.pk)
-
-
-def test_operator_admin_review_actions_and_stale_request_errors() -> None:
-    system = make_system(approved=True)
-    client, _ = verified_admin()
-    change = request_location_change(
-        system.member,
-        system.region.pk,
-        system.tenant.pk,
-        expected_revision=1,
-        latitude=41,
-        longitude=30,
-        timezone="UTC",
-    )
-    path = "/admin/regions/regionlocationchangerequest/"
-    assert client.get(path).status_code == 200
-    assert client.get(f"{path}{change.pk}/change/").status_code == 200
-    assert (
-        client.post(
-            path, {"action": "reject", "_selected_action": [change.pk]}, follow=True
-        ).status_code
-        == 200
-    )
-    change.refresh_from_db()
-    assert change.status == "rejected"
-    error = client.post(path, {"action": "approve", "_selected_action": [change.pk]}, follow=True)
-    assert b"stale or already reviewed" in error.content
-    new = request_location_change(
-        system.member,
-        system.region.pk,
-        system.tenant.pk,
-        expected_revision=1,
-        latitude=42,
-        longitude=30,
-        timezone="UTC",
-    )
-    assert (
-        client.post(
-            path, {"action": "approve", "_selected_action": [new.pk]}, follow=True
-        ).status_code
-        == 200
-    )
-    new.refresh_from_db()
-    assert new.status == "approved"
 
 
 @pytest.mark.parametrize("same_values", [True, False])

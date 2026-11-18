@@ -11,7 +11,8 @@ from django.utils import timezone
 from django.utils.translation import gettext, gettext_lazy
 from rest_framework.exceptions import APIException
 
-from pyracast.accounts.operations import require_workspace_admin
+from pyracast.accounts.authorization import tenant_membership
+from pyracast.accounts.models import WorkspaceRole
 from pyracast.incidents.models import IncidentKind, IncidentRevision, PlantIncident
 from pyracast.plants.models import Plant, PlantConfiguration
 from pyracast.regions.models import Region
@@ -260,7 +261,7 @@ def save_incident(
     **values: Any,
 ) -> PlantIncident:
     with transaction.atomic():
-        require_workspace_admin(actor, tenant_id)
+        tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
         plant = lock_incident_plant(tenant_id, region_id, plant_id)
         row = prepare_incident(
             actor,
@@ -318,7 +319,7 @@ def finish_incident(
     cancel: bool = False,
 ) -> PlantIncident:
     with transaction.atomic():
-        require_workspace_admin(actor, tenant_id)
+        tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
         plant = lock_incident_plant(tenant_id, region_id, plant_id)
         row = prepare_incident_finish(
             actor,

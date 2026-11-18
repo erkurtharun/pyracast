@@ -274,7 +274,7 @@ erDiagram
 
 #### `accounts_workspaceinvitation`
 
-- `workspaceinvitation_delivery_status_chk`: `CHECK ("delivery_status" IN ('pending', 'sent', 'uncertain'))`
+- `workspaceinvitation_delivery_status_chk`: `CHECK ("delivery_status" IN ('pending', 'sent', 'failed', 'uncertain'))`
 
 ## regions (`pyracast.regions`)
 
@@ -890,6 +890,7 @@ erDiagram
         timestamp_with_time_zone transmit_started_at "nullable"
         timestamp_with_time_zone sent_at "nullable"
         varchar_40 last_error
+        uuid message_token UK
         bigint binding_id FK "references connections_sitebinding.id"
         bigint snapshot_id FK "nullable; references forecasts_forecastsnapshot.id"
         bigint schedule_id FK "references notifications_reminderschedule.id"

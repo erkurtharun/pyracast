@@ -18,10 +18,11 @@ def test_turkish_api_validation_preserves_field_names_and_error_code() -> None:
     system = make_system(approved=True)
     client = Client()
     client.force_login(system.member)
-    path = f"/api/tenants/{system.tenant.pk}/regions/"
+    path = f"/api/tenants/{system.tenant.pk}/sites/"
+    site = {"name": "PV", "latitude": 41, "longitude": 30, "dc_capacity_mw": 1}
     response = client.post(
         path,
-        {"name": "PV", "latitude": 41, "longitude": 30, "timezone": "UTC", "extra": True},
+        {**site, "timezone": "UTC", "extra": True},
         content_type="application/json",
         HTTP_ACCEPT_LANGUAGE="tr",
     )
@@ -32,7 +33,7 @@ def test_turkish_api_validation_preserves_field_names_and_error_code() -> None:
     }
     response = client.post(
         path,
-        {"name": "PV", "latitude": 41, "longitude": 30, "timezone": "invalid"},
+        {**site, "timezone": "invalid"},
         content_type="application/json",
         HTTP_ACCEPT_LANGUAGE="tr",
     )

@@ -25,8 +25,8 @@ from pyracast.plants import operations
 from pyracast.plants.automation import set_calibration_automation
 from pyracast.plants.models import Plant, PlantEvent
 from pyracast.plants.sites import submit_site
-from pyracast.regions.models import AuditEvent, Region
-from pyracast.regions.operations import request_location_change, submit_region, update_region
+from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest
+from pyracast.regions.operations import request_location_change, submit_region
 from tests.support.domain import NOW, System, make_system
 
 pytestmark = pytest.mark.django_db(transaction=True)
@@ -43,9 +43,6 @@ def test_workspace_write_permission_rejects_anonymous_callers() -> None:
     ("method", "suffix"),
     [
         ("post", "sites/"),
-        ("post", "regions/"),
-        ("put", "regions/{region}/"),
-        ("patch", "regions/{region}/"),
         ("delete", "regions/{region}/"),
         ("post", "regions/{region}/location-change-requests/"),
         ("post", "regions/{region}/restore/"),
@@ -53,7 +50,6 @@ def test_workspace_write_permission_rejects_anonymous_callers() -> None:
         ("put", "regions/{region}/reminders/"),
         ("post", "regions/{region}/plants/"),
         ("put", "regions/{region}/plants/{plant}/"),
-        ("post", "regions/{region}/plants/{plant}/observations/"),
         ("post", "regions/{region}/plants/{plant}/calibrations/"),
         ("post", "regions/{region}/plants/{plant}/calibrations/1/activate/"),
         ("post", "regions/{region}/plants/{plant}/calibration/reset/"),
@@ -62,8 +58,6 @@ def test_workspace_write_permission_rejects_anonymous_callers() -> None:
         ("put", "regions/{region}/plants/{plant}/outages/1/"),
         ("post", "regions/{region}/plants/{plant}/outages/1/resolve/"),
         ("post", "regions/{region}/plants/{plant}/outages/1/cancel/"),
-        ("put", "regions/{region}/plants/{plant}/production-source/"),
-        ("delete", "regions/{region}/plants/{plant}/production-source/"),
         ("post", "invitations/"),
         ("delete", "invitations/1/"),
     ],
@@ -96,7 +90,6 @@ def mutation_calls(system: System, actor: User, plant: Plant) -> list[Callable[[
         lambda: submit_region(
             actor, tenant_id, name="New", latitude=41, longitude=30, timezone="UTC"
         ),
-        lambda: update_region(actor, region_id, tenant_id, name="Changed"),
         lambda: request_location_change(
             actor,
             region_id,
@@ -196,8 +189,7 @@ def test_viewer_reads_shared_records_and_changes_own_language() -> None:
     base = f"/api/tenants/{system.tenant.pk}/"
     for suffix in (
         "sites/",
-        "regions/",
-        f"regions/{system.region.pk}/",
+        f"regions/{system.region.pk}/location-change-requests/",
         "trash/regions/",
     ):
         assert client.get(base + suffix).status_code == 200
@@ -235,7 +227,15 @@ def test_workspace_transfer_serializes_with_mutation_and_rechecks_waiting_writer
             assert transferring.wait(timeout=10)
             writer_started.set()
             with pytest.raises(PermissionDenied):
-                update_region(system.member, system.region.pk, system.tenant.pk, name="Forbidden")
+                request_location_change(
+                    system.member,
+                    system.region.pk,
+                    system.tenant.pk,
+                    expected_revision=1,
+                    latitude=41,
+                    longitude=30,
+                    timezone="UTC",
+                )
         finally:
             connections.close_all()
 
@@ -243,7 +243,5 @@ def test_workspace_transfer_serializes_with_mutation_and_rechecks_waiting_writer
         transfer_future, mutation_future = pool.submit(transfer), pool.submit(mutate)
         transfer_future.result(timeout=15)
         mutation_future.result(timeout=15)
-    system.region.refresh_from_db()
-    assert system.region.name == "Site"
-    assert not AuditEvent.objects.filter(action="region_renamed").exists()
+    assert not RegionLocationChangeRequest.objects.exists()
     assert Membership.objects.get(user=replacement).role == WorkspaceRole.ADMIN

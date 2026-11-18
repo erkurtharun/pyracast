@@ -18,6 +18,7 @@ class WorkspaceRole(models.TextChoices):
 class InvitationDeliveryStatus(models.TextChoices):
     PENDING = "pending", "Pending"
     SENT = "sent", "Sent"
+    FAILED = "failed", "Failed"
     UNCERTAIN = "uncertain", "Uncertain"
 
 

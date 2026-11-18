@@ -4,7 +4,6 @@ from django.contrib import admin, messages
 from django.contrib.auth import logout
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
-from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse, HttpResponseNotAllowed
 from django.shortcuts import get_object_or_404, redirect
 from django.template.response import TemplateResponse
@@ -20,9 +19,9 @@ from django.views.decorators.debug import sensitive_post_parameters, sensitive_v
 from django.views.generic import RedirectView
 from rest_framework.exceptions import ValidationError as APIValidationError
 
+from pyracast.accounts.authorization import has_platform_admin_session
 from pyracast.accounts.language import explicit_language, save_user_language, set_language_cookie
 from pyracast.accounts.models import Tenant
-from pyracast.accounts.security import has_verified_mfa
 from pyracast.admin_forms import BindingActionForm, EpiasConnectionForm, ProviderSetupForm
 from pyracast.admin_historical import historical_import
 from pyracast.admin_tenants import WorkspaceAdministratorForm, tenant_list_context
@@ -63,17 +62,15 @@ from pyracast.plants.models import (
 )
 from pyracast.plants.operations import configuration_is_current
 from pyracast.providers import adapter_for
-from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest, RegionStatus
-from pyracast.regions.operations import approve_region, review_location_change, transition_region
+from pyracast.regions.models import AuditEvent, Region, RegionLocationChangeRequest
+from pyracast.regions.operations import approve_region
+
+_REPLACED_SITE_ROUTES = {"autocomplete", "logout", "password_change", "password_change_done"}
 
 
 class PlatformAdminSite(admin.AdminSite):
     def has_permission(self, request: HttpRequest) -> bool:
-        return bool(
-            super().has_permission(request)
-            and request.user.is_superuser
-            and has_verified_mfa(request)
-        )
+        return has_platform_admin_session(request)
 
     def login(
         self, request: HttpRequest, extra_context: dict[str, Any] | None = None
@@ -114,7 +111,7 @@ class PlatformAdminSite(admin.AdminSite):
             *[
                 url
                 for url in super().get_urls()
-                if not isinstance(url, URLPattern) or url.name not in {"password_change", "logout"}
+                if not isinstance(url, URLPattern) or url.name not in _REPLACED_SITE_ROUTES
             ],
         ]
 
@@ -291,6 +288,11 @@ else:
 
 
 class ReadOnlyAdmin(AdminBase):
+    def get_urls(self) -> list[URLPattern]:
+        prefix = f"{self.opts.app_label}_{self.opts.model_name}_"
+        kept = {prefix + view for view in ("changelist", "history", "change")}
+        return [url for url in super().get_urls() if url.name in kept]
+
     def has_add_permission(self, request: HttpRequest) -> bool:
         return False
 
@@ -302,15 +304,9 @@ class ReadOnlyAdmin(AdminBase):
 
 
 @admin.register(NotificationSettings, site=site)
-class NotificationSettingsAdmin(AdminBase):
+class NotificationSettingsAdmin(ReadOnlyAdmin):
     fields = ("max_recipients",)
     list_display = ("max_recipients",)
-
-    def has_add_permission(self, request: HttpRequest) -> bool:
-        return not NotificationSettings.objects.exists()
-
-    def has_delete_permission(self, request: HttpRequest, obj: Any = None) -> bool:
-        return False
 
 
 @admin.register(DispatcherStatus, site=site)
@@ -353,23 +349,12 @@ class RegionAdmin(ReadOnlyAdmin):
     list_filter = ("status",)
     search_fields = ("name", "tenant__name")
     change_form_template = "admin/regions/region/change_form.html"
-    actions = ("approve", "reject", "suspend")
-
-    def get_urls(self) -> list[URLPattern]:
-        return [
-            path(
-                "<int:object_id>/setup/",
-                self.admin_site.admin_view(self.setup),
-                name="regions_region_setup",
-            ),
-            *super().get_urls(),
-        ]
 
     @admin.display(description=gettext_lazy("Onboarding"))
     def review_link(self, obj: Region) -> SafeString:
         return format_html(
             '<a href="{}">{}</a>',
-            reverse("admin:regions_region_setup", args=(obj.pk,)),
+            reverse("admin:workspace_plant", args=(obj.pk,)),
             _("Review and set up"),
         )
 
@@ -606,69 +591,11 @@ class RegionAdmin(ReadOnlyAdmin):
             status=400 if request.method == "POST" else 200,
         )
 
-    @admin.action(
-        description=gettext_lazy("Approve validated reference binding"), permissions=["view"]
-    )
-    def approve(self, request: HttpRequest, queryset: QuerySet[Region]) -> None:
-        for region in queryset.filter(deleted_at__isnull=True):
-            try:
-                binding = SiteBinding.objects.filter(
-                    region=region, region_revision=region.revision, validated_at__isnull=False
-                ).latest("created_at")
-                approve_region(cast(User, request.user), region.pk, binding.pk, timezone.now())
-            except ObjectDoesNotExist, ValidationError:
-                self.message_user(
-                    request, _("Validate the current binding before approval."), level="ERROR"
-                )
-
-    @admin.action(description=gettext_lazy("Reject region"), permissions=["view"])
-    def reject(self, request: HttpRequest, queryset: QuerySet[Region]) -> None:
-        for region in queryset.filter(deleted_at__isnull=True):
-            transition_region(cast(User, request.user), region.pk, RegionStatus.REJECTED)
-
-    @admin.action(description=gettext_lazy("Suspend region"), permissions=["view"])
-    def suspend(self, request: HttpRequest, queryset: QuerySet[Region]) -> None:
-        for region in queryset.filter(deleted_at__isnull=True):
-            transition_region(cast(User, request.user), region.pk, RegionStatus.SUSPENDED)
-
 
 @admin.register(RegionLocationChangeRequest, site=site)
 class RegionLocationChangeRequestAdmin(ReadOnlyAdmin):
     list_display = ("id", "region", "status", "base_revision", "created_at", "reviewed_at")
     list_filter = ("status",)
-    actions = ("approve", "reject")
-
-    def review(
-        self,
-        request: HttpRequest,
-        queryset: QuerySet[RegionLocationChangeRequest],
-        *,
-        approve: bool,
-    ) -> None:
-        for change in queryset.filter(region__deleted_at__isnull=True):
-            try:
-                review_location_change(cast(User, request.user), change.pk, approve=approve)
-            except ObjectDoesNotExist, ValidationError:
-                self.message_user(
-                    request,
-                    _("The request is stale or already reviewed; review the current region."),
-                    level="ERROR",
-                )
-
-    @admin.action(
-        description=gettext_lazy(
-            "Approve location change (new binding validation and approval required)"
-        ),
-        permissions=["view"],
-    )
-    def approve(
-        self, request: HttpRequest, queryset: QuerySet[RegionLocationChangeRequest]
-    ) -> None:
-        self.review(request, queryset, approve=True)
-
-    @admin.action(description=gettext_lazy("Reject location change"), permissions=["view"])
-    def reject(self, request: HttpRequest, queryset: QuerySet[RegionLocationChangeRequest]) -> None:
-        self.review(request, queryset, approve=False)
 
 
 for model in (

@@ -20,9 +20,7 @@ class Command(BaseCommand):
 
     def handle(self, *args: Any, **options: Any) -> str:
         try:
-            actor = User.objects.get(
-                username=options["username"], is_active=True, is_superuser=True
-            )
+            actor = User.objects.get(username=options["username"])
             snapshot_ids = normalize_reference_capacity(
                 actor,
                 options["tenant_id"],

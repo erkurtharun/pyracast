@@ -8,7 +8,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from pyracast.accounts.operations import require_admin
+from pyracast.accounts.authorization import require_platform_admin
 from pyracast.calculation import calculate
 from pyracast.connections.models import ProviderAccount, SiteBinding
 from pyracast.forecasts.jobs import binding_is_current
@@ -174,7 +174,7 @@ def normalize_reference_capacity(
     target_binding_id: int,
     authorization_reference: str,
 ) -> tuple[int, ...]:
-    require_admin(actor)
+    require_platform_admin(actor)
     reference = authorization_reference.strip()
     if not reference or len(reference) > 1000:
         raise ValidationError("A bounded capacity-only equivalence authorization is required.")

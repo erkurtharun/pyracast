@@ -11,13 +11,9 @@ from django.core.exceptions import PermissionDenied
 from django.db import connections, transaction
 from django.utils import timezone
 
-from pyracast.accounts.models import Membership, Tenant
-from pyracast.accounts.operations import (
-    reassign_workspace_admin,
-    remove_workspace_member,
-    require_workspace_admin,
-    require_workspace_member,
-)
+from pyracast.accounts.authorization import tenant_membership
+from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
+from pyracast.accounts.operations import reassign_workspace_admin, remove_workspace_member
 from pyracast.change_requests import operations, preparation, queries
 from pyracast.change_requests.models import ChangeRequest
 from pyracast.change_requests.operations import RequestConflictError
@@ -58,12 +54,12 @@ def blocked_approval(
     entered = Event()
     fingerprint = review_fingerprint(case, proposal)
 
-    def require_admin(actor: User, tenant_id: int) -> None:
-        if actor.pk == case.system.member.pk:
+    def require_admin(actor: User, tenant_id: int, **options: Any) -> Membership:
+        if actor.pk == case.system.member.pk and options.get("role") == WorkspaceRole.ADMIN:
             entered.set()
-        require_workspace_admin(actor, tenant_id)
+        return tenant_membership(actor, tenant_id, **options)
 
-    monkeypatch.setattr(operations, "require_workspace_admin", require_admin)
+    monkeypatch.setattr(operations, "tenant_membership", require_admin)
     future = pool.submit(
         threaded_call,
         lambda: operations.approve_request(
@@ -201,11 +197,12 @@ def test_submission_waiting_for_removed_membership_cannot_create_orphan_proposal
     case = make_request_case(monkeypatch)
     entered = Event()
 
-    def require_member(actor: User, tenant_id: int) -> Membership:
-        entered.set()
-        return require_workspace_member(actor, tenant_id)
+    def require_member(actor: User, tenant_id: int, **options: Any) -> Membership:
+        if options.get("role") == WorkspaceRole.VIEWER:
+            entered.set()
+        return tenant_membership(actor, tenant_id, **options)
 
-    monkeypatch.setattr(operations, "require_workspace_member", require_member)
+    monkeypatch.setattr(operations, "tenant_membership", require_member)
     with ThreadPoolExecutor(max_workers=1) as pool:
         with transaction.atomic():
             Tenant.objects.select_for_update().get(pk=case.system.tenant.pk)
@@ -229,11 +226,12 @@ def test_concurrent_submissions_preserve_idempotency_and_the_last_pending_slot(
     key = uuid4()
     entered = Event()
 
-    def require_member(actor: User, tenant_id: int) -> Membership:
-        entered.set()
-        return require_workspace_member(actor, tenant_id)
+    def require_member(actor: User, tenant_id: int, **options: Any) -> Membership:
+        if options.get("role") == WorkspaceRole.VIEWER:
+            entered.set()
+        return tenant_membership(actor, tenant_id, **options)
 
-    monkeypatch.setattr(operations, "require_workspace_member", require_member)
+    monkeypatch.setattr(operations, "tenant_membership", require_member)
     with ThreadPoolExecutor(max_workers=1) as pool:
         with transaction.atomic():
             Tenant.objects.select_for_update().get(pk=case.system.tenant.pk)

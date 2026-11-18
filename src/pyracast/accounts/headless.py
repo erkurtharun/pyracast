@@ -2,13 +2,19 @@ import json
 from typing import Any
 
 from allauth.headless.account import views
-from django.http import HttpRequest, HttpResponse
+from allauth.headless.base.response import ConflictResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseBase
 
 from pyracast.accounts import inputs
 
 
 class LoginView(views.LoginView):
     input_class = inputs.LoginInput
+
+    def handle(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
+        if request.method == "POST" and request.user.is_authenticated:
+            return ConflictResponse(request)
+        return super().handle(request, *args, **kwargs)
 
 
 class RequestPasswordResetView(views.RequestPasswordResetView):
@@ -32,3 +38,7 @@ class ChangePasswordView(views.ChangePasswordView):
 
 class ReauthenticateView(views.ReauthenticateView):
     input_class = inputs.ReauthenticateInput
+
+
+class ManageEmailView(views.ManageEmailView):
+    input_class = views.ManageEmailView.input_class | {"PUT": inputs.ResendEmailVerificationInput}

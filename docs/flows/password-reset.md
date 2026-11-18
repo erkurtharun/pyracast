@@ -6,7 +6,7 @@ An anonymous user on the sign-in screen asks for a reset code, receives it by em
 
 - `web/src/components/auth.tsx` `Auth`, modes `forgot` and `reset`: reached from "Forgot password?", or on mount when `GET auth/session` reports a pending `password_reset_by_code` flow (reload resume). Client: `web/src/lib/auth-api.ts` `authRequest`.
 - `POST /api/auth/browser/v1/auth/password/request` -> `pyracast.accounts.headless.RequestPasswordResetView`; `POST .../auth/password/reset` -> `ResetPasswordView` (wrapped in `require_POST` in `pyracast.urls`). Actor: anonymous. Both only swap the input class (`RequestPasswordResetInput`, `ResetPasswordInput`) on allauth's headless views; code, attempts and state are allauth's `PasswordResetVerificationProcess`.
-- Mail: `AccountAdapter.render_mail` and `send_mail`; project templates `account/email/password_reset_code_*`, stock `unknown_account` and `password_reset`. No command, script or Dramatiq job; mail is sent inline through the SMTP or Gmail API backend.
+- Mail: `AccountAdapter.render_mail` and `send_mail`; project templates `account/email/password_reset_code_*` and the product notices `unknown_account` and `password_reset` (`account-mail-notifications`). No command, script or Dramatiq job; mail is sent inline through the SMTP or Gmail API backend.
 
 ## Sequence
 
@@ -54,13 +54,13 @@ sequenceDiagram
 | `account_emailaddress` | R/W | `email_identity` lookup; a confirmed code marks an unverified matching address verified and primary. |
 | `auth_user` | R/W | Resume reads the user; success writes the hash with a full `save`; verifying an address also rewrites `email`. |
 | `usersessions_usersession` | R/W | Rows of the user's other sessions are ended only when the reset verified an address (`email_changed` signal). |
-| `pyracast_authentication_cache` | R/W | Rate-limit histories via the autocommit `auth_cache` connection; success clears `login_failed` counters for all the user's addresses. |
+| `pyracast_authentication_cache` | R/W | Rate-limit histories via the autocommit `auth_cache` connection; success clears the per-address `login_failed` counters (10 minute and daily) for all the user's addresses; the per-IP `login_failed_ip` count is kept. |
 
 ## Authorization
 
 - No authentication. CSRF is enforced on both POSTs by `CsrfViewMiddleware` (token from `/api/session/`). The code exists only in the requesting session, so another browser gets 409.
 - Eligibility is decided at request time in `RequestPasswordResetInput.clean_email` via `pyracast.accounts.authentication.email_identity(for_recovery=True)`: either exactly one account owns the verified address and it is active, or none does and the lowest-id active account whose only address is this primary is chosen.
-- `ACCOUNT_RATE_LIMITS` `reset_password` (after input validation) and `reset_password_from_key` (before anything else), consumed inside the allauth views. `SessionRequestSerialization` holds a per-session advisory lock whenever a session cookie exists, so parallel attempts cannot lose counts. No MFA at reset; TOTP is still required at the next login, and staff without TOTP cannot sign in (`AccountAdapter.authenticate`).
+- `ACCOUNT_RATE_LIMITS` `reset_password` (after input validation) and `reset_password_from_key` (before anything else), consumed inside the allauth views. `SessionRequestSerialization` holds a per-session advisory lock whenever a session cookie exists, so parallel attempts cannot lose counts. No MFA at reset; TOTP is still required at the next login, and staff without TOTP cannot sign in (`AuthenticationBackend`).
 
 ## Failure paths
 
@@ -86,5 +86,5 @@ sequenceDiagram
 
 ## Tests
 
-- `tests/test_auth_lifecycle.py`: generic response, session binding, single use, revocation, 12-character minimum, expiry, attempt limit, unsafe identity states, ownership proof. `tests/test_session_serialization.py`: parallel wrong and correct codes, missing or expired session, non-POST methods, CSRF denial. `tests/test_company_registration.py`: recovery after the signup race. `tests/test_transactional_mail.py`: code mail layout and expiry (direct `render_mail`). Playwright: `web/tests/auth-registration.spec.ts` (mocked happy path, pending-flow precedence), `web/integration/auth-security.spec.ts` (real stack reset, then TOTP login). `tests/test_account_mail_failures.py`: with a failing mailer the request answers alike for known and unknown addresses and the reset completes.
-- Gaps: no test of the 429 limits, `unknown_account` and `password_reset` mails, `login_failed` clearing, an address verified elsewhere before the reset, `UserSession` revocation on the verification branch, or any frontend error state.
+- `tests/test_auth_lifecycle.py`: generic response, session binding, single use, revocation, 12-character minimum, expiry, attempt limit, unsafe identity states, ownership proof. `tests/test_session_serialization.py`: parallel wrong and correct codes, missing or expired session, non-POST methods, CSRF denial. `tests/test_company_registration.py`: recovery after the signup race. `tests/test_transactional_mail.py`: code mail layout and expiry; `tests/test_account_mail_content.py`: reset code in the saved language, unknown-address notice and completion notice through the views. Playwright: `web/tests/auth-registration.spec.ts` (mocked happy path, pending-flow precedence), `web/integration/auth-security.spec.ts` (real stack reset, then TOTP login). `tests/test_account_mail_failures.py`: with a failing mailer the request answers alike for known and unknown addresses and the reset completes.
+- Gaps: no test of the 429 limits, `login_failed` clearing, an address verified elsewhere before the reset, `UserSession` revocation on the verification branch, or any frontend error state.

@@ -3,10 +3,10 @@ from threading import Barrier
 from typing import Any
 
 import pytest
-from allauth.account.adapter import DefaultAccountAdapter
 from django.conf import LazySettings
 from django.contrib.auth.models import User
 from django.core import mail
+from django.core.mail import EmailMessage
 from django.db import IntegrityError, close_old_connections, connections, transaction
 from django.http import HttpResponse
 from django.test import Client, RequestFactory, override_settings
@@ -154,7 +154,9 @@ def test_authenticated_preference_survives_new_device_and_is_owned_by_caller() -
         ).status_code
         == 403
     )
-    response = choose(client, "tr", user_id=other.pk)
+    assert choose(client, "tr", user_id=other.pk).status_code == 400
+    assert not UserLanguagePreference.objects.exists()
+    response = choose(client, "tr")
     assert response.json()["user"]["id"] == owner.pk
     assert response.json()["user"]["language_preference"] == "tr"
     assert not UserLanguagePreference.objects.filter(user=other).exists()
@@ -299,13 +301,15 @@ def test_authentication_mail_pins_language_until_transaction_commit(
         UserLanguagePreference.objects.create(user=user, language=preference)
     languages = []
 
-    def capture(self: Any, prefix: str, email: str, context: dict[str, Any]) -> None:
+    def capture(message: EmailMessage) -> None:
         languages.append(translation.get_language())
 
-    monkeypatch.setattr(DefaultAccountAdapter, "send_mail", capture)
+    monkeypatch.setattr("pyracast.accounts.adapters.send", capture)
     with transaction.atomic():
         with translation.override("en"):
-            AccountAdapter().send_mail("unused", "owner@example.com", {"user": user})
+            AccountAdapter().send_mail(
+                "account/email/password_changed", "owner@example.com", {"user": user}
+            )
         assert languages == []
     assert languages == [preference or "en"]
 

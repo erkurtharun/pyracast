@@ -8,7 +8,7 @@ from django.db.models import Value
 from django.utils import timezone
 from django.views.decorators.debug import sensitive_variables
 
-from pyracast.accounts.operations import require_admin
+from pyracast.accounts.authorization import require_platform_admin
 from pyracast.connections.contracts import ProviderAdapter, ProviderError
 from pyracast.connections.identity import canonical_account_identity
 from pyracast.connections.models import BindingHealth, Provider, ProviderAccount, SiteBinding
@@ -55,7 +55,7 @@ def create_account(
     authorization_reference: str = "",
     require_new: bool = False,
 ) -> ProviderAccount:
-    require_admin(actor)
+    require_platform_admin(actor)
     provider = provider.strip().casefold()
     identity = external_account_id.strip()
     if provider not in Provider.values or not identity:
@@ -102,7 +102,7 @@ def create_account(
 
 @sensitive_variables()
 def rotate_secret(actor: User, account_id: int, api_key: str) -> None:
-    require_admin(actor)
+    require_platform_admin(actor)
     encrypted_api_key = encrypt_secret(api_key)
     with transaction.atomic():
         account = ProviderAccount.objects.select_for_update().get(pk=account_id)
@@ -190,7 +190,7 @@ def validate_binding(
     actor: User, binding_id: int, adapter: ProviderAdapter, now: datetime
 ) -> SiteBinding:
     started = time.monotonic()
-    require_admin(actor)
+    require_platform_admin(actor)
     binding = SiteBinding.objects.select_related("provider_account").get(
         pk=binding_id, region__deleted_at__isnull=True
     )

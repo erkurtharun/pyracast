@@ -1,6 +1,6 @@
 import base64
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from email import policy
 from email.parser import BytesParser
 from pathlib import Path
@@ -17,20 +17,31 @@ from django.test import Client, override_settings
 
 from pyracast import settings as project_settings
 from pyracast.accounts.checks import check_authentication_mail_delivery
-from pyracast.gmail import SEND_SCOPE, TOKEN_URL, EmailBackend
-from pyracast.mail_delivery import DeliveryUncertainError, NotSentError, PermanentlyNotSentError
+from pyracast.mail.errors import (
+    DeliveryUncertainError,
+    NotSentError,
+    PermanentlyNotSentError,
+    SendCancelledError,
+)
+from pyracast.mail.gmail import SEND_SCOPE, TOKEN_URL, EmailBackend
+from pyracast.mail.send import send
 from pyracast.notifications.jobs import process_notification
-from pyracast.notifications.mail import SendCancelledError, send_message
 from tests.support.company_registration import signup
 from tests.support.notifications import SLOT, ready
 
+SENDER = "Pyracast <info@pyracast.app>"
 OPTIONS = {
     "client_id": "gmail-client",
     "client_secret": "gmail-secret",
     "refresh_token": "gmail-refresh",
-    "sender": "Pyracast <info@pyracast.app>",
 }
-MAILERS = {"default": {"BACKEND": "pyracast.gmail.EmailBackend", "OPTIONS": OPTIONS}}
+MAILERS = {"default": {"BACKEND": "pyracast.mail.gmail.EmailBackend", "OPTIONS": OPTIONS}}
+
+
+@pytest.fixture(autouse=True)
+def gmail_sender() -> Iterator[None]:
+    with override_settings(DEFAULT_FROM_EMAIL=SENDER):
+        yield
 
 
 @pytest.fixture
@@ -63,7 +74,7 @@ def message() -> EmailMultiAlternatives:
     return EmailMultiAlternatives(
         "Pyracast forecast",
         "Plain forecast",
-        OPTIONS["sender"],
+        SENDER,
         ["customer@example.com"],
         headers={"Message-ID": "<delivery-123@notifications.pyracast>"},
     )
@@ -96,7 +107,7 @@ def test_gmail_serializes_recipients_html_csv_and_stable_message_id(
     with override_settings(MAILERS=MAILERS):
         first, second = mail.mailers["default"], mail.mailers["default"]
         assert first is not second
-        send_message(email)
+        send(email)
     assert len(requests) == 2
     assert parse_qs(requests[0].content.decode()) == {
         "client_id": [OPTIONS["client_id"]],
@@ -110,7 +121,8 @@ def test_gmail_serializes_recipients_html_csv_and_stable_message_id(
     assert requests[1].headers["Authorization"] == "Bearer gmail-access"
     raw = base64.urlsafe_b64decode(json.loads(requests[1].content)["raw"])
     mime = BytesParser(policy=policy.default).parsebytes(raw)
-    assert str(mime["From"]) == OPTIONS["sender"]
+    assert str(mime["From"]) == SENDER
+    assert str(mime["MIME-Version"]) == "1.0"
     if blind_only:
         assert mime["To"] is None
         assert mime["Cc"] is None
@@ -145,8 +157,8 @@ def test_gmail_rejects_missing_or_broader_scopes_before_transmission(
 
     gmail_transport(respond)
     with override_settings(MAILERS=MAILERS), pytest.raises(NotSentError) as error:
-        send_message(message())
-    assert error.value.code == "mail_authentication_failed"
+        send(message())
+    assert error.value.code == "mail_credentials_rejected"
     assert "private" not in str(error.value)
     assert len(requests) == 1
 
@@ -167,8 +179,40 @@ def test_gmail_authenticates_before_rechecking_transmission_permission(
 
     gmail_transport(respond)
     with override_settings(MAILERS=MAILERS), pytest.raises(SendCancelledError):
-        send_message(message(), before_send=permission)
+        send(message(), before_send=permission)
     assert len(requests) == 1
+
+
+@pytest.mark.parametrize(
+    ("status", "code"),
+    [
+        (429, "mail_rate_limited"),
+        (500, "mail_not_sent"),
+        (503, "mail_not_sent"),
+        (599, "mail_not_sent"),
+    ],
+)
+@pytest.mark.parametrize("json_body", [False, True])
+def test_oauth_transient_failure_preserves_credentials_without_sending(
+    gmail_transport: Callable[[Callable[[httpx.Request], httpx.Response]], None],
+    status: int,
+    code: str,
+    json_body: bool,
+) -> None:
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if json_body:
+            return httpx.Response(status, json={"error": "private-provider-error"})
+        return httpx.Response(status, text="private-provider-error")
+
+    gmail_transport(respond)
+    with override_settings(MAILERS=MAILERS), pytest.raises(NotSentError) as error:
+        send(message())
+    assert error.value.code == code
+    assert "private" not in str(error.value)
+    assert [str(request.url) for request in requests] == [TOKEN_URL]
 
 
 @pytest.mark.django_db(transaction=True)
@@ -176,12 +220,17 @@ def test_gmail_authenticates_before_rechecking_transmission_permission(
     ("mode", "status", "code"),
     [
         ("accepted", "sent", ""),
-        ("auth", "retry", "mail_authentication_failed"),
+        ("auth", "retry", "mail_credentials_rejected"),
+        ("token_rejected", "retry", "mail_credentials_rejected"),
+        ("token_revoked", "failed", "mail_authorization_revoked"),
+        ("token_quota", "retry", "mail_rate_limited"),
+        ("token_server", "retry", "mail_not_sent"),
         ("quota", "retry", "mail_rate_limited"),
         ("quota403", "retry", "mail_rate_limited"),
-        ("open_timeout", "retry", "mail_authentication_failed"),
+        ("open_timeout", "retry", "mail_not_sent"),
         ("connect_timeout", "retry", "mail_not_sent"),
         ("rejected", "failed", "mail_rejected"),
+        ("forbidden", "failed", "mail_sender_forbidden"),
         ("server", "uncertain", "mail_outcome_uncertain"),
         ("read_timeout", "uncertain", "mail_outcome_uncertain"),
         ("write_timeout", "uncertain", "mail_outcome_uncertain"),
@@ -201,6 +250,14 @@ def test_gmail_preserves_durable_delivery_acceptance_and_retry_policy(
         if str(request.url) == TOKEN_URL:
             if mode == "open_timeout":
                 raise httpx.ReadTimeout("private-token", request=request)
+            if mode == "token_rejected":
+                return httpx.Response(401, json={"error": "invalid_client"})
+            if mode == "token_revoked":
+                return httpx.Response(400, json={"error": "invalid_grant"})
+            if mode == "token_quota":
+                return httpx.Response(429)
+            if mode == "token_server":
+                return httpx.Response(503)
             return token()
         sends += 1
         if mode.endswith("timeout"):
@@ -210,6 +267,8 @@ def test_gmail_preserves_durable_delivery_acceptance_and_retry_policy(
                 "write_timeout": httpx.WriteTimeout,
             }[mode]
             raise failure("private-token", request=request)
+        if mode == "forbidden":
+            return httpx.Response(403, json={"error": {"errors": [{"reason": "forbidden"}]}})
         if mode == "quota403":
             return httpx.Response(
                 403, json={"error": {"errors": [{"reason": "userRateLimitExceeded"}]}}
@@ -221,14 +280,14 @@ def test_gmail_preserves_durable_delivery_acceptance_and_retry_policy(
 
     gmail_transport(respond)
     delivery = ready()
-    with override_settings(MAILERS=MAILERS, DEFAULT_FROM_EMAIL=OPTIONS["sender"]):
+    with override_settings(MAILERS=MAILERS, DEFAULT_FROM_EMAIL=SENDER):
         assert process_notification(delivery.pk, SLOT) is (status == "sent")
         delivery.refresh_from_db()
         assert delivery.status == status
         assert delivery.last_error == code
         if status == "uncertain":
             assert not process_notification(delivery.pk, SLOT)
-    assert sends == (0 if mode == "open_timeout" else 1)
+    assert sends == (0 if mode == "open_timeout" or mode.startswith("token_") else 1)
 
 
 def test_gmail_fail_silently_counts_only_acknowledged_messages(
@@ -240,7 +299,6 @@ def test_gmail_fail_silently_counts_only_acknowledged_messages(
         client_id=OPTIONS["client_id"],
         client_secret=OPTIONS["client_secret"],
         refresh_token=OPTIONS["refresh_token"],
-        sender=OPTIONS["sender"],
         fail_silently=True,
     )
     assert backend.send_messages([message(), message()]) == 1
@@ -252,13 +310,13 @@ def test_gmail_configuration_accepts_oauth_in_production(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("PYRACAST_EMAIL_BACKEND", "gmail")
-    monkeypatch.setenv("PYRACAST_FROM_EMAIL", OPTIONS["sender"])
+    monkeypatch.setenv("PYRACAST_FROM_EMAIL", SENDER)
     for suffix in ("CLIENT_ID", "CLIENT_SECRET", "REFRESH_TOKEN"):
         monkeypatch.setenv("PYRACAST_GMAIL_" + suffix, OPTIONS[suffix.lower()])
     configuration = run_path(str(Path(project_settings.__file__)))
-    assert configuration["MAILERS"]["default"]["BACKEND"] == "pyracast.gmail.EmailBackend"
+    assert configuration["MAILERS"]["default"]["BACKEND"] == "pyracast.mail.gmail.EmailBackend"
     with override_settings(
-        MAILERS=configuration["MAILERS"], DEFAULT_FROM_EMAIL=OPTIONS["sender"], DEBUG=False
+        MAILERS=configuration["MAILERS"], DEFAULT_FROM_EMAIL=SENDER, DEBUG=False
     ):
         assert check_authentication_mail_delivery() == []
         backend = mail.mailers["default"]
@@ -269,8 +327,8 @@ def test_gmail_configuration_accepts_oauth_in_production(
 def test_gmail_deployment_check_rejects_incomplete_oauth(missing: str) -> None:
     options = {**OPTIONS, missing: ""}
     with override_settings(
-        MAILERS={"default": {"BACKEND": "pyracast.gmail.EmailBackend", "OPTIONS": options}},
-        DEFAULT_FROM_EMAIL=OPTIONS["sender"],
+        MAILERS={"default": {"BACKEND": "pyracast.mail.gmail.EmailBackend", "OPTIONS": options}},
+        DEFAULT_FROM_EMAIL=SENDER,
         DEBUG=False,
     ):
         assert [error.id for error in check_authentication_mail_delivery()] == ["accounts.E001"]
@@ -291,7 +349,7 @@ def test_allauth_signup_sends_verification_using_gmail(
         )
 
     gmail_transport(respond)
-    with override_settings(MAILERS=MAILERS, DEFAULT_FROM_EMAIL=OPTIONS["sender"]):
+    with override_settings(MAILERS=MAILERS, DEFAULT_FROM_EMAIL=SENDER):
         response = signup(Client(enforce_csrf_checks=True))
     assert response.status_code == 401
     assert any(flow["id"] == "verify_email" for flow in response.json()["data"]["flows"])
@@ -299,13 +357,13 @@ def test_allauth_signup_sends_verification_using_gmail(
     raw = base64.urlsafe_b64decode(json.loads(requests[1].content)["raw"])
     mime = BytesParser(policy=policy.default).parsebytes(raw)
     assert str(mime["To"]).lower() == "owner@example.com"
-    assert "confirm your email address" in str(mime["Subject"]).lower()
+    assert mime["Subject"] == "Verify your email"
+    assert mime["X-Pyracast-Mail"] == "account/email/email_confirmation_signup"
 
 
 @pytest.mark.parametrize(
     ("key", "value"),
     [
-        ("sender", "invalid"),
         ("client_id", ""),
         ("client_secret", ""),
         ("refresh_token", ""),
@@ -314,6 +372,13 @@ def test_allauth_signup_sends_verification_using_gmail(
 )
 def test_gmail_rejects_invalid_transport_configuration(key: str, value: object) -> None:
     options: dict[str, Any] = {**OPTIONS, key: value}
+    with pytest.raises(ImproperlyConfigured, match="Gmail"):
+        EmailBackend(**options)
+
+
+@override_settings(DEFAULT_FROM_EMAIL="invalid")
+def test_gmail_rejects_an_invalid_sender() -> None:
+    options: dict[str, Any] = dict(OPTIONS)
     with pytest.raises(ImproperlyConfigured, match="Gmail"):
         EmailBackend(**options)
 
@@ -336,7 +401,7 @@ def test_malformed_oauth_response_is_a_safe_non_send(
 ) -> None:
     gmail_transport(lambda _request: httpx.Response(200, json=payload))
     with override_settings(MAILERS=MAILERS), pytest.raises(NotSentError, match="OAuth"):
-        send_message(message())
+        send(message())
 
 
 def test_auth_failure_honors_fail_silently_without_sending(
@@ -396,8 +461,9 @@ def test_nonquota_permission_rejection_cannot_be_retried(
             token() if str(request.url) == TOKEN_URL else httpx.Response(403, json=payload)
         )
     )
-    with override_settings(MAILERS=MAILERS), pytest.raises(PermanentlyNotSentError):
-        send_message(message())
+    with override_settings(MAILERS=MAILERS), pytest.raises(PermanentlyNotSentError) as caught:
+        send(message())
+    assert caught.value.code == "mail_sender_forbidden"
 
 
 @pytest.mark.parametrize(
@@ -417,7 +483,7 @@ def test_unverifiable_acceptance_is_uncertain(
 ) -> None:
     gmail_transport(lambda request: token() if str(request.url) == TOKEN_URL else response)
     with override_settings(MAILERS=MAILERS), pytest.raises(DeliveryUncertainError):
-        send_message(message())
+        send(message())
 
 
 @pytest.mark.parametrize("authentication_rejected", [False, True])
@@ -439,6 +505,6 @@ def test_gmail_cleanup_cannot_change_known_acceptance_or_auth_rejection(
     with override_settings(MAILERS=MAILERS):
         if authentication_rejected:
             with pytest.raises(NotSentError, match="OAuth"):
-                send_message(message())
+                send(message())
         else:
-            send_message(message())
+            send(message())

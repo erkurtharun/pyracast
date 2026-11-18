@@ -227,6 +227,7 @@ class Migration(migrations.Migration):
                         choices=[
                             ("pending", "Pending"),
                             ("sent", "Sent"),
+                            ("failed", "Failed"),
                             ("uncertain", "Uncertain"),
                         ],
                         default="pending",
@@ -250,7 +251,7 @@ class Migration(migrations.Migration):
                 "constraints": [
                     models.CheckConstraint(
                         condition=models.Q(
-                            ("delivery_status__in", ["pending", "sent", "uncertain"])
+                            ("delivery_status__in", ["pending", "sent", "failed", "uncertain"])
                         ),
                         name="workspaceinvitation_delivery_status_chk",
                     )

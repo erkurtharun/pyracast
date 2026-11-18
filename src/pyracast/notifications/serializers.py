@@ -1,11 +1,12 @@
 from rest_framework import serializers
 
 from pyracast.accounts.models import Language
+from pyracast.api.serializers import InputSerializer
 from pyracast.notifications.models import NotificationDeliveryStatus
 from pyracast.notifications.operations import RECIPIENT_MAX_LENGTH
 
 
-class ReminderInput(serializers.Serializer[dict[str, object]]):
+class ReminderInput(InputSerializer):
     enabled = serializers.BooleanField()
     include_workspace_members = serializers.BooleanField(default=False)
     language = serializers.ChoiceField(choices=Language.choices)

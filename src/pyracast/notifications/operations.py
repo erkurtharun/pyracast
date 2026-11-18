@@ -8,8 +8,8 @@ from django.db import transaction
 from django.utils import translation
 from django.utils.translation import gettext
 
-from pyracast.accounts.models import Language
-from pyracast.accounts.operations import require_member, require_workspace_admin
+from pyracast.accounts.authorization import tenant_membership
+from pyracast.accounts.models import Language, WorkspaceRole
 from pyracast.notifications.eligibility import binding_can_notify
 from pyracast.notifications.models import (
     NotificationSettings,
@@ -76,7 +76,7 @@ def _reminder_settings(schedule: ReminderSchedule) -> tuple[object, ...]:
 def get_reminder_schedule(
     actor: User, tenant_id: int, region_id: int, now: datetime
 ) -> ReminderSchedule:
-    require_member(actor, tenant_id)
+    tenant_membership(actor, tenant_id)
     region = Region.objects.get(pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True)
     return ReminderSchedule.objects.filter(region=region).first() or ReminderSchedule(
         region=region, effective_from=now, language=translation.get_language()
@@ -100,7 +100,7 @@ def configure_reminders(
     if language not in Language.values:
         raise ValidationError(gettext("A supported reminder language is required."))
     with transaction.atomic():
-        require_workspace_admin(actor, tenant_id)
+        tenant_membership(actor, tenant_id, role=WorkspaceRole.ADMIN, lock=True)
         address_limit = recipient_limit(lock=True)
         actor.refresh_from_db(fields=["email"])
         addresses = normalize_recipients(

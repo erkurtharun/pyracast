@@ -66,9 +66,7 @@ def _claim(run_id: int, now: datetime) -> _Lease | None:
         Tenant.objects.select_for_update().get(pk=identity.plant.region.tenant_id)
         if not Region.objects.select_for_update().filter(pk=identity.plant.region_id).exists():
             return None
-        plant = Plant.objects.select_for_update().filter(pk=identity.plant_id).first()
-        if plant is None:
-            return None
+        plant = Plant.objects.select_for_update().get(pk=identity.plant_id)
         run = CalibrationRun.objects.select_for_update().get(pk=run_id)
         now += timedelta(seconds=time.monotonic() - started)
         if run.status not in {CalibrationStatus.PENDING, CalibrationStatus.RUNNING}:

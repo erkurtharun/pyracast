@@ -200,6 +200,12 @@ export function WorkspaceMembers({
                                                 {t("deliveryUncertain")}
                                             </small>
                                         )}
+                                        {invitation.delivery_status ===
+                                            "failed" && (
+                                            <small className="field-hint">
+                                                {t("deliveryFailed")}
+                                            </small>
+                                        )}
                                     </span>
                                     <ActionForm
                                         children={null}

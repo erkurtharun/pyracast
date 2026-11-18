@@ -2,6 +2,7 @@ import logging
 import re
 from datetime import date
 from time import time
+from typing import Any
 
 import pytest
 from allauth.account.models import EmailAddress
@@ -18,18 +19,24 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError as APIValidationError
 
 from pyracast.accounts.models import Membership, Tenant, WorkspaceRole
-from pyracast.admin import ReadOnlyAdmin, RegionAdmin, site
+from pyracast.admin import ReadOnlyAdmin, site
 from pyracast.api.errors import exception_handler
 from pyracast.api.serializers import RegionInput
 from pyracast.api.views import TenantsView
 from pyracast.calculation import calculate
 from pyracast.connections.contracts import ProviderError
 from pyracast.connections.models import SiteBinding
-from pyracast.connections.operations import QuotaExceededError
+from pyracast.connections.operations import QuotaExceededError, create_account, validate_binding
 from pyracast.forecasts.jobs import collect
-from pyracast.forecasts.models import CollectionJob, ForecastResult
-from pyracast.providers import FixtureProvider
+from pyracast.forecasts.models import ForecastResult
+from pyracast.providers import FixtureProvider, adapter_for
 from pyracast.regions.models import Region
+from pyracast.regions.operations import (
+    approve_region,
+    configure_binding,
+    submit_region,
+    transition_region,
+)
 from tests.support.api import verified_admin
 
 pytestmark = pytest.mark.django_db
@@ -45,87 +52,45 @@ def customer() -> tuple[Client, User, Tenant]:
     return client, user, tenant
 
 
-def region_input() -> dict[str, object]:
+def region_input() -> dict[str, Any]:
     return {"name": "Reference", "latitude": 39.9, "longitude": 32.8, "timezone": "Europe/Istanbul"}
 
 
-def create_region(client: Client, tenant: Tenant) -> int:
-    response = client.post(
-        f"/api/tenants/{tenant.pk}/regions/", region_input(), content_type="application/json"
+def setup_binding(operator: User, region_id: int) -> SiteBinding:
+    account = create_account(operator, provider="fixture", external_account_id="canonical")
+    return configure_binding(
+        operator,
+        region_id,
+        provider_account_id=account.pk,
+        site_id="reference",
+        capacity_kw=1,
+        capacity_semantics_verified=True,
+        installation_date=date(2020, 1, 1),
     )
-    assert response.status_code == 201
-    return int(response.json()["id"])
-
-
-def setup_binding(client: Client, region_id: int) -> int:
-    account = client.post(
-        "/api/platform/accounts/",
-        {
-            "provider": "fixture",
-            "external_account_id": "canonical",
-            "api_key": "",
-        },
-        content_type="application/json",
-    )
-    assert account.status_code == 201
-    assert "secret" not in account.content.decode()
-    response = client.post(
-        f"/api/platform/regions/{region_id}/bindings/",
-        {
-            "provider_account_id": account.json()["id"],
-            "site_id": "reference",
-            "capacity_kw": 1,
-            "capacity_semantics_verified": True,
-            "installation_date": "2020-01-01",
-        },
-        content_type="application/json",
-    )
-    assert response.status_code == 201
-    return int(response.json()["id"])
 
 
 # The region forecast opens its own read-only snapshot transaction.
 @pytest.mark.django_db(transaction=True)
 def test_tenant_isolation_and_read_only_ownership(customer: tuple[Client, User, Tenant]) -> None:
     client, user, tenant = customer
-    region_id = create_region(client, tenant)
-    base = f"/api/tenants/{tenant.pk}/regions/"
-    assert client.get(base).json()["count"] == 1
-    assert client.get(f"{base}{region_id}/").json()["status"] == "pending"
+    region = submit_region(user, tenant.pk, **region_input())
+    own = f"/api/tenants/{tenant.pk}/regions/{region.pk}/"
+    forecast = f"forecast/?date={date.today()}"
+    assert client.get(f"{own}location-change-requests/").json()["count"] == 0
     other = Tenant.objects.create(name="Other")
     other_user = User.objects.create_user(username="other")
     Membership.objects.create(user=other_user, tenant=other, role=WorkspaceRole.ADMIN)
     client.force_login(other_user)
-    assert client.get(base).status_code == 403
-    assert client.get(f"{base}{region_id}/").status_code == 403
-    assert client.post(base, region_input(), content_type="application/json").status_code == 403
-    own = f"/api/tenants/{other.pk}/regions/{region_id}/"
-    assert client.get(own).status_code == 404
-    assert client.put(own, region_input(), content_type="application/json").status_code == 404
-    assert client.get(f"{own}forecast/?date={date.today()}").status_code == 404
-    client.force_login(user)
-    assert (
-        client.post(
-            base, {**region_input(), "status": "approved"}, content_type="application/json"
-        ).status_code
-        == 400
-    )
-    assert (
-        client.put(
-            f"{base}{region_id}/", {"name": "Renamed"}, content_type="application/json"
-        ).json()["revision"]
-        == 1
-    )
-    assert (
-        client.post(
-            base, {**region_input(), "timezone": "not-a-zone"}, content_type="application/json"
-        ).status_code
-        == 400
-    )
-    assert Client().get(base).status_code == 403
+    assert client.get(f"{own}location-change-requests/").status_code == 403
+    assert client.get(own + forecast).status_code == 403
+    assert client.delete(own).status_code == 403
+    foreign = f"/api/tenants/{other.pk}/regions/{region.pk}/"
+    assert client.get(f"{foreign}location-change-requests/").status_code == 404
+    assert client.get(foreign + forecast).status_code == 404
+    assert Client().get(own + forecast).status_code == 403
     csrf = Client(enforce_csrf_checks=True)
     csrf.force_login(user)
-    assert csrf.post(base, region_input(), content_type="application/json").status_code == 403
+    assert csrf.delete(own).status_code == 403
     assert (
         csrf.post(
             "/api/auth/browser/v1/auth/login",
@@ -134,22 +99,22 @@ def test_tenant_isolation_and_read_only_ownership(customer: tuple[Client, User, 
         ).status_code
         == 403
     )
+    region.refresh_from_db()
+    assert region.deleted_at is None
 
 
 # The region forecast opens its own read-only snapshot transaction.
 @pytest.mark.django_db(transaction=True)
 def test_fixture_workflow_and_freshness(customer: tuple[Client, User, Tenant]) -> None:
-    client, _, tenant = customer
-    region_id = create_region(client, tenant)
-    admin_client, _ = verified_admin()
-    binding_id = setup_binding(admin_client, region_id)
-    approval = f"/api/platform/regions/{region_id}/approve/"
-    assert admin_client.post(approval, {"binding_id": binding_id}).status_code == 400
-    assert admin_client.post(f"/api/platform/bindings/{binding_id}/validate/").status_code == 200
-    approved = admin_client.post(approval, {"binding_id": binding_id})
-    assert approved.status_code == 200
-    job = CollectionJob.objects.get(pk=approved.json()["id"])
-    path = f"/api/tenants/{tenant.pk}/regions/{region_id}/forecast/?date={job.target_date}"
+    client, user, tenant = customer
+    region = submit_region(user, tenant.pk, **region_input())
+    admin_client, operator = verified_admin()
+    binding = setup_binding(operator, region.pk)
+    with pytest.raises(ValidationError):
+        approve_region(operator, region.pk, binding.pk, timezone.now())
+    validate_binding(operator, binding.pk, adapter_for(binding), timezone.now())
+    job = approve_region(operator, region.pk, binding.pk, timezone.now())
+    path = f"/api/tenants/{tenant.pk}/regions/{region.pk}/forecast/?date={job.target_date}"
     assert client.get(path).json()["freshness"] == "missing"
     assert collect(job.pk, FixtureProvider(), calculate, timezone.now())
     response = client.get(path)
@@ -162,14 +127,8 @@ def test_fixture_workflow_and_freshness(customer: tuple[Client, User, Tenant]) -
     assert "unvalidated" in data["result"]["quality_flags"]
     assert not collect(job.pk, FixtureProvider(), calculate, timezone.now())
     assert ForecastResult.objects.count() == 1
-    assert (
-        admin_client.post(
-            f"/api/platform/regions/{region_id}/transition/", {"status": "suspended"}
-        ).status_code
-        == 200
-    )
+    transition_region(operator, region.pk, "suspended")
     assert client.get(path).json()["freshness"] == "stale"
-    region = Region.objects.get(pk=region_id)
     region.timezone = "America/New_York"
     region.save(update_fields=["timezone"])
     assert client.get(path).json()["timezone"] == "Europe/Istanbul"
@@ -179,43 +138,17 @@ def test_fixture_workflow_and_freshness(customer: tuple[Client, User, Tenant]) -
     assert client.get(path.replace(str(job.target_date), "invalid")).status_code == 400
     assert admin_client.get("/admin/").status_code == 200
     assert admin_client.get("/admin/regions/region/").status_code == 200
-    schema = client.get("/api/schema/?format=json")
-    assert schema.status_code == 200
-    assert "/api/platform/accounts/" not in schema.json()["paths"]
 
 
-def test_mfa_and_admin_mutation_boundaries(customer: tuple[Client, User, Tenant]) -> None:
-    client, user, tenant = customer
-    region_id = create_region(client, tenant)
-    assert client.post("/api/platform/accounts/", {}).status_code == 403
+def test_mfa_and_admin_read_only_boundaries(customer: tuple[Client, User, Tenant]) -> None:
+    client, user, _ = customer
     user.is_staff = True
     user.is_superuser = True
     user.save()
-    assert client.post("/api/platform/accounts/", {}).status_code == 403
     assert client.get("/admin/").status_code == 302
-    admin_client, admin_user = verified_admin()
-    response = admin_client.post(
-        "/admin/regions/region/",
-        {
-            "action": "approve",
-            "_selected_action": [str(region_id)],
-        },
-        follow=True,
-    )
-    assert response.status_code == 200
-    assert b"Validate the current binding" in response.content
-    binding_id = setup_binding(admin_client, region_id)
-    assert admin_client.post(f"/api/platform/bindings/{binding_id}/validate/").status_code == 200
+    _, admin_user = verified_admin()
     request = RequestFactory().post("/admin/")
     request.user = admin_user
-    queryset = Region.objects.filter(pk=region_id)
-    operator = RegionAdmin(Region, site)
-    operator.approve(request, queryset)
-    operator.reject(request, queryset)
-    operator.suspend(request, queryset)
-    operator.approve(request, Region.objects.none())
-    operator.reject(request, Region.objects.none())
-    operator.suspend(request, Region.objects.none())
     read_only = ReadOnlyAdmin(Region, site)
     assert not read_only.has_add_permission(request)
     assert not read_only.has_change_permission(request)
@@ -301,56 +234,29 @@ def test_entrypoints(monkeypatch: pytest.MonkeyPatch) -> None:
     assert callable(wsgi.application)
 
 
-def test_binding_api_records_megawatt_reference_metadata(
+def test_binding_records_megawatt_reference_metadata(
     customer: tuple[Client, User, Tenant],
 ) -> None:
-    customer_client, _, tenant = customer
-    region_id = create_region(customer_client, tenant)
-    admin_client, _ = verified_admin()
-    previous_id = setup_binding(admin_client, region_id)
-    previous = SiteBinding.objects.get(pk=previous_id)
-    response = admin_client.post(
-        f"/api/platform/regions/{region_id}/bindings/",
-        {
-            "provider_account_id": previous.provider_account_id,
-            "site_id": previous.site_id,
-            "capacity_kw": 1000,
-            "dc_capacity_kw": 1000,
-            "capacity_semantics_verified": True,
-            "installation_date": "2026-11-01",
-        },
-        content_type="application/json",
+    _, user, tenant = customer
+    region = submit_region(user, tenant.pk, **region_input())
+    _, operator = verified_admin()
+    previous = setup_binding(operator, region.pk)
+    reference = configure_binding(
+        operator,
+        region.pk,
+        provider_account_id=previous.provider_account_id,
+        site_id=previous.site_id,
+        capacity_kw=1000,
+        dc_capacity_kw=1000,
+        capacity_semantics_verified=True,
+        installation_date=date(2026, 11, 1),
     )
-    assert response.status_code == 201
-    reference = SiteBinding.objects.get(pk=response.json()["id"])
+    assert reference.pk != previous.pk
     assert reference.capacity_kw == reference.dc_capacity_kw == 1000
     assert reference.azimuth_degrees == reference.losses_percent == 0
     previous.refresh_from_db()
     assert previous.capacity_kw == 1
     assert previous.dc_capacity_kw is None
-
-
-def test_binding_api_accepts_no_tilt_because_every_reference_is_horizontal(
-    customer: tuple[Client, User, Tenant],
-) -> None:
-    customer_client, _, tenant = customer
-    region_id = create_region(customer_client, tenant)
-    admin_client, _ = verified_admin()
-    previous = SiteBinding.objects.get(pk=setup_binding(admin_client, region_id))
-    response = admin_client.post(
-        f"/api/platform/regions/{region_id}/bindings/",
-        {
-            "provider_account_id": previous.provider_account_id,
-            "site_id": previous.site_id,
-            "capacity_kw": 1000,
-            "capacity_semantics_verified": True,
-            "installation_date": "2026-11-01",
-            "tilt_degrees": 0,
-        },
-        content_type="application/json",
-    )
-    assert response.status_code == 400
-    assert SiteBinding.objects.filter(region_id=region_id).count() == 1
 
 
 @pytest.mark.django_db(transaction=True, databases=["default", "auth_cache"])
@@ -373,7 +279,6 @@ def test_admin_login_requires_password_and_totp() -> None:
     assert response.status_code == 401
     assert not response.json()["meta"]["is_authenticated"]
     assert client.get("/admin/").status_code == 302
-    assert client.get("/api/platform/accounts/").status_code == 403
     response = client.post(
         "/api/auth/browser/v1/auth/2fa/authenticate",
         {"code": format_hotp_value(hotp_value(secret, int(time()) // 30))},
@@ -382,4 +287,3 @@ def test_admin_login_requires_password_and_totp() -> None:
     )
     assert response.status_code == 200, response.json()
     assert client.get("/admin/").status_code == 200
-    assert client.get("/api/platform/accounts/").status_code == 405

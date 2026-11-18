@@ -11,6 +11,7 @@ from pyracast.forecasts.models import (
     DispatcherStatus,
     ForecastSnapshot,
 )
+from pyracast.mail.errors import CREDENTIAL_FAILURES
 from pyracast.metering.models import EpiasCollectionJob, EpiasJobStatus
 from pyracast.notifications.models import (
     PAUSED_DELIVERY_ERRORS,
@@ -141,7 +142,7 @@ def delivery_health(now: datetime, maximum_lag: timedelta) -> dict[str, object]:
             "pk", filter=Q(prepared_message__tomorrow_complete=False, scheduled_for__gte=recent)
         ),
         mail_authentication_failures=Count(
-            "pk", filter=Q(last_error="mail_authentication_failed", scheduled_for__gte=recent)
+            "pk", filter=Q(last_error__in=CREDENTIAL_FAILURES, scheduled_for__gte=recent)
         ),
         saved_forecast_notifications=Count(
             "pk",

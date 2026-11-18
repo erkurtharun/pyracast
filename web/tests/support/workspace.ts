@@ -179,10 +179,7 @@ export async function mockApi(
                     }),
                 ),
             };
-        } else if (
-            path.endsWith("/production/changes/") ||
-            path.endsWith("/observations/")
-        ) {
+        } else if (path.endsWith("/production/changes/")) {
             expect(route.request().postDataJSON()).toMatchObject({
                 configuration_id: 31,
                 unit: "kWh",

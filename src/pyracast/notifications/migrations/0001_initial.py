@@ -1,3 +1,4 @@
+import uuid
 from typing import ClassVar
 
 import django.core.validators
@@ -136,6 +137,10 @@ class Migration(migrations.Migration):
                 ("transmit_started_at", models.DateTimeField(null=True)),
                 ("sent_at", models.DateTimeField(null=True)),
                 ("last_error", models.CharField(default="", max_length=40)),
+                (
+                    "message_token",
+                    models.UUIDField(default=uuid.uuid4, editable=False, unique=True),
+                ),
                 (
                     "binding",
                     models.ForeignKey(

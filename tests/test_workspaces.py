@@ -11,6 +11,7 @@ from django.db import IntegrityError, close_old_connections, connection, connect
 from django.test import Client, override_settings
 from django.utils import timezone
 
+from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.invitations import (
     InvitationRateLimitError,
     accept_workspace_invitation,
@@ -25,7 +26,7 @@ from pyracast.accounts.models import (
     WorkspaceInvitation,
     WorkspaceRole,
 )
-from pyracast.accounts.operations import reassign_workspace_admin, require_workspace_admin
+from pyracast.accounts.operations import reassign_workspace_admin
 from tests.support.company_registration import mailed_code, signup
 from tests.support.workspaces import invitation_token
 
@@ -91,9 +92,9 @@ def test_platform_reassignment_requires_active_existing_member_and_current_selec
         )
     for rejected in (administrator, platform):
         with pytest.raises(PermissionDenied), transaction.atomic():
-            require_workspace_admin(rejected, tenant.pk)
+            tenant_membership(rejected, tenant.pk, role=WorkspaceRole.ADMIN, lock=True)
     with transaction.atomic():
-        require_workspace_admin(viewer, tenant.pk)
+        tenant_membership(viewer, tenant.pk, role=WorkspaceRole.ADMIN, lock=True)
 
 
 @override_settings(
@@ -335,7 +336,9 @@ def test_workspace_invitation_api_is_scoped_and_never_returns_secrets(
     assert client.get(members_url).status_code == 403
     assert client.get(invitations_url).status_code == 403
     with transaction.atomic(), pytest.raises(PermissionDenied):
-        require_workspace_admin(administrator, tenant.pk + wrong_tenant.pk + 1)
+        tenant_membership(
+            administrator, tenant.pk + wrong_tenant.pk + 1, role=WorkspaceRole.ADMIN, lock=True
+        )
 
 
 @override_settings(
@@ -366,10 +369,10 @@ def test_invitation_email_failure_has_explicit_unknown_outcome(
 ) -> None:
     tenant, administrator, _ = workspace
 
-    def fail(*args: object, **kwargs: object) -> int:
+    def fail(*args: object, **kwargs: object) -> None:
         raise OSError("secret transport details")
 
-    monkeypatch.setattr("pyracast.accounts.invitations.send_mail", fail)
+    monkeypatch.setattr("pyracast.accounts.invitations.send", fail)
     invitation = invite_workspace_member(administrator, tenant.pk, "new@example.com")
     assert invitation.delivery_status == "uncertain"
     assert WorkspaceInvitation.objects.get().delivery_status == "uncertain"

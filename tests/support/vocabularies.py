@@ -14,7 +14,7 @@ from rest_framework import serializers
 
 from pyracast.accounts.language import save_user_language
 from pyracast.accounts.models import Membership, Tenant, UserLanguagePreference, WorkspaceInvitation
-from pyracast.api.serializers import AccountInput, BindingInput, TransitionInput
+from pyracast.api.serializers import BindingInput
 from pyracast.api.session import LanguageInput
 from pyracast.change_requests.models import ChangeRequest, IncidentChange, ProductionChangeItem
 from pyracast.change_requests.operations import submit_incident, submit_production
@@ -30,12 +30,10 @@ from pyracast.forecasts.models import (
 from pyracast.incidents.api import IncidentInput
 from pyracast.incidents.models import PlantIncident
 from pyracast.incidents.operations import save_incident
-from pyracast.metering.history import read_production_day
 from pyracast.metering.models import EpiasCollectionJob, EpiasSnapshot
 from pyracast.notifications.models import NotificationDelivery, ReminderSchedule
 from pyracast.notifications.operations import configure_reminders
 from pyracast.notifications.serializers import ReminderInput
-from pyracast.plants.epias_api import EpiasDateQuery
 from pyracast.plants.models import (
     CalibrationRun,
     PlantConfiguration,
@@ -59,7 +57,7 @@ from tests.support.epias_api import archive_source
 from tests.support.incident_calibration import incident
 from tests.support.metering import connected
 from tests.support.notifications import configured, ready
-from tests.support.plant_operations import make_plant, snapshot_for
+from tests.support.plant_operations import make_plant, saved_actuals, snapshot_for
 
 OUTSIDE = "xx"
 COVERED_APPS = (
@@ -84,7 +82,7 @@ class StoredVocabulary:
     field: str
     row: Row
     retired: tuple[str, ...] = ()
-    customer_api: bool = True
+    published: bool = True
 
     @property
     def id(self) -> str:
@@ -106,6 +104,8 @@ class InputVocabulary:
     data: dict[str, object]
     field: str
     operation: Operation
+    accepted: str
+    error: str
     rejected: tuple[str, ...] = (OUTSIDE,)
 
 
@@ -136,9 +136,13 @@ def assert_serializer_rejects(case: InputVocabulary, value: str) -> None:
     assert case.field in refused.errors
 
 
-def assert_operation_rejects(operation: Callable[[str], object], value: str) -> None:
-    with pytest.raises(ValidationError):
+def assert_operation_rejects(
+    case: InputVocabulary, operation: Callable[[str], object], value: str
+) -> None:
+    with pytest.raises(ValidationError) as raised:
         operation(value)
+    assert raised.value.messages == [case.error]
+    operation(case.accepted)
 
 
 def _membership(monkeypatch: pytest.MonkeyPatch) -> models.Model:
@@ -185,7 +189,7 @@ def _audit_event(monkeypatch: pytest.MonkeyPatch) -> models.Model:
 
 def _account(monkeypatch: pytest.MonkeyPatch) -> models.Model:
     return create_account(
-        User.objects.create(username="platform", is_superuser=True),
+        User.objects.create(username="platform", is_superuser=True, is_staff=True),
         provider="solcast",
         external_account_id="vocabulary",
         api_key=provider_key(),
@@ -311,27 +315,22 @@ STORED_VOCABULARIES = (
         "action",
         _audit_event,
         retired=("approved", "rejected", "suspended", "binding_validated"),
-        customer_api=False,
     ),
-    StoredVocabulary(ProviderAccount, "provider", _account, customer_api=False),
-    StoredVocabulary(SiteBinding, "power_basis", _binding, customer_api=False),
-    StoredVocabulary(SiteBinding, "health", _binding, customer_api=False),
+    StoredVocabulary(ProviderAccount, "provider", _account, published=False),
+    StoredVocabulary(SiteBinding, "power_basis", _binding),
+    StoredVocabulary(SiteBinding, "health", _binding),
     StoredVocabulary(ChangeRequest, "kind", _production_request),
     StoredVocabulary(ChangeRequest, "status", _production_request),
     StoredVocabulary(ProductionChangeItem, "action", _production_item),
     StoredVocabulary(IncidentChange, "action", _incident_change),
-    StoredVocabulary(DispatcherStatus, "phase", _dispatcher_status, customer_api=False),
+    StoredVocabulary(DispatcherStatus, "phase", _dispatcher_status),
     StoredVocabulary(CollectionJob, "endpoint", _collection_job),
     StoredVocabulary(CollectionJob, "status", _collection_job),
-    StoredVocabulary(
-        RequestAttempt, "purpose", _request_attempt, retired=("operator",), customer_api=False
-    ),
-    StoredVocabulary(RequestAttempt, "outcome", _request_attempt, customer_api=False),
-    StoredVocabulary(ForecastSnapshot, "source_kind", _forecast_snapshot, customer_api=False),
+    StoredVocabulary(RequestAttempt, "purpose", _request_attempt, retired=("operator",)),
+    StoredVocabulary(RequestAttempt, "outcome", _request_attempt),
+    StoredVocabulary(ForecastSnapshot, "source_kind", _forecast_snapshot),
     StoredVocabulary(EpiasCollectionJob, "source_kind", _epias_job),
-    StoredVocabulary(
-        EpiasCollectionJob, "status", _epias_job, retired=("retry",), customer_api=False
-    ),
+    StoredVocabulary(EpiasCollectionJob, "status", _epias_job, retired=("retry",)),
     StoredVocabulary(EpiasSnapshot, "source_kind", _epias_snapshot),
     StoredVocabulary(PlantSubmission, "measurement_basis", _plant_submission),
     StoredVocabulary(PlantSubmission, "mounting_type", _plant_submission),
@@ -339,7 +338,7 @@ STORED_VOCABULARIES = (
     StoredVocabulary(PlantConfiguration, "mounting_type", _plant_configuration),
     StoredVocabulary(ProductionObservation, "quality", _observation),
     StoredVocabulary(CalibrationRun, "status", _calibration_run),
-    StoredVocabulary(PlantEvent, "action", _plant_event, customer_api=False),
+    StoredVocabulary(PlantEvent, "action", _plant_event),
     StoredVocabulary(PlantIncident, "kind", _plant_incident),
     StoredVocabulary(ReminderSchedule, "language", _reminder_schedule),
     StoredVocabulary(NotificationDelivery, "status", _notification_delivery),
@@ -348,7 +347,7 @@ STORED_VOCABULARIES = (
 
 
 def _create_account(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
-    administrator = User.objects.create(username="platform", is_superuser=True)
+    administrator = User.objects.create(username="platform", is_superuser=True, is_staff=True)
     return lambda provider: create_account(
         administrator,
         provider=provider,
@@ -426,6 +425,8 @@ def _import_observation(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], obje
     system, plant = make_plant(monkeypatch)
     configuration = plant.current_configuration_id
     assert configuration is not None
+    end = NOW - timedelta(days=1)
+    saved_actuals(system, end.date())
     return lambda quality: import_observations(
         system.member,
         system.tenant.pk,
@@ -433,7 +434,7 @@ def _import_observation(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], obje
         plant.pk,
         configuration_id=configuration,
         unit="MWh",
-        observations=[ObservationInput(NOW - timedelta(hours=1), NOW, 1, quality, "meter")],
+        observations=[ObservationInput(end - timedelta(hours=1), end, 1, quality, "meter")],
     )
 
 
@@ -455,7 +456,7 @@ def _configure_reminders(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], obj
         system.tenant.pk,
         system.region.pk,
         enabled=True,
-        recipients=[],
+        recipients=["ops@example.test"],
         times=["10:00"],
         language=language,
         now=NOW,
@@ -465,13 +466,6 @@ def _configure_reminders(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], obj
 def _reserve_request(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
     account = make_system().account
     return lambda purpose: reserve_account_request(account, NOW, purpose=purpose)
-
-
-def _read_production_day(monkeypatch: pytest.MonkeyPatch) -> Callable[[str], object]:
-    system, plant, _ = connected(monkeypatch)
-    return lambda source: read_production_day(
-        plant, actor=system.admin, day=NOW.date(), source_kind=source
-    )
 
 
 PLANT_DATA: dict[str, object] = {"name": "Plant", "dc_capacity_mw": 1}
@@ -486,10 +480,12 @@ OBSERVATION_DATA: dict[str, object] = {
 INPUT_VOCABULARIES = (
     InputVocabulary(
         "provider",
-        AccountInput,
+        None,
         {"provider": "solcast", "external_account_id": "account", "api_key": "key"},
         "provider",
         _create_account,
+        accepted="fixture",
+        error="Invalid provider account identity.",
     ),
     InputVocabulary(
         "power_basis",
@@ -503,22 +499,36 @@ INPUT_VOCABULARIES = (
         },
         "power_basis",
         _configure_binding,
+        accepted="dc",
+        error="An AC or DC power basis is required.",
     ),
     InputVocabulary(
         "region_transition",
-        TransitionInput,
+        None,
         {"status": "rejected"},
         "status",
         _transition_region,
+        accepted="suspended",
+        error="Use approval for approval transitions.",
         rejected=(OUTSIDE, "approved", "pending"),
     ),
-    InputVocabulary("language", LanguageInput, {"language": "en"}, "language", _save_language),
+    InputVocabulary(
+        "language",
+        LanguageInput,
+        {"language": "en"},
+        "language",
+        _save_language,
+        accepted="tr",
+        error="unsupported_language",
+    ),
     InputVocabulary(
         "incident_change_action",
         IncidentRequestInput,
         {"action": "create", "idempotency_key": str(uuid4())},
         "action",
         _submit_incident,
+        accepted="create",
+        error="Unknown incident request action.",
     ),
     InputVocabulary(
         "production_change_action",
@@ -532,6 +542,8 @@ INPUT_VOCABULARIES = (
         },
         "action",
         _submit_production,
+        accepted="set",
+        error="Unknown production action.",
     ),
     InputVocabulary(
         "measurement_basis",
@@ -539,10 +551,26 @@ INPUT_VOCABULARIES = (
         PLANT_DATA,
         "measurement_basis",
         _measurement_basis,
+        accepted="ac_generation",
+        error="Unsupported meter basis.",
     ),
-    InputVocabulary("mounting_type", PlantInput, PLANT_DATA, "mounting_type", _mounting_type),
     InputVocabulary(
-        "observation_quality", ObservationRow, OBSERVATION_DATA, "quality", _import_observation
+        "mounting_type",
+        PlantInput,
+        PLANT_DATA,
+        "mounting_type",
+        _mounting_type,
+        accepted="tracking",
+        error="Unsupported mounting type.",
+    ),
+    InputVocabulary(
+        "observation_quality",
+        ObservationRow,
+        OBSERVATION_DATA,
+        "quality",
+        _import_observation,
+        accepted="outage",
+        error="Unsupported observation quality.",
     ),
     InputVocabulary(
         "incident_kind",
@@ -550,6 +578,8 @@ INPUT_VOCABULARIES = (
         {"kind": "inverter", "title": "Inverter outage", "starts_at": "2026-11-09T11:00:00Z"},
         "kind",
         _save_incident,
+        accepted="grid",
+        error="Unsupported incident kind.",
     ),
     InputVocabulary(
         "reminder_language",
@@ -557,16 +587,18 @@ INPUT_VOCABULARIES = (
         {"enabled": True, "language": "en", "recipients": [], "times": ["10:00"]},
         "language",
         _configure_reminders,
+        accepted="tr",
+        error="A supported reminder language is required.",
     ),
     InputVocabulary(
-        "request_purpose", None, {}, "purpose", _reserve_request, rejected=(OUTSIDE, "operator")
-    ),
-    InputVocabulary(
-        "epias_data_source",
-        EpiasDateQuery,
-        {"date": "2026-11-09", "data_source": "settlement_injection"},
-        "data_source",
-        _read_production_day,
+        "request_purpose",
+        None,
+        {},
+        "purpose",
+        _reserve_request,
+        accepted="validation",
+        error="Unknown request purpose.",
+        rejected=(OUTSIDE, "operator"),
     ),
 )
 

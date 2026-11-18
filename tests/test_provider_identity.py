@@ -32,9 +32,9 @@ IDENTITIES = [
 def test_raw_provider_variants_share_one_account_and_quota(
     original: str, equivalent: str, expected: str
 ) -> None:
-    admin = User.objects.create(username="admin", is_superuser=True)
+    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
     existing = ProviderAccount.objects.create(
-        provider="\xa0FIXTURE\t",
+        provider="fixture",
         external_account_id=original,
         encrypted_api_key=encrypt_secret(provider_key()),
         daily_quota=1,
@@ -43,12 +43,13 @@ def test_raw_provider_variants_share_one_account_and_quota(
     )
     duplicate = create_account(
         admin,
-        provider="fixture",
+        provider="\xa0FIXTURE\t",
         external_account_id=equivalent,
         api_key=provider_key("OTHER"),
         daily_quota=10,
     )
     assert duplicate.pk == existing.pk
+    assert duplicate.provider == "fixture"
     assert decrypt_api_key(duplicate.encrypted_api_key) == provider_key()
     assert duplicate.daily_quota == 1
     assert not AuditEvent.objects.filter(action="provider_account_created").exists()
@@ -69,7 +70,7 @@ def test_raw_provider_variants_share_one_account_and_quota(
 def test_new_account_identity_uses_database_unicode_casefold(
     original: str, equivalent: str, expected: str
 ) -> None:
-    admin = User.objects.create(username="admin", is_superuser=True)
+    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
     created = create_account(
         admin, provider="fixture", external_account_id=original, api_key=provider_key()
     )
@@ -85,7 +86,7 @@ def test_new_account_identity_uses_database_unicode_casefold(
 
 
 def test_dotted_and_dotless_turkish_identities_keep_distinct_accounts() -> None:
-    admin = User.objects.create(username="admin", is_superuser=True)
+    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
     accounts = [
         create_account(
             admin, provider="fixture", external_account_id=identity, api_key=provider_key()
@@ -97,7 +98,7 @@ def test_dotted_and_dotless_turkish_identities_keep_distinct_accounts() -> None:
 
 
 def test_concurrent_unicode_account_creation_keeps_one_quota_identity() -> None:
-    admin = User.objects.create(username="admin", is_superuser=True)
+    admin = User.objects.create(username="admin", is_staff=True, is_superuser=True)
     barrier = Barrier(2)
 
     def create(identity: str) -> int:

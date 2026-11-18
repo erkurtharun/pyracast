@@ -79,7 +79,7 @@ def test_encrypted_provider_request_uses_plaintext_only_in_authorization_header(
 
 @pytest.mark.django_db
 def test_account_create_and_rotation_keep_encrypted_keys_out_of_audit_records() -> None:
-    admin = User.objects.create_user(username="secret-admin", is_superuser=True)
+    admin = User.objects.create_user(username="secret-admin", is_staff=True, is_superuser=True)
     account = create_account(
         admin,
         provider="solcast",

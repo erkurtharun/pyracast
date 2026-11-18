@@ -11,8 +11,9 @@ from django.db import IntegrityError, transaction
 from django.test import Client
 from rest_framework.pagination import PageNumberPagination
 
+from pyracast.accounts.authorization import tenant_membership
 from pyracast.accounts.models import Membership
-from pyracast.accounts.operations import reassign_workspace_admin, workspace_membership
+from pyracast.accounts.operations import reassign_workspace_admin
 from pyracast.change_requests import operations, queries
 from pyracast.change_requests.models import ChangeRequest, IncidentChange, ProductionChangeItem
 from pyracast.change_requests.operations import (
@@ -460,13 +461,13 @@ def test_detail_rechecks_ownership_when_final_membership_read_sees_admin_transfe
     client = Client()
     client.force_login(case.system.member)
 
-    def transferred_membership(actor: User, tenant_id: int) -> Membership:
+    def transferred_membership(actor: User, tenant_id: int, **options: Any) -> Membership:
         reassign_workspace_admin(
             case.system.admin, tenant_id, case.proposer.pk, expected_admin_id=case.system.member.pk
         )
-        return workspace_membership(actor, tenant_id)
+        return tenant_membership(actor, tenant_id, **options)
 
-    monkeypatch.setattr(queries, "workspace_membership", transferred_membership)
+    monkeypatch.setattr(queries, "tenant_membership", transferred_membership)
     response = client.get(f"/api/tenants/{case.system.tenant.pk}/change-requests/{request.pk}/")
     assert response.status_code == 404
     assert response.json() == {"code": "not_found"}

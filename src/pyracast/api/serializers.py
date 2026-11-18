@@ -4,13 +4,11 @@ from django.utils.translation import gettext
 from rest_framework import serializers
 
 from pyracast.accounts.models import Tenant, WorkspaceRole
-from pyracast.connections.models import PowerBasis, Provider
+from pyracast.connections.models import PowerBasis
 from pyracast.forecasts.models import SnapshotSourceKind
 from pyracast.regions.models import (
-    REGION_TRANSITIONS,
     Region,
     RegionLocationChangeRequest,
-    RegionStatus,
 )
 
 
@@ -56,10 +54,6 @@ class RegionOutput(serializers.ModelSerializer[Region]):
         read_only_fields = fields
 
 
-class RegionRenameInput(InputSerializer):
-    name = serializers.CharField(max_length=200)
-
-
 class LocationChangeInput(InputSerializer):
     expected_revision = serializers.IntegerField(min_value=1)
     latitude = serializers.FloatField(min_value=-90, max_value=90)
@@ -85,20 +79,6 @@ class LocationChangeOutput(serializers.ModelSerializer[RegionLocationChangeReque
         read_only_fields = fields
 
 
-class AccountInput(InputSerializer):
-    provider = serializers.ChoiceField(choices=Provider.choices)
-    external_account_id = serializers.CharField(max_length=200)
-    api_key = serializers.CharField(
-        max_length=1024, write_only=True, trim_whitespace=False, allow_blank=True, default=""
-    )
-    daily_quota = serializers.IntegerField(min_value=1, max_value=10, default=10)
-    authorization_reference = serializers.CharField(max_length=500, required=False, default="")
-
-
-class RotateSecretInput(InputSerializer):
-    api_key = serializers.CharField(max_length=1024, write_only=True, trim_whitespace=False)
-
-
 class BindingInput(InputSerializer):
     provider_account_id = serializers.IntegerField(min_value=1)
     site_id = serializers.CharField(max_length=200)
@@ -112,20 +92,6 @@ class BindingInput(InputSerializer):
     settings_verification_reference = serializers.CharField(
         max_length=500, required=False, default=""
     )
-
-
-class ApprovalInput(InputSerializer):
-    binding_id = serializers.IntegerField(min_value=1)
-
-
-class TransitionInput(InputSerializer):
-    status = serializers.ChoiceField(
-        choices=[(status.value, status.label) for status in map(RegionStatus, REGION_TRANSITIONS)]
-    )
-
-
-class IdentifierOutput(serializers.Serializer[dict[str, Any]]):
-    id = serializers.IntegerField()
 
 
 class ForecastQuery(InputSerializer):

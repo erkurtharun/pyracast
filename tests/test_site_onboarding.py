@@ -67,7 +67,6 @@ def test_combined_site_api_saves_technical_submission_before_provider_approval()
     assert site["plant"]["submission"]["inverter_capacity_mw"] is None
     assert site["plant"]["submission"]["export_limit_mw"] == 100
     assert PlantConfiguration.objects.count() == CollectionJob.objects.count() == 0
-    assert client.get(f"{base}{site['id']}/").json() == site
     rows = client.get(base).json()["results"]
     assert rows[0]["plant"] is None
     assert rows[1] == site
@@ -94,8 +93,7 @@ def test_site_api_rejects_invalid_values_and_cross_tenant_access_atomically() ->
     assert Region.objects.count() == 1
     assert not Plant.objects.exists()
     other = Tenant.objects.create(name="Other")
-    for suffix in ("", f"{system.region.pk}/"):
-        assert client.get(f"/api/tenants/{other.pk}/sites/{suffix}").status_code == 403
+    assert client.get(f"/api/tenants/{other.pk}/sites/").status_code == 403
     assert (
         client.post(
             f"/api/tenants/{other.pk}/sites/", site_values(), content_type="application/json"

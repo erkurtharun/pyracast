@@ -53,14 +53,14 @@ sequenceDiagram
 | `django_session` | R/W | Current session row deleted by logout; other sessions of the user fail the session-auth-hash check on their next request and are flushed then |
 | `usersessions_usersession` | R/W | Activity row of the current session is touched by `UserSessionsMiddleware` and left behind; other rows are not ended |
 | `account_emailaddress`, `mfa_authenticator` | R | Primary address for the notification; for accounts without a password also the reauthentication flows (verified addresses, TOTP or recovery codes) |
-| `accounts_userlanguagepreference` | R | Read by `RequestLanguage` middleware; the mail uses that active language because the notification context carries no `user` |
+| `accounts_userlanguagepreference` | R | Saved language of the account; the notification mail uses it |
 | `pyracast_authentication_cache` | R/W | `change_password` rate-limit history and its lock key per user (separate `auth_cache` connection) |
 
 ## Authorization
 
 - Authentication: allauth `AuthenticatedAPIView` returns 401 with login flows for anonymous requests; the view works only on `request.user`. `CsrfViewMiddleware` checks `X-CSRFToken` (the browser view is not CSRF-exempt); `pyracast.accounts.middleware.SessionLifetime` enforces 12 h absolute and 30 min idle before the view.
 - Knowledge proof: `ChangePasswordInput.clean_current_password` (view input layer) when the account has a usable password; recent reauthentication (`ACCOUNT_REAUTHENTICATION_TIMEOUT` 300 s) in `ChangePasswordView.handle` when it has none.
-- Rate limit: allauth `rate_limit(action="change_password")` on `handle`, default `5/m/user` (not overridden in `ACCOUNT_RATE_LIMITS`); it runs before the reauthentication check, so reauthentication 401s also count. No tenant, role or MFA check applies to any signed-in user, staff included; the database enforces nothing here.
+- Rate limit: allauth `rate_limit(action="change_password")` on `handle`, `5/10m/user` in `ACCOUNT_RATE_LIMITS`; it runs before the reauthentication check, so reauthentication 401s also count. A wrong current password logs `password_change_failed` (user id and client IP) from `ChangePasswordInput.clean_current_password`. No tenant, role or MFA check applies to any signed-in user, staff included; the database enforces nothing here.
 
 ## Failure paths
 
@@ -86,5 +86,5 @@ sequenceDiagram
 
 ## Tests
 
-- `tests/test_session.py` `test_password_change_requires_current_password_and_invalidates_all_sessions`, `test_expired_session_cannot_report_a_successful_password_change` (an anonymous client, not a timed-out session); `tests/test_auth_lifecycle.py` `test_password_change_requires_at_least_twelve_characters`, `test_password_whitespace_is_preserved_across_login_reauthentication_and_change`; `tests/test_social_accounts.py` `test_last_enabled_provider_cannot_be_removed` (set password after email reauthentication, status and hash only), `tests/test_transactional_mail.py` (templates only), `tests/test_admin_mfa_bootstrap.py` (admin redirect), `tests/test_account_mail_failures.py` `test_password_change_with_failing_mail_completes_and_is_audited` (401, flag, new hash and `password_changed` event with a failing mailer).
-- Playwright: `web/tests/social-auth.spec.ts` (first password, expired session; mocked API), `web/integration/auth-security.spec.ts` (full change, then login). Gaps: no test of the notification mail after a real change, the rate limit, the 1024-character cap on `new_password`, the `password_set` event or the reauthentication replay.
+- `tests/test_session.py` `test_password_change_requires_current_password_and_invalidates_all_sessions`, `test_expired_session_cannot_report_a_successful_password_change` (an anonymous client, not a timed-out session); `tests/test_auth_lifecycle.py` `test_password_change_requires_at_least_twelve_characters`, `test_password_whitespace_is_preserved_across_login_reauthentication_and_change`; `tests/test_social_accounts.py` `test_last_enabled_provider_cannot_be_removed` (set password after email reauthentication, status and hash only), `tests/test_account_mail_content.py` (notification after a real change, account language), `tests/test_admin_mfa_bootstrap.py` (admin redirect), `tests/test_account_mail_failures.py` `test_password_change_with_failing_mail_completes_and_is_audited` (401, flag, new hash and `password_changed` event with a failing mailer).
+- Playwright: `web/tests/social-auth.spec.ts` (first password, expired session; mocked API), `web/integration/auth-security.spec.ts` (full change, then login). Gaps: no test of the rate limit, the 1024-character cap on `new_password`, the `password_set` event or the reauthentication replay.

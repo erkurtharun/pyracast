@@ -9,5 +9,6 @@
 !Dockerfile
 **/__pycache__/
 **/*.py[cod]
+**/*.mo
 **/.env*
 **/gha-creds-*.json

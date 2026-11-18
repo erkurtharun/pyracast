@@ -148,7 +148,7 @@ def test_incomplete_and_interrupted_deliveries_remain_visible_to_monitoring() ->
     delivery.save()
     assert delivery_health(NOW, timedelta(minutes=5))["healthy"] is True
     delivery.status = "retry"
-    delivery.last_error = "mail_authentication_failed"
+    delivery.last_error = "mail_credentials_rejected"
     delivery.save()
     report = delivery_health(NOW, timedelta(minutes=5))
     assert report["mail_authentication_failures"] == 1
@@ -249,6 +249,25 @@ def test_health_command_emits_json_and_nonzero_for_degraded_work(
     assert json.loads(output.getvalue())["healthy"] is True
     with pytest.raises(CommandError, match="must be positive"):
         call_command("check_delivery_health", max_lag_minutes=0)
+
+
+@pytest.mark.django_db
+def test_health_command_bounds_every_statement_to_ten_seconds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def report(_now: datetime, _lag: timedelta) -> dict[str, object]:
+        with connection.cursor() as cursor:
+            cursor.execute("SHOW statement_timeout")
+            row = cursor.fetchone()
+        assert row is not None
+        return {"healthy": True, "statement_timeout": row[0]}
+
+    monkeypatch.setattr(
+        "pyracast.forecasts.management.commands.check_delivery_health.delivery_health", report
+    )
+    output = io.StringIO()
+    call_command("check_delivery_health", stdout=output)
+    assert json.loads(output.getvalue())["statement_timeout"] == "10s"
 
 
 @pytest.mark.parametrize("expired", [False, True])
