@@ -92,6 +92,7 @@ MIGRATION = frozenset(
         "test_invariant_migrations",
         "test_invitation_role_migration",
         "test_ledger_invitation_and_recipient_migrations",
+        "test_schema_naming_migrations",
         "test_vocabulary_migrations",
         "test_workspace_name_migration",
     }
