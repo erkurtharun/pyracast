@@ -19,7 +19,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBase
 from psycopg.errors import DeadlockDetected
 
 from pyracast.accounts import inputs
-from pyracast.accounts.adapters import violated_constraint
+from pyracast.db import violated_constraint
 
 COMPLETION_FAILURES = (ObjectDoesNotExist, ObjectNotUpdated, IntegrityError, OperationalError)
 # The second name is the one Django generated for allauth's unique (user, email).

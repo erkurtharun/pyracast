@@ -18,6 +18,7 @@ from django.contrib.auth.password_validation import (
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseBase
+from django.urls import reverse
 
 from pyracast.accounts.inputs import PasswordInput
 
@@ -58,16 +59,8 @@ class CompanySignupInput(PasswordInput, SignupInput):
             return cast(User, super().save(request))
 
 
-_SIGNUP_STARTED = "pyracast.signup_started"
-
-
 class CompanySignupView(SignupView):
     input_class = {"POST": CompanySignupInput}  # noqa: RUF012 -- Allauth's view contract.
-
-    def dispatch(self, request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponseBase:
-        if request.method == "POST":
-            request.META[_SIGNUP_STARTED] = time.monotonic()
-        return super().dispatch(request, *args, **kwargs)
 
 
 class SignupMinimumAnswerTime:
@@ -75,8 +68,12 @@ class SignupMinimumAnswerTime:
         self.get_response = get_response
 
     def __call__(self, request: HttpRequest) -> HttpResponseBase:
+        started = (
+            time.monotonic()
+            if request.method == "POST" and request.path_info == reverse("password_signup")
+            else None
+        )
         response = self.get_response(request)
-        started = request.META.get(_SIGNUP_STARTED)
         if started is not None and response.status_code != HTTPStatus.TOO_MANY_REQUESTS:
             elapsed = time.monotonic() - started
             remaining = settings.PYRACAST_SIGNUP_MINIMUM_ANSWER_SECONDS - elapsed

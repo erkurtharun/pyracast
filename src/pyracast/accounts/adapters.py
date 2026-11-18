@@ -36,10 +36,6 @@ CODE_TIMEOUTS = {
 }
 
 
-def violated_constraint(error: IntegrityError) -> str | None:
-    return getattr(getattr(error.__cause__, "diag", None), "constraint_name", None)
-
-
 LOGIN_LIMITED_MESSAGE = gettext_lazy(
     "Too many sign-in attempts, or a verification code was sent recently. "
     "Try again in a few minutes."

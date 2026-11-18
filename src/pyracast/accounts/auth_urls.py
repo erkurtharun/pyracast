@@ -24,7 +24,9 @@ urlpatterns = [
     path("config", ConfigView.as_api_view(client=Client.BROWSER)),
     path("auth/session", account_views.SessionView.as_api_view(client=Client.BROWSER)),
     path("auth/login", headless.LoginView.as_api_view(client=Client.BROWSER)),
-    path("auth/signup", CompanySignupView.as_api_view(client=Client.BROWSER)),
+    path(
+        "auth/signup", CompanySignupView.as_api_view(client=Client.BROWSER), name="password_signup"
+    ),
     path(
         "auth/email/verify",
         require_POST(headless.VerifyEmailView.as_api_view(client=Client.BROWSER)),
