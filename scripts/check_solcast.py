@@ -8,8 +8,6 @@ from typing import TYPE_CHECKING, cast
 import django
 import httpx
 
-from pyracast.regions.models import active_region
-
 if TYPE_CHECKING:
     from pyracast.connections.models import SiteBinding
 
@@ -72,6 +70,7 @@ def capture(
     from pyracast.forecasts.models import RequestAttempt, RequestPurpose
     from pyracast.provider_retry import retry_after_seconds, retryable_status
     from pyracast.providers import contains_secret
+    from pyracast.regions.models import active_region
 
     if kind not in {"settings", "forecast"}:
         raise ValueError("Unknown capture kind.")

@@ -53,9 +53,8 @@ class NormalizedInterval:
             "power_kw": self.power_kw,
             "sunlight": self.sunlight,
         }
-        if self.original_start is not None and self.original_end is not None:
-            row |= {
-                "original_start": self.original_start.isoformat(),
-                "original_end": self.original_end.isoformat(),
-            }
+        if self.original_start is not None:
+            row["original_start"] = self.original_start.isoformat()
+        if self.original_end is not None:
+            row["original_end"] = self.original_end.isoformat()
         return row

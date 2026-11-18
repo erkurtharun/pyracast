@@ -72,7 +72,6 @@ class RowTrigger:
 type SchemaObject = Extension | CompositeForeignKey | RowTrigger
 
 
-# The migration of each app that brought its names to the naming convention.
 NAMING = {
     "accounts": "0005_schema_naming_convention",
     "change_requests": "0004_schema_naming_convention",

@@ -21,7 +21,6 @@ def project_models() -> list[type[models.Model]]:
 
 
 def declared_names() -> dict[str, tuple[str, str]]:
-    """Each declared constraint and index name with the model and kind it belongs to."""
     tables = {model._meta.db_table: model for model in project_models()}
     names: dict[str, tuple[str, str]] = {}
     for model in project_models():

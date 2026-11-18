@@ -345,13 +345,11 @@ Composite foreign keys, the issuance trigger and the `btree_gist` extension, whi
 models cannot declare, are listed once in `pyracast/schema_objects.py`; the migration
 that creates each one and the schema catalog test both read that list.
 Constraint and index names follow `<model>_<subject>_<kind>`: the lowercased model
-class, the constrained columns (or one word for the rule when they do not fit) and one
-of `chk`, `uniq`, `excl`, `fk`, `idx`; index names stay within Django's 30 characters.
-A rename runs `pyracast.db.RenameInPlace` or `RenameField`, which PostgreSQL applies
-without rebuilding or revalidating anything. Rows under a trashed region are excluded
-through `Region.objects.active()`, `Plant.objects.active()` or `active_region` and
-`active_plant` for related rows; a test keeps raw `deleted_at` lookups to the region
-model and the trash.
+class, the constrained columns (or one word for the rule) and one of `chk`, `uniq`,
+`excl`, `fk`, `idx`; index names stay within Django's 30 characters. A rename changes
+only the name: PostgreSQL rebuilds and revalidates nothing. A region in the trash hides
+its plant and every row under them; readers ask the region and plant models what is
+active and never filter `deleted_at` themselves.
 EPİAŞ archives use protected relations; only the explicit expired-definition purge
 removes their snapshots, jobs and connections in order.
 

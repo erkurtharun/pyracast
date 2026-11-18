@@ -182,7 +182,6 @@ def renamed(rows: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, A
 
 
 def populate(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Rows in every table whose columns the naming migrations rename."""
     monkeypatch.setattr("pyracast.metering.scheduler.get_epias_client", lambda: FixtureClient())
     case = make_request_case(monkeypatch)
     system = case.system

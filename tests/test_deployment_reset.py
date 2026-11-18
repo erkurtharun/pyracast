@@ -277,14 +277,12 @@ def full_start(commands: FakeCommands) -> int:
 
 
 def finish_release(commands: FakeCommands, host: Host) -> None:
-    """What a successful install does: it migrates, starts and removes the marker."""
     commands.live = {"accounts_tenant": 1, "django_migrations": 89}
     commands.running = APPLICATION | EDGE | SUPPORT
     host.marker.unlink()
 
 
 def fail_release(commands: FakeCommands, host: Host) -> None:
-    """What a later install that fails in maintenance leaves: a new marker, stopped services."""
     host.marker.touch()
     commands.running = set(SUPPORT)
 
