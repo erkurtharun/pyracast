@@ -942,6 +942,28 @@ def test_a_stopped_release_leaves_the_runtime_role_on_the_secret_that_recovery_r
     assert "switch-runtime $release $secrets $secrets/runtime-verifier" in stop_path
 
 
+def test_the_deployment_guide_states_what_the_installer_does_with_secrets_and_failures() -> None:
+    guide = " ".join(text(ROOT / "docs" / "DEPLOYMENT.md").split())
+    script = installer()
+    body = preflight()
+
+    assert "restarts with it at once" not in guide
+    assert "the serving release then restarted" not in guide
+    assert "check_secrets" in body
+    assert "with the release's staged secrets" in guide
+    assert "nothing the serving release reads changes before maintenance" in guide
+    assert "switch_runtime\nprobe_database api" in script
+    assert "the runtime role's password changes only after" in guide
+    assert "revert-runtime" in function_body(script, "resume_previous")
+    assert "writes the runtime role's previous password back" in guide
+    assert "restarting pyracast.service" in script
+    assert "release again instead of restarting `pyracast.service`" in guide
+    assert "The gateway is stopped too" in script
+    assert "predates the maintenance notice" in guide
+    assert "No release served before this one" in script
+    assert "A first installation names no helper" in guide
+
+
 def test_a_failure_before_migrate_resumes_the_previous_release() -> None:
     script = installer()
     migrate = script.index('"${compose[@]}" run --rm --no-deps migrate\n')
