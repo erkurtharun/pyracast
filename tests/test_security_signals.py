@@ -47,6 +47,7 @@ PINNED_LINE_KEYS = frozenset(
         "method",
         "authenticator_type",
         "provider",
+        "scope",
     }
 )
 WRITERS = frozenset({"record_security_event", "record_on_commit", "record_refusal"})
@@ -93,6 +94,7 @@ WRITTEN = frozenset(
         "admin_mfa_provisioned",
         "invalid_proxy_headers",
         "authentication_request_throttled",
+        "api_throttled",
         "authorization_denied",
         "csrf_refused",
         "invitation_sent",
@@ -371,6 +373,19 @@ def test_a_detail_of_another_type_is_refused_and_reported(
 
     assert [record.getMessage() for record in caplog.records] == [
         "security_line_failed event=invitation_accepted error_type=ValueError"
+    ]
+
+
+def test_a_request_budget_scope_must_be_text(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reported_failures(caplog, monkeypatch)
+    fields: dict[str, Any] = {"scope": 7}
+
+    record_security_event(SecurityEvent("api_throttled"), user_id=USER_ID, **fields)
+
+    assert [record.getMessage() for record in caplog.records] == [
+        "security_line_failed event=api_throttled error_type=ValueError"
     ]
 
 
