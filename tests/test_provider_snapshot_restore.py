@@ -1,5 +1,6 @@
 import gzip
 import io
+import logging
 import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -1192,11 +1193,17 @@ def test_command_reports_forecasts_alone_without_a_day_report(
     ]
 
 
+@pytest.fixture
+def detached_console_handler(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(logging.getLogger("pyracast"), "handlers", [])
+
+
 def test_command_prints_a_fixed_sentence_per_refusal_and_no_export_value_or_path(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     pyracast_logs: pytest.LogCaptureFixture,
+    detached_console_handler: None,
 ) -> None:
     system = restore_system(monkeypatch)
     before = collections_before_reset(system)
@@ -1264,6 +1271,7 @@ def test_command_prints_an_unexpected_failure_by_type_and_origin_only(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     pyracast_logs: pytest.LogCaptureFixture,
+    detached_console_handler: None,
 ) -> None:
     system = restore_system(monkeypatch)
     path = tmp_path / f"{SITE}.solcast.jsonl.gz"
