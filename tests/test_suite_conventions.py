@@ -80,7 +80,7 @@ def _modules_matching(pattern: str) -> set[str]:
 @pytest.mark.parametrize(
     ("marker", "pattern"),
     [
-        ("migration", r"MigrationExecutor"),
+        ("migration", r"MigrationExecutor|from tests\.support\.migrations import"),
         ("subprocess", r"subprocess\.(run|Popen|check_output|check_call)\("),
     ],
 )
