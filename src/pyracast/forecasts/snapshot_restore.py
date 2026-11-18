@@ -1,7 +1,6 @@
 import gzip
 import hashlib
 import json
-import logging
 import zlib
 from collections import Counter, defaultdict
 from collections.abc import Iterable
@@ -40,18 +39,18 @@ from pyracast.forecasts.projections import prepare_daily_payloads
 from pyracast.forecasts.sources import snapshot_data
 from pyracast.regions.models import Region
 
-logger = logging.getLogger(__name__)
-
-# Sibling of the provider's keys in raw_payload; no reader depends on it.
+# Sibling of the provider's keys in raw_payload; no reader depends on it. A row that was
+# restored before keeps its earlier record under "previous".
 PROVENANCE_KEY = "snapshot_restore"
 LIVE_KINDS: dict[str, str] = {
     CollectionEndpoint.FORECASTS: SnapshotSourceKind.FORECAST,
     CollectionEndpoint.ESTIMATED_ACTUALS: SnapshotSourceKind.ESTIMATED_ACTUALS,
 }
-# The binding columns the stored numbers depend on: the provider's capacity scale and AC/DC
-# semantics, the geometry, losses and installation date of its site model, and the location
-# and calendar the readers use for daylight and local days.
+# The provider site and the binding columns the stored numbers depend on: the provider's
+# capacity scale and AC/DC semantics, the geometry, losses and installation date of its site
+# model, and the location and calendar the readers use for daylight and local days.
 SETTINGS = (
+    "site_id",
     "capacity_kw",
     "dc_capacity_kw",
     "power_basis",
@@ -76,7 +75,6 @@ class Outcome(StrEnum):
     ALREADY_RESTORED = "already_restored"
     SLOT_TAKEN = "slot_taken"
     OTHER_PROVIDER = "other_provider"
-    OTHER_SITE = "other_site"
     NOT_LIVE = "not_live"
 
 
@@ -218,7 +216,6 @@ def _acquisition(row: ExportRow, now: datetime) -> Acquisition:
             row.source_kind != LIVE_KINDS[row.endpoint]
             or acquisition.collected_at > now
             or not isinstance(acquisition.raw_payload, dict)
-            or PROVENANCE_KEY in acquisition.raw_payload
             or not isinstance(acquisition.intervals, list)
             or not all(_valid_interval(interval) for interval in acquisition.intervals)
             or not isinstance(acquisition.weather_payload, dict | None)
@@ -236,8 +233,6 @@ def _skipped(row: ExportRow, binding: SiteBinding) -> Outcome | None:
         return Outcome.NOT_LIVE
     if row.provider != binding.provider_account.provider:
         return Outcome.OTHER_PROVIDER
-    if row.binding["site_id"] != binding.site_id:
-        return Outcome.OTHER_SITE
     return None
 
 
@@ -262,8 +257,9 @@ def _differing_settings(binding: SiteBinding, rows: Iterable[ExportRow]) -> list
 
 
 def _job_schedule(endpoint: str, slot: datetime, zone: str) -> tuple[date, datetime | None]:
-    # As forecasts/scheduler.py derives them: a forecast targets the next local day, a nightly
-    # history job the previous one until its window closes, an intraday one its own day.
+    # The export carries no job slot, so the collection time is the slot. From it the rules of
+    # forecasts/scheduler.py give a forecast the next local day, a collection inside the nightly
+    # window the previous day until the window closes, and any other its own day.
     day = slot.astimezone(ZoneInfo(zone)).date()
     if endpoint == CollectionEndpoint.FORECASTS:
         return day + timedelta(days=1), None
@@ -305,13 +301,13 @@ def _store(
         attempts=1,
     )
     coverage_start, coverage_end = acquisition.coverage or (None, None)
+    record = {**provenance, "snapshot_id": row.snapshot_id}
+    if PROVENANCE_KEY in acquisition.raw_payload:
+        record["previous"] = acquisition.raw_payload[PROVENANCE_KEY]
     snapshot = ForecastSnapshot.objects.create(
         job=job,
         binding=binding,
-        raw_payload={
-            **acquisition.raw_payload,
-            PROVENANCE_KEY: {**provenance, "snapshot_id": row.snapshot_id},
-        },
+        raw_payload={**acquisition.raw_payload, PROVENANCE_KEY: record},
         normalized_intervals=acquisition.intervals,
         collected_at=slot,
         issued_at=acquisition.issued_at,
@@ -385,16 +381,20 @@ def _restore_rows(
         (_acquisition(row, moment) for row in matching),
         key=lambda item: (item.collected_at, item.row.snapshot_id),
     )
-    restored = set(
-        ForecastSnapshot.objects.filter(
-            binding=binding, raw_payload__has_key=PROVENANCE_KEY
-        ).values_list(f"raw_payload__{PROVENANCE_KEY}__snapshot_id", flat=True)
+    # An acquisition is its endpoint and collection time: snapshot ids restart with each
+    # database, and a restored job's slot is its collection time.
+    times = [item.collected_at for item in acquisitions]
+    held = ForecastSnapshot.objects.filter(
+        binding=binding, job__endpoint__in=tuple(LIVE_KINDS), collected_at__in=times
     )
-    taken = set(
+    restored = set(
+        held.filter(raw_payload__has_key=PROVENANCE_KEY).values_list(
+            "job__endpoint", "collected_at"
+        )
+    )
+    taken = set(held.values_list("job__endpoint", "collected_at")) | set(
         CollectionJob.objects.filter(
-            binding=binding,
-            endpoint__in=tuple(LIVE_KINDS),
-            scheduled_slot__in=[item.collected_at for item in acquisitions],
+            binding=binding, endpoint__in=tuple(LIVE_KINDS), scheduled_slot__in=times
         ).values_list("endpoint", "scheduled_slot")
     )
     provenance: dict[str, object] = {
@@ -403,15 +403,15 @@ def _restore_rows(
         "restored_at": moment.isoformat(),
     }
     for item in acquisitions:
-        slot = (item.row.endpoint, item.collected_at)
-        if item.row.snapshot_id in restored:
+        key = (item.row.endpoint, item.collected_at)
+        if key in restored:
             outcome = Outcome.ALREADY_RESTORED
-        elif slot in taken:
+        elif key in taken:
             outcome = Outcome.SLOT_TAKEN
         else:
             _store(item, binding, region.timezone, provenance)
-            restored.add(item.row.snapshot_id)
-            taken.add(slot)
+            restored.add(key)
+            taken.add(key)
             outcome = Outcome.RESTORED
         outcomes[item.row.endpoint][outcome] += 1
     periods = {
@@ -449,46 +449,31 @@ def restore_provider_snapshots(
     collections of the binding that now holds the same provider site; a dry run rolls back."""
     require_platform_admin(actor)
     moment = timezone.now()
-    try:
-        rows = _read_export(content)
-        with transaction.atomic():
-            region = Region.objects.select_for_update().get(
-                pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
-            )
-            binding = SiteBinding.objects.get(pk=binding_id, region=region)
-            account = ProviderAccount.objects.select_for_update().get(
-                pk=binding.provider_account_id
-            )
-            binding = SiteBinding.objects.select_for_update().get(pk=binding.pk)
-            binding.provider_account = account
-            _validate_authorized_binding(binding)
-            summary = _restore_rows(
-                actor,
-                region,
-                binding,
-                rows,
-                hashlib.sha256(content).hexdigest(),
-                moment,
-                dry_run=dry_run,
-            )
-            if dry_run:
-                transaction.set_rollback(True)
-            elif any(
-                item.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
-                and Outcome.RESTORED in dict(item.outcomes)
-                for item in summary.endpoints
-            ):
-                transaction.on_commit(partial(_prepare_region_calibrations, region.pk))
-    except ValidationError:
-        logger.warning("provider_snapshot_restore_refused binding_id=%s", binding_id)
-        raise
-    logger.info(
-        "provider_snapshot_restore_finished binding_id=%s dry_run=%s restored=%s skipped=%s "
-        "export_sha256=%s",
-        binding_id,
-        dry_run,
-        summary.restored,
-        summary.rows - summary.restored,
-        summary.export_sha256,
-    )
+    rows = _read_export(content)
+    with transaction.atomic():
+        region = Region.objects.select_for_update().get(
+            pk=region_id, tenant_id=tenant_id, deleted_at__isnull=True
+        )
+        binding = SiteBinding.objects.get(pk=binding_id, region=region)
+        account = ProviderAccount.objects.select_for_update().get(pk=binding.provider_account_id)
+        binding = SiteBinding.objects.select_for_update().get(pk=binding.pk)
+        binding.provider_account = account
+        _validate_authorized_binding(binding)
+        summary = _restore_rows(
+            actor,
+            region,
+            binding,
+            rows,
+            hashlib.sha256(content).hexdigest(),
+            moment,
+            dry_run=dry_run,
+        )
+        if dry_run:
+            transaction.set_rollback(True)
+        elif any(
+            item.endpoint == CollectionEndpoint.ESTIMATED_ACTUALS
+            and Outcome.RESTORED in dict(item.outcomes)
+            for item in summary.endpoints
+        ):
+            transaction.on_commit(partial(_prepare_region_calibrations, region.pk))
     return summary

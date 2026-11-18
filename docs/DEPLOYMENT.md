@@ -676,12 +676,13 @@ verification and restart on the real host in about five minutes of downtime.
      --region-id REGION --binding-id BINDING --export - --dry-run < EXPORT
    ```
 
-   Each forecast and estimated-actuals snapshot of that site becomes a native
-   collection of the binding at its original collection time. The summary names per
-   endpoint what is restored or skipped and why, and per local day whether native
-   estimated actuals are complete. A differing setting refuses the whole run; a second
-   run adds nothing. Imports and scaled copies are skipped: import their source file
-   again.
+   Each forecast and estimated-actuals snapshot becomes a native collection of the
+   binding at its original collection time. The summary names per endpoint what is
+   restored or skipped and why, and per local day whether native estimated actuals are
+   complete. A live row of another site or with other settings refuses the whole run; a
+   second run adds nothing. Imports and scaled copies are skipped: import the source
+   file again, and normalize the reference capacity again from the restored source
+   binding.
 10. Once your off-host copies show the printed SHA-256 values, delete the archives
     and exports on the host; they hold every erased row:
 

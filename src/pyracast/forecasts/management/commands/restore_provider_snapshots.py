@@ -1,3 +1,4 @@
+import logging
 import sys
 from pathlib import Path
 from typing import Any
@@ -6,12 +7,15 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist, PermissionDenied, ValidationError
 from django.core.management.base import BaseCommand, CommandError, CommandParser
 
+from pyracast.background.failures import log_failure
 from pyracast.forecasts.snapshot_restore import (
     EndpointSummary,
     Outcome,
     RestoreSummary,
     restore_provider_snapshots,
 )
+
+logger = logging.getLogger(__name__)
 
 REMEDIES = {
     "historical_import": "import its source file again",
@@ -22,7 +26,6 @@ PHRASES = {
     Outcome.ALREADY_RESTORED: "already restored",
     Outcome.SLOT_TAKEN: "skipped, slot held by another collection",
     Outcome.OTHER_PROVIDER: "skipped, another provider",
-    Outcome.OTHER_SITE: "skipped, another provider site",
 }
 
 
@@ -85,6 +88,7 @@ class Command(BaseCommand):
         parser.add_argument("--dry-run", action="store_true")
 
     def handle(self, *args: Any, **options: Any) -> str:
+        binding_id = options["binding_id"]
         try:
             actor = User.objects.get(username=options["username"])
             export = options["export"]
@@ -93,10 +97,27 @@ class Command(BaseCommand):
                 actor,
                 options["tenant_id"],
                 options["region_id"],
-                options["binding_id"],
+                binding_id,
                 content,
                 dry_run=options["dry_run"],
             )
         except (ObjectDoesNotExist, PermissionDenied, ValidationError, OSError) as exc:
+            logger.warning(
+                "provider_snapshot_restore_refused binding_id=%s error_type=%s",
+                binding_id,
+                type(exc).__name__,
+            )
             raise CommandError("Provider snapshot restore failed: " + str(exc)) from exc
+        except Exception as exc:
+            log_failure(logger, "provider_snapshot_restore_failed", exc, binding_id=binding_id)
+            raise
+        logger.info(
+            "provider_snapshot_restore_finished binding_id=%s dry_run=%s restored=%s skipped=%s "
+            "export_sha256=%s",
+            binding_id,
+            summary.dry_run,
+            summary.restored,
+            summary.rows - summary.restored,
+            summary.export_sha256,
+        )
         return "\n".join(_report(summary))

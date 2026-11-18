@@ -32,12 +32,14 @@ from pyracast.regions.models import Region
 from tests.support.domain import NOW, System
 from tests.support.invariants import archived_rows, rewritten_archive_rows
 from tests.support.provider_snapshot_restore import (
+    OTHER_SITE,
     SEPARATOR,
     SETTINGS,
     SITE,
     ZONE,
     BeforeReset,
     acquisition,
+    binding_after_second_reset,
     binding_before_reset,
     collections_after_reset,
     collections_before_reset,
@@ -51,6 +53,7 @@ from tests.support.provider_snapshot_restore import (
 pytestmark = pytest.mark.django_db(transaction=True)
 
 KEY = "test-only-solcast-key"
+COMMAND_LOGGER = "pyracast.forecasts.management.commands.restore_provider_snapshots"
 
 
 def restore(system: System, content: bytes, *, dry_run: bool = False) -> RestoreSummary:
@@ -233,7 +236,7 @@ def test_a_second_run_with_the_same_export_adds_nothing_and_says_so(
 
     assert first.restored == 6
     assert second.restored == 0
-    assert outcomes(second)["estimated_actuals"] == {"already_restored": 4, "other_site": 1}
+    assert outcomes(second)["estimated_actuals"] == {"already_restored": 4}
     assert outcomes(second)["forecasts"] == {"already_restored": 2}
     assert second.days == first.days
     assert CollectionJob.objects.count() == jobs
@@ -262,7 +265,7 @@ def test_dry_run_reports_the_restore_and_writes_nothing(
     assert planned.restored == applied.restored == 6
 
 
-def test_rows_that_are_no_live_collection_of_the_site_are_skipped_and_named(
+def test_rows_that_are_no_live_collection_of_the_provider_are_skipped_and_named(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     system = restore_system(monkeypatch)
@@ -273,9 +276,9 @@ def test_rows_that_are_no_live_collection_of_the_site_are_skipped_and_named(
 
     summary = restore(system, encode_rows(rows))
 
-    assert summary.rows == 10
+    assert summary.rows == 9
     assert outcomes(summary) == {
-        "estimated_actuals": {"restored": 4, "other_provider": 1, "other_site": 1},
+        "estimated_actuals": {"restored": 4, "other_provider": 1},
         "forecasts": {"restored": 2},
         "historical_import": {"not_live": 1},
         "scaled_estimated_actuals": {"not_live": 1},
@@ -322,6 +325,114 @@ def test_a_slot_that_holds_a_native_collection_is_skipped_and_kept(
         ).get()
         == held
     )
+
+
+def test_an_acquisition_the_binding_already_holds_is_skipped_and_kept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = restore_system(monkeypatch)
+    before = collections_before_reset(system)
+    original = before.forecasts[0]
+    held = acquisition(
+        system.binding,
+        "forecasts",
+        original.collected_at,
+        datetime(2026, 11, 4, 21, tzinfo=UTC),
+        datetime(2026, 11, 7, 21, tzinfo=UTC),
+    )
+    assert held.job.scheduled_slot < held.collected_at
+    assert (held.coverage_start, held.coverage_end) == (
+        original.coverage_start,
+        original.coverage_end,
+    )
+
+    summary = restore(system, before.content)
+
+    assert outcomes(summary)["forecasts"] == {"restored": 1, "slot_taken": 1}
+    assert list(
+        ForecastSnapshot.objects.filter(
+            binding=system.binding, collected_at=original.collected_at
+        ).values_list("pk", flat=True)
+    ) == [held.pk]
+
+
+def test_a_reused_snapshot_id_of_another_export_is_restored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = restore_system(monkeypatch)
+    before = collections_before_reset(system)
+    restore(system, before.content)
+    original = before.forecasts[0]
+    reused = next(row for row in export_rows(before.content) if row["id"] == original.pk)
+    reused["collected_at"] = (original.collected_at + timedelta(hours=12)).isoformat()
+
+    summary = restore(system, encode_rows([reused]))
+
+    assert outcomes(summary) == {"forecasts": {"restored": 1}}
+    assert sorted(
+        ForecastSnapshot.objects.filter(
+            binding=system.binding, raw_payload__snapshot_restore__snapshot_id=original.pk
+        ).values_list("collected_at", flat=True)
+    ) == [original.collected_at, original.collected_at + timedelta(hours=12)]
+
+
+def test_rows_restored_before_a_later_reset_are_restored_again_with_their_lineage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = restore_system(monkeypatch)
+    before = collections_before_reset(system)
+    restore(system, before.content)
+    later = encode_rows(
+        [row for row in export_rows(export_content()) if row["binding"]["id"] == system.binding.pk]
+    )
+    fresh = binding_after_second_reset(system)
+
+    summary = restore_provider_snapshots(
+        system.admin, system.tenant.pk, system.region.pk, fresh.pk, later
+    )
+
+    assert outcomes(summary) == {
+        "estimated_actuals": {"restored": 4},
+        "forecasts": {"restored": 2},
+    }
+    for original in (before.lookback, *before.nights, *before.forecasts):
+        first = restored_copy(system.binding, original)
+        second = ForecastSnapshot.objects.get(
+            binding=fresh, raw_payload__snapshot_restore__snapshot_id=first.pk
+        )
+        assert second.raw_payload == {
+            **original.raw_payload,
+            "snapshot_restore": {
+                "export_sha256": sha256(later).hexdigest(),
+                "snapshot_id": first.pk,
+                "restored_by_id": system.admin.pk,
+                "restored_at": NOW.isoformat(),
+                "previous": first.raw_payload["snapshot_restore"],
+            },
+        }
+        assert second.normalized_intervals == original.normalized_intervals
+
+
+def test_an_export_of_another_provider_site_refuses_the_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = restore_system(monkeypatch)
+    collections_before_reset(system)
+    acquisition(
+        binding_before_reset(system, site_id=OTHER_SITE),
+        "estimated_actuals",
+        datetime(2026, 11, 6, 21, 30, tzinfo=UTC),
+        datetime(2026, 11, 5, 21, tzinfo=UTC),
+        datetime(2026, 11, 6, 21, tzinfo=UTC),
+    )
+
+    with pytest.raises(ValidationError) as refused:
+        restore(system, export_content())
+
+    assert refused.value.messages == [
+        "The export's provider site differs from the binding in: site_id."
+    ]
+    assert restored_count(system) == 0
 
 
 @pytest.mark.parametrize(
@@ -493,7 +604,6 @@ def test_a_row_without_its_identity_refuses_the_run(
         {"coverage_end": None},
         {"coverage_end": "2026-10-29T07:00:00+00:00"},
         {"raw_payload": []},
-        {"raw_payload": {"snapshot_restore": {}}},
         {"normalized_intervals": {}},
         {"normalized_intervals": [["start"]]},
         {"normalized_intervals": [{"start": "2026-10-29T07:00:00+00:00", "power_kw": 1}]},
@@ -718,9 +828,9 @@ def test_command_restores_from_standard_input_and_prints_no_site_or_secret(
 
     def report(verb: str, outcome: str) -> list[str]:
         return [
-            f"Provider snapshot restore for binding {system.binding.pk}: 9 export rows, "
+            f"Provider snapshot restore for binding {system.binding.pk}: 8 export rows, "
             f"SHA-256 {digest}.",
-            f"estimated_actuals: 4 {verb}, 1 skipped, another provider site; covers "
+            f"estimated_actuals: 4 {verb}; covers "
             "2026-10-29T07:00:00+00:00 to 2026-11-07T21:00:00+00:00.",
             f"forecasts: 2 {verb}; covers 2026-11-04T21:00:00+00:00 to 2026-11-08T21:00:00+00:00.",
             "historical_import: 1 skipped, not a live collection (import its source file again).",
@@ -750,7 +860,7 @@ def test_command_restores_from_standard_input_and_prints_no_site_or_secret(
     output = StringIO()
     call_command("restore_provider_snapshots", *command_arguments(system, str(path)), stdout=output)
     assert output.getvalue().splitlines()[1:3] == [
-        "estimated_actuals: 4 already restored, 1 skipped, another provider site; covers "
+        "estimated_actuals: 4 already restored; covers "
         "2026-10-29T07:00:00+00:00 to 2026-11-07T21:00:00+00:00.",
         "forecasts: 2 already restored; covers "
         "2026-11-04T21:00:00+00:00 to 2026-11-08T21:00:00+00:00.",
@@ -758,14 +868,12 @@ def test_command_restores_from_standard_input_and_prints_no_site_or_secret(
     assert output.getvalue().splitlines()[-1] == "Nothing to restore."
 
     messages = [
-        record.getMessage()
-        for record in pyracast_logs.records
-        if record.name == "pyracast.forecasts.snapshot_restore"
+        record.getMessage() for record in pyracast_logs.records if record.name == COMMAND_LOGGER
     ]
     assert messages == [
         f"provider_snapshot_restore_finished binding_id={system.binding.pk} dry_run={dry_run} "
         f"restored={restored} skipped={skipped} export_sha256={digest}"
-        for dry_run, restored, skipped in ((True, 6, 3), (False, 6, 3), (False, 0, 9))
+        for dry_run, restored, skipped in ((True, 6, 2), (False, 6, 2), (False, 0, 8))
     ]
     assert SITE not in pyracast_logs.text
     assert KEY not in pyracast_logs.text
@@ -819,7 +927,33 @@ def test_command_reports_refusals_without_writing(
     assert SITE not in str(refused.value)
     assert restored_count(system) == 0
     assert [
-        record.getMessage()
-        for record in pyracast_logs.records
-        if record.name == "pyracast.forecasts.snapshot_restore"
-    ] == [f"provider_snapshot_restore_refused binding_id={system.binding.pk}"]
+        record.getMessage() for record in pyracast_logs.records if record.name == COMMAND_LOGGER
+    ] == [
+        f"provider_snapshot_restore_refused binding_id={system.binding.pk} error_type={name}"
+        for name in ("FileNotFoundError", "DoesNotExist", "ForbiddenError", "ValidationError")
+    ]
+
+
+def test_command_logs_an_unexpected_failure_by_type_and_origin(
+    monkeypatch: pytest.MonkeyPatch, pyracast_logs: pytest.LogCaptureFixture
+) -> None:
+    system = restore_system(monkeypatch)
+    content = collections_before_reset(system).content
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(content)))
+
+    def fail(*args: object, **kwargs: object) -> None:
+        raise RuntimeError(SITE)
+
+    monkeypatch.setattr(f"{COMMAND_LOGGER}.restore_provider_snapshots", fail)
+
+    with pytest.raises(RuntimeError):
+        call_command("restore_provider_snapshots", *command_arguments(system, "-"))
+
+    [message] = [
+        record.getMessage() for record in pyracast_logs.records if record.name == COMMAND_LOGGER
+    ]
+    assert message.startswith(
+        f"provider_snapshot_restore_failed binding_id={system.binding.pk} "
+        f"error_type=RuntimeError origin={COMMAND_LOGGER}:"
+    )
+    assert SITE not in pyracast_logs.text

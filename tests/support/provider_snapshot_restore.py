@@ -26,6 +26,8 @@ from tests.support.plant_operations import half_hours
 SITE = "SITE-7Q3X"
 OTHER_SITE = "SITE-OTHER-2"
 ZONE = "Europe/Istanbul"
+# A live job collects a few seconds after its scheduled slot; the export carries no slot.
+COLLECTION_DELAY = timedelta(seconds=4)
 # The export writes JSON text unescaped, so a payload can hold this line separator.
 SEPARATOR = chr(0x2028)
 # The binding columns that give stored provider numbers their meaning, as the restore compares them.
@@ -55,7 +57,6 @@ def restore_system(monkeypatch: pytest.MonkeyPatch) -> System:
 
 
 def binding_before_reset(system: System, *, site_id: str = SITE) -> SiteBinding:
-    """A binding of the database the reset erased, in a workspace of its own."""
     tenant = Tenant.objects.create(name="Before the reset")
     region = Region.objects.create(
         tenant=tenant, name="Plant", latitude=40, longitude=29, timezone=ZONE
@@ -82,7 +83,6 @@ def acquisition(
     weather_payload: dict[str, Any] | None = None,
     note: str | None = None,
 ) -> ForecastSnapshot:
-    """A published acquisition as the collection, an import or a normalization stores it."""
     rows = half_hours(start, end, 0.5) if rows is None else rows
     kind = "forecast" if endpoint.endswith("forecasts") else "estimated_actuals"
     payload: dict[str, Any] = {
@@ -110,7 +110,7 @@ def acquisition(
         binding=binding,
         reference_import=reference,
         endpoint=endpoint,
-        scheduled_slot=collected_at,
+        scheduled_slot=collected_at - COLLECTION_DELAY,
         target_date=start.astimezone(ZoneInfo(ZONE)).date(),
         status="succeeded",
         available_at=collected_at,
@@ -131,7 +131,6 @@ def acquisition(
 
 
 def export_content(*, compress: bool = True) -> bytes:
-    """The Solcast export of the reset tool, read from this database with its own query."""
     with connection.cursor() as cursor, cursor.cursor.copy(SOLCAST_EXPORT_SQL) as copy:
         lines = b"".join(copy)
     return gzip.compress(lines) if compress else lines
@@ -155,7 +154,7 @@ class BeforeReset:
 
 def collections_before_reset(system: System) -> BeforeReset:
     """Live collections of the erased binding (a seven-day lookback, three nights and two
-    forecasts) beside an import, a scaled copy and another site, exported by the reset tool."""
+    forecasts) beside an import and a scaled copy, exported by the reset tool."""
     before = binding_before_reset(system)
     lookback_start = datetime(2026, 10, 29, 7, tzinfo=UTC)
     lookback_end = datetime(2026, 11, 5, 7, tzinfo=UTC)
@@ -210,14 +209,26 @@ def collections_before_reset(system: System) -> BeforeReset:
         local(date(2026, 11, 5)),
         local(date(2026, 11, 6)),
     )
-    acquisition(
-        binding_before_reset(system, site_id=OTHER_SITE),
-        "estimated_actuals",
-        datetime(2026, 11, 6, 21, 30, tzinfo=UTC),
-        datetime(2026, 11, 5, 21, tzinfo=UTC),
-        datetime(2026, 11, 6, 21, tzinfo=UTC),
-    )
     return BeforeReset(lookback, nights, forecasts, export_content())
+
+
+def binding_after_second_reset(system: System) -> SiteBinding:
+    region = Region.objects.get(pk=system.region.pk)
+    target = system.binding
+    fresh = SiteBinding.objects.create(
+        region=region,
+        region_revision=region.revision + 1,
+        provider_account=system.account,
+        site_id=target.site_id,
+        settings_verification_reference=target.settings_verification_reference,
+        validated_at=target.validated_at,
+        validated_credential_revision=target.validated_credential_revision,
+        **{name: getattr(target, name) for name in SETTINGS},
+    )
+    Region.objects.filter(pk=region.pk).update(
+        revision=fresh.region_revision, approved_binding=fresh
+    )
+    return fresh
 
 
 def collections_after_reset(system: System, tmp_path: Path) -> ForecastSnapshot:
